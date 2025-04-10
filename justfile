@@ -18,14 +18,9 @@ build-ckpool:
 build: build-bitcoind build-ckpool
 
 bitcoind:
-  ./bitcoin/build/bin/bitcoind -datadir=./copr -signet 
-
-ckpool:
   #!/usr/bin/env bash
-  cd ckpool
-  make 
-  cd ..
-  ./ckpool/src/ckpool --config ./copr/ckpool.conf
+  ./bitcoin/build/bin/bitcoind -datadir=./copr -signet 
+  rm -rf ./copr/signet
 
 mine:
   #!/usr/bin/env bash
@@ -38,3 +33,11 @@ mine:
   for i in {1..16}; do
     $MINER --cli="$CLI" generate --grind-cmd="$GRIND" --address="$ADDR" --nbits=$NBITS
   done
+
+ckpool:
+  #!/usr/bin/env bash
+  cd ckpool
+  make 
+  cd ..
+  ./ckpool/src/ckpool --config ./copr/ckpool.conf
+  rm -rf logs
