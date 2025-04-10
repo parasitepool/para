@@ -1586,7 +1586,7 @@ int main(int argc, char **argv)
 	memset(&ckp, 0, sizeof(ckp));
 	ckp.starttime = time(NULL);
 	ckp.startpid = getpid();
-	ckp.loglevel = LOG_NOTICE;
+	ckp.loglevel = LOG_DEBUG;
 	ckp.initial_args = ckalloc(sizeof(char *) * (argc + 2)); /* Leave room for extra -H */
 	for (ckp.args = 0; ckp.args < argc; ckp.args++)
 		ckp.initial_args[ckp.args] = strdup(argv[ckp.args]);
