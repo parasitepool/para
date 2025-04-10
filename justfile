@@ -23,7 +23,7 @@ bitcoind:
 
 mine:
   #!/usr/bin/env bash
-  CLI="./bitcoin/build/bin/bitcoin-cli -signet"
+  CLI="./bitcoin/build/bin/bitcoin-cli -datadir=./copr -signet"
   MINER="./bitcoin/contrib/signet/miner"
   GRIND="./bitcoin/build/bin/bitcoin-util grind"
   ADDR=tb1q73me2ten2cwphzdpl60js6p0vgex8c2e5fqm6m
