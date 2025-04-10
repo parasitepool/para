@@ -1,3 +1,6 @@
 [submodule "bitcoin"]
 	path = bitcoin
 	url = git@github.com:bitcoin/bitcoin.git
+[submodule "ckstats"]
+	path = ckstats
+	url = git@github.com:mrv777/ckstats.git

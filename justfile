@@ -15,6 +15,14 @@ build-ckpool:
   ./configure
   make
 
+build-ckstats:
+  #!/usr/bin/env bash
+  cd ckstats
+  pnpm install
+  DATABASE_URL="postgresql://username:password@server:port/your_database_name"
+  SHADOW_DATABASE_URL="postgresql://username:password@server:port/your_shadow_database_name"
+  API_URL="http://192.168.0.197"
+
 build: build-bitcoind build-ckpool
 
 bitcoind:
