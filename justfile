@@ -39,3 +39,10 @@ ckpool:
   make 
   cd ..
   ./ckpool/src/ckpool --config ./copr/ckpool.conf
+
+mainnet:
+  #!/usr/bin/env bash
+  cd ckpool
+  make 
+  cd ..
+  ./ckpool/src/ckpool --config ./copr/ckpool.mainnet.conf --loglevel 7 --log-shares -L mainnet-logs
