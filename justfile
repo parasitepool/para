@@ -20,7 +20,6 @@ build: build-bitcoind build-ckpool
 bitcoind:
   #!/usr/bin/env bash
   ./bitcoin/build/bin/bitcoind -datadir=./copr -signet 
-  rm -rf ./copr/signet
 
 mine:
   #!/usr/bin/env bash
@@ -40,4 +39,3 @@ ckpool:
   make 
   cd ..
   ./ckpool/src/ckpool --config ./copr/ckpool.conf
-  rm -rf logs
