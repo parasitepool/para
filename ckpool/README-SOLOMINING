@@ -1,0 +1,151 @@
+Local solo mining.
+
+---
+
+QUICK START INSTRUCTIONS (build instructions not included.)
+
+Edit bitcoin.conf, enabling RPC (remote procedure calls) with a username and
+password. The following would allow ckpool to talk to a bitcoin daemon running
+on the same hardware:
+
+server=1
+rpcuser=username
+rpcpassword=password
+rpcallowip=127.0.0.1
+rpcbind=127.0.0.1
+
+
+Restart the bitcoin daemon with zmq messaging enabled by adding the following
+to the startup command:
+
+-zmqpubhashblock=tcp://127.0.0.1:28332
+
+
+If your bitcoin daemon was built without zmq support, you can use the ckpool
+notifier included by adding the following command
+
+-blocknotify=$CKPOOLSOURCE/src/notifier
+
+(Replace $CKPOOLSOURCE with the path to where you have the ckpool source code)
+
+
+Create or modify a ckpool configuration file (such as ckpool.conf), including
+the minimum necessary entries.
+
+{
+"btcd" :  [
+        {
+        "url" : "127.0.0.1:8332",
+        "auth" : "username",
+        "pass" : "password",
+        "notify" : true
+        }
+]
+}
+
+
+Start ckpool from the source code directory (pointing to the configuration file
+only if it has a different name to ckpool.conf or is placed elsewhere) in solo
+mode:
+
+src/ckpool -B
+
+
+Point the pools entry on your mining hardware to the local IP address where
+ckpool is running on port 3333, setting a username to the bitcoin address you
+wish to mine to, and put anything in the password field (such as "x")
+.e.g if ckpool has a local IP address of 192.168.1.100
+
+url: 192.168.1.100:3333
+username: 1PKN98VN2z5gwSGZvGKS2bj8aADZBkyhkZ
+password: x
+
+Any valid bitcoin address will work
+
+(Hope for) profit.
+
+---
+
+OPTIONAL CHANGES.
+
+
+Most of the ckpool configuration options would not need to be modified for a
+local solo mining operation, and some of the config options are not used in
+solo mode. The ckpool.conf included with the source has all the available
+configuration options and is not recommended to be used as is. The following
+options may be useful for a local solo mining operation.
+
+
+Mining to one fixed address. If you only plan to mine to one fixed address and
+not have to worry about setting the username in every piece of mining hardware,
+you can set a bitcoin address to mine to as follows:
+
+"btcaddress" : "14BMjogz69qe8hk9thyzbmR5pg34mVKB1e",
+
+You must then start ckpool withOUT the -B option. This would mine to the
+address 14BMjogz69qe8hk9thyzbmR5pg34mVKB1e, so modify it to the bitcoin address
+you wish to mine to.
+
+
+You can set the starting diff (instead of the default 42) on the pool as
+follows:
+
+"startdiff" : 10000,
+
+
+You can define a signature to be mined into any blocks you solved as follows:
+
+"btcsig" : "/mined by ck/",
+
+
+You may wish to enable a donation to the author of ckpool with any blocks found
+as a percentage (such as 0.5%) as follows:
+
+"donation" : 0.5,
+
+Donation is completely optional and disabled by default, but most appreciated.
+0.5% would be a reasonable value.
+
+
+By default ckpool binds to every local IP address on the hardware it's run on,
+but you can restrict it to certain addresses or change the port it runs on as
+follows:
+
+"serverurl" : [
+	"127.0.0.1:3333",
+	"192.168.1.100:3334"
+],
+
+
+You can specify a different configuration file as follows:
+
+src/ckpool -B -c myconfig.conf
+
+or you can start ckpool with a different name and it will look for the
+associated configuration
+
+src/ckpool -B -n local
+
+this will look for a configuration file called local.conf
+
+---
+
+NOTES.
+
+Json is very strict with its field processing although spacing is flexible. The
+most common error to watch out for is to NOT put a comma after the last field.
+
+You can mine with a pruned blockchain if you are short on space, though it is
+not recommended as it can add more latency.
+
+Bitcoin core is NOT optimised for mining by default without modification, and
+mining solo locally should be reserved as a backup operation only unless you
+have the skills, hardware, and data centre quality connectivity to minimise
+latency.
+
+Mining on testnet may create a cascade of solved competing blocks when the diff
+is 1. This is normal as the default behaviour is optimised around mainnet
+mining where block solving is rare.
+
+
+Good luck.
