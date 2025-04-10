@@ -16,7 +16,7 @@
 #include "bitcoin.h"
 #include "stratifier.h"
 
-static char* understood_rules[] = {"segwit", "signet"};
+static char* understood_rules[] = {"segwit"};
 
 static bool check_required_rule(const char* rule)
 {
@@ -113,7 +113,7 @@ out:
 	return val;
 }
 
-static const char *gbt_req = "{\"method\": \"getblocktemplate\", \"params\": [{\"capabilities\": [\"coinbasetxn\", \"workid\", \"coinbase/append\"], \"rules\" : [\"segwit\", \"signet\"]}]}\n";
+static const char *gbt_req = "{\"method\": \"getblocktemplate\", \"params\": [{\"capabilities\": [\"coinbasetxn\", \"workid\", \"coinbase/append\"], \"rules\" : [\"segwit\"]}]}\n";
 
 /* Request getblocktemplate from bitcoind already connected with a connsock_t
  * and then summarise the information to the most efficient set of data
