@@ -1,7 +1,6 @@
 build-bitcoind:
   #!/usr/bin/env bash
-  git submodule init
-  git submodule update
+  git submodule update --init
   cd bitcoin
   sudo apt-get install build-essential cmake pkgconf python3 libevent-dev libboost-dev libsqlite3-dev libzmq3-dev
   cmake -B build
@@ -9,6 +8,7 @@ build-bitcoind:
 
 build-ckpool:
   #!/usr/bin/env bash
+  git submodule update --init
   cd ckpool
   sudo apt-get install build-essential yasm autoconf automake libtool libzmq3-dev pkgconf
   ./autogen.sh
@@ -20,7 +20,6 @@ build: build-bitcoind build-ckpool
 bitcoind:
   #!/usr/bin/env bash
   ./bitcoin/build/bin/bitcoind -datadir=./copr -signet 
-  rm -rf ./copr/signet
 
 mine:
   #!/usr/bin/env bash
@@ -40,4 +39,3 @@ ckpool:
   make 
   cd ..
   ./ckpool/src/ckpool --config ./copr/ckpool.conf
-  rm -rf logs
