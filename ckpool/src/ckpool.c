@@ -1886,7 +1886,7 @@ int main(int argc, char **argv)
 		ckp.maxclients = ret * 9 / 10;
 	}
 
-	// ckp.ckpapi = create_ckmsgq(&ckp, "api", &ckpool_api);
+	ckp.ckpapi = create_ckmsgq(&ckp, "api", &ckpool_api);
 	create_pthread(&ckp.pth_listener, listener, &ckp.main);
 
 	handler.sa_handler = &sighandler;

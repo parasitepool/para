@@ -38,4 +38,4 @@ ckpool:
   cd ckpool
   make 
   cd ..
-  ./ckpool/src/ckpool --config ./copr/ckpool.conf
+  ./ckpool/src/ckpool --config ./copr/ckpool.conf --loglevel 7 --log-shares
