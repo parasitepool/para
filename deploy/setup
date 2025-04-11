@@ -117,9 +117,14 @@ systemctl daemon-reload
 systemctl enable bitcoind
 systemctl restart bitcoind
 
+
 journalctl --unit ckpool --vacuum-time 5m
 
 cp deploy/ckpool.service /etc/systemd/system/
+
+mkdir -p /etc/ckpool
+cp deploy/ckpool.conf /etc/ckpool/ckpool.conf
+
 systemctl daemon-reload
 systemctl enable ckpool
 systemctl restart ckpool
