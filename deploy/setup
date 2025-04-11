@@ -89,21 +89,12 @@ bitcoind --version
 
 rm -f /var/lib/bitcoind/settings.json
 
+cd ckpool
+./autogen.sh
+./configure
+make
 
-
-if [[ ! -e ~/.cargo/env ]]; then
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-fi
-
-source ~/.cargo/env
-
-rustup update stable
-
-cargo build --release
-install --backup target/release/ord /usr/local/bin/ord
-
-
-
+install --backup src/ckpool /usr/local/bin/ckpool
 
 id --user bitcoin || useradd --system bitcoin
 id --user ckpool || useradd --system ckpool
