@@ -10,7 +10,7 @@ build-ckpool:
   #!/usr/bin/env bash
   git submodule update --init
   cd ckpool
-  sudo apt-get install build-essential yasm autoconf automake libtool libzmq3-dev pkgconf
+  sudo apt-get install build-essential yasm autoconf automake libtool libzmq3-dev pkgconf libpq-dev
   ./autogen.sh
   ./configure
   make
@@ -38,4 +38,54 @@ ckpool:
   cd ckpool
   make 
   cd ..
-  ./ckpool/src/ckpool -B --config ./copr/ckpool.conf --loglevel 7 --log-shares
+  ./ckpool/src/ckpool -B -k --config ./copr/ckpool.conf --loglevel 7 --log-shares
+
+psql:
+  #!/usr/bin/env bash
+  # Install PostgreSQL if not installed
+  if ! dpkg -l | grep -q postgresql; then
+    sudo apt-get install -y postgresql postgresql-contrib
+  fi
+
+  # Check if PostgreSQL service is running
+  if ! systemctl is-active --quiet postgresql; then
+    sudo systemctl start postgresql
+  fi
+
+  # Create user and database if they don't exist
+  if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='satoshi'" | grep -q 1; then
+    sudo -u postgres psql -c "CREATE USER satoshi WITH PASSWORD 'nakamoto' SUPERUSER;"
+  fi
+
+  if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='ckpool_db'" | grep -q 1; then
+    sudo -u postgres psql -c "CREATE DATABASE ckpool_db OWNER satoshi;"
+  fi
+
+  # Modify pg_hba.conf to use md5 authentication for local connections
+  PG_HBA_PATH=$(sudo -u postgres psql -t -c "SHOW hba_file;" | xargs)
+
+  # Backup the original file
+  sudo cp $PG_HBA_PATH ${PG_HBA_PATH}.bak
+
+  # Update the authentication method for local connections
+  sudo sed -i '/^local.*all.*all.*peer/c\local all all md5' $PG_HBA_PATH
+  sudo sed -i '/^host.*all.*all.*127.0.0.1\/32/c\host all all 127.0.0.1/32 md5' $PG_HBA_PATH
+
+  # Reload PostgreSQL to apply changes
+  sudo systemctl reload postgresql
+
+  # Create table if it doesn't exist (now using -h localhost to force TCP connection)
+  PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool_db -c "
+    CREATE TABLE IF NOT EXISTS shares (
+      id SERIAL PRIMARY KEY,
+      data JSONB NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  "
+
+  echo "PostgreSQL is running"
+  echo "Database: ckpool_db"
+  echo "User: satoshi"
+  echo "Password: nakamoto"
+  echo "Table: shares with columns (id, data, created_at)"
+  echo "Connection string: dbname=ckpool_db user=satoshi password=nakamoto host=localhost"

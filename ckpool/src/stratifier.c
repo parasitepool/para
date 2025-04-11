@@ -24,6 +24,10 @@
 #include <zmq.h>
 #endif
 
+#ifdef HAVE_LIBPQ
+#include <postgresql/libpq-fe.h>
+#endif
+
 #include "ckpool.h"
 #include "libckpool.h"
 #include "bitcoin.h"
@@ -6238,6 +6242,27 @@ out_nowb:
         json_set_string(val, "agent", client->useragent);
 
 	if (ckp->logshares) {
+        PGconn *conn;
+        PGresult *res;
+        conn = PQconnectdb("dbname=ckpool_db user=satoshi password=nakamoto host=localhost");
+
+        if (PQstatus(conn) != CONNECTION_OK) {
+            LOGERR("Connection to database failed: %s", PQerrorMessage(conn));
+            PQfinish(conn);
+        } else {
+            /* Execute a simple static insert query */
+            res = PQexec(conn, "INSERT INTO shares (data) VALUES ('{\"test\": \"value\", \"timestamp\": 123456789}')");
+
+            if (PQresultStatus(res) != PGRES_COMMAND_OK) {
+                LOGERR("Database insert failed: %s", PQerrorMessage(conn));
+            } else {
+                LOGINFO("Successfully inserted test record into PostgreSQL");
+            }
+
+            PQclear(res);
+            PQfinish(conn);
+        }
+
 		fp = fopen(fname, "ae");
 		if (likely(fp)) {
 			s = json_dumps(val, JSON_EOL);
