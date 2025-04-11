@@ -65,7 +65,12 @@ psql:
   PG_HBA_PATH=$(sudo -u postgres psql -t -c "SHOW hba_file;" | xargs)
 
   # Backup the original file
-  sudo cp $PG_HBA_PATH ${PG_HBA_PATH}.bak
+  if [ ! -f "${PG_HBA_PATH}.bak" ]; then
+      sudo cp $PG_HBA_PATH ${PG_HBA_PATH}.bak
+      echo "Backup created: ${PG_HBA_PATH}.bak"
+  else
+      echo "Backup already exists, skipping backup creation"
+  fi
 
   # Update the authentication method for local connections
   sudo sed -i '/^local.*all.*all.*peer/c\local all all md5' $PG_HBA_PATH
@@ -77,11 +82,31 @@ psql:
   # Create table if it doesn't exist (now using -h localhost to force TCP connection)
   PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool_db -c "
     CREATE TABLE IF NOT EXISTS shares (
-      id SERIAL PRIMARY KEY,
-      data JSONB NOT NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-  "
+        id SERIAL PRIMARY KEY,
+        blockheight INTEGER,
+        workinfoid BIGINT,
+        clientid BIGINT,
+        enonce1 TEXT,
+        nonce2 TEXT,
+        nonce TEXT,
+        ntime TEXT,
+        diff DOUBLE PRECISION,
+        sdiff DOUBLE PRECISION,
+        hash TEXT,
+        result BOOLEAN,
+        reject_reason TEXT,
+        error TEXT,
+        errn INTEGER,
+        createdate TEXT,
+        createby TEXT,
+        createcode TEXT,
+        createinet TEXT,
+        workername TEXT,
+        username TEXT,
+        address TEXT,
+        agent TEXT
+    )
+    "
 
   echo "PostgreSQL is running"
   echo "Database: ckpool_db"
