@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+
+# This script is idempotent.
+
+set -euxo pipefail
+
+CHAIN=$1
+DOMAIN=$2
+
+export DEBIAN_FRONTEND=noninteractive
+
+touch ~/.hushlogin
+
+hostnamectl set-hostname $DOMAIN
+
+apt-get install --yes \
+  acl \
+  autoconf \ 
+  automake \ 
+  build-essential \ 
+  clang \
+  cmake \
+  curl \
+  libevent-dev \
+  libsqlite3-dev\
+  libssl-dev \
+  libtool \ 
+  libzmq3-dev \
+  locales-all \
+  pkg-config \
+  pkgconf \
+  python3 \ 
+  ufw \
+  vim \
+  yasm
+
+apt-get remove --yes --auto-remove
+
+ufw default allow outgoing
+ufw default deny incoming
+
+ufw allow 3333
+ufw allow ssh
+
+case $CHAIN in
+  main)
+    ufw allow 8333
+    ;;
+  regtest)
+    ufw allow 18444
+    ;;
+  signet)
+    ufw allow 38333
+    ;;
+  test)
+    ufw allow 18333
+    ;;
+  testnet4)
+    ufw allow 48333
+    ;;
+  *)
+    echo "Unknown chain: $CHAIN"
+    exit 1
+    ;;
+esac
+
+mkdir -p \
+  /etc/systemd/system/bitcoind.service.d \
+  /etc/systemd/system/ckpool.service.d
+
+OVERRIDE=/etc/systemd/system/ckpool.service.d/override.conf
+
+echo '[Service]' > $OVERRIDE
+echo "Environment=CHAIN=$CHAIN" >> $OVERRIDE
+
+cp $OVERRIDE /etc/systemd/system/bitcoind.service.d/override.conf
+
+sed -i -E 's/#?PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+sshd -t
+systemctl restart sshd
+
+ufw --force enable
+
+if ! which bitcoind; then
+  ./bin/install-bitcoin-core-linux
+fi
+
+bitcoind --version
+
+rm -f /var/lib/bitcoind/settings.json
+
+
+
+if [[ ! -e ~/.cargo/env ]]; then
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+fi
+
+source ~/.cargo/env
+
+rustup update stable
+
+cargo build --release
+install --backup target/release/ord /usr/local/bin/ord
+
+
+
+
+id --user bitcoin || useradd --system bitcoin
+id --user ckpool || useradd --system ckpool
+
+cp deploy/bitcoind.service /etc/systemd/system/
+
+mkdir -p /etc/bitcoin
+cp deploy/bitcoin.conf /etc/bitcoin/bitcoin.conf
+
+if [[ ! -e ~/.bitcoin/bitcoin.conf ]]; then
+  mkdir -p ~/.bitcoin
+  ln -s /etc/bitcoin/bitcoin.conf ~/.bitcoin/bitcoin.conf
+fi
+
+journalctl --unit bitcoind --vacuum-time 5m
+
+systemctl daemon-reload
+systemctl enable bitcoind
+systemctl restart bitcoind
+
+journalctl --unit ckpool --vacuum-time 5m
+
+cp deploy/ckpool.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable ckpool
+systemctl restart ckpool
+
+# TODO: add a curl or something that checks that ckpool is running
