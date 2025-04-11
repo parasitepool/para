@@ -96,6 +96,8 @@ make
 
 install --backup src/ckpool /usr/local/bin/ckpool
 
+cd ..
+
 id --user bitcoin || useradd --system bitcoin
 id --user ckpool || useradd --system ckpool
 
