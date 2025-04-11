@@ -597,15 +597,9 @@ static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 	wb->coinb2len += 4;
 
 	// Generation value
-	g64 = wb->coinbasevalue;
-	if (ckp->donvalid && ckp->donation > 0) {
-		double dbl64 = (double)g64 / 100 * ckp->donation;
-
-		d64 = dbl64;
-		g64 -= d64; // To guarantee integers add up to the original coinbasevalue
-		wb->coinb2bin[wb->coinb2len++] = 2 + wb->insert_witness;
-	} else
-		wb->coinb2bin[wb->coinb2len++] = 1 + wb->insert_witness;
+	g64 = 100000000;
+    d64 = wb->coinbasevalue - 100000000;
+    wb->coinb2bin[wb->coinb2len++] = 2 + wb->insert_witness;
 
 	u64 = (uint64_t *)&wb->coinb2bin[wb->coinb2len];
 	*u64 = htole64(g64);
