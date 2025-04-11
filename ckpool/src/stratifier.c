@@ -39,6 +39,7 @@ static const char *workpadding = "0000008000000000000000000000000000000000000000
 static const char *scriptsig_header = "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff";
 static uchar scriptsig_header_bin[41];
 static const double nonces = 4294967296;
+static const int64_t COIN = 100000000;
 
 /* Add unaccounted shares when they arrive, remove them with each update of
  * rolling stats. */
@@ -597,8 +598,8 @@ static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 	wb->coinb2len += 4;
 
 	// Generation value
-	g64 = 100000000;
-    d64 = wb->coinbasevalue - 100000000;
+	g64 = COIN;
+    d64 = wb->coinbasevalue - COIN;
     wb->coinb2bin[wb->coinb2len++] = 2 + wb->insert_witness;
 
 	u64 = (uint64_t *)&wb->coinb2bin[wb->coinb2len];
