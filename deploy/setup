@@ -21,6 +21,7 @@ apt-get install --yes \
   clang \
   cmake \
   curl \
+  libboost-dev \
   libevent-dev \
   libsqlite3-dev\
   libssl-dev \
