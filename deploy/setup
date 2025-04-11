@@ -117,7 +117,7 @@ systemctl daemon-reload
 systemctl enable bitcoind
 systemctl restart bitcoind
 
-if $CHAIN == signet; then
+if [ "$CHAIN" == "signet" ]; then
   git submodule update --init
   cd bitcoin
   cmake -B build
