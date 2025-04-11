@@ -599,8 +599,8 @@ static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 
 	// Generation value
 	g64 = COIN;
-    d64 = wb->coinbasevalue - COIN;
-    wb->coinb2bin[wb->coinb2len++] = 2 + wb->insert_witness;
+	d64 = wb->coinbasevalue - COIN;
+	wb->coinb2bin[wb->coinb2len++] = 2 + wb->insert_witness;
 
 	u64 = (uint64_t *)&wb->coinb2bin[wb->coinb2len];
 	*u64 = htole64(g64);
