@@ -39,6 +39,7 @@ static const char *workpadding = "0000008000000000000000000000000000000000000000
 static const char *scriptsig_header = "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff";
 static uchar scriptsig_header_bin[41];
 static const double nonces = 4294967296;
+static const int64_t COIN = 100000000;
 
 /* Add unaccounted shares when they arrive, remove them with each update of
  * rolling stats. */
@@ -597,15 +598,9 @@ static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 	wb->coinb2len += 4;
 
 	// Generation value
-	g64 = wb->coinbasevalue;
-	if (ckp->donvalid && ckp->donation > 0) {
-		double dbl64 = (double)g64 / 100 * ckp->donation;
-
-		d64 = dbl64;
-		g64 -= d64; // To guarantee integers add up to the original coinbasevalue
-		wb->coinb2bin[wb->coinb2len++] = 2 + wb->insert_witness;
-	} else
-		wb->coinb2bin[wb->coinb2len++] = 1 + wb->insert_witness;
+	g64 = COIN;
+	d64 = wb->coinbasevalue - COIN;
+	wb->coinb2bin[wb->coinb2len++] = 2 + wb->insert_witness;
 
 	u64 = (uint64_t *)&wb->coinb2bin[wb->coinb2len];
 	*u64 = htole64(g64);
@@ -8544,23 +8539,11 @@ void *stratifier(void *arg)
 		hex2bin(scriptsig_header_bin, scriptsig_header, 41);
 		sdata->txnlen = address_to_txn(sdata->txnbin, ckp->btcaddress, ckp->script, ckp->segwit);
 
-		/* Find a valid donation address if possible */
-		if (generator_checkaddr(ckp, ckp->donaddress, &ckp->donscript, &ckp->donsegwit)) {
-			ckp->donvalid = true;
-			sdata->dontxnlen = address_to_txn(sdata->dontxnbin, ckp->donaddress, ckp->donscript, ckp->donsegwit);
-			LOGNOTICE("BTC donation address valid %s", ckp->donaddress);
-		} else if (generator_checkaddr(ckp, ckp->tndonaddress, &ckp->donscript, &ckp->donsegwit)) {
-			ckp->donaddress = ckp->tndonaddress;
-			ckp->donvalid = true;
-			sdata->dontxnlen = address_to_txn(sdata->dontxnbin, ckp->donaddress, ckp->donscript, ckp->donsegwit);
-			LOGNOTICE("BTC testnet donation address valid %s", ckp->donaddress);
-		} else if (generator_checkaddr(ckp, ckp->rtdonaddress, &ckp->donscript, &ckp->donsegwit)) {
-			ckp->donaddress = ckp->rtdonaddress;
-			ckp->donvalid = true;
-			sdata->dontxnlen = address_to_txn(sdata->dontxnbin, ckp->donaddress, ckp->donscript, ckp->donsegwit);
-			LOGNOTICE("BTC regtest donation address valid %s", ckp->donaddress);
-		} else
-			LOGNOTICE("No valid donation address found");
+		ckp->donaddress = ckp->btcaddress;
+		ckp->donscript = ckp->script;
+		ckp->donsegwit = ckp->segwit;
+		ckp->donvalid = true;
+		sdata->dontxnlen = address_to_txn(sdata->dontxnbin, ckp->donaddress, ckp->donscript, ckp->donsegwit);
 	}
 
 	randomiser = time(NULL);
