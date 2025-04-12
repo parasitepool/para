@@ -475,9 +475,9 @@ struct stratifier_data {
 	mutex_t proxy_lock; /* Protects all proxy data */
 	proxy_t *subproxy; /* Which subproxy this sdata belongs to in proxy mode */
 
-    PGconn *pg_conn; // Persistent PostgreSQL connection */
-    mutex_t pg_lock;
-    bool pg_connected;
+	PGconn *pg_conn; // Persistent PostgreSQL connection */
+	mutex_t pg_lock;
+	bool pg_connected;
 };
 
 typedef struct json_entry json_entry_t;
