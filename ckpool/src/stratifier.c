@@ -8521,34 +8521,34 @@ static void *zmqnotify(void *arg)
 
 static bool sdata_db_connect(sdata_t *sdata)
 {
-    ckpool_t *ckp = sdata->ckp;
-
-    mutex_lock(&sdata->pg_lock);
-    if (sdata->pg_conn) {
-        if (PQstatus(sdata->pg_conn) == CONNECTION_OK) {
-            mutex_unlock(&sdata->pg_lock);
-            return true;
-        }
-        PQfinish(sdata->pg_conn);
-        sdata->pg_conn = NULL;
-    }
-
-    LOGINFO("Connecting to PostgreSQL database");
-    sdata->pg_conn = PQconnectdb("dbname=ckpool_db user=satoshi password=nakamoto host=localhost");
-
-    if (PQstatus(sdata->pg_conn) != CONNECTION_OK) {
-        LOGERR("Connection to database failed: %s", PQerrorMessage(sdata->pg_conn));
-        PQfinish(sdata->pg_conn);
-        sdata->pg_conn = NULL;
-        sdata->pg_connected = false;
-        mutex_unlock(&sdata->pg_lock);
-        return false;
-    }
-
-    LOGINFO("Successfully connected to PostgreSQL database");
-    sdata->pg_connected = true;
-    mutex_unlock(&sdata->pg_lock);
-    return true;
+	ckpool_t *ckp = sdata->ckp;
+	
+	mutex_lock(&sdata->pg_lock);
+	if (sdata->pg_conn) {
+		if (PQstatus(sdata->pg_conn) == CONNECTION_OK) {
+			mutex_unlock(&sdata->pg_lock);
+			return true;
+		}
+		PQfinish(sdata->pg_conn);
+		sdata->pg_conn = NULL;
+	}
+	
+	LOGINFO("Connecting to PostgreSQL database");
+	sdata->pg_conn = PQconnectdb("dbname=ckpool_db user=satoshi password=nakamoto host=localhost");
+	
+	if (PQstatus(sdata->pg_conn) != CONNECTION_OK) {
+		LOGERR("Connection to database failed: %s", PQerrorMessage(sdata->pg_conn));
+	    	PQfinish(sdata->pg_conn);
+	    	sdata->pg_conn = NULL;
+	    	sdata->pg_connected = false;
+	    	mutex_unlock(&sdata->pg_lock);
+	    	return false;
+	}
+	
+	LOGINFO("Successfully connected to PostgreSQL database");
+	sdata->pg_connected = true;
+	mutex_unlock(&sdata->pg_lock);
+	return true;
 }
 
 static void sdata_db_disconnect(sdata_t *sdata)
