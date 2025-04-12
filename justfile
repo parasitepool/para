@@ -1,16 +1,28 @@
-build-bitcoind:
-  #!/usr/bin/env bash
+install:
   git submodule update --init
+  sudo apt-get install --yes \
+    autoconf \
+    automake \
+    build-essential \
+    cmake \
+    libboost-dev \
+    libevent-dev \
+    libsqlite3-dev \
+    libtool \
+    libzmq3-dev \
+    pkgconf \
+    python3 \
+    yasm \
+
+build-bitcoind: install
+  #!/usr/bin/env bash
   cd bitcoin
-  sudo apt-get install build-essential cmake pkgconf python3 libevent-dev libboost-dev libsqlite3-dev libzmq3-dev
   cmake -B build
   cmake --build build -j 21
 
-build-ckpool:
+build-ckpool: install
   #!/usr/bin/env bash
-  git submodule update --init
   cd ckpool
-  sudo apt-get install build-essential yasm autoconf automake libtool libzmq3-dev pkgconf
   ./autogen.sh
   ./configure
   make
@@ -19,7 +31,9 @@ build: build-bitcoind build-ckpool
 
 bitcoind:
   #!/usr/bin/env bash
-  ./bitcoin/build/bin/bitcoind -datadir=./copr -signet 
+  ./bitcoin/build/bin/bitcoind \
+    -datadir=copr \
+    -signet 
 
 mine:
   #!/usr/bin/env bash
@@ -38,9 +52,13 @@ ckpool:
   cd ckpool
   make 
   cd ..
-  ./ckpool/src/ckpool -B --config ./copr/ckpool.conf --loglevel 7 --log-shares
+  ./ckpool/src/ckpool \
+    -B \
+    -k \
+    --config copr/ckpool.conf \
+    --loglevel 7 \
+    --log-shares
 
-# deployment only works for signet 
 deploy branch remote chain domain:
   ssh root@{{domain}} '\
     export DEBIAN_FRONTEND=noninteractive \
