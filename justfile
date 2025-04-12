@@ -30,7 +30,7 @@ mine:
   NBITS=1d00ffff
   $CLI createwallet copr
   for i in {1..16}; do
-    $MINER --cli="$CLI" generate --grind-cmd="$GRIND" --address="$ADDR" --nbits=$NBITS
+    # $MINER --cli="$CLI" generate --grind-cmd="$GRIND" --address="$ADDR" --nbits=$NBITS
   done
 
 ckpool:
