@@ -8597,15 +8597,16 @@ static PGresult *sdata_db_query(sdata_t *sdata, const char *query)
 			res = NULL;
 	
 			if (PQstatus(sdata->pg_conn) != CONNECTION_OK) {
-			PQfinish(sdata->pg_conn);
-			sdata->pg_conn = NULL;
-			sdata->pg_connected = false;
-			mutex_unlock(&sdata->pg_lock);
+				PQfinish(sdata->pg_conn);
+				sdata->pg_conn = NULL;
+				sdata->pg_connected = false;
+				mutex_unlock(&sdata->pg_lock);
 	
-			if (sdata_db_connect(sdata)) {
-				return sdata_db_query(sdata, query);
-			}
-			return NULL;
+				if (sdata_db_connect(sdata)) {
+					return sdata_db_query(sdata, query);
+				}
+
+				return NULL;
 			}
 		}
 	}
@@ -8662,8 +8663,10 @@ static void db_log_share(sdata_t *sdata, json_t *val, workbase_t *wb)
 	
 	res = sdata_db_query(sdata, query_str);
 	if (res) {
-	    LOGINFO("Successfully inserted share record into PostgreSQL");
+	    LOGDEBUG("Successfully inserted share %s", json_integer_value(json_object_get(val, "workinfoid")),
 	    PQclear(res);
+	} else {
+	    LOGDEBUG("Failed to insert share %s", json_integer_value(json_object_get(val, "workinfoid")),
 	}
 	
 	free(query_str);
@@ -8685,13 +8688,13 @@ void *stratifier(void *arg)
 	sdata->ckp = ckp;
 	sdata->verbose = true;
 
-    // init psql
-    mutex_init(&sdata->pg_lock);
-    sdata->pg_conn = NULL;
-    sdata->pg_connected = false;
-    if (ckp->logshares) {
-        sdata_db_connect(sdata);
-    }
+	// init psql
+    	mutex_init(&sdata->pg_lock);
+    	sdata->pg_conn = NULL;
+    	sdata->pg_connected = false;
+    	if (ckp->logshares) {
+		sdata_db_connect(sdata);
+    	}
 
 	/* Wait for the generator to have something for us */
 	while (!ckp->proxy && !ckp->generator_ready)
@@ -8767,9 +8770,9 @@ void *stratifier(void *arg)
 
 	stratum_loop(ckp, pi);
 out:
-    sdata_db_disconnect(sdata);
 	/* We should never get here unless there's a fatal error */
 	LOGEMERG("Stratifier failure, shutting down");
+	sdata_db_disconnect(sdata);
 	exit(1);
 	return NULL;
 }
