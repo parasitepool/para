@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-set -euxo pipefail
-
 sudo -u postgres psql -d ckpool_db -c "DROP TABLE IF EXISTS public.shares;"
 echo "Table Dropped: shares"
 sudo -u postgres psql -c "DROP DATABASE IF EXISTS ckpool_db;"
