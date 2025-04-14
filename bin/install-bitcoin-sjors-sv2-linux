@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+
+set -euxo pipefail
+
+version=0.1.16
+
+wget \
+  -O bitcoin.tar.gz \
+  https://github.com/Sjors/bitcoin/releases/download/sv2-tp-$version/bitcoin-sv2-tp-$version-x86_64-linux-gnu.tar.gz
+
+tar \
+  -xzvf bitcoin.tar.gz \
+  -C /usr/local/bin \
+  --strip-components 2 \
+  bitcoin-$version/bin/{bitcoin-cli,bitcoind}

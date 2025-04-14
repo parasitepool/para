@@ -84,7 +84,7 @@ systemctl restart sshd
 ufw --force enable
 
 if ! which bitcoind; then
-  ./bin/install-bitcoin-core-linux
+  ./bin/install-sjors-bitcoin-sv2-linux
 fi
 
 bitcoind --version
