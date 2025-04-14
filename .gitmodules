@@ -1,4 +1,4 @@
 [submodule "bitcoin"]
 	path = bitcoin
-	url = git@github.com:parasitepool/bitcoin.git
-	branch=sv2
+	url = git@github.com:Sjors/bitcoin.git
+	branch = sv2
