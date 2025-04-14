@@ -8629,7 +8629,7 @@ static void db_log_share(sdata_t *sdata, json_t *val, workbase_t *wb)
 	    "blockheight, workinfoid, clientid, enonce1, nonce2, nonce, ntime, diff, sdiff, "
 	    "hash, result, reject_reason, error, errn, createdate, createby, "
 	    "createcode, createinet, workername, username, address, agent"
-	    ") VALUES (%d, %lld, %lld, '%s', '%s', '%s', '%s', %f, %f, '%s', %s, %s, %s, %lld, "
+	    ") VALUES (%d, %lld, %lld, '%s', '%s', '%s', '%s', %f, %f, '%s', %s, '%s', '%s', %lld, "
 	    "'%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s')",
 	    wb->height,
 	    json_integer_value(json_object_get(val, "workinfoid")),
@@ -8642,10 +8642,8 @@ static void db_log_share(sdata_t *sdata, json_t *val, workbase_t *wb)
 	    json_real_value(json_object_get(val, "sdiff")),
 	    json_string_value(json_object_get(val, "hash")),
 	    json_is_true(json_object_get(val, "result")) ? "TRUE" : "FALSE",
-	    json_is_null(json_object_get(val, "reject-reason")) ? "NULL" :
-	        json_dumps(json_object_get(val, "reject-reason"), JSON_ENCODE_ANY),
-	    json_is_null(json_object_get(val, "error")) ? "NULL" :
-	        json_dumps(json_object_get(val, "error"), JSON_ENCODE_ANY),
+	    json_string_value(json_object_get(val, "reject-reason")),
+	    json_string_value(json_object_get(val, "error")),
 	    json_integer_value(json_object_get(val, "errn")),
 	    json_string_value(json_object_get(val, "createdate")),
 	    json_string_value(json_object_get(val, "createby")),
