@@ -2,7 +2,7 @@
 
 set -euxo pipefail
 
-version=28.1
+version=29.0
 
 wget \
   -O bitcoin.tar.gz \
