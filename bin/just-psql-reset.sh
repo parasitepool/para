@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+sudo -u postgres psql -d ckpool_db -c "DROP TABLE IF EXISTS public.shares;"
+echo "Table Dropped: shares"
+sudo -u postgres psql -c "DROP DATABASE IF EXISTS ckpool_db;"
+echo "DB Dropped: ckpool_db"
+
+PG_HBA_PATH=$(sudo -u postgres psql -t -c "SHOW hba_file;" | xargs)
+sudo cp ${PG_HBA_PATH}.bak $PG_HBA_PATH
+echo "Backup restored: ${PG_HBA_PATH}.bak"
+
+sudo -u postgres psql -c "DROP USER satoshi;"
+echo "User Dropped: satoshi CASCADE;"
+
+sudo systemctl stop postgresql
+echo "Postgres Stopped: restart with 'just psql'"
