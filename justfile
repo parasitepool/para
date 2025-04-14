@@ -43,8 +43,10 @@ mine:
   ADDR=tb1q73me2ten2cwphzdpl60js6p0vgex8c2e5fqm6m
   NBITS=1d00ffff
   $CLI loadwallet copr || $CLI createwallet copr
-  for i in {1..16}; do
+  HEIGHT=$($CLI getblockcount)
+  while [ $HEIGHT -lt 16 ]; do
     $MINER --cli="$CLI" generate --grind-cmd="$GRIND" --address="$ADDR" --nbits=$NBITS
+    HEIGHT=$($CLI getblockcount)
   done
 
 ckpool:
