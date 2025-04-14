@@ -62,10 +62,10 @@ ckpool:
     --log-shares
 
 psql:
-  ./bin/just-psql.sh
+  ./bin/postgres-init
 
 psql-reset:
-  ./bin/just-psql-reset.sh
+  ./bin/postgres-reset
 
 deploy branch remote chain domain:
   ssh root@{{domain}} '\

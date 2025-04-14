@@ -1,4 +1,3 @@
-
   #!/usr/bin/env bash
   # Install PostgreSQL if not installed
   if ! dpkg -l | grep -q postgresql; then
