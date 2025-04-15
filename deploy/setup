@@ -30,6 +30,8 @@ apt-get install --yes \
   locales-all \
   pkg-config \
   pkgconf \
+  postgresql \
+  postgresql-contrib \
   python3 \
   ufw \
   vim \
@@ -52,7 +54,7 @@ case $CHAIN in
     ;;
   signet)
     # Local signet only
-    # ufw allow 38333
+    ufw allow 38333
     ;;
   test)
     ufw allow 18333
@@ -95,9 +97,7 @@ cd ckpool
 ./autogen.sh
 ./configure
 make
-
 install --backup src/ckpool /usr/local/bin/ckpool
-
 cd ..
 
 id --user bitcoin || useradd --system bitcoin
@@ -118,6 +118,8 @@ journalctl --unit bitcoind --vacuum-time 5m
 systemctl daemon-reload
 systemctl enable bitcoind
 systemctl restart bitcoind
+
+./bin/postgres-init
 
 if [ "$CHAIN" == "signet" ]; then
   git submodule update --init
