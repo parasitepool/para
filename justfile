@@ -61,6 +61,12 @@ ckpool:
     --loglevel 7 \
     --log-shares
 
+psql:
+  ./bin/postgres-init
+
+psql-reset:
+  ./bin/postgres-reset
+
 deploy branch remote chain domain:
   ssh root@{{domain}} '\
     export DEBIAN_FRONTEND=noninteractive \
