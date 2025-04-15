@@ -128,17 +128,7 @@ if [ "$CHAIN" == "signet" ]; then
   cmake -B build
   cmake --build build -j 21
   cd ..
-  CLI="./bitcoin/build/bin/bitcoin-cli -datadir=/var/lib/bitcoind -signet"
-  MINER="./bitcoin/contrib/signet/miner"
-  GRIND="./bitcoin/build/bin/bitcoin-util grind"
-  ADDR=tb1q73me2ten2cwphzdpl60js6p0vgex8c2e5fqm6m
-  NBITS=1d00ffff
-  $CLI loadwallet copr || $CLI createwallet copr
-  HEIGHT=$($CLI getblockcount)
-  while [ $HEIGHT -lt 16 ]; do
-    $MINER --cli="$CLI" generate --grind-cmd="$GRIND" --address="$ADDR" --nbits=$NBITS
-    HEIGHT=$($CLI getblockcount)
-  done
+  ./bin/mine
 fi
 
 journalctl --unit ckpool --vacuum-time 5m
