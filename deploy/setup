@@ -54,7 +54,7 @@ case $CHAIN in
     ;;
   signet)
     # Local signet only
-    ufw allow 38333
+    # ufw allow 38333
     ;;
   test)
     ufw allow 18333
