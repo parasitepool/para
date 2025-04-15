@@ -243,6 +243,13 @@ struct ckpool_instance {
 	char *btcsig; // Optional signature to add to coinbase
 	bool coinbase_valid; // Coinbase transaction confirmed valid
 
+    /* Database data */
+    char *database_host;
+    char *database_name;
+    char *database_user;
+    char *database_pass;
+    char *db_conn_str;
+
 	/* Donation data */
 	char *donaddress; // Donation address
 	char *tndonaddress; // Testnet donation address

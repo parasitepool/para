@@ -1417,7 +1417,6 @@ out:
 	return ret;
 }
 
-
 static void parse_config(ckpool_t *ckp)
 {
 	json_t *json_conf, *arr_val;
@@ -1437,6 +1436,29 @@ static void parse_config(ckpool_t *ckp)
 		if (arr_size)
 			parse_btcds(ckp, arr_val, arr_size);
 	}
+
+    json_t *db_obj = json_object_get(json_conf, "database");
+    if (db_obj && json_is_object(db_obj)) {
+        json_get_string(&ckp->database_host, db_obj, "hostname");
+        json_get_string(&ckp->database_name, db_obj, "dbtable");
+        json_get_string(&ckp->database_user, db_obj, "user");
+        json_get_string(&ckp->database_pass, db_obj, "pass");
+
+        if (ckp->database_host && ckp->database_name && ckp->database_user && ckp->database_pass) {
+            int conn_str_len = strlen(ckp->database_host) + strlen(ckp->database_name) +
+                               strlen(ckp->database_user) + strlen(ckp->database_pass) + 30;
+            ckp->db_conn_str = ckalloc(conn_str_len);
+
+            snprintf(ckp->db_conn_str, conn_str_len,
+                    "host=%s dbname=%s user=%s password=%s",
+                    ckp->database_host, ckp->database_name, ckp->database_user, ckp->database_pass);
+
+            LOGDEBUG("Database connection string created successfully: %s", ckp->db_conn_str);
+        } else {
+            LOGWARNING("Missing required database configuration fields");
+        }
+    }
+
 	json_get_string(&ckp->btcaddress, json_conf, "btcaddress");
 	json_get_string(&ckp->btcsig, json_conf, "btcsig");
 	if (ckp->btcsig && strlen(ckp->btcsig) > 38) {

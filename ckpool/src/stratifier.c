@@ -8533,8 +8533,8 @@ static bool sdata_db_connect(sdata_t *sdata)
 		sdata->pg_conn = NULL;
 	}
 	
-	LOGINFO("Connecting to PostgreSQL database");
-	sdata->pg_conn = PQconnectdb("dbname=ckpool_db user=satoshi password=nakamoto host=localhost");
+	LOGDEBUG("Connecting to PostgreSQL database");
+    sdata->pg_conn = PQconnectdb(ckp->db_conn_str);
 	
 	if (PQstatus(sdata->pg_conn) != CONNECTION_OK) {
 		LOGERR("Connection to database failed: %s", PQerrorMessage(sdata->pg_conn));
@@ -8545,7 +8545,7 @@ static bool sdata_db_connect(sdata_t *sdata)
 	    	return false;
 	}
 	
-	LOGINFO("Successfully connected to PostgreSQL database");
+	LOGDEBUG("Successfully connected to PostgreSQL database");
 	sdata->pg_connected = true;
 	mutex_unlock(&sdata->pg_lock);
 	return true;
@@ -8663,10 +8663,10 @@ static void db_log_share(sdata_t *sdata, json_t *val, workbase_t *wb)
 	
 	res = sdata_db_query(sdata, query_str);
 	if (res) {
-	    LOGDEBUG("Successfully inserted share %d", json_integer_value(json_object_get(val, "workinfoid")));
+	    LOGDEBUG("Successfully inserted share %lld", json_integer_value(json_object_get(val, "workinfoid")));
 	    PQclear(res);
 	} else {
-	    LOGDEBUG("Failed to insert share %d", json_integer_value(json_object_get(val, "workinfoid")));
+	    LOGDEBUG("Failed to insert share %lld", json_integer_value(json_object_get(val, "workinfoid")));
 	}
 	
 	free(query_str);
