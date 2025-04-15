@@ -1,3 +1,6 @@
+alpha := 'root@alpha.parasite.dev'
+bravo := 'root@bravo.parasite.dev'
+
 install:
   git submodule update --init
   sudo apt-get install --yes \
@@ -80,3 +83,6 @@ deploy branch remote chain domain:
 
 deploy-signet branch='master' remote='parasitepool/pool': \
   (deploy branch remote 'signet' 'alpha.parasite.dev')
+
+tunnel server='alpha':
+  ssh -N -L 5433:127.0.0.1:5432 {{alpha}}
