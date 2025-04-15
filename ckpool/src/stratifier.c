@@ -8663,10 +8663,10 @@ static void db_log_share(sdata_t *sdata, json_t *val, workbase_t *wb)
 	
 	res = sdata_db_query(sdata, query_str);
 	if (res) {
-	    LOGDEBUG("Successfully inserted share %s", json_integer_value(json_object_get(val, "workinfoid")));
+	    LOGDEBUG("Successfully inserted share %d", json_integer_value(json_object_get(val, "workinfoid")));
 	    PQclear(res);
 	} else {
-	    LOGDEBUG("Failed to insert share %s", json_integer_value(json_object_get(val, "workinfoid")));
+	    LOGDEBUG("Failed to insert share %d", json_integer_value(json_object_get(val, "workinfoid")));
 	}
 	
 	free(query_str);
