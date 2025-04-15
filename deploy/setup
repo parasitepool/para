@@ -23,6 +23,7 @@ apt-get install --yes \
   curl \
   libboost-dev \
   libevent-dev \
+  libpq-dev \
   libsqlite3-dev\
   libssl-dev \
   libtool \

@@ -7,6 +7,7 @@ install:
     cmake \
     libboost-dev \
     libevent-dev \
+    libpq-dev \
     libsqlite3-dev \
     libtool \
     libzmq3-dev \
