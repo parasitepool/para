@@ -7,6 +7,7 @@ install:
     autoconf \
     automake \
     build-essential \
+    clang-format \
     cmake \
     libboost-dev \
     libevent-dev \
