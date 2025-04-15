@@ -79,6 +79,9 @@ AC_SEARCH_LIBS(exp, m, , echo "Error: Required library math not found." && exit 
 AC_SEARCH_LIBS(pthread_mutex_trylock, pthread, , echo "Error: Required library pthreads not found." && exit 1)
 AC_SEARCH_LIBS(zmq_socket, zmq, ZMQ=yes, ZMQ=no)
 
+AC_SEARCH_LIBS(PQconnectdb, pq, LIBPQ=yes, LIBPQ=no)
+AM_CONDITIONAL([HAVE_LIBPQ], [test x$LIBPQ = xyes])
+
 AC_CONFIG_FILES([Makefile src/Makefile])
 AC_OUTPUT
 
@@ -88,6 +91,7 @@ echo
 echo "Compilation............: make (or gmake)"
 echo "  YASM (Intel ASM).....: $YASM"
 echo "  ZMQ..................: $ZMQ"
+echo "  PostgreSQL...........: $LIBPQ"
 echo "  CPPFLAGS.............: $CPPFLAGS"
 echo "  CFLAGS...............: $CFLAGS"
 echo "  LDFLAGS..............: $LDFLAGS"

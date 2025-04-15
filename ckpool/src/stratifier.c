@@ -24,6 +24,10 @@
 #include <zmq.h>
 #endif
 
+#ifdef HAVE_LIBPQ
+#include <postgresql/libpq-fe.h>
+#endif
+
 #include "ckpool.h"
 #include "libckpool.h"
 #include "bitcoin.h"
@@ -470,6 +474,10 @@ struct stratifier_data {
 	proxy_t *proxies; /* Hashlist of all proxies */
 	mutex_t proxy_lock; /* Protects all proxy data */
 	proxy_t *subproxy; /* Which subproxy this sdata belongs to in proxy mode */
+
+	PGconn *pg_conn; // Persistent PostgreSQL connection */
+	mutex_t pg_lock;
+	bool pg_connected;
 };
 
 typedef struct json_entry json_entry_t;
@@ -742,6 +750,7 @@ static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 
 static void stratum_broadcast_update(sdata_t *sdata, const workbase_t *wb, bool clean);
 static void stratum_broadcast_updates(sdata_t *sdata, bool clean);
+static void db_log_share(sdata_t *sdata, json_t *val, workbase_t *wb);
 
 static void clear_userwb(sdata_t *sdata, int64_t id)
 {
@@ -6238,6 +6247,9 @@ out_nowb:
         json_set_string(val, "agent", client->useragent);
 
 	if (ckp->logshares) {
+		// TODO: remove file logging after validating
+	        db_log_share(sdata, val, wb);
+
 		fp = fopen(fname, "ae");
 		if (likely(fp)) {
 			s = json_dumps(val, JSON_EOL);
@@ -8507,6 +8519,159 @@ static void *zmqnotify(void *arg)
 	return NULL;
 }
 
+static bool sdata_db_connect(sdata_t *sdata)
+{
+	ckpool_t *ckp = sdata->ckp;
+	
+	mutex_lock(&sdata->pg_lock);
+	if (sdata->pg_conn) {
+		if (PQstatus(sdata->pg_conn) == CONNECTION_OK) {
+			mutex_unlock(&sdata->pg_lock);
+			return true;
+		}
+		PQfinish(sdata->pg_conn);
+		sdata->pg_conn = NULL;
+	}
+	
+	LOGINFO("Connecting to PostgreSQL database");
+	sdata->pg_conn = PQconnectdb("dbname=ckpool_db user=satoshi password=nakamoto host=localhost");
+	
+	if (PQstatus(sdata->pg_conn) != CONNECTION_OK) {
+		LOGERR("Connection to database failed: %s", PQerrorMessage(sdata->pg_conn));
+	    	PQfinish(sdata->pg_conn);
+	    	sdata->pg_conn = NULL;
+	    	sdata->pg_connected = false;
+	    	mutex_unlock(&sdata->pg_lock);
+	    	return false;
+	}
+	
+	LOGINFO("Successfully connected to PostgreSQL database");
+	sdata->pg_connected = true;
+	mutex_unlock(&sdata->pg_lock);
+	return true;
+}
+
+static void sdata_db_disconnect(sdata_t *sdata)
+{
+	mutex_lock(&sdata->pg_lock);
+	if (sdata->pg_conn) {
+		LOGINFO("Closing PostgreSQL database connection");
+	    	PQfinish(sdata->pg_conn);
+	    	sdata->pg_conn = NULL;
+	}
+	sdata->pg_connected = false;
+	mutex_unlock(&sdata->pg_lock);
+}
+
+static bool sdata_db_ensure_connected(sdata_t *sdata)
+{
+	bool connected = false;
+	
+	mutex_lock(&sdata->pg_lock);
+	if (sdata->pg_conn && PQstatus(sdata->pg_conn) == CONNECTION_OK) {
+		connected = true;
+	}
+	mutex_unlock(&sdata->pg_lock);
+	
+	if (!connected) {
+	    return sdata_db_connect(sdata);
+	}
+	
+	return true;
+}
+
+static PGresult *sdata_db_query(sdata_t *sdata, const char *query)
+{
+	PGresult *res = NULL;
+	
+	if (!sdata_db_ensure_connected(sdata)) {
+		return NULL;
+	}
+	
+	mutex_lock(&sdata->pg_lock);
+	if (sdata->pg_conn) {
+		res = PQexec(sdata->pg_conn, query);
+		if (PQresultStatus(res) != PGRES_COMMAND_OK && PQresultStatus(res) != PGRES_TUPLES_OK) {
+			LOGERR("Database query failed: %s", PQerrorMessage(sdata->pg_conn));
+			PQclear(res);
+			res = NULL;
+	
+			if (PQstatus(sdata->pg_conn) != CONNECTION_OK) {
+				PQfinish(sdata->pg_conn);
+				sdata->pg_conn = NULL;
+				sdata->pg_connected = false;
+				mutex_unlock(&sdata->pg_lock);
+	
+				if (sdata_db_connect(sdata)) {
+					return sdata_db_query(sdata, query);
+				}
+
+				return NULL;
+			}
+		}
+	}
+	mutex_unlock(&sdata->pg_lock);
+
+	return res;
+}
+
+static void db_log_share(sdata_t *sdata, json_t *val, workbase_t *wb)
+{
+	ckpool_t *ckp = sdata->ckp;
+	PGresult *res = NULL;
+	char *query_str = NULL;
+	int query_res;
+	
+	if (!ckp->logshares)
+	    return;
+	
+	query_res = asprintf(&query_str,
+	    "INSERT INTO shares ("
+	    "blockheight, workinfoid, clientid, enonce1, nonce2, nonce, ntime, diff, sdiff, "
+	    "hash, result, reject_reason, error, errn, createdate, createby, "
+	    "createcode, createinet, workername, username, address, agent"
+	    ") VALUES (%d, %lld, %lld, '%s', '%s', '%s', '%s', %f, %f, '%s', %s, '%s', '%s', %lld, "
+	    "'%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s')",
+	    wb->height,
+	    json_integer_value(json_object_get(val, "workinfoid")),
+	    json_integer_value(json_object_get(val, "clientid")),
+	    json_string_value(json_object_get(val, "enonce1")),
+	    json_string_value(json_object_get(val, "nonce2")),
+	    json_string_value(json_object_get(val, "nonce")),
+	    json_string_value(json_object_get(val, "ntime")),
+	    json_real_value(json_object_get(val, "diff")),
+	    json_real_value(json_object_get(val, "sdiff")),
+	    json_string_value(json_object_get(val, "hash")),
+	    json_is_true(json_object_get(val, "result")) ? "TRUE" : "FALSE",
+	    json_string_value(json_object_get(val, "reject-reason")),
+	    json_string_value(json_object_get(val, "error")),
+	    json_integer_value(json_object_get(val, "errn")),
+	    json_string_value(json_object_get(val, "createdate")),
+	    json_string_value(json_object_get(val, "createby")),
+	    json_string_value(json_object_get(val, "createcode")),
+	    json_string_value(json_object_get(val, "createinet")),
+	    json_string_value(json_object_get(val, "workername")),
+	    json_string_value(json_object_get(val, "username")),
+	    json_string_value(json_object_get(val, "address")),
+	    json_string_value(json_object_get(val, "agent"))
+	);
+	
+	if (query_res < 0) {
+	    LOGERR("Failed to create query string: out of memory");
+	    return;
+	}
+	
+	res = sdata_db_query(sdata, query_str);
+	if (res) {
+	    LOGDEBUG("Successfully inserted share %s", json_integer_value(json_object_get(val, "workinfoid")),
+	    PQclear(res);
+	} else {
+	    LOGDEBUG("Failed to insert share %s", json_integer_value(json_object_get(val, "workinfoid")),
+	}
+	
+	free(query_str);
+}
+
 void *stratifier(void *arg)
 {
 	pthread_t pth_blockupdate, pth_statsupdate, pth_throbber, pth_zmqnotify;
@@ -8522,6 +8687,14 @@ void *stratifier(void *arg)
 	ckp->sdata = sdata;
 	sdata->ckp = ckp;
 	sdata->verbose = true;
+
+	// init psql
+    	mutex_init(&sdata->pg_lock);
+    	sdata->pg_conn = NULL;
+    	sdata->pg_connected = false;
+    	if (ckp->logshares) {
+		sdata_db_connect(sdata);
+    	}
 
 	/* Wait for the generator to have something for us */
 	while (!ckp->proxy && !ckp->generator_ready)
@@ -8599,6 +8772,7 @@ void *stratifier(void *arg)
 out:
 	/* We should never get here unless there's a fatal error */
 	LOGEMERG("Stratifier failure, shutting down");
+	sdata_db_disconnect(sdata);
 	exit(1);
 	return NULL;
 }
