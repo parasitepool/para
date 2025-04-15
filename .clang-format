@@ -1,0 +1,10 @@
+BasedOnStyle: Chromium
+AlignAfterOpenBracket: AlwaysBreak
+AlignConsecutiveDeclarations: 'true'
+AlignEscapedNewlines: Left
+AlignOperands: 'true'
+ColumnLimit: '120'
+IndentWidth: '4'
+TabWidth: '4'
+UseTab: Never
+SortIncludes: false
