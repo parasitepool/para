@@ -15,9 +15,12 @@ install:
     libsqlite3-dev \
     libtool \
     libzmq3-dev \
+    nginx \
+    nodejs \
     pkgconf \
     python3 \
-    yasm \
+    yasm 
+  curl -fsSL https://get.pnpm.io/install.sh | bash
 
 build-bitcoind: install
   #!/usr/bin/env bash
@@ -32,13 +35,13 @@ build-ckpool: install
   ./configure
   make
 
-build-ckstats:
+build-ckstats: install
   #!/usr/bin/env bash
   cd ckstats
   pnpm install
-  DATABASE_URL="postgresql://username:password@server:port/your_database_name"
-  SHADOW_DATABASE_URL="postgresql://username:password@server:port/your_shadow_database_name"
-  API_URL="http://192.168.0.197"
+  echo DATABASE_URL="postgresql://username:password@server:port/your_database_name" >> .env
+  echo SHADOW_DATABASE_URL="postgresql://username:password@server:port/your_shadow_database_name" >> .env
+  echo API_URL="http://192.168.0.197" >> .env
 
 build: build-bitcoind build-ckpool
 
@@ -62,6 +65,9 @@ ckpool:
     --config copr/ckpool.conf \
     --loglevel 7 \
     --log-shares
+
+nginx:
+  sudo nginx -c $(pwd)/copr/nginx.conf -p ./
 
 psql:
   ./bin/postgres-init

@@ -43,6 +43,7 @@ apt-get remove --yes --auto-remove
 ufw default allow outgoing
 ufw default deny incoming
 
+ufw allow 80
 ufw allow 3333
 ufw allow ssh
 
@@ -113,6 +114,21 @@ if [[ ! -e ~/.bitcoin/bitcoin.conf ]]; then
   mkdir -p ~/.bitcoin
   ln -s /etc/bitcoin/bitcoin.conf ~/.bitcoin/bitcoin.conf
 fi
+
+mkdir -p /etc/nginx/sites-available
+mkdir -p /etc/nginx/sites-enabled
+
+cp deploy/nginx.conf /etc/nginx/sites-available/nginx.conf
+
+ln -sf /etc/nginx/sites-available/nginx.conf /etc/nginx/sites-enabled/nginx.conf
+
+mkdir -p /var/lib/ckpool/logs
+chown -R ckpool:ckpool /var/lib/ckpool
+chmod -R 755 /var/lib/ckpool/logs
+
+nginx -t
+systemctl enable nginx
+systemctl restart nginx
 
 journalctl --unit bitcoind --vacuum-time 5m
 
