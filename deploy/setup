@@ -44,7 +44,7 @@ apt-get remove --yes --auto-remove
 ufw default allow outgoing
 ufw default deny incoming
 
-ufw allow 80
+ufw allow http
 ufw allow 3333
 ufw allow ssh
 
