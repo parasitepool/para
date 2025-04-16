@@ -156,7 +156,7 @@ systemctl daemon-reload
 systemctl enable ckpool
 systemctl restart ckpool
 
-journalctl --unit para --vacuum-time 5m
+journalctl --unit para --vacuum-time 1s
 
 cp deploy/para.service /etc/systemd/system/
 
