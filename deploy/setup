@@ -6,6 +6,7 @@ set -euxo pipefail
 
 CHAIN=$1
 DOMAIN=$2
+STATS=$3
 
 export DEBIAN_FRONTEND=noninteractive
 
@@ -47,6 +48,40 @@ ufw allow http
 ufw allow https
 ufw allow ssh
 ufw allow 3333
+
+if [[ $STATS == 1 ]]; then
+  cd ckstats
+  
+  curl -fsSL https://get.pnpm.io/install.sh | bash
+  apt-get install --yes \
+    postgresql \
+    postgresql-contrib \
+    nodejs \
+    nginx
+
+  pnpm install
+
+  echo DATABASE_URL="postgres://satoshi:nakamoto@localhost:5432/ckstats_db"
+  echo SHADOW_DATABASE_URL="postgres://satoshi:nakamoto@localhost:5432/ckstats_db"
+  echo API_URL=http://alpha.parasite.dev
+
+  ../bin/postgres-init
+  
+  pnpm build
+
+  cat << 'EOF' | crontab -
+  */1 * * * * cd /root/deploy/parasitepool/pool/ckstats && /usr/local/bin/pnpm seed
+  */1 * * * * cd /root/deploy/parasitepool/pool/ckstats && /usr/local/bin/pnpm update-users
+  5 */2 * * * cd /root/deploy/parasitepool/pool/ckstats && /usr/local/bin/pnpm cleanup
+  5 1 * * * cd /root/deploy/parasitepool/pool/ckstats && /usr/local/bin/pnpm vacuum
+  EOF
+ 
+  pnpm start
+
+  exit 0
+fi
+
+exit 1
 
 case $CHAIN in
   main)

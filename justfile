@@ -1,5 +1,6 @@
 alpha := 'root@alpha.parasite.dev'
 bravo := 'root@bravo.parasite.dev'
+stats := 'root@parasite.space'
 
 install:
   git submodule update --init
@@ -61,7 +62,7 @@ psql:
 psql-reset:
   ./bin/postgres-reset
 
-deploy branch remote chain domain:
+deploy branch remote chain domain stats='0':
   ssh root@{{domain}} '\
     export DEBIAN_FRONTEND=noninteractive \
     && mkdir -p deploy \
@@ -69,10 +70,13 @@ deploy branch remote chain domain:
     && apt-get upgrade --yes \
     && apt-get install --yes git rsync'
   rsync -avz deploy/checkout root@{{domain}}:deploy/checkout
-  ssh root@{{domain}} 'cd deploy && ./checkout {{branch}} {{remote}} {{chain}} {{domain}}'
+  ssh root@{{domain}} 'cd deploy && ./checkout {{branch}} {{remote}} {{chain}} {{domain}} {{stats}}'
 
 deploy-signet branch='master' remote='parasitepool/pool': \
   (deploy branch remote 'signet' 'alpha.parasite.dev')
+
+deploy-stats branch='master' remote='parasitepool/pool': \
+  (deploy branch remote 'signet' 'parasite.space')
 
 tunnel server='alpha':
   ssh -N -L 5433:127.0.0.1:5432 {{alpha}}
