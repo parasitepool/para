@@ -5217,6 +5217,15 @@ static user_instance_t* generate_user(ckpool_t* ckp, stratum_instance_t* client,
         username[127] = '\0';
 
     user = get_create_user(sdata, username, &new_user);
+
+    char* combined_id = NULL;
+    if (!new_user && lightning_id && domain) {
+        ASPRINTF(&combined_id, "%s@%s", lightning_id, domain);
+        if (user->secondaryuserid != combined_id) {
+            new_user = true;
+        }
+    }
+
     worker = get_create_worker(sdata, user, workername, &new_worker);
 
     /* Create one worker instance for combined data from workers of the
@@ -5236,9 +5245,7 @@ static user_instance_t* generate_user(ckpool_t* ckp, stratum_instance_t* client,
 
             /* Store lightning ID if available */
             if (lightning_id && domain) {
-                char* combined_id = NULL;
                 ASPRINTF(&combined_id, "%s@%s", lightning_id, domain);
-
                 if (user->secondaryuserid)
                     free(user->secondaryuserid);
                 user->secondaryuserid = combined_id;
