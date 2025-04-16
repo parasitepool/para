@@ -12,7 +12,6 @@ use {
     options::Options,
     std::{env, io, net::ToSocketAddrs, path::PathBuf, process},
     tokio::{runtime::Runtime, task},
-    tower::ServiceBuilder,
     tower_http::{services::ServeDir, set_header::SetResponseHeaderLayer},
 };
 

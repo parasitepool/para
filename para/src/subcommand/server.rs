@@ -14,21 +14,17 @@ impl Server {
 
         log::info!("Serving files in {}", log_dir.display());
 
-        let mut router = Router::new()
+        let router = Router::new()
             .nest_service("/pool/", ServeDir::new(log_dir.join("pool")))
-            .nest_service("/users/", ServeDir::new(log_dir.join("users")));
-
-        router = router.layer(
-            ServiceBuilder::new()
-                .layer(SetResponseHeaderLayer::overriding(
-                    CONTENT_TYPE,
-                    HeaderValue::from_static("text/plain"),
-                ))
-                .layer(SetResponseHeaderLayer::if_not_present(
-                    CONTENT_DISPOSITION,
-                    HeaderValue::from_static("inline"),
-                )),
-        );
+            .nest_service("/users/", ServeDir::new(log_dir.join("users")))
+            .layer(SetResponseHeaderLayer::overriding(
+                CONTENT_TYPE,
+                HeaderValue::from_static("text/plain"),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                CONTENT_DISPOSITION,
+                HeaderValue::from_static("inline"),
+            ));
 
         self.spawn(router, handle, self.address.clone(), self.port)?
             .await??;
