@@ -747,6 +747,12 @@ static void generate_coinbase(ckpool_t* ckp, workbase_t* wb) {
 static void stratum_broadcast_update(sdata_t* sdata, const workbase_t* wb, bool clean);
 static void stratum_broadcast_updates(sdata_t* sdata, bool clean);
 static void db_log_share(sdata_t* sdata, json_t* val, workbase_t* wb);
+static void insert_user_database(
+    sdata_t*         sdata,
+    user_instance_t* user,
+    const char*      lightning_id,
+    const char*      domain,
+    const char*      workername);
 
 static void clear_userwb(sdata_t* sdata, int64_t id) {
     user_instance_t *instance, *tmp;
@@ -5149,16 +5155,63 @@ static worker_instance_t* get_worker(sdata_t* sdata, user_instance_t* user, cons
  * user or creates a new one. Needs to be entered with client holding a ref
  * count. */
 static user_instance_t* generate_user(ckpool_t* ckp, stratum_instance_t* client, const char* workername) {
-    char *             base_username = strdupa(workername), *username;
+    char*              full_username = strdupa(workername);  // Make a copy of the workername
+    char*              username = NULL;                      // BTC address part
+    char*              lightning_id = NULL;                  // Lightning ID part
+    char*              domain = NULL;                        // Domain part
+    char*              worker_suffix = NULL;                 // Worker name suffix
     bool               new_user = false, new_worker = false;
     sdata_t*           sdata = ckp->sdata;
     worker_instance_t* worker;
     user_instance_t*   user;
     int                len;
 
-    username = strsep(&base_username, "._");
+    // We need to correctly parse: btcaddress.lightning@domain.workername
+    char* tmp = strdupa(full_username);  // Make another copy for tokenizing
+
+    // First, split by periods to separate potential worker suffix
+    username = strsep(&tmp, ".");
+    if (!tmp) {
+        // No periods in the workername, simple case
+        // Just use the whole thing as username
+    } else {
+        // We have at least one period
+        // Check for @ in the remaining string to identify lightning ID
+        char* at_tmp = tmp;
+        char* at_part = strchr(at_tmp, '@');
+
+        if (at_part) {
+            // Format is btcaddress.lightning@domain.workername
+            // Reset and reparse
+            tmp = strdupa(full_username);
+
+            // First part is the BTC address (before first period)
+            username = strsep(&tmp, ".");
+
+            if (tmp) {
+                // Get the lightning part (between first period and @)
+                lightning_id = strsep(&tmp, "@");
+
+                if (tmp) {
+                    // The domain is everything between @ and next period (or end)
+                    domain = strsep(&tmp, ".");
+
+                    // If anything remains after the last period, it's the worker suffix
+                    worker_suffix = tmp;
+                }
+            }
+
+            LOGDEBUG(
+                "Parsed format: btcaddress=%s, lightning=%s, domain=%s, worker=%s", username, lightning_id, domain,
+                worker_suffix ? worker_suffix : "");
+        } else {
+            // Format is just username.workername
+            // worker_suffix is already set correctly by the first strsep
+        }
+    }
+
     if (!username || !strlen(username))
-        username = base_username;
+        username = full_username;
     len = strlen(username);
     if (unlikely(len > 127))
         username[127] = '\0';
@@ -5180,10 +5233,29 @@ static user_instance_t* generate_user(ckpool_t* ckp, stratum_instance_t* client,
         if (generator_checkaddr(ckp, username, &user->script, &user->segwit)) {
             user->btcaddress = true;
             user->txnlen = address_to_txn(user->txnbin, username, user->script, user->segwit);
+
+            /* Store lightning ID if available */
+            if (lightning_id && domain) {
+                char* combined_id = NULL;
+                ASPRINTF(&combined_id, "%s@%s", lightning_id, domain);
+
+                if (user->secondaryuserid)
+                    free(user->secondaryuserid);
+                user->secondaryuserid = combined_id;
+                LOGDEBUG("Set secondaryuserid to: %s", user->secondaryuserid);
+            }
+
+            /* Add new user to database if this is a new user */
+            if (new_user && ckp->logshares) {
+                insert_user_database(sdata, user, lightning_id, domain, workername);
+            }
         }
     }
+
     if (new_user) {
-        LOGNOTICE("Added new user %s%s", username, user->btcaddress ? " as address based registration" : "");
+        LOGNOTICE(
+            "Added new user %s%s%s%s", username, user->btcaddress ? " as address based registration" : "",
+            lightning_id ? " with lightning ID " : "", lightning_id ? lightning_id : "");
     }
 
     return user;
@@ -5290,6 +5362,8 @@ static json_t* parse_authorise(stratum_instance_t* client, const json_t* params_
         goto out;
     }
     pass = json_string_value(json_array_get(params_val, 1));
+
+    /* Parse the worker name which may include btcaddress.lightning@domain.worker format */
     user = generate_user(ckp, client, buf);
     client->user_id = user->id;
     ts_realtime(&now);
@@ -8264,6 +8338,51 @@ static PGresult* sdata_db_query(sdata_t* sdata, const char* query) {
     mutex_unlock(&sdata->pg_lock);
 
     return res;
+}
+
+static void insert_user_database(
+    sdata_t*         sdata,
+    user_instance_t* user,
+    const char*      lightning_id,
+    const char*      domain,
+    const char*      workername) {
+    char*     query_str = NULL;
+    int       query_res;
+    PGresult* res = NULL;
+
+    if (!sdata_db_ensure_connected(sdata)) {
+        LOGERR("Failed to connect to database for user insertion");
+        return;
+    }
+
+    query_res = asprintf(
+        &query_str,
+        "INSERT INTO users ("
+        "username, btcaddress, lightning_address, workername, script, segwit, created_at"
+        ") VALUES ('%s', %s, '%s', '%s', %s, %s, NOW()) "
+        "ON CONFLICT (username, lightning_address) DO UPDATE SET "
+        "btcaddress = EXCLUDED.btcaddress,"
+        "script = EXCLUDED.script,"
+        "segwit = EXCLUDED.segwit,"
+        "workername = EXCLUDED.workername,"
+        "last_seen = NOW()",
+        user->username, user->btcaddress ? "TRUE" : "FALSE", user->secondaryuserid ? user->secondaryuserid : "NULL",
+        workername, user->script ? "TRUE" : "FALSE", user->segwit ? "TRUE" : "FALSE");
+
+    if (query_res < 0) {
+        LOGERR("Failed to create user query string: out of memory");
+        return;
+    }
+
+    res = sdata_db_query(sdata, query_str);
+    if (res) {
+        LOGDEBUG("Successfully inserted/updated user %s in database", user->username);
+        PQclear(res);
+    } else {
+        LOGERR("Failed to insert user %s into database", user->username);
+    }
+
+    free(query_str);
 }
 
 static void db_log_share(sdata_t* sdata, json_t* val, workbase_t* wb) {

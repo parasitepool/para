@@ -65,6 +65,20 @@ PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool_db -c "
       agent TEXT
   )
   "
+PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool_db -c "
+  CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      username VARCHAR(128) UNIQUE NOT NULL,
+      btcaddress BOOLEAN DEFAULT FALSE,
+      lightning_address VARCHAR(255),
+      workername VARCHAR(255),
+      script BOOLEAN,
+      segwit BOOLEAN,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+      last_seen TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+      UNIQUE(username, lightning_address)
+  )
+  "
 
 echo "PostgreSQL is running"
 echo "Database: ckpool_db"
