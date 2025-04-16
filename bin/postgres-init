@@ -19,6 +19,10 @@ if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='ckpool
   sudo -u postgres psql -c "CREATE DATABASE ckpool_db OWNER satoshi;"
 fi
 
+if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='ckstats_db'" | grep -q 1; then
+  sudo -u postgres psql -c "CREATE DATABASE ckstats_db OWNER satoshi;"
+fi
+
 # Modify pg_hba.conf to use md5 authentication for local connections
 PG_HBA_PATH=$(sudo -u postgres psql -t -c "SHOW hba_file;" | xargs)
 
