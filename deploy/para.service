@@ -1,6 +1,6 @@
 [Unit]
 After=network.target
-Description=Para server
+Description=Parasaur
 StartLimitBurst=120
 StartLimitIntervalSec=10m
 
