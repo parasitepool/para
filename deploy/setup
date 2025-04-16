@@ -125,7 +125,8 @@ ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default
 
 mkdir -p /var/lib/ckpool/logs
 chown -R ckpool:ckpool /var/lib/ckpool
-chmod -R 666 /var/lib/ckpool/logs
+chmod -R 777 /var/lib/ckpool/logs
+chmod +x /var/lib/ckpool
 
 nginx -t
 systemctl enable nginx
