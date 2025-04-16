@@ -164,5 +164,4 @@ systemctl daemon-reload
 systemctl enable para
 systemctl restart para
 
-
 # TODO: add a curl or something that checks that ckpool is running
