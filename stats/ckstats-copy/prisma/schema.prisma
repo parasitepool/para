@@ -1,0 +1,112 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider          = "postgresql"
+  url               = env("DATABASE_URL")
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
+}
+
+model PoolStats {
+  id           Int      @id @default(autoincrement())
+  timestamp    DateTime @default(now())
+  runtime      Int
+  users        Int
+  workers      Int
+  idle         Int
+  disconnected Int
+  hashrate1m   BigInt   @default(0)
+  hashrate5m   BigInt   @default(0)
+  hashrate15m  BigInt   @default(0)
+  hashrate1hr  BigInt   @default(0)
+  hashrate6hr  BigInt   @default(0)
+  hashrate1d   BigInt   @default(0)
+  hashrate7d   BigInt   @default(0)
+  diff         Float
+  accepted     BigInt
+  rejected     BigInt
+  bestshare    BigInt
+  SPS1m        Float
+  SPS5m        Float
+  SPS15m       Float
+  SPS1h        Float
+
+  @@index([timestamp])
+}
+
+model User {
+  address      String   @id @unique
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  authorised   BigInt   @default(0)
+  workers      Worker[]
+  stats        UserStats[]
+  isActive     Boolean  @default(true)
+  isPublic     Boolean  @default(true)
+  
+  @@index([isActive])
+  @@index([isPublic])
+}
+
+model UserStats {
+  id           Int      @id @default(autoincrement())
+  user         User     @relation(fields: [userAddress], references: [address])
+  userAddress  String
+  hashrate1m   BigInt   @default(0)
+  hashrate5m   BigInt   @default(0)
+  hashrate1hr  BigInt   @default(0)
+  hashrate1d   BigInt   @default(0)
+  hashrate7d   BigInt   @default(0)
+  lastShare    BigInt   @default(0)
+  workerCount  Int      @default(0)
+  shares       BigInt   @default(0)
+  bestShare    Float    @default(0)
+  bestEver     BigInt   @default(0)
+  timestamp    DateTime @default(now())
+  
+  @@index([timestamp])
+  @@index([userAddress, timestamp])
+  @@index([userAddress, bestEver, timestamp])
+  @@index([userAddress, hashrate1hr, timestamp])
+}
+
+model Worker {
+  id           Int      @id @default(autoincrement())
+  name         String   @default("")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  hashrate1m   BigInt   @default(0)
+  hashrate5m   BigInt   @default(0)
+  hashrate1hr  BigInt   @default(0)
+  hashrate1d   BigInt   @default(0)
+  hashrate7d   BigInt   @default(0)
+  lastUpdate   DateTime @default(now())
+  shares       BigInt   @default(0)
+  bestShare    Float    @default(0)
+  bestEver     BigInt   @default(0)
+  user         User     @relation(fields: [userAddress], references: [address])
+  userAddress  String
+  stats        WorkerStats[]
+  
+  @@unique([userAddress, name])
+  @@index([userAddress])
+}
+
+model WorkerStats {
+  id           Int      @id @default(autoincrement())
+  worker       Worker   @relation(fields: [workerId], references: [id])
+  workerId     Int
+  hashrate1m   BigInt   @default(0)
+  hashrate5m   BigInt   @default(0)
+  hashrate1hr  BigInt   @default(0)
+  hashrate1d   BigInt   @default(0)
+  hashrate7d   BigInt   @default(0)
+  shares       BigInt   @default(0)
+  bestShare    Float    @default(0)
+  bestEver     BigInt   @default(0)
+  timestamp    DateTime @default(now())
+  
+  @@index([timestamp])
+  @@index([workerId, timestamp])
+}
