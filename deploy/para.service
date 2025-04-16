@@ -1,0 +1,33 @@
+[Unit]
+After=network.target
+Description=Parasaur
+StartLimitBurst=120
+StartLimitIntervalSec=10m
+
+[Service]
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+Environment=RUST_BACKTRACE=1
+Environment=RUST_LOG=info
+ExecStart=/usr/local/bin/para \
+  --log-dir /var/lib/ckpool/logs \
+  server \
+  --port 80
+Group=ckpool
+LimitNOFILE=65536
+MemoryDenyWriteExecute=true
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+Restart=on-failure
+RestartSec=5s
+StateDirectory=ckpool
+StateDirectoryMode=0700
+TimeoutStopSec=10m
+Type=simple
+User=ckpool
+WorkingDirectory=/var/lib/ckpool
+
+[Install]
+WantedBy=multi-user.target

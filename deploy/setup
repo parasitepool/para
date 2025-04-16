@@ -43,8 +43,10 @@ apt-get remove --yes --auto-remove
 ufw default allow outgoing
 ufw default deny incoming
 
-ufw allow 3333
+ufw allow http
+ufw allow https
 ufw allow ssh
+ufw allow 3333
 
 case $CHAIN in
   main)
@@ -101,6 +103,19 @@ make
 install --backup src/ckpool /usr/local/bin/ckpool
 cd ..
 
+if [[ ! -e ~/.cargo/env ]]; then
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+fi
+
+source ~/.cargo/env
+
+rustup update stable
+
+cd para
+cargo build --release
+install --backup target/release/para /usr/local/bin/para
+cd ..
+
 id --user bitcoin || useradd --system bitcoin
 id --user ckpool || useradd --system ckpool
 
@@ -141,5 +156,13 @@ cp deploy/ckpool.conf /etc/ckpool/ckpool.conf
 systemctl daemon-reload
 systemctl enable ckpool
 systemctl restart ckpool
+
+journalctl --unit para --vacuum-time 1s
+
+cp deploy/para.service /etc/systemd/system/
+
+systemctl daemon-reload
+systemctl enable para
+systemctl restart para
 
 # TODO: add a curl or something that checks that ckpool is running
