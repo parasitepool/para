@@ -29,6 +29,7 @@ apt-get install --yes \
   libtool \
   libzmq3-dev \
   locales-all \
+  nginx \
   pkg-config \
   pkgconf \
   postgresql \
