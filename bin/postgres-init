@@ -11,20 +11,20 @@ if ! systemctl is-active --quiet postgresql; then
 fi
 
 # Create user and database if they don't exist
-if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='satoshi'" | grep -q 1; then
-  sudo -u postgres psql -c "CREATE USER satoshi WITH PASSWORD 'nakamoto' SUPERUSER;"
+if ! sudo psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='satoshi'" | grep -q 1; then
+  sudo psql -c "CREATE USER satoshi WITH PASSWORD 'nakamoto' SUPERUSER;"
 fi
 
-if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='ckpool_db'" | grep -q 1; then
-  sudo -u postgres psql -c "CREATE DATABASE ckpool_db OWNER satoshi;"
+if ! sudo psql -tAc "SELECT 1 FROM pg_database WHERE datname='ckpool_db'" | grep -q 1; then
+  sudo psql -c "CREATE DATABASE ckpool_db OWNER satoshi;"
 fi
 
-if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='ckstats_db'" | grep -q 1; then
-  sudo -u postgres psql -c "CREATE DATABASE ckstats_db OWNER satoshi;"
+if ! sudo psql -tAc "SELECT 1 FROM pg_database WHERE datname='ckstats_db'" | grep -q 1; then
+  sudo psql -c "CREATE DATABASE ckstats_db OWNER satoshi;"
 fi
 
 # Modify pg_hba.conf to use md5 authentication for local connections
-PG_HBA_PATH=$(sudo -u postgres psql -t -c "SHOW hba_file;" | xargs)
+PG_HBA_PATH=$(sudo psql -t -c "SHOW hba_file;" | xargs)
 
 # Backup the original file
 if [ ! -f "${PG_HBA_PATH}.bak" ]; then

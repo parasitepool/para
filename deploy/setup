@@ -34,8 +34,6 @@ ufw allow ssh
 ufw allow 3333
 
 if [[ $STATS == 1 ]]; then
-  cd ckstats
-  
   curl -fsSL https://get.pnpm.io/install.sh | bash
   
   apt-get install --yes \
@@ -44,8 +42,8 @@ if [[ $STATS == 1 ]]; then
     nodejs \
     nginx
   
-  cd ..
   ./bin/postgres-init
+  
   cd ckstats
  
   pnpm install
