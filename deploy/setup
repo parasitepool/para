@@ -61,7 +61,7 @@ if [[ $STATS == 1 ]]; then
   */1 * * * * cd /root/deploy/parasitepool/pool/ckstats && /usr/local/bin/pnpm update-users
   5 */2 * * * cd /root/deploy/parasitepool/pool/ckstats && /usr/local/bin/pnpm cleanup
   5 1 * * * cd /root/deploy/parasitepool/pool/ckstats && /usr/local/bin/pnpm vacuum
-  EOF
+EOF
  
   pnpm start
 
