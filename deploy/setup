@@ -16,25 +16,9 @@ hostnamectl set-hostname $DOMAIN
 
 apt-get install --yes \
   acl \
-  autoconf \
-  automake \
-  build-essential \
-  clang \
-  cmake \
   curl \
-  libboost-dev \
-  libevent-dev \
-  libpq-dev \
-  libsqlite3-dev\
-  libssl-dev \
-  libtool \
-  libzmq3-dev \
-  locales-all \
-  pkg-config \
-  pkgconf \
   postgresql \
   postgresql-contrib \
-  python3 \
   ufw \
   vim \
   yasm

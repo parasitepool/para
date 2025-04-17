@@ -1,6 +1,6 @@
 alpha := 'root@alpha.parasite.dev'
 bravo := 'root@bravo.parasite.dev'
-stats := 'root@parasite.space'
+stats := 'root@stats.parasite.dev'
 
 install:
   git submodule update --init
@@ -75,8 +75,8 @@ deploy branch remote chain domain stats='0':
 deploy-signet branch='master' remote='parasitepool/pool': \
   (deploy branch remote 'signet' 'alpha.parasite.dev')
 
-deploy-stats branch='master' remote='parasitepool/pool': \
-  (deploy branch remote 'signet' 'parasite.space')
+deploy-stats branch='ckstats' remote='parasitepool/pool': \
+  (deploy branch remote 'signet' 'stats.parasite.dev' '1')
 
 tunnel server='alpha':
   ssh -N -L 5433:127.0.0.1:5432 {{alpha}}
