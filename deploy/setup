@@ -37,19 +37,22 @@ if [[ $STATS == 1 ]]; then
   cd ckstats
   
   curl -fsSL https://get.pnpm.io/install.sh | bash
+  
   apt-get install --yes \
     postgresql \
     postgresql-contrib \
     nodejs \
     nginx
-
+  
+  cd ..
+  ./bin/postgres-init
+  cd ckstats
+ 
   pnpm install
 
   echo DATABASE_URL="postgres://satoshi:nakamoto@localhost:5432/ckstats_db"
   echo SHADOW_DATABASE_URL="postgres://satoshi:nakamoto@localhost:5432/ckstats_db"
   echo API_URL=http://alpha.parasite.dev
-
-  ../bin/postgres-init
   
   pnpm build
 
