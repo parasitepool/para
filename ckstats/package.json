@@ -8,7 +8,6 @@
     "start": "next start",
     "lint": "next lint",
     "lint:fix": "next lint --fix",
-    "postinstall": "prisma generate",
     "prisma:generate": "pnpx prisma generate",
     "prisma:migrate": "pnpx prisma migrate dev",
     "seed": "node scripts/seed.js",
