@@ -42,9 +42,9 @@ if [[ $STATS == 1 ]]; then
  
   pnpm install
 
-  echo DATABASE_URL="postgres://satoshi:nakamoto@localhost:5432/ckstats_db"
-  echo SHADOW_DATABASE_URL="postgres://satoshi:nakamoto@localhost:5432/ckstats_db"
-  echo API_URL=http://alpha.parasite.dev
+  echo DATABASE_URL="postgres://satoshi:nakamoto@localhost:5432/ckstats_db" >> .env
+  echo SHADOW_DATABASE_URL="postgres://satoshi:nakamoto@localhost:5432/ckstats_db" >> .env
+  echo API_URL="http://alpha.parasite.dev" >> .env
   
   pnpm build
 
