@@ -36,12 +36,6 @@ ufw allow 3333
 if [[ $STATS == 1 ]]; then
   curl -fsSL https://get.pnpm.io/install.sh | bash
   
-  apt-get install --yes \
-    postgresql \
-    postgresql-contrib \
-    nodejs \
-    nginx
-  
   ./bin/postgres-init
   
   cd ckstats
