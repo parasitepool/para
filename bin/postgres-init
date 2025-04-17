@@ -2,44 +2,44 @@
 
 # Install PostgreSQL if not installed
 if ! dpkg -l | grep -q postgresql; then
-  sudo apt-get install -y postgresql postgresql-contrib
+  apt-get install -y postgresql postgresql-contrib
 fi
 
 # Check if PostgreSQL service is running
 if ! systemctl is-active --quiet postgresql; then
-  sudo systemctl start postgresql
+  systemctl start postgresql
 fi
 
 # Create user and database if they don't exist
-if ! sudo psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='satoshi'" | grep -q 1; then
-  sudo psql -c "CREATE USER satoshi WITH PASSWORD 'nakamoto' SUPERUSER;"
+if ! psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='satoshi'" | grep -q 1; then
+  psql -c "CREATE USER satoshi WITH PASSWORD 'nakamoto' SUPERUSER;"
 fi
 
-if ! sudo psql -tAc "SELECT 1 FROM pg_database WHERE datname='ckpool_db'" | grep -q 1; then
-  sudo psql -c "CREATE DATABASE ckpool_db OWNER satoshi;"
+if ! psql -tAc "SELECT 1 FROM pg_database WHERE datname='ckpool_db'" | grep -q 1; then
+  psql -c "CREATE DATABASE ckpool_db OWNER satoshi;"
 fi
 
-if ! sudo psql -tAc "SELECT 1 FROM pg_database WHERE datname='ckstats_db'" | grep -q 1; then
-  sudo psql -c "CREATE DATABASE ckstats_db OWNER satoshi;"
+if ! psql -tAc "SELECT 1 FROM pg_database WHERE datname='ckstats_db'" | grep -q 1; then
+  psql -c "CREATE DATABASE ckstats_db OWNER satoshi;"
 fi
 
 # Modify pg_hba.conf to use md5 authentication for local connections
-PG_HBA_PATH=$(sudo psql -t -c "SHOW hba_file;" | xargs)
+PG_HBA_PATH=$(psql -t -c "SHOW hba_file;" | xargs)
 
 # Backup the original file
 if [ ! -f "${PG_HBA_PATH}.bak" ]; then
-    sudo cp $PG_HBA_PATH ${PG_HBA_PATH}.bak
+    cp $PG_HBA_PATH ${PG_HBA_PATH}.bak
     echo "Backup created: ${PG_HBA_PATH}.bak"
 else
     echo "Backup already exists, skipping backup creation"
 fi
 
 # Update the authentication method for local connections
-sudo sed -i '/^local.*all.*all.*peer/c\local all all md5' $PG_HBA_PATH
-sudo sed -i '/^host.*all.*all.*127.0.0.1\/32/c\host all all 127.0.0.1/32 md5' $PG_HBA_PATH
+sed -i '/^local.*all.*all.*peer/c\local all all md5' $PG_HBA_PATH
+sed -i '/^host.*all.*all.*127.0.0.1\/32/c\host all all 127.0.0.1/32 md5' $PG_HBA_PATH
 
 # Reload PostgreSQL to apply changes
-sudo systemctl reload postgresql
+systemctl reload postgresql
 
 # Create table if it doesn't exist (now using -h localhost to force TCP connection)
 PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool_db -c "
