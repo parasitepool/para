@@ -79,7 +79,7 @@ deploy-stats branch='ckstats' remote='parasitepool/pool': \
   (deploy branch remote 'signet' 'stats.parasite.dev' '1')
 
 tunnel server='alpha':
-  ssh -N -L 5433:127.0.0.1:5432 {{alpha}}
+  ssh -N -L 5433:127.0.0.1:5432 {{server}}
 
 lint:
   find ./ckpool/src -type f \( -name "*.c" -o -name "*.h" \) -not -path "**/jansson-2.14/*" -exec clang-format -i {} \;
