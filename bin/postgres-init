@@ -44,7 +44,7 @@ sed -i '/^host.*all.*all.*127.0.0.1\/32/c\host all all 127.0.0.1/32 md5' $PG_HBA
 systemctl reload postgresql
 
 # Create table if it doesn't exist (now using -h localhost to force TCP connection)
-PGPASSWORD="nakamoto" sudo -i -u postgres psql -h localhost -U satoshi -d ckpool_db -c "
+PGPASSWORD="nakamoto" sudo psql -h localhost -U satoshi -d ckpool_db -c "
   CREATE TABLE IF NOT EXISTS shares (
       id SERIAL PRIMARY KEY,
       blockheight INTEGER,
