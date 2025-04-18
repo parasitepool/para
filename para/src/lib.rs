@@ -1,5 +1,6 @@
+#![allow(clippy::too_many_arguments)]
 use {
-    anyhow::{Error, anyhow},
+    anyhow::{Error, ensure},
     arguments::Arguments,
     axum::{
         Router,
@@ -9,8 +10,21 @@ use {
         },
     },
     clap::Parser,
+    futures::stream::StreamExt,
     options::Options,
-    std::{env, io, net::ToSocketAddrs, path::PathBuf, process},
+    rustls_acme::{
+        AcmeConfig,
+        acme::{LETS_ENCRYPT_PRODUCTION_DIRECTORY, LETS_ENCRYPT_STAGING_DIRECTORY},
+        axum::AxumAcceptor,
+        caches::DirCache,
+    },
+    std::{
+        env, io,
+        net::ToSocketAddrs,
+        path::PathBuf,
+        process,
+        sync::{Arc, LazyLock},
+    },
     tokio::{runtime::Runtime, task},
     tower_http::{services::ServeDir, set_header::SetResponseHeaderLayer},
 };

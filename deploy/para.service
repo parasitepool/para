@@ -9,9 +9,11 @@ AmbientCapabilities=CAP_NET_BIND_SERVICE
 Environment=RUST_BACKTRACE=1
 Environment=RUST_LOG=info
 ExecStart=/usr/local/bin/para \
+  --data-dir /var/lib/para \
   --log-dir /var/lib/ckpool/logs \
   server \
-  --port 80
+  --acme-contact mailto:infra@parasite.dev \
+  --acme-domain alpha.parasite.dev
 Group=ckpool
 LimitNOFILE=65536
 MemoryDenyWriteExecute=true
@@ -22,12 +24,12 @@ ProtectHome=true
 ProtectSystem=full
 Restart=on-failure
 RestartSec=5s
-StateDirectory=ckpool
+StateDirectory=para
 StateDirectoryMode=0700
 TimeoutStopSec=10m
 Type=simple
 User=ckpool
-WorkingDirectory=/var/lib/ckpool
+WorkingDirectory=/var/lib/para
 
 [Install]
 WantedBy=multi-user.target
