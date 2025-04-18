@@ -1,4 +1,6 @@
-use super::*;
+use {super::*, error::ServerResult};
+
+mod error;
 
 #[derive(Clone, Debug, Parser)]
 pub struct Server {
@@ -18,6 +20,8 @@ impl Server {
 
         log::info!("Serving files in {}", log_dir.display());
 
+        let database = Database::new(&options).await.unwrap();
+
         let router = Router::new()
             .nest_service("/pool/", ServeDir::new(log_dir.join("pool")))
             .nest_service("/users/", ServeDir::new(log_dir.join("users")))
@@ -28,7 +32,9 @@ impl Server {
             .layer(SetResponseHeaderLayer::overriding(
                 CONTENT_DISPOSITION,
                 HeaderValue::from_static("inline"),
-            ));
+            ))
+            .route("/splits", get(Self::get_splits))
+            .layer(Extension(database));
 
         self.spawn(
             router,
@@ -42,6 +48,12 @@ impl Server {
         .await??;
 
         Ok(())
+    }
+
+    pub(crate) async fn get_splits(
+        Extension(database): Extension<Database>,
+    ) -> ServerResult<Response> {
+        Ok(Json(database.get_splits().await?).into_response())
     }
 
     fn spawn(
