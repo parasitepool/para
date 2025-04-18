@@ -70,7 +70,6 @@ impl Server {
                         .to_socket_addrs()?
                         .next()
                         .unwrap();
-                    // .ok_or_else(|| anyhow!("failed to get socket addrs"))?;
 
                     log::info!("Listening on https://{addr}");
 
@@ -90,9 +89,9 @@ impl Server {
                         .to_socket_addrs()?
                         .next()
                         .unwrap();
-                    // .ok_or_else(|| anyhow!("failed to get socket addrs"))?;
 
                     log::info!("Listening on http://{addr}");
+
                     axum_server::Server::bind(addr)
                         .handle(handle)
                         .serve(router.into_make_service())
