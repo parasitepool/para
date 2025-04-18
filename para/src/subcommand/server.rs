@@ -56,6 +56,11 @@ impl Server {
     ) -> Result<task::JoinHandle<io::Result<()>>> {
         let acme_cache = data_dir.join("acme-cache");
 
+        let address = match address {
+            Some(address) => address,
+            None => "0.0.0.0".into(),
+        };
+
         Ok(tokio::spawn(async move {
             match (acme_domain, acme_contact) {
                 (Some(acme_domain), Some(acme_contact)) => {
@@ -63,10 +68,7 @@ impl Server {
                         "Getting certificate for {acme_domain} using contact email {acme_contact}"
                     );
 
-                    let addr = (
-                        address.unwrap_or("0.0.0.0".to_string()),
-                        port.unwrap_or(443),
-                    )
+                    let addr = (address, port.unwrap_or(443))
                         .to_socket_addrs()?
                         .next()
                         .unwrap();
@@ -80,11 +82,6 @@ impl Server {
                         .await
                 }
                 _ => {
-                    let address = match address {
-                        Some(address) => address,
-                        None => "0.0.0.0".into(),
-                    };
-
                     let addr = (address, port.unwrap_or(80))
                         .to_socket_addrs()?
                         .next()
