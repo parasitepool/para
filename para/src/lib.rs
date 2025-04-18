@@ -1,15 +1,20 @@
 #![allow(clippy::too_many_arguments)]
 use {
-    anyhow::{Error, ensure},
+    anyhow::{Error, anyhow, ensure},
     arguments::Arguments,
     axum::{
-        Router,
+        Extension, Router,
+        extract::Json,
         http::{
-            HeaderValue,
+            HeaderValue, StatusCode,
             header::{CONTENT_DISPOSITION, CONTENT_TYPE},
         },
+        response::{IntoResponse, Response},
+        routing::get,
     },
+    axum_server::Handle,
     clap::Parser,
+    database::Database,
     futures::stream::StreamExt,
     options::Options,
     rustls_acme::{
@@ -18,6 +23,8 @@ use {
         axum::AxumAcceptor,
         caches::DirCache,
     },
+    serde::{Deserialize, Serialize},
+    sqlx::{Pool, Postgres, postgres::PgPoolOptions},
     std::{
         env, io,
         net::ToSocketAddrs,
@@ -30,6 +37,7 @@ use {
 };
 
 mod arguments;
+mod database;
 mod options;
 mod subcommand;
 

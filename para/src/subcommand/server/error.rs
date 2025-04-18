@@ -1,11 +1,10 @@
 use super::*;
 
-pub(super) enum ServerError {
+pub(crate) enum ServerError {
     Internal(Error),
-    NotFound(String),
 }
 
-pub(super) type ServerResult<T> = Result<T, ServerError>;
+pub(crate) type ServerResult<T> = Result<T, ServerError>;
 
 impl IntoResponse for ServerError {
     fn into_response(self) -> Response {
@@ -20,7 +19,12 @@ impl IntoResponse for ServerError {
                 )
                     .into_response()
             }
-            Self::NotFound(message) => (StatusCode::NOT_FOUND, message).into_response(),
         }
+    }
+}
+
+impl From<Error> for ServerError {
+    fn from(error: Error) -> Self {
+        Self::Internal(error)
     }
 }
