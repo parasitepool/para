@@ -23,7 +23,7 @@ impl Database {
     }
 
     pub(crate) async fn get_splits(&self) -> Result<Vec<Split>> {
-        Ok(sqlx::query_as::<_, Split>(
+        sqlx::query_as::<_, Split>(
             "
             WITH worker_sums AS (
                 SELECT
@@ -54,6 +54,6 @@ impl Database {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|err| anyhow!(err))?)
+        .map_err(|err| anyhow!(err))
     }
 }
