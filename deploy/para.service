@@ -12,8 +12,8 @@ ExecStart=/usr/local/bin/para \
   --data-dir /var/lib/para \
   --log-dir /var/lib/ckpool/logs \
   server \
-  --acme-domain alpha.parasite.dev \
-  --acme-contact mailto:infra@parasite.dev
+  --acme-contact mailto:infra@parasite.dev \
+  --acme-domain alpha.parasite.dev
 Group=ckpool
 LimitNOFILE=65536
 MemoryDenyWriteExecute=true
