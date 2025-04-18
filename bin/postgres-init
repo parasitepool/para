@@ -65,6 +65,40 @@ PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool_db -c "
       agent TEXT
   )
   "
+PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool_db -c "
+  CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      username VARCHAR(128) NOT NULL,
+      btcaddress BOOLEAN DEFAULT FALSE,
+      lightning_address VARCHAR(255),
+      workername VARCHAR(255),
+      script BOOLEAN,
+      segwit BOOLEAN,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+      last_seen TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+      UNIQUE(username, lightning_address)
+  )
+  "
+
+PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool_db -c "
+  CREATE TABLE IF NOT EXISTS blocks (
+      id SERIAL PRIMARY KEY,
+      blockheight INTEGER NOT NULL,
+      blockhash VARCHAR(64) NOT NULL,
+      confirmed BOOLEAN DEFAULT FALSE,
+      workername VARCHAR(255),
+      username VARCHAR(128),
+      diff DOUBLE PRECISION,
+      time_found TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+      coinbasevalue BIGINT,
+      rewards_processed BOOLEAN DEFAULT FALSE
+  )
+  "
+PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool_db -c "
+  INSERT INTO blocks (blockheight, blockhash, confirmed)
+  SELECT 0, '0000000000000000000000000000000000000000000000000000000000000000', FALSE
+  WHERE NOT EXISTS (SELECT 1 FROM blocks);
+"
 
 echo "PostgreSQL is running"
 echo "Database: ckpool_db"

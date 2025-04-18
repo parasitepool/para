@@ -747,6 +747,23 @@ static void generate_coinbase(ckpool_t* ckp, workbase_t* wb) {
 static void stratum_broadcast_update(sdata_t* sdata, const workbase_t* wb, bool clean);
 static void stratum_broadcast_updates(sdata_t* sdata, bool clean);
 static void db_log_share(sdata_t* sdata, json_t* val, workbase_t* wb);
+static void db_update_block_status(sdata_t* sdata, const char* hash, bool confirmed, bool rewards_processed);
+static void db_add_block(
+    sdata_t*    sdata,
+    int         height,
+    const char* hash,
+    bool        confirmed,
+    const char* workername,
+    const char* username,
+    double      diff,
+    int64_t     coinbasevalue);
+
+static void insert_user_database(
+    sdata_t*         sdata,
+    user_instance_t* user,
+    const char*      lightning_id,
+    const char*      lightning_domain,
+    const char*      workername);
 
 static void clear_userwb(sdata_t* sdata, int64_t id) {
     user_instance_t *instance, *tmp;
@@ -2112,7 +2129,7 @@ static void put_workbase(sdata_t* sdata, workbase_t* wb) {
 #define put_remote_workbase(sdata, wb) put_workbase(sdata, wb)
 
 static void block_solve(ckpool_t* ckp, json_t* val);
-static void block_reject(json_t* val);
+static void block_reject(ckpool_t* ckp, json_t* val);
 
 static void submit_node_block(ckpool_t* ckp, sdata_t* sdata, json_t* val) {
     char *      coinbase = NULL, *enonce1 = NULL, *nonce = NULL, *nonce2 = NULL, *gbt_block, *coinbasehex, *swaphex;
@@ -2205,7 +2222,7 @@ static void submit_node_block(ckpool_t* ckp, sdata_t* sdata, json_t* val) {
     if (ret)
         block_solve(ckp, bval);
     else
-        block_reject(bval);
+        block_reject(ckp, bval);
 
     json_decref(bval);
 out:
@@ -3632,6 +3649,9 @@ static void block_solve(ckpool_t* ckp, json_t* val) {
     double   diff = 0;
     int      height = 0;
     ts_t     ts_now;
+    char     blockhash[68] = {0};
+    int64_t  coinbasevalue = 0;
+    char*    username = NULL;
 
     ts_realtime(&ts_now);
     sprintf(cdfield, "%lu,%lu", ts_now.tv_sec, ts_now.tv_nsec);
@@ -3642,20 +3662,46 @@ static void block_solve(ckpool_t* ckp, json_t* val) {
     json_get_int(&height, val, "height");
     json_get_double(&diff, val, "diff");
     json_get_string(&workername, val, "workername");
+    char* blockhash_str = NULL;
+    json_get_string(&blockhash_str, val, "blockhash");
+    // Then use blockhash_str and free it when done
+    if (blockhash_str) {
+        // Use blockhash_str
+        strncpy(blockhash, blockhash_str, sizeof(blockhash) - 1);
+        free(blockhash_str);
+    }
+    json_get_int64(&coinbasevalue, val, "reward");
 
     if (!workername) {
         ASPRINTF(&msg, "Block solved by %s!", ckp->name);
         LOGWARNING("Solved and confirmed block!");
+
+        // Record block in database without worker info
+        if (ckp->logshares) {
+            db_add_block(sdata, height, blockhash, true, "", "", diff, coinbasevalue);
+        }
     } else {
         json_t *           user_val, *worker_val;
         worker_instance_t* worker;
         user_instance_t*   user;
         char*              s;
 
+        // Extract username from workername
+        username = strdupa(workername);
+        char* worker_part = strchr(username, '.');
+        if (worker_part) {
+            *worker_part = '\0';  // Split at first period to get username
+        }
+
         ASPRINTF(&msg, "Block %d solved by %s @ %s!", height, workername, ckp->name);
         LOGWARNING("Solved and confirmed block %d by %s", height, workername);
         user = user_by_workername(sdata, workername);
         worker = get_worker(sdata, user, workername);
+
+        // Record block in database with worker info
+        if (ckp->logshares) {
+            db_add_block(sdata, height, blockhash, true, workername, username, diff, coinbasevalue);
+        }
 
         ck_rlock(&sdata->instance_lock);
         user_val = user_stats(user);
@@ -3680,10 +3726,24 @@ static void block_solve(ckpool_t* ckp, json_t* val) {
     reset_bestshares(sdata);
 }
 
-static void block_reject(json_t* val) {
-    int height = 0;
+static void block_reject(ckpool_t* ckp, json_t* val) {
+    int      height = 0;
+    char     blockhash[68] = {0};
+    sdata_t* sdata = ckp->sdata;
 
     json_get_int(&height, val, "height");
+    char* blockhash_str = NULL;
+    json_get_string(&blockhash_str, val, "blockhash");
+    if (blockhash_str) {
+        strncpy(blockhash, blockhash_str, sizeof(blockhash) - 1);
+
+        // Update block status in database as rejected
+        if (ckp->logshares) {
+            db_update_block_status(sdata, blockhash_str, false, false);
+        }
+
+        free(blockhash_str);
+    }
 
     LOGWARNING("Submitted, but had block %d rejected", height);
 }
@@ -5149,21 +5209,77 @@ static worker_instance_t* get_worker(sdata_t* sdata, user_instance_t* user, cons
  * user or creates a new one. Needs to be entered with client holding a ref
  * count. */
 static user_instance_t* generate_user(ckpool_t* ckp, stratum_instance_t* client, const char* workername) {
-    char *             base_username = strdupa(workername), *username;
+    char*              full_username = strdupa(workername);  // Make a copy of the workername
+    char*              username = NULL;                      // BTC address part
+    char*              lightning_id = NULL;                  // Lightning ID part
+    char*              lightning_domain = NULL;              // Domain part
+    char*              worker_suffix = NULL;                 // Worker name suffix
     bool               new_user = false, new_worker = false;
     sdata_t*           sdata = ckp->sdata;
     worker_instance_t* worker;
     user_instance_t*   user;
     int                len;
 
-    username = strsep(&base_username, "._");
+    // We need to correctly parse: btcaddress.lightning@domain.workername
+    char* tmp = strdupa(full_username);  // Make another copy for tokenizing
+
+    // First, split by periods to separate potential worker suffix
+    username = strsep(&tmp, ".");
+    if (!tmp) {
+        // No periods in the workername, simple case
+        // Just use the whole thing as username
+    } else {
+        // We have at least one period
+        // Check for @ in the remaining string to identify lightning ID
+        char* at_tmp = tmp;
+        char* at_part = strchr(at_tmp, '@');
+
+        if (at_part) {
+            // Format is btcaddress.lightning@domain.workername
+            // Reset and reparse
+            tmp = strdupa(full_username);
+
+            // First part is the BTC address (before first period)
+            username = strsep(&tmp, ".");
+
+            if (tmp) {
+                // Get the lightning part (between first period and @)
+                lightning_id = strsep(&tmp, "@");
+
+                if (tmp) {
+                    // The domain is everything between @ and next period (or end)
+                    lightning_domain = strsep(&tmp, ".");
+
+                    // If anything remains after the last period, it's the worker suffix
+                    worker_suffix = tmp;
+                }
+            }
+
+            LOGDEBUG(
+                "Parsed format: btcaddress=%s, lightning=%s, domain=%s, worker=%s", username, lightning_id,
+                lightning_domain, worker_suffix ? worker_suffix : "");
+        } else {
+            // Format is just username.workername
+            // worker_suffix is already set correctly by the first strsep
+        }
+    }
+
     if (!username || !strlen(username))
-        username = base_username;
+        username = full_username;
     len = strlen(username);
     if (unlikely(len > 127))
         username[127] = '\0';
 
     user = get_create_user(sdata, username, &new_user);
+
+    char* combined_id = NULL;
+    if (!new_user && lightning_id && lightning_domain) {
+        ASPRINTF(&combined_id, "%s@%s", lightning_id, lightning_domain);
+        if (user->secondaryuserid != combined_id) {
+            new_user = true;
+        }
+    }
+
     worker = get_create_worker(sdata, user, workername, &new_worker);
 
     /* Create one worker instance for combined data from workers of the
@@ -5180,10 +5296,27 @@ static user_instance_t* generate_user(ckpool_t* ckp, stratum_instance_t* client,
         if (generator_checkaddr(ckp, username, &user->script, &user->segwit)) {
             user->btcaddress = true;
             user->txnlen = address_to_txn(user->txnbin, username, user->script, user->segwit);
+
+            /* Store lightning ID if available */
+            if (lightning_id && lightning_domain) {
+                ASPRINTF(&combined_id, "%s@%s", lightning_id, lightning_domain);
+                if (user->secondaryuserid)
+                    free(user->secondaryuserid);
+                user->secondaryuserid = combined_id;
+                LOGDEBUG("Set secondaryuserid to: %s", user->secondaryuserid);
+            }
+
+            /* Add new user to database if this is a new user */
+            if (new_user && ckp->logshares) {
+                insert_user_database(sdata, user, lightning_id, lightning_domain, workername);
+            }
         }
     }
+
     if (new_user) {
-        LOGNOTICE("Added new user %s%s", username, user->btcaddress ? " as address based registration" : "");
+        LOGNOTICE(
+            "Added new user %s%s%s%s", username, user->btcaddress ? " as address based registration" : "",
+            lightning_id ? " with lightning ID " : "", lightning_id ? lightning_id : "");
     }
 
     return user;
@@ -5290,6 +5423,8 @@ static json_t* parse_authorise(stratum_instance_t* client, const json_t* params_
         goto out;
     }
     pass = json_string_value(json_array_get(params_val, 1));
+
+    /* Parse the worker name which may include btcaddress.lightning@domain.worker format */
     user = generate_user(ckp, client, buf);
     client->user_id = user->id;
     ts_realtime(&now);
@@ -5608,7 +5743,7 @@ static void test_blocksolve(
     if (ret)
         block_solve(ckp, val);
     else
-        block_reject(val);
+        block_reject(ckp, val);
 
     json_decref(val);
 }
@@ -6846,31 +6981,46 @@ static void parse_remote_workers(sdata_t* sdata, const json_t* val, const char* 
     LOGDEBUG("Adding %d remote workers to user %s", workers, username);
 }
 
-/* Attempt to submit a remote block locally by recreating it from its workinfo */
 static void parse_remote_block(ckpool_t* ckp, sdata_t* sdata, json_t* val, const char* buf, const int64_t client_id) {
     json_t *    workername_val = json_object_get(val, "workername"), *name_val = json_object_get(val, "name"), *res;
     const char *workername, *name, *coinbasehex, *swaphex, *cnfrm;
+    const char* blockhash_str;
     workbase_t* wb = NULL;
     double      diff = 0;
     int         height = 0;
     int64_t     id = 0;
     char*       msg;
     int         cblen;
+    int64_t     coinbasevalue = 0;
+    bool        confirmed = false;
+    char*       username = NULL;
 
     name = json_string_value(name_val);
     if (!name_val || !name)
         goto out_add;
 
-    /* If this is the confirm block message don't try to resubmit it */
-    cnfrm = json_string_value(json_object_get(val, "confirmed"));
-    if (cnfrm && cnfrm[0] == '1')
-        goto out_add;
+    /* Get block hash */
+    blockhash_str = json_string_value(json_object_get(val, "blockhash"));
 
+    /* Check if this is the confirm block message */
+    cnfrm = json_string_value(json_object_get(val, "confirmed"));
+    if (cnfrm && cnfrm[0] == '1') {
+        confirmed = true;
+        /* Update the block status in database */
+        if (ckp->logshares && blockhash_str) {
+            db_update_block_status(sdata, blockhash_str, true, false);
+            LOGNOTICE("Updated confirmed status for block %s", blockhash_str);
+        }
+        goto out_add;
+    }
+
+    json_get_int(&height, val, "height");
+    json_get_double(&diff, val, "diff");
     json_get_int64(&id, val, "workinfoid");
     coinbasehex = json_string_value(json_object_get(val, "coinbasehex"));
     swaphex = json_string_value(json_object_get(val, "swaphex"));
     json_get_int(&cblen, val, "cblen");
-    json_get_double(&diff, val, "diff");
+    json_get_int64(&coinbasevalue, val, "reward");
 
     if (likely(id && coinbasehex && swaphex && cblen))
         wb = get_remote_workbase(sdata, id, client_id);
@@ -6891,6 +7041,26 @@ static void parse_remote_block(ckpool_t* ckp, sdata_t* sdata, json_t* val, const
         /* Note nodes use jobid of the mapped_id instead of workinfoid */
         json_set_int64(val, "jobid", wb->mapped_id);
         send_nodes_block(sdata, val, client_id);
+
+        /* Add the block to database if it's not already added */
+        if (ckp->logshares) {
+            workername = json_string_value(workername_val);
+            if (workername && strlen(workername)) {
+                /* Extract username from workername */
+                username = strdupa(workername);
+                char* worker_part = strchr(username, '.');
+                if (worker_part) {
+                    *worker_part = '\0';  // Split at first period to get username
+                }
+            } else {
+                workername = "";
+                username = "";
+            }
+
+            db_add_block(sdata, height, blockhash, false, workername, username, diff, coinbasevalue);
+            LOGNOTICE("Added potential block %s at height %d to database", blockhash, height);
+        }
+
         /* We rely on the remote server to give us the ID_BLOCK
          * responses, so only use this response to determine if we
          * should reset the best shares. */
@@ -6923,10 +7093,28 @@ out_add:
 }
 
 void parse_upstream_block(ckpool_t* ckp, json_t* val) {
-    char*    buf;
-    sdata_t* sdata = ckp->sdata;
+    char*       buf;
+    sdata_t*    sdata = ckp->sdata;
+    const char* blockhash_str;
+    const char* cnfrm;
+    bool        confirmed = false;
 
     buf = json_dumps(val, 0);
+
+    /* Check if this is a confirmation message */
+    cnfrm = json_string_value(json_object_get(val, "confirmed"));
+    if (cnfrm && cnfrm[0] == '1') {
+        confirmed = true;
+        blockhash_str = json_string_value(json_object_get(val, "blockhash"));
+
+        /* Update the block status in database for confirmed blocks */
+        if (ckp->logshares && blockhash_str) {
+            db_update_block_status(sdata, blockhash_str, true, false);
+            LOGNOTICE("Updated confirmed status for upstream block %s", blockhash_str);
+        }
+    }
+
+    /* Continue with normal processing */
     parse_remote_block(ckp, sdata, val, buf, 0);
     free(buf);
 }
@@ -8176,6 +8364,7 @@ static void* zmqnotify(void* arg) {
 
 static bool sdata_db_connect(sdata_t* sdata) {
     ckpool_t* ckp = sdata->ckp;
+    bool      success = false;
 
     mutex_lock(&sdata->pg_lock);
     if (sdata->pg_conn) {
@@ -8199,10 +8388,106 @@ static bool sdata_db_connect(sdata_t* sdata) {
         return false;
     }
 
-    LOGDEBUG("Successfully connected to PostgreSQL database");
+    // Prepare the statements once connection is established
+    PGresult* res = NULL;
+
+    // Prepare insert_share statement
+    res = PQprepare(
+        sdata->pg_conn, "insert_share",
+        "INSERT INTO shares (blockheight, workinfoid, clientid, enonce1, nonce2, nonce, ntime, diff, sdiff, "
+        "hash, result, reject_reason, error, errn, createdate, createby, createcode, createinet, workername, username, "
+        "address, agent) "
+        "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)",
+        0, NULL);
+
+    if (PQresultStatus(res) != PGRES_COMMAND_OK) {
+        LOGERR("Failed to prepare insert_share statement: %s", PQerrorMessage(sdata->pg_conn));
+        PQclear(res);
+        PQfinish(sdata->pg_conn);
+        sdata->pg_conn = NULL;
+        sdata->pg_connected = false;
+        mutex_unlock(&sdata->pg_lock);
+        return false;
+    }
+    PQclear(res);
+
+    // Prepare insert_user statement
+    res = PQprepare(
+        sdata->pg_conn, "insert_user",
+        "INSERT INTO users (username, btcaddress, lightning_address, workername, script, segwit, created_at) "
+        "VALUES ($1, $2, $3, $4, $5, $6, NOW()) "
+        "ON CONFLICT (username, lightning_address) DO UPDATE SET "
+        "btcaddress = EXCLUDED.btcaddress, script = EXCLUDED.script, segwit = EXCLUDED.segwit, "
+        "workername = EXCLUDED.workername, last_seen = NOW()",
+        0, NULL);
+
+    if (PQresultStatus(res) != PGRES_COMMAND_OK) {
+        LOGERR("Failed to prepare insert_user statement: %s", PQerrorMessage(sdata->pg_conn));
+        PQclear(res);
+        PQfinish(sdata->pg_conn);
+        sdata->pg_conn = NULL;
+        sdata->pg_connected = false;
+        mutex_unlock(&sdata->pg_lock);
+        return false;
+    }
+    PQclear(res);
+
+    // Prepare insert_block statement
+    res = PQprepare(
+        sdata->pg_conn, "insert_block",
+        "INSERT INTO blocks (blockheight, blockhash, confirmed, workername, username, diff, coinbasevalue) "
+        "VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        0, NULL);
+
+    if (PQresultStatus(res) != PGRES_COMMAND_OK) {
+        LOGERR("Failed to prepare insert_block statement: %s", PQerrorMessage(sdata->pg_conn));
+        PQclear(res);
+        PQfinish(sdata->pg_conn);
+        sdata->pg_conn = NULL;
+        sdata->pg_connected = false;
+        mutex_unlock(&sdata->pg_lock);
+        return false;
+    }
+    PQclear(res);
+
+    // Prepare update_block_confirmed statement
+    res = PQprepare(
+        sdata->pg_conn, "update_block_confirmed",
+        "UPDATE blocks SET confirmed = $1, rewards_processed = $2 WHERE blockhash = $3", 0, NULL);
+
+    if (PQresultStatus(res) != PGRES_COMMAND_OK) {
+        LOGERR("Failed to prepare update_block_confirmed statement: %s", PQerrorMessage(sdata->pg_conn));
+        PQclear(res);
+        PQfinish(sdata->pg_conn);
+        sdata->pg_conn = NULL;
+        sdata->pg_connected = false;
+        mutex_unlock(&sdata->pg_lock);
+        return false;
+    }
+    PQclear(res);
+
+    // Prepare get_latest_block statement
+    res = PQprepare(
+        sdata->pg_conn, "get_latest_block",
+        "SELECT blockheight, blockhash, confirmed FROM blocks ORDER BY id DESC LIMIT 1", 0, NULL);
+
+    if (PQresultStatus(res) != PGRES_COMMAND_OK) {
+        LOGERR("Failed to prepare get_latest_block statement: %s", PQerrorMessage(sdata->pg_conn));
+        PQclear(res);
+        PQfinish(sdata->pg_conn);
+        sdata->pg_conn = NULL;
+        sdata->pg_connected = false;
+        mutex_unlock(&sdata->pg_lock);
+        return false;
+    }
+    PQclear(res);
+
+    LOGDEBUG("Successfully connected to PostgreSQL database and prepared statements");
     sdata->pg_connected = true;
+    success = true;
     mutex_unlock(&sdata->pg_lock);
-    return true;
+
+    return success;
 }
 
 static void sdata_db_disconnect(sdata_t* sdata) {
@@ -8230,6 +8515,48 @@ static bool sdata_db_ensure_connected(sdata_t* sdata) {
     }
 
     return true;
+}
+
+static PGresult* sdata_db_exec_prepared(
+    sdata_t*    sdata,
+    const char* stmt_name,
+    const char* param_values[],
+    const int   param_lengths[],
+    const int   param_formats[],
+    int         param_count) {
+    PGresult* res = NULL;
+
+    if (!sdata_db_ensure_connected(sdata)) {
+        return NULL;
+    }
+
+    mutex_lock(&sdata->pg_lock);
+    if (sdata->pg_conn) {
+        res = PQexecPrepared(sdata->pg_conn, stmt_name, param_count, param_values, param_lengths, param_formats, 0);
+
+        if (PQresultStatus(res) != PGRES_COMMAND_OK && PQresultStatus(res) != PGRES_TUPLES_OK) {
+            LOGERR("Database query failed: %s", PQerrorMessage(sdata->pg_conn));
+            PQclear(res);
+            res = NULL;
+
+            if (PQstatus(sdata->pg_conn) != CONNECTION_OK) {
+                PQfinish(sdata->pg_conn);
+                sdata->pg_conn = NULL;
+                sdata->pg_connected = false;
+                mutex_unlock(&sdata->pg_lock);
+
+                if (sdata_db_connect(sdata)) {
+                    return sdata_db_exec_prepared(
+                        sdata, stmt_name, param_values, param_lengths, param_formats, param_count);
+                }
+
+                return NULL;
+            }
+        }
+    }
+    mutex_unlock(&sdata->pg_lock);
+
+    return res;
 }
 
 static PGresult* sdata_db_query(sdata_t* sdata, const char* query) {
@@ -8266,50 +8593,266 @@ static PGresult* sdata_db_query(sdata_t* sdata, const char* query) {
     return res;
 }
 
+static void insert_user_database(
+    sdata_t*         sdata,
+    user_instance_t* user,
+    const char*      lightning_id,
+    const char*      lightning_domain,
+    const char*      workername) {
+    const char* param_values[6];
+    int         param_lengths[6];
+    int         param_formats[6];
+    char        btcaddress_str[8];
+    char        script_str[8];
+    char        segwit_str[8];
+    PGresult*   res = NULL;
+    char*       lightning_address = NULL;
+
+    if (!sdata_db_ensure_connected(sdata)) {
+        LOGERR("Failed to connect to database for user insertion");
+        return;
+    }
+
+    /* Create lightning address if both lightning_id and domain exist */
+    if (lightning_id && lightning_domain) {
+        ASPRINTF(&lightning_address, "%s@%s", lightning_id, lightning_domain);
+    }
+
+    /* Convert boolean values to strings */
+    snprintf(btcaddress_str, sizeof(btcaddress_str), "%s", user->btcaddress ? "TRUE" : "FALSE");
+    snprintf(script_str, sizeof(script_str), "%s", user->script ? "TRUE" : "FALSE");
+    snprintf(segwit_str, sizeof(segwit_str), "%s", user->segwit ? "TRUE" : "FALSE");
+
+    /* Set up parameters */
+    param_values[0] = user->username;
+    param_values[1] = btcaddress_str;
+    param_values[2] = lightning_address ? lightning_address : NULL;
+    param_values[3] = workername;
+    param_values[4] = script_str;
+    param_values[5] = segwit_str;
+
+    /* All parameters are text format */
+    for (int i = 0; i < 6; i++) {
+        param_formats[i] = 0; /* 0 = text */
+        param_lengths[i] = 0; /* 0 = use strlen */
+    }
+
+    res = sdata_db_exec_prepared(sdata, "insert_user", param_values, param_lengths, param_formats, 6);
+    if (res) {
+        LOGDEBUG("Successfully inserted/updated user %s in database", user->username);
+        PQclear(res);
+    } else {
+        LOGERR("Failed to insert user %s into database", user->username);
+    }
+
+    free(lightning_address);
+}
+
 static void db_log_share(sdata_t* sdata, json_t* val, workbase_t* wb) {
-    ckpool_t* ckp = sdata->ckp;
-    PGresult* res = NULL;
-    char*     query_str = NULL;
-    int       query_res;
+    ckpool_t*   ckp = sdata->ckp;
+    PGresult*   res = NULL;
+    const char* param_values[22];
+    int         param_lengths[22];
+    int         param_formats[22];
+    char        height_str[16];
+    char        clientid_str[32];
+    char        workinfoid_str[32];
+    char        diff_str[32];
+    char        sdiff_str[32];
+    char        errn_str[32];
+    char        result_str[8];
 
     if (!ckp->logshares)
         return;
 
-    query_res = asprintf(
-        &query_str,
-        "INSERT INTO shares ("
-        "blockheight, workinfoid, clientid, enonce1, nonce2, nonce, ntime, diff, sdiff, "
-        "hash, result, reject_reason, error, errn, createdate, createby, "
-        "createcode, createinet, workername, username, address, agent"
-        ") VALUES (%d, %lld, %lld, '%s', '%s', '%s', '%s', %f, %f, '%s', %s, '%s', '%s', %lld, "
-        "'%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s')",
-        wb->height, json_integer_value(json_object_get(val, "workinfoid")),
-        json_integer_value(json_object_get(val, "clientid")), json_string_value(json_object_get(val, "enonce1")),
-        json_string_value(json_object_get(val, "nonce2")), json_string_value(json_object_get(val, "nonce")),
-        json_string_value(json_object_get(val, "ntime")), json_real_value(json_object_get(val, "diff")),
-        json_real_value(json_object_get(val, "sdiff")), json_string_value(json_object_get(val, "hash")),
-        json_is_true(json_object_get(val, "result")) ? "TRUE" : "FALSE",
-        json_string_value(json_object_get(val, "reject-reason")), json_string_value(json_object_get(val, "error")),
-        json_integer_value(json_object_get(val, "errn")), json_string_value(json_object_get(val, "createdate")),
-        json_string_value(json_object_get(val, "createby")), json_string_value(json_object_get(val, "createcode")),
-        json_string_value(json_object_get(val, "createinet")), json_string_value(json_object_get(val, "workername")),
-        json_string_value(json_object_get(val, "username")), json_string_value(json_object_get(val, "address")),
-        json_string_value(json_object_get(val, "agent")));
+    /* Convert numeric values to strings */
+    snprintf(height_str, sizeof(height_str), "%d", wb->height);
+    snprintf(workinfoid_str, sizeof(workinfoid_str), "%lld", json_integer_value(json_object_get(val, "workinfoid")));
+    snprintf(clientid_str, sizeof(clientid_str), "%lld", json_integer_value(json_object_get(val, "clientid")));
+    snprintf(diff_str, sizeof(diff_str), "%f", json_real_value(json_object_get(val, "diff")));
+    snprintf(sdiff_str, sizeof(sdiff_str), "%f", json_real_value(json_object_get(val, "sdiff")));
+    snprintf(errn_str, sizeof(errn_str), "%lld", json_integer_value(json_object_get(val, "errn")));
+    snprintf(result_str, sizeof(result_str), "%s", json_is_true(json_object_get(val, "result")) ? "TRUE" : "FALSE");
 
-    if (query_res < 0) {
-        LOGERR("Failed to create query string: out of memory");
-        return;
+    /* Set up parameters */
+    param_values[0] = height_str;
+    param_values[1] = workinfoid_str;
+    param_values[2] = clientid_str;
+    param_values[3] = json_string_value(json_object_get(val, "enonce1"));
+    param_values[4] = json_string_value(json_object_get(val, "nonce2"));
+    param_values[5] = json_string_value(json_object_get(val, "nonce"));
+    param_values[6] = json_string_value(json_object_get(val, "ntime"));
+    param_values[7] = diff_str;
+    param_values[8] = sdiff_str;
+    param_values[9] = json_string_value(json_object_get(val, "hash"));
+    param_values[10] = result_str;
+    param_values[11] = json_string_value(json_object_get(val, "reject-reason"));
+    param_values[12] = json_string_value(json_object_get(val, "error"));
+    param_values[13] = errn_str;
+    param_values[14] = json_string_value(json_object_get(val, "createdate"));
+    param_values[15] = json_string_value(json_object_get(val, "createby"));
+    param_values[16] = json_string_value(json_object_get(val, "createcode"));
+    param_values[17] = json_string_value(json_object_get(val, "createinet"));
+    param_values[18] = json_string_value(json_object_get(val, "workername"));
+    param_values[19] = json_string_value(json_object_get(val, "username"));
+    param_values[20] = json_string_value(json_object_get(val, "address"));
+    param_values[21] = json_string_value(json_object_get(val, "agent"));
+
+    /* All parameters are text format */
+    for (int i = 0; i < 22; i++) {
+        param_formats[i] = 0; /* 0 = text */
+        param_lengths[i] = 0; /* 0 = use strlen */
     }
 
-    res = sdata_db_query(sdata, query_str);
+    res = sdata_db_exec_prepared(sdata, "insert_share", param_values, param_lengths, param_formats, 22);
     if (res) {
         LOGDEBUG("Successfully inserted share %lld", json_integer_value(json_object_get(val, "workinfoid")));
         PQclear(res);
     } else {
         LOGDEBUG("Failed to insert share %lld", json_integer_value(json_object_get(val, "workinfoid")));
     }
+}
 
-    free(query_str);
+static void db_add_block(
+    sdata_t*    sdata,
+    int         height,
+    const char* hash,
+    bool        confirmed,
+    const char* workername,
+    const char* username,
+    double      diff,
+    int64_t     coinbasevalue) {
+    const char* param_values[7];
+    int         param_lengths[7];
+    int         param_formats[7];
+    char        height_str[16];
+    char        confirmed_str[8];
+    char        diff_str[32];
+    char        coinbasevalue_str[32];
+    PGresult*   res = NULL;
+
+    if (!sdata_db_ensure_connected(sdata)) {
+        LOGERR("Failed to connect to database for block insertion");
+        return;
+    }
+
+    /* Convert numeric values to strings */
+    snprintf(height_str, sizeof(height_str), "%d", height);
+    snprintf(confirmed_str, sizeof(confirmed_str), "%s", confirmed ? "TRUE" : "FALSE");
+    snprintf(diff_str, sizeof(diff_str), "%f", diff);
+    snprintf(coinbasevalue_str, sizeof(coinbasevalue_str), "%ld", coinbasevalue);
+
+    /* Set up parameters */
+    param_values[0] = height_str;
+    param_values[1] = hash;
+    param_values[2] = confirmed_str;
+    param_values[3] = workername;
+    param_values[4] = username;
+    param_values[5] = diff_str;
+    param_values[6] = coinbasevalue_str;
+
+    /* All parameters are text format */
+    for (int i = 0; i < 7; i++) {
+        param_formats[i] = 0; /* 0 = text */
+        param_lengths[i] = 0; /* 0 = use strlen */
+    }
+
+    res = sdata_db_exec_prepared(sdata, "insert_block", param_values, param_lengths, param_formats, 7);
+    if (res) {
+        LOGNOTICE("Successfully inserted block %s at height %d in database", hash, height);
+        PQclear(res);
+    } else {
+        LOGERR("Failed to insert block %s into database", hash);
+    }
+}
+
+static void db_update_block_status(sdata_t* sdata, const char* hash, bool confirmed, bool rewards_processed) {
+    const char* param_values[3];
+    int         param_lengths[3];
+    int         param_formats[3];
+    char        confirmed_str[8];
+    char        rewards_processed_str[8];
+    PGresult*   res = NULL;
+
+    if (!sdata_db_ensure_connected(sdata)) {
+        LOGERR("Failed to connect to database for block update");
+        return;
+    }
+
+    /* Convert boolean values to strings */
+    snprintf(confirmed_str, sizeof(confirmed_str), "%s", confirmed ? "TRUE" : "FALSE");
+    snprintf(rewards_processed_str, sizeof(rewards_processed_str), "%s", rewards_processed ? "TRUE" : "FALSE");
+
+    /* Set up parameters */
+    param_values[0] = confirmed_str;
+    param_values[1] = rewards_processed_str;
+    param_values[2] = hash;
+
+    /* All parameters are text format */
+    for (int i = 0; i < 3; i++) {
+        param_formats[i] = 0; /* 0 = text */
+        param_lengths[i] = 0; /* 0 = use strlen */
+    }
+
+    res = sdata_db_exec_prepared(sdata, "update_block_confirmed", param_values, param_lengths, param_formats, 3);
+    if (res) {
+        LOGNOTICE(
+            "Successfully updated block %s status (confirmed: %s, rewards_processed: %s)", hash,
+            confirmed ? "true" : "false", rewards_processed ? "true" : "false");
+        PQclear(res);
+    } else {
+        LOGERR("Failed to update block %s status", hash);
+    }
+}
+
+static void db_get_latest_block(sdata_t* sdata, int* height, char* hash, bool* confirmed) {
+    PGresult* res = NULL;
+
+    if (!sdata_db_ensure_connected(sdata)) {
+        LOGERR("Failed to connect to database for getting latest block");
+        return;
+    }
+
+    res = sdata_db_exec_prepared(sdata, "get_latest_block", NULL, NULL, NULL, 0);
+    if (res) {
+        if (PQntuples(res) > 0) {
+            *height = atoi(PQgetvalue(res, 0, 0));
+            strncpy(hash, PQgetvalue(res, 0, 1), 65);
+            *confirmed = strcmp(PQgetvalue(res, 0, 2), "t") == 0;
+            LOGDEBUG(
+                "Latest block in database: height=%d hash=%s confirmed=%s", *height, hash,
+                *confirmed ? "true" : "false");
+        } else {
+            LOGDEBUG("No blocks found in database");
+            *height = 0;
+            strcpy(hash, "0000000000000000000000000000000000000000000000000000000000000000");
+            *confirmed = false;
+        }
+        PQclear(res);
+    } else {
+        LOGERR("Failed to get latest block from database");
+        *height = 0;
+        strcpy(hash, "0000000000000000000000000000000000000000000000000000000000000000");
+        *confirmed = false;
+    }
+}
+
+static void check_blocks_status(ckpool_t* ckp) {
+    sdata_t* sdata = ckp->sdata;
+    int      height = 0;
+    char     hash[68] = {0};
+    bool     confirmed = false;
+
+    if (!ckp->logshares)
+        return;
+
+    db_get_latest_block(sdata, &height, hash, &confirmed);
+    if (height > 0) {
+        LOGNOTICE(
+            "Latest block in database: height=%d hash=%s confirmed=%s", height, hash, confirmed ? "true" : "false");
+    } else {
+        LOGDEBUG("No blocks recorded in database yet");
+    }
 }
 
 void* stratifier(void* arg) {
@@ -8327,12 +8870,17 @@ void* stratifier(void* arg) {
     sdata->ckp = ckp;
     sdata->verbose = true;
 
-    // init psql
+    /* Initialize PostgreSQL connection */
     mutex_init(&sdata->pg_lock);
     sdata->pg_conn = NULL;
     sdata->pg_connected = false;
     if (ckp->logshares) {
-        sdata_db_connect(sdata);
+        if (sdata_db_connect(sdata)) {
+            LOGNOTICE("Successfully connected to PostgreSQL database");
+            check_blocks_status(ckp);
+        } else {
+            LOGWARNING("Failed to connect to PostgreSQL database at startup");
+        }
     }
 
     /* Wait for the generator to have something for us */
