@@ -1,0 +1,9 @@
+#!/bin/bash
+
+for file in ./ckpool/test/*.c; do
+    base="${file%.c}"
+    echo "Testing $file"
+    gcc "$file" -o "$base" && ./"$base"
+    [ $? -ne 0 ] && echo "ERROR: $file exited with code $?" || echo "OK"
+    rm -f "$base"
+done
