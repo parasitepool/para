@@ -762,7 +762,7 @@ static void insert_user_database(
     sdata_t*         sdata,
     user_instance_t* user,
     const char*      lightning_id,
-    const char*      domain,
+    const char*      lightning_domain,
     const char*      workername);
 
 static void clear_userwb(sdata_t* sdata, int64_t id) {
@@ -5212,7 +5212,7 @@ static user_instance_t* generate_user(ckpool_t* ckp, stratum_instance_t* client,
     char*              full_username = strdupa(workername);  // Make a copy of the workername
     char*              username = NULL;                      // BTC address part
     char*              lightning_id = NULL;                  // Lightning ID part
-    char*              domain = NULL;                        // Domain part
+    char*              lightning_domain = NULL;              // Domain part
     char*              worker_suffix = NULL;                 // Worker name suffix
     bool               new_user = false, new_worker = false;
     sdata_t*           sdata = ckp->sdata;
@@ -5248,7 +5248,7 @@ static user_instance_t* generate_user(ckpool_t* ckp, stratum_instance_t* client,
 
                 if (tmp) {
                     // The domain is everything between @ and next period (or end)
-                    domain = strsep(&tmp, ".");
+                    lightning_domain = strsep(&tmp, ".");
 
                     // If anything remains after the last period, it's the worker suffix
                     worker_suffix = tmp;
@@ -5256,8 +5256,8 @@ static user_instance_t* generate_user(ckpool_t* ckp, stratum_instance_t* client,
             }
 
             LOGDEBUG(
-                "Parsed format: btcaddress=%s, lightning=%s, domain=%s, worker=%s", username, lightning_id, domain,
-                worker_suffix ? worker_suffix : "");
+                "Parsed format: btcaddress=%s, lightning=%s, domain=%s, worker=%s", username, lightning_id,
+                lightning_domain, worker_suffix ? worker_suffix : "");
         } else {
             // Format is just username.workername
             // worker_suffix is already set correctly by the first strsep
@@ -5273,8 +5273,8 @@ static user_instance_t* generate_user(ckpool_t* ckp, stratum_instance_t* client,
     user = get_create_user(sdata, username, &new_user);
 
     char* combined_id = NULL;
-    if (!new_user && lightning_id && domain) {
-        ASPRINTF(&combined_id, "%s@%s", lightning_id, domain);
+    if (!new_user && lightning_id && lightning_domain) {
+        ASPRINTF(&combined_id, "%s@%s", lightning_id, lightning_domain);
         if (user->secondaryuserid != combined_id) {
             new_user = true;
         }
@@ -5298,8 +5298,8 @@ static user_instance_t* generate_user(ckpool_t* ckp, stratum_instance_t* client,
             user->txnlen = address_to_txn(user->txnbin, username, user->script, user->segwit);
 
             /* Store lightning ID if available */
-            if (lightning_id && domain) {
-                ASPRINTF(&combined_id, "%s@%s", lightning_id, domain);
+            if (lightning_id && lightning_domain) {
+                ASPRINTF(&combined_id, "%s@%s", lightning_id, lightning_domain);
                 if (user->secondaryuserid)
                     free(user->secondaryuserid);
                 user->secondaryuserid = combined_id;
@@ -5308,7 +5308,7 @@ static user_instance_t* generate_user(ckpool_t* ckp, stratum_instance_t* client,
 
             /* Add new user to database if this is a new user */
             if (new_user && ckp->logshares) {
-                insert_user_database(sdata, user, lightning_id, domain, workername);
+                insert_user_database(sdata, user, lightning_id, lightning_domain, workername);
             }
         }
     }
@@ -8597,7 +8597,7 @@ static void insert_user_database(
     sdata_t*         sdata,
     user_instance_t* user,
     const char*      lightning_id,
-    const char*      domain,
+    const char*      lightning_domain,
     const char*      workername) {
     const char* param_values[6];
     int         param_lengths[6];
@@ -8614,8 +8614,8 @@ static void insert_user_database(
     }
 
     /* Create lightning address if both lightning_id and domain exist */
-    if (lightning_id && domain) {
-        ASPRINTF(&lightning_address, "%s@%s", lightning_id, domain);
+    if (lightning_id && lightning_domain) {
+        ASPRINTF(&lightning_address, "%s@%s", lightning_id, lightning_domain);
     }
 
     /* Convert boolean values to strings */
