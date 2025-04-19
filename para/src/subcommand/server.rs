@@ -1,3 +1,4 @@
+use axum::extract::Path;
 use {super::*, error::ServerResult};
 
 mod error;
@@ -20,7 +21,7 @@ impl Server {
 
         log::info!("Serving files in {}", log_dir.display());
 
-        let database = Database::new(&options).await.unwrap();
+        let database = Database::new(&options).await?;
 
         let router = Router::new()
             .nest_service("/pool/", ServeDir::new(log_dir.join("pool")))
@@ -34,6 +35,7 @@ impl Server {
                 HeaderValue::from_static("inline"),
             ))
             .route("/splits", get(Self::get_splits))
+            .route("/payouts/{blockheight}", get(Self::get_payouts))
             .layer(Extension(database));
 
         self.spawn(
@@ -56,6 +58,13 @@ impl Server {
         Ok(Json(database.get_splits().await?).into_response())
     }
 
+    pub(crate) async fn get_payouts(
+        Path(blockheight): Path<i32>,
+        Extension(database): Extension<Database>,
+    ) -> ServerResult<Response> {
+        Ok(Json(database.get_payouts(blockheight).await?).into_response())
+    }
+
     fn spawn(
         &self,
         router: Router,
@@ -68,10 +77,7 @@ impl Server {
     ) -> Result<task::JoinHandle<io::Result<()>>> {
         let acme_cache = data_dir.join("acme-cache");
 
-        let address = match address {
-            Some(address) => address,
-            None => "0.0.0.0".into(),
-        };
+        let address = address.unwrap_or_else(|| "0.0.0.0".into());
 
         Ok(tokio::spawn(async move {
             match (acme_domain, acme_contact) {
