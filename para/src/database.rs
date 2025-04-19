@@ -100,7 +100,7 @@ impl Database {
                 u.lightning_address,
                 CAST(qs.total_diff as INT8) AS payable_shares,
                 CAST(ss.grand_total as INT8) AS total_shares,
-                ROUND((qs.total_diff / ss.grand_total * 100)::numeric, 4)::FLOAT8 as percentage
+                ROUND((qs.total_diff / ss.grand_total)::numeric, 8)::FLOAT8 as percentage
             FROM qualified_shares qs
             CROSS JOIN sum_shares ss
             LEFT JOIN users u ON qs.workername = u.workername
