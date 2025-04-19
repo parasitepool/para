@@ -14,9 +14,7 @@ impl Subcommand {
             Self::Server(server) => {
                 let handle = Handle::new();
 
-                Runtime::new()
-                    .unwrap()
-                    .block_on(async { server.run(options, handle).await.unwrap() });
+                Runtime::new()?.block_on(async { server.run(options, handle).await.unwrap() });
 
                 Ok(())
             }
