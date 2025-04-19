@@ -38,7 +38,6 @@ bitcoind:
   #!/usr/bin/env bash
   ./bitcoin/build/bin/bitcoind \
     -datadir=copr \
-    -signet 
 
 mine:
   ./bin/mine
