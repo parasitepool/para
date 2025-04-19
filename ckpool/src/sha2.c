@@ -47,10 +47,10 @@
         *((str) + 0) = (uint8_t)((x) >> 24); \
     }
 
-#define PACK32(str, x)                                                                                      \
-    {                                                                                                       \
-        *(x) = ((uint32_t)*((str) + 3)) | ((uint32_t)*((str) + 2) << 8) | ((uint32_t)*((str) + 1) << 16) |  \
-               ((uint32_t)*((str) + 0) << 24);                                                              \
+#define PACK32(str, x)                                                                                     \
+    {                                                                                                      \
+        *(x) = ((uint32_t)*((str) + 3)) | ((uint32_t)*((str) + 2) << 8) | ((uint32_t)*((str) + 1) << 16) | \
+               ((uint32_t)*((str) + 0) << 24);                                                             \
     }
 
 #define SHA256_SCR(i)                                                             \
