@@ -1548,8 +1548,8 @@ void* connector(void* arg) {
                 goto out;
             }
             port = atoi(newport);
-            /* All high port servers are treated as highdiff ports */
-            if (port > 4000) {
+            /* All even-numbered port servers are treated as highdiff ports */
+            if (port % 2 == 0) {
                 LOGNOTICE("Highdiff server %s", serverurl);
                 ckp->server_highdiff[i] = true;
             }
