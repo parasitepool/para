@@ -62,7 +62,7 @@ jobs:
     - name: Test
       run: cargo test --all
 
-  test-ckpool:
+  ckpool:
     runs-on: ubuntu-latest
     
     steps:   
