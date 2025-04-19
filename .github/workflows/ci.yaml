@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches:
+    - master
+  pull_request:
+    branches:
+    - master
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  RUSTFLAGS: --deny warnings
+
+jobs:
+  para:
+    runs-on: ubuntu-latest
+    
+    defaults:
+      run:
+        working-directory: para
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust Toolchain Components
+      uses: actions-rs/toolchain@v1
+      with:
+        components: clippy, rustfmt
+        override: true
+        toolchain: stable
+
+    - uses: Swatinem/rust-cache@v2
+
+    - name: Clippy
+      run: cargo clippy --all --all-targets
+
+    - name: Format
+      run: cargo fmt --all -- --check
+
+    - name: Test
+      run: cargo test --all
+
+  ckpool:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - uses: egor-tensin/setup-gcc@v1
+
+    - name: Format
+      run: |
+        sudo apt-get install -y clang-format
+        files=$(find ./ckpool/src -type f \( -name "*.c" -o -name "*.h" \) -not -path "**/jansson-2.14/*" -not -name "sha2.c" -not -name "sha2.h")
+        if [ -n "$files" ]; then
+          echo "$files" | xargs clang-format --dry-run -Werror
+        else
+          echo "No .c or .h files found to format."
+        fi
+
+    - name: Test
+      run: |
+        ./bin/run_tests
