@@ -61,3 +61,11 @@ jobs:
 
     - name: Test
       run: cargo test --all
+
+  test-ckpool:
+    runs-on: ubuntu-latest
+  
+    steps:   
+    - name: Run CKpool tests
+      run: |
+        ./bin/run_tests
