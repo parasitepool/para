@@ -117,7 +117,7 @@ struct userwb {
     UT_hash_handle hh;
     int64_t        id;
 
-    uchar* coinb2bin;  // Coinb2 cointaining this user's address for generation
+    uchar *coinb2bin;  // Coinb2 cointaining this user's address for generation
     char*  coinb2;
     int    coinb2len;  // Length of user coinb2
 };
