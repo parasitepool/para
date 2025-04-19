@@ -55,7 +55,7 @@ jobs:
     - name: Format
       run: |
         sudo apt-get install -y clang-format
-        find ./ckpool/src -type f \( -name "*.c" -o -name "*.h" \) -not -path "**/jansson-2.14/*" -exec clang-format {} \;
+        find ./ckpool/src -type f \( -name "*.c" -o -name "*.h" \) -not -path "**/jansson-2.14/*" -exec clang-format --dry-run -Werror {} \;
 
     - name: Test
       run: |
