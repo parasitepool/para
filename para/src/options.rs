@@ -18,7 +18,7 @@ impl Options {
     pub(crate) fn database_url(&self) -> String {
         self.database_url
             .clone()
-            .unwrap_or_else(|| "postgres://satoshi:nakamoto@127.0.0.1:5432/ckpool_db".to_string())
+            .unwrap_or_else(|| "postgres://satoshi:nakamoto@127.0.0.1:5432/ckpool".to_string())
     }
 
     pub(crate) fn log_dir(&self) -> PathBuf {

@@ -15,8 +15,8 @@ if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='satoshi'"
   sudo -u postgres psql -c "CREATE USER satoshi WITH PASSWORD 'nakamoto' SUPERUSER;"
 fi
 
-if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='ckpool_db'" | grep -q 1; then
-  sudo -u postgres psql -c "CREATE DATABASE ckpool_db OWNER satoshi;"
+if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='ckpool'" | grep -q 1; then
+  sudo -u postgres psql -c "CREATE DATABASE ckpool OWNER satoshi;"
 fi
 
 # Modify pg_hba.conf to use md5 authentication for local connections
@@ -38,7 +38,7 @@ sudo sed -i '/^host.*all.*all.*127.0.0.1\/32/c\host all all 127.0.0.1/32 md5' $P
 sudo systemctl reload postgresql
 
 # Create table if it doesn't exist (now using -h localhost to force TCP connection)
-PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool_db -c "
+PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
   CREATE TABLE IF NOT EXISTS shares (
       id SERIAL PRIMARY KEY,
       blockheight INTEGER,
@@ -65,7 +65,7 @@ PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool_db -c "
       agent TEXT
   )
   "
-PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool_db -c "
+PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
   CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
       username VARCHAR(128) NOT NULL,
@@ -80,7 +80,7 @@ PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool_db -c "
   )
   "
 
-PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool_db -c "
+PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
   CREATE TABLE IF NOT EXISTS blocks (
       id SERIAL PRIMARY KEY,
       blockheight INTEGER NOT NULL,
@@ -94,15 +94,15 @@ PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool_db -c "
       rewards_processed BOOLEAN DEFAULT FALSE
   )
   "
-PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool_db -c "
+PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
   INSERT INTO blocks (blockheight, blockhash, confirmed)
   SELECT 0, '0000000000000000000000000000000000000000000000000000000000000000', FALSE
   WHERE NOT EXISTS (SELECT 1 FROM blocks);
 "
 
 echo "PostgreSQL is running"
-echo "Database: ckpool_db"
+echo "Database: ckpool"
 echo "User: satoshi"
 echo "Password: nakamoto"
 echo "Table: shares with columns (id, data, created_at)"
-echo "Connection string: dbname=ckpool_db user=satoshi password=nakamoto host=localhost"
+echo "Connection string: dbname=ckpool user=satoshi password=nakamoto host=localhost"
