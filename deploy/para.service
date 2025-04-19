@@ -10,7 +10,7 @@ Environment=RUST_BACKTRACE=1
 Environment=RUST_LOG=info
 ExecStart=/usr/local/bin/para \
   --data-dir /var/lib/para \
-  --database-url postgres://satoshi:nakamoto@127.0.0.1:5432/ckpool_db \
+  --database-url postgres://satoshi:nakamoto@127.0.0.1:5432/ckpool \
   --log-dir /var/lib/ckpool/logs \
   server \
   --acme-contact mailto:infra@parasite.dev \
