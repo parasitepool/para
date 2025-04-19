@@ -1,4 +1,3 @@
-use axum::extract::Path;
 use {super::*, error::ServerResult};
 
 mod error;

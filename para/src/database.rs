@@ -62,9 +62,9 @@ impl Database {
                 percentage DESC;
             ",
         )
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|err| anyhow!(err))
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))
     }
 
     pub(crate) async fn get_payouts(&self, blockheight: i32) -> Result<Vec<Payout>> {
@@ -111,9 +111,9 @@ impl Database {
             ORDER BY qs.total_diff DESC;
             ",
         )
-            .bind(blockheight)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|err| anyhow!(err))
+        .bind(blockheight)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))
     }
 }
