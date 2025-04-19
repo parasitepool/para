@@ -66,8 +66,8 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
+    - uses: actions/checkout@v4
     - uses: egor-tensin/setup-gcc@v1
-
     - name: Lightning address parsing
       run: |
         ./bin/run_tests
