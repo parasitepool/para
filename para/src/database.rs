@@ -68,10 +68,6 @@ impl Database {
     }
 
     pub(crate) async fn get_payouts(&self, blockheight: i32) -> Result<Vec<Payout>> {
-        if blockheight <= 0 {
-            return Err(anyhow!("Block height must be greater than 0"));
-        }
-
         sqlx::query_as::<_, Payout>(
             "
             WITH target_block AS (

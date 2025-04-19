@@ -58,10 +58,15 @@ impl Server {
     }
 
     pub(crate) async fn get_payouts(
-        Path(blockheight): Path<i32>,
+        Path(blockheight): Path<u32>,
         Extension(database): Extension<Database>,
     ) -> ServerResult<Response> {
-        Ok(Json(database.get_payouts(blockheight).await?).into_response())
+        Ok(Json(
+            database
+                .get_payouts(blockheight.try_into().unwrap())
+                .await?,
+        )
+        .into_response())
     }
 
     fn spawn(
