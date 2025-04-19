@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -euxo pipefail
+
 for file in ./ckpool/test/*.c; do
     base="${file%.c}"
     echo "Testing $file"
