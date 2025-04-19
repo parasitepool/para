@@ -53,7 +53,7 @@ impl Database {
             SELECT
                 ws.workername AS worker_name,
                 CAST(ws.worker_total AS INT8),
-                (ws.worker_total / ts.grand_total) AS percentage
+                ROUND((ws.worker_total / ts.grand_total)::numeric, 8)::FLOAT8 AS percentage
             FROM
                 worker_sums ws
                     CROSS JOIN
