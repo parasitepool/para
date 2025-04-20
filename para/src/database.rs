@@ -11,7 +11,7 @@ pub(crate) struct Split {
 pub(crate) struct Payout {
     pub(crate) worker_name: String,
     pub(crate) btcaddress: Option<String>,
-    pub(crate) lightning_address: Option<String>,
+    pub(crate) lnurl: Option<String>,
     pub(crate) payable_shares: i64,
     pub(crate) total_shares: i64,
     pub(crate) percentage: f64,
@@ -100,12 +100,12 @@ impl Database {
                 JOIN target_block tb ON b.blockheight < tb.blockheight
             ),
             qualified_shares AS (
-                SELECT s.workername, SUM(s.diff) as total_diff
+                SELECT s.workername, s.lnurl, s.username AS btcaddress, SUM(s.diff) as total_diff
                 FROM shares s, target_block tb, previous_block pb
                 WHERE s.blockheight <= tb.blockheight
                     AND s.blockheight > pb.prev_height
                     AND s.reject_reason IS NULL
-                GROUP BY s.workername
+                GROUP BY s.lnurl, s.username, s.workername
             ),
             sum_shares AS (
                 SELECT SUM(total_diff) as grand_total
@@ -113,14 +113,13 @@ impl Database {
             )
             SELECT
                 qs.workername AS worker_name,
-                u.username AS btcaddress,
-                u.lightning_address,
+                qs.btcaddress,
+                qs.lnurl,
                 CAST(qs.total_diff as INT8) AS payable_shares,
                 CAST(ss.grand_total as INT8) AS total_shares,
                 ROUND((qs.total_diff / ss.grand_total)::numeric, 8)::FLOAT8 as percentage
             FROM qualified_shares qs
             CROSS JOIN sum_shares ss
-            LEFT JOIN users u ON qs.workername = u.workername
             ORDER BY qs.total_diff DESC;
             ",
         )
