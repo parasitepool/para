@@ -91,6 +91,10 @@ impl Server {
         Path(blockheight): Path<u32>,
         Extension(database): Extension<Database>,
     ) -> ServerResult<Response> {
+        if blockheight == 0 {
+            return Err(ServerError::NotFound("block not mined by parasite".into()));
+        }
+
         let Some((blockheight, blockhash, total_payment_amount)) = database
             .get_total_split_amount(blockheight.try_into().unwrap())
             .await?
