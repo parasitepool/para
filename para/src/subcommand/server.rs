@@ -8,7 +8,7 @@ mod error;
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub(crate) struct Payment {
     pub(crate) lightning_address: String,
-    pub(crate) amount: i64,
+    pub(crate) amount: f64,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
@@ -103,9 +103,13 @@ impl Server {
         let mut payments = Vec::new();
         for payout in payouts {
             if let Some(lnurl) = payout.lnurl {
+                dbg!(&payout.payable_shares);
+                dbg!(&payout.total_shares);
+                dbg!(&total_payment_amount);
+
                 payments.push(Payment {
                     lightning_address: lnurl,
-                    amount: (payout.payable_shares / payout.total_shares) * total_payment_amount,
+                    amount: payout.percentage * total_payment_amount as f64,
                 });
             }
         }
