@@ -74,9 +74,6 @@ deploy branch remote chain domain:
 deploy-signet branch='master' remote='parasitepool/pool': \
   (deploy branch remote 'signet' 'alpha.parasite.dev')
 
-deploy-prod branch='master' remote='parasitepool/pool': \
-  (deploy branch remote 'mainnet' 'zulu.parasite.dev')
-
 tunnel server='alpha':
   ssh -N -L 5433:127.0.0.1:5432 {{alpha}}
 
