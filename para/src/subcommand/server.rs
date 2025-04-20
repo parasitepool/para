@@ -1,6 +1,23 @@
-use {super::*, error::ServerResult};
+use {
+    super::*,
+    error::{ServerError, ServerResult},
+};
 
 mod error;
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+pub(crate) struct Payment {
+    pub(crate) lightning_address: String,
+    pub(crate) amount: i64,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+pub(crate) struct SatSplit {
+    pub(crate) block_height: i32,
+    pub(crate) block_hash: String,
+    pub(crate) total_payment_amount: i64,
+    pub(crate) payments: Vec<Payment>,
+}
 
 #[derive(Clone, Debug, Parser)]
 pub struct Server {
@@ -33,8 +50,9 @@ impl Server {
                 CONTENT_DISPOSITION,
                 HeaderValue::from_static("inline"),
             ))
-            .route("/splits", get(Self::get_splits))
-            .route("/payouts/{blockheight}", get(Self::get_payouts))
+            .route("/payouts/{blockheight}", get(Self::payouts))
+            .route("/split", get(Self::open_split))
+            .route("/split/{blockheight}", get(Self::sat_split))
             .layer(Extension(database));
 
         self.spawn(
@@ -51,13 +69,7 @@ impl Server {
         Ok(())
     }
 
-    pub(crate) async fn get_splits(
-        Extension(database): Extension<Database>,
-    ) -> ServerResult<Response> {
-        Ok(Json(database.get_splits().await?).into_response())
-    }
-
-    pub(crate) async fn get_payouts(
+    pub(crate) async fn payouts(
         Path(blockheight): Path<u32>,
         Extension(database): Extension<Database>,
     ) -> ServerResult<Response> {
@@ -66,6 +78,48 @@ impl Server {
                 .get_payouts(blockheight.try_into().unwrap())
                 .await?,
         )
+        .into_response())
+    }
+
+    pub(crate) async fn open_split(
+        Extension(database): Extension<Database>,
+    ) -> ServerResult<Response> {
+        Ok(Json(database.get_split().await?).into_response())
+    }
+
+    pub(crate) async fn sat_split(
+        Path(blockheight): Path<u32>,
+        Extension(database): Extension<Database>,
+    ) -> ServerResult<Response> {
+        if blockheight == 0 {
+            return Err(ServerError::NotFound("block not mined by parasite".into()));
+        }
+
+        let Some((blockheight, blockhash, total_payment_amount)) = database
+            .get_total_split_amount(blockheight.try_into().unwrap())
+            .await?
+        else {
+            return Err(ServerError::NotFound("block not mined by parasite".into()));
+        };
+
+        let payouts = database.get_payouts(blockheight).await?;
+
+        let mut payments = Vec::new();
+        for payout in payouts {
+            if let Some(lnurl) = payout.lnurl {
+                payments.push(Payment {
+                    lightning_address: lnurl,
+                    amount: (total_payment_amount / payout.total_shares) * payout.payable_shares,
+                });
+            }
+        }
+
+        Ok(Json(SatSplit {
+            block_height: blockheight,
+            block_hash: blockhash,
+            total_payment_amount,
+            payments,
+        })
         .into_response())
     }
 
@@ -165,5 +219,22 @@ impl Server {
         });
 
         Ok(acceptor)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    #[test]
+    fn validate_math() {
+        let a: i64 = 3;
+        let b: i64 = 2;
+        assert_eq!(a / b, 1);
+    }
+
+    #[test]
+    fn invalid_math() {
+        let a: i64 = 3;
+        let b: i64 = 2;
+        assert!(a / b != 2);
     }
 }
