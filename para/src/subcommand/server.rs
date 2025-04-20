@@ -8,7 +8,7 @@ mod error;
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub(crate) struct Payment {
     pub(crate) lightning_address: String,
-    pub(crate) amount: f64,
+    pub(crate) amount: i64,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
@@ -109,7 +109,7 @@ impl Server {
 
                 payments.push(Payment {
                     lightning_address: lnurl,
-                    amount: payout.percentage * total_payment_amount as f64,
+                    amount: (total_payment_amount / payout.total_shares) * payout.payable_shares,
                 });
             }
         }
