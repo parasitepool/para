@@ -103,10 +103,6 @@ impl Server {
         let mut payments = Vec::new();
         for payout in payouts {
             if let Some(lnurl) = payout.lnurl {
-                dbg!(&payout.payable_shares);
-                dbg!(&payout.total_shares);
-                dbg!(&total_payment_amount);
-
                 payments.push(Payment {
                     lightning_address: lnurl,
                     amount: (total_payment_amount / payout.total_shares) * payout.payable_shares,
@@ -219,5 +215,22 @@ impl Server {
         });
 
         Ok(acceptor)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    #[test]
+    fn validate_math() {
+        let a: i64 = 3;
+        let b: i64 = 2;
+        assert_eq!(a / b, 1);
+    }
+
+    #[test]
+    fn invalid_math() {
+        let a: i64 = 3;
+        let b: i64 = 2;
+        assert!(a / b != 2);
     }
 }
