@@ -36,7 +36,7 @@ impl Server {
             .route("/splits", get(Self::get_splits))
             .route("/payouts/{blockheight}", get(Self::get_payouts))
             // TODO: RPC call to get total block output
-            .route("/payments/{blockheight}", get(Self::get_payments))
+            .route("/sat_sheet/{blockheight}", get(Self::sat_sheet))
             .layer(Extension(database));
 
         self.spawn(
