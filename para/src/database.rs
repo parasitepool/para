@@ -67,7 +67,7 @@ impl Database {
         .map_err(|err| anyhow!(err))
     }
 
-    pub(crate) async fn get_total_split_amount(
+    pub(crate) async fn get_total_coinbase(
         &self,
         blockheight: i32,
     ) -> Result<Option<(i32, String, i64)>> {
