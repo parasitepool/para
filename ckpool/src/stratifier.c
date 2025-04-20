@@ -8724,14 +8724,20 @@ static void db_add_block(
     snprintf(coinbasevalue_str, sizeof(coinbasevalue_str), "%ld", coinbasevalue);
 
     size_t hash_len = strlen(hash);
-    if (hash_len % 2 != 0) {
+    if (hash_len % 8 != 0) {
         LOGERR("Invalid hash length: %zu", hash_len);
         return;
     }
 
-    for (size_t i = 0; i < hash_len; i += 2) {
-        be_hash[hash_len - i - 2] = hash[i];
-        be_hash[hash_len - i - 1] = hash[i + 1];
+    for (size_t i = 0; i < hash_len; i += 8) {
+        be_hash[hash_len - i - 1] = hash[i + 7];
+        be_hash[hash_len - i - 2] = hash[i + 6];
+        be_hash[hash_len - i - 3] = hash[i + 5];
+        be_hash[hash_len - i - 4] = hash[i + 4];
+        be_hash[hash_len - i - 5] = hash[i + 3];
+        be_hash[hash_len - i - 6] = hash[i + 2];
+        be_hash[hash_len - i - 7] = hash[i + 1];
+        be_hash[hash_len - i - 8] = hash[i];
     }
     be_hash[hash_len] = '\0';
 
