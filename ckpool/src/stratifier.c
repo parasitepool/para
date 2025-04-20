@@ -5220,52 +5220,32 @@ static user_instance_t* generate_user(ckpool_t* ckp, stratum_instance_t* client,
     user_instance_t*   user;
     int                len;
 
-    // We need to correctly parse: btcaddress.lightning@domain.workername
-    char* tmp = strdupa(full_username);  // Make another copy for tokenizing
-
-    // First, split by periods to separate potential worker suffix
+    char* tmp = strdup(full_username);
     username = strsep(&tmp, ".");
-    if (!tmp) {
-        // No periods in the workername, simple case
-        // Just use the whole thing as username
-    } else {
-        // We have at least one period
-        // Check for @ in the remaining string to identify lightning ID
-        char* at_tmp = tmp;
-        char* at_part = strchr(at_tmp, '@');
-
-        if (at_part) {
-            // Format is btcaddress.lightning@domain.workername
-            // Reset and reparse
-            tmp = strdupa(full_username);
-
-            // First part is the BTC address (before first period)
-            username = strsep(&tmp, ".");
-
-            if (tmp) {
-                // Get the lightning part (between first period and @)
-                lightning_id = strsep(&tmp, "@");
-
-                if (tmp) {
-                    // The domain is everything between @ and next period (or end)
-                    lightning_domain = strsep(&tmp, ".");
-
-                    // If anything remains after the last period, it's the worker suffix
-                    worker_suffix = tmp;
+    if (tmp && strlen(tmp) > 0) {
+        worker_suffix = strsep(&tmp, ".");
+        if (tmp && strlen(tmp) > 0) {
+            lightning_id = strsep(&tmp, "@");
+            if (tmp && strlen(tmp) > 0) {
+                lightning_id = strdup(lightning_id);
+                size_t len = strlen(tmp);
+                if (len > 0 && tmp[len - 1] == '.') {
+                    tmp[len - 1] = '\0';
                 }
+                lightning_domain = strdup(tmp);
+            } else {
+                lightning_id = NULL;
             }
 
             LOGDEBUG(
                 "Parsed format: btcaddress=%s, lightning=%s, domain=%s, worker=%s", username, lightning_id,
                 lightning_domain, worker_suffix ? worker_suffix : "");
-        } else {
-            // Format is just username.workername
-            // worker_suffix is already set correctly by the first strsep
         }
     }
 
     if (!username || !strlen(username))
         username = full_username;
+
     len = strlen(username);
     if (unlikely(len > 127))
         username[127] = '\0';
