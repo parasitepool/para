@@ -1,10 +1,9 @@
 #![allow(clippy::too_many_arguments)]
 use {
-    anyhow::{Error, anyhow, ensure},
+    anyhow::{Error, anyhow, bail, ensure},
     arguments::Arguments,
     axum::{
         Extension, Router,
-        extract::{Json, Path},
         http::{
             HeaderValue, StatusCode,
             header::{CONTENT_DISPOSITION, CONTENT_TYPE},
@@ -13,6 +12,9 @@ use {
         routing::get,
     },
     axum_server::Handle,
+    bitcoin::Network,
+    bitcoincore_rpc::{Auth, Client, RpcApi},
+    chain::Chain,
     clap::Parser,
     database::Database,
     futures::stream::StreamExt,
@@ -26,17 +28,23 @@ use {
     serde::{Deserialize, Serialize},
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
     std::{
-        env, io,
+        env,
+        fmt::{self, Display, Formatter},
+        io,
         net::ToSocketAddrs,
-        path::PathBuf,
+        path::{Path, PathBuf},
         process,
+        str::FromStr,
         sync::{Arc, LazyLock},
+        thread,
+        time::Duration,
     },
     tokio::{runtime::Runtime, task},
     tower_http::{services::ServeDir, set_header::SetResponseHeaderLayer},
 };
 
 mod arguments;
+mod chain;
 mod database;
 mod options;
 mod subcommand;
