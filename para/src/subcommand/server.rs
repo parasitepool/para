@@ -33,10 +33,9 @@ impl Server {
                 CONTENT_DISPOSITION,
                 HeaderValue::from_static("inline"),
             ))
-            .route("/splits", get(Self::get_splits))
-            .route("/payouts/{blockheight}", get(Self::get_payouts))
-            // TODO: RPC call to get total block output
-            .route("/sat_split/{blockheight}", get(Self::get_sat_split))
+            .route("/payouts/{blockheight}", get(Self::payouts))
+            .route("/split", get(Self::open_split))
+            .route("/split/{blockheight}", get(Self::sat_split))
             .layer(Extension(database));
 
         self.spawn(
@@ -53,19 +52,7 @@ impl Server {
         Ok(())
     }
 
-    pub(crate) async fn get_splits(
-        Extension(database): Extension<Database>,
-    ) -> ServerResult<Response> {
-        Ok(Json(database.get_splits().await?).into_response())
-    }
-
-    pub(crate) async fn get_sat_split(
-        Extension(database): Extension<Database>,
-    ) -> ServerResult<Response> {
-        Ok(Json("").into_response())
-    }
-
-    pub(crate) async fn get_payouts(
+    pub(crate) async fn payouts(
         Path(blockheight): Path<u32>,
         Extension(database): Extension<Database>,
     ) -> ServerResult<Response> {
@@ -75,6 +62,36 @@ impl Server {
                 .await?,
         )
         .into_response())
+    }
+
+    pub(crate) async fn open_split(
+        Extension(database): Extension<Database>,
+    ) -> ServerResult<Response> {
+        Ok(Json(database.get_split().await?).into_response())
+    }
+
+    pub(crate) async fn sat_split(
+        Extension(_database): Extension<Database>,
+    ) -> ServerResult<Response> {
+        // TODO: RPC call to get total block output
+        // TODO: sanitize database inputs so that sati get clean API return
+
+        #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+        pub(crate) struct Payment {
+            pub(crate) lightning_address: String,
+            pub(crate) amount: i64,
+        }
+
+        #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+        pub(crate) struct SatSplit {
+            pub(crate) block_height: i32,
+            pub(crate) block_hash: String,
+            pub(crate) confirmations: i32,
+            pub(crate) total_payment_amount: i64,
+            pub(crate) payments: Vec<Payment>,
+        }
+
+        Ok(Json("").into_response())
     }
 
     fn spawn(

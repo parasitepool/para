@@ -17,23 +17,6 @@ pub(crate) struct Payout {
     pub(crate) percentage: f64,
 }
 
-#[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub(crate) struct Payment {
-    pub(crate) lightning_address: String,
-    pub(crate) amount: i64, //Amount
-}
-
-// TODO: sanitize database inputs so that sati get clean API return
-#[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub(crate) struct BlockFoundPayments {
-    pub(crate) block_height: i32,
-    pub(crate) block_hash: String, //BlockHash,
-    pub(crate) confirmations: i32,
-    pub(crate) total_payment_amount: i64,
-    pub(crate) payments: Vec<Payment>
-
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct Database {
     pub(crate) pool: Pool<Postgres>,
@@ -49,7 +32,7 @@ impl Database {
         })
     }
 
-    pub(crate) async fn get_splits(&self) -> Result<Vec<Split>> {
+    pub(crate) async fn get_split(&self) -> Result<Vec<Split>> {
         sqlx::query_as::<_, Split>(
             "
             WITH worker_sums AS (
