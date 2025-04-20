@@ -8376,9 +8376,11 @@ static bool sdata_db_connect(sdata_t* sdata) {
     res = PQprepare(
         sdata->pg_conn, "insert_share",
         "INSERT INTO shares (blockheight, workinfoid, clientid, enonce1, nonce2, nonce, ntime, diff, sdiff, "
-        "hash, result, reject_reason, error, errn, createdate, createby, createcode, createinet, workername, username, lnurl, "
+        "hash, result, reject_reason, error, errn, createdate, createby, createcode, createinet, workername, username, "
+        "lnurl, "
         "address, agent) "
-        "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)",
+        "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, "
+        "$23)",
         0, NULL);
 
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
