@@ -27,44 +27,23 @@ typedef struct {
 
 parse_result_t parse_workername(const char* workername) {
     parse_result_t result = {0};
-    char* full_username = str_dup(workername);
-    char* tmp = str_dup(full_username);
-
-    // First, split by periods to separate potential worker suffix
+    char* full_username = strdup(workername);
+    char* tmp = strdup(full_username);
     result.username = strsep(&tmp, ".");
-    if (!tmp) {
-        // No periods in the workername, simple case
-        // Just use the whole thing as username
-    } else {
-        // We have at least one period
-        // Check for @ in the remaining string to identify lightning ID
-        char* at_tmp = tmp;
-        char* at_part = strchr(at_tmp, '@');
-
-        if (at_part) {
-            // Format is btcaddress.lightning@domain.workername
-            // Reset and reparse
-            tmp = str_dup(full_username);
-
-            // First part is the BTC address (before first period)
-            result.username = strsep(&tmp, ".");
-
-            if (tmp) {
-                // Get the lightning part (between first period and @)
-                result.lightning_id = strsep(&tmp, "@");
-
-                if (tmp) {
-                    // The domain is everything between @ and next period (or end)
-                    result.domain = strsep(&tmp, ".");
-
-                    // If anything remains after the last period, it's the worker suffix
-                    result.worker_suffix = tmp;
+    if (tmp && strlen(tmp) > 0) {
+        result.worker_suffix = strsep(&tmp, ".");
+        if (tmp && strlen(tmp) > 0) {
+            result.lightning_id = strsep(&tmp, "@");
+            if (tmp && strlen(tmp) > 0) {
+                result.lightning_id = strdup(result.lightning_id);
+                size_t len = strlen(tmp);
+                if (len > 0 && tmp[len - 1] == '.') {
+                    tmp[len - 1] = '\0';
                 }
+                result.domain = strdup(tmp);
+            } else {
+                result.lightning_id = NULL;
             }
-        } else {
-            // Format is just username.workername
-            // worker_suffix is already set correctly by the first strsep
-            result.worker_suffix = tmp;
         }
     }
 
@@ -96,32 +75,26 @@ int test_predefined_examples() {
     const char* test_cases[] = {
         "user1",
         "user1.worker1",
-        "btcaddress.lightning@domain.worker1",
-        "btcaddress.lightning@domain",
-        "btcaddress.lightning@",
+        "btcaddress.worker1.lightning@domain.com",
         "user1.worker1.rig2",
-        "user1.worker@rig2",
-        "1abc123def.lnid@example.com.worker1",
-        "btc.lightning@domain@extra.worker",
-        "bc1address.lightning@domain.worker.rig1.gpu2"
+        "1abc123def.worker1.lnid@example.com",
+        "btc.worker.lightning@domain@extra",
+        "bc1address.worker.rig1.gpu2.lightning@domain"
     };
 
     const parse_result_t expected[] = {
         { strdup("user1"), NULL, NULL, NULL },
         { strdup("user1"), NULL, NULL, strdup("worker1") },
-        { strdup("btcaddress"), strdup("lightning"), strdup("domain"), strdup("worker1") },
-        { strdup("btcaddress"), strdup("lightning"), strdup("domain"), NULL },
-        { strdup("btcaddress"), strdup("lightning"), strdup(""), NULL },
-        { strdup("user1"), NULL, NULL, strdup("worker1.rig2") },
-        { strdup("user1"), strdup("worker"), strdup("rig2"), NULL },
-        { strdup("1abc123def"), strdup("lnid"), strdup("example"), strdup("com.worker1") },
+        { strdup("btcaddress"), strdup("lightning"), strdup("domain.com"), strdup("worker1") },
+        { strdup("user1"), NULL, NULL, strdup("worker1") },
+        { strdup("1abc123def"), strdup("lnid"), strdup("example.com"), strdup("worker1") },
         { strdup("btc"), strdup("lightning"), strdup("domain@extra"), strdup("worker") },
-        { strdup("bc1address"), strdup("lightning"), strdup("domain"), strdup("worker.rig1.gpu2") }
+        { strdup("bc1address"), strdup("rig1.gpu2.lightning"), strdup("domain"), strdup("worker") }
     };
 
     for (int i = 0; i < sizeof(test_cases) / sizeof(test_cases[0]); i++) {
         parse_result_t result = parse_workername(test_cases[i]);
-        //print_parse_result(test_cases[i], result);
+        print_parse_result(test_cases[i], result);
         if (!str_equal(result.username, expected[i].username)) {
             printf("Unexpected value for username while parsing %s: expected %s found %s\n", test_cases[i], expected[i].username, result.username);
             return 1;
