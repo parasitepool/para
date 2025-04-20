@@ -13,6 +13,7 @@ use {
         routing::get,
     },
     axum_server::Handle,
+    bitcoin::{Amount, BlockHash},
     clap::Parser,
     database::Database,
     futures::stream::StreamExt,
@@ -23,7 +24,7 @@ use {
         axum::AxumAcceptor,
         caches::DirCache,
     },
-    serde::{Deserialize, Serialize},
+    serde::{Deserialize, Deserializer, Serialize},
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
     std::{
         env, io,

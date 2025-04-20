@@ -35,6 +35,7 @@ impl Server {
             ))
             .route("/splits", get(Self::get_splits))
             .route("/payouts/{blockheight}", get(Self::get_payouts))
+            .route("/payments/{blockheight}", get(Self::get_payments))
             .layer(Extension(database));
 
         self.spawn(
