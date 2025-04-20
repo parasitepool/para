@@ -8712,6 +8712,7 @@ static void db_add_block(
     char        diff_str[32];
     char        coinbasevalue_str[32];
     PGresult*   res = NULL;
+    char        be_hash[65] = {0};
 
     if (!sdata_db_ensure_connected(sdata)) {
         LOGERR("Failed to connect to database for block insertion");
@@ -8724,9 +8725,21 @@ static void db_add_block(
     snprintf(diff_str, sizeof(diff_str), "%f", diff);
     snprintf(coinbasevalue_str, sizeof(coinbasevalue_str), "%ld", coinbasevalue);
 
+    size_t hash_len = strlen(hash);
+    if (hash_len % 2 != 0) {
+        LOGERR("Invalid hash length: %zu", hash_len);
+        return;
+    }
+
+    for (size_t i = 0; i < hash_len; i += 2) {
+        be_hash[hash_len - i - 2] = hash[i];
+        be_hash[hash_len - i - 1] = hash[i + 1];
+    }
+    be_hash[hash_len] = '\0';
+
     /* Set up parameters */
     param_values[0] = height_str;
-    param_values[1] = hash;
+    param_values[1] = be_hash;
     param_values[2] = confirmed_str;
     param_values[3] = workername;
     param_values[4] = username;
