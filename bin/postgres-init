@@ -61,6 +61,7 @@ PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
       createinet TEXT,
       workername TEXT,
       username TEXT,
+      lnurl TEXT,
       address TEXT,
       agent TEXT
   )
