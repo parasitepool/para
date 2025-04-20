@@ -74,7 +74,9 @@ bool str_equal(const char* a, const char* b) {
 int test_predefined_examples() {
     const char* test_cases[] = {
         "user1",
+        "user1.",
         "user1.worker1",
+        "user1.worker1.",
         "btcaddress.worker1.lightning@domain.com",
         "user1.worker1.rig2",
         "1abc123def.worker1.lnid@example.com",
@@ -84,6 +86,8 @@ int test_predefined_examples() {
 
     const parse_result_t expected[] = {
         { strdup("user1"), NULL, NULL, NULL },
+        { strdup("user1"), NULL, NULL, NULL },
+        { strdup("user1"), NULL, NULL, strdup("worker1") },
         { strdup("user1"), NULL, NULL, strdup("worker1") },
         { strdup("btcaddress"), strdup("lightning"), strdup("domain.com"), strdup("worker1") },
         { strdup("user1"), NULL, NULL, strdup("worker1") },
