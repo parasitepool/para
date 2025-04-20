@@ -11,9 +11,7 @@ autotests = false
 anyhow = { version = "1.0.98", features = ["backtrace"] }
 axum = { version = "0.8.3", features = ["http2"] }
 axum-server = "0.7.2"
-bitcoin = "0.32.5"
 clap = { version = "4.5.36", features = ["derive", "env"] }
-email_address = "0.2.9"
 env_logger = "0.11.8"
 futures = "0.3.31"
 log = "0.4.27"

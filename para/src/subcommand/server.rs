@@ -36,7 +36,7 @@ impl Server {
             .route("/splits", get(Self::get_splits))
             .route("/payouts/{blockheight}", get(Self::get_payouts))
             // TODO: RPC call to get total block output
-            .route("/sat_sheet/{blockheight}", get(Self::sat_sheet))
+            .route("/sat_split/{blockheight}", get(Self::get_sat_split))
             .layer(Extension(database));
 
         self.spawn(
@@ -57,6 +57,12 @@ impl Server {
         Extension(database): Extension<Database>,
     ) -> ServerResult<Response> {
         Ok(Json(database.get_splits().await?).into_response())
+    }
+
+    pub(crate) async fn get_sat_split(
+        Extension(database): Extension<Database>,
+    ) -> ServerResult<Response> {
+        Ok(Json("").into_response())
     }
 
     pub(crate) async fn get_payouts(
