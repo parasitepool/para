@@ -6162,6 +6162,7 @@ out_nowb:
     json_set_string(val, "createinet", ckp->serverurl[client->server]);
     json_set_string(val, "workername", client->workername);
     json_set_string(val, "username", user->username);
+    json_set_string(val, "lnurl", user->secondaryuserid);
     json_set_string(val, "address", client->address);
     json_set_string(val, "agent", client->useragent);
 
@@ -8376,8 +8377,10 @@ static bool sdata_db_connect(sdata_t* sdata) {
         sdata->pg_conn, "insert_share",
         "INSERT INTO shares (blockheight, workinfoid, clientid, enonce1, nonce2, nonce, ntime, diff, sdiff, "
         "hash, result, reject_reason, error, errn, createdate, createby, createcode, createinet, workername, username, "
+        "lnurl, "
         "address, agent) "
-        "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)",
+        "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, "
+        "$23)",
         0, NULL);
 
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
@@ -8631,9 +8634,9 @@ static void insert_user_database(
 static void db_log_share(sdata_t* sdata, json_t* val, workbase_t* wb) {
     ckpool_t*   ckp = sdata->ckp;
     PGresult*   res = NULL;
-    const char* param_values[22];
-    int         param_lengths[22];
-    int         param_formats[22];
+    const char* param_values[23];
+    int         param_lengths[23];
+    int         param_formats[23];
     char        height_str[16];
     char        clientid_str[32];
     char        workinfoid_str[32];
@@ -8675,16 +8678,17 @@ static void db_log_share(sdata_t* sdata, json_t* val, workbase_t* wb) {
     param_values[17] = json_string_value(json_object_get(val, "createinet"));
     param_values[18] = json_string_value(json_object_get(val, "workername"));
     param_values[19] = json_string_value(json_object_get(val, "username"));
-    param_values[20] = json_string_value(json_object_get(val, "address"));
-    param_values[21] = json_string_value(json_object_get(val, "agent"));
+    param_values[20] = json_string_value(json_object_get(val, "lnurl"));
+    param_values[21] = json_string_value(json_object_get(val, "address"));
+    param_values[22] = json_string_value(json_object_get(val, "agent"));
 
     /* All parameters are text format */
-    for (int i = 0; i < 22; i++) {
+    for (int i = 0; i < 23; i++) {
         param_formats[i] = 0; /* 0 = text */
         param_lengths[i] = 0; /* 0 = use strlen */
     }
 
-    res = sdata_db_exec_prepared(sdata, "insert_share", param_values, param_lengths, param_formats, 22);
+    res = sdata_db_exec_prepared(sdata, "insert_share", param_values, param_lengths, param_formats, 23);
     if (res) {
         LOGDEBUG("Successfully inserted share %lld", json_integer_value(json_object_get(val, "workinfoid")));
         PQclear(res);
