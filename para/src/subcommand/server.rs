@@ -1,6 +1,23 @@
-use {super::*, error::ServerResult};
+use {
+    super::*,
+    error::{ServerError, ServerResult},
+};
 
 mod error;
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+pub(crate) struct Payment {
+    pub(crate) lightning_address: String,
+    pub(crate) amount: i64,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+pub(crate) struct SatSplit {
+    pub(crate) block_height: i32,
+    pub(crate) block_hash: String,
+    pub(crate) total_payment_amount: i64,
+    pub(crate) payments: Vec<Payment>,
+}
 
 #[derive(Clone, Debug, Parser)]
 pub struct Server {
@@ -71,27 +88,35 @@ impl Server {
     }
 
     pub(crate) async fn sat_split(
-        Extension(_database): Extension<Database>,
+        Path(blockheight): Path<u32>,
+        Extension(database): Extension<Database>,
     ) -> ServerResult<Response> {
-        // TODO: RPC call to get total block output
-        // TODO: sanitize database inputs so that sati get clean API return
+        let Some((blockheight, blockhash, total_payment_amount)) = database
+            .get_total_split_amount(blockheight.try_into().unwrap())
+            .await?
+        else {
+            return Err(ServerError::NotFound("block not mined by parasite".into()));
+        };
 
-        #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-        pub(crate) struct Payment {
-            pub(crate) lightning_address: String,
-            pub(crate) amount: i64,
+        let payouts = database.get_payouts(blockheight).await?;
+
+        let mut payments = Vec::new();
+        for payout in payouts {
+            if let Some(lnurl) = payout.lnurl {
+                payments.push(Payment {
+                    lightning_address: lnurl,
+                    amount: (payout.payable_shares / payout.total_shares) * total_payment_amount,
+                });
+            }
         }
 
-        #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-        pub(crate) struct SatSplit {
-            pub(crate) block_height: i32,
-            pub(crate) block_hash: String,
-            pub(crate) confirmations: i32,
-            pub(crate) total_payment_amount: i64,
-            pub(crate) payments: Vec<Payment>,
-        }
-
-        Ok(Json("").into_response())
+        Ok(Json(SatSplit {
+            block_height: blockheight,
+            block_hash: blockhash,
+            total_payment_amount,
+            payments,
+        })
+        .into_response())
     }
 
     fn spawn(

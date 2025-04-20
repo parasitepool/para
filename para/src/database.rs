@@ -67,6 +67,23 @@ impl Database {
         .map_err(|err| anyhow!(err))
     }
 
+    pub(crate) async fn get_total_split_amount(
+        &self,
+        blockheight: i32,
+    ) -> Result<Option<(i32, String, i64)>> {
+        sqlx::query_as::<_, (i32, String, i64)>(
+            "
+            SELECT blockheight, blockhash, coinbasevalue 
+            FROM blocks
+            WHERE blockheight = $1
+            ",
+        )
+        .bind(blockheight)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))
+    }
+
     pub(crate) async fn get_payouts(&self, blockheight: i32) -> Result<Vec<Payout>> {
         sqlx::query_as::<_, Payout>(
             "

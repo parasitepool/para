@@ -2,6 +2,7 @@ use super::*;
 
 pub(crate) enum ServerError {
     Internal(Error),
+    NotFound(String),
 }
 
 pub(crate) type ServerResult<T> = Result<T, ServerError>;
@@ -19,6 +20,7 @@ impl IntoResponse for ServerError {
                 )
                     .into_response()
             }
+            Self::NotFound(message) => (StatusCode::NOT_FOUND, message).into_response(),
         }
     }
 }
