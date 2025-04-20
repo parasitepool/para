@@ -41,6 +41,8 @@ mod database;
 mod options;
 mod subcommand;
 
+pub const COIN_VALUE: u64 = 100_000_000;
+
 type Result<T = (), E = Error> = std::result::Result<T, E>;
 
 pub fn main() {

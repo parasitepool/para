@@ -95,12 +95,14 @@ impl Server {
             return Err(ServerError::NotFound("block not mined by parasite".into()));
         }
 
-        let Some((blockheight, blockhash, total_payment_amount)) = database
-            .get_total_split_amount(blockheight.try_into().unwrap())
+        let Some((blockheight, blockhash, coinbasevalue)) = database
+            .get_total_coinbase(blockheight.try_into().unwrap())
             .await?
         else {
             return Err(ServerError::NotFound("block not mined by parasite".into()));
         };
+
+        let total_payment_amount = coinbasevalue.saturating_sub(COIN_VALUE.try_into().unwrap());
 
         let payouts = database.get_payouts(blockheight).await?;
 
