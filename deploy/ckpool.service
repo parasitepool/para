@@ -13,14 +13,7 @@ ExecStart=/usr/local/bin/ckpool \
   --loglevel 7 \
   --log-shares \
   --sockdir /var/lib/ckpool/tmp
-ExecReload=/usr/local/bin/ckpool \
-  --btcsolo \
-  --handover \
-  --killold \
-  --config /etc/ckpool/ckpool.conf \
-  --loglevel 7 \
-  --log-shares \
-  --sockdir /var/lib/ckpool/tmp
+ExecReload=/bin/sh -c "sleep 1 &"
 Group=ckpool
 LimitNOFILE=65536
 MemoryDenyWriteExecute=true
