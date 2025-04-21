@@ -10,14 +10,7 @@ ExecStart=/usr/local/bin/ckpool \
   --daemonise \
   --btcsolo \
   --handover \
-  --config /etc/ckpool/ckpool.conf \
-  --loglevel 7 \
-  --log-shares \
-  --sockdir /var/lib/ckpool/tmp
-ExecReload=/usr/local/bin/ckpool \
-  --daemonise \
-  --btcsolo \
-  --handover \
+  --killold \
   --config /etc/ckpool/ckpool.conf \
   --loglevel 7 \
   --log-shares \
