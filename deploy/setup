@@ -155,7 +155,12 @@ cp deploy/ckpool.conf /etc/ckpool/ckpool.conf
 
 systemctl daemon-reload
 systemctl enable ckpool
-systemctl reload-or-restart ckpool
+
+if systemctl is-active --quiet ckpool; then
+    systemctl reload ckpool
+else
+    systemctl restart ckpool
+fi
 
 journalctl --unit para --vacuum-time 1s
 
