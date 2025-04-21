@@ -6162,7 +6162,8 @@ out_nowb:
     json_set_string(val, "createinet", ckp->serverurl[client->server]);
     json_set_string(val, "workername", client->workername);
     json_set_string(val, "username", user->username);
-    json_set_string(val, "lnurl", user->secondaryuserid);
+    if (user->secondaryuserid)
+        json_set_string(val, "lnurl", user->secondaryuserid);
     json_set_string(val, "address", client->address);
     json_set_string(val, "agent", client->useragent);
 
