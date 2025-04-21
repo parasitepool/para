@@ -7,11 +7,19 @@ StartLimitIntervalSec=10m
 [Service]
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 ExecStart=/usr/local/bin/ckpool \
-  -B \
-  -k \
+  --btcsolo \
+  --killold \
   --config /etc/ckpool/ckpool.conf \
   --loglevel 7 \
-  --log-shares
+  --log-shares \
+  --sockdir /var/lib/ckpool/tmp
+ExecReload=/usr/local/bin/ckpool \
+  --btcsolo \
+  --handover \
+  --config /etc/ckpool/ckpool.conf \
+  --loglevel 7 \
+  --log-shares \
+  --sockdir /var/lib/ckpool/tmp
 Group=ckpool
 LimitNOFILE=65536
 MemoryDenyWriteExecute=true
