@@ -36,7 +36,7 @@ RestartSec=5s
 StateDirectory=ckpool
 StateDirectoryMode=0700
 TimeoutStopSec=10m
-Type=forking
+Type=simple
 User=ckpool
 WorkingDirectory=/var/lib/ckpool
 
