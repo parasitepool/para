@@ -8,6 +8,7 @@ StartLimitIntervalSec=10m
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 ExecStart=/usr/local/bin/ckpool \
   --btcsolo \
+  --killold \
   --config /etc/ckpool/ckpool.conf \
   --loglevel 7 \
   --log-shares \
@@ -15,6 +16,7 @@ ExecStart=/usr/local/bin/ckpool \
 ExecReload=/usr/local/bin/ckpool \
   --btcsolo \
   --handover \
+  --killold \
   --config /etc/ckpool/ckpool.conf \
   --loglevel 7 \
   --log-shares \
