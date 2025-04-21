@@ -21,7 +21,7 @@ ExecReload=/usr/local/bin/ckpool \
   --log-shares \
   --sockdir /var/lib/ckpool/tmp
 Group=ckpool
-KillMode=process
+KillMode=control-group
 LimitNOFILE=65536
 MemoryDenyWriteExecute=true
 NoNewPrivileges=true
