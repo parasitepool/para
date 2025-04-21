@@ -24,7 +24,7 @@ LimitNOFILE=65536
 MemoryDenyWriteExecute=true
 NoNewPrivileges=true
 PrivateDevices=true
-PrivateTmp=false
+PrivateTmp=true
 ProtectHome=true
 ProtectSystem=full
 Restart=on-failure
@@ -32,7 +32,7 @@ RestartSec=5s
 StateDirectory=ckpool
 StateDirectoryMode=0700
 TimeoutStopSec=10m
-Type=simple
+Type=forking
 User=ckpool
 WorkingDirectory=/var/lib/ckpool
 
