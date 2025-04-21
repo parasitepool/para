@@ -25,7 +25,6 @@ Group=ckpool
 LimitNOFILE=65536
 MemoryDenyWriteExecute=true
 NoNewPrivileges=true
-PIDFile=/var/lib/ckpool/tmp/main.pid
 PrivateDevices=true
 PrivateTmp=true
 ProtectHome=true
