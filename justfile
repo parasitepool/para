@@ -55,6 +55,12 @@ ckpool:
     --loglevel 7 \
     --log-shares
 
+lint:
+  find ./ckpool/src -type f \( -name "*.c" -o -name "*.h" \) -not -path "**/jansson-2.14/*" -exec clang-format -i {} \;
+
+test: lint
+  ./bin/run_tests
+
 psql:
   ./bin/postgres-init
 
@@ -71,14 +77,16 @@ deploy branch remote chain domain:
   rsync -avz deploy/checkout root@{{domain}}:deploy/checkout
   ssh root@{{domain}} 'cd deploy && ./checkout {{branch}} {{remote}} {{chain}} {{domain}}'
 
+deploy-bitcoind:
+
+deploy-postgres:
+
+deploy-ckpool:
+
+deploy-para:
+
 deploy-signet branch='master' remote='parasitepool/pool': \
   (deploy branch remote 'signet' 'alpha.parasite.dev')
 
 tunnel server='zulu.parasite.dev':
   ssh -N -L 5433:127.0.0.1:5432 {{server}}
-
-lint:
-  find ./ckpool/src -type f \( -name "*.c" -o -name "*.h" \) -not -path "**/jansson-2.14/*" -exec clang-format -i {} \;
-
-test: lint
-  ./bin/run_tests

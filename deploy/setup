@@ -73,7 +73,8 @@ esac
 
 mkdir -p \
   /etc/systemd/system/bitcoind.service.d \
-  /etc/systemd/system/ckpool.service.d
+  /etc/systemd/system/ckpool.service.d \
+  /etc/systemd/system/para.service.d
 
 OVERRIDE=/etc/systemd/system/ckpool.service.d/override.conf
 
@@ -81,6 +82,7 @@ echo '[Service]' > $OVERRIDE
 echo "Environment=CHAIN=$CHAIN" >> $OVERRIDE
 
 cp $OVERRIDE /etc/systemd/system/bitcoind.service.d/override.conf
+cp $OVERRIDE /etc/systemd/system/para.service.d/override.conf
 
 sed -i -E 's/#?PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
 sshd -t
@@ -96,73 +98,13 @@ bitcoind --version
 
 rm -f /var/lib/bitcoind/settings.json
 
-cd ckpool
-./autogen.sh
-./configure
-make
-install --backup src/ckpool /usr/local/bin/ckpool
-cd ..
-
-if [[ ! -e ~/.cargo/env ]]; then
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-fi
-
-source ~/.cargo/env
-
-rustup update stable
-
-cd para
-cargo build --release
-install --backup target/release/para /usr/local/bin/para
-cd ..
-
 id --user bitcoin || useradd --system bitcoin
 id --user ckpool || useradd --system ckpool
 
-cp deploy/bitcoind.service /etc/systemd/system/
-
-mkdir -p /etc/bitcoin
-cp deploy/bitcoin.conf /etc/bitcoin/bitcoin.conf
-
-if [[ ! -e ~/.bitcoin/bitcoin.conf ]]; then
-  mkdir -p ~/.bitcoin
-  ln -s /etc/bitcoin/bitcoin.conf ~/.bitcoin/bitcoin.conf
-fi
-
-journalctl --unit bitcoind --vacuum-time 5m
-
-systemctl daemon-reload
-systemctl enable bitcoind
-systemctl restart bitcoind
+./deploy/deploy-bitcoind
 
 ./bin/postgres-init
 
-if [ "$CHAIN" == "signet" ]; then
-  git submodule update --init
-  cd bitcoin
-  cmake -B build
-  cmake --build build -j 21
-  cd ..
-  ./bin/mine
-fi
+./deploy/deploy-ckpool
 
-journalctl --unit ckpool --vacuum-time 5m
-
-cp deploy/ckpool.service /etc/systemd/system/
-
-mkdir -p /etc/ckpool
-cp deploy/ckpool.conf /etc/ckpool/ckpool.conf
-
-systemctl daemon-reload
-systemctl enable ckpool
-systemctl restart ckpool
-
-journalctl --unit para --vacuum-time 1s
-
-cp deploy/para.service /etc/systemd/system/
-
-systemctl daemon-reload
-systemctl enable para
-systemctl restart para
-
-# TODO: add a curl or something that checks that ckpool is running
+./deploy/deploy-para
