@@ -8650,7 +8650,7 @@ static void db_log_share(sdata_t* sdata, json_t* val, workbase_t* wb) {
         return;
 
     /* Convert numeric values to strings */
-    snprintf(height_str, sizeof(height_str), "%d", wb->height);
+    snprintf(height_str, sizeof(height_str), "%d", !wb ? 0 : wb->height);
     snprintf(workinfoid_str, sizeof(workinfoid_str), "%lld", json_integer_value(json_object_get(val, "workinfoid")));
     snprintf(clientid_str, sizeof(clientid_str), "%lld", json_integer_value(json_object_get(val, "clientid")));
     snprintf(diff_str, sizeof(diff_str), "%f", json_real_value(json_object_get(val, "diff")));
