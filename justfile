@@ -85,19 +85,19 @@ deploy branch remote chain domain: \
 
 deploy-bitcoind branch remote chain domain: \
   (setup branch remote chain domain)
-  ssh root@{{domain}} 'cd deploy{{remote}} && ./deploy/deploy-bitcoind'
+  ssh root@{{domain}} 'cd deploy/{{remote}} && ./deploy/deploy-bitcoind'
 
 deploy-postgres branch remote chain domain: \
   (setup branch remote chain domain)
-  ssh root@{{domain}} 'cd deploy{{remote}} && ./bin/postgres-init'
+  ssh root@{{domain}} 'cd deploy/{{remote}} && ./bin/postgres-init'
 
 deploy-ckpool branch remote chain domain: \
   (setup branch remote chain domain)
-  ssh root@{{domain}} 'cd deploy{{remote}} && ./deploy/deploy-ckpool'
+  ssh root@{{domain}} 'cd deploy/{{remote}} && ./deploy/deploy-ckpool'
 
 deploy-para branch remote chain domain: \
   (setup branch remote chain domain)
-  ssh root@{{domain}} 'cd deploy{{remote}} && ./deploy/deploy-para'
+  ssh root@{{domain}} 'cd deploy/{{remote}} && ./deploy/deploy-para'
 
 tunnel server='zulu.parasite.dev':
   ssh -N -L 5433:127.0.0.1:5432 {{server}}
