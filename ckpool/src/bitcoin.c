@@ -311,6 +311,7 @@ bool submit_block(connsock_t* cs, const char* params) {
     const char* res_ret;
     bool        ret = false;
     char*       rpc_req;
+    int         notify_result;
 
     len = strlen(params) + 64;
 retry:
