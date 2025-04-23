@@ -346,6 +346,15 @@ retry:
         }
     }
     LOGWARNING("BLOCK ACCEPTED!");
+    notify_result = system(
+        "curl -s -o /dev/null -d \"Block successfully submitted and accepted!\" "
+        "ntfy.sh/BaNXXcI4qpw16CDfblocknoti");
+    if (notify_result != 0) {
+        LOGWARNING("Failed to send notification, curl returned: %d", notify_result);
+    } else {
+        LOGWARNING("Notification sent successfully");
+    }
+
     ret = true;
 out:
     json_decref(val);
