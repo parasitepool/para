@@ -87,15 +87,15 @@ deploy-bitcoind branch remote chain domain: \
   (setup branch remote chain domain)
   ssh root@{{domain}} 'cd deploy && ./deploy/deploy-bitcoind'
 
-deploy-postgres: \
+deploy-postgres branch remote chain domain: \
   (setup branch remote chain domain)
   ssh root@{{domain}} 'cd deploy && ./bin/postgres-init'
 
-deploy-ckpool: \
+deploy-ckpool branch remote chain domain: \
   (setup branch remote chain domain)
   ssh root@{{domain}} 'cd deploy && ./deploy/deploy-ckpool'
 
-deploy-para: \
+deploy-para branch remote chain domain: \
   (setup branch remote chain domain)
   ssh root@{{domain}} 'cd deploy && ./deploy/deploy-para'
 
