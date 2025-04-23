@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+set -euxo pipefail
+
 # Install PostgreSQL if not installed
 if ! dpkg -l | grep -q postgresql; then
   sudo apt-get install -y postgresql postgresql-contrib
