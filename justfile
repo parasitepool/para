@@ -1,5 +1,4 @@
-alpha := 'root@alpha.parasite.dev'
-bravo := 'root@bravo.parasite.dev'
+set positional-arguments
 
 install:
   git submodule update --init
@@ -67,7 +66,7 @@ psql:
 psql-reset:
   ./bin/postgres-reset
 
-deploy branch remote chain domain:
+setup branch remote chain domain:
   ssh root@{{domain}} '\
     export DEBIAN_FRONTEND=noninteractive \
     && mkdir -p deploy \
@@ -77,16 +76,31 @@ deploy branch remote chain domain:
   rsync -avz deploy/checkout root@{{domain}}:deploy/checkout
   ssh root@{{domain}} 'cd deploy && ./checkout {{branch}} {{remote}} {{chain}} {{domain}}'
 
-deploy-bitcoind:
+deploy branch remote chain domain: \
+  (setup branch remote chain domain) \
+  (deploy-bitcoind branch remote chain domain) \
+  (deploy-postgres branch remote chain domain) \
+  (deploy-ckpool branch remote chain domain) \
+  (deploy-para branch remote chain domain)
 
-deploy-postgres:
+deploy-bitcoind branch remote chain domain: \
+  (setup branch remote chain domain)
+  ssh root@{{domain}} 'cd deploy && ./deploy/deploy-bitcoind'
 
-deploy-ckpool:
+deploy-postgres: \
+  (setup branch remote chain domain)
+  ssh root@{{domain}} 'cd deploy && ./bin/postgres-init'
 
-deploy-para:
+deploy-ckpool: \
+  (setup branch remote chain domain)
+  ssh root@{{domain}} 'cd deploy && ./deploy/deploy-ckpool'
+
+deploy-para: \
+  (setup branch remote chain domain)
+  ssh root@{{domain}} 'cd deploy && ./deploy/deploy-para'
 
 deploy-signet branch='master' remote='parasitepool/pool': \
-  (deploy branch remote 'signet' 'alpha.parasite.dev')
+  (setup branch remote 'signet' 'alpha.parasite.dev')
 
 tunnel server='zulu.parasite.dev':
   ssh -N -L 5433:127.0.0.1:5432 {{server}}

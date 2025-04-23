@@ -100,11 +100,3 @@ rm -f /var/lib/bitcoind/settings.json
 
 id --user bitcoin || useradd --system bitcoin
 id --user ckpool || useradd --system ckpool
-
-./deploy/deploy-bitcoind
-
-./bin/postgres-init
-
-./deploy/deploy-ckpool
-
-./deploy/deploy-para
