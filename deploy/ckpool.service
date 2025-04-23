@@ -13,10 +13,7 @@ ExecStart=/usr/local/bin/ckpool \
   --loglevel 7 \
   --log-shares \
   --sockdir /var/lib/ckpool/tmp
-ExecStopPost=/bin/sh \
-  -c 'if [ "$SERVICE_RESULT" = "failed" ] || [ "$EXIT_CODE" != "0" ]; \
-  then curl -s -o /dev/null -d "CKPool service failed on $(hostname)" \
-  ntfy.sh/BaNXXcI4qpw16CDfpooldownnoti; fi'
+ExecStopPost=curl -s -o /dev/null -d "CKPool service failed on $(hostname)" ntfy.sh/BaNXXcI4qpw16CDfpooldownnoti
 Group=ckpool
 KillMode=none
 LimitNOFILE=65536
