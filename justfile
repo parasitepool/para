@@ -48,7 +48,7 @@ ckpool:
   cd ckpool
   make 
   cd ..
-  valgrind --leak-check=full ./ckpool/src/ckpool \
+  valgrind --leak-check=full --track-origins=yes ./ckpool/src/ckpool \
     -B \
     -k \
     --config copr/ckpool.conf \
