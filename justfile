@@ -16,6 +16,7 @@ install:
     libzmq3-dev \
     pkgconf \
     python3 \
+    valgrind \
     yasm \
 
 build-bitcoind: install
@@ -47,7 +48,7 @@ ckpool:
   cd ckpool
   make 
   cd ..
-  ./ckpool/src/ckpool \
+  valgrind --leak-check=full ./ckpool/src/ckpool \
     -B \
     -k \
     --config copr/ckpool.conf \
