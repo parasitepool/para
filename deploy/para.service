@@ -13,8 +13,10 @@ ExecStart=/usr/local/bin/para \
   --database-url postgres://satoshi:nakamoto@127.0.0.1:5432/ckpool \
   --log-dir /var/lib/ckpool/logs \
   server \
-  --acme-contact mailto:infra@parasite.dev mailto::infra@parasite.dev \
-  --acme-domain parasite.wtf parasite.xyz
+  --acme-contact mailto:infra@parasite.dev \
+  --acme-contact mailto:infra@parasite.dev \
+  --acme-domain parasite.wtf \
+  --acme-domain parasite.xyz
 Group=ckpool
 LimitNOFILE=65536
 MemoryDenyWriteExecute=true

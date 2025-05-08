@@ -3,7 +3,7 @@
 
 ## Servers
 
-alpha.parasite.dev -> Privat signet test server
+alpha.parasite.dev -> Private signet test server
 bravo.parasite.dev  -> GPT playground
 charlie.parasite.dev -> Wireguard and email
 delta.parasite.dev -> Signet ckstats server
