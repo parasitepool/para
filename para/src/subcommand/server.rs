@@ -24,9 +24,9 @@ pub struct Server {
     #[clap(long, help = "Listen at <ADDRESS>")]
     pub(crate) address: Option<String>,
     #[arg(long, help = "Request ACME TLS certificate for <ACME_DOMAIN>")]
-    pub(crate) acme_domain: Option<String>,
+    pub(crate) acme_domain: Vec<String>,
     #[arg(long, help = "Provide ACME contact <ACME_CONTACT>")]
-    pub(crate) acme_contact: Option<String>,
+    pub(crate) acme_contact: Vec<String>,
     #[clap(long, help = "Listen on <PORT>")]
     pub(crate) port: Option<u16>,
 }
@@ -132,53 +132,52 @@ impl Server {
         address: Option<String>,
         port: Option<u16>,
         data_dir: PathBuf,
-        acme_domain: Option<String>,
-        acme_contact: Option<String>,
+        acme_domain: Vec<String>,
+        acme_contact: Vec<String>,
     ) -> Result<task::JoinHandle<io::Result<()>>> {
         let acme_cache = data_dir.join("acme-cache");
 
         let address = address.unwrap_or_else(|| "0.0.0.0".into());
 
         Ok(tokio::spawn(async move {
-            match (acme_domain, acme_contact) {
-                (Some(acme_domain), Some(acme_contact)) => {
-                    log::info!(
-                        "Getting certificate for {acme_domain} using contact email {acme_contact}"
-                    );
+            if !acme_domain.is_empty() && !acme_contact.is_empty() {
+                log::info!(
+                    "Getting certificate for {} using contact email {}",
+                    acme_domain[0],
+                    acme_contact[0]
+                );
 
-                    let addr = (address, port.unwrap_or(443))
-                        .to_socket_addrs()?
-                        .next()
-                        .unwrap();
+                let addr = (address, port.unwrap_or(443))
+                    .to_socket_addrs()?
+                    .next()
+                    .unwrap();
 
-                    log::info!("Listening on https://{addr}");
+                log::info!("Listening on https://{addr}");
 
-                    axum_server::Server::bind(addr)
-                        .handle(handle)
-                        .acceptor(Self::acceptor(acme_domain, acme_contact, acme_cache).unwrap())
-                        .serve(router.into_make_service())
-                        .await
-                }
-                _ => {
-                    let addr = (address, port.unwrap_or(80))
-                        .to_socket_addrs()?
-                        .next()
-                        .unwrap();
+                axum_server::Server::bind(addr)
+                    .handle(handle)
+                    .acceptor(Self::acceptor(acme_domain, acme_contact, acme_cache).unwrap())
+                    .serve(router.into_make_service())
+                    .await
+            } else {
+                let addr = (address, port.unwrap_or(80))
+                    .to_socket_addrs()?
+                    .next()
+                    .unwrap();
 
-                    log::info!("Listening on http://{addr}");
+                log::info!("Listening on http://{addr}");
 
-                    axum_server::Server::bind(addr)
-                        .handle(handle)
-                        .serve(router.into_make_service())
-                        .await
-                }
+                axum_server::Server::bind(addr)
+                    .handle(handle)
+                    .serve(router.into_make_service())
+                    .await
             }
         }))
     }
 
     fn acceptor(
-        acme_domain: String,
-        acme_contact: String,
+        acme_domain: Vec<String>,
+        acme_contact: Vec<String>,
         acme_cache: PathBuf,
     ) -> Result<AxumAcceptor> {
         static RUSTLS_PROVIDER_INSTALLED: LazyLock<bool> = LazyLock::new(|| {
@@ -187,8 +186,8 @@ impl Server {
                 .is_ok()
         });
 
-        let config = AcmeConfig::new(vec![acme_domain])
-            .contact(vec![acme_contact])
+        let config = AcmeConfig::new(acme_domain)
+            .contact(acme_contact)
             .cache_option(Some(DirCache::new(acme_cache)))
             .directory(if cfg!(test) {
                 LETS_ENCRYPT_STAGING_DIRECTORY
