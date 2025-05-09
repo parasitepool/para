@@ -14,7 +14,9 @@ ExecStart=/usr/local/bin/para \
   --log-dir /var/lib/ckpool/logs \
   server \
   --acme-contact mailto:infra@parasite.dev \
-  --acme-domain parasite.wtf
+  --acme-contact mailto:infra@parasite.dev \
+  --acme-domain parasite.wtf \
+  --acme-domain parasite.xyz
 Group=ckpool
 LimitNOFILE=65536
 MemoryDenyWriteExecute=true
