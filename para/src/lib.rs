@@ -17,6 +17,7 @@ use {
     database::Database,
     futures::stream::StreamExt,
     options::Options,
+    rust_embed::RustEmbed,
     rustls_acme::{
         AcmeConfig,
         acme::{LETS_ENCRYPT_PRODUCTION_DIRECTORY, LETS_ENCRYPT_STAGING_DIRECTORY},

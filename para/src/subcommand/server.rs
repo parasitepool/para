@@ -5,6 +5,10 @@ use {
 
 mod error;
 
+#[derive(RustEmbed)]
+#[folder = "static"]
+struct StaticAssets;
+
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub(crate) struct Payment {
     pub(crate) lightning_address: String,
@@ -123,6 +127,10 @@ impl Server {
             payments,
         })
         .into_response())
+    }
+
+    pub(crate) async fn static_assets(Path(path): Path<String>) -> ServerResult<Response> {
+        todo!()
     }
 
     fn spawn(
