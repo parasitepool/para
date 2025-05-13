@@ -1,6 +1,6 @@
 use {
     super::*,
-    error::{ServerError, ServerResult},
+    error::{OptionExt, ServerError, ServerResult},
 };
 
 mod error;
@@ -57,6 +57,7 @@ impl Server {
             .route("/payouts/{blockheight}", get(Self::payouts))
             .route("/split", get(Self::open_split))
             .route("/split/{blockheight}", get(Self::sat_split))
+            .route("/static/{*path}", get(Self::static_assets))
             .layer(Extension(database));
 
         self.spawn(
@@ -130,7 +131,19 @@ impl Server {
     }
 
     pub(crate) async fn static_assets(Path(path): Path<String>) -> ServerResult<Response> {
-        todo!()
+        let content = StaticAssets::get(if let Some(stripped) = path.strip_prefix('/') {
+            stripped
+        } else {
+            &path
+        })
+        .ok_or_not_found(|| format!("asset {path}"))?;
+
+        let mime = mime_guess::from_path(path).first_or_octet_stream();
+
+        Ok(Response::builder()
+            .header(CONTENT_TYPE, mime.as_ref())
+            .body(content.data.into())
+            .unwrap())
     }
 
     fn spawn(

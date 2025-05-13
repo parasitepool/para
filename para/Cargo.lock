@@ -1686,6 +1686,7 @@ dependencies = [
  "env_logger",
  "futures",
  "log",
+ "mime_guess",
  "rust-embed",
  "rustls",
  "rustls-acme",
