@@ -27,7 +27,9 @@ use {
     serde::{Deserialize, Serialize},
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
     std::{
-        env, io,
+        env,
+        fmt::Display,
+        io,
         net::ToSocketAddrs,
         path::PathBuf,
         process,
@@ -41,6 +43,7 @@ mod arguments;
 mod database;
 mod options;
 mod subcommand;
+mod templates;
 
 pub const COIN_VALUE: u64 = 100_000_000;
 

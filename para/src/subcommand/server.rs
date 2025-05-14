@@ -1,5 +1,6 @@
 use {
     super::*,
+    crate::templates::{PageContent, PageHtml, home::HomeHtml},
     error::{OptionExt, ServerError, ServerResult},
 };
 
@@ -54,6 +55,7 @@ impl Server {
                 CONTENT_DISPOSITION,
                 HeaderValue::from_static("inline"),
             ))
+            .route("/", get(Self::home))
             .route("/payouts/{blockheight}", get(Self::payouts))
             .route("/split", get(Self::open_split))
             .route("/split/{blockheight}", get(Self::sat_split))
@@ -72,6 +74,13 @@ impl Server {
         .await??;
 
         Ok(())
+    }
+
+    async fn home() -> ServerResult<PageHtml<HomeHtml>> {
+        Ok(HomeHtml {
+            stratum_url: "parasite.wtf:42069".to_string(),
+        }
+        .page())
     }
 
     pub(crate) async fn payouts(
