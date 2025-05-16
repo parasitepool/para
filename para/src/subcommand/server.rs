@@ -44,6 +44,8 @@ impl Server {
 
         let database = Database::new(&options).await?;
 
+        let domain = self.domains()?.first().expect("should have domain").clone();
+
         let router = Router::new()
             .nest_service("/pool/", ServeDir::new(log_dir.join("pool")))
             .nest_service("/users/", ServeDir::new(log_dir.join("users")))
@@ -60,6 +62,7 @@ impl Server {
             .route("/split", get(Self::open_split))
             .route("/split/{blockheight}", get(Self::sat_split))
             .route("/static/{*path}", get(Self::static_assets))
+            .layer(Extension(domain))
             .layer(Extension(database));
 
         self.spawn(
@@ -76,11 +79,11 @@ impl Server {
         Ok(())
     }
 
-    async fn home() -> ServerResult<PageHtml<HomeHtml>> {
+    async fn home(Extension(domain): Extension<String>) -> ServerResult<PageHtml<HomeHtml>> {
         Ok(HomeHtml {
-            stratum_url: "parasite.wtf:42069".to_string(),
+            stratum_url: format!("{}:42069", domain),
         }
-        .page())
+        .page(domain))
     }
 
     pub(crate) async fn payouts(
@@ -153,6 +156,16 @@ impl Server {
             .header(CONTENT_TYPE, mime.as_ref())
             .body(content.data.into())
             .unwrap())
+    }
+
+    fn domains(&self) -> Result<Vec<String>> {
+        if !self.acme_domain.is_empty() {
+            Ok(self.acme_domain.clone())
+        } else {
+            Ok(vec![
+                System::host_name().ok_or(anyhow!("no hostname found"))?,
+            ])
+        }
     }
 
     fn spawn(
