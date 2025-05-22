@@ -1,8 +1,8 @@
-use sysinfo::{Disks, System};
 use {
     super::*,
     crate::templates::{PageContent, PageHtml, home::HomeHtml},
     error::{OptionExt, ServerError, ServerResult},
+    sysinfo::{Disks, System},
 };
 
 mod error;
@@ -97,48 +97,49 @@ impl Server {
     }
 
     pub(crate) async fn healthcheck() -> ServerResult<Response> {
-        let mut system = System::new_all();
-        system.refresh_all();
+        let health_status = tokio::task::spawn_blocking(|| {
+            let mut system = System::new_all();
+            system.refresh_all();
 
-        // Let's grab some disks and a path to figure out our storage situation
-        let path = std::env::current_dir().map_err(|e| ServerError::Internal(e.into()))?;
-        let mut disk_usage_percent = 0.0;
-        let disks = Disks::new_with_refreshed_list();
-        for disk in &disks {
-            if path.starts_with(disk.mount_point()) {
-                let total = disk.total_space();
-                if total > 0 {
-                    disk_usage_percent =
-                        100.0 * (total - disk.available_space()) as f64 / total as f64;
+            let path = std::env::current_dir().map_err(|e| ServerError::Internal(e.into()))?;
+            let mut disk_usage_percent = 0.0;
+            let disks = Disks::new_with_refreshed_list();
+            for disk in &disks {
+                if path.starts_with(disk.mount_point()) {
+                    let total = disk.total_space();
+                    if total > 0 {
+                        disk_usage_percent =
+                            100.0 * (total - disk.available_space()) as f64 / total as f64;
+                    }
+                    break;
                 }
-                break;
             }
-        }
 
-        // Memory is pretty straight forward
-        let total_memory = system.total_memory();
-        let memory_usage_percent = if total_memory > 0 {
-            100.0 * system.used_memory() as f64 / total_memory as f64
-        } else {
-            -1.0
-        };
+            let total_memory = system.total_memory();
+            let memory_usage_percent = if total_memory > 0 {
+                100.0 * system.used_memory() as f64 / total_memory as f64
+            } else {
+                -1.0
+            };
 
-        // Fetch cpu data, wait for refresh, then grab usage percentage
-        system.refresh_cpu_all();
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        system.refresh_cpu_all();
-        let cpu_usage_percent: f64 = system.global_cpu_usage().into();
+            system.refresh_cpu_all();
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            system.refresh_cpu_all();
+            let cpu_usage_percent: f64 = system.global_cpu_usage().into();
 
-        // I'm so sleepy boss
-        let uptime_seconds = System::uptime();
+            let uptime_seconds = System::uptime();
 
-        Ok(Json(HealthStatus {
-            disk_usage_percent,
-            memory_usage_percent,
-            cpu_usage_percent,
-            uptime_seconds,
+            Ok::<_, ServerError>(HealthStatus {
+                disk_usage_percent,
+                memory_usage_percent,
+                cpu_usage_percent,
+                uptime_seconds,
+            })
         })
-        .into_response())
+        .await
+        .map_err(|e| ServerError::Internal(e.into()))??;
+
+        Ok(Json(health_status).into_response())
     }
 
     pub(crate) async fn payouts(
