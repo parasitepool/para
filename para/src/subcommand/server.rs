@@ -141,9 +141,9 @@ impl Server {
         .map_err(|e| ServerError::Internal(e.into()))??;
 
         Ok(HealthcheckHtml {
-            disk_usage_percent: health_status.disk_usage_percent,
-            memory_usage_percent: health_status.memory_usage_percent,
-            cpu_usage_percent: health_status.cpu_usage_percent,
+            disk_usage_percent: format!("{:.2}", health_status.disk_usage_percent),
+            memory_usage_percent: format!("{:.2}", health_status.memory_usage_percent),
+            cpu_usage_percent: format!("{:.2}", health_status.cpu_usage_percent),
             uptime_seconds: health_status.uptime_seconds,
         }
         .page(domain))
