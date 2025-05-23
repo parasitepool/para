@@ -2,7 +2,6 @@ use {
     super::*,
     crate::templates::{PageContent, PageHtml, home::HomeHtml},
     error::{OptionExt, ServerError, ServerResult},
-    sysinfo::{Disks, System},
 };
 
 mod error;

@@ -35,7 +35,7 @@ use {
         process,
         sync::{Arc, LazyLock},
     },
-    sysinfo::System,
+    sysinfo::{Disks, System},
     tokio::{runtime::Runtime, task},
     tower_http::{services::ServeDir, set_header::SetResponseHeaderLayer},
 };
