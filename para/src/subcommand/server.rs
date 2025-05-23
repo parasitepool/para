@@ -1,9 +1,14 @@
 use {
     super::*,
-    error::{ServerError, ServerResult},
+    crate::templates::{PageContent, PageHtml, home::HomeHtml},
+    error::{OptionExt, ServerError, ServerResult},
 };
 
 mod error;
+
+#[derive(RustEmbed)]
+#[folder = "static"]
+struct StaticAssets;
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub(crate) struct Payment {
@@ -39,6 +44,8 @@ impl Server {
 
         let database = Database::new(&options).await?;
 
+        let domain = self.domains()?.first().expect("should have domain").clone();
+
         let router = Router::new()
             .nest_service("/pool/", ServeDir::new(log_dir.join("pool")))
             .nest_service("/users/", ServeDir::new(log_dir.join("users")))
@@ -50,9 +57,12 @@ impl Server {
                 CONTENT_DISPOSITION,
                 HeaderValue::from_static("inline"),
             ))
+            .route("/", get(Self::home))
             .route("/payouts/{blockheight}", get(Self::payouts))
             .route("/split", get(Self::open_split))
             .route("/split/{blockheight}", get(Self::sat_split))
+            .route("/static/{*path}", get(Self::static_assets))
+            .layer(Extension(domain))
             .layer(Extension(database));
 
         self.spawn(
@@ -67,6 +77,13 @@ impl Server {
         .await??;
 
         Ok(())
+    }
+
+    async fn home(Extension(domain): Extension<String>) -> ServerResult<PageHtml<HomeHtml>> {
+        Ok(HomeHtml {
+            stratum_url: format!("{}:42069", domain),
+        }
+        .page(domain))
     }
 
     pub(crate) async fn payouts(
@@ -123,6 +140,32 @@ impl Server {
             payments,
         })
         .into_response())
+    }
+
+    pub(crate) async fn static_assets(Path(path): Path<String>) -> ServerResult<Response> {
+        let content = StaticAssets::get(if let Some(stripped) = path.strip_prefix('/') {
+            stripped
+        } else {
+            &path
+        })
+        .ok_or_not_found(|| format!("asset {path}"))?;
+
+        let mime = mime_guess::from_path(path).first_or_octet_stream();
+
+        Ok(Response::builder()
+            .header(CONTENT_TYPE, mime.as_ref())
+            .body(content.data.into())
+            .unwrap())
+    }
+
+    fn domains(&self) -> Result<Vec<String>> {
+        if !self.acme_domain.is_empty() {
+            Ok(self.acme_domain.clone())
+        } else {
+            Ok(vec![
+                System::host_name().ok_or(anyhow!("no hostname found"))?,
+            ])
+        }
     }
 
     fn spawn(

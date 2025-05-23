@@ -17,6 +17,7 @@ use {
     database::Database,
     futures::stream::StreamExt,
     options::Options,
+    rust_embed::RustEmbed,
     rustls_acme::{
         AcmeConfig,
         acme::{LETS_ENCRYPT_PRODUCTION_DIRECTORY, LETS_ENCRYPT_STAGING_DIRECTORY},
@@ -26,12 +27,15 @@ use {
     serde::{Deserialize, Serialize},
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
     std::{
-        env, io,
+        env,
+        fmt::Display,
+        io,
         net::ToSocketAddrs,
         path::PathBuf,
         process,
         sync::{Arc, LazyLock},
     },
+    sysinfo::System,
     tokio::{runtime::Runtime, task},
     tower_http::{services::ServeDir, set_header::SetResponseHeaderLayer},
 };
@@ -40,6 +44,7 @@ mod arguments;
 mod database;
 mod options;
 mod subcommand;
+mod templates;
 
 pub const COIN_VALUE: u64 = 100_000_000;
 
