@@ -1,6 +1,6 @@
 use {
     super::*,
-    crate::templates::{PageContent, PageHtml, home::HomeHtml},
+    crate::templates::{PageContent, PageHtml, healthcheck::HealthcheckHtml, home::HomeHtml},
     error::{OptionExt, ServerError, ServerResult},
 };
 
@@ -95,7 +95,9 @@ impl Server {
         .page(domain))
     }
 
-    pub(crate) async fn healthcheck() -> ServerResult<Response> {
+    pub(crate) async fn healthcheck(
+        Extension(domain): Extension<String>,
+    ) -> ServerResult<PageHtml<HealthcheckHtml>> {
         let health_status = tokio::task::spawn_blocking(|| {
             let mut system = System::new_all();
             system.refresh_all();
@@ -138,7 +140,13 @@ impl Server {
         .await
         .map_err(|e| ServerError::Internal(e.into()))??;
 
-        Ok(Json(health_status).into_response())
+        Ok(HealthcheckHtml {
+            disk_usage_percent: health_status.disk_usage_percent,
+            memory_usage_percent: health_status.memory_usage_percent,
+            cpu_usage_percent: health_status.cpu_usage_percent,
+            uptime_seconds: health_status.uptime_seconds,
+        }
+        .page(domain))
     }
 
     pub(crate) async fn payouts(
