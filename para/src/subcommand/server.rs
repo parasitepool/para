@@ -122,8 +122,6 @@ impl Server {
             };
 
             system.refresh_cpu_all();
-            std::thread::sleep(std::time::Duration::from_millis(100));
-            system.refresh_cpu_all();
             let cpu_usage_percent: f64 = system.global_cpu_usage().into();
 
             let uptime_seconds = System::uptime();
