@@ -4,15 +4,17 @@ use {
     arguments::Arguments,
     axum::{
         Extension, Router,
-        extract::{Json, Path},
+        extract::{Json, Path, Request},
         http::{
-            HeaderValue, StatusCode,
-            header::{CONTENT_DISPOSITION, CONTENT_TYPE},
+            HeaderMap, HeaderValue, StatusCode,
+            header::{AUTHORIZATION, CONTENT_DISPOSITION, CONTENT_TYPE},
         },
+        middleware::{self, Next},
         response::{IntoResponse, Response},
         routing::get,
     },
     axum_server::Handle,
+    base64::{Engine, engine::general_purpose::STANDARD},
     clap::Parser,
     database::Database,
     futures::stream::StreamExt,
@@ -45,6 +47,7 @@ mod database;
 mod options;
 mod subcommand;
 mod templates;
+mod util;
 
 pub const COIN_VALUE: u64 = 100_000_000;
 

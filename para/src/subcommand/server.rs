@@ -1,6 +1,9 @@
 use {
     super::*,
-    crate::templates::{PageContent, PageHtml, healthcheck::HealthcheckHtml, home::HomeHtml},
+    crate::{
+        templates::{PageContent, PageHtml, healthcheck::HealthcheckHtml, home::HomeHtml},
+        util::format_uptime,
+    },
     error::{OptionExt, ServerError, ServerResult},
 };
 
@@ -9,14 +12,6 @@ mod error;
 #[derive(RustEmbed)]
 #[folder = "static"]
 struct StaticAssets;
-
-#[derive(Serialize, Debug)]
-pub(crate) struct HealthStatus {
-    disk_usage_percent: f64,
-    memory_usage_percent: f64,
-    cpu_usage_percent: f64,
-    uptime_seconds: u64,
-}
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub(crate) struct Payment {
@@ -66,7 +61,10 @@ impl Server {
                 HeaderValue::from_static("inline"),
             ))
             .route("/", get(Self::home))
-            .route("/healthcheck", get(Self::healthcheck))
+            .route(
+                "/healthcheck",
+                get(Self::healthcheck).layer(middleware::from_fn(util::auth_middleware)),
+            )
             .route("/payouts/{blockheight}", get(Self::payouts))
             .route("/split", get(Self::open_split))
             .route("/split/{blockheight}", get(Self::sat_split))
@@ -98,7 +96,7 @@ impl Server {
     pub(crate) async fn healthcheck(
         Extension(domain): Extension<String>,
     ) -> ServerResult<PageHtml<HealthcheckHtml>> {
-        let health_status = tokio::task::spawn_blocking(|| {
+        tokio::task::block_in_place(|| {
             let mut system = System::new_all();
             system.refresh_all();
 
@@ -130,23 +128,14 @@ impl Server {
 
             let uptime_seconds = System::uptime();
 
-            Ok::<_, ServerError>(HealthStatus {
-                disk_usage_percent,
-                memory_usage_percent,
-                cpu_usage_percent,
-                uptime_seconds,
-            })
+            Ok(HealthcheckHtml {
+                disk_usage_percent: format!("{:.2}", disk_usage_percent),
+                memory_usage_percent: format!("{:.2}", memory_usage_percent),
+                cpu_usage_percent: format!("{:.2}", cpu_usage_percent),
+                uptime_seconds: format_uptime(uptime_seconds),
+            }
+            .page(domain))
         })
-        .await
-        .map_err(|e| ServerError::Internal(e.into()))??;
-
-        Ok(HealthcheckHtml {
-            disk_usage_percent: format!("{:.2}", health_status.disk_usage_percent),
-            memory_usage_percent: format!("{:.2}", health_status.memory_usage_percent),
-            cpu_usage_percent: format!("{:.2}", health_status.cpu_usage_percent),
-            uptime_seconds: health_status.uptime_seconds,
-        }
-        .page(domain))
     }
 
     pub(crate) async fn payouts(

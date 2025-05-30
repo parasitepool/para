@@ -5,7 +5,7 @@ pub(crate) struct HealthcheckHtml {
     pub(crate) disk_usage_percent: String,
     pub(crate) memory_usage_percent: String,
     pub(crate) cpu_usage_percent: String,
-    pub(crate) uptime_seconds: u64,
+    pub(crate) uptime_seconds: String,
 }
 
 impl PageContent for HealthcheckHtml {
