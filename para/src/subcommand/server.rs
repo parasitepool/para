@@ -130,7 +130,7 @@ impl Server {
                 disk_usage_percent: format!("{:.2}", disk_usage_percent),
                 memory_usage_percent: format!("{:.2}", memory_usage_percent),
                 cpu_usage_percent: format!("{:.2}", cpu_usage_percent),
-                uptime_seconds: format_uptime(uptime_seconds),
+                uptime: format_uptime(uptime_seconds),
             }
             .page(domain))
         })
