@@ -1059,15 +1059,7 @@ static void add_base(ckpool_t* ckp, sdata_t* sdata, workbase_t* wb, bool* new_bl
         __bin2hex(sdata->lastswaphash, swap, 32);
         sdata->blockchange_id = wb->id;
     }
-    if (*new_block && ckp->logshares) {
-        sprintf(wb->logdir, "%s%08x/", ckp->logdir, wb->height);
-        ret = mkdir(wb->logdir, 0750);
-        if (unlikely(ret && errno != EEXIST))
-            LOGERR("Failed to create log directory %s", wb->logdir);
-    }
     sprintf(wb->idstring, "%016lx", wb->id);
-    if (ckp->logshares)
-        sprintf(wb->logdir, "%s%08x/%s", ckp->logdir, wb->height, wb->idstring);
 
     HASH_ADD_I64(sdata->workbases, id, wb);
     if (sdata->current_workbase)
@@ -6168,20 +6160,7 @@ out_nowb:
     json_set_string(val, "agent", client->useragent);
 
     if (ckp->logshares) {
-        // TODO: remove file logging after validating
         db_log_share(sdata, val, wb);
-
-        fp = fopen(fname, "ae");
-        if (likely(fp)) {
-            s = json_dumps(val, JSON_EOL);
-            len = strlen(s);
-            len = fprintf(fp, "%s", s);
-            free(s);
-            fclose(fp);
-            if (unlikely(len < 0))
-                LOGERR("Failed to fwrite to %s", fname);
-        } else
-            LOGERR("Failed to fopen %s", fname);
     }
     if (ckp->remote)
         upstream_json_msgtype(ckp, val, SM_SHARE);
