@@ -10,6 +10,6 @@ pub(crate) struct HealthcheckHtml {
 
 impl PageContent for HealthcheckHtml {
     fn title(&self) -> String {
-        "Parasite - Health Check".to_string()
+        "Healthcheck".to_string()
     }
 }
