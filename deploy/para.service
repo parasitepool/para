@@ -8,8 +8,6 @@ StartLimitIntervalSec=10m
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 Environment=RUST_BACKTRACE=1
 Environment=RUST_LOG=info
-Environment=TEAM_USERNAME=parasite
-Environment=TEAM_PASSWORD=2g1k3WxAthr5BpyHTs1zk5EZ8KEB6WTE
 ExecStart=/usr/local/bin/para \
   --data-dir /var/lib/para \
   --database-url postgres://satoshi:nakamoto@127.0.0.1:5432/ckpool \
@@ -18,7 +16,9 @@ ExecStart=/usr/local/bin/para \
   --acme-contact mailto:infra@parasite.dev \
   --acme-contact mailto:infra@parasite.dev \
   --acme-domain parasite.wtf \
-  --acme-domain parasite.xyz
+  --acme-domain parasite.xyz \
+  --username parasite \
+  --password 2g1k3WxAthr5BpyHTs1zk5EZ8KEB6WTE
 Group=ckpool
 LimitNOFILE=65536
 MemoryDenyWriteExecute=true

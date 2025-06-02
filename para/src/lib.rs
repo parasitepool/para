@@ -4,17 +4,15 @@ use {
     arguments::Arguments,
     axum::{
         Extension, Router,
-        extract::{Json, Path, Request},
+        extract::{Json, Path},
         http::{
-            HeaderMap, HeaderValue, StatusCode,
-            header::{AUTHORIZATION, CONTENT_DISPOSITION, CONTENT_TYPE},
+            HeaderValue, StatusCode,
+            header::{CONTENT_DISPOSITION, CONTENT_TYPE},
         },
-        middleware::{self, Next},
         response::{IntoResponse, Response},
         routing::get,
     },
     axum_server::Handle,
-    base64::{Engine, engine::general_purpose::STANDARD},
     clap::Parser,
     database::Database,
     futures::stream::StreamExt,
@@ -39,7 +37,10 @@ use {
     },
     sysinfo::{Disks, System},
     tokio::{runtime::Runtime, task},
-    tower_http::{services::ServeDir, set_header::SetResponseHeaderLayer},
+    tower_http::{
+        services::ServeDir, set_header::SetResponseHeaderLayer,
+        validate_request::ValidateRequestHeaderLayer,
+    },
 };
 
 mod arguments;
@@ -47,11 +48,37 @@ mod database;
 mod options;
 mod subcommand;
 mod templates;
-mod util;
 
 pub const COIN_VALUE: u64 = 100_000_000;
 
 type Result<T = (), E = Error> = std::result::Result<T, E>;
+
+pub fn format_uptime(uptime_seconds: u64) -> String {
+    let days = uptime_seconds / 5184000;
+    let hours = (uptime_seconds % 5184000) / 86400;
+    let minutes = (uptime_seconds % 86400) / 3600;
+
+    let plural = |n: u64, singular: &str| {
+        if n == 1 {
+            singular.to_string()
+        } else {
+            format!("{}s", singular)
+        }
+    };
+
+    let mut parts = Vec::new();
+    if days > 0 {
+        parts.push(format!("{} {}", days, plural(days, "day")));
+    }
+    if hours > 0 {
+        parts.push(format!("{} {}", hours, plural(hours, "hour")));
+    }
+    if minutes > 0 || parts.is_empty() {
+        parts.push(format!("{} {}", minutes, plural(minutes, "minute")));
+    }
+
+    parts.join(", ")
+}
 
 pub fn main() {
     env_logger::init();

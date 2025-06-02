@@ -1,9 +1,6 @@
 use {
     super::*,
-    crate::{
-        templates::{PageContent, PageHtml, healthcheck::HealthcheckHtml, home::HomeHtml},
-        util::format_uptime,
-    },
+    crate::templates::{PageContent, PageHtml, healthcheck::HealthcheckHtml, home::HomeHtml},
     error::{OptionExt, ServerError, ServerResult},
 };
 
@@ -37,6 +34,10 @@ pub struct Server {
     pub(crate) acme_contact: Vec<String>,
     #[clap(long, help = "Listen on <PORT>")]
     pub(crate) port: Option<u16>,
+    #[arg(long, help = "Require basic HTTP authentication with <USERNAME>.")]
+    pub(crate) username: Option<String>,
+    #[arg(long, help = "Require basic HTTP authentication with <PASSWORD>.")]
+    pub(crate) password: Option<String>,
 }
 
 impl Server {
@@ -63,7 +64,12 @@ impl Server {
             .route("/", get(Self::home))
             .route(
                 "/healthcheck",
-                get(Self::healthcheck).layer(middleware::from_fn(util::auth_middleware)),
+                if let Some((username, password)) = self.credentials() {
+                    get(Self::healthcheck)
+                        .layer(ValidateRequestHeaderLayer::basic(username, password))
+                } else {
+                    get(Self::healthcheck)
+                },
             )
             .route("/payouts/{blockheight}", get(Self::payouts))
             .route("/split", get(Self::open_split))
@@ -206,6 +212,10 @@ impl Server {
             .header(CONTENT_TYPE, mime.as_ref())
             .body(content.data.into())
             .unwrap())
+    }
+
+    fn credentials(&self) -> Option<(&str, &str)> {
+        self.username.as_deref().zip(self.password.as_deref())
     }
 
     fn domains(&self) -> Result<Vec<String>> {
