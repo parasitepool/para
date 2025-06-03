@@ -4,6 +4,7 @@ use {
     html_escaper::{Escape, Trusted},
 };
 
+pub(crate) mod healthcheck;
 pub(crate) mod home;
 
 #[derive(Boilerplate)]

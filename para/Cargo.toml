@@ -25,7 +25,7 @@ serde = { version = "1.0.219", features = ["derive"] }
 sqlx = { version =  "0.8.5", features = ["postgres", "runtime-tokio"] }
 sysinfo = "0.35.1"
 tokio = { version = "1.44.2", features = ["macros", "rt-multi-thread"] }
-tower-http = { version = "0.6.2", features = ["fs", "set-header"] }
+tower-http = { version = "0.6.2", features = ["auth", "fs", "set-header"] }
 
 [[bin]]
 name = "para"

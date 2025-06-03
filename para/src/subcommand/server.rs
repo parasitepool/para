@@ -1,6 +1,6 @@
 use {
     super::*,
-    crate::templates::{PageContent, PageHtml, home::HomeHtml},
+    crate::templates::{PageContent, PageHtml, healthcheck::HealthcheckHtml, home::HomeHtml},
     error::{OptionExt, ServerError, ServerResult},
 };
 
@@ -34,6 +34,10 @@ pub struct Server {
     pub(crate) acme_contact: Vec<String>,
     #[clap(long, help = "Listen on <PORT>")]
     pub(crate) port: Option<u16>,
+    #[arg(long, help = "Require basic HTTP authentication with <USERNAME>.")]
+    pub(crate) username: Option<String>,
+    #[arg(long, help = "Require basic HTTP authentication with <PASSWORD>.")]
+    pub(crate) password: Option<String>,
 }
 
 impl Server {
@@ -58,6 +62,15 @@ impl Server {
                 HeaderValue::from_static("inline"),
             ))
             .route("/", get(Self::home))
+            .route(
+                "/healthcheck",
+                if let Some((username, password)) = self.credentials() {
+                    get(Self::healthcheck)
+                        .layer(ValidateRequestHeaderLayer::basic(username, password))
+                } else {
+                    get(Self::healthcheck)
+                },
+            )
             .route("/payouts/{blockheight}", get(Self::payouts))
             .route("/split", get(Self::open_split))
             .route("/split/{blockheight}", get(Self::sat_split))
@@ -84,6 +97,49 @@ impl Server {
             stratum_url: format!("{}:42069", domain),
         }
         .page(domain))
+    }
+
+    pub(crate) async fn healthcheck(
+        Extension(domain): Extension<String>,
+    ) -> ServerResult<PageHtml<HealthcheckHtml>> {
+        tokio::task::block_in_place(|| {
+            let mut system = System::new_all();
+            system.refresh_all();
+
+            let path = std::env::current_dir().map_err(|e| ServerError::Internal(e.into()))?;
+            let mut disk_usage_percent = 0.0;
+            let disks = Disks::new_with_refreshed_list();
+            for disk in &disks {
+                if path.starts_with(disk.mount_point()) {
+                    let total = disk.total_space();
+                    if total > 0 {
+                        disk_usage_percent =
+                            100.0 * (total - disk.available_space()) as f64 / total as f64;
+                    }
+                    break;
+                }
+            }
+
+            let total_memory = system.total_memory();
+            let memory_usage_percent = if total_memory > 0 {
+                100.0 * system.used_memory() as f64 / total_memory as f64
+            } else {
+                -1.0
+            };
+
+            system.refresh_cpu_all();
+            let cpu_usage_percent: f64 = system.global_cpu_usage().into();
+
+            let uptime_seconds = System::uptime();
+
+            Ok(HealthcheckHtml {
+                disk_usage_percent: format!("{:.2}", disk_usage_percent),
+                memory_usage_percent: format!("{:.2}", memory_usage_percent),
+                cpu_usage_percent: format!("{:.2}", cpu_usage_percent),
+                uptime: format_uptime(uptime_seconds),
+            }
+            .page(domain))
+        })
     }
 
     pub(crate) async fn payouts(
@@ -156,6 +212,10 @@ impl Server {
             .header(CONTENT_TYPE, mime.as_ref())
             .body(content.data.into())
             .unwrap())
+    }
+
+    fn credentials(&self) -> Option<(&str, &str)> {
+        self.username.as_deref().zip(self.password.as_deref())
     }
 
     fn domains(&self) -> Result<Vec<String>> {
