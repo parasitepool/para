@@ -30,3 +30,16 @@ impl From<Error> for ServerError {
         Self::Internal(error)
     }
 }
+
+pub(super) trait OptionExt<T> {
+    fn ok_or_not_found<F: FnOnce() -> S, S: Into<String>>(self, f: F) -> ServerResult<T>;
+}
+
+impl<T> OptionExt<T> for Option<T> {
+    fn ok_or_not_found<F: FnOnce() -> S, S: Into<String>>(self, f: F) -> ServerResult<T> {
+        match self {
+            Some(value) => Ok(value),
+            None => Err(ServerError::NotFound(f().into() + " not found")),
+        }
+    }
+}
