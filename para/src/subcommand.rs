@@ -21,7 +21,7 @@ impl Subcommand {
 
                 Ok(())
             }
-            Self::Worker(worker) => worker.run(options)?,
+            Self::Worker(_worker) => Ok(()),
         }
     }
 }
