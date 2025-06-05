@@ -11,6 +11,7 @@ autotests = false
 anyhow = { version = "1.0.98", features = ["backtrace"] }
 axum = { version = "0.8.3", features = ["http2"] }
 axum-server = "0.7.2"
+bitcoin = "0.32.6"
 boilerplate = { version = "1.0.1", features = ["axum"] }
 clap = { version = "4.5.36", features = ["derive", "env"] }
 env_logger = "0.11.8"
@@ -18,6 +19,7 @@ futures = "0.3.31"
 html-escaper = "0.2.0"
 log = "0.4.27"
 mime_guess = "2.0.5"
+primitive-types = "0.13.1"
 rust-embed = "8.7.1"
 rustls = { version = "0.23.26", features = ["ring"] }
 rustls-acme = { version = "0.13.0", features = ["axum"] }
