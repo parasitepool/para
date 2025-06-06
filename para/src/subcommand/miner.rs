@@ -9,13 +9,15 @@ fn target() -> Target {
     Target::from_be_bytes(bytes)
 }
 
-fn header(target: Target) -> Header {
-    let hash = BlockHash::all_zeros().to_raw_hash();
+fn target_as_block_hash(target: Target) -> BlockHash {
+    BlockHash::from_raw_hash(Hash::from_byte_array(target.to_le_bytes()))
+}
 
+fn header(target: Target) -> Header {
     Header {
         version: Version::TWO,
         prev_blockhash: BlockHash::all_zeros(),
-        merkle_root: TxMerkleNode::from_raw_hash(hash),
+        merkle_root: TxMerkleNode::from_raw_hash(BlockHash::all_zeros().to_raw_hash()),
         time: 0,
         bits: target.to_compact_lossy(),
         nonce: 0,
@@ -31,7 +33,7 @@ impl Miner {
         let target = target();
 
         println!(
-            "Mining\n\tId: {}\n\tTarget: {}\n\tDifficulty: {}\n\t",
+            "Mining...\nId\t\t{}\nTarget\t\t{}\nDifficulty\t{}\n\n",
             job_id,
             target,
             target.difficulty_float()
@@ -43,9 +45,17 @@ impl Miner {
             target,
         };
 
+        let start = Instant::now();
         let header = hasher.hash()?;
 
-        println!("Found block with with nonce: {}", header.nonce);
+        println!(
+            "Block found...\nNonce\t\t{}\nTime\t\t{}ms\nBlockhash\t{}\nTarget\t\t{}\nWork\t\t{}\n",
+            header.nonce,
+            (Instant::now() - start).as_millis(),
+            header.block_hash(),
+            target_as_block_hash(target),
+            target.to_work(),
+        );
 
         Ok(())
     }
@@ -66,7 +76,7 @@ impl Miner {
 //}
 //
 // Handles all the stratum protocol messages. Holds all the client information and updates the
-// miner with new work/templates. Has a couple channels to the Miner for communication and
+// hasher with new work/templates. Has a couple channels to the Miner for communication and
 // listens/talks to upstream mining pool
 //struct Client {
 //    client_id: u32,
@@ -77,10 +87,9 @@ impl Miner {
 //    miner: Miner,
 //}
 
-// This could also be called the Miner, it implements the actual hashing and increments the nonce
-// and checks if below pool target. For now should only increment the nonce space and not think too
-// much about extranonce2 space. It has channels to the client for sending shares and updating
-// workbase.
+// Implements the actual hashing and increments the nonce and checks if below pool target. For now
+// should only increment the nonce space and not think too much about extranonce2 space. It has
+// channels to the client for sending shares and updating workbase.
 struct Hasher {
     header: Header,
     job_id: u32,
