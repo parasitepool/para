@@ -13,6 +13,11 @@ use {
         routing::get,
     },
     axum_server::Handle,
+    bitcoin::{
+        BlockHash, Target, TxMerkleNode,
+        block::{Header, Version},
+        hashes::Hash,
+    },
     clap::Parser,
     database::Database,
     futures::stream::StreamExt,

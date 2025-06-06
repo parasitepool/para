@@ -1,14 +1,14 @@
 use super::*;
 
+mod miner;
 mod server;
-mod worker;
 
 #[derive(Debug, Parser)]
 pub(crate) enum Subcommand {
+    #[command(about = "Run a toy worker")]
+    Miner(miner::Miner),
     #[command(about = "Run API server")]
     Server(server::Server),
-    #[command(about = "Run a toy worker")]
-    Worker(worker::Worker),
 }
 
 impl Subcommand {
@@ -21,7 +21,7 @@ impl Subcommand {
 
                 Ok(())
             }
-            Self::Worker(_worker) => Ok(()),
+            Self::Miner(miner) => Ok(miner.run()?),
         }
     }
 }

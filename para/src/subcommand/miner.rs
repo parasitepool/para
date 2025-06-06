@@ -1,14 +1,53 @@
-use {
-    super::*,
-    bitcoin::{Target, block::Header},
-};
+use super::*;
+
+fn target() -> Target {
+    let mut bytes = [0u8; 32];
+    bytes[0] = 0x00;
+    bytes[1] = 0x00;
+    bytes[2] = 0xff;
+    bytes[3] = 0xff;
+    Target::from_be_bytes(bytes)
+}
+
+fn header(target: Target) -> Header {
+    let hash = BlockHash::all_zeros().to_raw_hash();
+
+    Header {
+        version: Version::TWO,
+        prev_blockhash: BlockHash::all_zeros(),
+        merkle_root: TxMerkleNode::from_raw_hash(hash),
+        time: 0,
+        bits: target.to_compact_lossy(),
+        nonce: 0,
+    }
+}
 
 #[derive(Debug, Parser)]
-pub(crate) struct Worker;
+pub(crate) struct Miner {}
 
-impl Worker {
-    pub(crate) fn run(&self) -> Result<()> {
-        todo!();
+impl Miner {
+    pub(crate) fn run(&self) -> Result {
+        let job_id = 123;
+        let target = target();
+
+        println!(
+            "Mining\n\tId: {}\n\tTarget: {}\n\tDifficulty: {}\n\t",
+            job_id,
+            target,
+            target.difficulty_float()
+        );
+
+        let mut hasher = Hasher {
+            header: header(target),
+            job_id,
+            target,
+        };
+
+        let header = hasher.hash()?;
+
+        println!("Found block with with nonce: {}", header.nonce);
+
+        Ok(())
     }
 }
 
@@ -26,9 +65,9 @@ impl Worker {
 //    _clean_jobs: bool, // not needed
 //}
 //
-//// Handles all the stratum protocol messages. Holds all the client information and updates the
-//// miner with new work/templates. Has a couple channels to the Miner for communication and
-//// listens/talks to upstream mining pool
+// Handles all the stratum protocol messages. Holds all the client information and updates the
+// miner with new work/templates. Has a couple channels to the Miner for communication and
+// listens/talks to upstream mining pool
 //struct Client {
 //    client_id: u32,
 //    extranonce1: Option<Extranonce<'static>>,
@@ -49,7 +88,7 @@ struct Hasher {
 }
 
 impl Hasher {
-    fn hash(&mut self) -> Result<Header, ()> {
+    fn hash(&mut self) -> Result<Header> {
         println!("Hashing for job {}", self.job_id);
         loop {
             if self.target.is_met_by(self.header.block_hash()) {
@@ -58,45 +97,23 @@ impl Hasher {
 
             self.header.nonce += 1;
 
-            if self.header.nonce == 1000 {
-                break;
+            if self.header.nonce == 100_000 {
+                return Err(anyhow!("Hashed {} times", self.header.nonce));
             }
         }
-
-        Err(())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::*,
-        bitcoin::{BlockHash, TxMerkleNode, block::Version, hashes::Hash},
-        primitive_types::U256,
-    };
+    use super::*;
 
     #[test]
     fn hasher_hashes() {
-        let target = {
-            let mut bytes = [0u8; 32];
-            bytes[0] = 0xff;
-            bytes[1] = 0xff;
-            Target::from_be_bytes(U256::from_big_endian(&bytes).to_big_endian())
-        };
-
-        let hash = BlockHash::all_zeros().to_raw_hash();
-
-        let header = Header {
-            version: Version::TWO,
-            prev_blockhash: BlockHash::all_zeros(),
-            merkle_root: TxMerkleNode::from_raw_hash(hash),
-            time: 0,
-            bits: target.to_compact_lossy(),
-            nonce: 0,
-        };
+        let target = target();
 
         let mut hasher = Hasher {
-            header,
+            header: header(target),
             job_id: 1,
             target,
         };
