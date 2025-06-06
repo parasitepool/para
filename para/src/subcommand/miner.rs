@@ -1,11 +1,23 @@
 use super::*;
 
-fn target() -> Target {
+// TODO: probably do target from difficulty
+// caveat: if the target is very large it cannot be properly represented in the compact_lossy
+fn target(shift: u8) -> Target {
     let mut bytes = [0u8; 32];
-    bytes[0] = 0x00;
-    bytes[1] = 0x00;
-    bytes[2] = 0xff;
-    bytes[3] = 0xff;
+    let (a, b, c, d) = match shift {
+        0 => (0xff, 0xff, 0x00, 0x00),
+        1 => (0x0f, 0xff, 0xf0, 0x00),
+        2 => (0x00, 0xff, 0xff, 0x00),
+        3 => (0x00, 0x0f, 0xff, 0xf0),
+        4 => (0x00, 0x00, 0xff, 0xff),
+        _ => panic!("shift should be less than 5"),
+    };
+
+    bytes[0] = a;
+    bytes[1] = b;
+    bytes[2] = c;
+    bytes[3] = d;
+
     Target::from_be_bytes(bytes)
 }
 
@@ -13,14 +25,14 @@ fn target_as_block_hash(target: Target) -> BlockHash {
     BlockHash::from_raw_hash(Hash::from_byte_array(target.to_le_bytes()))
 }
 
-fn header(target: Target) -> Header {
+fn header(network_target: Option<Target>, nonce: Option<u32>) -> Header {
     Header {
         version: Version::TWO,
         prev_blockhash: BlockHash::all_zeros(),
         merkle_root: TxMerkleNode::from_raw_hash(BlockHash::all_zeros().to_raw_hash()),
         time: 0,
-        bits: target.to_compact_lossy(),
-        nonce: 0,
+        bits: network_target.unwrap_or(Target::MAX).to_compact_lossy(),
+        nonce: nonce.unwrap_or_default(),
     }
 }
 
@@ -30,7 +42,7 @@ pub(crate) struct Miner {}
 impl Miner {
     pub(crate) fn run(&self) -> Result {
         let job_id = 123;
-        let target = target();
+        let target = target(4);
 
         println!(
             "Mining...\nId\t\t{}\nTarget\t\t{}\nDifficulty\t{}\n\n",
@@ -40,18 +52,24 @@ impl Miner {
         );
 
         let mut hasher = Hasher {
-            header: header(target),
-            job_id,
+            header: header(None, None),
             target,
         };
 
         let start = Instant::now();
         let header = hasher.hash()?;
+        let duration = (Instant::now() - start).as_millis();
+
+        if header.validate_pow(header.target()).is_ok() {
+            println!("Block found!");
+        } else {
+            println!("Share found!");
+        }
 
         println!(
-            "Block found...\nNonce\t\t{}\nTime\t\t{}ms\nBlockhash\t{}\nTarget\t\t{}\nWork\t\t{}\n",
+            "Nonce\t\t{}\nTime\t\t{}ms\nBlockhash\t{}\nTarget\t\t{}\nWork\t\t{}\n",
             header.nonce,
-            (Instant::now() - start).as_millis(),
+            duration,
             header.block_hash(),
             target_as_block_hash(target),
             target.to_work(),
@@ -92,13 +110,11 @@ impl Miner {
 // channels to the client for sending shares and updating workbase.
 struct Hasher {
     header: Header,
-    job_id: u32,
     target: Target, // this is not necessarily the target from the pool but a custom one from client
 }
 
 impl Hasher {
     fn hash(&mut self) -> Result<Header> {
-        println!("Hashing for job {}", self.job_id);
         loop {
             if self.target.is_met_by(self.header.block_hash()) {
                 return Ok(self.header);
@@ -106,8 +122,8 @@ impl Hasher {
 
             self.header.nonce += 1;
 
-            if self.header.nonce == 100_000 {
-                return Err(anyhow!("Hashed {} times", self.header.nonce));
+            if self.header.nonce == u32::MAX {
+                return Err(anyhow!("nonce space exhausted"));
             }
         }
     }
@@ -119,17 +135,31 @@ mod tests {
 
     #[test]
     fn hasher_hashes() {
-        let target = target();
+        let target = target(1);
 
         let mut hasher = Hasher {
-            header: header(target),
-            job_id: 1,
+            header: header(Some(target), None),
             target,
         };
 
         let header = hasher.hash().unwrap();
 
-        assert_eq!(header.nonce, 0);
         assert!(header.validate_pow(target).is_ok());
+    }
+
+    #[test]
+    fn hasher_nonce_space_exhausted() {
+        let target = target(1);
+
+        let mut hasher = Hasher {
+            header: header(Some(target), Some(u32::MAX - 1)),
+            target,
+        };
+
+        assert!(
+            hasher
+                .hash()
+                .is_err_and(|err| err.to_string() == "nonce space exhausted")
+        )
     }
 }

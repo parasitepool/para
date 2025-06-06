@@ -120,7 +120,7 @@ mod tests {
 
     #[test]
     fn test_single_units() {
-        assert_eq!(format_uptime(1), "0 minutes"); // Less than a minute
+        assert_eq!(format_uptime(1), "0 minutes");
         assert_eq!(format_uptime(60), "1 minute");
         assert_eq!(format_uptime(3600), "1 hour");
         assert_eq!(format_uptime(86400), "1 day");
@@ -146,7 +146,6 @@ mod tests {
         assert_eq!(format_uptime(59), "0 minutes");
         assert_eq!(format_uptime(3599), "59 minutes");
         assert_eq!(format_uptime(86399), "23 hours, 59 minutes");
-
         assert_eq!(format_uptime(60), "1 minute");
         assert_eq!(format_uptime(3600), "1 hour");
         assert_eq!(format_uptime(86400), "1 day");
@@ -155,7 +154,6 @@ mod tests {
     #[test]
     fn test_large_values() {
         assert_eq!(format_uptime(2592000), "30 days");
-
         assert_eq!(format_uptime(31581000), "365 days, 12 hours, 30 minutes");
     }
 
