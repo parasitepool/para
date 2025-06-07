@@ -5,7 +5,7 @@ mod server;
 
 #[derive(Debug, Parser)]
 pub(crate) enum Subcommand {
-    #[command(about = "Run a toy worker")]
+    #[command(about = "Run a toy miner")]
     Miner(miner::Miner),
     #[command(about = "Run API server")]
     Server(server::Server),

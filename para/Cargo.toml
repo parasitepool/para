@@ -19,7 +19,6 @@ futures = "0.3.31"
 html-escaper = "0.2.0"
 log = "0.4.27"
 mime_guess = "2.0.5"
-primitive-types = "0.13.1"
 rust-embed = "8.7.1"
 rustls = { version = "0.23.26", features = ["ring"] }
 rustls-acme = { version = "0.13.0", features = ["axum"] }

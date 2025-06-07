@@ -327,7 +327,7 @@ impl Server {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     #[test]
     fn validate_math() {
         let a: i64 = 3;
