@@ -21,7 +21,11 @@ impl Subcommand {
 
                 Ok(())
             }
-            Self::Miner(miner) => Ok(miner.run()?),
+            Self::Miner(miner) => {
+                Runtime::new()?.block_on(async { miner.run().await.unwrap() });
+
+                Ok(())
+            }
         }
     }
 }
