@@ -236,7 +236,7 @@ static bool server_alive(ckpool_t* ckp, server_instance_t* si, bool pinging) {
     }
 
     /* Test we can connect, authorise and get a block template */
-    if (!gen_gbtbase(cs, &gbt, &ckp->signet)) {
+    if (!gen_gbtbase(cs, &gbt, ckp->signet)) {
         if (!pinging) {
             LOGINFO("Failed to get test block template from %s:%s!", cs->url, cs->port);
         }
@@ -416,7 +416,7 @@ retry:
     buf = umsg->buf;
     LOGDEBUG("Generator received request: %s", buf);
     if (cmdmatch(buf, "getbase")) {
-        if (!gen_gbtbase(cs, &gbt, &ckp->signet)) {
+        if (!gen_gbtbase(cs, &gbt, ckp->signet)) {
             LOGWARNING("Failed to get block template from %s:%s", cs->url, cs->port);
             si->alive = cs->alive = false;
             send_unix_msg(umsg->sockd, "Failed");
@@ -828,7 +828,7 @@ struct genwork* generator_getbase(ckpool_t* ckp) {
     }
     cs = &si->cs;
     gbt = ckzalloc(sizeof(gbtbase_t));
-    if (unlikely(!gen_gbtbase(cs, gbt, &ckp->signet))) {
+    if (unlikely(!gen_gbtbase(cs, gbt, ckp->signet))) {
         LOGWARNING("Failed to get block template from %s:%s", cs->url, cs->port);
         si->alive = cs->alive = false;
         reconnect_generator(ckp);

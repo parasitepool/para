@@ -119,7 +119,7 @@ static const char* gbt_req_signet =
 /* Request getblocktemplate from bitcoind already connected with a connsock_t
  * and then summarise the information to the most efficient set of data
  * required to assemble a mining template, storing it in a gbtbase_t structure */
-bool gen_gbtbase(connsock_t* cs, gbtbase_t* gbt, bool* signet) {
+bool gen_gbtbase(connsock_t* cs, gbtbase_t* gbt, bool signet) {
     json_t *    rules_array, *coinbase_aux, *res_val, *val;
     const char* previousblockhash;
     char        hash_swap[32], tmp[32];
