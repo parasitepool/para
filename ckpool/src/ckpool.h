@@ -229,6 +229,7 @@ struct ckpool_instance {
     int    blockpoll;     // How frequently in ms to poll bitcoind for block updates
     int    nonce1length;  // Extranonce1 length
     int    nonce2length;  // Extranonce2 length
+    bool   signet;        // Signet
 
     /* Difficulty settings */
     int64_t mindiff;    // Default 1
