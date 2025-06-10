@@ -1483,27 +1483,16 @@ static void prepare_child(ckpool_t* ckp, proc_instance_t* pi, void* process, cha
     create_unix_receiver(pi);
 }
 
-static struct option long_options[] = {
-    {"btcsolo", no_argument, 0, 'B'},
-    {"config", required_argument, 0, 'c'},
-    {"daemonise", no_argument, 0, 'D'},
-    {"group", required_argument, 0, 'g'},
-    {"handover", no_argument, 0, 'H'},
-    {"help", no_argument, 0, 'h'},
-    {"killold", no_argument, 0, 'k'},
-    {"log-shares", no_argument, 0, 'L'},
-    {"loglevel", required_argument, 0, 'l'},
-    {"name", required_argument, 0, 'n'},
-    {"node", no_argument, 0, 'N'},
-    {"passthrough", no_argument, 0, 'P'},
-    {"proxy", no_argument, 0, 'p'},
-    {"quiet", no_argument, 0, 'q'},
-    {"redirector", no_argument, 0, 'R'},
-    {"sockdir", required_argument, 0, 's'},
-    {"trusted", no_argument, 0, 't'},
-    {"userproxy", no_argument, 0, 'u'},
-    {"signet", no_argument, 0, 'S'},
-    {0, 0, 0, 0}};
+static struct option long_options[] = {{"btcsolo", no_argument, 0, 'B'},        {"config", required_argument, 0, 'c'},
+                                       {"daemonise", no_argument, 0, 'D'},      {"group", required_argument, 0, 'g'},
+                                       {"handover", no_argument, 0, 'H'},       {"help", no_argument, 0, 'h'},
+                                       {"killold", no_argument, 0, 'k'},        {"log-shares", no_argument, 0, 'L'},
+                                       {"loglevel", required_argument, 0, 'l'}, {"name", required_argument, 0, 'n'},
+                                       {"node", no_argument, 0, 'N'},           {"passthrough", no_argument, 0, 'P'},
+                                       {"proxy", no_argument, 0, 'p'},          {"quiet", no_argument, 0, 'q'},
+                                       {"redirector", no_argument, 0, 'R'},     {"sockdir", required_argument, 0, 's'},
+                                       {"trusted", no_argument, 0, 't'},        {"userproxy", no_argument, 0, 'u'},
+                                       {"signet", no_argument, 0, 'S'},         {0, 0, 0, 0}};
 
 static bool send_recv_path(const char* path, const char* msg) {
     int   sockd = open_unix_client(path);
