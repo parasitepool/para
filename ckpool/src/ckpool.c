@@ -1502,6 +1502,7 @@ static struct option long_options[] = {
     {"sockdir", required_argument, 0, 's'},
     {"trusted", no_argument, 0, 't'},
     {"userproxy", no_argument, 0, 'u'},
+    {"signet", no_argument, 0, 'S'},
     {0, 0, 0, 0}};
 
 static bool send_recv_path(const char* path, const char* msg) {
@@ -1632,6 +1633,9 @@ int main(int argc, char** argv) {
                 if (ckp.proxy || ckp.redirector || ckp.passthrough || ckp.node)
                     quit(1, "Cannot set both userproxy and another proxy type or redirector");
                 ckp.userproxy = ckp.proxy = true;
+                break;
+            case 'S':
+                ckp.signet = true;
                 break;
         }
     }
