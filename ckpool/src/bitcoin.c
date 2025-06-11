@@ -16,7 +16,7 @@
 #include "bitcoin.h"
 #include "stratifier.h"
 
-static char* understood_rules[] = {"segwit"};
+static char* understood_rules[] = {"segwit", "signet"};
 
 static bool check_required_rule(const char* rule) {
     unsigned int i;
@@ -112,10 +112,14 @@ static const char* gbt_req =
     "{\"method\": \"getblocktemplate\", \"params\": [{\"capabilities\": [\"coinbasetxn\", \"workid\", "
     "\"coinbase/append\"], \"rules\" : [\"segwit\"]}]}\n";
 
+static const char* gbt_req_signet =
+    "{\"method\": \"getblocktemplate\", \"params\": [{\"capabilities\": [\"coinbasetxn\", \"workid\", "
+    "\"coinbase/append\"], \"rules\" : [\"segwit\", \"signet\"]}]}\n";
+
 /* Request getblocktemplate from bitcoind already connected with a connsock_t
  * and then summarise the information to the most efficient set of data
  * required to assemble a mining template, storing it in a gbtbase_t structure */
-bool gen_gbtbase(connsock_t* cs, gbtbase_t* gbt) {
+bool gen_gbtbase(connsock_t* cs, gbtbase_t* gbt, bool signet) {
     json_t *    rules_array, *coinbase_aux, *res_val, *val;
     const char* previousblockhash;
     char        hash_swap[32], tmp[32];
@@ -130,7 +134,12 @@ bool gen_gbtbase(connsock_t* cs, gbtbase_t* gbt) {
     int         i;
     bool        ret = false;
 
-    val = json_rpc_call(cs, gbt_req);
+    if (signet) {
+        val = json_rpc_call(cs, gbt_req_signet);
+    } else {
+        val = json_rpc_call(cs, gbt_req);
+    }
+
     if (!val) {
         LOGWARNING("%s:%s Failed to get valid json response to getblocktemplate", cs->url, cs->port);
         return ret;
