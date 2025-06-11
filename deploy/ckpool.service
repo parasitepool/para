@@ -10,7 +10,7 @@ ExecStart=/usr/local/bin/ckpool \
   --btcsolo \
   --handover \
   --config /etc/ckpool/ckpool.conf \
-  --loglevel 5 \
+  --loglevel 4 \
   --log-shares \
   --sockdir /var/lib/ckpool/tmp
 Group=ckpool
