@@ -1,15 +1,5 @@
-use {
-    super::*,
-    client::Client,
-    serde_json::{Value, json},
-    tokio::{
-        io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-        net::TcpStream,
-        signal::ctrl_c,
-    },
-};
+use {super::*, crate::client::Client};
 
-mod client;
 mod hasher;
 
 #[derive(Debug, Parser)]
@@ -21,30 +11,48 @@ pub(crate) struct Miner {
     #[arg(long, help = "Stratum <USER>")]
     user: String,
     #[arg(long, help = "Stratum <PASSWORD>")]
-    password: Option<String>,
+    password: String,
 }
 
 impl Miner {
     pub(crate) async fn run(&self) -> Result {
-        let mut client =
-            Client::connect(&self.host, self.port, &self.user, self.password.clone()).await?;
+        let mut client = Client::connect(&self.host, self.port, &self.user, &self.password).await?;
 
         client.subscribe().await?;
         client.authorize().await?;
-
-        let (reader, mut _writer) = client.stream.into_split();
-        let mut reader = BufReader::new(reader);
+        
+        // handle notifications
+        // handle requests
+        // ignore responses that do not have corresponding request
 
         loop {
             tokio::select! {
-                _ = async {
-                    let mut line = String::new();
-                    reader.read_line(&mut line).await.unwrap();
-                    let response: Value = serde_json::from_str(&line).unwrap();
-                    log::info!("Received: {}", response);
-                } => {}
+                Some(msg) = client.message_receiver.recv() => {
+                    match msg {
+                        Message::Notification { method, params } => {
+                            match method.as_str() {
+                                "mining.notify" => {
+                                    let notify: Notify = serde_json::from_value(params)?;
+                                    log::info!("Got new job: {:?}", notify);
+                                }
+                                "mining.set_difficulty" => {
+                                    let set_difficulty: SetDifficulty = serde_json::from_value(params)?;
+                                    log::info!("Got new set difficulty: {:?}", set_difficulty.0[0]);
+                                },
+                                _ => log::info!("Unhandled notification method: {}", method)
+                            }
+                        }
+                        Message::Response { id, result, error } => {
+                            log::info!("Response to id={id}: result={result:?}, error={error:?}");
+                        }
+                        _ => {
+                            log::info!("Unhandled message: {:?}", msg);
+                        }
+                    }
+                }
                 _ = ctrl_c() => {
                     log::info!("Shutting down");
+                    client.shutdown();
                     break;
                 }
             }
@@ -71,7 +79,7 @@ mod tests {
     #[test]
     fn parse_args() {
         parse_miner_args(
-            "para miner --host parasite.wtf --port 42069 --user bc1q8jx6g9ujlqmdx3jnt3ap6ll2fdwqjdkdgs959m.worker1.aed48ef@parasite.sati.pro",
+            "para miner --host parasite.wtf --port 42069 --user bc1q8jx6g9ujlqmdx3jnt3ap6ll2fdwqjdkdgs959m.worker1.aed48ef@parasite.sati.pro --password x",
         );
     }
 }

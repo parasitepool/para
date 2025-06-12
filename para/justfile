@@ -24,7 +24,11 @@ doc:
   cargo doc --workspace --open
 
 miner: 
-  RUST_LOG=info cargo run -- miner --host solo.ckpool.org --port 3333 --user abc.123
+  RUST_LOG=info cargo run -- miner \
+    --host solo.ckpool.org \
+    --port 3333 \
+    --user bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg6dzw5nk24r45dzasde25r3.ParaMiner \
+    --password x
 
 server: 
   RUST_LOG=info cargo run -- --log-dir ../logs server --port 8080

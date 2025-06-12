@@ -16,15 +16,12 @@ impl Subcommand {
         match self {
             Self::Server(server) => {
                 let handle = Handle::new();
-
-                Runtime::new()?.block_on(async { server.run(options, handle).await.unwrap() });
-
-                Ok(())
+                let rt = Runtime::new()?;
+                rt.block_on(async { server.run(options, handle).await })
             }
             Self::Miner(miner) => {
-                Runtime::new()?.block_on(async { miner.run().await.unwrap() });
-
-                Ok(())
+                let rt = Runtime::new()?;
+                rt.block_on(async { miner.run().await })
             }
         }
     }

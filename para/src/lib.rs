@@ -25,7 +25,11 @@ use {
         axum::AxumAcceptor,
         caches::DirCache,
     },
-    serde::{Deserialize, Serialize},
+    serde::{
+        Deserialize, Serialize,
+        de::{self, Deserializer},
+    },
+    serde_json::{Value, json},
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
     std::{
         env,
@@ -36,8 +40,16 @@ use {
         process,
         sync::{Arc, LazyLock},
     },
+    stratum::{Message, Notify, SetDifficulty, SubscribeResult},
     sysinfo::{Disks, System},
-    tokio::{runtime::Runtime, task},
+    tokio::{
+        io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader, BufWriter},
+        net::{TcpStream, tcp::OwnedWriteHalf},
+        runtime::Runtime,
+        signal::ctrl_c,
+        sync::{mpsc, oneshot},
+        task::{self, JoinHandle},
+    },
     tower_http::{
         services::ServeDir, set_header::SetResponseHeaderLayer,
         validate_request::ValidateRequestHeaderLayer,
@@ -45,8 +57,10 @@ use {
 };
 
 mod arguments;
+mod client;
 mod database;
 mod options;
+mod stratum;
 mod subcommand;
 mod templates;
 
