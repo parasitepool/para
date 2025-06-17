@@ -4,12 +4,12 @@ use super::*;
 #[serde(untagged)]
 pub enum Message {
     Request {
-        id: Value,
+        id: u64,
         method: String,
         params: Value,
     },
     Response {
-        id: Value,
+        id: u64,
         result: Option<Value>,
         error: Option<JsonRpcError>,
     },
@@ -31,18 +31,22 @@ impl<'de> Deserialize<'de> for Message {
         let value = Value::deserialize(deserializer)?;
 
         let is_request = value.get("method").is_some() && value.get("id").is_some();
+
         let is_notification_null_id =
             value.get("method").is_some() && value.get("id") == Some(&Value::Null);
+
         let is_response = value.get("result").is_some() || value.get("error").is_some();
 
         if is_response {
             #[derive(Deserialize)]
             struct Resp {
-                id: Value,
+                id: u64,
                 result: Option<Value>,
                 error: Option<JsonRpcError>,
             }
+
             let r: Resp = serde_json::from_value(value).map_err(de::Error::custom)?;
+
             Ok(Message::Response {
                 id: r.id,
                 result: r.result,
@@ -54,19 +58,23 @@ impl<'de> Deserialize<'de> for Message {
                 .and_then(Value::as_str)
                 .ok_or_else(|| de::Error::missing_field("method"))?
                 .to_string();
+
             let params = value
                 .get("params")
                 .cloned()
                 .ok_or_else(|| de::Error::missing_field("params"))?;
+
             Ok(Message::Notification { method, params })
         } else if is_request {
             #[derive(Deserialize)]
             struct Req {
-                id: Value,
+                id: u64,
                 method: String,
                 params: Value,
             }
+
             let r: Req = serde_json::from_value(value).map_err(de::Error::custom)?;
+
             Ok(Message::Request {
                 id: r.id,
                 method: r.method,
@@ -79,7 +87,26 @@ impl<'de> Deserialize<'de> for Message {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct JsonRpcError(pub i32, pub String, pub Option<Value>);
+pub struct JsonRpcError(
+    pub i32,           // error code
+    pub String,        // human-readable message
+    pub Option<Value>, // optional traceback or debugging info
+);
+
+impl Display for JsonRpcError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.2 {
+            Some(traceback) => write!(
+                f,
+                "Stratum error {}: {} (traceback: {})",
+                self.0,
+                self.1,
+                serde_json::to_string(traceback).unwrap_or_else(|_| "<invalid traceback>".into())
+            ),
+            None => write!(f, "Stratum error {}: {}", self.0, self.1),
+        }
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SubscribeResult(
@@ -87,6 +114,24 @@ pub struct SubscribeResult(
     pub String,                // extranonce1
     pub u32,                   // extranonce2_size
 );
+
+impl Display for SubscribeResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let subs: Vec<String> = self
+            .0
+            .iter()
+            .map(|(method, id)| format!("(\"{method}\", \"{id}\")"))
+            .collect();
+
+        write!(
+            f,
+            "subscriptions=[{}], extranonce1={}, extranonce2_size={}",
+            subs.join(", "),
+            self.1,
+            self.2
+        )
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Notify {

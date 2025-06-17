@@ -6,7 +6,9 @@ use super::*;
 pub struct Client {
     pub user: String,
     pub password: String,
-    pub message_receiver: mpsc::Receiver<Message>,
+    pub notifications: mpsc::Receiver<Message>,
+    pub requests: mpsc::Receiver<Message>,
+    pending: Arc<Mutex<BTreeMap<u64, oneshot::Sender<Message>>>>,
     listener: JoinHandle<()>,
     tcp_writer: BufWriter<OwnedWriteHalf>,
     id_counter: u64,
@@ -23,53 +25,99 @@ impl Client {
             (BufReader::new(rx), BufWriter::new(tx))
         };
 
-        let (message_sender, message_receiver) = mpsc::channel(32);
+        let (request_sender, request_receiver) = mpsc::channel(32);
+        let (notification_sender, notification_receiver) = mpsc::channel(32);
+
+        let pending: Arc<Mutex<BTreeMap<u64, oneshot::Sender<Message>>>> =
+            Arc::new(Mutex::new(BTreeMap::new()));
 
         let listener = {
-            let sender = message_sender.clone();
-            tokio::spawn(async { Self::listener(tcp_reader, sender).await })
+            let request_sender = request_sender.clone();
+            let notification_sender = notification_sender.clone();
+            let pending = pending.clone();
+            tokio::spawn(async {
+                Self::listener(tcp_reader, request_sender, notification_sender, pending).await
+            })
         };
 
         Ok(Self {
             tcp_writer,
-            message_receiver,
+            requests: request_receiver,
+            notifications: notification_receiver,
             listener,
+            pending: pending.clone(),
             user: user.to_string(),
             password: password.to_string(),
             id_counter: 1,
         })
     }
 
-    async fn listener<R>(mut tcp_reader: BufReader<R>, message_sender: mpsc::Sender<Message>)
-    where
+    async fn listener<R>(
+        mut tcp_reader: BufReader<R>,
+        requests: mpsc::Sender<Message>,
+        notifications: mpsc::Sender<Message>,
+        pending: Arc<Mutex<BTreeMap<u64, oneshot::Sender<Message>>>>,
+    ) where
         R: AsyncRead + Unpin,
     {
         let mut line = String::new();
+
         loop {
             line.clear();
+
             match tcp_reader.read_line(&mut line).await {
                 Ok(0) => break,
-                Ok(_) => match serde_json::from_str::<Message>(&line) {
-                    Ok(msg) => {
-                        if message_sender.send(msg).await.is_err() {
-                            break;
-                        }
-                    }
-                    Err(err) => {
-                        log::info!("Invalid message: {line} - {err}");
-                    }
-                },
+                Ok(n) => n,
                 Err(e) => {
                     log::error!("Read error: {e}");
                     break;
+                }
+            };
+
+            let msg: Message = match serde_json::from_str(&line) {
+                Ok(msg) => msg,
+                Err(e) => {
+                    log::warn!("Invalid JSON message: {line:?} - {e}");
+                    continue;
+                }
+            };
+
+            match msg {
+                Message::Response { id, result, error } => {
+                    let tx = {
+                        let mut map = pending.lock().await;
+                        map.remove(&id)
+                    };
+
+                    if let Some(tx) = tx {
+                        if tx.send(Message::Response { id, result, error }).is_err() {
+                            log::debug!("Dropped response for id={id} — receiver went away");
+                        }
+                    } else {
+                        log::warn!("Unmatched response ID={id}: {line}");
+                    }
+                }
+
+                Message::Notification { .. } => {
+                    if let Err(e) = notifications.send(msg).await {
+                        log::error!("Failed to forward notification: {e}");
+                        break;
+                    }
+                }
+
+                Message::Request { .. } => {
+                    if let Err(e) = requests.send(msg).await {
+                        log::error!("Failed to forward request: {e}");
+                        break;
+                    }
                 }
             }
         }
     }
 
     pub async fn send(&mut self, message: &Message) -> Result<()> {
-        let json = serde_json::to_string(message)? + "\n";
-        self.tcp_writer.write_all(json.as_bytes()).await?;
+        let frame = serde_json::to_string(message)? + "\n";
+        self.tcp_writer.write_all(frame.as_bytes()).await?;
         self.tcp_writer.flush().await?;
         Ok(())
     }
@@ -80,49 +128,66 @@ impl Client {
         id
     }
 
-    pub async fn send_request(&mut self, method: &str, params: serde_json::Value) -> Result {
+    pub async fn send_request(
+        &mut self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<oneshot::Receiver<Message>> {
         let id = self.next_id();
+
         let msg = Message::Request {
-            id: json!(id),
+            id,
             method: method.to_string(),
             params,
         };
-        // let (_tx, rx) = oneshot::channel();
-        // self.requests.lock().await.insert(id, tx);
+
+        let (tx, rx) = oneshot::channel();
+
+        self.pending.lock().await.insert(id, tx);
+
         self.send(&msg).await?;
-        Ok(())
+
+        Ok(rx)
     }
 
-    pub async fn subscribe(&mut self) -> Result<()> {
-        self.send_request("mining.subscribe", json!([])).await?;
+    pub async fn subscribe(&mut self) -> Result<SubscribeResult> {
+        let rx = self.send_request("mining.subscribe", json!([])).await?;
 
-        //    if let Message::Response {
-        //        result: Some(val), ..
-        //    } = rx.await?
-        //    {
-        //        let result: SubscribeResult = serde_json::from_value(val)?;
-        //        log::info!(
-        //            "Subscribed: extranonce1={}, extranonce2_size={}",
-        //            result.1,
-        //            result.2
-        //        );
-        //    }
-        Ok(())
+        match rx.await? {
+            Message::Response {
+                result: Some(result),
+                error: None,
+                ..
+            } => Ok(serde_json::from_value(result)?),
+            Message::Response {
+                error: Some(err), ..
+            } => Err(anyhow!("mining.subscribe error: {}", err)),
+            _ => Err(anyhow!("Unknown mining.subscribe error")),
+        }
     }
 
-    pub async fn authorize(&mut self) -> Result<()> {
-        self.send_request("mining.authorize", json!([self.user, self.password]))
+    pub async fn authorize(&mut self) -> Result {
+        let rx = self
+            .send_request("mining.authorize", json!([self.user, self.password]))
             .await?;
 
-        //    if let Message::Response {
-        //        result: Some(val), ..
-        //    } = rx.await?
-        //    {
-        //        if val == json!(true) {
-        //            log::info!("Authorized");
-        //        }
-        //    }
-        Ok(())
+        match rx.await? {
+            Message::Response {
+                result: Some(result),
+                error: None,
+                ..
+            } => {
+                if serde_json::from_value(result)? {
+                    Ok(())
+                } else {
+                    Err(anyhow!("Unauthorized"))
+                }
+            }
+            Message::Response {
+                error: Some(err), ..
+            } => Err(anyhow!("mining.authorize error: {}", err)),
+            _ => Err(anyhow!("Unknown mining.authorize error")),
+        }
     }
 
     pub fn shutdown(&self) {

@@ -18,36 +18,33 @@ impl Miner {
     pub(crate) async fn run(&self) -> Result {
         let mut client = Client::connect(&self.host, self.port, &self.user, &self.password).await?;
 
-        client.subscribe().await?;
+        let subscribe = client.subscribe().await?;
+        log::info!("Subscribed successfully: {subscribe}");
+        // TODO: set extranonce etc.
+
         client.authorize().await?;
-        
-        // handle notifications
-        // handle requests
-        // ignore responses that do not have corresponding request
+        log::info!("Authorized successfully");
 
         loop {
             tokio::select! {
-                Some(msg) = client.message_receiver.recv() => {
-                    match msg {
-                        Message::Notification { method, params } => {
-                            match method.as_str() {
-                                "mining.notify" => {
-                                    let notify: Notify = serde_json::from_value(params)?;
-                                    log::info!("Got new job: {:?}", notify);
-                                }
-                                "mining.set_difficulty" => {
-                                    let set_difficulty: SetDifficulty = serde_json::from_value(params)?;
-                                    log::info!("Got new set difficulty: {:?}", set_difficulty.0[0]);
-                                },
-                                _ => log::info!("Unhandled notification method: {}", method)
+                Some(msg) = client.notifications.recv() => {
+                    if let Message::Notification { method, params } = msg {
+                        match method.as_str() {
+                            "mining.notify" => {
+                                let notify: Notify = serde_json::from_value(params)?;
+                                log::info!("Got new job: {:?}", notify);
                             }
+                            "mining.set_difficulty" => {
+                                let set_difficulty: SetDifficulty = serde_json::from_value(params)?;
+                                log::info!("New difficulty: {:?}", set_difficulty.0[0]);
+                            }
+                            _ => log::info!("Unhandled notification: {}", method),
                         }
-                        Message::Response { id, result, error } => {
-                            log::info!("Response to id={id}: result={result:?}, error={error:?}");
-                        }
-                        _ => {
-                            log::info!("Unhandled message: {:?}", msg);
-                        }
+                    }
+                }
+                Some(msg) = client.requests.recv() => {
+                    if let Message::Request { method, params, id } = msg {
+                        log::info!("Got request method={method} with id={id} with params={params}");
                     }
                 }
                 _ = ctrl_c() => {

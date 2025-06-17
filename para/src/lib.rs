@@ -32,8 +32,9 @@ use {
     serde_json::{Value, json},
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
     std::{
+        collections::BTreeMap,
         env,
-        fmt::Display,
+        fmt::{self, Display},
         io,
         net::ToSocketAddrs,
         path::PathBuf,
@@ -47,7 +48,7 @@ use {
         net::{TcpStream, tcp::OwnedWriteHalf},
         runtime::Runtime,
         signal::ctrl_c,
-        sync::{mpsc, oneshot},
+        sync::{Mutex, mpsc, oneshot},
         task::{self, JoinHandle},
     },
     tower_http::{
