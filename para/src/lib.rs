@@ -39,7 +39,10 @@ use {
         net::ToSocketAddrs,
         path::PathBuf,
         process,
-        sync::{Arc, LazyLock},
+        sync::{
+            Arc, LazyLock,
+            atomic::{AtomicU64, Ordering},
+        },
     },
     stratum::{Message, Notify, SetDifficulty, SubscribeResult},
     sysinfo::{Disks, System},

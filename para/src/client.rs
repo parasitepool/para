@@ -11,7 +11,7 @@ pub struct Client {
     pending: Arc<Mutex<BTreeMap<u64, oneshot::Sender<Message>>>>,
     listener: JoinHandle<()>,
     tcp_writer: BufWriter<OwnedWriteHalf>,
-    id_counter: u64,
+    id_counter: AtomicU64,
 }
 
 impl Client {
@@ -48,7 +48,7 @@ impl Client {
             pending: pending.clone(),
             user: user.to_string(),
             password: password.to_string(),
-            id_counter: 1,
+            id_counter: AtomicU64::new(1),
         })
     }
 
@@ -115,41 +115,6 @@ impl Client {
         }
     }
 
-    pub async fn send(&mut self, message: &Message) -> Result<()> {
-        let frame = serde_json::to_string(message)? + "\n";
-        self.tcp_writer.write_all(frame.as_bytes()).await?;
-        self.tcp_writer.flush().await?;
-        Ok(())
-    }
-
-    fn next_id(&mut self) -> u64 {
-        let id = self.id_counter;
-        self.id_counter += 1;
-        id
-    }
-
-    pub async fn send_request(
-        &mut self,
-        method: &str,
-        params: serde_json::Value,
-    ) -> Result<oneshot::Receiver<Message>> {
-        let id = self.next_id();
-
-        let msg = Message::Request {
-            id,
-            method: method.to_string(),
-            params,
-        };
-
-        let (tx, rx) = oneshot::channel();
-
-        self.pending.lock().await.insert(id, tx);
-
-        self.send(&msg).await?;
-
-        Ok(rx)
-    }
-
     pub async fn subscribe(&mut self) -> Result<SubscribeResult> {
         let rx = self.send_request("mining.subscribe", json!([])).await?;
 
@@ -188,6 +153,39 @@ impl Client {
             } => Err(anyhow!("mining.authorize error: {}", err)),
             _ => Err(anyhow!("Unknown mining.authorize error")),
         }
+    }
+
+    async fn send_request(
+        &mut self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<oneshot::Receiver<Message>> {
+        let id = self.next_id();
+
+        let msg = Message::Request {
+            id,
+            method: method.to_string(),
+            params,
+        };
+
+        let (tx, rx) = oneshot::channel();
+
+        self.pending.lock().await.insert(id, tx);
+
+        self.send(&msg).await?;
+
+        Ok(rx)
+    }
+
+    async fn send(&mut self, message: &Message) -> Result {
+        let frame = serde_json::to_string(message)? + "\n";
+        self.tcp_writer.write_all(frame.as_bytes()).await?;
+        self.tcp_writer.flush().await?;
+        Ok(())
+    }
+
+    fn next_id(&mut self) -> u64 {
+        self.id_counter.fetch_add(1, Ordering::Relaxed)
     }
 
     pub fn shutdown(&self) {
