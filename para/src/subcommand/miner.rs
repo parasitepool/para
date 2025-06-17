@@ -19,11 +19,11 @@ impl Miner {
         let mut client = Client::connect(&self.host, self.port, &self.user, &self.password).await?;
 
         let subscribe = client.subscribe().await?;
-        log::info!("Subscribed successfully: {subscribe}");
+        info!("Subscribed successfully: {subscribe}");
         // TODO: set extranonce etc.
 
         client.authorize().await?;
-        log::info!("Authorized successfully");
+        info!("Authorized successfully");
 
         loop {
             tokio::select! {
@@ -32,23 +32,23 @@ impl Miner {
                         match method.as_str() {
                             "mining.notify" => {
                                 let notify: Notify = serde_json::from_value(params)?;
-                                log::info!("Got new job: {:?}", notify);
+                                info!("Got new job: {:?}", notify);
                             }
                             "mining.set_difficulty" => {
                                 let set_difficulty: SetDifficulty = serde_json::from_value(params)?;
-                                log::info!("New difficulty: {:?}", set_difficulty.0[0]);
+                                info!("New difficulty: {:?}", set_difficulty.0[0]);
                             }
-                            _ => log::info!("Unhandled notification: {}", method),
+                            _ => info!("Unhandled notification: {}", method),
                         }
                     }
                 }
                 Some(msg) = client.requests.recv() => {
                     if let Message::Request { method, params, id } = msg {
-                        log::info!("Got request method={method} with id={id} with params={params}");
+                        info!("Got request method={method} with id={id} with params={params}");
                     }
                 }
                 _ = ctrl_c() => {
-                    log::info!("Shutting down");
+                    info!("Shutting down");
                     client.shutdown();
                     break;
                 }

@@ -55,7 +55,7 @@ use {
         services::ServeDir, set_header::SetResponseHeaderLayer,
         validate_request::ValidateRequestHeaderLayer,
     },
-    tracing::{error, info},
+    tracing::{debug, error, info, warn},
     tracing_subscriber::EnvFilter,
 };
 
@@ -104,9 +104,6 @@ pub fn main() {
         .init();
 
     let args = Arguments::parse();
-
-    let span = tracing::info_span!("main", command = ?args);
-    let _enter = span.enter();
 
     match args.run() {
         Err(err) => {

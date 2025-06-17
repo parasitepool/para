@@ -16,7 +16,7 @@ pub struct Client {
 
 impl Client {
     pub async fn connect(host: &str, port: u16, user: &str, password: &str) -> Result<Self> {
-        log::info!("Connecting to {host}:{port} with user {user}");
+        info!("Connecting to {host}:{port} with user {user}");
 
         let stream = TcpStream::connect((host, port)).await?;
 
@@ -69,7 +69,7 @@ impl Client {
                 Ok(0) => break,
                 Ok(n) => n,
                 Err(e) => {
-                    log::error!("Read error: {e}");
+                    error!("Read error: {e}");
                     break;
                 }
             };
@@ -77,7 +77,7 @@ impl Client {
             let msg: Message = match serde_json::from_str(&line) {
                 Ok(msg) => msg,
                 Err(e) => {
-                    log::warn!("Invalid JSON message: {line:?} - {e}");
+                    warn!("Invalid JSON message: {line:?} - {e}");
                     continue;
                 }
             };
@@ -91,23 +91,23 @@ impl Client {
 
                     if let Some(tx) = tx {
                         if tx.send(Message::Response { id, result, error }).is_err() {
-                            log::debug!("Dropped response for id={id} — receiver went away");
+                            debug!("Dropped response for id={id} — receiver went away");
                         }
                     } else {
-                        log::warn!("Unmatched response ID={id}: {line}");
+                        warn!("Unmatched response ID={id}: {line}");
                     }
                 }
 
                 Message::Notification { .. } => {
                     if let Err(e) = notifications.send(msg).await {
-                        log::error!("Failed to forward notification: {e}");
+                        error!("Failed to forward notification: {e}");
                         break;
                     }
                 }
 
                 Message::Request { .. } => {
                     if let Err(e) = requests.send(msg).await {
-                        log::error!("Failed to forward request: {e}");
+                        error!("Failed to forward request: {e}");
                         break;
                     }
                 }
