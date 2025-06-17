@@ -44,7 +44,7 @@ impl Server {
     pub async fn run(&self, options: Options, handle: Handle) -> Result {
         let log_dir = options.log_dir();
 
-        log::info!("Serving files in {}", log_dir.display());
+        info!("Serving files in {}", log_dir.display());
 
         let database = Database::new(&options).await?;
 
@@ -244,10 +244,9 @@ impl Server {
 
         Ok(tokio::spawn(async move {
             if !acme_domain.is_empty() && !acme_contact.is_empty() {
-                log::info!(
+                info!(
                     "Getting certificate for {} using contact email {}",
-                    acme_domain[0],
-                    acme_contact[0]
+                    acme_domain[0], acme_contact[0]
                 );
 
                 let addr = (address, port.unwrap_or(443))
@@ -255,7 +254,7 @@ impl Server {
                     .next()
                     .unwrap();
 
-                log::info!("Listening on https://{addr}");
+                info!("Listening on https://{addr}");
 
                 axum_server::Server::bind(addr)
                     .handle(handle)
@@ -268,7 +267,7 @@ impl Server {
                     .next()
                     .unwrap();
 
-                log::info!("Listening on http://{addr}");
+                info!("Listening on http://{addr}");
 
                 axum_server::Server::bind(addr)
                     .handle(handle)
@@ -316,8 +315,8 @@ impl Server {
         tokio::spawn(async move {
             while let Some(result) = state.next().await {
                 match result {
-                    Ok(ok) => log::info!("ACME event: {:?}", ok),
-                    Err(err) => log::error!("ACME error: {:?}", err),
+                    Ok(ok) => info!("ACME event: {:?}", ok),
+                    Err(err) => error!("ACME error: {:?}", err),
                 }
             }
         });

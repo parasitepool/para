@@ -41,6 +41,8 @@ use {
         services::ServeDir, set_header::SetResponseHeaderLayer,
         validate_request::ValidateRequestHeaderLayer,
     },
+    tracing::{error, info},
+    tracing_subscriber::EnvFilter,
 };
 
 mod arguments;
@@ -81,19 +83,24 @@ pub fn format_uptime(uptime_seconds: u64) -> String {
 }
 
 pub fn main() {
-    env_logger::init();
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
 
     let args = Arguments::parse();
 
+    let span = tracing::info_span!("main", command = ?args);
+    let _enter = span.enter();
+
     match args.run() {
         Err(err) => {
-            eprintln!("error: {err}");
+            error!("error: {err}");
 
             if env::var_os("RUST_BACKTRACE")
                 .map(|val| val == "1")
                 .unwrap_or_default()
             {
-                eprintln!("{}", err.backtrace());
+                error!("{}", err.backtrace());
             }
             process::exit(1);
         }
