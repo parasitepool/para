@@ -4,8 +4,8 @@ use super::*;
 // hasher with new work/templates. Has a couple channels to the Miner for communication and
 // listens/talks to upstream mining pool
 pub struct Client {
-    pub user: String,
-    pub password: String,
+    user: String,
+    password: String,
     pub notifications: mpsc::Receiver<Message>,
     pub requests: mpsc::Receiver<Message>,
     pending: Arc<Mutex<BTreeMap<u64, oneshot::Sender<Message>>>>,
@@ -116,7 +116,9 @@ impl Client {
     }
 
     pub async fn subscribe(&mut self) -> Result<SubscribeResult> {
-        let rx = self.send_request("mining.subscribe", json!([])).await?;
+        let rx = self
+            .send_request("mining.subscribe", json!(["user ParaMiner/0.0.1"]))
+            .await?;
 
         match rx.await? {
             Message::Response {
