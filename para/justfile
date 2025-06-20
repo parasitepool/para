@@ -30,5 +30,12 @@ miner:
     --user bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg6dzw5nk24r45dzasde25r3.ParaMiner \
     --password x
 
+miner-local: 
+  RUST_LOG=info cargo run -- miner \
+    --host 0.0.0.0 \
+    --port 42069 \
+    --user tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.ParaMiner \
+    --password x
+
 server: 
   RUST_LOG=info cargo run -- --log-dir ../logs server --port 8080

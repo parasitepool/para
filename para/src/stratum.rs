@@ -133,18 +133,24 @@ impl Display for SubscribeResult {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct Notify {
     pub job_id: String,
-    pub prevhash: String,
+    pub prevhash: BlockHash,
     pub coinb1: String,
     pub coinb2: String,
     pub merkle_branch: Vec<String>,
-    pub version: String,
-    pub nbits: String,
-    pub ntime: String,
+    pub version: String, // TODO
+    pub nbits: String,   // TODO
+    pub ntime: String, // TODO
     pub clean_jobs: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct SetDifficulty(pub Vec<u64>);
+pub struct SetDifficulty(pub Vec<Difficulty>);
+
+impl SetDifficulty {
+    pub fn to_difficulty(self) -> Difficulty {
+        self.0.into_iter().next().unwrap_or_default()
+    }
+}

@@ -13,10 +13,16 @@ use {
         routing::get,
     },
     axum_server::Handle,
-    bitcoin::{Target, block::Header},
+    bitcoin::{
+        BlockHash, CompactTarget, Target, TxMerkleNode,
+        block::{Header, Version},
+        hashes::Hash,
+    },
     clap::Parser,
     database::Database,
+    difficulty::Difficulty,
     futures::stream::StreamExt,
+    lazy_static::lazy_static,
     options::Options,
     rust_embed::RustEmbed,
     rustls_acme::{
@@ -65,6 +71,7 @@ use {
 mod arguments;
 mod client;
 mod database;
+mod difficulty;
 mod options;
 mod stratum;
 mod subcommand;

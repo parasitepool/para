@@ -25,20 +25,42 @@ impl Miner {
         client.authorize().await?;
         info!("Authorized successfully");
 
+        let mut pool_difficulty = Difficulty::default();
+
         loop {
             tokio::select! {
                 Some(msg) = client.notifications.recv() => {
                     if let Message::Notification { method, params } = msg {
                         match method.as_str() {
                             "mining.notify" => {
-                                let notify: Notify = serde_json::from_value(params)?;
-                                info!("Got new job: {:?}", notify);
+                                let notify: Notify = serde_json::from_value(dbg!(params))?;
+                                let mut hasher = hasher::Hasher {
+                                    header: Header {
+                                        version: Version::TWO,
+                                        prev_blockhash: notify.prevhash,
+                                        merkle_root: TxMerkleNode::from_raw_hash(BlockHash::all_zeros().to_raw_hash()),
+                                        time: u32::from_str_radix(&notify.ntime, 16)?,
+                                        bits: CompactTarget::from_unprefixed_hex(&notify.nbits)?,
+                                        nonce: 0,
+                                    },
+                                    pool_target: pool_difficulty.to_target(),
+                                };
+
+                                dbg!(hasher.hash()?);
+
+                                dbg!(&hasher);
+
                             }
                             "mining.set_difficulty" => {
-                                let set_difficulty: SetDifficulty = serde_json::from_value(params)?;
-                                info!("New difficulty: {:?}", set_difficulty.0[0]);
+                                let pool_difficulty =  serde_json::from_value::<SetDifficulty>(params)?.to_difficulty();
+
+                                let pool_target = pool_difficulty.to_target();
+
+                                info!("Pool difficulty: {:?}", pool_difficulty);
+                                info!("Pool target: {:?}", pool_target);
+                                info!("Pool target (nbits): {:?}", pool_target.to_compact_lossy());
                             }
-                            _ => info!("Unhandled notification: {}", method),
+                            _ => warn!("Unhandled notification: {}", method),
                         }
                     }
                 }

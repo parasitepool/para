@@ -4,16 +4,18 @@ use super::*;
 // should only increment the nonce space and not think too much about extranonce2 space. It has
 // channels to the client for sending shares and updating workbase. Target is the one given from
 // the pool. The actual network target/difficulty is inside the Header.
+#[derive(Debug)]
 pub(crate) struct Hasher {
     pub(crate) header: Header,
-    pub(crate) target: Target,
+    pub(crate) pool_target: Target,
 }
 
 impl Hasher {
-    #[allow(unused)]
     pub(crate) fn hash(&mut self) -> Result<Header> {
+        let network_target = self.header.target();
         loop {
-            if self.target.is_met_by(self.header.block_hash()) {
+            let hash = self.header.block_hash();
+            if self.pool_target.is_met_by(hash) || network_target.is_met_by(hash) {
                 return Ok(self.header);
             }
 
@@ -73,7 +75,7 @@ mod tests {
 
         let mut hasher = Hasher {
             header: header(Some(target), None),
-            target,
+            pool_target: target,
         };
 
         let header = hasher.hash().unwrap();
@@ -87,7 +89,7 @@ mod tests {
 
         let mut hasher = Hasher {
             header: header(Some(target), Some(u32::MAX - 1)),
-            target,
+            pool_target: target,
         };
 
         assert!(
