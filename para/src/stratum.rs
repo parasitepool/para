@@ -1,15 +1,23 @@
 use super::*;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord, Display, Clone)]
+#[serde(untagged)]
+pub enum Id {
+    Null,
+    Number(u64),
+    String(String),
+}
+
+#[derive(Debug, Serialize, PartialEq)]
 #[serde(untagged)]
 pub enum Message {
     Request {
-        id: u64,
+        id: Id,
         method: String,
         params: Value,
     },
     Response {
-        id: u64,
+        id: Id,
         result: Option<Value>,
         error: Option<JsonRpcError>,
     },
@@ -32,15 +40,15 @@ impl<'de> Deserialize<'de> for Message {
 
         let is_request = value.get("method").is_some() && value.get("id").is_some();
 
-        let is_notification_null_id =
-            value.get("method").is_some() && value.get("id") == Some(&Value::Null);
+        let is_notification_optional_null_id = value.get("method").is_some()
+            && (value.get("id") == Some(&Value::Null) || value.get("id").is_none());
 
         let is_response = value.get("result").is_some() || value.get("error").is_some();
 
         if is_response {
             #[derive(Deserialize)]
             struct Resp {
-                id: u64,
+                id: Id,
                 result: Option<Value>,
                 error: Option<JsonRpcError>,
             }
@@ -52,7 +60,7 @@ impl<'de> Deserialize<'de> for Message {
                 result: r.result,
                 error: r.error,
             })
-        } else if is_notification_null_id {
+        } else if is_notification_optional_null_id {
             let method = value
                 .get("method")
                 .and_then(Value::as_str)
@@ -68,7 +76,7 @@ impl<'de> Deserialize<'de> for Message {
         } else if is_request {
             #[derive(Deserialize)]
             struct Req {
-                id: u64,
+                id: Id,
                 method: String,
                 params: Value,
             }
@@ -86,54 +94,85 @@ impl<'de> Deserialize<'de> for Message {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct JsonRpcError(
-    pub i32,           // error code
-    pub String,        // human-readable message
-    pub Option<Value>, // optional traceback or debugging info
-);
+/// ckpool does not follow this convention
+#[derive(Debug, Deserialize, PartialEq)]
+pub struct JsonRpcError {
+    pub error_code: i32,
+    pub message: String,
+    pub traceback: Option<Value>,
+}
 
-impl Display for JsonRpcError {
+impl Serialize for JsonRpcError {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        (&self.error_code, &self.message, &self.traceback).serialize(serializer)
+    }
+}
+
+impl fmt::Display for JsonRpcError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.2 {
+        match &self.traceback {
             Some(traceback) => write!(
                 f,
                 "Stratum error {}: {} (traceback: {})",
-                self.0,
-                self.1,
+                self.error_code,
+                self.message,
                 serde_json::to_string(traceback).unwrap_or_else(|_| "<invalid traceback>".into())
             ),
-            None => write!(f, "Stratum error {}: {}", self.0, self.1),
+            None => write!(f, "Stratum error {}: {}", self.error_code, self.message),
         }
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SubscribeResult(
-    pub Vec<(String, String)>, // subscriptions
-    pub String,                // extranonce1
-    pub u32,                   // extranonce2_size
-);
+#[derive(Debug, Deserialize, PartialEq)]
+pub struct Subscribe {
+    pub user_agent: String,
+    pub extranonce1: Option<String>,
+}
 
-impl Display for SubscribeResult {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let subs: Vec<String> = self
-            .0
-            .iter()
-            .map(|(method, id)| format!("(\"{method}\", \"{id}\")"))
-            .collect();
+impl Serialize for Subscribe {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut seq_len = 1;
+        if self.extranonce1.is_some() {
+            seq_len += 1;
+        }
 
-        write!(
-            f,
-            "subscriptions=[{}], extranonce1={}, extranonce2_size={}",
-            subs.join(", "),
-            self.1,
-            self.2
-        )
+        let mut seq = serializer.serialize_seq(Some(seq_len))?;
+        seq.serialize_element(&self.user_agent)?;
+        if let Some(ref extranonce1) = self.extranonce1 {
+            seq.serialize_element(extranonce1)?;
+        }
+        seq.end()
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize)]
+pub struct SubscribeResult {
+    pub subscriptions: Vec<(String, String)>,
+    pub extranonce1: String,
+    pub extranonce2_size: u32,
+}
+
+impl Serialize for SubscribeResult {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        (
+            &self.subscriptions,
+            &self.extranonce1,
+            &self.extranonce2_size,
+        )
+            .serialize(serializer)
+    }
+}
+
+#[derive(Debug, Deserialize, PartialEq, Clone)]
 pub struct Notify {
     pub job_id: String,
     pub prevhash: BlockHash,
@@ -142,15 +181,312 @@ pub struct Notify {
     pub merkle_branch: Vec<String>,
     pub version: String, // TODO
     pub nbits: String,   // TODO
-    pub ntime: String, // TODO
+    pub ntime: String,   // TODO
     pub clean_jobs: bool,
+}
+
+impl Serialize for Notify {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        (
+            &self.job_id,
+            &self.prevhash,
+            &self.coinb1,
+            &self.coinb2,
+            &self.merkle_branch,
+            &self.version,
+            &self.nbits,
+            &self.ntime,
+            &self.clean_jobs,
+        )
+            .serialize(serializer)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SetDifficulty(pub Vec<Difficulty>);
 
 impl SetDifficulty {
-    pub fn to_difficulty(self) -> Difficulty {
-        self.0.into_iter().next().unwrap_or_default()
+    pub fn difficulty(&self) -> Difficulty {
+        *self.0.first().unwrap()
+    }
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+pub struct Submit {
+    pub worker_name: String,
+    pub job_id: String, // TODO: is this the extranonce1?
+    pub extranonce2: String,
+    pub ntime: String, // TODO
+    pub nonce: u32,
+}
+
+impl Serialize for Submit {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        (
+            &self.worker_name,
+            &self.job_id,
+            &self.extranonce2,
+            &self.ntime,
+            format!("{:08x}", &self.nonce),
+        )
+            .serialize(serializer)
+    }
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+pub struct Authorize {
+    pub worker_name: String,
+    pub password: String,
+}
+
+impl Serialize for Authorize {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        (&self.worker_name, &self.password).serialize(serializer)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use {super::*, serde_json::json};
+
+    #[track_caller]
+    fn case(s: &str, expected: Message) {
+        let actual = serde_json::from_str::<Message>(s).unwrap();
+        assert_eq!(actual, expected);
+
+        let serialized = serde_json::to_string(&actual).unwrap();
+        assert_eq!(serialized, s);
+
+        let round_trip = serde_json::from_str::<Message>(&serialized).unwrap();
+        assert_eq!(round_trip, expected);
+    }
+
+    #[test]
+    fn request() {
+        case(
+            r#"{"id":1,"method":"mining.subscribe","params":[]}"#,
+            Message::Request {
+                id: Id::Number(1),
+                method: "mining.subscribe".into(),
+                params: json!([]),
+            },
+        );
+    }
+
+    #[test]
+    fn notification() {
+        case(
+            r#"{"method":"mining.notify","params":[]}"#,
+            Message::Notification {
+                method: "mining.notify".into(),
+                params: json!([]),
+            },
+        );
+
+        let with_id_null = r#"{"method":"mining.notify","params":[],"id":null}"#;
+
+        assert_eq!(
+            serde_json::from_str::<Message>(with_id_null).unwrap(),
+            Message::Notification {
+                method: "mining.notify".into(),
+                params: json!([]),
+            }
+        );
+    }
+
+    #[test]
+    fn response() {
+        case(
+            r#"{"id":8,"result":[[["mining.set_difficulty","b4b6693b72a50c7116db18d6497cac52"],["mining.notify","ae6812eb4cd7735a302a8a9dd95cf71f"]],"08000002",4],"error":null}"#,
+            Message::Response {
+                id: Id::Number(8),
+                result: Some(json!([
+                    [
+                        ["mining.set_difficulty", "b4b6693b72a50c7116db18d6497cac52"],
+                        ["mining.notify", "ae6812eb4cd7735a302a8a9dd95cf71f"]
+                    ],
+                    "08000002",
+                    4
+                ])),
+                error: None,
+            },
+        );
+    }
+
+    #[test]
+    fn error_response() {
+        case(
+            r#"{"id":10,"result":null,"error":null}"#,
+            Message::Response {
+                id: Id::Number(10),
+                result: None,
+                error: None,
+            },
+        );
+
+        case(
+            r#"{"id":10,"result":null,"error":[21,"Job not found",null]}"#,
+            Message::Response {
+                id: Id::Number(10),
+                result: None,
+                error: Some(JsonRpcError {
+                    error_code: 21,
+                    message: "Job not found".into(),
+                    traceback: None,
+                }),
+            },
+        );
+    }
+
+    #[test]
+    fn notify() {
+        let notify = Notify {
+            job_id: "bf".into(),
+            prevhash: "4d16b6f85af6e2198f44ae2a6de67f78487ae5611b77c6c0440b921e00000000".parse().unwrap(),
+            coinb1: "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff20020862062f503253482f04b8864e5008".into(),
+            coinb2: "072f736c7573682f000000000100f2052a010000001976a914d23fcdf86f7e756a64a7a9688ef9903327048ed988ac00000000".into(),
+            merkle_branch: Vec::new(),
+            version: "00000002".into(),
+            nbits: "1c2ac4af".into(),
+            ntime: "504e86b9".into(), 
+            clean_jobs: false,
+        };
+
+        case(
+            r#"{"method":"mining.notify","params":["bf","4d16b6f85af6e2198f44ae2a6de67f78487ae5611b77c6c0440b921e00000000","01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff20020862062f503253482f04b8864e5008","072f736c7573682f000000000100f2052a010000001976a914d23fcdf86f7e756a64a7a9688ef9903327048ed988ac00000000",[],"00000002","1c2ac4af","504e86b9",false]}"#,
+            Message::Notification {
+                method: "mining.notify".into(),
+                params: serde_json::to_value(&notify).unwrap(),
+            },
+        );
+
+        let notify_string = r#"{"params": ["bf", "4d16b6f85af6e2198f44ae2a6de67f78487ae5611b77c6c0440b921e00000000",
+"01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff20020862062f503253482f04b8864e5008",
+"072f736c7573682f000000000100f2052a010000001976a914d23fcdf86f7e756a64a7a9688ef9903327048ed988ac00000000", [],
+"00000002", "1c2ac4af", "504e86b9", false], "id": null, "method": "mining.notify"}"#;
+
+        assert_eq!(
+            serde_json::from_str::<Message>(notify_string).unwrap(),
+            Message::Notification {
+                method: "mining.notify".into(),
+                params: serde_json::to_value(notify).unwrap(),
+            },
+        );
+    }
+
+    #[test]
+    fn submit() {
+        case(
+            r#"{"id":4,"method":"mining.submit","params":["slush.miner1","bf","00000001","504e86ed","b2957c02"]}"#,
+            Message::Request {
+                id: Id::Number(4),
+                method: "mining.submit".into(),
+                params: serde_json::to_value(&Submit {
+                    worker_name: "slush.miner1".into(),
+                    job_id: "bf".into(),
+                    extranonce2: "00000001".into(),
+                    ntime: "504e86ed".into(),
+                    nonce: u32::from_str_radix("b2957c02", 16).unwrap(),
+                })
+                .unwrap(),
+            },
+        );
+
+        case(
+            r#"{"id":4,"result":true,"error":null}"#,
+            Message::Response {
+                id: Id::Number(4),
+                result: Some(json!(true)),
+                error: None,
+            },
+        );
+    }
+
+    #[test]
+    fn set_difficulty() {
+        let set_difficulty_str = r#"{"id":null,"method":"mining.set_difficulty","params":[2]}"#;
+
+        assert_eq!(
+            serde_json::from_str::<Message>(set_difficulty_str).unwrap(),
+            Message::Notification {
+                method: "mining.set_difficulty".into(),
+                params: serde_json::to_value(SetDifficulty(vec![Difficulty(2)])).unwrap(),
+            },
+        );
+    }
+
+    #[test]
+    fn authorize() {
+        case(
+            r#"{"id":2,"method":"mining.authorize","params":["slush.miner1","password"]}"#,
+            Message::Request {
+                id: Id::Number(2),
+                method: "mining.authorize".into(),
+                params: serde_json::to_value(Authorize {
+                    worker_name: "slush.miner1".into(),
+                    password: "password".into(),
+                })
+                .unwrap(),
+            },
+        );
+
+        case(
+            r#"{"id":2,"result":true,"error":null}"#,
+            Message::Response {
+                id: Id::Number(2),
+                result: Some(json!(true)),
+                error: None,
+            },
+        );
+    }
+
+    #[test]
+    fn subscribe() {
+        case(
+            r#"{"id":1,"method":"mining.subscribe","params":["user ParaMiner/0.0.1"]}"#,
+            Message::Request {
+                id: Id::Number(1),
+                method: "mining.subscribe".into(),
+                params: serde_json::to_value(Subscribe {
+                    user_agent: "user ParaMiner/0.0.1".into(),
+                    extranonce1: None,
+                })
+                .unwrap(),
+            },
+        );
+
+        case(
+            r#"{"id":1,"result":[[["mining.set_difficulty","b4b6693b72a50c7116db18d6497cac52"],["mining.notify","ae6812eb4cd7735a302a8a9dd95cf71f"]],"08000002",4],"error":null}"#,
+            Message::Response {
+                id: Id::Number(1),
+                result: Some(
+                    serde_json::to_value(SubscribeResult {
+                        subscriptions: vec![
+                            (
+                                "mining.set_difficulty".into(),
+                                "b4b6693b72a50c7116db18d6497cac52".into(),
+                            ),
+                            (
+                                "mining.notify".into(),
+                                "ae6812eb4cd7735a302a8a9dd95cf71f".into(),
+                            ),
+                        ],
+                        extranonce1: "08000002".into(),
+                        extranonce2_size: 4,
+                    })
+                    .unwrap(),
+                ),
+                error: None,
+            },
+        );
     }
 }

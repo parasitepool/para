@@ -8,7 +8,7 @@ pub struct Client {
     password: String,
     pub notifications: mpsc::Receiver<Message>,
     pub requests: mpsc::Receiver<Message>,
-    pending: Arc<Mutex<BTreeMap<u64, oneshot::Sender<Message>>>>,
+    pending: Arc<Mutex<BTreeMap<Id, oneshot::Sender<Message>>>>,
     listener: JoinHandle<()>,
     tcp_writer: BufWriter<OwnedWriteHalf>,
     id_counter: AtomicU64,
@@ -28,7 +28,7 @@ impl Client {
         let (request_sender, request_receiver) = mpsc::channel(32);
         let (notification_sender, notification_receiver) = mpsc::channel(32);
 
-        let pending: Arc<Mutex<BTreeMap<u64, oneshot::Sender<Message>>>> =
+        let pending: Arc<Mutex<BTreeMap<Id, oneshot::Sender<Message>>>> =
             Arc::new(Mutex::new(BTreeMap::new()));
 
         let listener = {
@@ -56,7 +56,7 @@ impl Client {
         mut tcp_reader: BufReader<R>,
         requests: mpsc::Sender<Message>,
         notifications: mpsc::Sender<Message>,
-        pending: Arc<Mutex<BTreeMap<u64, oneshot::Sender<Message>>>>,
+        pending: Arc<Mutex<BTreeMap<Id, oneshot::Sender<Message>>>>,
     ) where
         R: AsyncRead + Unpin,
     {
@@ -90,7 +90,14 @@ impl Client {
                     };
 
                     if let Some(tx) = tx {
-                        if tx.send(Message::Response { id, result, error }).is_err() {
+                        if tx
+                            .send(Message::Response {
+                                id: id.clone(),
+                                result,
+                                error,
+                            })
+                            .is_err()
+                        {
                             debug!("Dropped response for id={id} — receiver went away");
                         }
                     } else {
@@ -117,7 +124,13 @@ impl Client {
 
     pub async fn subscribe(&mut self) -> Result<SubscribeResult> {
         let rx = self
-            .send_request("mining.subscribe", json!(["user ParaMiner/0.0.1"]))
+            .send_request(
+                "mining.subscribe",
+                serde_json::to_value(Subscribe {
+                    user_agent: "user ParaMiner/0.0.1".into(),
+                    extranonce1: None,
+                })?,
+            )
             .await?;
 
         match rx.await? {
@@ -135,7 +148,13 @@ impl Client {
 
     pub async fn authorize(&mut self) -> Result {
         let rx = self
-            .send_request("mining.authorize", json!([self.user, self.password]))
+            .send_request(
+                "mining.authorize",
+                serde_json::to_value(Authorize {
+                    worker_name: self.user.clone(),
+                    password: self.password.clone(),
+                })?,
+            )
             .await?;
 
         match rx.await? {
@@ -157,6 +176,45 @@ impl Client {
         }
     }
 
+    pub async fn submit(
+        &mut self,
+        job_id: String,
+        extranonce2: String,
+        ntime: String,
+        nonce: u32,
+    ) -> Result {
+        let rx = self
+            .send_request(
+                "mining.submit",
+                serde_json::to_value(Submit {
+                    worker_name: self.user.clone(),
+                    job_id,
+                    extranonce2,
+                    ntime,
+                    nonce,
+                })?,
+            )
+            .await?;
+
+        match rx.await? {
+            Message::Response {
+                result: Some(result),
+                error: None,
+                ..
+            } => {
+                if serde_json::from_value(result)? {
+                    Ok(())
+                } else {
+                    Err(anyhow!("Failed to submit"))
+                }
+            }
+            Message::Response {
+                error: Some(err), ..
+            } => Err(anyhow!("mining.submit error: {}", err)),
+            _ => Err(anyhow!("Unknown mining.submit error")),
+        }
+    }
+
     async fn send_request(
         &mut self,
         method: &str,
@@ -165,14 +223,14 @@ impl Client {
         let id = self.next_id();
 
         let msg = Message::Request {
-            id,
+            id: id.clone(),
             method: method.to_string(),
             params,
         };
 
         let (tx, rx) = oneshot::channel();
 
-        self.pending.lock().await.insert(id, tx);
+        self.pending.lock().await.insert(id.clone(), tx);
 
         self.send(&msg).await?;
 
@@ -186,35 +244,11 @@ impl Client {
         Ok(())
     }
 
-    fn next_id(&mut self) -> u64 {
-        self.id_counter.fetch_add(1, Ordering::Relaxed)
+    fn next_id(&mut self) -> Id {
+        Id::Number(self.id_counter.fetch_add(1, Ordering::Relaxed))
     }
 
     pub fn shutdown(&self) {
         self.listener.abort()
     }
 }
-
-//struct Client {
-//    client_id: u32,
-//    extranonce1: Option<Extranonce<'static>>,
-//    extranonce2_size: Option<usize>,
-//    version_rolling_mask: Option<HexU32Be>,
-//    version_rolling_min_bit: Option<HexU32Be>,
-//    miner: Miner,
-//}
-
-// Comese from the mining.notify message
-//struct Job {
-//    job_id: u32,
-//    prev_hash: [u8; 32],
-//    coinbase_1: Vec<u32>,
-//    coinbase_2: Vec<u32>,
-//    merkle_brances: Vec<[u8; 32]>,
-//    merkle_root: [u8; 32],
-//    version: u32,
-//    nbits: u32,
-//    _ntime: u32,       // not needed?
-//    _clean_jobs: bool, // not needed
-//}
-//

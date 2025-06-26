@@ -11,10 +11,19 @@ pub(crate) struct Hasher {
 }
 
 impl Hasher {
-    pub(crate) fn hash(&mut self) -> Result<Header> {
+    pub(crate) fn hash(&mut self, cancel: CancellationToken) -> Result<Header> {
         let network_target = self.header.target();
+        let mut hashes = 0;
+        let start = Instant::now();
+        let mut last_log = start;
+
         loop {
+            if cancel.is_cancelled() {
+                return Err(anyhow!("hashing cancelled"));
+            }
+
             let hash = self.header.block_hash();
+            hashes += 1;
             if self.pool_target.is_met_by(hash) || network_target.is_met_by(hash) {
                 return Ok(self.header);
             }
@@ -23,9 +32,27 @@ impl Hasher {
                 return Err(anyhow!("nonce space exhausted"));
             }
 
+            let now = Instant::now();
+            if now.duration_since(last_log) >= Duration::from_secs(1) {
+                let elapsed = now.duration_since(start).as_secs_f64().max(1e-6);
+                let hashrate = hashes as f64 / elapsed;
+                info!("Hashrate: {}", format_hashrate(hashrate));
+                last_log = now;
+            }
             self.header.nonce = self.header.nonce.wrapping_add(1);
         }
     }
+}
+
+fn format_hashrate(hashes_per_sec: f64) -> String {
+    const UNITS: &[&str] = &["H/s", "kH/s", "MH/s", "GH/s", "TH/s", "PH/s", "EH/s"];
+    let mut rate = hashes_per_sec;
+    let mut unit = 0;
+    while rate >= 1000.0 && unit < UNITS.len() - 1 {
+        rate /= 1000.0;
+        unit += 1;
+    }
+    format!("{:.2} {}", rate, UNITS[unit])
 }
 
 #[cfg(test)]
@@ -78,7 +105,7 @@ mod tests {
             pool_target: target,
         };
 
-        let header = hasher.hash().unwrap();
+        let header = hasher.hash(CancellationToken::new()).unwrap();
 
         assert!(header.validate_pow(target).is_ok());
     }
@@ -94,7 +121,7 @@ mod tests {
 
         assert!(
             hasher
-                .hash()
+                .hash(CancellationToken::new())
                 .is_err_and(|err| err.to_string() == "nonce space exhausted")
         )
     }
