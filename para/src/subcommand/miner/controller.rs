@@ -5,8 +5,9 @@ pub(crate) struct Controller {
     job: Arc<Mutex<Option<Notify>>>,
     difficulty: Arc<Mutex<Difficulty>>,
     extranonce1: String,
-    share_rx: mpsc::Receiver<Header>,
-    share_tx: mpsc::Sender<Header>,
+    extranonce2_size: u32,
+    share_rx: mpsc::Receiver<(Header, String)>,
+    share_tx: mpsc::Sender<(Header, String)>,
     hasher_cancel: CancellationToken,
 }
 
@@ -27,6 +28,7 @@ impl Controller {
             job: Arc::new(Mutex::new(None)),
             difficulty: Arc::new(Mutex::new(Difficulty::default())),
             extranonce1: subscribe.extranonce1,
+            extranonce2_size: subscribe.extranonce2_size,
             share_rx,
             share_tx,
             hasher_cancel: CancellationToken::new(),
@@ -38,17 +40,17 @@ impl Controller {
             tokio::select! {
                 Some(msg) = self.client.notifications.recv() => self.handle_notification(msg).await?,
                 Some(msg) = self.client.requests.recv() => self.handle_request(msg).await?,
-                Some(header) = self.share_rx.recv() => {
+                Some((header, extranonce2)) = self.share_rx.recv() => {
                     info!("Valid header found: {:?}", header);
                     let notify = self.job.lock().await.clone().unwrap();
-                    if let Err(e) = self.client.submit(notify.job_id, "".into(), format!("{:08x}", header.time), header.nonce).await {
+                    if let Err(e) = self.client.submit(notify.job_id, extranonce2, format!("{:08x}", header.time), header.nonce).await {
                         warn!("Failed to submit share: {e}");
                     }
                 }
                 _ = ctrl_c() => {
                     info!("Shutting down client and hasher");
                     self.client.shutdown();
-                    self.cancel_hasher().await;
+                    self.cancel_hasher();
                     break;
                 }
             }
@@ -62,30 +64,41 @@ impl Controller {
             match method.as_str() {
                 "mining.notify" => {
                     let notify = serde_json::from_value::<Notify>(params)?;
-
                     self.job.lock().await.replace(notify.clone());
 
-                    // let job_id = notify.job_id.clone();
-                    // let extranonce2 = self.next_extranonce2();
+                    let extranonce2 = {
+                        let mut bytes = vec![0u8; self.extranonce2_size.try_into().unwrap()];
+                        rand::rng().fill(&mut bytes[..]);
+                        hex::encode(bytes)
+                    };
 
                     let share_tx = self.share_tx.clone();
 
-                    self.cancel_hasher().await;
+                    self.cancel_hasher();
                     let cancel = self.hasher_cancel.clone();
+
+                    let pool_diff = self.difficulty.lock().await;
+                    let pool_target = pool_diff.to_target();
+                    let network_target: Target = CompactTarget::from_unprefixed_hex(&notify.nbits)
+                        .unwrap()
+                        .into();
+
+                    // info!("Pool diff: {}", pool_diff);
+                    // info!("Pool target: {}", pool_target);
+                    info!("Network target: {}", target_as_block_hash(network_target));
 
                     let mut hasher = Hasher {
                         header: Header {
                             version: Version::TWO,
                             prev_blockhash: notify.prevhash,
-                            merkle_root: TxMerkleNode::from_raw_hash(
-                                BlockHash::all_zeros().to_raw_hash(),
-                            ),
+                            merkle_root: self.build_merkle_root(&notify, &extranonce2)?,
                             time: u32::from_str_radix(&notify.ntime, 16).unwrap_or_default(),
                             bits: CompactTarget::from_unprefixed_hex(&notify.nbits)
                                 .unwrap_or_default(),
                             nonce: 0,
                         },
-                        pool_target: self.difficulty.lock().await.to_target(),
+                        pool_target,
+                        extranonce2: extranonce2.to_string(),
                     };
 
                     // CPU-heavy task so spawning in it's own thread pool
@@ -122,7 +135,24 @@ impl Controller {
         Ok(())
     }
 
-    async fn cancel_hasher(&mut self) {
+    fn build_merkle_root(&self, notify: &Notify, extranonce2: &str) -> Result<TxMerkleNode> {
+        let coinbase = notify.coinb1.clone() + &self.extranonce1 + extranonce2 + &notify.coinb2;
+
+        let mut merkle_root = sha256d::Hash::hash(&hex::decode(coinbase)?.as_slice());
+
+        for branch in &notify.merkle_branch {
+            let branch_hash = sha256d::Hash::from_str(branch)?;
+            let mut concat = Vec::with_capacity(64);
+            concat.extend_from_slice(&merkle_root[..]);
+            concat.extend_from_slice(&branch_hash[..]);
+
+            merkle_root = sha256d::Hash::hash(&concat);
+        }
+
+        Ok(TxMerkleNode::from_raw_hash(merkle_root))
+    }
+
+    fn cancel_hasher(&mut self) {
         self.hasher_cancel.cancel();
         self.hasher_cancel = CancellationToken::new();
     }

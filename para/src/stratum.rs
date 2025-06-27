@@ -20,6 +20,12 @@ pub enum Message {
         id: Id,
         result: Option<Value>,
         error: Option<JsonRpcError>,
+        #[serde(
+            skip_serializing_if = "Option::is_none",
+            rename = "reject-reason",
+            default
+        )]
+        reject_reason: Option<String>,
     },
     Notification {
         method: String,
@@ -43,7 +49,9 @@ impl<'de> Deserialize<'de> for Message {
         let is_notification_optional_null_id = value.get("method").is_some()
             && (value.get("id") == Some(&Value::Null) || value.get("id").is_none());
 
-        let is_response = value.get("result").is_some() || value.get("error").is_some();
+        let is_response = value.get("result").is_some()
+            || value.get("error").is_some()
+            || value.get("reject-reason").is_some();
 
         if is_response {
             #[derive(Deserialize)]
@@ -51,6 +59,8 @@ impl<'de> Deserialize<'de> for Message {
                 id: Id,
                 result: Option<Value>,
                 error: Option<JsonRpcError>,
+                #[serde(rename = "reject-reason")]
+                reject_reason: Option<String>,
             }
 
             let r: Resp = serde_json::from_value(value).map_err(de::Error::custom)?;
@@ -59,6 +69,7 @@ impl<'de> Deserialize<'de> for Message {
                 id: r.id,
                 result: r.result,
                 error: r.error,
+                reject_reason: r.reject_reason,
             })
         } else if is_notification_optional_null_id {
             let method = value
@@ -318,6 +329,23 @@ mod tests {
                     4
                 ])),
                 error: None,
+                reject_reason: None,
+            },
+        );
+    }
+
+    #[test]
+    fn share_rejected_response() {
+        assert_eq!(
+            serde_json::from_str::<Message>(
+                r#"{"reject-reason":"Above target","result":false,"error":null,"id":5}"#
+            )
+            .unwrap(),
+            Message::Response {
+                id: Id::Number(5),
+                result: Some(json!(false)),
+                error: None,
+                reject_reason: Some("Above target".into()),
             },
         );
     }
@@ -327,6 +355,7 @@ mod tests {
         case(
             r#"{"id":10,"result":null,"error":null}"#,
             Message::Response {
+                reject_reason: None,
                 id: Id::Number(10),
                 result: None,
                 error: None,
@@ -338,6 +367,7 @@ mod tests {
             Message::Response {
                 id: Id::Number(10),
                 result: None,
+                reject_reason: None,
                 error: Some(JsonRpcError {
                     error_code: 21,
                     message: "Job not found".into(),
@@ -404,6 +434,7 @@ mod tests {
         case(
             r#"{"id":4,"result":true,"error":null}"#,
             Message::Response {
+                reject_reason: None,
                 id: Id::Number(4),
                 result: Some(json!(true)),
                 error: None,
@@ -445,6 +476,7 @@ mod tests {
                 id: Id::Number(2),
                 result: Some(json!(true)),
                 error: None,
+                reject_reason: None,
             },
         );
     }
@@ -486,6 +518,7 @@ mod tests {
                     .unwrap(),
                 ),
                 error: None,
+                reject_reason: None,
             },
         );
     }

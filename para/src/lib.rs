@@ -16,7 +16,7 @@ use {
     bitcoin::{
         BlockHash, CompactTarget, Target, TxMerkleNode,
         block::{Header, Version},
-        hashes::Hash,
+        hashes::{Hash, sha256d},
     },
     clap::Parser,
     database::Database,
@@ -25,6 +25,7 @@ use {
     futures::stream::StreamExt,
     lazy_static::lazy_static,
     options::Options,
+    rand::Rng,
     rust_embed::RustEmbed,
     rustls_acme::{
         AcmeConfig,
@@ -45,6 +46,7 @@ use {
         net::ToSocketAddrs,
         path::PathBuf,
         process,
+        str::FromStr,
         sync::{
             Arc, LazyLock,
             atomic::{AtomicU64, Ordering},
@@ -82,6 +84,11 @@ mod templates;
 pub const COIN_VALUE: u64 = 100_000_000;
 
 type Result<T = (), E = Error> = std::result::Result<T, E>;
+
+
+fn target_as_block_hash(target: bitcoin::Target) -> BlockHash {
+  BlockHash::from_raw_hash(Hash::from_byte_array(target.to_le_bytes()))
+}
 
 pub fn format_uptime(uptime_seconds: u64) -> String {
     let days = uptime_seconds / 86400;

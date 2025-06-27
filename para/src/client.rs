@@ -66,7 +66,10 @@ impl Client {
             line.clear();
 
             match tcp_reader.read_line(&mut line).await {
-                Ok(0) => break,
+                Ok(0) => {
+                    error!("Stratum server disconnected");
+                    break;
+                }
                 Ok(n) => n,
                 Err(e) => {
                     error!("Read error: {e}");
@@ -83,7 +86,12 @@ impl Client {
             };
 
             match msg {
-                Message::Response { id, result, error } => {
+                Message::Response {
+                    id,
+                    result,
+                    error,
+                    reject_reason,
+                } => {
                     let tx = {
                         let mut map = pending.lock().await;
                         map.remove(&id)
@@ -95,6 +103,7 @@ impl Client {
                                 id: id.clone(),
                                 result,
                                 error,
+                                reject_reason,
                             })
                             .is_err()
                         {
@@ -200,6 +209,7 @@ impl Client {
             Message::Response {
                 result: Some(result),
                 error: None,
+                reject_reason: None,
                 ..
             } => {
                 if serde_json::from_value(result)? {
@@ -211,6 +221,10 @@ impl Client {
             Message::Response {
                 error: Some(err), ..
             } => Err(anyhow!("mining.submit error: {}", err)),
+            Message::Response {
+                reject_reason: Some(reason),
+                ..
+            } => Err(anyhow!("share rejected: {}", reason)),
             _ => Err(anyhow!("Unknown mining.submit error")),
         }
     }

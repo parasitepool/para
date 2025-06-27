@@ -8,14 +8,19 @@ use super::*;
 pub(crate) struct Hasher {
     pub(crate) header: Header,
     pub(crate) pool_target: Target,
+    pub(crate) extranonce2: String,
 }
 
 impl Hasher {
-    pub(crate) fn hash(&mut self, cancel: CancellationToken) -> Result<Header> {
+    pub(crate) fn hash(&mut self, cancel: CancellationToken) -> Result<(Header, String)> {
         let network_target = self.header.target();
         let mut hashes = 0;
         let start = Instant::now();
         let mut last_log = start;
+        // info!(
+        //     "nbits: {:08x}",
+        //     self.pool_target.to_compact_lossy().to_consensus()
+        // );
 
         loop {
             if cancel.is_cancelled() {
@@ -24,8 +29,16 @@ impl Hasher {
 
             let hash = self.header.block_hash();
             hashes += 1;
+
             if self.pool_target.is_met_by(hash) || network_target.is_met_by(hash) {
-                return Ok(self.header);
+            // if self.pool_target.is_met_by(hash) {
+                info!("Solved hash: {hash}");
+                info!(
+                    "Solved pool target: {}",
+                    target_as_block_hash(self.pool_target)
+                );
+                dbg!(self.header);
+                return Ok((self.header, self.extranonce2.clone()));
             }
 
             if self.header.nonce == u32::MAX {
@@ -33,10 +46,11 @@ impl Hasher {
             }
 
             let now = Instant::now();
-            if now.duration_since(last_log) >= Duration::from_secs(1) {
+            if now.duration_since(last_log) >= Duration::from_secs(10) {
                 let elapsed = now.duration_since(start).as_secs_f64().max(1e-6);
                 let hashrate = hashes as f64 / elapsed;
                 info!("Hashrate: {}", format_hashrate(hashrate));
+                info!("Extranonce2: {}", self.extranonce2);
                 last_log = now;
             }
             self.header.nonce = self.header.nonce.wrapping_add(1);
@@ -44,6 +58,7 @@ impl Hasher {
     }
 }
 
+// TODO: make this a FromStr or Display for a HashRate(f64)
 fn format_hashrate(hashes_per_sec: f64) -> String {
     const UNITS: &[&str] = &["H/s", "kH/s", "MH/s", "GH/s", "TH/s", "PH/s", "EH/s"];
     let mut rate = hashes_per_sec;
@@ -103,9 +118,10 @@ mod tests {
         let mut hasher = Hasher {
             header: header(Some(target), None),
             pool_target: target,
+            extranonce2: "00000000000".into(),
         };
 
-        let header = hasher.hash(CancellationToken::new()).unwrap();
+        let (header, _extranonce2) = hasher.hash(CancellationToken::new()).unwrap();
 
         assert!(header.validate_pow(target).is_ok());
     }
@@ -117,6 +133,7 @@ mod tests {
         let mut hasher = Hasher {
             header: header(Some(target), Some(u32::MAX - 1)),
             pool_target: target,
+            extranonce2: "00000000000".into(),
         };
 
         assert!(
