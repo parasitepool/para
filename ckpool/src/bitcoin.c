@@ -314,7 +314,7 @@ out:
     return ret;
 }
 
-bool submit_block(connsock_t* cs, const char* params) {
+bool submit_block(connsock_t* cs, const char* params, bool signet) {
     json_t *    val, *res_val;
     int         len, retries = 0;
     const char* res_ret;
@@ -356,13 +356,17 @@ retry:
         }
     }
     LOGWARNING("BLOCK ACCEPTED!");
-    notify_result = system(
-        "curl -s -o /dev/null -d \"Block successfully submitted and accepted!\" "
-        "ntfy.sh/BaNXXcI4qpw16CDfblocknoti");
-    if (notify_result != 0) {
-        LOGWARNING("Failed to send notification, curl returned: %d", notify_result);
+    if (signet) {
+        // do nothing
     } else {
-        LOGWARNING("Notification sent successfully");
+        notify_result = system(
+            "curl -s -o /dev/null -d \"Block successfully submitted and accepted!\" "
+            "ntfy.sh/BaNXXcI4qpw16CDfblocknoti");
+        if (notify_result != 0) {
+            LOGWARNING("Failed to send notification, curl returned: %d", notify_result);
+        } else {
+            LOGWARNING("Notification sent successfully");
+        }
     }
 
     ret = true;
