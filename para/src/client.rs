@@ -190,18 +190,18 @@ impl Client {
         job_id: String,
         extranonce2: String,
         ntime: String,
-        nonce: u32,
+        nonce: String,
     ) -> Result {
         let rx = self
             .send_request(
                 "mining.submit",
-                serde_json::to_value(Submit {
+                serde_json::to_value(dbg!(Submit {
                     worker_name: self.user.clone(),
                     job_id,
                     extranonce2,
                     ntime,
                     nonce,
-                })?,
+                }))?,
             )
             .await?;
 

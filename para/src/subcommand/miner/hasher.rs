@@ -1,3 +1,5 @@
+use bitcoin::consensus::Encodable;
+
 use super::*;
 
 // Implements the actual hashing and increments the nonce and checks if below pool target. For now
@@ -31,13 +33,17 @@ impl Hasher {
             hashes += 1;
 
             if self.pool_target.is_met_by(hash) || network_target.is_met_by(hash) {
-            // if self.pool_target.is_met_by(hash) {
+                // if self.pool_target.is_met_by(hash) {
                 info!("Solved hash: {hash}");
                 info!(
                     "Solved pool target: {}",
                     target_as_block_hash(self.pool_target)
                 );
-                dbg!(self.header);
+                let mut encoded = Vec::new();
+                self.header.consensus_encode(&mut encoded)?;
+                dbg!(&self.header);
+                let hex_header = hex::encode(&encoded);
+                println!("submitheader hex: {hex_header}");
                 return Ok((self.header, self.extranonce2.clone()));
             }
 

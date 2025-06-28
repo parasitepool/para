@@ -13,6 +13,7 @@ axum = { version = "0.8.3", features = ["http2"] }
 axum-server = "0.7.2"
 bitcoin = { version = "0.32.6", features = ["serde"] }
 boilerplate = { version = "1.0.1", features = ["axum"] }
+byteorder = "1.5.0"
 clap = { version = "4.5.36", features = ["derive", "env"] }
 derive_more = { version = "2.0.1", features = ["display"] }
 futures = "0.3.31"
@@ -27,6 +28,7 @@ rustls = { version = "0.23.26", features = ["ring"] }
 rustls-acme = { version = "0.13.0", features = ["axum"] }
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
+serde_with = "3.13.0"
 sqlx = { version =  "0.8.5", features = ["postgres", "runtime-tokio"] }
 sysinfo = "0.35.1"
 tokio = { version = "1.44.2", features = ["macros", "rt-multi-thread", "signal"] }

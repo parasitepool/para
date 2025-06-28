@@ -1,5 +1,7 @@
 use super::*;
 
+mod prev_hash;
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord, Display, Clone)]
 #[serde(untagged)]
 pub enum Id {
@@ -186,7 +188,7 @@ impl Serialize for SubscribeResult {
 #[derive(Debug, Deserialize, PartialEq, Clone)]
 pub struct Notify {
     pub job_id: String,
-    pub prevhash: BlockHash,
+    pub prevhash: String,
     pub coinb1: String,
     pub coinb2: String,
     pub merkle_branch: Vec<String>,
@@ -231,7 +233,7 @@ pub struct Submit {
     pub job_id: String, // TODO: is this the extranonce1?
     pub extranonce2: String,
     pub ntime: String, // TODO
-    pub nonce: u32,
+    pub nonce: String,
 }
 
 impl Serialize for Submit {
@@ -244,7 +246,7 @@ impl Serialize for Submit {
             &self.job_id,
             &self.extranonce2,
             &self.ntime,
-            format!("{:08x}", &self.nonce),
+            &self.nonce,
         )
             .serialize(serializer)
     }
@@ -425,7 +427,7 @@ mod tests {
                     job_id: "bf".into(),
                     extranonce2: "00000001".into(),
                     ntime: "504e86ed".into(),
-                    nonce: u32::from_str_radix("b2957c02", 16).unwrap(),
+                    nonce: "b2957c02".into(),
                 })
                 .unwrap(),
             },

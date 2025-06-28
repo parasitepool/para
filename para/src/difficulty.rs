@@ -10,6 +10,7 @@ lazy_static! {
 /// all mining.set_difficulty messages are supposed to be only u64 so that's why I decided to go
 /// with this. There is also the compact representation called nbits.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize, Display)]
+#[serde(transparent)]
 pub struct Difficulty(pub u64);
 
 impl Difficulty {
