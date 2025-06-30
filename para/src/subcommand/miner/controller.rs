@@ -43,7 +43,7 @@ impl Controller {
                 Some((header, extranonce2)) = self.share_rx.recv() => {
                     info!("Valid header found: {:?}", header);
                     let notify = self.job.lock().await.clone().unwrap();
-                    if let Err(e) = self.client.submit(notify.job_id, extranonce2, format!("{:08x}", header.time), format!("{:08x}", header.nonce)).await {
+                    if let Err(e) = self.client.submit(notify.job_id, extranonce2, header.time.into(), header.nonce.into()).await {
                         warn!("Failed to submit share: {e}");
                     }
                 }
@@ -63,9 +63,7 @@ impl Controller {
         if let Message::Notification { method, params } = message {
             match method.as_str() {
                 "mining.notify" => {
-                    dbg!(&params);
                     let notify = serde_json::from_value::<Notify>(params)?;
-                    dbg!(&notify);
                     self.job.lock().await.replace(notify.clone());
 
                     let extranonce2 = {
@@ -81,9 +79,8 @@ impl Controller {
 
                     let pool_diff = self.difficulty.lock().await;
                     let pool_target = pool_diff.to_target();
-                    let network_target: Target = CompactTarget::from_unprefixed_hex(&notify.nbits)
-                        .unwrap()
-                        .into();
+                    let network_nbits: CompactTarget = notify.nbits.into();
+                    let network_target: Target = network_nbits.into();
 
                     // info!("Pool diff: {}", pool_diff);
                     // info!("Pool target: {}", pool_target);
@@ -91,15 +88,11 @@ impl Controller {
 
                     let mut hasher = Hasher {
                         header: Header {
-                            version: Version::TWO,
-                            // prev_blockhash: notify.prevhash,
-                            prev_blockhash: BlockHash::from_str(
-                                "0000030e09efa16c68bdbc73536ae9a337d3c09a6c0576915f2a0d2d899cec17",
-                            )?,
+                            version: block::Version::TWO,
+                            prev_blockhash: notify.prevhash.clone().into(),
                             merkle_root: self.build_merkle_root(&notify, &extranonce2)?,
-                            time: u32::from_str_radix(&notify.ntime, 16).unwrap_or_default(),
-                            bits: CompactTarget::from_unprefixed_hex(&notify.nbits)
-                                .unwrap_or_default(),
+                            time: notify.ntime.into(),
+                            bits: notify.nbits.into(),
                             nonce: 0,
                         },
                         pool_target,
@@ -141,22 +134,29 @@ impl Controller {
     }
 
     fn build_merkle_root(&self, notify: &Notify, extranonce2: &str) -> Result<TxMerkleNode> {
-        let coinbase_hex = notify.coinb1.clone() + &self.extranonce1 + extranonce2 + &notify.coinb2;
-        let coinbase_bin = hex::decode(&coinbase_hex)?;
-        let coinbase_hash = sha256d::Hash::hash(&coinbase_bin);
+        let coinbase_hex = format!(
+            "{}{}{}{}",
+            notify.coinb1, self.extranonce1, extranonce2, notify.coinb2
+        );
 
-        let mut cursor = bitcoin::io::Cursor::new(coinbase_bin);
-        let transaction = bitcoin::Transaction::consensus_decode_from_finite_reader(&mut cursor)?;
+        let coinbase_bin = hex::decode(&coinbase_hex)?;
+
+        let mut cursor = bitcoin::io::Cursor::new(&coinbase_bin);
+        let coinbase_tx = bitcoin::Transaction::consensus_decode_from_finite_reader(&mut cursor)?;
+
+        info!(
+            "Building merkle root with coinbase txid {:?}",
+            coinbase_tx.compute_txid()
+        );
+
+        let coinbase_hash = sha256d::Hash::hash(&coinbase_bin);
 
         let mut merkle_root = coinbase_hash;
 
         for branch in &notify.merkle_branch {
-            let branch_hash = sha256d::Hash::from_str(branch)?;
-
             let mut concat = Vec::with_capacity(64);
             concat.extend_from_slice(&merkle_root[..]);
-            concat.extend_from_slice(&branch_hash[..]);
-
+            concat.extend_from_slice(branch.as_byte_array());
             merkle_root = sha256d::Hash::hash(&concat);
         }
 

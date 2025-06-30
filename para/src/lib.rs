@@ -15,7 +15,7 @@ use {
     axum_server::Handle,
     bitcoin::{
         BlockHash, CompactTarget, Target, TxMerkleNode,
-        block::{Header, Version},
+        block::{self, Header},
         consensus::Decodable,
         hashes::{Hash, sha256d},
     },
@@ -57,7 +57,10 @@ use {
         },
         time::{Duration, Instant},
     },
-    stratum::{Authorize, Id, Message, Notify, SetDifficulty, Submit, Subscribe, SubscribeResult},
+    stratum::{
+        Authorize, Id, Message, Nonce, Notify, Ntime, SetDifficulty, Submit, Subscribe,
+        SubscribeResult,
+    },
     sysinfo::{Disks, System},
     tokio::{
         io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader, BufWriter},

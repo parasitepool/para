@@ -1,6 +1,12 @@
 use super::*;
 
-mod prev_hash;
+mod nbits;
+mod nonce;
+mod ntime;
+mod prevhash;
+mod version;
+
+pub use {nbits::Nbits, nonce::Nonce, ntime::Ntime, prevhash::PrevHash, version::Version};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord, Display, Clone)]
 #[serde(untagged)]
@@ -22,11 +28,7 @@ pub enum Message {
         id: Id,
         result: Option<Value>,
         error: Option<JsonRpcError>,
-        #[serde(
-            skip_serializing_if = "Option::is_none",
-            rename = "reject-reason",
-            default
-        )]
+        #[serde(skip_serializing_if = "Option::is_none", rename = "reject-reason")]
         reject_reason: Option<String>,
     },
     Notification {
@@ -188,13 +190,13 @@ impl Serialize for SubscribeResult {
 #[derive(Debug, Deserialize, PartialEq, Clone)]
 pub struct Notify {
     pub job_id: String,
-    pub prevhash: String,
+    pub prevhash: PrevHash,
     pub coinb1: String,
     pub coinb2: String,
-    pub merkle_branch: Vec<String>,
-    pub version: String, // TODO
-    pub nbits: String,   // TODO
-    pub ntime: String,   // TODO
+    pub merkle_branch: Vec<sha256d::Hash>,
+    pub version: Version,
+    pub nbits: Nbits,
+    pub ntime: Ntime,
     pub clean_jobs: bool,
 }
 
@@ -230,10 +232,10 @@ impl SetDifficulty {
 #[derive(Debug, Deserialize, PartialEq)]
 pub struct Submit {
     pub worker_name: String,
-    pub job_id: String, // TODO: is this the extranonce1?
+    pub job_id: String,
     pub extranonce2: String,
-    pub ntime: String, // TODO
-    pub nonce: String,
+    pub ntime: Ntime,
+    pub nonce: Nonce,
 }
 
 impl Serialize for Submit {
@@ -387,9 +389,9 @@ mod tests {
             coinb1: "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff20020862062f503253482f04b8864e5008".into(),
             coinb2: "072f736c7573682f000000000100f2052a010000001976a914d23fcdf86f7e756a64a7a9688ef9903327048ed988ac00000000".into(),
             merkle_branch: Vec::new(),
-            version: "00000002".into(),
-            nbits: "1c2ac4af".into(),
-            ntime: "504e86b9".into(), 
+            version: Version(block::Version::TWO),
+            nbits: Nbits::from_str("1c2ac4af").unwrap(),
+            ntime: Ntime::from_str("504e86b9").unwrap(), 
             clean_jobs: false,
         };
 
@@ -426,8 +428,8 @@ mod tests {
                     worker_name: "slush.miner1".into(),
                     job_id: "bf".into(),
                     extranonce2: "00000001".into(),
-                    ntime: "504e86ed".into(),
-                    nonce: "b2957c02".into(),
+                    ntime: Ntime::from_str("504e86ed").unwrap(),
+                    nonce: Nonce::from_str("b2957c02").unwrap(),
                 })
                 .unwrap(),
             },
