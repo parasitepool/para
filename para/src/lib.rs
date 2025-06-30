@@ -105,7 +105,7 @@ pub fn format_uptime(uptime_seconds: u64) -> String {
         if n == 1 {
             singular.to_string()
         } else {
-            format!("{}s", singular)
+            format!("{singular}s")
         }
     };
 

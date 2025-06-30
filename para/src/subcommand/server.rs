@@ -94,7 +94,7 @@ impl Server {
 
     async fn home(Extension(domain): Extension<String>) -> ServerResult<PageHtml<HomeHtml>> {
         Ok(HomeHtml {
-            stratum_url: format!("{}:42069", domain),
+            stratum_url: format!("{domain}:42069"),
         }
         .page(domain))
     }
@@ -133,9 +133,9 @@ impl Server {
             let uptime_seconds = System::uptime();
 
             Ok(HealthcheckHtml {
-                disk_usage_percent: format!("{:.2}", disk_usage_percent),
-                memory_usage_percent: format!("{:.2}", memory_usage_percent),
-                cpu_usage_percent: format!("{:.2}", cpu_usage_percent),
+                disk_usage_percent: format!("{disk_usage_percent:.2}"),
+                memory_usage_percent: format!("{memory_usage_percent:.2}"),
+                cpu_usage_percent: format!("{cpu_usage_percent:.2}"),
                 uptime: format_uptime(uptime_seconds),
             }
             .page(domain))

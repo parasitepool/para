@@ -80,7 +80,7 @@ mod tests {
         let serialized = serde_json::to_string(&version).unwrap();
         assert_eq!(
             serialized,
-            format!("\"{}\"", version_str),
+            format!("\"{version_str}\""),
             "Serialization mismatch"
         );
 

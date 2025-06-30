@@ -66,7 +66,7 @@ mod tests {
         assert_eq!(prevhash, PrevHash::from(blockhash));
 
         let serialized = serde_json::to_string(&prevhash).unwrap();
-        assert_eq!(serialized, format!("\"{}\"", prevhash_str));
+        assert_eq!(serialized, format!("\"{prevhash_str}\""));
 
         let round_trip = serde_json::from_str::<PrevHash>(&serialized).unwrap();
         assert_eq!(round_trip, prevhash);
