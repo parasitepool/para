@@ -1,8 +1,5 @@
 use super::*;
 
-// Handles all the stratum protocol messages. Holds all the client information and updates the
-// hasher with new work/templates. Has a couple channels to the Miner for communication and
-// listens/talks to upstream mining pool
 pub struct Client {
     user: String,
     password: String,

@@ -1,6 +1,7 @@
 use super::*;
 
-/// prevhash in the protocol spec is insane: it swaps bytes of every u32 word into big endian.
+/// The prevhash has a pretty insane encoding: It swaps every 4-byte word from 
+/// big-endian into little-endian and then hex encodes.
 #[derive(Debug, PartialEq, Clone, DeserializeFromStr, SerializeDisplay)]
 pub struct PrevHash(BlockHash);
 
