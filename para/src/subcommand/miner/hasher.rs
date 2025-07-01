@@ -32,8 +32,8 @@ impl Hasher {
             let hash = self.header.block_hash();
             hashes += 1;
 
-            if self.pool_target.is_met_by(hash) || network_target.is_met_by(hash) {
-                // if self.pool_target.is_met_by(hash) {
+            // if self.pool_target.is_met_by(hash) || network_target.is_met_by(hash) {
+            if self.pool_target.is_met_by(hash) {
                 info!("Solved hash: {hash}");
                 info!(
                     "Solved pool target: {}",

@@ -88,7 +88,7 @@ impl Controller {
 
                     let mut hasher = Hasher {
                         header: Header {
-                            version: block::Version::TWO,
+                            version: notify.version.clone().into(),
                             prev_blockhash: notify.prevhash.clone().into(),
                             merkle_root: self.build_merkle_root(&notify, &extranonce2)?,
                             time: notify.ntime.into(),
