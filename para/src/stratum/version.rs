@@ -31,19 +31,6 @@ impl From<Version> for block::Version {
     }
 }
 
-impl AsRef<block::Version> for Version {
-    fn as_ref(&self) -> &block::Version {
-        &self.0
-    }
-}
-
-impl std::ops::Deref for Version {
-    type Target = block::Version;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
