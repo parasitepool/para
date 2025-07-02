@@ -109,7 +109,6 @@ impl<'de> Deserialize<'de> for Message {
     }
 }
 
-/// ckpool does not follow this convention
 #[derive(Debug, Deserialize, PartialEq)]
 pub struct JsonRpcError {
     pub error_code: i32,
