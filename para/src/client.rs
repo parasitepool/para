@@ -7,12 +7,12 @@ pub struct Client {
     password: String,
     pending: Arc<Mutex<BTreeMap<Id, oneshot::Sender<Message>>>>,
     tcp_writer: BufWriter<OwnedWriteHalf>,
-    worker_name: String,
+    username: String,
 }
 
 impl Client {
-    pub async fn connect(host: &str, port: u16, user: &str, password: &str) -> Result<Self> {
-        info!("Connecting to {host}:{port} with user {user}");
+    pub async fn connect(host: &str, port: u16, username: &str, password: &str) -> Result<Self> {
+        info!("Connecting to {host}:{port} with user {username}");
 
         let stream = TcpStream::connect((host, port)).await?;
 
@@ -37,7 +37,7 @@ impl Client {
             incoming: incoming_rx,
             listener,
             pending: pending.clone(),
-            worker_name: user.to_string(),
+            username: username.to_string(),
             password: password.to_string(),
             id_counter: AtomicU64::new(1),
         })
@@ -143,7 +143,7 @@ impl Client {
             .send_request(
                 "mining.authorize",
                 serde_json::to_value(Authorize {
-                    worker_name: self.worker_name.clone(),
+                    username: self.username.clone(),
                     password: self.password.clone(),
                 })?,
             )
@@ -179,7 +179,7 @@ impl Client {
             .send_request(
                 "mining.submit",
                 serde_json::to_value(Submit {
-                    worker_name: self.worker_name.clone(),
+                    username: self.username.clone(),
                     job_id,
                     extranonce2,
                     ntime,

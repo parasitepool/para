@@ -16,13 +16,9 @@ impl Subcommand {
         match self {
             Self::Server(server) => {
                 let handle = Handle::new();
-                let rt = Runtime::new()?;
-                rt.block_on(async { server.run(options, handle).await })
+                Runtime::new()?.block_on(async { server.run(options, handle).await })
             }
-            Self::Miner(miner) => {
-                let rt = Runtime::new()?;
-                rt.block_on(async { miner.run().await })
-            }
+            Self::Miner(miner) => miner.run(),
         }
     }
 }

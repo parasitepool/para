@@ -29,3 +29,23 @@ impl From<u32> for Nonce {
         Nonce(n)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn some_nonces() {
+        assert_eq!(Nonce::from(u32::MAX).to_string(), "ffffffff");
+        assert_eq!(Nonce::from_str("ffffffff").unwrap(), Nonce::from(u32::MAX));
+
+        assert_eq!(Nonce::from(u32::MAX - 1).to_string(), "fffffffe");
+        assert_eq!(
+            Nonce::from_str("fffffffe").unwrap(),
+            Nonce::from(u32::MAX - 1)
+        );
+
+        assert_eq!(Nonce::from(0).to_string(), "00000000");
+        assert_eq!(Nonce::from_str("00000000").unwrap(), Nonce::from(0));
+    }
+}

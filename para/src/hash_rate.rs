@@ -41,7 +41,7 @@ mod tests {
 
         for (input, expected) in cases {
             let hr = HashRate(input);
-            assert_eq!(hr.to_string(), expected, "Failed on input {}", input);
+            assert_eq!(hr.to_string(), expected, "Failed on input {input}");
         }
     }
 }

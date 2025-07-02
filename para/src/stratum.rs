@@ -230,7 +230,7 @@ impl SetDifficulty {
 
 #[derive(Debug, Deserialize, PartialEq)]
 pub struct Submit {
-    pub worker_name: String,
+    pub username: String,
     pub job_id: String,
     pub extranonce2: String,
     pub ntime: Ntime,
@@ -243,7 +243,7 @@ impl Serialize for Submit {
         S: Serializer,
     {
         (
-            &self.worker_name,
+            &self.username,
             &self.job_id,
             &self.extranonce2,
             &self.ntime,
@@ -255,7 +255,7 @@ impl Serialize for Submit {
 
 #[derive(Debug, Deserialize, PartialEq)]
 pub struct Authorize {
-    pub worker_name: String,
+    pub username: String,
     pub password: String,
 }
 
@@ -264,7 +264,7 @@ impl Serialize for Authorize {
     where
         S: Serializer,
     {
-        (&self.worker_name, &self.password).serialize(serializer)
+        (&self.username, &self.password).serialize(serializer)
     }
 }
 
@@ -424,7 +424,7 @@ mod tests {
                 id: Id::Number(4),
                 method: "mining.submit".into(),
                 params: serde_json::to_value(&Submit {
-                    worker_name: "slush.miner1".into(),
+                    username: "slush.miner1".into(),
                     job_id: "bf".into(),
                     extranonce2: "00000001".into(),
                     ntime: Ntime::from_str("504e86ed").unwrap(),
@@ -466,7 +466,7 @@ mod tests {
                 id: Id::Number(2),
                 method: "mining.authorize".into(),
                 params: serde_json::to_value(Authorize {
-                    worker_name: "slush.miner1".into(),
+                    username: "slush.miner1".into(),
                     password: "password".into(),
                 })
                 .unwrap(),
