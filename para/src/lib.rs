@@ -25,6 +25,7 @@ use {
     derive_more::Display,
     difficulty::Difficulty,
     futures::stream::StreamExt,
+    hash_rate::HashRate,
     hex::FromHex,
     lazy_static::lazy_static,
     options::Options,
@@ -83,6 +84,7 @@ mod arguments;
 mod client;
 mod database;
 mod difficulty;
+mod hash_rate;
 mod options;
 mod stratum;
 mod subcommand;

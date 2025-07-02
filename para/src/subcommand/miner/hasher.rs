@@ -1,50 +1,30 @@
-use bitcoin::consensus::Encodable;
-
 use super::*;
 
-// Implements the actual hashing and increments the nonce and checks if below pool target. For now
-// should only increment the nonce space and not think too much about extranonce2 space. It has
-// channels to the client for sending shares and updating workbase. Target is the one given from
-// the pool. The actual network target/difficulty is inside the Header.
 #[derive(Debug)]
 pub(crate) struct Hasher {
-    pub(crate) header: Header,
-    pub(crate) pool_target: Target,
     pub(crate) extranonce2: String,
+    pub(crate) header: Header,
+    pub(crate) job_id: String,
+    pub(crate) pool_target: Target,
 }
 
 impl Hasher {
-    pub(crate) fn hash(&mut self, cancel: CancellationToken) -> Result<(Header, String)> {
-        let network_target = self.header.target();
+    pub(crate) fn hash(&mut self, cancel: CancellationToken) -> Result<(Header, String, String)> {
         let mut hashes = 0;
         let start = Instant::now();
         let mut last_log = start;
-        // info!(
-        //     "nbits: {:08x}",
-        //     self.pool_target.to_compact_lossy().to_consensus()
-        // );
 
         loop {
             if cancel.is_cancelled() {
-                return Err(anyhow!("hashing cancelled"));
+                return Err(anyhow!("hasher cancelled"));
             }
 
             let hash = self.header.block_hash();
             hashes += 1;
 
-            // if self.pool_target.is_met_by(hash) || network_target.is_met_by(hash) {
             if self.pool_target.is_met_by(hash) {
-                info!("Solved hash: {hash}");
-                info!(
-                    "Solved pool target: {}",
-                    target_as_block_hash(self.pool_target)
-                );
-                let mut encoded = Vec::new();
-                self.header.consensus_encode(&mut encoded)?;
-                dbg!(&self.header);
-                let hex_header = hex::encode(&encoded);
-                println!("submitheader hex: {hex_header}");
-                return Ok((self.header, self.extranonce2.clone()));
+                info!("Solved block with hash: {hash}");
+                return Ok((self.header, self.extranonce2.clone(), self.job_id.clone()));
             }
 
             if self.header.nonce == u32::MAX {
@@ -54,26 +34,12 @@ impl Hasher {
             let now = Instant::now();
             if now.duration_since(last_log) >= Duration::from_secs(10) {
                 let elapsed = now.duration_since(start).as_secs_f64().max(1e-6);
-                let hashrate = hashes as f64 / elapsed;
-                info!("Hashrate: {}", format_hashrate(hashrate));
-                info!("Extranonce2: {}", self.extranonce2);
                 last_log = now;
+                info!("Hashrate: {}", HashRate(hashes as f64 / elapsed));
             }
             self.header.nonce = self.header.nonce.wrapping_add(1);
         }
     }
-}
-
-// TODO: make this a FromStr or Display for a HashRate(f64)
-fn format_hashrate(hashes_per_sec: f64) -> String {
-    const UNITS: &[&str] = &["H/s", "kH/s", "MH/s", "GH/s", "TH/s", "PH/s", "EH/s"];
-    let mut rate = hashes_per_sec;
-    let mut unit = 0;
-    while rate >= 1000.0 && unit < UNITS.len() - 1 {
-        rate /= 1000.0;
-        unit += 1;
-    }
-    format!("{:.2} {}", rate, UNITS[unit])
 }
 
 #[cfg(test)]
@@ -125,9 +91,10 @@ mod tests {
             header: header(Some(target), None),
             pool_target: target,
             extranonce2: "00000000000".into(),
+            job_id: "bf".into(),
         };
 
-        let (header, _extranonce2) = hasher.hash(CancellationToken::new()).unwrap();
+        let (header, _extranonce2, _job_id) = hasher.hash(CancellationToken::new()).unwrap();
 
         assert!(header.validate_pow(target).is_ok());
     }
@@ -140,6 +107,7 @@ mod tests {
             header: header(Some(target), Some(u32::MAX - 1)),
             pool_target: target,
             extranonce2: "00000000000".into(),
+            job_id: "bg".into(),
         };
 
         assert!(

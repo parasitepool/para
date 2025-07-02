@@ -1,14 +1,13 @@
 use super::*;
 
 pub struct Client {
-    user: String,
-    password: String,
-    pub notifications: mpsc::Receiver<Message>,
-    pub requests: mpsc::Receiver<Message>,
-    pending: Arc<Mutex<BTreeMap<Id, oneshot::Sender<Message>>>>,
-    listener: JoinHandle<()>,
-    tcp_writer: BufWriter<OwnedWriteHalf>,
+    pub incoming: mpsc::Receiver<Message>,
     id_counter: AtomicU64,
+    listener: JoinHandle<()>,
+    password: String,
+    pending: Arc<Mutex<BTreeMap<Id, oneshot::Sender<Message>>>>,
+    tcp_writer: BufWriter<OwnedWriteHalf>,
+    worker_name: String,
 }
 
 impl Client {
@@ -22,28 +21,23 @@ impl Client {
             (BufReader::new(rx), BufWriter::new(tx))
         };
 
-        let (request_sender, request_receiver) = mpsc::channel(32);
-        let (notification_sender, notification_receiver) = mpsc::channel(32);
+        let (incoming_tx, incoming_rx) = mpsc::channel(32);
 
         let pending: Arc<Mutex<BTreeMap<Id, oneshot::Sender<Message>>>> =
             Arc::new(Mutex::new(BTreeMap::new()));
 
         let listener = {
-            let request_sender = request_sender.clone();
-            let notification_sender = notification_sender.clone();
+            let incoming_tx = incoming_tx.clone();
             let pending = pending.clone();
-            tokio::spawn(async {
-                Self::listener(tcp_reader, request_sender, notification_sender, pending).await
-            })
+            tokio::spawn(async move { Self::listener(tcp_reader, incoming_tx, pending).await })
         };
 
         Ok(Self {
             tcp_writer,
-            requests: request_receiver,
-            notifications: notification_receiver,
+            incoming: incoming_rx,
             listener,
             pending: pending.clone(),
-            user: user.to_string(),
+            worker_name: user.to_string(),
             password: password.to_string(),
             id_counter: AtomicU64::new(1),
         })
@@ -51,8 +45,7 @@ impl Client {
 
     async fn listener<R>(
         mut tcp_reader: BufReader<R>,
-        requests: mpsc::Sender<Message>,
-        notifications: mpsc::Sender<Message>,
+        incoming: mpsc::Sender<Message>,
         pending: Arc<Mutex<BTreeMap<Id, oneshot::Sender<Message>>>>,
     ) where
         R: AsyncRead + Unpin,
@@ -111,16 +104,9 @@ impl Client {
                     }
                 }
 
-                Message::Notification { .. } => {
-                    if let Err(e) = notifications.send(msg).await {
-                        error!("Failed to forward notification: {e}");
-                        break;
-                    }
-                }
-
-                Message::Request { .. } => {
-                    if let Err(e) = requests.send(msg).await {
-                        error!("Failed to forward request: {e}");
+                _ => {
+                    if let Err(e) = incoming.send(msg).await {
+                        error!("Failed to forward incoming notification/request: {e}");
                         break;
                     }
                 }
@@ -157,7 +143,7 @@ impl Client {
             .send_request(
                 "mining.authorize",
                 serde_json::to_value(Authorize {
-                    worker_name: self.user.clone(),
+                    worker_name: self.worker_name.clone(),
                     password: self.password.clone(),
                 })?,
             )
@@ -193,7 +179,7 @@ impl Client {
             .send_request(
                 "mining.submit",
                 serde_json::to_value(Submit {
-                    worker_name: self.user.clone(),
+                    worker_name: self.worker_name.clone(),
                     job_id,
                     extranonce2,
                     ntime,

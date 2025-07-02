@@ -2,13 +2,12 @@ use super::*;
 
 pub(crate) struct Controller {
     client: Client,
-    job: Arc<Mutex<Option<Notify>>>,
-    difficulty: Arc<Mutex<Difficulty>>,
+    pool_difficulty: Arc<Mutex<Difficulty>>,
     extranonce1: String,
     extranonce2_size: u32,
-    share_rx: mpsc::Receiver<(Header, String)>,
-    share_tx: mpsc::Sender<(Header, String)>,
-    hasher_cancel: CancellationToken,
+    share_rx: mpsc::Receiver<(Header, String, String)>,
+    share_tx: mpsc::Sender<(Header, String, String)>,
+    cancel: CancellationToken,
 }
 
 impl Controller {
@@ -21,29 +20,36 @@ impl Controller {
             subscribe.extranonce1, subscribe.extranonce2_size
         );
 
-        let (share_tx, share_rx) = mpsc::channel(8);
+        let (share_tx, share_rx) = mpsc::channel(32);
 
         Ok(Self {
             client,
-            job: Arc::new(Mutex::new(None)),
-            difficulty: Arc::new(Mutex::new(Difficulty::default())),
+            pool_difficulty: Arc::new(Mutex::new(Difficulty::default())),
             extranonce1: subscribe.extranonce1,
             extranonce2_size: subscribe.extranonce2_size,
             share_rx,
             share_tx,
-            hasher_cancel: CancellationToken::new(),
+            cancel: CancellationToken::new(),
         })
     }
 
     pub(crate) async fn run(mut self) -> Result {
         loop {
             tokio::select! {
-                Some(msg) = self.client.notifications.recv() => self.handle_notification(msg).await?,
-                Some(msg) = self.client.requests.recv() => self.handle_request(msg).await?,
-                Some((header, extranonce2)) = self.share_rx.recv() => {
+                Some(msg) = self.client.incoming.recv() => {
+                     match msg {
+                        Message::Notification { method, params } => {
+                            self.handle_notification(method, params).await?;
+                        }
+                        Message::Request { id, method, params } => {
+                            self.handle_request(id, method, params).await?;
+                        }
+                        _ => warn!("Unexpected message on incoming: {:?}", msg)
+                    }
+                },
+                Some((header, extranonce2, job_id)) = self.share_rx.recv() => {
                     info!("Valid header found: {:?}", header);
-                    let notify = self.job.lock().await.clone().unwrap();
-                    if let Err(e) = self.client.submit(notify.job_id, extranonce2, header.time.into(), header.nonce.into()).await {
+                    if let Err(e) = self.client.submit(job_id, extranonce2, header.time.into(), header.nonce.into()).await {
                         warn!("Failed to submit share: {e}");
                     }
                 }
@@ -59,76 +65,70 @@ impl Controller {
         Ok(())
     }
 
-    async fn handle_notification(&mut self, message: Message) -> Result {
-        if let Message::Notification { method, params } = message {
-            match method.as_str() {
-                "mining.notify" => {
-                    let notify = serde_json::from_value::<Notify>(params)?;
-                    self.job.lock().await.replace(notify.clone());
+    async fn handle_notification(&mut self, method: String, params: Value) -> Result {
+        match method.as_str() {
+            "mining.notify" => {
+                let notify = serde_json::from_value::<Notify>(params)?;
 
-                    let extranonce2 = {
-                        let mut bytes = vec![0u8; self.extranonce2_size.try_into().unwrap()];
-                        rand::rng().fill(&mut bytes[..]);
-                        hex::encode(bytes)
-                    };
+                let extranonce2 = {
+                    let mut bytes = vec![0u8; self.extranonce2_size.try_into().unwrap()];
+                    rand::rng().fill(&mut bytes[..]);
+                    hex::encode(bytes)
+                };
 
-                    let share_tx = self.share_tx.clone();
+                let share_tx = self.share_tx.clone();
 
-                    self.cancel_hasher();
-                    let cancel = self.hasher_cancel.clone();
+                self.cancel_hasher();
+                let cancel = self.cancel.clone();
 
-                    let pool_diff = self.difficulty.lock().await;
-                    let pool_target = pool_diff.to_target();
-                    let network_nbits: CompactTarget = notify.nbits.into();
-                    let network_target: Target = network_nbits.into();
+                let network_nbits: CompactTarget = notify.nbits.into();
+                let network_target: Target = network_nbits.into();
+                let pool_target = self.pool_difficulty.lock().await.to_target();
 
-                    // info!("Pool diff: {}", pool_diff);
-                    // info!("Pool target: {}", pool_target);
-                    info!("Network target: {}", target_as_block_hash(network_target));
+                info!("Network target:\t{}", target_as_block_hash(network_target));
+                info!("Pool target:\t{}", target_as_block_hash(pool_target));
 
-                    let mut hasher = Hasher {
-                        header: Header {
-                            version: notify.version.clone().into(),
-                            prev_blockhash: notify.prevhash.clone().into(),
-                            merkle_root: self.build_merkle_root(&notify, &extranonce2)?,
-                            time: notify.ntime.into(),
-                            bits: notify.nbits.into(),
-                            nonce: 0,
-                        },
-                        pool_target,
-                        extranonce2: extranonce2.to_string(),
-                    };
+                let mut hasher = Hasher {
+                    header: Header {
+                        version: notify.version.clone().into(),
+                        prev_blockhash: notify.prevhash.clone().into(),
+                        merkle_root: self.build_merkle_root(&notify, &extranonce2)?,
+                        time: notify.ntime.into(),
+                        bits: notify.nbits.into(),
+                        nonce: 0,
+                    },
+                    pool_target,
+                    extranonce2: extranonce2.to_string(),
+                    job_id: notify.job_id,
+                };
 
-                    // CPU-heavy task so spawning in it's own thread pool
-                    tokio::spawn(async move {
-                        let result = tokio::task::spawn_blocking(move || hasher.hash(cancel)).await;
+                // CPU-heavy task so spawning in it's own thread pool
+                tokio::spawn(async move {
+                    let result = tokio::task::spawn_blocking(move || hasher.hash(cancel)).await;
 
-                        if let Ok(Ok(header)) = result {
-                            if let Err(e) = share_tx.send(header).await {
-                                error!("Failed to send found share: {e:#}");
-                            }
-                        } else if let Err(e) = result {
-                            error!("Join error on hasher: {e:#}");
+                    if let Ok(Ok(share)) = result {
+                        if let Err(e) = share_tx.send(share).await {
+                            error!("Failed to send found share: {e:#}");
                         }
-                    });
-                }
-                "mining.set_difficulty" => {
-                    let difficulty = serde_json::from_value::<SetDifficulty>(params)?.difficulty();
-                    *self.difficulty.lock().await = difficulty;
-                    info!("New difficulty: {difficulty}");
-                }
-
-                _ => warn!("Unhandled notification: {}", method),
+                    } else if let Err(e) = result {
+                        error!("Join error on hasher: {e:#}");
+                    }
+                });
             }
+            "mining.set_difficulty" => {
+                let difficulty = serde_json::from_value::<SetDifficulty>(params)?.difficulty();
+                *self.pool_difficulty.lock().await = difficulty;
+                info!("New difficulty: {difficulty}");
+            }
+
+            _ => warn!("Unhandled notification: {}", method),
         }
 
         Ok(())
     }
 
-    async fn handle_request(&self, message: Message) -> Result {
-        if let Message::Request { method, params, id } = message {
-            info!("Got request method={method} with id={id} with params={params}");
-        }
+    async fn handle_request(&self, id: Id, method: String, params: Value) -> Result {
+        info!("Got request method={method} with id={id} with params={params}");
 
         Ok(())
     }
@@ -164,7 +164,7 @@ impl Controller {
     }
 
     fn cancel_hasher(&mut self) {
-        self.hasher_cancel.cancel();
-        self.hasher_cancel = CancellationToken::new();
+        self.cancel.cancel();
+        self.cancel = CancellationToken::new();
     }
 }
