@@ -13,10 +13,23 @@ use {
         routing::get,
     },
     axum_server::Handle,
+    bitcoin::{
+        BlockHash, CompactTarget, Target, TxMerkleNode,
+        block::{self, Header},
+        consensus::Decodable,
+        hashes::{Hash, sha256d},
+    },
+    byteorder::{BigEndian, ByteOrder, LittleEndian},
     clap::Parser,
     database::Database,
+    derive_more::Display,
+    difficulty::Difficulty,
     futures::stream::StreamExt,
+    hash_rate::HashRate,
+    hex::FromHex,
+    lazy_static::lazy_static,
     options::Options,
+    rand::Rng,
     rust_embed::RustEmbed,
     rustls_acme::{
         AcmeConfig,
@@ -24,36 +37,66 @@ use {
         axum::AxumAcceptor,
         caches::DirCache,
     },
-    serde::{Deserialize, Serialize},
+    serde::{
+        Deserialize, Serialize, Serializer,
+        de::{self, Deserializer},
+        ser::SerializeSeq,
+    },
+    serde_json::Value,
+    serde_with::{DeserializeFromStr, SerializeDisplay},
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
     std::{
-        env,
-        fmt::Display,
-        io,
+        collections::BTreeMap,
+        env, fmt, io,
         net::ToSocketAddrs,
         path::PathBuf,
         process,
-        sync::{Arc, LazyLock},
+        str::FromStr,
+        sync::{
+            Arc, LazyLock,
+            atomic::{AtomicU64, Ordering},
+        },
+        time::{Duration, Instant},
+    },
+    stratum::{
+        Authorize, Id, Message, Nonce, Notify, Ntime, SetDifficulty, Submit, Subscribe,
+        SubscribeResult,
     },
     sysinfo::{Disks, System},
-    tokio::{runtime::Runtime, task},
+    tokio::{
+        io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader, BufWriter},
+        net::{TcpStream, tcp::OwnedWriteHalf},
+        runtime::Runtime,
+        signal::ctrl_c,
+        sync::{Mutex, mpsc, oneshot},
+        task::{self, JoinHandle},
+    },
+    tokio_util::sync::CancellationToken,
     tower_http::{
         services::ServeDir, set_header::SetResponseHeaderLayer,
         validate_request::ValidateRequestHeaderLayer,
     },
-    tracing::{error, info},
+    tracing::{debug, error, info, warn},
     tracing_subscriber::EnvFilter,
 };
 
 mod arguments;
+mod client;
 mod database;
+mod difficulty;
+mod hash_rate;
 mod options;
+mod stratum;
 mod subcommand;
 mod templates;
 
 pub const COIN_VALUE: u64 = 100_000_000;
 
 type Result<T = (), E = Error> = std::result::Result<T, E>;
+
+fn target_as_block_hash(target: bitcoin::Target) -> BlockHash {
+    BlockHash::from_raw_hash(Hash::from_byte_array(target.to_le_bytes()))
+}
 
 pub fn format_uptime(uptime_seconds: u64) -> String {
     let days = uptime_seconds / 86400;
@@ -64,7 +107,7 @@ pub fn format_uptime(uptime_seconds: u64) -> String {
         if n == 1 {
             singular.to_string()
         } else {
-            format!("{}s", singular)
+            format!("{singular}s")
         }
     };
 
@@ -88,9 +131,6 @@ pub fn main() {
         .init();
 
     let args = Arguments::parse();
-
-    let span = tracing::info_span!("main", command = ?args);
-    let _enter = span.enter();
 
     match args.run() {
         Err(err) => {
@@ -121,7 +161,7 @@ mod tests {
 
     #[test]
     fn test_single_units() {
-        assert_eq!(format_uptime(1), "0 minutes"); // Less than a minute
+        assert_eq!(format_uptime(1), "0 minutes");
         assert_eq!(format_uptime(60), "1 minute");
         assert_eq!(format_uptime(3600), "1 hour");
         assert_eq!(format_uptime(86400), "1 day");
@@ -147,7 +187,6 @@ mod tests {
         assert_eq!(format_uptime(59), "0 minutes");
         assert_eq!(format_uptime(3599), "59 minutes");
         assert_eq!(format_uptime(86399), "23 hours, 59 minutes");
-
         assert_eq!(format_uptime(60), "1 minute");
         assert_eq!(format_uptime(3600), "1 hour");
         assert_eq!(format_uptime(86400), "1 day");
@@ -156,7 +195,6 @@ mod tests {
     #[test]
     fn test_large_values() {
         assert_eq!(format_uptime(2592000), "30 days");
-
         assert_eq!(format_uptime(31581000), "365 days, 12 hours, 30 minutes");
     }
 
