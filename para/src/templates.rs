@@ -26,7 +26,7 @@ where
     }
 }
 
-pub trait PageContent: Display + 'static {
+pub trait PageContent: fmt::Display + 'static {
     fn title(&self) -> String;
 
     fn page(self, domain: String) -> PageHtml<Self>
