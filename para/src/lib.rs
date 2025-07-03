@@ -4,7 +4,7 @@ use {
     arguments::Arguments,
     axum::{
         Extension, Router,
-        extract::{Json, Path},
+        extract::{Path, Json},
         http::{
             HeaderValue, StatusCode,
             header::{CONTENT_DISPOSITION, CONTENT_TYPE},
@@ -13,6 +13,8 @@ use {
         routing::get,
     },
     axum_server::Handle,
+    bitcoin::Network,
+    chain::Chain,
     clap::Parser,
     database::Database,
     futures::stream::StreamExt,
@@ -28,11 +30,12 @@ use {
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
     std::{
         env,
-        fmt::Display,
+        fmt::{self, Display, Formatter},
         io,
         net::ToSocketAddrs,
-        path::PathBuf,
+        path::{self, PathBuf},
         process,
+        str::FromStr,
         sync::{Arc, LazyLock},
     },
     sysinfo::{Disks, System},
@@ -46,6 +49,7 @@ use {
 };
 
 mod arguments;
+mod chain;
 mod database;
 mod options;
 mod subcommand;

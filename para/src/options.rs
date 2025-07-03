@@ -2,6 +2,8 @@ use super::*;
 
 #[derive(Clone, Default, Debug, Parser)]
 pub struct Options {
+    #[arg(long = "chain", help = "Run on <CHAIN>")]
+    pub(crate) chain: Option<Chain>,
     #[arg(long, alias = "datadir", help = "Store acme cache in <DATA_DIR>")]
     pub(crate) data_dir: Option<PathBuf>,
     #[arg(long, help = "Connect to Postgres running at <DATABASE_URL>")]
