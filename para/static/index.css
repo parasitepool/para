@@ -1,0 +1,16 @@
+body {
+  margin: 0;
+  height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+  background-color: #0a0a0a;
+  color: #ffffff
+}
+
+img {
+  height: 99vh;
+  object-fit: cover;
+  display: block;
+}

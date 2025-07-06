@@ -6162,7 +6162,8 @@ out_nowb:
     json_set_string(val, "createinet", ckp->serverurl[client->server]);
     json_set_string(val, "workername", client->workername);
     json_set_string(val, "username", user->username);
-    json_set_string(val, "lnurl", user->secondaryuserid);
+    if (user->secondaryuserid)
+        json_set_string(val, "lnurl", user->secondaryuserid);
     json_set_string(val, "address", client->address);
     json_set_string(val, "agent", client->useragent);
 
@@ -8376,9 +8377,11 @@ static bool sdata_db_connect(sdata_t* sdata) {
     res = PQprepare(
         sdata->pg_conn, "insert_share",
         "INSERT INTO shares (blockheight, workinfoid, clientid, enonce1, nonce2, nonce, ntime, diff, sdiff, "
-        "hash, result, reject_reason, error, errn, createdate, createby, createcode, createinet, workername, username, lnurl, "
+        "hash, result, reject_reason, error, errn, createdate, createby, createcode, createinet, workername, username, "
+        "lnurl, "
         "address, agent) "
-        "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)",
+        "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, "
+        "$23)",
         0, NULL);
 
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
@@ -8647,7 +8650,7 @@ static void db_log_share(sdata_t* sdata, json_t* val, workbase_t* wb) {
         return;
 
     /* Convert numeric values to strings */
-    snprintf(height_str, sizeof(height_str), "%d", wb->height);
+    snprintf(height_str, sizeof(height_str), "%d", !wb ? 0 : wb->height);
     snprintf(workinfoid_str, sizeof(workinfoid_str), "%lld", json_integer_value(json_object_get(val, "workinfoid")));
     snprintf(clientid_str, sizeof(clientid_str), "%lld", json_integer_value(json_object_get(val, "clientid")));
     snprintf(diff_str, sizeof(diff_str), "%f", json_real_value(json_object_get(val, "diff")));
@@ -8712,6 +8715,7 @@ static void db_add_block(
     char        diff_str[32];
     char        coinbasevalue_str[32];
     PGresult*   res = NULL;
+    char        be_hash[65] = {0};
 
     if (!sdata_db_ensure_connected(sdata)) {
         LOGERR("Failed to connect to database for block insertion");
@@ -8724,9 +8728,27 @@ static void db_add_block(
     snprintf(diff_str, sizeof(diff_str), "%f", diff);
     snprintf(coinbasevalue_str, sizeof(coinbasevalue_str), "%ld", coinbasevalue);
 
+    size_t hash_len = strlen(hash);
+    if (hash_len % 8 != 0) {
+        LOGERR("Invalid hash length: %zu", hash_len);
+        return;
+    }
+
+    for (size_t i = 0; i < hash_len; i += 8) {
+        be_hash[hash_len - i - 1] = hash[i + 7];
+        be_hash[hash_len - i - 2] = hash[i + 6];
+        be_hash[hash_len - i - 3] = hash[i + 5];
+        be_hash[hash_len - i - 4] = hash[i + 4];
+        be_hash[hash_len - i - 5] = hash[i + 3];
+        be_hash[hash_len - i - 6] = hash[i + 2];
+        be_hash[hash_len - i - 7] = hash[i + 1];
+        be_hash[hash_len - i - 8] = hash[i];
+    }
+    be_hash[hash_len] = '\0';
+
     /* Set up parameters */
     param_values[0] = height_str;
-    param_values[1] = hash;
+    param_values[1] = be_hash;
     param_values[2] = confirmed_str;
     param_values[3] = workername;
     param_values[4] = username;

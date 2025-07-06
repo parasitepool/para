@@ -1,0 +1,132 @@
+#!/bin/bash
+
+LOGS_DIR="/var/lib/ckpool/logs"
+REMOTE_DESTINATION="root@104.176.44.89:/root/poolbackup/"
+KEEP_COUNT=5
+BANDWIDTH_LIMIT=50000
+
+hex_to_dec() {
+    echo $((16#${1}))
+}
+
+echo "Finding log directories..."
+log_dirs=()
+# don't touch directories that don't start with 000
+for dir in "$LOGS_DIR"/000*; do
+    if [[ -d "$dir" ]]; then
+        dirname="${dir##*/}"
+        log_dirs+=("$dirname")
+    fi
+done
+
+if [[ ${#log_dirs[@]} -eq 0 ]]; then
+    echo "No log directories found matching pattern 000*"
+    exit 1
+fi
+
+IFS=$'\n' sorted_dirs=($(printf '%s\n' "${log_dirs[@]}" | sort -r))
+unset IFS
+
+echo "Found ${#sorted_dirs[@]} log directories"
+echo "Newest directories:"
+for i in "${!sorted_dirs[@]}"; do
+    if [[ $i -lt $KEEP_COUNT ]]; then  # Show first 3
+        echo "  ${sorted_dirs[$i]} (decimal: $(hex_to_dec ${sorted_dirs[$i]}))"
+    fi
+done
+
+if [[ ${#sorted_dirs[@]} -le $KEEP_COUNT ]]; then
+    echo "Only ${#sorted_dirs[@]} directories found, keeping all (need > $KEEP_COUNT to delete any)"
+    exit 0
+fi
+
+threshold_folder="${sorted_dirs[$KEEP_COUNT]}"
+threshold_decimal=$(hex_to_dec "$threshold_folder")
+
+echo "Keeping newest $KEEP_COUNT folders"
+echo "Threshold folder: $threshold_folder (decimal: $threshold_decimal)"
+echo "Will delete directories with hex value < $threshold_folder"
+
+echo
+echo "Preview - Directories to be deleted:"
+dirs_to_delete=()
+for dir in "${sorted_dirs[@]}"; do
+    dir_decimal=$(hex_to_dec "$dir")
+    if [[ $dir_decimal -lt $threshold_decimal ]]; then
+        echo "  DELETE: $dir (decimal: $dir_decimal)"
+        dirs_to_delete+=("$dir")
+    fi
+done
+
+if [[ ${#dirs_to_delete[@]} -eq 0 ]]; then
+    echo "No directories to delete"
+    exit 0
+fi
+
+echo
+echo "Directories to keep:"
+for dir in "${sorted_dirs[@]}"; do
+    dir_decimal=$(hex_to_dec "$dir")
+    if [[ $dir_decimal -ge $threshold_decimal ]]; then
+        echo "  KEEP: $dir (decimal: $dir_decimal)"
+    fi
+done
+
+echo
+echo "Running: ionice -c 3 rsync -avzi --bwlimit=$BANDWIDTH_LIMIT --progress --dry-run $LOGS_DIR/000* $REMOTE_DESTINATION"
+echo
+
+ionice -c 3 rsync -avzi --bwlimit=$BANDWIDTH_LIMIT --progress --dry-run "$LOGS_DIR"/000* "$REMOTE_DESTINATION"
+
+if [[ $? -ne 0 ]]; then
+    echo "Rsync dry-run failed! Aborting."
+    exit 1
+fi
+
+echo
+echo "=== CONFIRMATION REQUIRED ==="
+echo "This will:"
+echo "1. Backup all log directories to $REMOTE_DESTINATION"
+echo "2. Delete ${#dirs_to_delete[@]} local directories (keeping newest $KEEP_COUNT)"
+echo
+echo "Directories that will be PERMANENTLY DELETED:"
+for dir in "${dirs_to_delete[@]}"; do
+    echo "  - $LOGS_DIR/$dir"
+done
+
+echo
+read -p "Do you want to proceed? (type 'yes' to continue): " confirmation
+
+if [[ "$confirmation" != "yes" ]]; then
+    echo "Operation cancelled by user"
+    exit 0
+fi
+
+echo
+echo "Running actual backup..."
+ionice -c 3 rsync -avzi --bwlimit=$BANDWIDTH_LIMIT --progress "$LOGS_DIR"/000* "$REMOTE_DESTINATION"
+
+if [[ $? -ne 0 ]]; then
+    echo "Backup failed! NOT deleting local directories."
+    exit 1
+fi
+
+echo "Backup completed successfully!"
+
+echo
+echo "Deleting old directories..."
+for dir in "${dirs_to_delete[@]}"; do
+    full_path="$LOGS_DIR/$dir"
+    echo "Deleting: $full_path"
+    rm -rf "$full_path"
+    if [[ $? -eq 0 ]]; then
+        echo "  ✓ Deleted successfully"
+    else
+        echo "  ✗ Failed to delete"
+    fi
+done
+
+echo
+echo "=== COMPLETED ==="
+echo "Backup and cleanup completed successfully!"
+echo "Kept newest $KEEP_COUNT directories, deleted ${#dirs_to_delete[@]} old directories"

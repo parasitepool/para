@@ -1,5 +1,6 @@
-Steps:
+# Parasite Pool
 
+## Local development
 ```
 just build
 just bitcoind
