@@ -1,4 +1,7 @@
-use super::*;
+use {
+    super::*,
+    bitcoincore_rpc::{Auth, Client, RpcApi},
+};
 
 #[derive(Clone, Default, Debug, Parser)]
 pub struct Options {
@@ -71,7 +74,7 @@ impl Options {
 
         let bitcoin_credentials = self.bitcoin_credentials()?;
 
-        log::info!("Connecting to Bitcoin Core at {rpc_url}",);
+        info!("Connecting to Bitcoin Core at {rpc_url}",);
 
         let client = Client::new(&rpc_url, bitcoin_credentials.clone()).map_err(|_| {
             anyhow!(format!(
