@@ -22,7 +22,7 @@ impl Hasher {
             let hash = self.header.block_hash();
             hashes += 1;
 
-            if self.pool_target.is_met_by(hash) {
+            if self.pool_target.is_met_by(hash) || self.header.target().is_met_by(hash) {
                 info!("Solved block with hash: {hash}");
                 return Ok((self.header, self.extranonce2.clone(), self.job_id.clone()));
             }

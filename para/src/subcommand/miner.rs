@@ -16,12 +16,12 @@ pub(crate) struct Miner {
 }
 
 impl Miner {
-    pub(crate) fn run(&self) -> Result {
+    pub(crate) fn run(&self, options: Options) -> Result {
         Runtime::new()?.block_on(async {
             let client =
                 Client::connect(&self.host, self.port, &self.username, &self.password).await?;
 
-            let controller = Controller::new(client).await?;
+            let controller = Controller::new(options, client).await?;
 
             controller.run().await
         })

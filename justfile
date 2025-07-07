@@ -53,6 +53,7 @@ ckpool:
     --config copr/ckpool.conf \
     --loglevel 7 \
     --log-shares \
+    --sockdir copr/tmp/ckpool \
     --signet
 
 lint:

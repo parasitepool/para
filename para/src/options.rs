@@ -1,7 +1,4 @@
-use {
-    super::*,
-    bitcoincore_rpc::{Auth, Client, RpcApi},
-};
+use super::*;
 
 #[derive(Clone, Default, Debug, Parser)]
 pub struct Options {
@@ -69,24 +66,25 @@ impl Options {
         format!("127.0.0.1:{}/", self.bitcoin_rpc_port())
     }
 
-    pub(crate) fn bitcoin_rpc_client(&self) -> Result<Client> {
+    pub(crate) fn bitcoin_rpc_client(&self) -> Result<bitcoincore_rpc::Client> {
         let rpc_url = self.bitcoin_rpc_url();
 
         let bitcoin_credentials = self.bitcoin_credentials()?;
 
         info!("Connecting to Bitcoin Core at {rpc_url}",);
 
-        let client = Client::new(&rpc_url, bitcoin_credentials.clone()).map_err(|_| {
-            anyhow!(format!(
-                "failed to connect to Bitcoin Core RPC at `{rpc_url}` with {}",
-                match bitcoin_credentials {
-                    Auth::None => "no credentials".into(),
-                    Auth::UserPass(_, _) => "username and password".into(),
-                    Auth::CookieFile(cookie_file) =>
-                        format!("cookie file at {}", cookie_file.display()),
-                }
-            ))
-        })?;
+        let client =
+            bitcoincore_rpc::Client::new(&rpc_url, bitcoin_credentials.clone()).map_err(|_| {
+                anyhow!(format!(
+                    "failed to connect to Bitcoin Core RPC at `{rpc_url}` with {}",
+                    match bitcoin_credentials {
+                        Auth::None => "no credentials".into(),
+                        Auth::UserPass(_, _) => "username and password".into(),
+                        Auth::CookieFile(cookie_file) =>
+                            format!("cookie file at {}", cookie_file.display()),
+                    }
+                ))
+            })?;
 
         let mut checks = 0;
         let rpc_chain = loop {

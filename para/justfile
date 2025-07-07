@@ -31,7 +31,9 @@ miner:
     --password x
 
 miner-signet: 
-  RUST_LOG=info cargo run --release -- miner \
+  RUST_LOG=info cargo run --release -- \
+  --chain signet \
+  miner \
     --host 0.0.0.0 \
     --port 42069 \
     --username tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.ParaMiner \

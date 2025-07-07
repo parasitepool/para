@@ -16,9 +16,10 @@ use {
     bitcoin::{
         BlockHash, CompactTarget, Network, Target, TxMerkleNode,
         block::{self, Header},
-        consensus::Decodable,
+        consensus::{Decodable, Encodable},
         hashes::{Hash, sha256d},
     },
+    bitcoincore_rpc::{Auth, RpcApi},
     byteorder::{BigEndian, ByteOrder, LittleEndian},
     chain::Chain,
     clap::Parser,

@@ -1,6 +1,7 @@
 use super::*;
 
 pub(crate) struct Controller {
+    options: Options,
     client: Client,
     pool_difficulty: Arc<Mutex<Difficulty>>,
     extranonce1: String,
@@ -11,7 +12,7 @@ pub(crate) struct Controller {
 }
 
 impl Controller {
-    pub(crate) async fn new(mut client: Client) -> Result<Self> {
+    pub(crate) async fn new(options: Options, mut client: Client) -> Result<Self> {
         let subscribe = client.subscribe().await?;
         client.authorize().await?;
 
@@ -23,6 +24,7 @@ impl Controller {
         let (share_tx, share_rx) = mpsc::channel(32);
 
         Ok(Self {
+            options,
             client,
             pool_difficulty: Arc::new(Mutex::new(Difficulty::default())),
             extranonce1: subscribe.extranonce1,
@@ -49,6 +51,20 @@ impl Controller {
                 },
                 Some((header, extranonce2, job_id)) = self.share_rx.recv() => {
                     info!("Valid header found: {:?}", header);
+
+                    let client = self.options.bitcoin_rpc_client()?;
+
+                    let mut buffer = Vec::new();
+                    header.consensus_encode(&mut buffer)?;
+
+                    let hex = hex::encode(buffer);
+
+                    println!("{hex}");
+
+                    let result = client.call::<Value>("submitheader", &[hex.into()])?;
+
+                    dbg!(result);
+
                     if let Err(e) = self.client.submit(job_id, extranonce2, header.time.into(), header.nonce.into()).await {
                         warn!("Failed to submit share: {e}");
                     }
