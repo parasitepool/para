@@ -74,7 +74,6 @@ psql-reset:
 
 setup branch remote chain domain:
   ssh root@{{domain}} '\
-    export DEBIAN_FRONTEND=noninteractive \
     && mkdir -p deploy \
     && dnf -y upgrade \
     && dnf -y install git rsync'
