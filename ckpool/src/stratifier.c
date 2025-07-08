@@ -1314,13 +1314,15 @@ static txntable_t* wb_merkle_bin_txns(ckpool_t* ckp, sdata_t* sdata, workbase_t*
     json_t*     arr_val;
     uchar*      hashbin;
     char*       fname;
-    FILE*       fp;
+    FILE*       fp = NULL;
 
-    ASPRINTF(&fname, "%s/pool/pool.txns", ckp->logdir);
-    fp = fopen(fname, "we");
-    if (unlikely(!fp))
-        LOGERR("Failed to fopen %s", fname);
-    dealloc(fname);
+    if (ckp->logtxns) {
+        ASPRINTF(&fname, "%s/pool/pool.txns", ckp->logdir);
+        fp = fopen(fname, "we");
+        if (!fp)
+            LOGERR("Failed to fopen %s", fname);
+        dealloc(fname);
+    }
 
     wb->txns = json_array_size(txn_array);
     wb->merkles = 0;
