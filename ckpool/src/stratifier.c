@@ -1320,7 +1320,7 @@ static txntable_t* wb_merkle_bin_txns(ckpool_t* ckp, sdata_t* sdata, workbase_t*
     fp = fopen(fname, "we");
     if (unlikely(!fp)) {
         LOGERR("Failed to fopen %s", fname);
-        fp = NULL; // dangerous
+        fp = NULL;  // dangerous
         // return txns;
     }
     dealloc(fname);
