@@ -2,18 +2,23 @@ set positional-arguments
 
 install:
   git submodule update --init
-  sudo apt-get install --yes \
+  sudo dnf install -y \
+    libevent-devel \
+    postgresql-devel \
+    libpq \
+    sqlite-devel \
+    zeromq-devel \
+    czmq-devel \
+    make \
+    gcc \
+    gcc-c++ \
+    kernel-devel \
     autoconf \
     automake \
-    build-essential \
     clang-format \
     cmake \
-    libboost-dev \
-    libevent-dev \
-    libpq-dev \
-    libsqlite3-dev \
+    boost-devel \
     libtool \
-    libzmq3-dev \
     pkgconf \
     python3 \
     yasm \
@@ -28,7 +33,7 @@ build-ckpool: install
   #!/usr/bin/env bash
   cd ckpool
   ./autogen.sh
-  ./configure
+  ./configure CPPFLAGS="-I/usr/pgsql-13/include" LDFLAGS="-L/usr/pgsql-13/lib"
   make
 
 build: build-bitcoind build-ckpool
@@ -71,9 +76,8 @@ setup branch remote chain domain:
   ssh root@{{domain}} '\
     export DEBIAN_FRONTEND=noninteractive \
     && mkdir -p deploy \
-    && apt-get update --yes \
-    && apt-get upgrade --yes \
-    && apt-get install --yes git rsync'
+    && dnf -y upgrade \
+    && dnf -y install git rsync'
   rsync -avz deploy/checkout root@{{domain}}:deploy/checkout
   ssh root@{{domain}} 'cd deploy && ./checkout {{branch}} {{remote}} {{chain}} {{domain}}'
 
