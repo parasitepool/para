@@ -1318,11 +1318,8 @@ static txntable_t* wb_merkle_bin_txns(ckpool_t* ckp, sdata_t* sdata, workbase_t*
 
     ASPRINTF(&fname, "%s/pool/pool.txns", ckp->logdir);
     fp = fopen(fname, "we");
-    if (unlikely(!fp)) {
+    if (unlikely(!fp))
         LOGERR("Failed to fopen %s", fname);
-        fp = NULL;  // dangerous
-        // return txns;
-    }
     dealloc(fname);
 
     wb->txns = json_array_size(txn_array);
