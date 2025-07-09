@@ -504,7 +504,7 @@ impl Database {
             "
             SELECT * FROM shares
             WHERE blockheight >= $1 AND blockheight <= $2
-            ORDER BY blockheight ASC, id ASC
+            ORDER BY blockheight, id
             ",
         )
         .bind(start_height)
