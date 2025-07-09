@@ -38,4 +38,4 @@ miner-signet:
     --password x
 
 server: 
-  RUST_LOG=info cargo run -- --log-dir ../logs server --port 8080
+  RUST_LOG=info cargo run -- --log-dir ../copr/logs server --port 8080
