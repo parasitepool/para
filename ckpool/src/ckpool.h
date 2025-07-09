@@ -141,6 +141,8 @@ struct ckpool_instance {
     bool killold;
     /* Whether to log shares or not */
     bool logshares;
+    /* Whether to log txns or not */
+    bool logtxns;
     /* Logging level */
     int loglevel;
     /* Main process name */

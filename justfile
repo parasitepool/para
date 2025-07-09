@@ -53,7 +53,8 @@ ckpool:
     --config copr/ckpool.conf \
     --loglevel 7 \
     --log-shares \
-    --signet
+    --signet \
+    --log-txns
 
 lint:
   find ./ckpool/src -type f \( -name "*.c" -o -name "*.h" \) -not -path "**/jansson-2.14/*" -exec clang-format -i {} \;
