@@ -1,4 +1,4 @@
 use super::*;
 
-mod user;
 mod pool;
+mod user;
