@@ -47,7 +47,7 @@ use {
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
     std::{
         collections::BTreeMap,
-        env, fmt, io,
+        env, fmt, fs, io,
         net::ToSocketAddrs,
         path::PathBuf,
         process,
