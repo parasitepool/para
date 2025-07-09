@@ -452,9 +452,6 @@ impl SyncReceive {
             batch.batch_id
         );
 
-        // TODO: remove this after validating that we don't have (a)sync issues
-        sleep(Duration::from_millis(2000)).await;
-
         if !batch.shares.is_empty() {
             let total_diff: f64 = batch.shares.iter().filter_map(|s| s.diff).sum();
 
