@@ -62,15 +62,7 @@ impl Server {
                 HeaderValue::from_static("inline"),
             ))
             .route("/", get(Self::home))
-            .route(
-                "/healthcheck",
-                if let Some((username, password)) = self.credentials() {
-                    get(Self::healthcheck)
-                        .layer(ValidateRequestHeaderLayer::basic(username, password))
-                } else {
-                    get(Self::healthcheck)
-                },
-            )
+            .route("/healthcheck", self.with_auth(get(Self::healthcheck)))
             .route("/payouts/{blockheight}", get(Self::payouts))
             .route("/split", get(Self::open_split))
             .route("/split/{blockheight}", get(Self::sat_split))
@@ -90,6 +82,17 @@ impl Server {
         .await??;
 
         Ok(())
+    }
+
+    fn with_auth<S>(&self, method_router: MethodRouter<S>) -> MethodRouter<S>
+    where
+        S: Clone + Send + Sync + 'static,
+    {
+        if let Some((username, password)) = self.credentials() {
+            method_router.layer(ValidateRequestHeaderLayer::basic(username, password))
+        } else {
+            method_router
+        }
     }
 
     async fn home(Extension(domain): Extension<String>) -> ServerResult<PageHtml<HomeHtml>> {

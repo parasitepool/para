@@ -10,7 +10,7 @@ use {
             header::{CONTENT_DISPOSITION, CONTENT_TYPE},
         },
         response::{IntoResponse, Response},
-        routing::get,
+        routing::{MethodRouter, get},
     },
     axum_server::Handle,
     clap::Parser,
