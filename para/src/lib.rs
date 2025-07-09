@@ -29,6 +29,7 @@ use {
     hex::FromHex,
     lazy_static::lazy_static,
     options::Options,
+    pretty_assertions::assert_eq as pretty_assert_eq,
     rand::Rng,
     rust_embed::RustEmbed,
     rustls_acme::{
