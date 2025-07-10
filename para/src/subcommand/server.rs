@@ -107,15 +107,14 @@ impl Server {
 
     async fn users(Extension(config): Extension<Arc<Config>>) -> ServerResult<Response> {
         task::block_in_place(|| {
-            let path = config.log_dir().join("users");
-
-            let users: Vec<String> = fs::read_dir(&path)
-                .map_err(|err| anyhow!(err))?
-                .filter_map(Result::ok)
-                .filter_map(|entry| entry.file_name().to_str().map(|s| s.to_string()))
-                .collect();
-
-            Ok(Json(users).into_response())
+            Ok(Json(
+                fs::read_dir(config.log_dir().join("users"))
+                    .map_err(|err| anyhow!(err))?
+                    .filter_map(Result::ok)
+                    .filter_map(|entry| entry.file_name().to_str().map(|s| s.to_string()))
+                    .collect::<Vec<String>>(),
+            )
+            .into_response())
         })
     }
 
