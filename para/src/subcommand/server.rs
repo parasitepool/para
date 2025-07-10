@@ -39,10 +39,6 @@ impl Server {
         let pool_dir = log_dir.join("pool");
         let user_dir = log_dir.join("users");
 
-        if !log_dir.exists() {
-            warn!("Log dir {} does not exist", log_dir.display());
-        }
-
         if !pool_dir.exists() {
             warn!("Pool dir {} does not exist", pool_dir.display());
         }

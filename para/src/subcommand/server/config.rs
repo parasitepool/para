@@ -80,9 +80,15 @@ impl Config {
     }
 
     pub(crate) fn log_dir(&self) -> PathBuf {
-        self.log_dir.clone().unwrap_or_else(|| {
+        let dir = self.log_dir.clone().unwrap_or_else(|| {
             std::env::current_dir().expect("Failed to get current working directory")
-        })
+        });
+
+        if !dir.exists() {
+            warn!("Log dir {} does not exist", dir.display());
+        }
+
+        dir
     }
 
     pub(crate) fn port(&self) -> Option<u16> {
