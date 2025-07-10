@@ -4,7 +4,6 @@ use {
     error::{OptionExt, ServerError, ServerResult},
 };
 
-mod api;
 mod error;
 
 #[derive(RustEmbed)]
