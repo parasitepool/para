@@ -34,17 +34,27 @@ pub struct Server {
 
 impl Server {
     pub async fn run(&self, handle: Handle) -> Result {
-        let config = self.config.clone();
+        let config = Arc::new(self.config.clone());
         let log_dir = config.log_dir();
+        let pool_dir = log_dir.join("pool");
+        let user_dir = log_dir.join("users");
 
-        info!("Serving files in {}", log_dir.display());
+        if !log_dir.exists() {
+            warn!("Log dir {} does not exist", log_dir.display());
+        }
 
-        let database = Database::new(config.database_url()).await?;
+        if !pool_dir.exists() {
+            warn!("Pool dir {} does not exist", pool_dir.display());
+        }
 
-        let router = Router::new()
-            .nest_service("/pool/", ServeDir::new(log_dir.join("pool")))
+        if !user_dir.exists() {
+            warn!("User dir {} does not exist", user_dir.display());
+        }
+
+        let mut router = Router::new()
+            .nest_service("/pool/", ServeDir::new(pool_dir))
             .route("/users", get(Self::users))
-            .nest_service("/users/", ServeDir::new(log_dir.join("users")))
+            .nest_service("/users/", ServeDir::new(user_dir))
             .layer(SetResponseHeaderLayer::overriding(
                 CONTENT_TYPE,
                 HeaderValue::from_static("text/plain"),
@@ -63,19 +73,30 @@ impl Server {
                     get(Self::healthcheck)
                 },
             )
-            .route("/payouts/{blockheight}", get(Self::payouts))
-            .route("/split", get(Self::open_split))
-            .route("/split/{blockheight}", get(Self::sat_split))
             .route("/static/{*path}", get(Self::static_assets))
-            .layer(Extension(config.clone()))
-            .layer(Extension(database));
+            .layer(Extension(config.clone()));
+
+        match Database::new(config.database_url()).await {
+            Ok(database) => {
+                router = router
+                    .route("/payouts/{blockheight}", get(Self::payouts))
+                    .route("/split", get(Self::open_split))
+                    .route("/split/{blockheight}", get(Self::sat_split))
+                    .layer(Extension(database));
+            }
+            Err(err) => {
+                warn!("Failed to connect to PostgreSQL: {err}",);
+            }
+        }
+
+        info!("Serving files in {}", log_dir.display());
 
         self.spawn(config, router, handle)?.await??;
 
         Ok(())
     }
 
-    async fn home(Extension(config): Extension<Config>) -> ServerResult<PageHtml<HomeHtml>> {
+    async fn home(Extension(config): Extension<Arc<Config>>) -> ServerResult<PageHtml<HomeHtml>> {
         let domain = config.domain();
 
         Ok(HomeHtml {
@@ -84,7 +105,7 @@ impl Server {
         .page(domain))
     }
 
-    async fn users(Extension(config): Extension<Config>) -> ServerResult<Response> {
+    async fn users(Extension(config): Extension<Arc<Config>>) -> ServerResult<Response> {
         task::block_in_place(|| {
             let path = config.log_dir().join("users");
 
@@ -99,7 +120,7 @@ impl Server {
     }
 
     pub(crate) async fn healthcheck(
-        Extension(config): Extension<Config>,
+        Extension(config): Extension<Arc<Config>>,
     ) -> ServerResult<PageHtml<HealthcheckHtml>> {
         task::block_in_place(|| {
             let mut system = System::new_all();
@@ -215,7 +236,7 @@ impl Server {
 
     fn spawn(
         &self,
-        config: Config,
+        config: Arc<Config>,
         router: Router,
         handle: Handle,
     ) -> Result<task::JoinHandle<io::Result<()>>> {
