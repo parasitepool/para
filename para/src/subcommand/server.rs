@@ -387,8 +387,8 @@ mod tests {
 
     #[test]
     fn credentials_both_provided() {
-        let config = parse_server_config("para server --username miner --password secret");
-        assert_eq!(config.credentials(), Some(("miner", "secret")));
+        let config = parse_server_config("para server --username satoshi --password secret");
+        assert_eq!(config.credentials(), Some(("satoshi", "secret")));
     }
 
     #[test]
@@ -465,7 +465,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "required")]
     fn credentials_only_username_panics() {
-        parse_server_config("para server --username miner");
+        parse_server_config("para server --username satoshi");
     }
 
     #[test]
@@ -476,7 +476,7 @@ mod tests {
 
     #[test]
     fn credentials_mutual_requirement_no_panic() {
-        parse_server_config("para server --username miner --password secret");
+        parse_server_config("para server --username satoshi --password secret");
         parse_server_config("para server");
     }
 
