@@ -1,9 +1,11 @@
 use {
     super::*,
     crate::templates::{PageContent, PageHtml, healthcheck::HealthcheckHtml, home::HomeHtml},
+    config::Config,
     error::{OptionExt, ServerError, ServerResult},
 };
 
+mod config;
 mod error;
 
 #[derive(RustEmbed)]
@@ -26,35 +28,18 @@ pub(crate) struct SatSplit {
 
 #[derive(Clone, Debug, Parser)]
 pub struct Server {
-    #[clap(long, help = "Listen at <ADDRESS>")]
-    pub(crate) address: Option<String>,
-    #[arg(long, help = "Request ACME TLS certificate for <ACME_DOMAIN>")]
-    pub(crate) acme_domain: Vec<String>,
-    #[arg(long, help = "Provide ACME contact <ACME_CONTACT>")]
-    pub(crate) acme_contact: Vec<String>,
-    #[arg(long, alias = "datadir", help = "Store acme cache in <DATA_DIR>")]
-    pub(crate) data_dir: Option<PathBuf>,
-    #[arg(long, help = "Connect to Postgres running at <DATABASE_URL>")]
-    pub(crate) database_url: Option<String>,
-    #[arg(long, help = "CKpool <LOG_DIR>")]
-    pub(crate) log_dir: Option<PathBuf>,
-    #[clap(long, help = "Listen on <PORT>")]
-    pub(crate) port: Option<u16>,
-    #[arg(long, help = "Require basic HTTP authentication with <USERNAME>.")]
-    pub(crate) username: Option<String>,
-    #[arg(long, help = "Require basic HTTP authentication with <PASSWORD>.")]
-    pub(crate) password: Option<String>,
+    #[command(flatten)]
+    pub(crate) config: Config,
 }
 
 impl Server {
     pub async fn run(&self, handle: Handle) -> Result {
-        let log_dir = self.log_dir();
+        let config = self.config.clone();
+        let log_dir = config.log_dir();
 
         info!("Serving files in {}", log_dir.display());
 
-        let database = Database::new(self.database_url()).await?;
-
-        let domain = self.domains()?.first().expect("should have domain").clone();
+        let database = Database::new(config.database_url()).await?;
 
         let router = Router::new()
             .nest_service("/pool/", ServeDir::new(log_dir.join("pool")))
@@ -71,7 +56,7 @@ impl Server {
             .route("/", get(Self::home))
             .route(
                 "/healthcheck",
-                if let Some((username, password)) = self.credentials() {
+                if let Some((username, password)) = config.credentials() {
                     get(Self::healthcheck)
                         .layer(ValidateRequestHeaderLayer::basic(username, password))
                 } else {
@@ -82,34 +67,26 @@ impl Server {
             .route("/split", get(Self::open_split))
             .route("/split/{blockheight}", get(Self::sat_split))
             .route("/static/{*path}", get(Self::static_assets))
-            .layer(Extension(self.log_dir()))
-            .layer(Extension(domain))
+            .layer(Extension(config.clone()))
             .layer(Extension(database));
 
-        self.spawn(
-            router,
-            handle,
-            self.address.clone(),
-            self.port,
-            self.data_dir(),
-            self.acme_domain.clone(),
-            self.acme_contact.clone(),
-        )?
-        .await??;
+        self.spawn(config, router, handle)?.await??;
 
         Ok(())
     }
 
-    async fn home(Extension(domain): Extension<String>) -> ServerResult<PageHtml<HomeHtml>> {
+    async fn home(Extension(config): Extension<Config>) -> ServerResult<PageHtml<HomeHtml>> {
+        let domain = config.domain();
+
         Ok(HomeHtml {
             stratum_url: format!("{domain}:42069"),
         }
         .page(domain))
     }
 
-    async fn users(Extension(log_dir): Extension<PathBuf>) -> ServerResult<Response> {
+    async fn users(Extension(config): Extension<Config>) -> ServerResult<Response> {
         task::block_in_place(|| {
-            let path = log_dir.join("users");
+            let path = config.log_dir().join("users");
 
             let users: Vec<String> = fs::read_dir(&path)
                 .map_err(|err| anyhow!(err))?
@@ -122,7 +99,7 @@ impl Server {
     }
 
     pub(crate) async fn healthcheck(
-        Extension(domain): Extension<String>,
+        Extension(config): Extension<Config>,
     ) -> ServerResult<PageHtml<HealthcheckHtml>> {
         task::block_in_place(|| {
             let mut system = System::new_all();
@@ -160,7 +137,7 @@ impl Server {
                 cpu_usage_percent: format!("{cpu_usage_percent:.2}"),
                 uptime: format_uptime(uptime_seconds),
             }
-            .page(domain))
+            .page(config.domain()))
         })
     }
 
@@ -236,58 +213,25 @@ impl Server {
             .unwrap())
     }
 
-    fn credentials(&self) -> Option<(&str, &str)> {
-        self.username.as_deref().zip(self.password.as_deref())
-    }
-
-    fn domains(&self) -> Result<Vec<String>> {
-        if !self.acme_domain.is_empty() {
-            Ok(self.acme_domain.clone())
-        } else {
-            Ok(vec![
-                System::host_name().ok_or(anyhow!("no hostname found"))?,
-            ])
-        }
-    }
-
-    fn data_dir(&self) -> PathBuf {
-        self.data_dir.clone().unwrap_or_default()
-    }
-
-    fn database_url(&self) -> String {
-        self.database_url
-            .clone()
-            .unwrap_or_else(|| "postgres://satoshi:nakamoto@127.0.0.1:5432/ckpool".to_string())
-    }
-
-    fn log_dir(&self) -> PathBuf {
-        self.log_dir.clone().unwrap_or_else(|| {
-            std::env::current_dir().expect("Failed to get current working directory")
-        })
-    }
-
     fn spawn(
         &self,
+        config: Config,
         router: Router,
         handle: Handle,
-        address: Option<String>,
-        port: Option<u16>,
-        data_dir: PathBuf,
-        acme_domain: Vec<String>,
-        acme_contact: Vec<String>,
     ) -> Result<task::JoinHandle<io::Result<()>>> {
-        let acme_cache = data_dir.join("acme-cache");
-
-        let address = address.unwrap_or_else(|| "0.0.0.0".into());
+        let acme_cache = config.acme_cache();
+        let acme_domains = config.acme_domains();
+        let acme_contacts = config.acme_contacts();
+        let address = config.address();
 
         Ok(tokio::spawn(async move {
-            if !acme_domain.is_empty() && !acme_contact.is_empty() {
+            if !acme_domains.is_empty() && !acme_contacts.is_empty() {
                 info!(
                     "Getting certificate for {} using contact email {}",
-                    acme_domain[0], acme_contact[0]
+                    acme_domains[0], acme_contacts[0]
                 );
 
-                let addr = (address, port.unwrap_or(443))
+                let addr = (address, config.port().unwrap_or(443))
                     .to_socket_addrs()?
                     .next()
                     .unwrap();
@@ -296,11 +240,11 @@ impl Server {
 
                 axum_server::Server::bind(addr)
                     .handle(handle)
-                    .acceptor(Self::acceptor(acme_domain, acme_contact, acme_cache).unwrap())
+                    .acceptor(Self::acceptor(acme_domains, acme_contacts, acme_cache).unwrap())
                     .serve(router.into_make_service())
                     .await
             } else {
-                let addr = (address, port.unwrap_or(80))
+                let addr = (address, config.port().unwrap_or(80))
                     .to_socket_addrs()?
                     .next()
                     .unwrap();
@@ -365,6 +309,177 @@ impl Server {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    fn parse_server_config(args: &str) -> Config {
+        match Arguments::try_parse_from(args.split_whitespace()) {
+            Ok(arguments) => match arguments.subcommand {
+                Subcommand::Server(server) => server.config,
+                subcommand => panic!("unexpected subcommand: {subcommand:?}"),
+            },
+            Err(err) => panic!("error parsing arguments: {err}"),
+        }
+    }
+
+    #[test]
+    fn default_address() {
+        let config = parse_server_config("para server");
+        assert_eq!(config.address(), "0.0.0.0");
+    }
+
+    #[test]
+    fn override_address() {
+        let config = parse_server_config("para server --address 127.0.0.1");
+        assert_eq!(config.address(), "127.0.0.1");
+    }
+
+    #[test]
+    fn default_acme_cache() {
+        let config = parse_server_config("para server");
+        assert_eq!(config.acme_cache(), PathBuf::from("acme-cache"));
+    }
+
+    #[test]
+    fn override_acme_cache_via_data_dir() {
+        let config = parse_server_config("para server --data-dir /custom/path");
+        assert_eq!(
+            config.acme_cache(),
+            PathBuf::from("/custom/path/acme-cache")
+        );
+    }
+
+    #[test]
+    fn default_acme_domains() {
+        let config = parse_server_config("para server");
+        assert!(config.acme_domains().is_empty());
+    }
+
+    #[test]
+    fn override_acme_domains() {
+        let config =
+            parse_server_config("para server --acme-domain example.com --acme-domain foo.bar");
+        assert_eq!(
+            config.acme_domains(),
+            vec!["example.com".to_string(), "foo.bar".to_string()]
+        );
+    }
+
+    #[test]
+    fn default_acme_contacts() {
+        let config = parse_server_config("para server");
+        assert!(config.acme_contacts().is_empty());
+    }
+
+    #[test]
+    fn override_acme_contacts() {
+        let config = parse_server_config("para server --acme-contact admin@example.com");
+        assert_eq!(
+            config.acme_contacts(),
+            vec!["admin@example.com".to_string()]
+        );
+    }
+
+    #[test]
+    fn default_credentials() {
+        let config = parse_server_config("para server");
+        assert_eq!(config.credentials(), None);
+    }
+
+    #[test]
+    fn credentials_both_provided() {
+        let config = parse_server_config("para server --username miner --password secret");
+        assert_eq!(config.credentials(), Some(("miner", "secret")));
+    }
+
+    #[test]
+    fn default_domain() {
+        let config = parse_server_config("para server --acme-domain example.com");
+        assert_eq!(config.domain(), "example.com");
+    }
+
+    #[test]
+    fn default_domains_fallback() {
+        let config = parse_server_config("para server");
+        let domains = config.domains().unwrap();
+        assert!(!domains.is_empty(), "Expected hostname fallback");
+    }
+
+    #[test]
+    fn override_domains_no_fallback() {
+        let config = parse_server_config("para server --acme-domain custom.domain");
+        let domains = config.domains().unwrap();
+        assert_eq!(domains, vec!["custom.domain".to_string()]);
+    }
+
+    #[test]
+    fn default_data_dir() {
+        let config = parse_server_config("para server");
+        assert_eq!(config.data_dir(), PathBuf::new());
+    }
+
+    #[test]
+    fn override_data_dir() {
+        let config = parse_server_config("para server --data-dir /var/pool");
+        assert_eq!(config.data_dir(), PathBuf::from("/var/pool"));
+    }
+
+    #[test]
+    fn default_database_url() {
+        let config = parse_server_config("para server");
+        assert_eq!(
+            config.database_url(),
+            "postgres://satoshi:nakamoto@127.0.0.1:5432/ckpool"
+        );
+    }
+
+    #[test]
+    fn override_database_url() {
+        let config = parse_server_config("para server --database-url postgres://user:pass@host/db");
+        assert_eq!(config.database_url(), "postgres://user:pass@host/db");
+    }
+
+    #[test]
+    fn default_log_dir() {
+        let config = parse_server_config("para server");
+        assert_eq!(config.log_dir(), std::env::current_dir().unwrap());
+    }
+
+    #[test]
+    fn override_log_dir() {
+        let config = parse_server_config("para server --log-dir /logs");
+        assert_eq!(config.log_dir(), PathBuf::from("/logs"));
+    }
+
+    #[test]
+    fn default_port() {
+        let config = parse_server_config("para server");
+        assert_eq!(config.port(), None);
+    }
+
+    #[test]
+    fn override_port() {
+        let config = parse_server_config("para server --port 8080");
+        assert_eq!(config.port(), Some(8080));
+    }
+
+    #[test]
+    #[should_panic(expected = "required")]
+    fn credentials_only_username_panics() {
+        parse_server_config("para server --username miner");
+    }
+
+    #[test]
+    #[should_panic(expected = "required")]
+    fn credentials_only_password_panics() {
+        parse_server_config("para server --password secret");
+    }
+
+    #[test]
+    fn credentials_mutual_requirement_no_panic() {
+        parse_server_config("para server --username miner --password secret");
+        parse_server_config("para server");
+    }
+
     #[test]
     fn validate_math() {
         let a: i64 = 3;
