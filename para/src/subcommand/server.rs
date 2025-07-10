@@ -52,6 +52,7 @@ impl Server {
 
         let router = Router::new()
             .nest_service("/pool/", ServeDir::new(log_dir.join("pool")))
+            .route("/users", get(Self::users))
             .nest_service("/users/", ServeDir::new(log_dir.join("users")))
             .layer(SetResponseHeaderLayer::overriding(
                 CONTENT_TYPE,
@@ -75,6 +76,7 @@ impl Server {
             .route("/split", get(Self::open_split))
             .route("/split/{blockheight}", get(Self::sat_split))
             .route("/static/{*path}", get(Self::static_assets))
+            .layer(Extension(options.clone()))
             .layer(Extension(domain))
             .layer(Extension(database));
 
@@ -99,10 +101,24 @@ impl Server {
         .page(domain))
     }
 
+    async fn users(Extension(options): Extension<Options>) -> ServerResult<Response> {
+        task::block_in_place(|| {
+            let path = options.log_dir().join("users");
+
+            let users: Vec<String> = fs::read_dir(&path)
+                .map_err(|err| anyhow!(err))?
+                .filter_map(Result::ok)
+                .filter_map(|entry| entry.file_name().to_str().map(|s| s.to_string()))
+                .collect();
+
+            Ok(Json(users).into_response())
+        })
+    }
+
     pub(crate) async fn healthcheck(
         Extension(domain): Extension<String>,
     ) -> ServerResult<PageHtml<HealthcheckHtml>> {
-        tokio::task::block_in_place(|| {
+        task::block_in_place(|| {
             let mut system = System::new_all();
             system.refresh_all();
 
