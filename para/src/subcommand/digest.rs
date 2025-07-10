@@ -1,5 +1,8 @@
 use super::*;
 
+mod pool;
+mod user;
+
 #[derive(Clone, Debug, Parser)]
 pub struct Digest {
     #[arg(long, help = "<ENDPOINTS> to pull statistics from.")]
