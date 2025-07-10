@@ -28,7 +28,6 @@ use {
     hash_rate::HashRate,
     hex::FromHex,
     lazy_static::lazy_static,
-    options::Options,
     rand::Rng,
     rust_embed::RustEmbed,
     rustls_acme::{
@@ -85,7 +84,6 @@ mod client;
 mod database;
 mod difficulty;
 mod hash_rate;
-mod options;
 mod stratum;
 mod subcommand;
 mod templates;

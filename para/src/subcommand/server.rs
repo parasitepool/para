@@ -32,6 +32,12 @@ pub struct Server {
     pub(crate) acme_domain: Vec<String>,
     #[arg(long, help = "Provide ACME contact <ACME_CONTACT>")]
     pub(crate) acme_contact: Vec<String>,
+    #[arg(long, alias = "datadir", help = "Store acme cache in <DATA_DIR>")]
+    pub(crate) data_dir: Option<PathBuf>,
+    #[arg(long, help = "Connect to Postgres running at <DATABASE_URL>")]
+    pub(crate) database_url: Option<String>,
+    #[arg(long, help = "CKpool <LOG_DIR>")]
+    pub(crate) log_dir: Option<PathBuf>,
     #[clap(long, help = "Listen on <PORT>")]
     pub(crate) port: Option<u16>,
     #[arg(long, help = "Require basic HTTP authentication with <USERNAME>.")]
@@ -41,12 +47,12 @@ pub struct Server {
 }
 
 impl Server {
-    pub async fn run(&self, options: Options, handle: Handle) -> Result {
-        let log_dir = options.log_dir();
+    pub async fn run(&self, handle: Handle) -> Result {
+        let log_dir = self.log_dir();
 
         info!("Serving files in {}", log_dir.display());
 
-        let database = Database::new(&options).await?;
+        let database = Database::new(self.database_url()).await?;
 
         let domain = self.domains()?.first().expect("should have domain").clone();
 
@@ -76,7 +82,7 @@ impl Server {
             .route("/split", get(Self::open_split))
             .route("/split/{blockheight}", get(Self::sat_split))
             .route("/static/{*path}", get(Self::static_assets))
-            .layer(Extension(options.clone()))
+            .layer(Extension(self.log_dir()))
             .layer(Extension(domain))
             .layer(Extension(database));
 
@@ -85,7 +91,7 @@ impl Server {
             handle,
             self.address.clone(),
             self.port,
-            options.data_dir(),
+            self.data_dir(),
             self.acme_domain.clone(),
             self.acme_contact.clone(),
         )?
@@ -101,9 +107,9 @@ impl Server {
         .page(domain))
     }
 
-    async fn users(Extension(options): Extension<Options>) -> ServerResult<Response> {
+    async fn users(Extension(log_dir): Extension<PathBuf>) -> ServerResult<Response> {
         task::block_in_place(|| {
-            let path = options.log_dir().join("users");
+            let path = log_dir.join("users");
 
             let users: Vec<String> = fs::read_dir(&path)
                 .map_err(|err| anyhow!(err))?
@@ -242,6 +248,22 @@ impl Server {
                 System::host_name().ok_or(anyhow!("no hostname found"))?,
             ])
         }
+    }
+
+    fn data_dir(&self) -> PathBuf {
+        self.data_dir.clone().unwrap_or_default()
+    }
+
+    fn database_url(&self) -> String {
+        self.database_url
+            .clone()
+            .unwrap_or_else(|| "postgres://satoshi:nakamoto@127.0.0.1:5432/ckpool".to_string())
+    }
+
+    fn log_dir(&self) -> PathBuf {
+        self.log_dir.clone().unwrap_or_else(|| {
+            std::env::current_dir().expect("Failed to get current working directory")
+        })
     }
 
     fn spawn(
