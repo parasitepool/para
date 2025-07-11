@@ -46,7 +46,7 @@ use {
     serde_with::{DeserializeFromStr, SerializeDisplay},
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
     std::{
-        collections::BTreeMap,
+        collections::{BTreeMap, HashMap},
         env, fmt, fs, io,
         net::ToSocketAddrs,
         ops::Add,
