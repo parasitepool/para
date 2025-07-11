@@ -1,10 +1,12 @@
 use {
     super::*,
     crate::templates::{PageContent, PageHtml, healthcheck::HealthcheckHtml, home::HomeHtml},
+    aggregator::Aggregator,
     config::Config,
     error::{OptionExt, ServerError, ServerResult},
 };
 
+mod aggregator;
 mod config;
 mod error;
 
@@ -83,6 +85,13 @@ impl Server {
             Err(err) => {
                 warn!("Failed to connect to PostgreSQL: {err}",);
             }
+        }
+
+        if !config.nodes().is_empty() {
+            let aggregator = Aggregator::init(config.nodes().clone())?;
+            router = router.merge(aggregator);
+        } else {
+            warn!("No aggregator nodes configured: skipping aggregator routes.");
         }
 
         info!("Serving files in {}", log_dir.display());
@@ -494,6 +503,44 @@ mod tests {
     fn credentials_mutual_requirement_no_panic() {
         parse_server_config("para server --username satoshi --password secret");
         parse_server_config("para server");
+    }
+
+    #[test]
+    fn default_nodes() {
+        let config = parse_server_config("para server");
+        assert_eq!(config.nodes(), vec![]);
+    }
+
+    #[test]
+    fn override_nodes_single_http() {
+        let config = parse_server_config("para server --nodes http://localhost:80");
+        let expected = vec![Url::parse("http://localhost:80").unwrap()];
+        assert_eq!(config.nodes(), expected);
+    }
+
+    #[test]
+    fn override_nodes_single_https() {
+        let config = parse_server_config("para server --nodes https://parasite.wtf");
+        let expected = vec![Url::parse("https://parasite.wtf").unwrap()];
+        assert_eq!(config.nodes(), expected);
+    }
+
+    #[test]
+    fn multiple_nodes() {
+        let config = parse_server_config(
+            "para server --nodes http://localhost:80 --nodes https://parasite.wtf",
+        );
+        let expected = vec![
+            Url::parse("http://localhost:80").unwrap(),
+            Url::parse("https://parasite.wtf").unwrap(),
+        ];
+        assert_eq!(config.nodes(), expected);
+    }
+
+    #[test]
+    #[should_panic(expected = "error parsing arguments")]
+    fn invalid_node_url() {
+        parse_server_config("para server --nodes invalid_url");
     }
 
     #[test]

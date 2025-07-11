@@ -2,11 +2,11 @@ use super::*;
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
 pub(crate) struct User {
-    pub(crate) hashrate1m: String, // could be HashRate if adapted
-    pub(crate) hashrate5m: String,
-    pub(crate) hashrate1hr: String,
-    pub(crate) hashrate1d: String,
-    pub(crate) hashrate7d: String,
+    pub(crate) hashrate1m: HashRate,
+    pub(crate) hashrate5m: HashRate,
+    pub(crate) hashrate1hr: HashRate,
+    pub(crate) hashrate1d: HashRate,
+    pub(crate) hashrate7d: HashRate,
     pub(crate) lastshare: u64, // I think this is a unix time
     pub(crate) workers: u64,
     pub(crate) shares: u64,
@@ -18,12 +18,12 @@ pub(crate) struct User {
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
 pub(crate) struct Worker {
-    pub(crate) workername: String, // make HashRate type
-    pub(crate) hashrate1m: String,
-    pub(crate) hashrate5m: String,
-    pub(crate) hashrate1hr: String,
-    pub(crate) hashrate1d: String,
-    pub(crate) hashrate7d: String,
+    pub(crate) workername: String,
+    pub(crate) hashrate1m: HashRate,
+    pub(crate) hashrate5m: HashRate,
+    pub(crate) hashrate1hr: HashRate,
+    pub(crate) hashrate1d: HashRate,
+    pub(crate) hashrate7d: HashRate,
     pub(crate) lastshare: u64, //unix time
     pub(crate) shares: u64,
     pub(crate) bestshare: f64,
