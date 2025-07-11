@@ -383,7 +383,6 @@ mod tests {
         assert_eq!(sum.shares.sps15m, 650.0);
         assert_eq!(sum.shares.sps1h, 850.0);
 
-        // Bonus round: Parse and add for that real-world flair
         let parsed_status = Status::from_str(POOL_STATUS).unwrap();
         let sum_with_parsed = status1 + parsed_status;
         assert_eq!(
