@@ -23,11 +23,12 @@ pub(crate) struct Database {
 }
 
 impl Database {
-    pub(crate) async fn new(options: &Options) -> Result<Self> {
+    pub(crate) async fn new(database_url: String) -> Result<Self> {
         Ok(Self {
             pool: PgPoolOptions::new()
                 .max_connections(5)
-                .connect(&options.database_url())
+                .acquire_timeout(Duration::from_secs(5))
+                .connect(&database_url)
                 .await?,
         })
     }
