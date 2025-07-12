@@ -21,7 +21,6 @@ use {
     },
     byteorder::{BigEndian, ByteOrder, LittleEndian},
     clap::Parser,
-    database::Database,
     derive_more::Display,
     difficulty::Difficulty,
     futures::stream::StreamExt,
@@ -57,10 +56,7 @@ use {
         },
         time::{Duration, Instant},
     },
-    stratum::{
-        Authorize, Id, Message, Nonce, Notify, Ntime, SetDifficulty, Submit, Subscribe,
-        SubscribeResult,
-    },
+    stratum::{Id, Message, Notify, SetDifficulty},
     sysinfo::{Disks, System},
     tokio::{
         io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader, BufWriter},
@@ -80,13 +76,10 @@ use {
 };
 
 mod arguments;
-mod client;
-mod database;
-mod difficulty;
-mod hash_rate;
-mod stratum;
+pub mod difficulty;
+pub mod hash_rate;
+pub mod stratum;
 mod subcommand;
-mod templates;
 
 pub const COIN_VALUE: u64 = 100_000_000;
 

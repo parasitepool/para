@@ -1,12 +1,15 @@
 use {
     super::*,
-    crate::templates::{PageContent, PageHtml, healthcheck::HealthcheckHtml, home::HomeHtml},
     config::Config,
+    database::Database,
     error::{OptionExt, ServerError, ServerResult},
+    templates::{PageContent, PageHtml, healthcheck::HealthcheckHtml, home::HomeHtml},
 };
 
 mod config;
+mod database;
 mod error;
+mod templates;
 
 #[derive(RustEmbed)]
 #[folder = "static"]

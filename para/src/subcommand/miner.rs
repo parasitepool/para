@@ -1,4 +1,4 @@
-use {super::*, crate::client::Client, controller::Controller, hasher::Hasher};
+use {super::*, controller::Controller, hasher::Hasher, stratum::Client};
 
 mod controller;
 mod hasher;

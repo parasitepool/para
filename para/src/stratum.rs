@@ -1,12 +1,15 @@
 use super::*;
 
-mod nbits;
-mod nonce;
-mod ntime;
-mod prevhash;
-mod version;
+pub mod client;
+pub mod nbits;
+pub mod nonce;
+pub mod ntime;
+pub mod prevhash;
+pub mod version;
 
-pub use {nbits::Nbits, nonce::Nonce, ntime::Ntime, prevhash::PrevHash, version::Version};
+pub use {
+    client::Client, nbits::Nbits, nonce::Nonce, ntime::Ntime, prevhash::PrevHash, version::Version,
+};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord, Display, Clone)]
 #[serde(untagged)]
