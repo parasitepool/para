@@ -89,7 +89,7 @@ fn target_as_block_hash(target: bitcoin::Target) -> BlockHash {
     BlockHash::from_raw_hash(Hash::from_byte_array(target.to_le_bytes()))
 }
 
-pub fn format_uptime(uptime_seconds: u64) -> String {
+fn format_uptime(uptime_seconds: u64) -> String {
     let days = uptime_seconds / 86400;
     let hours = (uptime_seconds % 86400) / 3600;
     let minutes = (uptime_seconds % 3600) / 60;

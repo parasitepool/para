@@ -1,11 +1,11 @@
 use super::*;
 
-pub mod client;
-pub mod nbits;
-pub mod nonce;
-pub mod ntime;
-pub mod prevhash;
-pub mod version;
+mod client;
+mod nbits;
+mod nonce;
+mod ntime;
+mod prevhash;
+mod version;
 
 pub use {
     client::Client, nbits::Nbits, nonce::Nonce, ntime::Ntime, prevhash::PrevHash, version::Version,
