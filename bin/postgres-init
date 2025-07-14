@@ -68,6 +68,117 @@ PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
       agent TEXT
   )
   "
+
+# This is wildly unacceptable and demonstrates why we made need to move to an internal query-library model
+PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
+  CREATE OR REPLACE FUNCTION compress_shares(
+      window_start_val BIGINT,
+      window_end_val BIGINT
+  ) RETURNS TABLE(id BIGINT, total_diff NUMERIC, workername TEXT) LANGUAGE plpgsql AS $$
+  DECLARE initial_results TEXT;
+          final_results TEXT;
+  BEGIN
+      -- calculate initial state for sanity check
+      WITH initial_data AS (
+          SELECT
+              MIN(shares.id)::BIGINT as min_id,
+              COALESCE(SUM(shares.diff), 0)::NUMERIC as total_diff,
+              COALESCE(shares.workername, '') as workername
+          FROM shares
+          WHERE shares.id > window_start_val AND shares.id <= window_end_val AND shares.result = true
+          GROUP BY shares.workername
+      )
+      SELECT string_agg(
+                     initial_data.min_id::text || '|' || initial_data.total_diff::text || '|' || initial_data.workername,
+                     ','
+                     ORDER BY min_id
+             )
+      INTO initial_results
+      FROM initial_data;
+
+      -- fix records with broken or 0 values for blockheight
+      UPDATE shares
+      SET blockheight = subq.fill_value
+      FROM (
+               SELECT
+                   s.id,
+                   MAX(CASE WHEN s.blockheight > 0 THEN s.blockheight END)
+                   OVER (
+                       ORDER BY s.id
+                       ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                       ) as fill_value
+               FROM shares s
+               WHERE s.id > window_start_val AND s.id <= window_end_val
+           ) subq
+      WHERE shares.id > window_start_val AND shares.id <= window_end_val AND
+          shares.id = subq.id AND
+          shares.blockheight = 0 AND
+          subq.fill_value IS NOT NULL;
+
+      -- update share values by setting all except the first to 0 and the first to the sum of the others
+      UPDATE shares
+      SET diff = subq.total_diff
+      FROM (
+               SELECT
+                   s.workername,
+                   s.blockheight,
+                   MIN(s.id) as keep_id,
+                   SUM(s.diff) as total_diff
+               FROM shares s
+               WHERE s.id > window_start_val AND s.id <= window_end_val AND s.blockheight > 0 AND s.result = true
+               GROUP BY s.workername, s.blockheight
+           ) subq
+      WHERE shares.id > window_start_val AND shares.id <= window_end_val
+        AND shares.id = subq.keep_id;
+
+      -- remove the shares with diff 0
+      DELETE FROM shares
+      WHERE shares.id > window_start_val AND shares.id <= window_end_val AND
+          shares.id NOT IN (
+              SELECT MIN(s.id)
+              FROM shares s
+              WHERE s.id > window_start_val AND s.id <= window_end_val AND s.blockheight > 0 AND s.result = true
+              GROUP BY s.workername, s.blockheight
+          ) AND
+          shares.blockheight > 0;
+
+      -- calculate final output values for sanity check
+      WITH final_data AS (
+          SELECT
+              MIN(shares.id) as min_id,
+              COALESCE(SUM(shares.diff), 0) as total_diff,
+              COALESCE(shares.workername, '') as workername
+          FROM shares
+          WHERE shares.id > window_start_val AND shares.id <= window_end_val AND shares.result = true
+          GROUP BY shares.workername
+      )
+      SELECT string_agg(
+                     final_data.min_id::text || '|' || final_data.total_diff::text || '|' || final_data.workername,
+                     ','
+                     ORDER BY min_id
+             )
+      INTO final_results
+      FROM final_data;
+
+      -- reject the unexpected case that a workername is now seeing a different total number of shares O_O
+      IF initial_results != final_results THEN
+          RAISE EXCEPTION 'Data integrity check failed for window % to %: grouped results changed during processing. Initial: %, Final: %',
+              window_start_val, window_end_val, initial_results, final_results;
+      END IF;
+
+      -- return aggregate data for safety check
+      RETURN QUERY
+          SELECT
+              MIN(shares.id)::BIGINT as id,
+              SUM(shares.diff)::NUMERIC as total_diff,
+              shares.workername
+          FROM shares
+          WHERE shares.id > window_start_val AND shares.id <= window_end_val AND shares.result = true
+          GROUP BY shares.workername
+          ORDER BY MIN(shares.id);
+  END $$;
+  "
+
 PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
   CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
