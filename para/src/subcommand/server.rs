@@ -508,7 +508,7 @@ mod tests {
     #[test]
     fn default_nodes() {
         let config = parse_server_config("para server");
-        assert_eq!(config.nodes(), vec![]);
+        assert!(config.nodes().is_empty());
     }
 
     #[test]
