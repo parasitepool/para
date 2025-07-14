@@ -92,15 +92,7 @@ impl Server {
                 HeaderValue::from_static("inline"),
             ))
             .route("/", get(Self::home))
-            .route(
-                "/healthcheck",
-                if let Some((username, password)) = config.credentials() {
-                    get(Self::healthcheck)
-                        .layer(ValidateRequestHeaderLayer::basic(username, password))
-                } else {
-                    get(Self::healthcheck)
-                },
-            )
+            .route("/healthcheck", self.with_auth(get(Self::healthcheck)))
             .route("/static/{*path}", get(Self::static_assets))
             .layer(Extension(config.clone()));
 
@@ -129,6 +121,17 @@ impl Server {
         self.spawn(config, router, handle)?.await??;
 
         Ok(())
+    }
+
+    fn with_auth<S>(&self, method_router: MethodRouter<S>) -> MethodRouter<S>
+    where
+        S: Clone + Send + Sync + 'static,
+    {
+        if let Some((username, password)) = self.credentials() {
+            method_router.layer(ValidateRequestHeaderLayer::basic(username, password))
+        } else {
+            method_router
+        }
     }
 
     async fn home(Extension(config): Extension<Arc<Config>>) -> ServerResult<PageHtml<HomeHtml>> {
