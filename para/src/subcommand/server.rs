@@ -1,12 +1,15 @@
 use {
     super::*,
-    crate::templates::{PageContent, PageHtml, healthcheck::HealthcheckHtml, home::HomeHtml},
     config::Config,
+    database::Database,
     error::{OptionExt, ServerError, ServerResult},
+    templates::{PageContent, PageHtml, healthcheck::HealthcheckHtml, home::HomeHtml},
 };
 
 mod config;
+mod database;
 mod error;
+mod templates;
 
 #[derive(RustEmbed)]
 #[folder = "static"]
@@ -24,6 +27,33 @@ pub(crate) struct SatSplit {
     pub(crate) block_hash: String,
     pub(crate) total_payment_amount: i64,
     pub(crate) payments: Vec<Payment>,
+}
+
+fn format_uptime(uptime_seconds: u64) -> String {
+    let days = uptime_seconds / 86400;
+    let hours = (uptime_seconds % 86400) / 3600;
+    let minutes = (uptime_seconds % 3600) / 60;
+
+    let plural = |n: u64, singular: &str| {
+        if n == 1 {
+            singular.to_string()
+        } else {
+            format!("{singular}s")
+        }
+    };
+
+    let mut parts = Vec::new();
+    if days > 0 {
+        parts.push(format!("{} {}", days, plural(days, "day")));
+    }
+    if hours > 0 {
+        parts.push(format!("{} {}", hours, plural(hours, "hour")));
+    }
+    if minutes > 0 || parts.is_empty() {
+        parts.push(format!("{} {}", minutes, plural(minutes, "minute")));
+    }
+
+    parts.join(", ")
 }
 
 #[derive(Clone, Debug, Parser)]
@@ -494,6 +524,64 @@ mod tests {
     fn credentials_mutual_requirement_no_panic() {
         parse_server_config("para server --username satoshi --password secret");
         parse_server_config("para server");
+    }
+
+    #[test]
+    fn test_zero_seconds() {
+        assert_eq!(format_uptime(0), "0 minutes");
+    }
+
+    #[test]
+    fn test_single_units() {
+        assert_eq!(format_uptime(1), "0 minutes");
+        assert_eq!(format_uptime(60), "1 minute");
+        assert_eq!(format_uptime(3600), "1 hour");
+        assert_eq!(format_uptime(86400), "1 day");
+    }
+
+    #[test]
+    fn test_plural_units() {
+        assert_eq!(format_uptime(120), "2 minutes");
+        assert_eq!(format_uptime(7200), "2 hours");
+        assert_eq!(format_uptime(172800), "2 days");
+    }
+
+    #[test]
+    fn test_mixed_units() {
+        assert_eq!(format_uptime(90060), "1 day, 1 hour, 1 minute");
+        assert_eq!(format_uptime(183900), "2 days, 3 hours, 5 minutes");
+        assert_eq!(format_uptime(88200), "1 day, 30 minutes");
+        assert_eq!(format_uptime(8100), "2 hours, 15 minutes");
+    }
+
+    #[test]
+    fn test_edge_cases() {
+        assert_eq!(format_uptime(59), "0 minutes");
+        assert_eq!(format_uptime(3599), "59 minutes");
+        assert_eq!(format_uptime(86399), "23 hours, 59 minutes");
+        assert_eq!(format_uptime(60), "1 minute");
+        assert_eq!(format_uptime(3600), "1 hour");
+        assert_eq!(format_uptime(86400), "1 day");
+    }
+
+    #[test]
+    fn test_large_values() {
+        assert_eq!(format_uptime(2592000), "30 days");
+        assert_eq!(format_uptime(31581000), "365 days, 12 hours, 30 minutes");
+    }
+
+    #[test]
+    fn test_only_minutes_when_less_than_hour() {
+        assert_eq!(format_uptime(30), "0 minutes");
+        assert_eq!(format_uptime(90), "1 minute");
+        assert_eq!(format_uptime(1800), "30 minutes");
+    }
+
+    #[test]
+    fn test_fractional_seconds_truncated() {
+        assert_eq!(format_uptime(119), "1 minute"); // 1 min 59 sec -> 1 minute
+        assert_eq!(format_uptime(3659), "1 hour"); // 1 hour 59 sec -> 1 hour
+        assert_eq!(format_uptime(86459), "1 day"); // 1 day 59 sec -> 1 day
     }
 
     #[test]
