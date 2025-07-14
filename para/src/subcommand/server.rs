@@ -9,7 +9,7 @@ use {
 
 mod aggregator;
 mod config;
-mod database;
+pub(crate) mod database;
 mod error;
 mod templates;
 

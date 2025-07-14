@@ -1,7 +1,7 @@
 use super::*;
 
 mod miner;
-mod server;
+pub(crate) mod server;
 mod sync;
 
 #[derive(Debug, Parser)]
