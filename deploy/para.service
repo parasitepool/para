@@ -11,9 +11,7 @@ Environment=RUST_LOG=info
 ExecStart=/usr/local/bin/para \
   server \
   --acme-contact mailto:infra@parasite.dev \
-  --acme-contact mailto:infra@parasite.dev \
   --acme-domain parasite.wtf \
-  --acme-domain parasite.xyz \
   --data-dir /var/lib/para \
   --database-url postgres://satoshi:nakamoto@127.0.0.1:5432/ckpool \
   --log-dir /var/lib/ckpool/logs \
