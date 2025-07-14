@@ -38,4 +38,12 @@ miner-signet:
     --password x
 
 server: 
-  RUST_LOG=info cargo run -- server --log-dir ../copr/logs --port 8080 --nodes http://localhost:8080 --nodes https://parasite.wtf
+  RUST_LOG=info cargo run -- server --log-dir ../copr/logs --port 8080
+
+aggregator: 
+  RUST_LOG=info cargo run \
+    server \
+    --port 8080 \
+    --nodes https://solo.ckpool.org \
+    --nodes https://eusolo.ckpool.org \
+    --nodes https://ausolo.ckpool.org
