@@ -127,7 +127,7 @@ impl Server {
     where
         S: Clone + Send + Sync + 'static,
     {
-        if let Some((username, password)) = self.credentials() {
+        if let Some((username, password)) = self.config.credentials() {
             method_router.layer(ValidateRequestHeaderLayer::basic(username, password))
         } else {
             method_router
