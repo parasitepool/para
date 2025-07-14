@@ -137,7 +137,7 @@ impl SyncSend {
             println!("Reset current height to 0");
         }
 
-        println!("Starting sync send from block height: {}", current_height);
+        println!("Starting sync send from block height: {current_height}");
 
         while !shutdown_flag.load(Ordering::Relaxed) {
             match self
@@ -152,7 +152,7 @@ impl SyncSend {
                     sleep(Duration::from_millis(SYNC_DELAY_MS)).await;
                 }
                 Err(e) => {
-                    eprintln!("Sync send error: {}", e);
+                    eprintln!("Sync send error: {e}");
                     sleep(Duration::from_millis(SYNC_DELAY_MS * 5)).await;
                 }
             }
@@ -214,7 +214,7 @@ impl SyncSend {
                     return Ok(SyncResult::Continue);
                 }
                 Err(e) => {
-                    eprintln!("Attempt {} failed: {}", attempt, e);
+                    eprintln!("Attempt {attempt} failed: {e}");
                     if attempt == MAX_RETRIES {
                         return Err(e);
                     }
@@ -235,11 +235,11 @@ impl SyncSend {
     ) -> Result<()> {
         let socket = context
             .socket(SocketType::REQ)
-            .map_err(|e| anyhow!("Failed to create ZMQ socket: {}", e))?;
+            .map_err(|e| anyhow!("Failed to create ZMQ socket: {e}"))?;
 
         socket
             .connect(&self.zmq_endpoint)
-            .map_err(|e| anyhow!("Failed to connect to ZMQ endpoint: {}", e))?;
+            .map_err(|e| anyhow!("Failed to connect to ZMQ endpoint: {e}"))?;
 
         let batch_id = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
@@ -375,7 +375,7 @@ impl SyncReceive {
                 }
                 Err(e) => {
                     // error
-                    eprintln!("Error processing batch: {}", e);
+                    eprintln!("Error processing batch: {e}");
                     let error_response = SyncResponse {
                         batch_id: 0,
                         received_count: 0,
