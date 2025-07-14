@@ -17,14 +17,7 @@ env:
 
 jobs:
   para:
-    strategy:
-      matrix:
-        os:
-        - macos-latest
-        - ubuntu-latest
-        - windows-latest
-
-    runs-on: ${{matrix.os}}
+    runs-on: ubuntu-latest
     
     defaults:
       run:
@@ -47,6 +40,15 @@ jobs:
 
     - name: Format
       run: cargo fmt --all -- --check
+
+    strategy:
+      matrix:
+        os:
+        - macos-latest
+        - ubuntu-latest
+        - windows-latest
+
+    runs-on: ${{matrix.os}}
 
     - name: Test
       run: cargo test --all
