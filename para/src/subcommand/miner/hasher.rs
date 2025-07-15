@@ -13,7 +13,8 @@ impl Hasher {
     pub(crate) fn hash(&mut self, cancel: CancellationToken) -> Result<(Header, String, String)> {
         const CANCEL_CHECK_INTERVAL: u32 = 1000;
 
-        let span = tracing::info_span!("hasher", job_id = %self.job_id, extranonce2 = %self.extranonce2);
+        let span =
+            tracing::info_span!("hasher", job_id = %self.job_id, extranonce2 = %self.extranonce2);
         let _enter = span.enter();
 
         let mut hashes = 0u64;
@@ -31,14 +32,13 @@ impl Hasher {
 
                 if self.pool_target.is_met_by(hash) {
                     info!("Solved block with hash: {hash}");
-                    return Ok((
-                        self.header,
-                        self.extranonce2.clone(),
-                        self.job_id.clone(),
-                    ));
+                    return Ok((self.header, self.extranonce2.clone(), self.job_id.clone()));
                 }
 
-                self.header.nonce = self.header.nonce.checked_add(1)
+                self.header.nonce = self
+                    .header
+                    .nonce
+                    .checked_add(1)
                     .ok_or_else(|| anyhow!("nonce space exhausted"))?;
             }
 
@@ -51,7 +51,6 @@ impl Hasher {
         }
     }
 }
-
 
 // Creates a target with specified difficulty (number of leading zero bits)
 //
@@ -72,8 +71,9 @@ fn target_with_difficulty(difficulty: u8) -> Target {
     let full_zero_bytes = (difficulty / 8) as usize;
     let partial_bits = difficulty % 8;
 
-    for i in 0..full_zero_bytes {
-        bytes[i] = 0x00;
+    // Fix: Use iterator instead of range loop
+    for byte in bytes.iter_mut().take(full_zero_bytes) {
+        *byte = 0x00;
     }
 
     if partial_bits > 0 {
@@ -121,20 +121,18 @@ fn get_difficulty_from_user() -> Result<Target> {
                 println!("Selected difficulty: {} bits", difficulty);
                 return Ok(target_with_difficulty(difficulty));
             }
-            Ok(7) => {
-                loop {
-                    print!("Enter custom difficulty (1-32): ");
-                    io::stdout().flush()?;
-                    let input = read_line_trimmed()?;
-                    if let Ok(custom_diff) = input.parse::<u8>() {
-                        if (1..=32).contains(&custom_diff) {
-                            println!("Selected custom difficulty: {} bits", custom_diff);
-                            return Ok(target_with_difficulty(custom_diff));
-                        }
+            Ok(7) => loop {
+                print!("Enter custom difficulty (1-32): ");
+                io::stdout().flush()?;
+                let input = read_line_trimmed()?;
+                if let Ok(custom_diff) = input.parse::<u8>() {
+                    if (1..=32).contains(&custom_diff) {
+                        println!("Selected custom difficulty: {} bits", custom_diff);
+                        return Ok(target_with_difficulty(custom_diff));
                     }
-                    println!("Invalid custom difficulty. Please try again.");
                 }
-            }
+                println!("Invalid custom difficulty. Please try again.");
+            },
             _ => println!("Invalid choice. Please enter a number between 1 and 7."),
         }
     }
@@ -159,12 +157,14 @@ fn format_hashrate(hashes_per_second: f64) -> String {
     for &(threshold, suffix) in UNITS {
         if hashes_per_second >= threshold {
             let val = hashes_per_second / threshold;
-            return format!("{:.2} {}", val, suffix).trim_end_matches('0').trim_end_matches('.').to_string();
+            return format!("{:.2} {}", val, suffix)
+                .trim_end_matches('0')
+                .trim_end_matches('.')
+                .to_string();
         }
     }
     format!("{:.2} H/s", hashes_per_second)
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -244,8 +244,8 @@ mod tests {
 
     #[test]
     fn hasher_nonce_space_exhausted() {
-    // Use higher difficulty to ensure miner is able to hit nonce exhaustion
-        let target = target_with_difficulty(32); 
+        // Use higher difficulty to ensure miner is able to hit nonce exhaustion
+        let target = target_with_difficulty(32);
         let mut hasher = Hasher {
             header: header(None, Some(u32::MAX - 1)),
             pool_target: target,
@@ -268,8 +268,9 @@ mod tests {
 
         let hard_target = target_with_difficulty(32);
         let hard_bytes = hard_target.to_be_bytes();
-        for i in 0..4 {
-            assert_eq!(hard_bytes[i], 0);
+        // Fix: Use iterator instead of range loop
+        for byte in hard_bytes.iter().take(4) {
+            assert_eq!(*byte, 0);
         }
         assert_eq!(hard_bytes[4], 0xFF);
     }
@@ -289,16 +290,19 @@ mod tests {
         // Test that difficulties create properly ordered targets
         let difficulties = [1, 4, 8, 12, 16, 20, 24];
         let mut targets = Vec::new();
-        
+
         for &diff in &difficulties {
             targets.push(target_with_difficulty(diff));
         }
-        
+
         // Each target should be smaller (more restrictive) than the previous
         for i in 1..targets.len() {
-            assert!(targets[i] < targets[i-1], 
-                "Target at difficulty {} should be smaller than difficulty {}", 
-                difficulties[i], difficulties[i-1]);
+            assert!(
+                targets[i] < targets[i - 1],
+                "Target at difficulty {} should be smaller than difficulty {}",
+                difficulties[i],
+                difficulties[i - 1]
+            );
         }
     }
 
@@ -306,7 +310,7 @@ mod tests {
     fn test_multiple_difficulty_levels() {
         // Test that hasher works with different difficulty levels
         let difficulties = [1, 2, 3, 4]; // Keep low for test speed
-        
+
         for difficulty in difficulties {
             let target = target_with_difficulty(difficulty);
             let mut hasher = Hasher {
@@ -315,14 +319,17 @@ mod tests {
                 extranonce2: "00000000000".into(),
                 job_id: format!("test_{}", difficulty),
             };
-            
+
             let result = hasher.hash(CancellationToken::new());
             assert!(result.is_ok(), "Failed at difficulty {}", difficulty);
-            
+
             let (header, _, _) = result.unwrap();
             // Use pool_target for validation instead of validate_pow
-            assert!(target.is_met_by(header.block_hash()), 
-                "Invalid PoW at difficulty {}", difficulty);
+            assert!(
+                target.is_met_by(header.block_hash()),
+                "Invalid PoW at difficulty {}",
+                difficulty
+            );
         }
     }
 }
