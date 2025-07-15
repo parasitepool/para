@@ -123,10 +123,10 @@ impl Add for HashRateStatus {
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone, Copy)]
 pub(crate) struct ShareStatus {
-    diff: f64, // no idea what this is but some sort of percentage; 100% means work for one block achieved
+    diff: f64,
     accepted: u64,
     rejected: u64,
-    bestshare: u64, // maybe a f64, see above
+    bestshare: u64,
     #[serde(rename = "SPS1m")]
     sps1m: f64,
     #[serde(rename = "SPS5m")]

@@ -7,12 +7,12 @@ pub(crate) struct User {
     pub(crate) hashrate1hr: HashRate,
     pub(crate) hashrate1d: HashRate,
     pub(crate) hashrate7d: HashRate,
-    pub(crate) lastshare: u64, // I think this is a unix time
+    pub(crate) lastshare: u64,
     pub(crate) workers: u64,
     pub(crate) shares: u64,
     pub(crate) bestshare: f64,
     pub(crate) bestever: u64,
-    pub(crate) authorised: u64, // This is unix time
+    pub(crate) authorised: u64,
     pub(crate) worker: Vec<Worker>,
 }
 
@@ -20,21 +20,18 @@ impl Add for User {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self {
-        let mut workers_map: HashMap<String, Worker> = self
+        let worker = self
             .worker
             .into_iter()
-            .map(|w| (w.workername.clone(), w))
+            .chain(rhs.worker)
+            .fold(HashMap::new(), |mut acc, w| {
+                acc.entry(w.workername.clone())
+                    .and_modify(|existing: &mut Worker| *existing = existing.clone() + w.clone())
+                    .or_insert(w);
+                acc
+            })
+            .into_values()
             .collect();
-
-        for w in rhs.worker {
-            if let Some(existing) = workers_map.get_mut(&w.workername) {
-                *existing = existing.clone() + w;
-            } else {
-                workers_map.insert(w.workername.clone(), w);
-            }
-        }
-
-        let worker_vec: Vec<Worker> = workers_map.into_values().collect();
 
         Self {
             hashrate1m: self.hashrate1m + rhs.hashrate1m,
@@ -48,12 +45,11 @@ impl Add for User {
             bestshare: self.bestshare.max(rhs.bestshare),
             bestever: self.bestever.max(rhs.bestever),
             authorised: self.authorised.min(rhs.authorised),
-            worker: worker_vec,
+            worker,
         }
     }
 }
 
-// TODO: note to self, adding up averages naively feels a bit wrong, investigate further
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 pub(crate) struct Worker {
     pub(crate) workername: String,
@@ -62,7 +58,7 @@ pub(crate) struct Worker {
     pub(crate) hashrate1hr: HashRate,
     pub(crate) hashrate1d: HashRate,
     pub(crate) hashrate7d: HashRate,
-    pub(crate) lastshare: u64, // TODO: unix time
+    pub(crate) lastshare: u64,
     pub(crate) shares: u64,
     pub(crate) bestshare: f64,
     pub(crate) bestever: u64,
@@ -72,7 +68,7 @@ impl Add for Worker {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self {
-        assert_eq!(self.workername, rhs.workername); // TODO: For sanity
+        assert_eq!(self.workername, rhs.workername);
 
         Self {
             workername: self.workername,
