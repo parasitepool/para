@@ -118,7 +118,7 @@ fn get_difficulty_from_user() -> Result<Target> {
         match read_line_trimmed()?.parse::<u8>() {
             Ok(choice @ 1..=6) => {
                 let difficulty = DIFFICULTIES[(choice - 1) as usize].0;
-                println!("Selected difficulty: {} bits", difficulty);
+                println!("Selected difficulty: {difficulty} bits");
                 return Ok(target_with_difficulty(difficulty));
             }
             Ok(7) => loop {
@@ -127,7 +127,7 @@ fn get_difficulty_from_user() -> Result<Target> {
                 let input = read_line_trimmed()?;
                 if let Ok(custom_diff) = input.parse::<u8>() {
                     if (1..=32).contains(&custom_diff) {
-                        println!("Selected custom difficulty: {} bits", custom_diff);
+                        println!("Selected custom difficulty: {custom_diff} bits");
                         return Ok(target_with_difficulty(custom_diff));
                     }
                 }
@@ -157,13 +157,13 @@ fn format_hashrate(hashes_per_second: f64) -> String {
     for &(threshold, suffix) in UNITS {
         if hashes_per_second >= threshold {
             let val = hashes_per_second / threshold;
-            return format!("{:.2} {}", val, suffix)
+            return format!("{val:.2} {suffix}")
                 .trim_end_matches('0')
                 .trim_end_matches('.')
                 .to_string();
         }
     }
-    format!("{:.2} H/s", hashes_per_second)
+    format!("{hashes_per_second:.2} H/s")
 }
 
 #[cfg(test)]
@@ -317,18 +317,17 @@ mod tests {
                 header: header(None, None), // Again, don't set network target in bits field
                 pool_target: target,
                 extranonce2: "00000000000".into(),
-                job_id: format!("test_{}", difficulty),
+                job_id: format!("test_{difficulty}"),
             };
 
             let result = hasher.hash(CancellationToken::new());
-            assert!(result.is_ok(), "Failed at difficulty {}", difficulty);
+            assert!(result.is_ok(), "Failed at difficulty {difficulty}");
 
             let (header, _, _) = result.unwrap();
             // Use pool_target for validation instead of validate_pow
             assert!(
                 target.is_met_by(header.block_hash()),
-                "Invalid PoW at difficulty {}",
-                difficulty
+                "Invalid PoW at difficulty {difficulty}"
             );
         }
     }
