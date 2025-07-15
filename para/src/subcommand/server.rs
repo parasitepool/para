@@ -1,10 +1,15 @@
 use {
     super::*,
-    crate::templates::{PageContent, PageHtml, healthcheck::HealthcheckHtml, home::HomeHtml},
+    config::Config,
+    database::Database,
     error::{OptionExt, ServerError, ServerResult},
+    templates::{PageContent, PageHtml, healthcheck::HealthcheckHtml, home::HomeHtml},
 };
 
+mod config;
+mod database;
 mod error;
+mod templates;
 
 #[derive(RustEmbed)]
 #[folder = "static"]
@@ -24,36 +29,58 @@ pub(crate) struct SatSplit {
     pub(crate) payments: Vec<Payment>,
 }
 
+fn format_uptime(uptime_seconds: u64) -> String {
+    let days = uptime_seconds / 86400;
+    let hours = (uptime_seconds % 86400) / 3600;
+    let minutes = (uptime_seconds % 3600) / 60;
+
+    let plural = |n: u64, singular: &str| {
+        if n == 1 {
+            singular.to_string()
+        } else {
+            format!("{singular}s")
+        }
+    };
+
+    let mut parts = Vec::new();
+    if days > 0 {
+        parts.push(format!("{} {}", days, plural(days, "day")));
+    }
+    if hours > 0 {
+        parts.push(format!("{} {}", hours, plural(hours, "hour")));
+    }
+    if minutes > 0 || parts.is_empty() {
+        parts.push(format!("{} {}", minutes, plural(minutes, "minute")));
+    }
+
+    parts.join(", ")
+}
+
 #[derive(Clone, Debug, Parser)]
 pub struct Server {
-    #[clap(long, help = "Listen at <ADDRESS>")]
-    pub(crate) address: Option<String>,
-    #[arg(long, help = "Request ACME TLS certificate for <ACME_DOMAIN>")]
-    pub(crate) acme_domain: Vec<String>,
-    #[arg(long, help = "Provide ACME contact <ACME_CONTACT>")]
-    pub(crate) acme_contact: Vec<String>,
-    #[clap(long, help = "Listen on <PORT>")]
-    pub(crate) port: Option<u16>,
-    #[arg(long, help = "Require basic HTTP authentication with <USERNAME>.")]
-    pub(crate) username: Option<String>,
-    #[arg(long, help = "Require basic HTTP authentication with <PASSWORD>.")]
-    pub(crate) password: Option<String>,
+    #[command(flatten)]
+    pub(crate) config: Config,
 }
 
 impl Server {
-    pub async fn run(&self, options: Options, handle: Handle) -> Result {
-        let log_dir = options.log_dir();
+    pub async fn run(&self, handle: Handle) -> Result {
+        let config = Arc::new(self.config.clone());
+        let log_dir = config.log_dir();
+        let pool_dir = log_dir.join("pool");
+        let user_dir = log_dir.join("users");
 
-        info!("Serving files in {}", log_dir.display());
+        if !pool_dir.exists() {
+            warn!("Pool dir {} does not exist", pool_dir.display());
+        }
 
-        let database = Database::new(&options).await?;
+        if !user_dir.exists() {
+            warn!("User dir {} does not exist", user_dir.display());
+        }
 
-        let domain = self.domains()?.first().expect("should have domain").clone();
-
-        let router = Router::new()
-            .nest_service("/pool/", ServeDir::new(log_dir.join("pool")))
+        let mut router = Router::new()
+            .nest_service("/pool/", ServeDir::new(pool_dir))
             .route("/users", get(Self::users))
-            .nest_service("/users/", ServeDir::new(log_dir.join("users")))
+            .nest_service("/users/", ServeDir::new(user_dir))
             .layer(SetResponseHeaderLayer::overriding(
                 CONTENT_TYPE,
                 HeaderValue::from_static("text/plain"),
@@ -65,58 +92,60 @@ impl Server {
             .route("/", get(Self::home))
             .route(
                 "/healthcheck",
-                if let Some((username, password)) = self.credentials() {
+                if let Some((username, password)) = config.credentials() {
                     get(Self::healthcheck)
                         .layer(ValidateRequestHeaderLayer::basic(username, password))
                 } else {
                     get(Self::healthcheck)
                 },
             )
-            .route("/payouts/{blockheight}", get(Self::payouts))
-            .route("/split", get(Self::open_split))
-            .route("/split/{blockheight}", get(Self::sat_split))
             .route("/static/{*path}", get(Self::static_assets))
-            .layer(Extension(options.clone()))
-            .layer(Extension(domain))
-            .layer(Extension(database));
+            .layer(Extension(config.clone()));
 
-        self.spawn(
-            router,
-            handle,
-            self.address.clone(),
-            self.port,
-            options.data_dir(),
-            self.acme_domain.clone(),
-            self.acme_contact.clone(),
-        )?
-        .await??;
+        match Database::new(config.database_url()).await {
+            Ok(database) => {
+                router = router
+                    .route("/payouts/{blockheight}", get(Self::payouts))
+                    .route("/split", get(Self::open_split))
+                    .route("/split/{blockheight}", get(Self::sat_split))
+                    .layer(Extension(database));
+            }
+            Err(err) => {
+                warn!("Failed to connect to PostgreSQL: {err}",);
+            }
+        }
+
+        info!("Serving files in {}", log_dir.display());
+
+        self.spawn(config, router, handle)?.await??;
 
         Ok(())
     }
 
-    async fn home(Extension(domain): Extension<String>) -> ServerResult<PageHtml<HomeHtml>> {
+    async fn home(Extension(config): Extension<Arc<Config>>) -> ServerResult<PageHtml<HomeHtml>> {
+        let domain = config.domain();
+
         Ok(HomeHtml {
             stratum_url: format!("{domain}:42069"),
         }
         .page(domain))
     }
 
-    async fn users(Extension(options): Extension<Options>) -> ServerResult<Response> {
+    async fn users(Extension(config): Extension<Arc<Config>>) -> ServerResult<Response> {
         task::block_in_place(|| {
-            let path = options.log_dir().join("users");
-
-            let users: Vec<String> = fs::read_dir(&path)
-                .map_err(|err| anyhow!(err))?
-                .filter_map(Result::ok)
-                .filter_map(|entry| entry.file_name().to_str().map(|s| s.to_string()))
-                .collect();
-
-            Ok(Json(users).into_response())
+            Ok(Json(
+                fs::read_dir(config.log_dir().join("users"))
+                    .map_err(|err| anyhow!(err))?
+                    .filter_map(Result::ok)
+                    .filter_map(|entry| entry.file_name().to_str().map(|s| s.to_string()))
+                    .collect::<Vec<String>>(),
+            )
+            .into_response())
         })
     }
 
     pub(crate) async fn healthcheck(
-        Extension(domain): Extension<String>,
+        Extension(config): Extension<Arc<Config>>,
     ) -> ServerResult<PageHtml<HealthcheckHtml>> {
         task::block_in_place(|| {
             let mut system = System::new_all();
@@ -154,7 +183,7 @@ impl Server {
                 cpu_usage_percent: format!("{cpu_usage_percent:.2}"),
                 uptime: format_uptime(uptime_seconds),
             }
-            .page(domain))
+            .page(config.domain()))
         })
     }
 
@@ -230,42 +259,25 @@ impl Server {
             .unwrap())
     }
 
-    fn credentials(&self) -> Option<(&str, &str)> {
-        self.username.as_deref().zip(self.password.as_deref())
-    }
-
-    fn domains(&self) -> Result<Vec<String>> {
-        if !self.acme_domain.is_empty() {
-            Ok(self.acme_domain.clone())
-        } else {
-            Ok(vec![
-                System::host_name().ok_or(anyhow!("no hostname found"))?,
-            ])
-        }
-    }
-
     fn spawn(
         &self,
+        config: Arc<Config>,
         router: Router,
         handle: Handle,
-        address: Option<String>,
-        port: Option<u16>,
-        data_dir: PathBuf,
-        acme_domain: Vec<String>,
-        acme_contact: Vec<String>,
     ) -> Result<task::JoinHandle<io::Result<()>>> {
-        let acme_cache = data_dir.join("acme-cache");
-
-        let address = address.unwrap_or_else(|| "0.0.0.0".into());
+        let acme_cache = config.acme_cache();
+        let acme_domains = config.acme_domains();
+        let acme_contacts = config.acme_contacts();
+        let address = config.address();
 
         Ok(tokio::spawn(async move {
-            if !acme_domain.is_empty() && !acme_contact.is_empty() {
+            if !acme_domains.is_empty() && !acme_contacts.is_empty() {
                 info!(
                     "Getting certificate for {} using contact email {}",
-                    acme_domain[0], acme_contact[0]
+                    acme_domains[0], acme_contacts[0]
                 );
 
-                let addr = (address, port.unwrap_or(443))
+                let addr = (address, config.port().unwrap_or(443))
                     .to_socket_addrs()?
                     .next()
                     .unwrap();
@@ -274,11 +286,11 @@ impl Server {
 
                 axum_server::Server::bind(addr)
                     .handle(handle)
-                    .acceptor(Self::acceptor(acme_domain, acme_contact, acme_cache).unwrap())
+                    .acceptor(Self::acceptor(acme_domains, acme_contacts, acme_cache).unwrap())
                     .serve(router.into_make_service())
                     .await
             } else {
-                let addr = (address, port.unwrap_or(80))
+                let addr = (address, config.port().unwrap_or(80))
                     .to_socket_addrs()?
                     .next()
                     .unwrap();
@@ -343,6 +355,235 @@ impl Server {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    fn parse_server_config(args: &str) -> Config {
+        match Arguments::try_parse_from(args.split_whitespace()) {
+            Ok(arguments) => match arguments.subcommand {
+                Subcommand::Server(server) => server.config,
+                subcommand => panic!("unexpected subcommand: {subcommand:?}"),
+            },
+            Err(err) => panic!("error parsing arguments: {err}"),
+        }
+    }
+
+    #[test]
+    fn default_address() {
+        let config = parse_server_config("para server");
+        assert_eq!(config.address(), "0.0.0.0");
+    }
+
+    #[test]
+    fn override_address() {
+        let config = parse_server_config("para server --address 127.0.0.1");
+        assert_eq!(config.address(), "127.0.0.1");
+    }
+
+    #[test]
+    fn default_acme_cache() {
+        let config = parse_server_config("para server");
+        assert_eq!(config.acme_cache(), PathBuf::from("acme-cache"));
+    }
+
+    #[test]
+    fn override_acme_cache_via_data_dir() {
+        let config = parse_server_config("para server --data-dir /custom/path");
+        assert_eq!(
+            config.acme_cache(),
+            PathBuf::from("/custom/path/acme-cache")
+        );
+    }
+
+    #[test]
+    fn default_acme_domains() {
+        let config = parse_server_config("para server");
+        assert!(config.acme_domains().is_empty());
+    }
+
+    #[test]
+    fn override_acme_domains() {
+        let config =
+            parse_server_config("para server --acme-domain example.com --acme-domain foo.bar");
+        assert_eq!(
+            config.acme_domains(),
+            vec!["example.com".to_string(), "foo.bar".to_string()]
+        );
+    }
+
+    #[test]
+    fn default_acme_contacts() {
+        let config = parse_server_config("para server");
+        assert!(config.acme_contacts().is_empty());
+    }
+
+    #[test]
+    fn override_acme_contacts() {
+        let config = parse_server_config("para server --acme-contact admin@example.com");
+        assert_eq!(
+            config.acme_contacts(),
+            vec!["admin@example.com".to_string()]
+        );
+    }
+
+    #[test]
+    fn default_credentials() {
+        let config = parse_server_config("para server");
+        assert_eq!(config.credentials(), None);
+    }
+
+    #[test]
+    fn credentials_both_provided() {
+        let config = parse_server_config("para server --username satoshi --password secret");
+        assert_eq!(config.credentials(), Some(("satoshi", "secret")));
+    }
+
+    #[test]
+    fn default_domain() {
+        let config = parse_server_config("para server --acme-domain example.com");
+        assert_eq!(config.domain(), "example.com");
+    }
+
+    #[test]
+    fn default_domains_fallback() {
+        let config = parse_server_config("para server");
+        let domains = config.domains().unwrap();
+        assert!(!domains.is_empty(), "Expected hostname fallback");
+    }
+
+    #[test]
+    fn override_domains_no_fallback() {
+        let config = parse_server_config("para server --acme-domain custom.domain");
+        let domains = config.domains().unwrap();
+        assert_eq!(domains, vec!["custom.domain".to_string()]);
+    }
+
+    #[test]
+    fn default_data_dir() {
+        let config = parse_server_config("para server");
+        assert_eq!(config.data_dir(), PathBuf::new());
+    }
+
+    #[test]
+    fn override_data_dir() {
+        let config = parse_server_config("para server --data-dir /var/pool");
+        assert_eq!(config.data_dir(), PathBuf::from("/var/pool"));
+    }
+
+    #[test]
+    fn default_database_url() {
+        let config = parse_server_config("para server");
+        assert_eq!(
+            config.database_url(),
+            "postgres://satoshi:nakamoto@127.0.0.1:5432/ckpool"
+        );
+    }
+
+    #[test]
+    fn override_database_url() {
+        let config = parse_server_config("para server --database-url postgres://user:pass@host/db");
+        assert_eq!(config.database_url(), "postgres://user:pass@host/db");
+    }
+
+    #[test]
+    fn default_log_dir() {
+        let config = parse_server_config("para server");
+        assert_eq!(config.log_dir(), std::env::current_dir().unwrap());
+    }
+
+    #[test]
+    fn override_log_dir() {
+        let config = parse_server_config("para server --log-dir /logs");
+        assert_eq!(config.log_dir(), PathBuf::from("/logs"));
+    }
+
+    #[test]
+    fn default_port() {
+        let config = parse_server_config("para server");
+        assert_eq!(config.port(), None);
+    }
+
+    #[test]
+    fn override_port() {
+        let config = parse_server_config("para server --port 8080");
+        assert_eq!(config.port(), Some(8080));
+    }
+
+    #[test]
+    #[should_panic(expected = "required")]
+    fn credentials_only_username_panics() {
+        parse_server_config("para server --username satoshi");
+    }
+
+    #[test]
+    #[should_panic(expected = "required")]
+    fn credentials_only_password_panics() {
+        parse_server_config("para server --password secret");
+    }
+
+    #[test]
+    fn credentials_mutual_requirement_no_panic() {
+        parse_server_config("para server --username satoshi --password secret");
+        parse_server_config("para server");
+    }
+
+    #[test]
+    fn test_zero_seconds() {
+        assert_eq!(format_uptime(0), "0 minutes");
+    }
+
+    #[test]
+    fn test_single_units() {
+        assert_eq!(format_uptime(1), "0 minutes");
+        assert_eq!(format_uptime(60), "1 minute");
+        assert_eq!(format_uptime(3600), "1 hour");
+        assert_eq!(format_uptime(86400), "1 day");
+    }
+
+    #[test]
+    fn test_plural_units() {
+        assert_eq!(format_uptime(120), "2 minutes");
+        assert_eq!(format_uptime(7200), "2 hours");
+        assert_eq!(format_uptime(172800), "2 days");
+    }
+
+    #[test]
+    fn test_mixed_units() {
+        assert_eq!(format_uptime(90060), "1 day, 1 hour, 1 minute");
+        assert_eq!(format_uptime(183900), "2 days, 3 hours, 5 minutes");
+        assert_eq!(format_uptime(88200), "1 day, 30 minutes");
+        assert_eq!(format_uptime(8100), "2 hours, 15 minutes");
+    }
+
+    #[test]
+    fn test_edge_cases() {
+        assert_eq!(format_uptime(59), "0 minutes");
+        assert_eq!(format_uptime(3599), "59 minutes");
+        assert_eq!(format_uptime(86399), "23 hours, 59 minutes");
+        assert_eq!(format_uptime(60), "1 minute");
+        assert_eq!(format_uptime(3600), "1 hour");
+        assert_eq!(format_uptime(86400), "1 day");
+    }
+
+    #[test]
+    fn test_large_values() {
+        assert_eq!(format_uptime(2592000), "30 days");
+        assert_eq!(format_uptime(31581000), "365 days, 12 hours, 30 minutes");
+    }
+
+    #[test]
+    fn test_only_minutes_when_less_than_hour() {
+        assert_eq!(format_uptime(30), "0 minutes");
+        assert_eq!(format_uptime(90), "1 minute");
+        assert_eq!(format_uptime(1800), "30 minutes");
+    }
+
+    #[test]
+    fn test_fractional_seconds_truncated() {
+        assert_eq!(format_uptime(119), "1 minute"); // 1 min 59 sec -> 1 minute
+        assert_eq!(format_uptime(3659), "1 hour"); // 1 hour 59 sec -> 1 hour
+        assert_eq!(format_uptime(86459), "1 day"); // 1 day 59 sec -> 1 day
+    }
+
     #[test]
     fn validate_math() {
         let a: i64 = 3;
