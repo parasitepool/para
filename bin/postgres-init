@@ -42,7 +42,7 @@ sudo systemctl reload postgresql
 # Create table if it doesn't exist (now using -h localhost to force TCP connection)
 PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
   CREATE TABLE IF NOT EXISTS shares (
-      id SERIAL PRIMARY KEY,
+      id BIGSERIAL PRIMARY KEY,
       blockheight INTEGER,
       workinfoid BIGINT,
       clientid BIGINT,
