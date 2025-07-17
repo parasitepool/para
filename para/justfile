@@ -25,7 +25,7 @@ doc:
 
 miner: 
   RUST_LOG=info cargo run -- miner \
-    --host parasite.wtf \
+    --host fkb.parasite.xyz \
     --port 42069 \
     --username bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg6dzw5nk24r45dzasde25r3.ParaMiner \
     --password x
