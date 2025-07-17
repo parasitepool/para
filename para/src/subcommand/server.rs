@@ -266,7 +266,7 @@ impl Server {
         handle: Handle,
     ) -> Result<task::JoinHandle<io::Result<()>>> {
         let acme_cache = config.acme_cache();
-        let acme_domains = config.acme_domains();
+        let acme_domains = config.domains()?;
         let acme_contacts = config.acme_contacts();
         let address = config.address();
 
@@ -395,17 +395,11 @@ mod tests {
     }
 
     #[test]
-    fn default_acme_domains() {
-        let config = parse_server_config("para server");
-        assert!(config.acme_domains().is_empty());
-    }
-
-    #[test]
     fn override_acme_domains() {
         let config =
             parse_server_config("para server --acme-domain example.com --acme-domain foo.bar");
         assert_eq!(
-            config.acme_domains(),
+            config.domains().unwrap(),
             vec!["example.com".to_string(), "foo.bar".to_string()]
         );
     }
