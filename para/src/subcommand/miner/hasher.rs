@@ -1,5 +1,7 @@
-use super::*;
-use std::io::{self, Write};
+use {
+  super::*,
+  std::io::{self, Write};
+};
 
 #[derive(Debug)]
 pub(crate) struct Hasher {
