@@ -42,7 +42,6 @@ impl Ping {
         let should_stop = Arc::new(AtomicBool::new(false));
         let sequence = Arc::new(AtomicU64::new(0));
 
-        // May try to incorporate `tokio::select` instead
         let should_stop_clone = Arc::clone(&should_stop);
         let stats_clone = Arc::clone(&stats);
         let target_clone = self.target.clone();
@@ -62,7 +61,6 @@ impl Ping {
             let seq = sequence.fetch_add(1, Ordering::Relaxed);
             let start = Instant::now();
 
-            // Considering parallelizing with `join_all`
             match self.ping_once(addr, seq).await {
                 Ok(response_size) => {
                     let duration = start.elapsed();
@@ -77,7 +75,7 @@ impl Ping {
                 }
                 Err(e) => {
                     stats.record_failure();
-                    println!("Request timeout for seq={} ({})", seq, e);
+                    println!("Request timeout for seq={seq} ({e})");
                 }
             }
 
@@ -95,7 +93,6 @@ impl Ping {
             format!("{}:4444", self.target)
         };
 
-        // Could optimize with `lazy_static` or `OnceCell` caching
         let addr = tokio::task::spawn_blocking(move || {
             host_port
                 .to_socket_addrs()?
@@ -113,16 +110,14 @@ impl Ping {
 
         let mut stream = stream;
 
-        // Could benefit from memoizing serialized string
         let request = StratumRequest {
             id: sequence,
             method: "mining.subscribe".to_string(),
             params: vec![json!("para-ping/1.0")],
         };
 
-        // Change to single buffer?
         let request_json = serde_json::to_string(&request)?;
-        let request_line = format!("{}\n", request_json);
+        let request_line = format!("{request_json}\n");
 
         stream.write_all(request_line.as_bytes()).await?;
 
@@ -194,7 +189,6 @@ impl PingStats {
         let min_time_ns = self.min_time_ns.load(Ordering::Relaxed);
         let max_time_ns = self.max_time_ns.load(Ordering::Relaxed);
 
-        // Not sure whether to use a tuple or struct here
         let loss_percent = if sent > 0 {
             100.0 * (sent - received) as f64 / sent as f64
         } else {
@@ -222,16 +216,10 @@ impl PingStats {
 fn print_final_stats(target: &str, stats: &PingStats) {
     let (sent, received, loss_percent, min_ms, avg_ms, max_ms) = stats.get_stats();
 
-    println!("\n--- {} ping statistics ---", target);
-    println!(
-        "{} packets transmitted, {} received, {:.1}% packet loss",
-        sent, received, loss_percent
-    );
+    println!("\n--- {target} ping statistics ---");
+    println!("{sent} packets transmitted, {received} received, {loss_percent:.1}% packet loss");
 
     if received > 0 {
-        println!(
-            "round-trip min/avg/max = {:.3}/{:.3}/{:.3} ms",
-            min_ms, avg_ms, max_ms
-        );
+        println!("round-trip min/avg/max = {min_ms:.3}/{avg_ms:.3}/{max_ms:.3} ms");
     }
 }
