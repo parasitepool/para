@@ -26,7 +26,7 @@ impl Hasher {
                 return Err(anyhow!("hasher cancelled"));
             }
 
-            for _ in 0..CANCEL_CHECK_INTERVAL {
+            for _ in 0..10000 {
                 let hash = self.header.block_hash();
                 hashes += 1;
 
