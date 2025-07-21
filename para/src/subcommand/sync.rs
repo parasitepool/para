@@ -481,38 +481,117 @@ impl SyncReceive {
         }
     }
 
-    // TODO: Add handling for what to do with transferred shares
-    async fn process_share_batch(&self, batch: &ShareBatch, _database: &Database) -> Result<()> {
+    async fn process_share_batch(&self, batch: &ShareBatch, database: &Database) -> Result<()> {
         println!(
             "Processing {} shares from batch {}",
             batch.shares.len(),
             batch.batch_id
         );
 
-        if !batch.shares.is_empty() {
-            let total_diff: f64 = batch.shares.iter().filter_map(|s| s.diff).sum();
-
-            let worker_count = batch
-                .shares
-                .iter()
-                .filter_map(|s| s.workername.as_ref())
-                .collect::<std::collections::HashSet<_>>()
-                .len();
-
-            // Show blockheight range for info, but we're not using it for querying
-            let min_blockheight = batch.shares.iter().filter_map(|s| s.blockheight).min();
-            let max_blockheight = batch.shares.iter().filter_map(|s| s.blockheight).max();
-
-            println!(
-                "Batch {} summary: {} shares, total difficulty: {:.2}, {} unique workers, blockheights: {:?}-{:?}",
-                batch.batch_id,
-                batch.shares.len(),
-                total_diff,
-                worker_count,
-                min_blockheight,
-                max_blockheight
-            );
+        if batch.shares.is_empty() {
+            return Ok(());
         }
+
+        // Insert shares into the aggregate database with origin tracking
+        let mut tx = database
+            .pool
+            .begin()
+            .await
+            .map_err(|e| anyhow!("Failed to start transaction: {}", e))?;
+
+        for share in &batch.shares {
+            sqlx::query(
+                "
+                INSERT INTO remote_shares (
+                    id, origin, blockheight, workinfoid, clientid, enonce1, nonce2, nonce, ntime,
+                    diff, sdiff, hash, result, reject_reason, error, errn, createdate, createby,
+                    createcode, createinet, workername, username, lnurl, address, agent
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+                    $17, $18, $19, $20, $21, $22, $23, $24, $25
+                )
+                ON CONFLICT (id, origin) DO UPDATE SET
+                    blockheight = EXCLUDED.blockheight,
+                    workinfoid = EXCLUDED.workinfoid,
+                    clientid = EXCLUDED.clientid,
+                    enonce1 = EXCLUDED.enonce1,
+                    nonce2 = EXCLUDED.nonce2,
+                    nonce = EXCLUDED.nonce,
+                    ntime = EXCLUDED.ntime,
+                    diff = EXCLUDED.diff,
+                    sdiff = EXCLUDED.sdiff,
+                    hash = EXCLUDED.hash,
+                    result = EXCLUDED.result,
+                    reject_reason = EXCLUDED.reject_reason,
+                    error = EXCLUDED.error,
+                    errn = EXCLUDED.errn,
+                    createdate = EXCLUDED.createdate,
+                    createby = EXCLUDED.createby,
+                    createcode = EXCLUDED.createcode,
+                    createinet = EXCLUDED.createinet,
+                    workername = EXCLUDED.workername,
+                    username = EXCLUDED.username,
+                    lnurl = EXCLUDED.lnurl,
+                    address = EXCLUDED.address,
+                    agent = EXCLUDED.agent
+                "
+            )
+                .bind(share.id)
+                .bind("zulu") // TODO: Extrapolate this to a validated enum against known remote servers
+                .bind(share.blockheight)
+                .bind(share.workinfoid)
+                .bind(share.clientid)
+                .bind(&share.enonce1)
+                .bind(&share.nonce2)
+                .bind(&share.nonce)
+                .bind(&share.ntime)
+                .bind(share.diff)
+                .bind(share.sdiff)
+                .bind(&share.hash)
+                .bind(share.result)
+                .bind(&share.reject_reason)
+                .bind(&share.error)
+                .bind(share.errn)
+                .bind(&share.createdate)
+                .bind(&share.createby)
+                .bind(&share.createcode)
+                .bind(&share.createinet)
+                .bind(&share.workername)
+                .bind(&share.username)
+                .bind(&share.lnurl)
+                .bind(&share.address)
+                .bind(&share.agent)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| anyhow!("Failed to insert share {}: {}", share.id, e))?;
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| anyhow!("Failed to commit transaction: {}", e))?;
+
+        // Calculate statistics for logging
+        let total_diff: f64 = batch.shares.iter().filter_map(|s| s.diff).sum();
+        let worker_count = batch
+            .shares
+            .iter()
+            .filter_map(|s| s.workername.as_ref())
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+
+        let min_blockheight = batch.shares.iter().filter_map(|s| s.blockheight).min();
+        let max_blockheight = batch.shares.iter().filter_map(|s| s.blockheight).max();
+
+        println!(
+            "Stored batch {} with {} shares: total difficulty: {:.2}, {} unique workers, blockheights: {:?}-{:?}, origin: {}",
+            batch.batch_id,
+            batch.shares.len(),
+            total_diff,
+            worker_count,
+            min_blockheight,
+            max_blockheight,
+            self.zmq_endpoint
+        );
 
         Ok(())
     }
@@ -551,7 +630,6 @@ impl Database {
         .map_err(|err| anyhow!("Database query failed: {}", err))
     }
 
-    /// Compress shares in the given ID range using the compress_shares function
     pub(crate) async fn compress_shares_range(&self, start_id: i64, end_id: i64) -> Result<i64> {
         if start_id > end_id {
             return Err(anyhow!(
@@ -561,8 +639,6 @@ impl Database {
             ));
         }
 
-        // Call the compress_shares function and count the results
-        // We only care about the count, not the actual values returned
         let row_count =
             sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM compress_shares($1, $2)")
                 .fetch_one(&self.pool)
