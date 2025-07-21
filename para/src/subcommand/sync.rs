@@ -190,6 +190,29 @@ impl SyncSend {
             max_id
         );
 
+        // Run share compression BEFORE transmitting
+        println!(
+            "Compressing shares in range {} to {}",
+            *current_id + 1,
+            target_id
+        );
+        match database
+            .compress_shares_range(*current_id + 1, target_id)
+            .await
+        {
+            Ok(compressed_count) => {
+                println!("Compressed {} share records in range", compressed_count);
+            }
+            Err(e) => {
+                eprintln!(
+                    "Warning: Failed to compress range {} to {}: {}",
+                    *current_id + 1,
+                    target_id,
+                    e
+                );
+            }
+        }
+
         let shares = database
             .get_shares_by_id_range(*current_id + 1, target_id)
             .await?;
@@ -201,7 +224,7 @@ impl SyncSend {
             return Ok(SyncResult::Continue);
         }
 
-        println!("Found {} shares to sync", shares.len());
+        println!("Found {} shares to sync (after compression)", shares.len());
 
         // retry n times
         for attempt in 1..=MAX_RETRIES {
@@ -526,5 +549,26 @@ impl Database {
         .fetch_all(&self.pool)
         .await
         .map_err(|err| anyhow!("Database query failed: {}", err))
+    }
+
+    /// Compress shares in the given ID range using the compress_shares function
+    pub(crate) async fn compress_shares_range(&self, start_id: i64, end_id: i64) -> Result<i64> {
+        if start_id > end_id {
+            return Err(anyhow!(
+                "Invalid ID range for compression: {} > {}",
+                start_id,
+                end_id
+            ));
+        }
+
+        // Call the compress_shares function and count the results
+        // We only care about the count, not the actual values returned
+        let row_count =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM compress_shares($1, $2)")
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|err| anyhow!("Compression failed: {}", err))?;
+
+        Ok(row_count)
     }
 }
