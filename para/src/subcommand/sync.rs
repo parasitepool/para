@@ -201,7 +201,7 @@ impl SyncSend {
             .await
         {
             Ok(compressed_count) => {
-                println!("Compressed {} share records in range", compressed_count);
+                println!("Compressed {compressed_count} share records in range");
             }
             Err(e) => {
                 eprintln!(
@@ -350,7 +350,7 @@ impl SyncSend {
     }
 
     async fn save_current_id(&self, id: i64) -> Result<()> {
-        fs::write(ID_FILE, id.to_string()).map_err(|e| anyhow!("Failed to save ID file: {}", e))?;
+        fs::write(ID_FILE, id.to_string()).map_err(|e| anyhow!("Failed to save ID file: {e}"))?;
         Ok(())
     }
 }
@@ -377,15 +377,15 @@ impl SyncReceive {
 
         let socket = context
             .socket(SocketType::REP)
-            .map_err(|e| anyhow!("Failed to create ZMQ socket: {}", e))?;
+            .map_err(|e| anyhow!("Failed to create ZMQ socket: {e}"))?;
 
         socket
             .bind(&self.zmq_endpoint)
-            .map_err(|e| anyhow!("Failed to bind to ZMQ endpoint: {}", e))?;
+            .map_err(|e| anyhow!("Failed to bind to ZMQ endpoint: {e}"))?;
 
         socket
             .set_rcvtimeo(1000) // 1 second timeout
-            .map_err(|e| anyhow!("Failed to set socket timeout: {}", e))?;
+            .map_err(|e| anyhow!("Failed to set socket timeout: {e}"))?;
 
         while !shutdown_flag.load(Ordering::Relaxed) {
             match self.receive_and_process_batch(&socket, &database).await {
@@ -427,7 +427,7 @@ impl SyncReceive {
                 println!("Received batch message");
 
                 let batch: ShareBatch = serde_json::from_str(&message)
-                    .map_err(|e| anyhow!("Failed to parse batch JSON: {}", e))?;
+                    .map_err(|e| anyhow!("Failed to parse batch JSON: {e}"))?;
 
                 println!(
                     "Processing batch {} with {} shares (IDs {}-{})",
@@ -447,11 +447,11 @@ impl SyncReceive {
                         };
 
                         let response_json = serde_json::to_string(&response)
-                            .map_err(|e| anyhow!("Failed to serialize response: {}", e))?;
+                            .map_err(|e| anyhow!("Failed to serialize response: {e}"))?;
 
                         socket
                             .send(&response_json, 0)
-                            .map_err(|e| anyhow!("Failed to send response: {}", e))?;
+                            .map_err(|e| anyhow!("Failed to send response: {e}"))?;
 
                         println!("Successfully processed batch {}", batch.batch_id);
                         Ok(true)
@@ -469,7 +469,7 @@ impl SyncReceive {
 
                         socket
                             .send(&response_json, 0)
-                            .map_err(|e| anyhow!("Failed to send error response: {}", e))?;
+                            .map_err(|e| anyhow!("Failed to send error response: {e}"))?;
 
                         Err(e)
                     }
@@ -477,7 +477,7 @@ impl SyncReceive {
             }
             Ok(Err(e)) => Err(anyhow!("Invalid UTF-8 in received message: {:?}", e)),
             Err(zmq::Error::EAGAIN) => Ok(false),
-            Err(e) => Err(anyhow!("Failed to receive ZMQ message: {}", e)),
+            Err(e) => Err(anyhow!("Failed to receive ZMQ message: {e}")),
         }
     }
 
@@ -497,7 +497,7 @@ impl SyncReceive {
             .pool
             .begin()
             .await
-            .map_err(|e| anyhow!("Failed to start transaction: {}", e))?;
+            .map_err(|e| anyhow!("Failed to start transaction: {e}"))?;
 
         for share in &batch.shares {
             sqlx::query(
@@ -568,7 +568,7 @@ impl SyncReceive {
 
         tx.commit()
             .await
-            .map_err(|e| anyhow!("Failed to commit transaction: {}", e))?;
+            .map_err(|e| anyhow!("Failed to commit transaction: {e}"))?;
 
         // Calculate statistics for logging
         let total_diff: f64 = batch.shares.iter().filter_map(|s| s.diff).sum();
@@ -602,7 +602,7 @@ impl Database {
         let result = sqlx::query_scalar::<_, Option<i64>>("SELECT MAX(id) FROM shares")
             .fetch_one(&self.pool)
             .await
-            .map_err(|e| anyhow!("Failed to get max ID: {}", e))?;
+            .map_err(|e| anyhow!("Failed to get max ID: {e}"))?;
 
         Ok(result.unwrap_or(0))
     }
@@ -627,7 +627,7 @@ impl Database {
         .bind(end_id)
         .fetch_all(&self.pool)
         .await
-        .map_err(|err| anyhow!("Database query failed: {}", err))
+        .map_err(|err| anyhow!("Database query failed: {err}"))
     }
 
     pub(crate) async fn compress_shares_range(&self, start_id: i64, end_id: i64) -> Result<i64> {
@@ -643,7 +643,7 @@ impl Database {
             sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM compress_shares($1, $2)")
                 .fetch_one(&self.pool)
                 .await
-                .map_err(|err| anyhow!("Compression failed: {}", err))?;
+                .map_err(|err| anyhow!("Compression failed: {err}"))?;
 
         Ok(row_count)
     }
