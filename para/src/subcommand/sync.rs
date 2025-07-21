@@ -1,10 +1,12 @@
 use super::*;
 use crate::subcommand::server::database::Database;
 use serde::{Deserialize, Serialize};
-use std::fs;
-use std::path::Path;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::{
+    fs,
+    path::Path,
+    sync::Arc,
+    sync::atomic::{AtomicBool, Ordering},
+};
 use tokio::time::{Duration, sleep, timeout};
 use zmq::{Context, SocketType};
 
