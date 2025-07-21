@@ -10,10 +10,10 @@ use std::{
 use tokio::time::{Duration, sleep, timeout};
 use zmq::{Context, SocketType};
 
-const HEIGHT_FILE: &str = "current_height.txt";
+const ID_FILE: &str = "current_id.txt";
 const SYNC_DELAY_MS: u64 = 1000;
-const TARGET_BLOCK_BUFFER: i32 = 2;
-const ZMQ_TIMEOUT_MS: u64 = 10000; // 10 second timeout
+const TARGET_ID_BUFFER: i64 = 0; // this may no longer be necessary since we are transferring by id now
+const ZMQ_TIMEOUT_MS: u64 = 10000;
 const MAX_RETRIES: u32 = 3;
 
 #[derive(Debug, Parser)]
@@ -25,11 +25,15 @@ pub(crate) struct SyncSend {
     )]
     zmq_endpoint: String,
 
-    #[arg(long, help = "Batch size for processing shares", default_value = "1")]
-    batch_size: i32,
+    #[arg(
+        long,
+        help = "Batch size for processing shares",
+        default_value = "1000000"
+    )]
+    batch_size: i64,
 
-    #[arg(long, help = "Force reset current height to 0")]
-    reset_height: bool,
+    #[arg(long, help = "Force reset current ID to 0")]
+    reset_id: bool,
 
     #[arg(
         long,
@@ -96,8 +100,8 @@ struct ShareBatch {
     shares: Vec<Share>,
     batch_id: u64,
     total_shares: usize,
-    start_height: i32,
-    end_height: i32,
+    start_id: i64,
+    end_id: i64,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -132,21 +136,18 @@ impl SyncSend {
         let database = Database::new(self.database_url.clone()).await?;
         let context = Context::new();
 
-        let mut current_height = self.load_current_height().await?;
+        let mut current_id = self.load_current_id().await?;
 
-        if self.reset_height {
-            current_height = 0;
-            self.save_current_height(current_height).await?;
-            println!("Reset current height to 0");
+        if self.reset_id {
+            current_id = 0;
+            self.save_current_id(current_id).await?;
+            println!("Reset current ID to 0");
         }
 
-        println!("Starting sync send from block height: {current_height}");
+        println!("Starting sync send from ID: {current_id}");
 
         while !shutdown_flag.load(Ordering::Relaxed) {
-            match self
-                .sync_batch(&database, &context, &mut current_height)
-                .await
-            {
+            match self.sync_batch(&database, &context, &mut current_id).await {
                 Ok(SyncResult::Complete) => {
                     println!("Sync send completed successfully");
                     break;
@@ -172,34 +173,31 @@ impl SyncSend {
         &self,
         database: &Database,
         context: &Context,
-        current_height: &mut i32,
+        current_id: &mut i64,
     ) -> Result<SyncResult> {
-        let max_height = database.get_max_blockheight().await?;
+        let max_id = database.get_max_id().await?;
 
-        if *current_height + TARGET_BLOCK_BUFFER >= max_height {
+        if *current_id + TARGET_ID_BUFFER >= max_id {
             return Ok(SyncResult::Complete);
         }
 
-        let target_height = std::cmp::min(
-            *current_height + self.batch_size,
-            max_height - TARGET_BLOCK_BUFFER,
-        );
+        let target_id = std::cmp::min(*current_id + self.batch_size, max_id - TARGET_ID_BUFFER);
 
         println!(
-            "Fetching shares from height {} to {} (max: {})",
-            *current_height + 1,
-            target_height,
-            max_height
+            "Fetching shares from ID {} to {} (max: {})",
+            *current_id + 1,
+            target_id,
+            max_id
         );
 
         let shares = database
-            .get_shares_by_height_range(*current_height + 1, target_height)
+            .get_shares_by_id_range(*current_id + 1, target_id)
             .await?;
 
         if shares.is_empty() {
             println!("No shares found in range, moving to next batch");
-            *current_height = target_height;
-            self.save_current_height(*current_height).await?;
+            *current_id = target_id;
+            self.save_current_id(*current_id).await?;
             return Ok(SyncResult::Continue);
         }
 
@@ -208,12 +206,12 @@ impl SyncSend {
         // retry n times
         for attempt in 1..=MAX_RETRIES {
             match self
-                .send_batch_with_timeout(context, &shares, *current_height + 1, target_height)
+                .send_batch_with_timeout(context, &shares, *current_id + 1, target_id)
                 .await
             {
                 Ok(_) => {
-                    *current_height = target_height;
-                    self.save_current_height(*current_height).await?;
+                    *current_id = target_id;
+                    self.save_current_id(*current_id).await?;
                     return Ok(SyncResult::Continue);
                 }
                 Err(e) => {
@@ -233,8 +231,8 @@ impl SyncSend {
         &self,
         context: &Context,
         shares: &[Share],
-        start_height: i32,
-        end_height: i32,
+        start_id: i64,
+        end_id: i64,
     ) -> Result<()> {
         let socket = context
             .socket(SocketType::REQ)
@@ -252,8 +250,8 @@ impl SyncSend {
             shares: shares.to_vec(),
             batch_id,
             total_shares: shares.len(),
-            start_height,
-            end_height,
+            start_id,
+            end_id,
         };
 
         let serialized = serde_json::to_string(&batch)
@@ -304,33 +302,32 @@ impl SyncSend {
         }
 
         println!(
-            "Successfully synced batch {} with {} shares (heights {}-{})",
+            "Successfully synced batch {} with {} shares (IDs {}-{})",
             batch_id,
             shares.len(),
-            start_height,
-            end_height
+            start_id,
+            end_id
         );
 
         Ok(())
     }
 
-    async fn load_current_height(&self) -> Result<i32> {
-        if Path::new(HEIGHT_FILE).exists() {
-            let content = fs::read_to_string(HEIGHT_FILE)
-                .map_err(|e| anyhow!("Failed to read height file: {}", e))?;
-            let height = content
+    async fn load_current_id(&self) -> Result<i64> {
+        if Path::new(ID_FILE).exists() {
+            let content = fs::read_to_string(ID_FILE)
+                .map_err(|e| anyhow!("Failed to read ID file: {}", e))?;
+            let id = content
                 .trim()
-                .parse::<i32>()
-                .map_err(|e| anyhow!("Invalid height in file: {}", e))?;
-            Ok(height)
+                .parse::<i64>()
+                .map_err(|e| anyhow!("Invalid ID in file: {}", e))?;
+            Ok(id)
         } else {
             Ok(0)
         }
     }
 
-    async fn save_current_height(&self, height: i32) -> Result<()> {
-        fs::write(HEIGHT_FILE, height.to_string())
-            .map_err(|e| anyhow!("Failed to save height file: {}", e))?;
+    async fn save_current_id(&self, id: i64) -> Result<()> {
+        fs::write(ID_FILE, id.to_string()).map_err(|e| anyhow!("Failed to save ID file: {}", e))?;
         Ok(())
     }
 }
@@ -410,11 +407,11 @@ impl SyncReceive {
                     .map_err(|e| anyhow!("Failed to parse batch JSON: {}", e))?;
 
                 println!(
-                    "Processing batch {} with {} shares (heights {}-{})",
+                    "Processing batch {} with {} shares (IDs {}-{})",
                     batch.batch_id,
                     batch.shares.len(),
-                    batch.start_height,
-                    batch.end_height
+                    batch.start_id,
+                    batch.end_id
                 );
 
                 match self.process_share_batch(&batch, database).await {
@@ -479,12 +476,18 @@ impl SyncReceive {
                 .collect::<std::collections::HashSet<_>>()
                 .len();
 
+            // Show blockheight range for info, but we're not using it for querying
+            let min_blockheight = batch.shares.iter().filter_map(|s| s.blockheight).min();
+            let max_blockheight = batch.shares.iter().filter_map(|s| s.blockheight).max();
+
             println!(
-                "Batch {} summary: {} shares, total difficulty: {:.2}, {} unique workers",
+                "Batch {} summary: {} shares, total difficulty: {:.2}, {} unique workers, blockheights: {:?}-{:?}",
                 batch.batch_id,
                 batch.shares.len(),
                 total_diff,
-                worker_count
+                worker_count,
+                min_blockheight,
+                max_blockheight
             );
         }
 
@@ -493,39 +496,33 @@ impl SyncReceive {
 }
 
 impl Database {
-    pub(crate) async fn get_max_blockheight(&self) -> Result<i32> {
-        let result = sqlx::query_scalar::<_, Option<i32>>(
-            "SELECT MAX(blockheight) FROM shares WHERE blockheight IS NOT NULL",
-        )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|e| anyhow!("Failed to get max block height: {}", e))?;
+    pub(crate) async fn get_max_id(&self) -> Result<i64> {
+        let result = sqlx::query_scalar::<_, Option<i64>>("SELECT MAX(id) FROM shares")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| anyhow!("Failed to get max ID: {}", e))?;
 
         Ok(result.unwrap_or(0))
     }
 
-    pub(crate) async fn get_shares_by_height_range(
+    pub(crate) async fn get_shares_by_id_range(
         &self,
-        start_height: i32,
-        end_height: i32,
+        start_id: i64,
+        end_id: i64,
     ) -> Result<Vec<Share>> {
-        if start_height > end_height {
-            return Err(anyhow!(
-                "Invalid height range: {} > {}",
-                start_height,
-                end_height
-            ));
+        if start_id > end_id {
+            return Err(anyhow!("Invalid ID range: {} > {}", start_id, end_id));
         }
 
         sqlx::query_as::<_, Share>(
             "
             SELECT * FROM shares
-            WHERE blockheight >= $1 AND blockheight <= $2
-            ORDER BY blockheight, id
+            WHERE id >= $1 AND id <= $2
+            ORDER BY id
             ",
         )
-        .bind(start_height)
-        .bind(end_height)
+        .bind(start_id)
+        .bind(end_id)
         .fetch_all(&self.pool)
         .await
         .map_err(|err| anyhow!("Database query failed: {}", err))
