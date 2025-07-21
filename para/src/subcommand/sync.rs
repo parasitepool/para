@@ -65,7 +65,7 @@ pub(crate) struct SyncReceive {
 
 #[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone)]
 pub(crate) struct Share {
-    pub(crate) id: i32,
+    pub(crate) id: i64,
     pub(crate) blockheight: Option<i32>,
     pub(crate) workinfoid: Option<i64>,
     pub(crate) clientid: Option<i64>,
