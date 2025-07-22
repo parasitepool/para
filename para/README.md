@@ -14,3 +14,4 @@
 |client.show_message|[ ]|[ ]|
 |mining.set_extranonce|[ ]|[ ]|
 
+
