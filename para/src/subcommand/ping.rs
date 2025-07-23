@@ -1,22 +1,8 @@
 use {
     super::*,
-    clap::Parser,
-    serde::Serialize,
     serde_json::json,
-    std::{
-        net::{SocketAddr, ToSocketAddrs},
-        sync::{
-            Arc,
-            atomic::{AtomicBool, AtomicU64, Ordering},
-        },
-        time::{Duration, Instant},
-    },
-    tokio::{
-        io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-        net::TcpStream,
-        signal,
-        time::sleep,
-    },
+    std::{net::SocketAddr, sync::atomic::AtomicBool},
+    tokio::{signal, time::sleep},
 };
 
 #[derive(Parser, Debug)]
@@ -93,13 +79,10 @@ impl Ping {
             format!("{}:42069", self.target)
         };
 
-        let addr = tokio::task::spawn_blocking(move || {
-            host_port
-                .to_socket_addrs()?
-                .next()
-                .ok_or_else(|| anyhow::anyhow!("Failed to resolve hostname"))
-        })
-        .await??;
+        let addr = tokio::net::lookup_host(&host_port)
+            .await?
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("Failed to resolve hostname"))?;
 
         Ok(addr)
     }
