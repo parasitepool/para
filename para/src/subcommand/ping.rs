@@ -22,7 +22,7 @@ use {
 #[derive(Parser, Debug)]
 #[command(about = "Ping a stratum mining server.")]
 pub(crate) struct Ping {
-    pub target: String,
+    target: String,
 }
 
 #[derive(Debug, Serialize)]
