@@ -87,7 +87,7 @@ impl Hasher {
 }
 
 #[allow(dead_code)]
-fn target_with_leading_zeros(leading_zeros: u8) -> Target {
+fn shift(leading_zeros: u8) -> Target {
     assert!(leading_zeros <= 32, "leading_zeros too high");
 
     let mut bytes = [0xFFu8; 32];
@@ -131,10 +131,10 @@ mod tests {
 
     #[test]
     fn test_target_leading_zeros_levels() {
-        let target_0 = target_with_leading_zeros(0);
-        let target_8 = target_with_leading_zeros(8);
-        let target_16 = target_with_leading_zeros(16);
-        let target_24 = target_with_leading_zeros(24);
+        let target_0 = shift(0);
+        let target_8 = shift(8);
+        let target_16 = shift(16);
+        let target_24 = shift(24);
 
         assert!(target_8 < target_0);
         assert!(target_16 < target_8);
@@ -153,8 +153,8 @@ mod tests {
 
     #[test]
     fn test_partial_byte_leading_zeros() {
-        let target_4 = target_with_leading_zeros(4);
-        let target_12 = target_with_leading_zeros(12);
+        let target_4 = shift(4);
+        let target_12 = shift(12);
 
         let bytes_4 = target_4.to_be_bytes();
         let bytes_12 = target_12.to_be_bytes();
@@ -169,7 +169,7 @@ mod tests {
 
     #[test]
     fn hasher_hashes_with_very_low_leading_zeros() {
-        let target = target_with_leading_zeros(1);
+        let target = shift(1);
         let mut hasher = Hasher {
             header: header(None, None),
             pool_target: target,
@@ -183,7 +183,7 @@ mod tests {
 
     #[test]
     fn hasher_nonce_space_exhausted() {
-        let target = target_with_leading_zeros(32);
+        let target = shift(32);
         let mut hasher = Hasher {
             header: header(None, Some(u32::MAX - 1)),
             pool_target: target,
@@ -200,11 +200,11 @@ mod tests {
 
     #[test]
     fn test_extreme_leading_zeros() {
-        let easy_target = target_with_leading_zeros(1);
+        let easy_target = shift(1);
         let easy_bytes = easy_target.to_be_bytes();
         assert_eq!(easy_bytes[0], 0x7F);
 
-        let hard_target = target_with_leading_zeros(32);
+        let hard_target = shift(32);
         let hard_bytes = hard_target.to_be_bytes();
         for byte in hard_bytes.iter().take(4) {
             assert_eq!(*byte, 0);
@@ -218,7 +218,7 @@ mod tests {
         let mut targets = Vec::new();
 
         for &zeros in &leading_zeros {
-            targets.push(target_with_leading_zeros(zeros));
+            targets.push(shift(zeros));
         }
 
         for i in 1..targets.len() {
@@ -236,7 +236,7 @@ mod tests {
         let leading_zeros = [1, 2, 3, 4];
 
         for zeros in leading_zeros {
-            let target = target_with_leading_zeros(zeros);
+            let target = shift(zeros);
             let mut hasher = Hasher {
                 header: header(None, None),
                 pool_target: target,
