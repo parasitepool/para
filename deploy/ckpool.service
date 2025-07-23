@@ -12,6 +12,7 @@ ExecStart=/usr/local/bin/ckpool \
   --config /etc/ckpool/ckpool.conf \
   --loglevel 5 \
   --log-shares \
+  --log-txns \
   --sockdir /var/lib/ckpool/tmp
 Group=ckpool
 KillMode=none
