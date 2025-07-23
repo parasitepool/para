@@ -86,27 +86,6 @@ impl Hasher {
     }
 }
 
-#[allow(dead_code)]
-fn shift(leading_zeros: u8) -> Target {
-    assert!(leading_zeros <= 32, "leading_zeros too high");
-
-    let mut bytes = [0xFFu8; 32];
-
-    let full_zero_bytes = (leading_zeros / 8) as usize;
-    let partial_bits = leading_zeros % 8;
-
-    for byte in bytes.iter_mut().take(full_zero_bytes) {
-        *byte = 0x00;
-    }
-
-    if partial_bits > 0 {
-        let mask = 0xFF >> partial_bits;
-        bytes[full_zero_bytes] = mask;
-    }
-
-    Target::from_be_bytes(bytes)
-}
-
 #[cfg(test)]
 mod tests {
     use {
@@ -118,6 +97,25 @@ mod tests {
         },
     };
 
+    fn shift(leading_zeros: u8) -> Target {
+        assert!(leading_zeros <= 32, "leading_zeros too high");
+
+        let mut bytes = [0xFFu8; 32];
+
+        let full_zero_bytes = (leading_zeros / 8) as usize;
+        let partial_bits = leading_zeros % 8;
+
+        for byte in bytes.iter_mut().take(full_zero_bytes) {
+            *byte = 0x00;
+        }
+
+        if partial_bits > 0 {
+            let mask = 0xFF >> partial_bits;
+            bytes[full_zero_bytes] = mask;
+        }
+
+        Target::from_be_bytes(bytes)
+    }
     fn header(network_target: Option<Target>, nonce: Option<u32>) -> Header {
         Header {
             version: Version::TWO,
