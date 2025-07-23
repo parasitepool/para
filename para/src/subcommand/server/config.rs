@@ -41,10 +41,6 @@ impl Config {
         self.data_dir().join("acme-cache")
     }
 
-    pub(crate) fn acme_domains(&self) -> Vec<String> {
-        self.acme_domain.clone()
-    }
-
     pub(crate) fn acme_contacts(&self) -> Vec<String> {
         self.acme_contact.clone()
     }
