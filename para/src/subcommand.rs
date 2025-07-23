@@ -24,7 +24,6 @@ impl Subcommand {
                 let handle = Handle::new();
                 Runtime::new()?.block_on(async { server.run(handle).await })
             }
-            Self::Miner(miner) => miner.run(),
             Self::SyncSend(sync_send) => {
                 let handle = Handle::new();
 
