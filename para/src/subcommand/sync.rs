@@ -492,85 +492,87 @@ impl SyncReceive {
             return Ok(());
         }
 
-        // Insert shares into the aggregate database with origin tracking
+        let origin = System::host_name().ok_or(anyhow!("no hostname found"))?;
+
         let mut tx = database
             .pool
             .begin()
             .await
             .map_err(|e| anyhow!("Failed to start transaction: {e}"))?;
 
-        for share in &batch.shares {
-            sqlx::query(
-                "
-                INSERT INTO remote_shares (
-                    id, origin, blockheight, workinfoid, clientid, enonce1, nonce2, nonce, ntime,
-                    diff, sdiff, hash, result, reject_reason, error, errn, createdate, createby,
-                    createcode, createinet, workername, username, lnurl, address, agent
-                ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-                    $17, $18, $19, $20, $21, $22, $23, $24, $25
-                )
-                ON CONFLICT (id, origin) DO UPDATE SET
-                    blockheight = EXCLUDED.blockheight,
-                    workinfoid = EXCLUDED.workinfoid,
-                    clientid = EXCLUDED.clientid,
-                    enonce1 = EXCLUDED.enonce1,
-                    nonce2 = EXCLUDED.nonce2,
-                    nonce = EXCLUDED.nonce,
-                    ntime = EXCLUDED.ntime,
-                    diff = EXCLUDED.diff,
-                    sdiff = EXCLUDED.sdiff,
-                    hash = EXCLUDED.hash,
-                    result = EXCLUDED.result,
-                    reject_reason = EXCLUDED.reject_reason,
-                    error = EXCLUDED.error,
-                    errn = EXCLUDED.errn,
-                    createdate = EXCLUDED.createdate,
-                    createby = EXCLUDED.createby,
-                    createcode = EXCLUDED.createcode,
-                    createinet = EXCLUDED.createinet,
-                    workername = EXCLUDED.workername,
-                    username = EXCLUDED.username,
-                    lnurl = EXCLUDED.lnurl,
-                    address = EXCLUDED.address,
-                    agent = EXCLUDED.agent
-                "
-            )
-                .bind(share.id)
-                .bind(System::host_name().ok_or(anyhow!("no hostname found"))?)
-                .bind(share.blockheight)
-                .bind(share.workinfoid)
-                .bind(share.clientid)
-                .bind(&share.enonce1)
-                .bind(&share.nonce2)
-                .bind(&share.nonce)
-                .bind(&share.ntime)
-                .bind(share.diff)
-                .bind(share.sdiff)
-                .bind(&share.hash)
-                .bind(share.result)
-                .bind(&share.reject_reason)
-                .bind(&share.error)
-                .bind(share.errn)
-                .bind(&share.createdate)
-                .bind(&share.createby)
-                .bind(&share.createcode)
-                .bind(&share.createinet)
-                .bind(&share.workername)
-                .bind(&share.username)
-                .bind(&share.lnurl)
-                .bind(&share.address)
-                .bind(&share.agent)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| anyhow!("Failed to insert share {}: {}", share.id, e))?;
-        }
+        let mut query_builder = sqlx::QueryBuilder::new(
+            "INSERT INTO remote_shares (
+            id, origin, blockheight, workinfoid, clientid, enonce1, nonce2, nonce, ntime,
+            diff, sdiff, hash, result, reject_reason, error, errn, createdate, createby,
+            createcode, createinet, workername, username, lnurl, address, agent
+        ) "
+        );
+
+        // batch our inserts to reduce number of required transactions
+        query_builder.push_values(&batch.shares, |mut b, share| {
+            b.push_bind(share.id)
+                .push_bind(&origin)
+                .push_bind(share.blockheight)
+                .push_bind(share.workinfoid)
+                .push_bind(share.clientid)
+                .push_bind(&share.enonce1)
+                .push_bind(&share.nonce2)
+                .push_bind(&share.nonce)
+                .push_bind(&share.ntime)
+                .push_bind(share.diff)
+                .push_bind(share.sdiff)
+                .push_bind(&share.hash)
+                .push_bind(share.result)
+                .push_bind(&share.reject_reason)
+                .push_bind(&share.error)
+                .push_bind(share.errn)
+                .push_bind(&share.createdate)
+                .push_bind(&share.createby)
+                .push_bind(&share.createcode)
+                .push_bind(&share.createinet)
+                .push_bind(&share.workername)
+                .push_bind(&share.username)
+                .push_bind(&share.lnurl)
+                .push_bind(&share.address)
+                .push_bind(&share.agent);
+        });
+
+        query_builder.push(
+            " ON CONFLICT (id, origin) DO UPDATE SET
+            blockheight = EXCLUDED.blockheight,
+            workinfoid = EXCLUDED.workinfoid,
+            clientid = EXCLUDED.clientid,
+            enonce1 = EXCLUDED.enonce1,
+            nonce2 = EXCLUDED.nonce2,
+            nonce = EXCLUDED.nonce,
+            ntime = EXCLUDED.ntime,
+            diff = EXCLUDED.diff,
+            sdiff = EXCLUDED.sdiff,
+            hash = EXCLUDED.hash,
+            result = EXCLUDED.result,
+            reject_reason = EXCLUDED.reject_reason,
+            error = EXCLUDED.error,
+            errn = EXCLUDED.errn,
+            createdate = EXCLUDED.createdate,
+            createby = EXCLUDED.createby,
+            createcode = EXCLUDED.createcode,
+            createinet = EXCLUDED.createinet,
+            workername = EXCLUDED.workername,
+            username = EXCLUDED.username,
+            lnurl = EXCLUDED.lnurl,
+            address = EXCLUDED.address,
+            agent = EXCLUDED.agent"
+        );
+
+        let query = query_builder.build();
+        query.execute(&mut *tx)
+            .await
+            .map_err(|e| anyhow!("Failed to batch insert shares: {e}"))?;
 
         tx.commit()
             .await
             .map_err(|e| anyhow!("Failed to commit transaction: {e}"))?;
 
-        // Calculate statistics for logging
         let total_diff: f64 = batch.shares.iter().filter_map(|s| s.diff).sum();
         let worker_count = batch
             .shares
