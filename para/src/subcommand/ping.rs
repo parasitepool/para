@@ -36,7 +36,7 @@ impl Ping {
     pub(crate) async fn run(&self, _handle: Handle) -> Result {
         let addr = self.resolve_target().await?;
 
-        println!("PING {} ({})", self.target, addr);
+        println!("SUBSCRIBE PING {} ({})", self.target, addr);
 
         let stats = Arc::new(PingStats::new());
         let should_stop = Arc::new(AtomicBool::new(false));
