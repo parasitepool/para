@@ -8,7 +8,7 @@ mod server;
 pub(crate) enum Subcommand {
     #[command(about = "Run a toy miner")]
     Miner(miner::Miner),
-    #[command(about = "Measure Stratum ping for mining.subscribe method")]
+    #[command(about = "Measure Stratum message ping")]
     Ping(ping::Ping),
     #[command(about = "Run API server")]
     Server(server::Server),
