@@ -6,13 +6,6 @@ pub(crate) struct Ping {
     target: String,
 }
 
-#[derive(Debug, Serialize)]
-struct StratumRequest {
-    id: u64,
-    method: String,
-    params: Vec<serde_json::Value>,
-}
-
 impl Ping {
     pub(crate) async fn run(&self) -> Result {
         let addr = self.resolve_target().await?;
@@ -27,13 +20,11 @@ impl Ping {
                 _ = ctrl_c() => break,
                 _ = sleep(Duration::from_secs(1)) => {
                     let seq = sequence.fetch_add(1, Ordering::Relaxed);
-                    let start = Instant::now();
 
                     match self.ping_once(addr, seq).await {
-                        Ok(size) => {
-                            let dur = start.elapsed();
-                            stats.record_success(dur);
-                            println!("Response from {addr}: seq={seq} size={size} time={:.3}ms", dur.as_secs_f64() * 1000.0);
+                        Ok((size, duration)) => {
+                            stats.record_success(duration);
+                            println!("Response from {addr}: seq={seq} size={size} time={:.3}ms", duration.as_secs_f64() * 1000.0);
                         }
                         Err(e) => {
                             stats.record_failure();
@@ -63,30 +54,34 @@ impl Ping {
         Ok(addr)
     }
 
-    async fn ping_once(&self, addr: SocketAddr, sequence: u64) -> Result<usize> {
-        let stream =
+    async fn ping_once(&self, addr: SocketAddr, sequence: u64) -> Result<(usize, Duration)> {
+        let mut stream =
             tokio::time::timeout(Duration::from_secs(5), TcpStream::connect(addr)).await??;
 
-        let mut stream = stream;
-
-        let request = StratumRequest {
-            id: sequence,
-            method: "mining.subscribe".to_string(),
-            params: vec![json!("ParaPing/0.0.1")],
+        let request = Message::Request {
+            id: Id::Number(sequence),
+            method: "mining.subscribe".into(),
+            params: serde_json::to_value(stratum::Subscribe {
+                user_agent: "user ParaPing/0.0.1".into(),
+                extranonce1: None,
+            })?,
         };
 
-        let request_json = serde_json::to_string(&request)?;
-        let request_line = format!("{request_json}\n");
+        let frame = serde_json::to_string(&request)? + "\n";
 
-        stream.write_all(request_line.as_bytes()).await?;
+        let start = Instant::now();
+
+        stream.write_all(frame.as_bytes()).await?;
 
         let mut reader = BufReader::new(&mut stream);
         let mut response_line = String::new();
         let bytes_read = reader.read_line(&mut response_line).await?;
 
+        let duration = start.elapsed();
+
         let _: serde_json::Value = serde_json::from_str(response_line.trim())?;
 
-        Ok(bytes_read)
+        Ok((bytes_read, duration))
     }
 }
 

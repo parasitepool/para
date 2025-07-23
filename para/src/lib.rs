@@ -41,7 +41,7 @@ use {
         de::{self, Deserializer},
         ser::SerializeSeq,
     },
-    serde_json::{Value, json},
+    serde_json::Value,
     serde_with::{DeserializeFromStr, SerializeDisplay},
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
     std::{
