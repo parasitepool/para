@@ -14,11 +14,11 @@ pub(crate) enum Subcommand {
 impl Subcommand {
     pub(crate) fn run(self) -> Result {
         match self {
+            Self::Miner(miner) => miner.run(),
             Self::Server(server) => {
                 let handle = Handle::new();
                 Runtime::new()?.block_on(async { server.run(handle).await })
             }
-            Self::Miner(miner) => miner.run(),
         }
     }
 }
