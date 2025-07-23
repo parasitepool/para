@@ -537,7 +537,7 @@ impl SyncReceive {
                 "
             )
                 .bind(share.id)
-                .bind("zulu") // TODO: Extrapolate this to a validated enum against known remote servers
+                .bind(System::host_name().ok_or(anyhow!("no hostname found"))?)
                 .bind(share.blockheight)
                 .bind(share.workinfoid)
                 .bind(share.clientid)
