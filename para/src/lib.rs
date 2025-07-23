@@ -41,7 +41,7 @@ use {
         de::{self, Deserializer},
         ser::SerializeSeq,
     },
-    serde_json::Value,
+    serde_json::{Value, json},
     serde_with::{DeserializeFromStr, SerializeDisplay},
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
     std::{
@@ -54,7 +54,7 @@ use {
         str::FromStr,
         sync::{
             Arc, LazyLock,
-            atomic::{AtomicU64, Ordering},
+            atomic::{AtomicU64, Ordering, AtomicBool},
         },
         time::{Duration, Instant},
     },

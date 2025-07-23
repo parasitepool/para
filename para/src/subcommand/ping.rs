@@ -1,9 +1,4 @@
-use {
-    super::*,
-    serde_json::json,
-    std::{net::SocketAddr, sync::atomic::AtomicBool},
-    tokio::{signal, time::sleep},
-};
+use {super::*, std::net::SocketAddr, tokio::time::sleep};
 
 #[derive(Parser, Debug)]
 #[command(about = "Ping a stratum mining server.")]
@@ -33,7 +28,7 @@ impl Ping {
         let target_clone = self.target.clone();
 
         tokio::spawn(async move {
-            signal::ctrl_c().await.ok();
+            ctrl_c().await.ok();
             should_stop_clone.store(true, Ordering::Relaxed);
             print_final_stats(&target_clone, &stats_clone);
             std::process::exit(0);

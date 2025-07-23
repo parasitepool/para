@@ -37,5 +37,8 @@ miner-signet:
     --username tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.ParaMiner \
     --password x
 
+ping:
+  RUST_LOG=info cargo run ping parasite.wtf:42069
+
 server: 
   RUST_LOG=info cargo run -- server --log-dir ../copr/logs --port 8080
