@@ -20,44 +20,28 @@ impl Ping {
         println!("SUBSCRIBE PING {} ({})", self.target, addr);
 
         let stats = Arc::new(PingStats::new());
-        let should_stop = Arc::new(AtomicBool::new(false));
-        let sequence = Arc::new(AtomicU64::new(0));
-
-        let should_stop_clone = Arc::clone(&should_stop);
-        let stats_clone = Arc::clone(&stats);
-        let target_clone = self.target.clone();
-
-        tokio::spawn(async move {
-            ctrl_c().await.ok();
-            should_stop_clone.store(true, Ordering::Relaxed);
-            print_final_stats(&target_clone, &stats_clone);
-            std::process::exit(0);
-        });
+        let sequence = AtomicU64::new(0);
 
         loop {
-            if should_stop.load(Ordering::Relaxed) {
-                break;
-            }
+            tokio::select! {
+                _ = ctrl_c() => break,
+                _ = sleep(Duration::from_secs(1)) => {
+                    let seq = sequence.fetch_add(1, Ordering::Relaxed);
+                    let start = Instant::now();
 
-            let seq = sequence.fetch_add(1, Ordering::Relaxed);
-            let start = Instant::now();
-
-            match self.ping_once(addr, seq).await {
-                Ok(response_size) => {
-                    let duration = start.elapsed();
-                    stats.record_success(duration);
-                    println!(
-                        "Response from {addr}: seq={seq} size={response_size} time={:.3}ms",
-                        duration.as_secs_f64() * 1000.0,
-                    );
-                }
-                Err(e) => {
-                    stats.record_failure();
-                    println!("Request timeout for seq={seq} ({e})");
+                    match self.ping_once(addr, seq).await {
+                        Ok(size) => {
+                            let dur = start.elapsed();
+                            stats.record_success(dur);
+                            println!("Response from {addr}: seq={seq} size={size} time={:.3}ms", dur.as_secs_f64() * 1000.0);
+                        }
+                        Err(e) => {
+                            stats.record_failure();
+                            println!("Request timeout for seq={seq} ({e})");
+                        }
+                    }
                 }
             }
-
-            sleep(Duration::from_secs(1)).await;
         }
 
         print_final_stats(&self.target, &stats);

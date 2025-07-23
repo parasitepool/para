@@ -54,7 +54,7 @@ use {
         str::FromStr,
         sync::{
             Arc, LazyLock,
-            atomic::{AtomicBool, AtomicU64, Ordering},
+            atomic::{AtomicU64, Ordering},
         },
         time::{Duration, Instant},
     },
