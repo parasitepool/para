@@ -98,6 +98,7 @@ pub(crate) struct Share {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct ShareBatch {
     shares: Vec<Share>,
+    hostname: String,
     batch_id: u64,
     total_shares: usize,
     start_id: i64,
@@ -271,6 +272,7 @@ impl SyncSend {
 
         let batch = ShareBatch {
             shares: shares.to_vec(),
+            hostname: System::host_name().ok_or(anyhow!("no hostname found"))?,
             batch_id,
             total_shares: shares.len(),
             start_id,
@@ -492,8 +494,6 @@ impl SyncReceive {
             return Ok(());
         }
 
-        let origin = System::host_name().ok_or(anyhow!("no hostname found"))?;
-
         let mut tx = database
             .pool
             .begin()
@@ -505,13 +505,13 @@ impl SyncReceive {
             id, origin, blockheight, workinfoid, clientid, enonce1, nonce2, nonce, ntime,
             diff, sdiff, hash, result, reject_reason, error, errn, createdate, createby,
             createcode, createinet, workername, username, lnurl, address, agent
-        ) "
+        ) ",
         );
 
         // batch our inserts to reduce number of required transactions
         query_builder.push_values(&batch.shares, |mut b, share| {
             b.push_bind(share.id)
-                .push_bind(&origin)
+                .push_bind(&batch.hostname)
                 .push_bind(share.blockheight)
                 .push_bind(share.workinfoid)
                 .push_bind(share.clientid)
@@ -561,11 +561,12 @@ impl SyncReceive {
             username = EXCLUDED.username,
             lnurl = EXCLUDED.lnurl,
             address = EXCLUDED.address,
-            agent = EXCLUDED.agent"
+            agent = EXCLUDED.agent",
         );
 
         let query = query_builder.build();
-        query.execute(&mut *tx)
+        query
+            .execute(&mut *tx)
             .await
             .map_err(|e| anyhow!("Failed to batch insert shares: {e}"))?;
 
