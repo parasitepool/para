@@ -20,7 +20,7 @@ use {
 };
 
 #[derive(Parser, Debug)]
-#[command(about = "Ping stratum mining servers")]
+#[command(about = "Ping a stratum mining server.")]
 pub struct Ping {
     pub target: String,
 }
