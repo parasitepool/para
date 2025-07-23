@@ -113,7 +113,7 @@ impl Ping {
         let request = StratumRequest {
             id: sequence,
             method: "mining.subscribe".to_string(),
-            params: vec![json!("para-ping/1.0")],
+            params: vec![json!("ParaPing/0.0.1")],
         };
 
         let request_json = serde_json::to_string(&request)?;
