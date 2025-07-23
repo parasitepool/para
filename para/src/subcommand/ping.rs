@@ -33,7 +33,7 @@ struct StratumRequest {
 }
 
 impl Ping {
-    pub async fn run(&self, _handle: Handle) -> Result {
+    pub(crate) async fn run(&self, _handle: Handle) -> Result {
         let addr = self.resolve_target().await?;
 
         println!("PING {} ({})", self.target, addr);
