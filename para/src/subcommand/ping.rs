@@ -90,7 +90,7 @@ impl Ping {
         let host_port = if self.target.contains(':') {
             self.target.clone()
         } else {
-            format!("{}:4444", self.target)
+            format!("{}:42069", self.target)
         };
 
         let addr = tokio::task::spawn_blocking(move || {
