@@ -640,7 +640,9 @@ impl Database {
         }
 
         let row_count =
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM compress_shares($1, $2)").bind(start_id).bind(end_id)
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM compress_shares($1, $2)")
+                .bind(start_id)
+                .bind(end_id)
                 .fetch_one(&self.pool)
                 .await
                 .map_err(|err| anyhow!("Compression failed: {err}"))?;
