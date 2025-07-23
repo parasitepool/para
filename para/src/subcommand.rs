@@ -18,10 +18,7 @@ impl Subcommand {
     pub(crate) fn run(self) -> Result {
         match self {
             Self::Miner(miner) => miner.run(),
-            Self::Ping(ping) => {
-                let handle = Handle::new();
-                Runtime::new()?.block_on(async { ping.run(handle).await })
-            }
+            Self::Ping(ping) => Runtime::new()?.block_on(async { ping.run().await }),
             Self::Server(server) => {
                 let handle = Handle::new();
                 Runtime::new()?.block_on(async { server.run(handle).await })

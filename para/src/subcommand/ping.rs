@@ -14,7 +14,7 @@ struct StratumRequest {
 }
 
 impl Ping {
-    pub(crate) async fn run(&self, _handle: Handle) -> Result {
+    pub(crate) async fn run(&self) -> Result {
         let addr = self.resolve_target().await?;
 
         println!("SUBSCRIBE PING {} ({})", self.target, addr);
@@ -47,11 +47,8 @@ impl Ping {
                     let duration = start.elapsed();
                     stats.record_success(duration);
                     println!(
-                        "Response from {}: seq={} time={:.3}ms size={}",
-                        addr,
-                        seq,
+                        "Response from {addr}: seq={seq} size={response_size} time={:.3}ms",
                         duration.as_secs_f64() * 1000.0,
-                        response_size
                     );
                 }
                 Err(e) => {
