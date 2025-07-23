@@ -69,6 +69,39 @@ PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
   )
   "
 
+# Create remote_share table if it doesn't exist (now using -h localhost to force TCP connection)
+PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
+  CREATE TABLE IF NOT EXISTS remote_shares (
+      id BIGINT,
+      origin TEXT,
+      blockheight INTEGER,
+      workinfoid BIGINT,
+      clientid BIGINT,
+      enonce1 TEXT,
+      nonce2 TEXT,
+      nonce TEXT,
+      ntime TEXT,
+      diff DOUBLE PRECISION,
+      sdiff DOUBLE PRECISION,
+      hash TEXT,
+      result BOOLEAN,
+      reject_reason TEXT,
+      error TEXT,
+      errn INTEGER,
+      createdate TEXT,
+      createby TEXT,
+      createcode TEXT,
+      createinet TEXT,
+      workername TEXT,
+      username TEXT,
+      lnurl TEXT,
+      address TEXT,
+      agent TEXT,
+
+      PRIMARY KEY (id, origin)
+  )
+  "
+
 # This is wildly unacceptable and demonstrates why we made need to move to an internal query-library model
 PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
   CREATE OR REPLACE FUNCTION compress_shares(
