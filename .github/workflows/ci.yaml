@@ -16,9 +16,9 @@ env:
   RUSTFLAGS: --deny warnings
 
 jobs:
-  para:
+  lint:
     runs-on: ubuntu-latest
-    
+
     defaults:
       run:
         working-directory: para
@@ -40,6 +40,27 @@ jobs:
 
     - name: Format
       run: cargo fmt --all -- --check
+
+  test:
+    strategy:
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    defaults:
+      run:
+        working-directory: para
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust Toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+
+    - uses: Swatinem/rust-cache@v2
 
     - name: Test
       run: cargo test --all

@@ -28,6 +28,8 @@ pub(crate) struct Config {
         requires = "username"
     )]
     password: Option<String>,
+    #[clap(long, help = "Collect statistics from <NODES>.")]
+    nodes: Vec<Url>,
 }
 
 impl Config {
@@ -93,5 +95,9 @@ impl Config {
 
     pub(crate) fn port(&self) -> Option<u16> {
         self.port
+    }
+
+    pub(crate) fn nodes(&self) -> Vec<Url> {
+        self.nodes.clone()
     }
 }
