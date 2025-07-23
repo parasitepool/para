@@ -15,7 +15,9 @@ ExecStart=/usr/local/bin/para \
   --database-url postgres://satoshi:nakamoto@127.0.0.1:5432/ckpool \
   --log-dir /var/lib/ckpool/logs \
   --username parasite \
-  --password 2g1k3WxAthr5BpyHTs1zk5EZ8KEB6WTE
+  --password 2g1k3WxAthr5BpyHTs1zk5EZ8KEB6WTE \
+  --nodes https://fkb.parasite.xyz \
+  --nodes https://sin.paraiste.xyz
 Group=ckpool
 LimitNOFILE=65536
 MemoryDenyWriteExecute=true
