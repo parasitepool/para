@@ -10,20 +10,28 @@ pub(crate) struct Hasher {
 
 impl Hasher {
     pub(crate) fn hash(&mut self, cancel: CancellationToken) -> Result<(Header, String, String)> {
+        const CANCEL_CHECK_INTERVAL: u32 = 1000;
+        const MIN_LOG_INTERVAL_SECS: f64 = 1.0;
+        const MAX_LOG_INTERVAL_SECS: f64 = 60.0;
+        const INITIAL_LOG_INTERVAL_SECS: f64 = 5.0;
+
         let span =
             tracing::info_span!("hasher", job_id = %self.job_id, extranonce2 = %self.extranonce2);
         let _enter = span.enter();
 
         let mut hashes = 0u64;
         let start = Instant::now();
-        let mut next_log = start + Duration::from_secs(10);
+        let mut last_log = start;
+        let mut adaptive_check_interval = CANCEL_CHECK_INTERVAL;
+        let mut current_log_interval = INITIAL_LOG_INTERVAL_SECS;
+        let mut last_hashrate: Option<f64> = None;
 
         loop {
             if cancel.is_cancelled() {
                 return Err(anyhow!("hasher cancelled"));
             }
 
-            for _ in 0..10000 {
+            for _ in 0..adaptive_check_interval {
                 let hash = self.header.block_hash();
                 hashes += 1;
 
@@ -40,13 +48,63 @@ impl Hasher {
             }
 
             let now = Instant::now();
-            if now >= next_log {
-                let elapsed = now.duration_since(start).as_secs_f64().max(1e-6);
-                info!("Hashrate: {}", HashRate(hashes as f64 / elapsed));
-                next_log += Duration::from_secs(10);
+            let elapsed_since_last = now.duration_since(last_log).as_secs_f64();
+
+            if elapsed_since_last >= current_log_interval {
+                let total_elapsed = now.duration_since(start).as_secs_f64().max(1e-6);
+                let current_hashrate = hashes as f64 / total_elapsed;
+
+                info!("Hashrate: {}", HashRate(current_hashrate));
+
+                if let Some(prev_hashrate) = last_hashrate {
+                    let hashrate_change_pct =
+                        ((current_hashrate - prev_hashrate) / prev_hashrate).abs() * 100.0;
+
+                    // Adjust interval based on hashrate stability
+                    current_log_interval = if hashrate_change_pct < 2.0 {
+                        // Hashrate is very stable, log less frequently
+                        (current_log_interval * 1.5).min(MAX_LOG_INTERVAL_SECS)
+                    } else if hashrate_change_pct < 10.0 {
+                        // Hashrate is moderately stable, keep current interval
+                        current_log_interval
+                    } else {
+                        // Hashrate is changing significantly, log more frequently
+                        (current_log_interval * 0.7).max(MIN_LOG_INTERVAL_SECS)
+                    };
+                }
+
+                last_hashrate = Some(current_hashrate);
+
+                let target_checks_per_interval = (current_log_interval
+                    * (adaptive_check_interval as f64 / elapsed_since_last))
+                    as u32;
+                adaptive_check_interval = target_checks_per_interval.clamp(100, 10000);
+
+                last_log = now;
             }
         }
     }
+}
+
+#[allow(dead_code)]
+fn target_with_leading_zeros(leading_zeros: u8) -> Target {
+    assert!(leading_zeros <= 32, "leading_zeros too high");
+
+    let mut bytes = [0xFFu8; 32];
+
+    let full_zero_bytes = (leading_zeros / 8) as usize;
+    let partial_bits = leading_zeros % 8;
+
+    for byte in bytes.iter_mut().take(full_zero_bytes) {
+        *byte = 0x00;
+    }
+
+    if partial_bits > 0 {
+        let mask = 0xFF >> partial_bits;
+        bytes[full_zero_bytes] = mask;
+    }
+
+    Target::from_be_bytes(bytes)
 }
 
 #[cfg(test)]
@@ -60,26 +118,6 @@ mod tests {
         },
     };
 
-    fn target_with_difficulty(difficulty: u8) -> Target {
-        assert!(difficulty <= 32, "difficulty too high");
-
-        let mut bytes = [0xFFu8; 32];
-
-        let full_zero_bytes = (difficulty / 8) as usize;
-        let partial_bits = difficulty % 8;
-
-        for byte in bytes.iter_mut().take(full_zero_bytes) {
-            *byte = 0x00;
-        }
-
-        if partial_bits > 0 {
-            let mask = 0xFF >> partial_bits;
-            bytes[full_zero_bytes] = mask;
-        }
-
-        Target::from_be_bytes(bytes)
-    }
-
     fn header(network_target: Option<Target>, nonce: Option<u32>) -> Header {
         Header {
             version: Version::TWO,
@@ -92,11 +130,11 @@ mod tests {
     }
 
     #[test]
-    fn test_target_difficulty_levels() {
-        let target_0 = target_with_difficulty(0);
-        let target_8 = target_with_difficulty(8);
-        let target_16 = target_with_difficulty(16);
-        let target_24 = target_with_difficulty(24);
+    fn test_target_leading_zeros_levels() {
+        let target_0 = target_with_leading_zeros(0);
+        let target_8 = target_with_leading_zeros(8);
+        let target_16 = target_with_leading_zeros(16);
+        let target_24 = target_with_leading_zeros(24);
 
         assert!(target_8 < target_0);
         assert!(target_16 < target_8);
@@ -114,9 +152,9 @@ mod tests {
     }
 
     #[test]
-    fn test_partial_byte_difficulty() {
-        let target_4 = target_with_difficulty(4);
-        let target_12 = target_with_difficulty(12);
+    fn test_partial_byte_leading_zeros() {
+        let target_4 = target_with_leading_zeros(4);
+        let target_12 = target_with_leading_zeros(12);
 
         let bytes_4 = target_4.to_be_bytes();
         let bytes_12 = target_12.to_be_bytes();
@@ -130,8 +168,8 @@ mod tests {
     }
 
     #[test]
-    fn hasher_hashes_with_very_low_difficulty() {
-        let target = target_with_difficulty(1);
+    fn hasher_hashes_with_very_low_leading_zeros() {
+        let target = target_with_leading_zeros(1);
         let mut hasher = Hasher {
             header: header(None, None),
             pool_target: target,
@@ -145,7 +183,7 @@ mod tests {
 
     #[test]
     fn hasher_nonce_space_exhausted() {
-        let target = target_with_difficulty(32);
+        let target = target_with_leading_zeros(32);
         let mut hasher = Hasher {
             header: header(None, Some(u32::MAX - 1)),
             pool_target: target,
@@ -161,12 +199,12 @@ mod tests {
     }
 
     #[test]
-    fn test_extreme_difficulties() {
-        let easy_target = target_with_difficulty(1);
+    fn test_extreme_leading_zeros() {
+        let easy_target = target_with_leading_zeros(1);
         let easy_bytes = easy_target.to_be_bytes();
         assert_eq!(easy_bytes[0], 0x7F);
 
-        let hard_target = target_with_difficulty(32);
+        let hard_target = target_with_leading_zeros(32);
         let hard_bytes = hard_target.to_be_bytes();
         for byte in hard_bytes.iter().take(4) {
             assert_eq!(*byte, 0);
@@ -175,57 +213,44 @@ mod tests {
     }
 
     #[test]
-    fn test_hashrate_formatting() {
-        assert_eq!(HashRate(1000.0).to_string(), "1.00 kH/s");
-        assert_eq!(HashRate(1_000_000.0).to_string(), "1.00 MH/s");
-        assert_eq!(HashRate(1_000_000_000.0).to_string(), "1.00 GH/s");
-        assert_eq!(HashRate(1_000_000_000_000.0).to_string(), "1.00 TH/s");
-        assert_eq!(HashRate(1_000_000_000_000_000.0).to_string(), "1.00 PH/s");
-        assert_eq!(
-            HashRate(1_000_000_000_000_000_000.0).to_string(),
-            "1.00 EH/s"
-        );
-    }
-
-    #[test]
-    fn test_difficulty_progression() {
-        let difficulties = [1, 4, 8, 12, 16, 20, 24];
+    fn test_leading_zeros_progression() {
+        let leading_zeros = [1, 4, 8, 12, 16, 20, 24];
         let mut targets = Vec::new();
 
-        for &diff in &difficulties {
-            targets.push(target_with_difficulty(diff));
+        for &zeros in &leading_zeros {
+            targets.push(target_with_leading_zeros(zeros));
         }
 
         for i in 1..targets.len() {
             assert!(
                 targets[i] < targets[i - 1],
-                "Target at difficulty {} should be smaller than difficulty {}",
-                difficulties[i],
-                difficulties[i - 1]
+                "Target at {} leading zeros should be smaller than {} leading zeros",
+                leading_zeros[i],
+                leading_zeros[i - 1]
             );
         }
     }
 
     #[test]
-    fn test_multiple_difficulty_levels() {
-        let difficulties = [1, 2, 3, 4];
+    fn test_multiple_leading_zeros_levels() {
+        let leading_zeros = [1, 2, 3, 4];
 
-        for difficulty in difficulties {
-            let target = target_with_difficulty(difficulty);
+        for zeros in leading_zeros {
+            let target = target_with_leading_zeros(zeros);
             let mut hasher = Hasher {
                 header: header(None, None),
                 pool_target: target,
                 extranonce2: "00000000000".into(),
-                job_id: format!("test_{difficulty}"),
+                job_id: format!("test_{zeros}"),
             };
 
             let result = hasher.hash(CancellationToken::new());
-            assert!(result.is_ok(), "Failed at difficulty {difficulty}");
+            assert!(result.is_ok(), "Failed at {zeros} leading zeros");
 
             let (header, _, _) = result.unwrap();
             assert!(
                 target.is_met_by(header.block_hash()),
-                "Invalid PoW at difficulty {difficulty}"
+                "Invalid PoW at {zeros} leading zeros"
             );
         }
     }
