@@ -107,7 +107,7 @@ PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
   CREATE OR REPLACE FUNCTION compress_shares(
       window_start_val BIGINT,
       window_end_val BIGINT
-  ) RETURNS TABLE(id BIGINT, total_diff NUMERIC, workername TEXT) LANGUAGE plpgsql AS $$
+  ) RETURNS TABLE(id BIGINT, total_diff NUMERIC, workername TEXT) LANGUAGE plpgsql AS \$\$
   DECLARE initial_results TEXT;
           final_results TEXT;
   BEGIN
@@ -209,7 +209,7 @@ PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
           WHERE shares.id > window_start_val AND shares.id <= window_end_val AND shares.result = true
           GROUP BY shares.workername
           ORDER BY MIN(shares.id);
-  END $$;
+  END \$\$;
   "
 
 PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
