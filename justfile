@@ -101,5 +101,9 @@ deploy-para branch remote chain domain: \
   (setup branch remote chain domain)
   ssh root@{{domain}} 'cd deploy/{{remote}} && ./deploy/deploy-para'
 
+deploy-para-to-xyz branch='master': \
+  (deploy-para branch 'parasitepool/pool' 'main' 'fkb.parasite.xyz') \
+  (deploy-para branch 'parasitepool/pool' 'main' 'sin.parasite.xyz')
+
 tunnel server='zulu.parasite.dev':
   ssh -N -L 5433:127.0.0.1:5432 {{server}}
