@@ -105,5 +105,9 @@ deploy-para-to-xyz branch='master': \
   (deploy-para branch 'parasitepool/pool' 'main' 'fkb.parasite.xyz') \
   (deploy-para branch 'parasitepool/pool' 'main' 'sin.parasite.xyz')
 
+deploy-all-to-xyz branch='master': \
+  (deploy branch 'parasitepool/pool' 'main' 'fkb.parasite.xyz') \
+  (deploy branch 'parasitepool/pool' 'main' 'sin.parasite.xyz')
+
 tunnel server='zulu.parasite.dev':
   ssh -N -L 5433:127.0.0.1:5432 {{server}}
