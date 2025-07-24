@@ -139,8 +139,12 @@ struct ckpool_instance {
     char* config;
     /* Kill old instance with same name */
     bool killold;
-    /* Whether to log shares or not */
+    /* Should we log shares */
     bool logshares;
+    /* Whether to log shares to db */
+    bool logshares_db;
+    /* Whether to log shares to file */
+    bool logshares_file;
     /* Whether to log txns or not */
     bool logtxns;
     /* Logging level */
