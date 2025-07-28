@@ -41,25 +41,23 @@ impl Subcommand {
                     });
                     sync_tasks.push(receive_task);
                     info!("Started SyncReceive due to configured nodes");
-                } else {
-                    if let Some(zmq_endpoint) = server.config.zmq_endpoint() {
-                        let sync_send = sync::SyncSend::default().with_zmq_endpoint(zmq_endpoint);
-                        let sync_handle = handle.clone();
+                } else if let Some(zmq_endpoint) = server.config.zmq_endpoint() {
+                    let sync_send = sync::SyncSend::default().with_zmq_endpoint(zmq_endpoint);
+                    let sync_handle = handle.clone();
 
-                        let send_task = rt.spawn_blocking(move || {
-                            let sync_rt = Runtime::new().expect("Failed to create sync send runtime");
-                            sync_rt.block_on(async {
-                                if let Err(e) = sync_send.run(sync_handle).await {
-                                    error!("SyncSend failed: {}", e);
-                                }
-                            });
+                    let send_task = rt.spawn_blocking(move || {
+                        let sync_rt = Runtime::new().expect("Failed to create sync send runtime");
+                        sync_rt.block_on(async {
+                            if let Err(e) = sync_send.run(sync_handle).await {
+                                error!("SyncSend failed: {}", e);
+                            }
                         });
-                        sync_tasks.push(send_task);
-                        info!(
+                    });
+                    sync_tasks.push(send_task);
+                    info!(
                         "Started SyncSend to endpoint: {}",
                         server.config.zmq_endpoint().unwrap()
                     );
-                    }
                 }
 
                 if sync_tasks.is_empty() {

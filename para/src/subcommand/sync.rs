@@ -12,6 +12,7 @@ use zmq::{Context, SocketType};
 
 const ID_FILE: &str = "current_id.txt";
 const SYNC_DELAY_MS: u64 = 1000;
+const BLOCKHEIGHT_CHECK_DELAY_MS: u64 = 5000;
 const TARGET_ID_BUFFER: i64 = 0; // this may no longer be necessary since we are transferring by id now
 const ZMQ_TIMEOUT_MS: u64 = 10000;
 const MAX_RETRIES: u32 = 3;
@@ -34,6 +35,13 @@ pub(crate) struct SyncSend {
 
     #[arg(long, help = "Force reset current ID to 0")]
     reset_id: bool,
+
+    #[arg(
+        long,
+        help = "Terminate when no more records to process",
+        action = clap::ArgAction::SetTrue
+    )]
+    terminate_when_complete: bool,
 
     #[arg(
         long,
@@ -129,6 +137,7 @@ struct SyncResponse {
 enum SyncResult {
     Continue,
     Complete,
+    WaitForNewBlock,
 }
 
 impl SyncSend {
@@ -145,6 +154,9 @@ impl SyncSend {
         });
 
         println!("Starting ZMQ share sync send...");
+        if !self.terminate_when_complete {
+            println!("Keep-alive mode enabled - will continue running even when caught up");
+        }
 
         let database = Database::new(self.database_url.clone()).await?;
         let context = Context::new();
@@ -162,11 +174,22 @@ impl SyncSend {
         while !shutdown_flag.load(Ordering::Relaxed) {
             match self.sync_batch(&database, &context, &mut current_id).await {
                 Ok(SyncResult::Complete) => {
-                    println!("Sync send completed successfully");
-                    break;
+                    if !self.terminate_when_complete {
+                        println!("Sync send caught up, waiting for new data...");
+                        sleep(Duration::from_millis(SYNC_DELAY_MS)).await;
+                    } else {
+                        println!("Sync send completed successfully");
+                        break;
+                    }
                 }
                 Ok(SyncResult::Continue) => {
                     sleep(Duration::from_millis(SYNC_DELAY_MS)).await;
+                }
+                Ok(SyncResult::WaitForNewBlock) => {
+                    println!(
+                        "Current and latest records have same blockheight, waiting for new block..."
+                    );
+                    sleep(Duration::from_millis(BLOCKHEIGHT_CHECK_DELAY_MS)).await;
                 }
                 Err(e) => {
                     eprintln!("Sync send error: {e}");
@@ -194,13 +217,24 @@ impl SyncSend {
             return Ok(SyncResult::Complete);
         }
 
+        let current_blockheight = database.get_blockheight_for_id(*current_id).await?;
+        let latest_blockheight = database.get_blockheight_for_id(max_id).await?;
+
+        if let (Some(current_bh), Some(latest_bh)) = (current_blockheight, latest_blockheight) {
+            if current_bh == latest_bh {
+                return Ok(SyncResult::WaitForNewBlock);
+            }
+        }
+
         let target_id = std::cmp::min(*current_id + self.batch_size, max_id - TARGET_ID_BUFFER);
 
         println!(
-            "Fetching shares from ID {} to {} (max: {})",
+            "Fetching shares from ID {} to {} (max: {}) - blockheights: {:?} -> {:?}",
             *current_id + 1,
             target_id,
-            max_id
+            max_id,
+            current_blockheight,
+            latest_blockheight
         );
 
         // Run share compression BEFORE transmitting
@@ -630,6 +664,17 @@ impl Database {
             .map_err(|e| anyhow!("Failed to get max ID: {e}"))?;
 
         Ok(result.unwrap_or(0))
+    }
+
+    pub(crate) async fn get_blockheight_for_id(&self, id: i64) -> Result<Option<i32>> {
+        let result =
+            sqlx::query_scalar::<_, Option<i32>>("SELECT blockheight FROM shares WHERE id = $1")
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| anyhow!("Failed to get blockheight for ID {}: {}", id, e))?;
+
+        Ok(result.flatten())
     }
 
     pub(crate) async fn get_shares_by_id_range(
