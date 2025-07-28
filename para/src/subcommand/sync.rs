@@ -43,6 +43,12 @@ pub(crate) struct SyncSend {
     database_url: String,
 }
 
+impl Default for SyncSend {
+    fn default() -> Self {
+        Self::try_parse_from(std::iter::empty::<String>()).unwrap()
+    }
+}
+
 #[derive(Debug, Parser)]
 pub(crate) struct SyncReceive {
     #[arg(
@@ -65,6 +71,12 @@ pub(crate) struct SyncReceive {
         default_value = "postgres://satoshi:nakamoto@127.0.0.1:5432/ckpool"
     )]
     database_url: String,
+}
+
+impl Default for SyncReceive {
+    fn default() -> Self {
+        Self::try_parse_from(std::iter::empty::<String>()).unwrap()
+    }
 }
 
 #[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone)]
@@ -355,6 +367,11 @@ impl SyncSend {
         fs::write(ID_FILE, id.to_string()).map_err(|e| anyhow!("Failed to save ID file: {e}"))?;
         Ok(())
     }
+
+    pub(crate) fn with_zmq_endpoint(mut self, zmq_endpoint: String) -> Self {
+        self.zmq_endpoint = zmq_endpoint;
+        self
+    }
 }
 
 impl SyncReceive {
@@ -597,6 +614,11 @@ impl SyncReceive {
         );
 
         Ok(())
+    }
+
+    pub(crate) fn _with_zmq_endpoint(mut self, zmq_endpoint: String) -> Self {
+        self.zmq_endpoint = zmq_endpoint;
+        self
     }
 }
 
