@@ -263,6 +263,7 @@ impl SyncSend {
         let shares = database
             .get_shares_by_id_range(*current_id + 1, target_id)
             .await?;
+        let highest_id = shares.last().map(|share| share.id);
 
         if shares.is_empty() {
             println!("No shares found in range, moving to next batch");
@@ -280,7 +281,7 @@ impl SyncSend {
                 .await
             {
                 Ok(_) => {
-                    *current_id = target_id;
+                    *current_id = highest_id.unwrap_or(target_id);
                     self.save_current_id(*current_id).await?;
                     return Ok(SyncResult::Continue);
                 }
