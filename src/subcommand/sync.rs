@@ -650,7 +650,7 @@ impl SyncReceive {
         Ok(())
     }
 
-    pub(crate) fn _with_zmq_endpoint(mut self, zmq_endpoint: String) -> Self {
+    pub(crate) fn with_zmq_endpoint(mut self, zmq_endpoint: String) -> Self {
         self.zmq_endpoint = zmq_endpoint;
         self
     }

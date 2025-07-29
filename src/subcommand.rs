@@ -34,7 +34,7 @@ impl Subcommand {
                         let sync_rt =
                             Runtime::new().expect("Failed to create sync receive runtime");
                         sync_rt.block_on(async {
-                            if let Err(e) = sync_receive.run(sync_handle).await {
+                            if let Err(e) = sync_receive.with_zmq_endpoint("tcp://0.0.0.0:5555".into_string()).run(sync_handle).await {
                                 error!("SyncReceive failed: {}", e);
                             }
                         });
