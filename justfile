@@ -38,7 +38,7 @@ miner-signet:
     --password x
 
 server: 
-  RUST_LOG=info cargo run -- server --log-dir ../copr/logs --port 8080
+  RUST_LOG=info cargo run -- server --log-dir copr/logs --port 8080
 
 install:
   git submodule update --init
