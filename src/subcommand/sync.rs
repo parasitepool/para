@@ -162,6 +162,7 @@ impl SyncSend {
         let context = Context::new();
 
         let mut current_id = self.load_current_id().await?;
+        let mut caught_up_logged = false;
 
         if self.reset_id {
             current_id = 0;
@@ -175,7 +176,10 @@ impl SyncSend {
             match self.sync_batch(&database, &context, &mut current_id).await {
                 Ok(SyncResult::Complete) => {
                     if !self.terminate_when_complete {
-                        println!("Sync send caught up, waiting for new data...");
+                        if !caught_up_logged {
+                            println!("Sync send caught up, waiting for new data...");
+                            caught_up_logged = true;
+                        }
                         sleep(Duration::from_millis(SYNC_DELAY_MS)).await;
                     } else {
                         println!("Sync send completed successfully");
@@ -183,12 +187,16 @@ impl SyncSend {
                     }
                 }
                 Ok(SyncResult::Continue) => {
+                    caught_up_logged = false;
                     sleep(Duration::from_millis(SYNC_DELAY_MS)).await;
                 }
                 Ok(SyncResult::WaitForNewBlock) => {
-                    println!(
-                        "Current and latest records have same blockheight, waiting for new block..."
-                    );
+                    if !caught_up_logged {
+                        println!(
+                            "Current and latest records have same blockheight, waiting for new block..."
+                        );
+                        caught_up_logged = true;
+                    }
                     sleep(Duration::from_millis(BLOCKHEIGHT_CHECK_DELAY_MS)).await;
                 }
                 Err(e) => {
