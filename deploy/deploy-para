@@ -10,10 +10,8 @@ source ~/.cargo/env
 
 rustup update stable
 
-cd para
 cargo build --release
 install --backup target/release/para /usr/local/bin/para
-cd ..
 
 journalctl --unit para --vacuum-time 1s
 

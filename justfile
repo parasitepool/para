@@ -1,5 +1,45 @@
 set positional-arguments
 
+watch +args='test':
+  cargo watch --clear --exec '{{args}}'
+
+fmt:
+  cargo fmt --all
+
+clippy:
+  cargo clippy --all --all-targets -- --deny warnings
+
+ci: clippy
+  cargo fmt -- --check
+  cargo test --all
+  cargo test --all -- --ignored
+
+outdated:
+  cargo outdated --root-deps-only --workspace
+
+unused:
+  cargo +nightly udeps --workspace
+
+doc:
+  cargo doc --workspace --open
+
+miner: 
+  RUST_LOG=info cargo run -- miner \
+    --host parasite.xyz \
+    --port 42069 \
+    --username bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg6dzw5nk24r45dzasde25r3.ParaMiner \
+    --password x
+
+miner-signet: 
+  RUST_LOG=info cargo run --release -- miner \
+    --host 0.0.0.0 \
+    --port 42069 \
+    --username tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.ParaMiner \
+    --password x
+
+server: 
+  RUST_LOG=info cargo run -- server --log-dir copr/logs --port 8080
+
 install:
   git submodule update --init
   sudo apt-get install --yes \
