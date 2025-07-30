@@ -1547,7 +1547,7 @@ int main(int argc, char** argv) {
     if (!strcmp(appname, "ckproxy"))
         ckp.proxy = true;
 
-    while ((c = getopt_long(argc, argv, "Bc:Dd:g:HhkLl:Nn:PpqRST:s:tu", long_options, &i)) != -1) {
+    while ((c = getopt_long(argc, argv, "Bc:Dd:g:HhkLFl:Nn:PpqRST:s:tu", long_options, &i)) != -1) {
         switch (c) {
             case 'B':
                 if (ckp.proxy)
@@ -1588,6 +1588,11 @@ int main(int argc, char** argv) {
                 break;
             case 'L':
                 ckp.logshares = true;
+                ckp.logshares_db = true;
+                break;
+            case 'F':
+                ckp.logshares = true;
+                ckp.logshares_file = true;
                 break;
             case 'l':
                 ckp.loglevel = atoi(optarg);

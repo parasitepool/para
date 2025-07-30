@@ -1059,14 +1059,14 @@ static void add_base(ckpool_t* ckp, sdata_t* sdata, workbase_t* wb, bool* new_bl
         __bin2hex(sdata->lastswaphash, swap, 32);
         sdata->blockchange_id = wb->id;
     }
-    if (*new_block && ckp->logshares) {
+    if (*new_block && ckp->logshares_file) {
         sprintf(wb->logdir, "%s%08x/", ckp->logdir, wb->height);
         ret = mkdir(wb->logdir, 0750);
         if (unlikely(ret && errno != EEXIST))
             LOGERR("Failed to create log directory %s", wb->logdir);
     }
     sprintf(wb->idstring, "%016lx", wb->id);
-    if (ckp->logshares)
+    if (ckp->logshares_file)
         sprintf(wb->logdir, "%s%08x/%s", ckp->logdir, wb->height, wb->idstring);
 
     HASH_ADD_I64(sdata->workbases, id, wb);
@@ -3691,7 +3691,7 @@ static void block_solve(ckpool_t* ckp, json_t* val) {
         LOGWARNING("Solved and confirmed block!");
 
         // Record block in database without worker info
-        if (ckp->logshares) {
+        if (ckp->logshares_db) {
             db_add_block(sdata, height, blockhash, true, "", "", diff, coinbasevalue);
         }
     } else {
@@ -3713,7 +3713,7 @@ static void block_solve(ckpool_t* ckp, json_t* val) {
         worker = get_worker(sdata, user, workername);
 
         // Record block in database with worker info
-        if (ckp->logshares) {
+        if (ckp->logshares_db) {
             db_add_block(sdata, height, blockhash, true, workername, username, diff, coinbasevalue);
         }
 
@@ -3752,7 +3752,7 @@ static void block_reject(ckpool_t* ckp, json_t* val) {
         strncpy(blockhash, blockhash_str, sizeof(blockhash) - 1);
 
         // Update block status in database as rejected
-        if (ckp->logshares) {
+        if (ckp->logshares_db) {
             db_update_block_status(sdata, blockhash_str, false, false);
         }
 
@@ -5301,7 +5301,7 @@ static user_instance_t* generate_user(ckpool_t* ckp, stratum_instance_t* client,
             }
 
             /* Add new user to database if this is a new user */
-            if (new_user && ckp->logshares) {
+            if (new_user && ckp->logshares_db) {
                 insert_user_database(sdata, user, lightning_id, lightning_domain, workername);
             }
         }
@@ -6181,10 +6181,11 @@ out_nowb:
     json_set_string(val, "address", client->address);
     json_set_string(val, "agent", client->useragent);
 
-    if (ckp->logshares) {
-        // TODO: remove file logging after validating
+    if (ckp->logshares_db) {
         db_log_share(sdata, val, wb);
+    }
 
+    if (ckp->logshares_file) {
         fp = fopen(fname, "ae");
         if (likely(fp)) {
             s = json_dumps(val, JSON_EOL);
@@ -7003,7 +7004,7 @@ static void parse_remote_block(ckpool_t* ckp, sdata_t* sdata, json_t* val, const
     if (cnfrm && cnfrm[0] == '1') {
         confirmed = true;
         /* Update the block status in database */
-        if (ckp->logshares && blockhash_str) {
+        if (ckp->logshares_db && blockhash_str) {
             db_update_block_status(sdata, blockhash_str, true, false);
             LOGNOTICE("Updated confirmed status for block %s", blockhash_str);
         }
@@ -7039,7 +7040,7 @@ static void parse_remote_block(ckpool_t* ckp, sdata_t* sdata, json_t* val, const
         send_nodes_block(sdata, val, client_id);
 
         /* Add the block to database if it's not already added */
-        if (ckp->logshares) {
+        if (ckp->logshares_db) {
             workername = json_string_value(workername_val);
             if (workername && strlen(workername)) {
                 /* Extract username from workername */
@@ -7104,7 +7105,7 @@ void parse_upstream_block(ckpool_t* ckp, json_t* val) {
         blockhash_str = json_string_value(json_object_get(val, "blockhash"));
 
         /* Update the block status in database for confirmed blocks */
-        if (ckp->logshares && blockhash_str) {
+        if (ckp->logshares_db && blockhash_str) {
             db_update_block_status(sdata, blockhash_str, true, false);
             LOGNOTICE("Updated confirmed status for upstream block %s", blockhash_str);
         }
@@ -8660,7 +8661,7 @@ static void db_log_share(sdata_t* sdata, json_t* val, workbase_t* wb) {
     char        errn_str[32];
     char        result_str[8];
 
-    if (!ckp->logshares)
+    if (!ckp->logshares_db)
         return;
 
     /* Convert numeric values to strings */
@@ -8861,7 +8862,7 @@ static void check_blocks_status(ckpool_t* ckp) {
     char     hash[68] = {0};
     bool     confirmed = false;
 
-    if (!ckp->logshares)
+    if (!ckp->logshares_db)
         return;
 
     db_get_latest_block(sdata, &height, hash, &confirmed);
@@ -8892,7 +8893,7 @@ void* stratifier(void* arg) {
     mutex_init(&sdata->pg_lock);
     sdata->pg_conn = NULL;
     sdata->pg_connected = false;
-    if (ckp->logshares) {
+    if (ckp->logshares_db) {
         if (sdata_db_connect(sdata)) {
             LOGNOTICE("Successfully connected to PostgreSQL database");
             check_blocks_status(ckp);

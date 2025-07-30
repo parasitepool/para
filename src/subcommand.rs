@@ -2,7 +2,8 @@ use super::*;
 
 mod miner;
 mod ping;
-mod server;
+pub(crate) mod server;
+mod sync;
 
 #[derive(Debug, Parser)]
 pub(crate) enum Subcommand {
@@ -12,6 +13,10 @@ pub(crate) enum Subcommand {
     Ping(ping::Ping),
     #[command(about = "Run API server")]
     Server(server::Server),
+    #[command(about = "Send shares to ZMQ endpoint")]
+    SyncSend(sync::SyncSend),
+    #[command(about = "Receive and process shares from ZMQ endpoint")]
+    SyncReceive(sync::SyncReceive),
 }
 
 impl Subcommand {
@@ -22,6 +27,20 @@ impl Subcommand {
             Self::Server(server) => {
                 let handle = Handle::new();
                 Runtime::new()?.block_on(async { server.run(handle).await })
+            }
+            Self::SyncSend(sync_send) => {
+                let handle = Handle::new();
+
+                Runtime::new()?.block_on(async { sync_send.run(handle).await.unwrap() });
+
+                Ok(())
+            }
+            Self::SyncReceive(sync_receive) => {
+                let handle = Handle::new();
+
+                Runtime::new()?.block_on(async { sync_receive.run(handle).await.unwrap() });
+
+                Ok(())
             }
         }
     }

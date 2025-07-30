@@ -19,10 +19,6 @@ jobs:
   lint:
     runs-on: ubuntu-latest
 
-    defaults:
-      run:
-        working-directory: para
-
     steps:
     - uses: actions/checkout@v4
 
@@ -47,10 +43,6 @@ jobs:
         os: [macos-latest, ubuntu-latest, windows-latest]
 
     runs-on: ${{ matrix.os }}
-
-    defaults:
-      run:
-        working-directory: para
 
     steps:
     - uses: actions/checkout@v4
