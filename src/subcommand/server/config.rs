@@ -30,6 +30,8 @@ pub(crate) struct Config {
     password: Option<String>,
     #[clap(long, help = "Collect statistics from <NODES>.")]
     nodes: Vec<Url>,
+    #[arg(long, help = "Send shares to ZMQ endpoint <ZMQ_SEND_ENDPOINT>")]
+    zmq_endpoint: Option<String>,
 }
 
 impl Config {
@@ -95,5 +97,9 @@ impl Config {
 
     pub(crate) fn nodes(&self) -> Vec<Url> {
         self.nodes.clone()
+    }
+
+    pub(crate) fn zmq_endpoint(&self) -> Option<String> {
+        self.zmq_endpoint.clone()
     }
 }
