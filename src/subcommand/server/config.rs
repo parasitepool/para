@@ -30,9 +30,6 @@ pub(crate) struct Config {
     password: Option<String>,
     #[clap(long, help = "Collect statistics from <NODES>.")]
     nodes: Vec<Url>,
-
-    #[arg(long, help = "Run sync-receive concurrently with the api server")]
-    zmq_receiver: bool,
     #[arg(long, help = "Send shares to ZMQ endpoint <ZMQ_SEND_ENDPOINT>")]
     zmq_endpoint: Option<String>,
 }
@@ -102,9 +99,6 @@ impl Config {
         self.nodes.clone()
     }
 
-    pub(crate) fn zmq_receiver(&self) -> bool {
-        self.zmq_receiver
-    }
     pub(crate) fn zmq_endpoint(&self) -> Option<String> {
         self.zmq_endpoint.clone()
     }
