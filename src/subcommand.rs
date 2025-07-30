@@ -26,7 +26,7 @@ impl Subcommand {
 
                 let mut sync_tasks = Vec::new();
 
-                if !server.config.nodes().is_empty() {
+                if !server.config.zmq_receiver() {
                     let sync_receive = sync::SyncReceive::default();
                     let sync_handle = handle.clone();
 
