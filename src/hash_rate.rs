@@ -18,12 +18,14 @@ impl fmt::Display for HashRate {
             return write!(f, "0{}", UNITS[unit]);
         }
 
-        let precision = if rate >= 10.0 {
+        let precision = if rate >= 100.0 {
             0
-        } else if rate >= 1.0 {
+        } else if rate >= 10.0 {
             1
-        } else {
+        } else if rate >= 1.0 {
             2
+        } else {
+            3
         };
 
         write!(f, "{rate:.precision$}{}", UNITS[unit])
@@ -84,14 +86,14 @@ mod tests {
         let cases = [
             (0.0, "0"),
             (999.0, "999"),
-            (1_000.0, "1.0K"),
-            (1_500_000.0, "1.5M"),
-            (2_000_000_000.0, "2.0G"),
-            (3.5e12, "3.5T"),
-            (4.2e15, "4.2P"),
-            (5.1e18, "5.1E"),
-            (6.6e21, "6.6Z"),
-            (7.7e24, "7.7Y"),
+            (1_000.0, "1.00K"),
+            (1_500_000.0, "1.50M"),
+            (2_000_000_000.0, "2.00G"),
+            (3.5e12, "3.50T"),
+            (4.2e15, "4.20P"),
+            (5.1e18, "5.10E"),
+            (6.6e21, "6.60Z"),
+            (7.7e24, "7.70Y"),
             (1.2e27, "1200Y"),
         ];
 
@@ -154,5 +156,12 @@ mod tests {
         let hr2 = HashRate::from_str("1.23E").unwrap();
         let sum = hr1 + hr2;
         assert_eq!(sum.0, 314e15 + 1.23e18);
+
+
+        let hr1 = HashRate::from_str("10.1P").unwrap();
+        let hr2 = HashRate::from_str("528G").unwrap();
+        let hr3 = HashRate::from_str("610G").unwrap();
+        let sum = hr1 + hr2 + hr3;
+        assert_eq!(sum.to_string(), "10.1P".to_string());
     }
 }
