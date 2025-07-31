@@ -229,7 +229,7 @@ impl SyncSend {
         let latest_blockheight = database.get_blockheight_for_id(max_id).await?;
 
         if let (Some(current_bh), Some(latest_bh)) = (current_blockheight, latest_blockheight) {
-            if current_bh == latest_bh {
+            if current_bh >= latest_bh {
                 return Ok(SyncResult::WaitForNewBlock);
             }
         }
