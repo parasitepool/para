@@ -554,51 +554,61 @@ impl SyncReceive {
             return Ok(());
         }
 
+        const MAX_SHARES_PER_SUBBATCH: usize = 2500;
         let mut tx = database
             .pool
             .begin()
             .await
             .map_err(|e| anyhow!("Failed to start transaction: {e}"))?;
 
-        let mut query_builder = sqlx::QueryBuilder::new(
-            "INSERT INTO remote_shares (
+        // Process shares in chunks to avoid parameter limit
+        for (chunk_idx, chunk) in batch.shares.chunks(MAX_SHARES_PER_SUBBATCH).enumerate() {
+            println!(
+                "Processing sub-batch {}/{} with {} shares",
+                chunk_idx + 1,
+                batch.shares.len().div_ceil(MAX_SHARES_PER_SUBBATCH),
+                chunk.len()
+            );
+
+            let mut query_builder = sqlx::QueryBuilder::new(
+                "INSERT INTO remote_shares (
             id, origin, blockheight, workinfoid, clientid, enonce1, nonce2, nonce, ntime,
             diff, sdiff, hash, result, reject_reason, error, errn, createdate, createby,
             createcode, createinet, workername, username, lnurl, address, agent
         ) ",
-        );
+            );
 
-        // batch our inserts to reduce number of required transactions
-        query_builder.push_values(&batch.shares, |mut b, share| {
-            b.push_bind(share.id)
-                .push_bind(&batch.hostname)
-                .push_bind(share.blockheight)
-                .push_bind(share.workinfoid)
-                .push_bind(share.clientid)
-                .push_bind(&share.enonce1)
-                .push_bind(&share.nonce2)
-                .push_bind(&share.nonce)
-                .push_bind(&share.ntime)
-                .push_bind(share.diff)
-                .push_bind(share.sdiff)
-                .push_bind(&share.hash)
-                .push_bind(share.result)
-                .push_bind(&share.reject_reason)
-                .push_bind(&share.error)
-                .push_bind(share.errn)
-                .push_bind(&share.createdate)
-                .push_bind(&share.createby)
-                .push_bind(&share.createcode)
-                .push_bind(&share.createinet)
-                .push_bind(&share.workername)
-                .push_bind(&share.username)
-                .push_bind(&share.lnurl)
-                .push_bind(&share.address)
-                .push_bind(&share.agent);
-        });
+            // batch our inserts to reduce number of required transactions
+            query_builder.push_values(chunk, |mut b, share| {
+                b.push_bind(share.id)
+                    .push_bind(&batch.hostname)
+                    .push_bind(share.blockheight)
+                    .push_bind(share.workinfoid)
+                    .push_bind(share.clientid)
+                    .push_bind(&share.enonce1)
+                    .push_bind(&share.nonce2)
+                    .push_bind(&share.nonce)
+                    .push_bind(&share.ntime)
+                    .push_bind(share.diff)
+                    .push_bind(share.sdiff)
+                    .push_bind(&share.hash)
+                    .push_bind(share.result)
+                    .push_bind(&share.reject_reason)
+                    .push_bind(&share.error)
+                    .push_bind(share.errn)
+                    .push_bind(&share.createdate)
+                    .push_bind(&share.createby)
+                    .push_bind(&share.createcode)
+                    .push_bind(&share.createinet)
+                    .push_bind(&share.workername)
+                    .push_bind(&share.username)
+                    .push_bind(&share.lnurl)
+                    .push_bind(&share.address)
+                    .push_bind(&share.agent);
+            });
 
-        query_builder.push(
-            " ON CONFLICT (id, origin) DO UPDATE SET
+            query_builder.push(
+                " ON CONFLICT (id, origin) DO UPDATE SET
             blockheight = EXCLUDED.blockheight,
             workinfoid = EXCLUDED.workinfoid,
             clientid = EXCLUDED.clientid,
@@ -622,13 +632,16 @@ impl SyncReceive {
             lnurl = EXCLUDED.lnurl,
             address = EXCLUDED.address,
             agent = EXCLUDED.agent",
-        );
+            );
 
-        let query = query_builder.build();
-        query
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| anyhow!("Failed to batch insert shares: {e}"))?;
+            let query = query_builder.build();
+            query.execute(&mut *tx).await.map_err(|e| {
+                anyhow!(
+                    "Failed to batch insert shares in sub-batch {}: {e}",
+                    chunk_idx + 1
+                )
+            })?;
+        }
 
         tx.commit()
             .await
@@ -653,7 +666,7 @@ impl SyncReceive {
             worker_count,
             min_blockheight,
             max_blockheight,
-            self.zmq_endpoint
+            batch.hostname // Fixed: use batch.hostname instead of self.zmq_endpoint
         );
 
         Ok(())
