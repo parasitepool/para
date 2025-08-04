@@ -14,30 +14,42 @@ impl Hasher {
         let start = Instant::now();
         let mut last_log = start;
 
+        let span =
+            tracing::info_span!("hasher", job_id = %self.job_id, extranonce2 = %self.extranonce2);
+        let _ = span.enter();
+
         loop {
             if cancel.is_cancelled() {
                 return Err(anyhow!("hasher cancelled"));
             }
 
-            let hash = self.header.block_hash();
-            hashes += 1;
+            for _ in 0..10000 {
+                let hash = self.header.block_hash();
+                hashes += 1;
 
-            if self.pool_target.is_met_by(hash) {
-                info!("Solved block with hash: {hash}");
-                return Ok((self.header, self.extranonce2.clone(), self.job_id.clone()));
-            }
+                if self.pool_target.is_met_by(hash) {
+                    info!("Solved block with hash: {hash}");
+                    return Ok((self.header, self.extranonce2.clone(), self.job_id.clone()));
+                }
 
-            if self.header.nonce == u32::MAX {
-                return Err(anyhow!("nonce space exhausted"));
+                self.header.nonce = self
+                    .header
+                    .nonce
+                    .checked_add(1)
+                    .ok_or_else(|| anyhow!("nonce space exhausted"))?;
             }
 
             let now = Instant::now();
-            if now.duration_since(last_log) >= Duration::from_secs(10) {
-                let elapsed = now.duration_since(start).as_secs_f64().max(1e-6);
+            let elapsed_since_last = now.duration_since(last_log).as_secs();
+
+            if elapsed_since_last >= 5 {
+                let total_elapsed = now.duration_since(start).as_secs_f64().max(1e-6);
+                let current_hashrate = hashes as f64 / total_elapsed;
+
+                info!("Hashrate: {}", HashRate(current_hashrate));
+
                 last_log = now;
-                info!("Hashrate: {}", HashRate(hashes as f64 / elapsed));
             }
-            self.header.nonce = self.header.nonce.wrapping_add(1);
         }
     }
 }
@@ -53,26 +65,25 @@ mod tests {
         },
     };
 
-    // Hacky way to create very easy to solve targets for testing
-    fn target(shift: u8) -> Target {
-        let mut bytes = [0u8; 32];
-        let (a, b, c, d) = match shift {
-            0 => (0xff, 0xff, 0x00, 0x00),
-            1 => (0x0f, 0xff, 0xf0, 0x00),
-            2 => (0x00, 0xff, 0xff, 0x00),
-            3 => (0x00, 0x0f, 0xff, 0xf0),
-            4 => (0x00, 0x00, 0xff, 0xff),
-            _ => panic!("shift should be less than 5"),
-        };
+    fn shift(leading_zeros: u8) -> Target {
+        assert!(leading_zeros <= 32, "leading_zeros too high");
 
-        bytes[0] = a;
-        bytes[1] = b;
-        bytes[2] = c;
-        bytes[3] = d;
+        let mut bytes = [0xFFu8; 32];
+
+        let full_zero_bytes = (leading_zeros / 8) as usize;
+        let partial_bits = leading_zeros % 8;
+
+        for byte in bytes.iter_mut().take(full_zero_bytes) {
+            *byte = 0x00;
+        }
+
+        if partial_bits > 0 {
+            let mask = 0xFF >> partial_bits;
+            bytes[full_zero_bytes] = mask;
+        }
 
         Target::from_be_bytes(bytes)
     }
-
     fn header(network_target: Option<Target>, nonce: Option<u32>) -> Header {
         Header {
             version: Version::TWO,
@@ -83,28 +94,64 @@ mod tests {
             nonce: nonce.unwrap_or_default(),
         }
     }
-    #[test]
-    fn hasher_hashes() {
-        let target = target(1);
 
+    #[test]
+    fn test_target_leading_zeros_levels() {
+        let target_0 = shift(0);
+        let target_8 = shift(8);
+        let target_16 = shift(16);
+        let target_24 = shift(24);
+
+        assert!(target_8 < target_0);
+        assert!(target_16 < target_8);
+        assert!(target_24 < target_16);
+
+        let bytes_8 = target_8.to_be_bytes();
+        let bytes_16 = target_16.to_be_bytes();
+
+        assert_eq!(bytes_8[0], 0);
+        assert_eq!(bytes_16[0], 0);
+        assert_eq!(bytes_16[1], 0);
+
+        assert_eq!(bytes_8[1], 0xFF);
+        assert_eq!(bytes_16[2], 0xFF);
+    }
+
+    #[test]
+    fn test_partial_byte_leading_zeros() {
+        let target_4 = shift(4);
+        let target_12 = shift(12);
+
+        let bytes_4 = target_4.to_be_bytes();
+        let bytes_12 = target_12.to_be_bytes();
+
+        assert_eq!(bytes_4[0], 0x0F);
+        assert_eq!(bytes_4[1], 0xFF);
+
+        assert_eq!(bytes_12[0], 0);
+        assert_eq!(bytes_12[1], 0x0F);
+        assert_eq!(bytes_12[2], 0xFF);
+    }
+
+    #[test]
+    fn hasher_hashes_with_very_low_leading_zeros() {
+        let target = shift(1);
         let mut hasher = Hasher {
-            header: header(Some(target), None),
+            header: header(None, None),
             pool_target: target,
             extranonce2: "00000000000".into(),
             job_id: "bf".into(),
         };
 
         let (header, _extranonce2, _job_id) = hasher.hash(CancellationToken::new()).unwrap();
-
-        assert!(header.validate_pow(target).is_ok());
+        assert!(target.is_met_by(header.block_hash()));
     }
 
     #[test]
     fn hasher_nonce_space_exhausted() {
-        let target = target(1);
-
+        let target = shift(32);
         let mut hasher = Hasher {
-            header: header(Some(target), Some(u32::MAX - 1)),
+            header: header(None, Some(u32::MAX - 1)),
             pool_target: target,
             extranonce2: "00000000000".into(),
             job_id: "bg".into(),
@@ -114,6 +161,63 @@ mod tests {
             hasher
                 .hash(CancellationToken::new())
                 .is_err_and(|err| err.to_string() == "nonce space exhausted")
-        )
+        );
+    }
+
+    #[test]
+    fn test_extreme_leading_zeros() {
+        let easy_target = shift(1);
+        let easy_bytes = easy_target.to_be_bytes();
+        assert_eq!(easy_bytes[0], 0x7F);
+
+        let hard_target = shift(32);
+        let hard_bytes = hard_target.to_be_bytes();
+        for byte in hard_bytes.iter().take(4) {
+            assert_eq!(*byte, 0);
+        }
+        assert_eq!(hard_bytes[4], 0xFF);
+    }
+
+    #[test]
+    fn test_leading_zeros_progression() {
+        let leading_zeros = [1, 4, 8, 12, 16, 20, 24];
+        let mut targets = Vec::new();
+
+        for &zeros in &leading_zeros {
+            targets.push(shift(zeros));
+        }
+
+        for i in 1..targets.len() {
+            assert!(
+                targets[i] < targets[i - 1],
+                "Target at {} leading zeros should be smaller than {} leading zeros",
+                leading_zeros[i],
+                leading_zeros[i - 1]
+            );
+        }
+    }
+
+    #[test]
+    fn test_multiple_leading_zeros_levels() {
+        let leading_zeros = [1, 2, 3, 4];
+
+        for zeros in leading_zeros {
+            let target = shift(zeros);
+            let mut hasher = Hasher {
+                header: header(None, None),
+                pool_target: target,
+                extranonce2: "00000000000".into(),
+                job_id: format!("test_{zeros}"),
+            };
+
+            let result = hasher.hash(CancellationToken::new());
+            assert!(result.is_ok(), "Failed at {zeros} leading zeros");
+
+            let (header, _, _) = result.unwrap();
+            assert!(
+                target.is_met_by(header.block_hash()),
+                "Invalid PoW at {zeros} leading zeros"
+            );
+        }
     }
 }
