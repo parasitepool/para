@@ -12,6 +12,7 @@ use zmq::{Context, SocketType};
 
 const ID_FILE: &str = "current_id.txt";
 const SYNC_DELAY_MS: u64 = 1000;
+const BLOCKHEIGHT_CHECK_DELAY_MS: u64 = 5000;
 const TARGET_ID_BUFFER: i64 = 0; // this may no longer be necessary since we are transferring by id now
 const ZMQ_TIMEOUT_MS: u64 = 10000;
 const MAX_RETRIES: u32 = 3;
@@ -37,10 +38,23 @@ pub(crate) struct SyncSend {
 
     #[arg(
         long,
+        help = "Terminate when no more records to process",
+        action = clap::ArgAction::SetTrue
+    )]
+    terminate_when_complete: bool,
+
+    #[arg(
+        long,
         help = "Connect to Postgres running at <DATABASE_URL>",
         default_value = "postgres://satoshi:nakamoto@127.0.0.1:5432/ckpool"
     )]
     database_url: String,
+}
+
+impl Default for SyncSend {
+    fn default() -> Self {
+        Self::try_parse_from(std::iter::empty::<String>()).unwrap()
+    }
 }
 
 #[derive(Debug, Parser)]
@@ -65,6 +79,12 @@ pub(crate) struct SyncReceive {
         default_value = "postgres://satoshi:nakamoto@127.0.0.1:5432/ckpool"
     )]
     database_url: String,
+}
+
+impl Default for SyncReceive {
+    fn default() -> Self {
+        Self::try_parse_from(std::iter::empty::<String>()).unwrap()
+    }
 }
 
 #[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone)]
@@ -117,6 +137,7 @@ struct SyncResponse {
 enum SyncResult {
     Continue,
     Complete,
+    WaitForNewBlock,
 }
 
 impl SyncSend {
@@ -133,11 +154,15 @@ impl SyncSend {
         });
 
         println!("Starting ZMQ share sync send...");
+        if !self.terminate_when_complete {
+            println!("Keep-alive mode enabled - will continue running even when caught up");
+        }
 
         let database = Database::new(self.database_url.clone()).await?;
         let context = Context::new();
 
         let mut current_id = self.load_current_id().await?;
+        let mut caught_up_logged = false;
 
         if self.reset_id {
             current_id = 0;
@@ -150,11 +175,29 @@ impl SyncSend {
         while !shutdown_flag.load(Ordering::Relaxed) {
             match self.sync_batch(&database, &context, &mut current_id).await {
                 Ok(SyncResult::Complete) => {
-                    println!("Sync send completed successfully");
-                    break;
+                    if !self.terminate_when_complete {
+                        if !caught_up_logged {
+                            println!("Sync send caught up, waiting for new data...");
+                            caught_up_logged = true;
+                        }
+                        sleep(Duration::from_millis(SYNC_DELAY_MS)).await;
+                    } else {
+                        println!("Sync send completed successfully");
+                        break;
+                    }
                 }
                 Ok(SyncResult::Continue) => {
+                    caught_up_logged = false;
                     sleep(Duration::from_millis(SYNC_DELAY_MS)).await;
+                }
+                Ok(SyncResult::WaitForNewBlock) => {
+                    if !caught_up_logged {
+                        println!(
+                            "Current and latest records have same blockheight, waiting for new block..."
+                        );
+                        caught_up_logged = true;
+                    }
+                    sleep(Duration::from_millis(BLOCKHEIGHT_CHECK_DELAY_MS)).await;
                 }
                 Err(e) => {
                     eprintln!("Sync send error: {e}");
@@ -182,13 +225,24 @@ impl SyncSend {
             return Ok(SyncResult::Complete);
         }
 
+        let current_blockheight = database.get_blockheight_for_id(*current_id).await?;
+        let latest_blockheight = database.get_blockheight_for_id(max_id).await?;
+
+        if let (Some(current_bh), Some(latest_bh)) = (current_blockheight, latest_blockheight) {
+            if current_bh >= latest_bh {
+                return Ok(SyncResult::WaitForNewBlock);
+            }
+        }
+
         let target_id = std::cmp::min(*current_id + self.batch_size, max_id - TARGET_ID_BUFFER);
 
         println!(
-            "Fetching shares from ID {} to {} (max: {})",
+            "Fetching shares from ID {} to {} (max: {}) - blockheights: {:?} -> {:?}",
             *current_id + 1,
             target_id,
-            max_id
+            max_id,
+            current_blockheight,
+            latest_blockheight
         );
 
         // Run share compression BEFORE transmitting
@@ -217,6 +271,7 @@ impl SyncSend {
         let shares = database
             .get_shares_by_id_range(*current_id + 1, target_id)
             .await?;
+        let highest_id = shares.last().map(|share| share.id);
 
         if shares.is_empty() {
             println!("No shares found in range, moving to next batch");
@@ -234,7 +289,7 @@ impl SyncSend {
                 .await
             {
                 Ok(_) => {
-                    *current_id = target_id;
+                    *current_id = highest_id.unwrap_or(target_id);
                     self.save_current_id(*current_id).await?;
                     return Ok(SyncResult::Continue);
                 }
@@ -354,6 +409,11 @@ impl SyncSend {
     async fn save_current_id(&self, id: i64) -> Result<()> {
         fs::write(ID_FILE, id.to_string()).map_err(|e| anyhow!("Failed to save ID file: {e}"))?;
         Ok(())
+    }
+
+    pub(crate) fn with_zmq_endpoint(mut self, zmq_endpoint: String) -> Self {
+        self.zmq_endpoint = zmq_endpoint;
+        self
     }
 }
 
@@ -494,51 +554,61 @@ impl SyncReceive {
             return Ok(());
         }
 
+        const MAX_SHARES_PER_SUBBATCH: usize = 2500;
         let mut tx = database
             .pool
             .begin()
             .await
             .map_err(|e| anyhow!("Failed to start transaction: {e}"))?;
 
-        let mut query_builder = sqlx::QueryBuilder::new(
-            "INSERT INTO remote_shares (
+        // Process shares in chunks to avoid parameter limit
+        for (chunk_idx, chunk) in batch.shares.chunks(MAX_SHARES_PER_SUBBATCH).enumerate() {
+            println!(
+                "Processing sub-batch {}/{} with {} shares",
+                chunk_idx + 1,
+                batch.shares.len().div_ceil(MAX_SHARES_PER_SUBBATCH),
+                chunk.len()
+            );
+
+            let mut query_builder = sqlx::QueryBuilder::new(
+                "INSERT INTO remote_shares (
             id, origin, blockheight, workinfoid, clientid, enonce1, nonce2, nonce, ntime,
             diff, sdiff, hash, result, reject_reason, error, errn, createdate, createby,
             createcode, createinet, workername, username, lnurl, address, agent
         ) ",
-        );
+            );
 
-        // batch our inserts to reduce number of required transactions
-        query_builder.push_values(&batch.shares, |mut b, share| {
-            b.push_bind(share.id)
-                .push_bind(&batch.hostname)
-                .push_bind(share.blockheight)
-                .push_bind(share.workinfoid)
-                .push_bind(share.clientid)
-                .push_bind(&share.enonce1)
-                .push_bind(&share.nonce2)
-                .push_bind(&share.nonce)
-                .push_bind(&share.ntime)
-                .push_bind(share.diff)
-                .push_bind(share.sdiff)
-                .push_bind(&share.hash)
-                .push_bind(share.result)
-                .push_bind(&share.reject_reason)
-                .push_bind(&share.error)
-                .push_bind(share.errn)
-                .push_bind(&share.createdate)
-                .push_bind(&share.createby)
-                .push_bind(&share.createcode)
-                .push_bind(&share.createinet)
-                .push_bind(&share.workername)
-                .push_bind(&share.username)
-                .push_bind(&share.lnurl)
-                .push_bind(&share.address)
-                .push_bind(&share.agent);
-        });
+            // batch our inserts to reduce number of required transactions
+            query_builder.push_values(chunk, |mut b, share| {
+                b.push_bind(share.id)
+                    .push_bind(&batch.hostname)
+                    .push_bind(share.blockheight)
+                    .push_bind(share.workinfoid)
+                    .push_bind(share.clientid)
+                    .push_bind(&share.enonce1)
+                    .push_bind(&share.nonce2)
+                    .push_bind(&share.nonce)
+                    .push_bind(&share.ntime)
+                    .push_bind(share.diff)
+                    .push_bind(share.sdiff)
+                    .push_bind(&share.hash)
+                    .push_bind(share.result)
+                    .push_bind(&share.reject_reason)
+                    .push_bind(&share.error)
+                    .push_bind(share.errn)
+                    .push_bind(&share.createdate)
+                    .push_bind(&share.createby)
+                    .push_bind(&share.createcode)
+                    .push_bind(&share.createinet)
+                    .push_bind(&share.workername)
+                    .push_bind(&share.username)
+                    .push_bind(&share.lnurl)
+                    .push_bind(&share.address)
+                    .push_bind(&share.agent);
+            });
 
-        query_builder.push(
-            " ON CONFLICT (id, origin) DO UPDATE SET
+            query_builder.push(
+                " ON CONFLICT (id, origin) DO UPDATE SET
             blockheight = EXCLUDED.blockheight,
             workinfoid = EXCLUDED.workinfoid,
             clientid = EXCLUDED.clientid,
@@ -562,13 +632,16 @@ impl SyncReceive {
             lnurl = EXCLUDED.lnurl,
             address = EXCLUDED.address,
             agent = EXCLUDED.agent",
-        );
+            );
 
-        let query = query_builder.build();
-        query
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| anyhow!("Failed to batch insert shares: {e}"))?;
+            let query = query_builder.build();
+            query.execute(&mut *tx).await.map_err(|e| {
+                anyhow!(
+                    "Failed to batch insert shares in sub-batch {}: {e}",
+                    chunk_idx + 1
+                )
+            })?;
+        }
 
         tx.commit()
             .await
@@ -593,10 +666,15 @@ impl SyncReceive {
             worker_count,
             min_blockheight,
             max_blockheight,
-            self.zmq_endpoint
+            batch.hostname // Fixed: use batch.hostname instead of self.zmq_endpoint
         );
 
         Ok(())
+    }
+
+    pub(crate) fn with_zmq_endpoint(mut self, zmq_endpoint: String) -> Self {
+        self.zmq_endpoint = zmq_endpoint;
+        self
     }
 }
 
@@ -608,6 +686,17 @@ impl Database {
             .map_err(|e| anyhow!("Failed to get max ID: {e}"))?;
 
         Ok(result.unwrap_or(0))
+    }
+
+    pub(crate) async fn get_blockheight_for_id(&self, id: i64) -> Result<Option<i32>> {
+        let result =
+            sqlx::query_scalar::<_, Option<i32>>("SELECT blockheight FROM shares WHERE id = $1")
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| anyhow!("Failed to get blockheight for ID {}: {}", id, e))?;
+
+        Ok(result.flatten())
     }
 
     pub(crate) async fn get_shares_by_id_range(
