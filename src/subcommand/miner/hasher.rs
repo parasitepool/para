@@ -10,28 +10,20 @@ pub(crate) struct Hasher {
 
 impl Hasher {
     pub(crate) fn hash(&mut self, cancel: CancellationToken) -> Result<(Header, String, String)> {
-        const CANCEL_CHECK_INTERVAL: u32 = 1000;
-        const MIN_LOG_INTERVAL_SECS: f64 = 1.0;
-        const MAX_LOG_INTERVAL_SECS: f64 = 60.0;
-        const INITIAL_LOG_INTERVAL_SECS: f64 = 5.0;
-
-        let span =
-            tracing::info_span!("hasher", job_id = %self.job_id, extranonce2 = %self.extranonce2);
-        let _enter = span.enter();
-
         let mut hashes = 0u64;
         let start = Instant::now();
         let mut last_log = start;
-        let mut adaptive_check_interval = CANCEL_CHECK_INTERVAL;
-        let mut current_log_interval = INITIAL_LOG_INTERVAL_SECS;
-        let mut last_hashrate: Option<f64> = None;
+
+        let span =
+            tracing::info_span!("hasher", job_id = %self.job_id, extranonce2 = %self.extranonce2);
+        let _ = span.enter();
 
         loop {
             if cancel.is_cancelled() {
                 return Err(anyhow!("hasher cancelled"));
             }
 
-            for _ in 0..adaptive_check_interval {
+            for _ in 0..10000 {
                 let hash = self.header.block_hash();
                 hashes += 1;
 
@@ -48,37 +40,13 @@ impl Hasher {
             }
 
             let now = Instant::now();
-            let elapsed_since_last = now.duration_since(last_log).as_secs_f64();
+            let elapsed_since_last = now.duration_since(last_log).as_secs();
 
-            if elapsed_since_last >= current_log_interval {
+            if elapsed_since_last >= 5 {
                 let total_elapsed = now.duration_since(start).as_secs_f64().max(1e-6);
                 let current_hashrate = hashes as f64 / total_elapsed;
 
                 info!("Hashrate: {}", HashRate(current_hashrate));
-
-                if let Some(prev_hashrate) = last_hashrate {
-                    let hashrate_change_pct =
-                        ((current_hashrate - prev_hashrate) / prev_hashrate).abs() * 100.0;
-
-                    // Adjust interval based on hashrate stability
-                    current_log_interval = if hashrate_change_pct < 2.0 {
-                        // Hashrate is very stable, log less frequently
-                        (current_log_interval * 1.5).min(MAX_LOG_INTERVAL_SECS)
-                    } else if hashrate_change_pct < 10.0 {
-                        // Hashrate is moderately stable, keep current interval
-                        current_log_interval
-                    } else {
-                        // Hashrate is changing significantly, log more frequently
-                        (current_log_interval * 0.7).max(MIN_LOG_INTERVAL_SECS)
-                    };
-                }
-
-                last_hashrate = Some(current_hashrate);
-
-                let target_checks_per_interval = (current_log_interval
-                    * (adaptive_check_interval as f64 / elapsed_since_last))
-                    as u32;
-                adaptive_check_interval = target_checks_per_interval.clamp(100, 10000);
 
                 last_log = now;
             }
