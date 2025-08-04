@@ -1,6 +1,7 @@
 use super::*;
 
 mod miner;
+mod ping;
 pub(crate) mod server;
 mod sync;
 
@@ -8,6 +9,8 @@ mod sync;
 pub(crate) enum Subcommand {
     #[command(about = "Run a toy miner")]
     Miner(miner::Miner),
+    #[command(about = "Measure Stratum message ping")]
+    Ping(ping::Ping),
     #[command(about = "Run API server")]
     Server(server::Server),
     #[command(about = "Send shares to ZMQ endpoint")]
@@ -20,6 +23,7 @@ impl Subcommand {
     pub(crate) fn run(self) -> Result {
         match self {
             Self::Miner(miner) => miner.run(),
+            Self::Ping(ping) => Runtime::new()?.block_on(async { ping.run().await }),
             Self::Server(server) => {
                 let handle = Handle::new();
                 let rt = Runtime::new()?;
