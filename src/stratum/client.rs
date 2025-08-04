@@ -212,6 +212,34 @@ impl Client {
         }
     }
 
+    /// Request transaction data for a specific job
+    /// Note: This uses the Stratum protocol to request transactions from the pool
+    /// The pool server should implement rate limiting and caching to prevent abuse
+    pub async fn get_transactions(&mut self, job_id: String) -> Result<GetTransactionsResult> {
+        let rx = self
+            .send_request(
+                "mining.get_transactions",
+                serde_json::to_value(GetTransactions {
+                    job_id: job_id.clone(),
+                })?,
+            )
+            .await?;
+
+        match rx.await? {
+            Message::Response {
+                result: Some(result),
+                error: None,
+                ..
+            } => Ok(GetTransactionsResult {
+                transactions: serde_json::from_value(result)?,
+            }),
+            Message::Response {
+                error: Some(err), ..
+            } => Err(anyhow!("mining.get_transactions error: {}", err)),
+            _ => Err(anyhow!("Unknown mining.get_transactions error")),
+        }
+    }
+
     async fn send_request(
         &mut self,
         method: &str,
