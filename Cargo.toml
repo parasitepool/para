@@ -15,18 +15,21 @@ bitcoin = { version = "0.32.6", features = ["serde"] }
 boilerplate = { version = "1.0.1", features = ["axum"] }
 byteorder = "1.5.0"
 clap = { version = "4.5.36", features = ["derive", "env"] }
+dashmap = "5.5"
 derive_more = { version = "2.0.1", features = ["display"] }
 futures = "0.3.31"
 hex = "0.4.3"
 html-escaper = "0.2.0"
 lazy_static = "1.5.0"
 mime_guess = "2.0.5"
+moka = { version = "0.12", features = ["sync"] }
 primitive-types = "0.13.1"
 rand = "0.9.1"
 reqwest = { version = "0.12.22", features = ["rustls-tls"] }
 rust-embed = "8.7.1"
 rustls = { version = "0.23.26", features = ["ring"] }
 rustls-acme = { version = "0.13.0", features = ["axum"] }
+scopeguard = "1.2"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
 serde_with = "3.14.0"

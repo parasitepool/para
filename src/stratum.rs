@@ -271,6 +271,36 @@ impl Serialize for Authorize {
     }
 }
 
+#[derive(Debug, Deserialize, PartialEq, Clone)]
+pub struct GetTransactions {
+    pub job_id: String,
+}
+
+impl Serialize for GetTransactions {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut seq = serializer.serialize_seq(Some(1))?;
+        seq.serialize_element(&self.job_id)?;
+        seq.end()
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct GetTransactionsResult {
+    pub transactions: Vec<String>,
+}
+
+impl Serialize for GetTransactionsResult {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.transactions.serialize(serializer)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use {super::*, serde_json::json};
@@ -523,6 +553,33 @@ mod tests {
                     })
                     .unwrap(),
                 ),
+                error: None,
+                reject_reason: None,
+            },
+        );
+    }
+
+    #[test]
+    fn get_transactions() {
+        case(
+            r#"{"id":3,"method":"mining.get_transactions","params":["bf"]}"#,
+            Message::Request {
+                id: Id::Number(3),
+                method: "mining.get_transactions".into(),
+                params: serde_json::to_value(&GetTransactions {
+                    job_id: "bf".into(),
+                })
+                .unwrap(),
+            },
+        );
+
+        case(
+            r#"{"id":3,"result":["01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff08044c86041b020602ffffffff0100f2052a010000004341041b0e8c2567c12536aa13357b79a073dc4444acb83c4ec7a0e2f99dd7457516c5817242da796924ca4e99947d087fedf9ce467cb9f7c6287078f801df276fdf84ac00000000"],"error":null}"#,
+            Message::Response {
+                id: Id::Number(3),
+                result: Some(json!([
+                    "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff08044c86041b020602ffffffff0100f2052a010000004341041b0e8c2567c12536aa13357b79a073dc4444acb83c4ec7a0e2f99dd7457516c5817242da796924ca4e99947d087fedf9ce467cb9f7c6287078f801df276fdf84ac00000000"
+                ])),
                 error: None,
                 reject_reason: None,
             },
