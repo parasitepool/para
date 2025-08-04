@@ -24,8 +24,8 @@ doc:
   cargo doc --workspace --open
 
 miner: 
-  RUST_LOG=info cargo run -- miner \
-    --host parasite.xyz \
+  RUST_LOG=info cargo run --release -- miner \
+    --host parasite.wtf \
     --port 42069 \
     --username bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg6dzw5nk24r45dzasde25r3.ParaMiner \
     --password x
