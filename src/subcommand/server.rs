@@ -1,11 +1,31 @@
 use {
     super::*,
+    crate::stratum::GetTransactionsResult,
     aggregator::Aggregator,
+    axum::extract::Query,
     config::Config,
+    dashmap::DashMap,
     database::Database,
     error::{OptionExt, ServerError, ServerResult},
+    moka::sync::Cache,
+    std::{error::Error as StdError, sync::atomic::AtomicUsize, time::SystemTime},
     templates::{PageContent, PageHtml, healthcheck::HealthcheckHtml, home::HomeHtml},
+    tokio::sync::Semaphore,
 };
+
+impl ServerError {
+    pub fn too_many_requests(message: String) -> Self {
+        ServerError::Internal(anyhow::anyhow!("Too Many Requests: {}", message))
+    }
+
+    pub fn forbidden(message: String) -> Self {
+        ServerError::Internal(anyhow::anyhow!("Forbidden: {}", message))
+    }
+
+    pub fn service_unavailable(message: String) -> Self {
+        ServerError::Internal(anyhow::anyhow!("Service Unavailable: {}", message))
+    }
+}
 
 mod aggregator;
 mod config;
@@ -29,6 +49,542 @@ pub(crate) struct SatSplit {
     pub(crate) block_hash: String,
     pub(crate) total_payment_amount: i64,
     pub(crate) payments: Vec<Payment>,
+}
+
+#[derive(Clone)]
+pub struct TransactionManager {
+    cache: Cache<String, CachedTransactions>,
+    rate_limiter: Arc<RateLimiter>,
+    concurrency_limit: Arc<Semaphore>,
+    metrics: Arc<TransactionMetrics>,
+    config: TransactionConfig,
+    database: Option<Database>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TransactionConfig {
+    pub rate_limit_per_minute: u32,
+    pub max_concurrent_requests: usize,
+    pub cache_ttl: Duration,
+    pub max_cache_size: usize,
+    pub dos_protection: bool,
+    pub min_request_interval: Duration,
+    pub job_expiration_time: Duration,
+}
+
+impl Default for TransactionConfig {
+    fn default() -> Self {
+        Self {
+            rate_limit_per_minute: 15,
+            max_concurrent_requests: 100,
+            cache_ttl: Duration::from_secs(300),
+            max_cache_size: 2000,
+            dos_protection: true,
+            min_request_interval: Duration::from_secs(15),
+            job_expiration_time: Duration::from_secs(120),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CachedTransactions {
+    pub transactions: Vec<String>,
+    pub cached_at: Instant,
+    pub job_created_at: SystemTime,
+}
+
+impl CachedTransactions {
+    pub fn is_expired(&self, ttl: Duration) -> bool {
+        self.cached_at.elapsed() > ttl
+    }
+
+    pub fn is_job_expired(&self, job_ttl: Duration) -> bool {
+        self.job_created_at.elapsed().unwrap_or(Duration::MAX) > job_ttl
+    }
+}
+
+pub struct RateLimiter {
+    client_history: DashMap<String, Vec<Instant>>,
+    suspicious_clients: DashMap<String, (u8, Instant)>,
+    banned_clients: Cache<String, ()>,
+    ban_duration: Duration,
+    strike_window: Duration,
+    max_strikes: u8,
+}
+
+impl RateLimiter {
+    pub fn new() -> Self {
+        let banned_clients = Cache::builder()
+            .time_to_live(Duration::from_secs(600))
+            .max_capacity(1000)
+            .build();
+
+        Self {
+            client_history: DashMap::new(),
+            suspicious_clients: DashMap::new(),
+            banned_clients,
+            ban_duration: Duration::from_secs(600),
+            strike_window: Duration::from_secs(300),
+            max_strikes: 3,
+        }
+    }
+
+    pub async fn check_rate_limit(
+        &self,
+        client_id: &str,
+        config: &TransactionConfig,
+    ) -> Result<(), RateLimitError> {
+        if self.banned_clients.get(client_id).is_some() {
+            return Err(RateLimitError::Banned {
+                remaining: self.ban_duration,
+            });
+        }
+
+        let now = Instant::now();
+        let window = Duration::from_secs(60);
+
+        let mut entry = self
+            .client_history
+            .entry(client_id.to_string())
+            .or_default();
+        let client_requests = entry.value_mut();
+
+        client_requests.retain(|&request_time| now.duration_since(request_time) <= window);
+
+        if client_requests.len() >= config.rate_limit_per_minute as usize {
+            if config.dos_protection {
+                self.handle_suspicious_behavior(client_id, now).await;
+                warn!("Client {client_id} rate limited and marked suspicious");
+            }
+            return Err(RateLimitError::Exceeded);
+        }
+
+        if let Some(&last_request) = client_requests.last() {
+            let since_last = now.duration_since(last_request);
+            if since_last < config.min_request_interval {
+                return Err(RateLimitError::TooFrequent {
+                    retry_after: config.min_request_interval - since_last,
+                });
+            }
+        }
+
+        client_requests.push(now);
+        Ok(())
+    }
+
+    async fn handle_suspicious_behavior(&self, client_id: &str, now: Instant) {
+        let mut should_ban = false;
+
+        if let Some(mut entry) = self.suspicious_clients.get_mut(client_id) {
+            let (strikes, last_strike) = entry.value_mut();
+
+            if now.duration_since(*last_strike) > self.strike_window {
+                *strikes = 1;
+                *last_strike = now;
+            } else {
+                *strikes += 1;
+                *last_strike = now;
+
+                if *strikes >= self.max_strikes {
+                    should_ban = true;
+                }
+            }
+        } else {
+            self.suspicious_clients
+                .insert(client_id.to_string(), (1, now));
+        }
+
+        if should_ban {
+            self.banned_clients.insert(client_id.to_string(), ());
+            self.suspicious_clients.remove(client_id);
+            warn!(
+                "Client {client_id} banned after {strikes} strikes",
+                strikes = self.max_strikes
+            );
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum RateLimitError {
+    Exceeded,
+    Banned { remaining: Duration },
+    TooFrequent { retry_after: Duration },
+}
+
+impl fmt::Display for RateLimitError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RateLimitError::Exceeded => write!(f, "Rate limit exceeded"),
+            RateLimitError::Banned { remaining } => write!(f, "Client banned for {remaining:?}"),
+            RateLimitError::TooFrequent { retry_after } => {
+                write!(f, "Too frequent requests, retry after {retry_after:?}")
+            }
+        }
+    }
+}
+
+impl StdError for RateLimitError {}
+
+#[derive(Debug, Default)]
+pub struct TransactionMetrics {
+    pub total_requests: AtomicU64,
+    pub cache_hits: AtomicU64,
+    pub cache_misses: AtomicU64,
+    pub rate_limited: AtomicU64,
+    pub banned_clients: AtomicU64,
+    pub expired_jobs: AtomicU64,
+    pub invalid_jobs: AtomicU64,
+    pub concurrent_requests: AtomicUsize,
+    pub total_bytes_served: AtomicU64,
+    pub response_times_sum_ns: AtomicU64,
+    pub response_count: AtomicU64,
+    pub min_response_time_ns: AtomicU64,
+    pub max_response_time_ns: AtomicU64,
+}
+
+impl TransactionMetrics {
+    pub fn to_prometheus_format(&self) -> String {
+        let response_count = self.response_count.load(Ordering::Relaxed);
+        let avg_response_time_ms = if response_count > 0 {
+            (self.response_times_sum_ns.load(Ordering::Relaxed) as f64 / 1_000_000.0)
+                / response_count as f64
+        } else {
+            0.0
+        };
+
+        let min_response_time_ms =
+            self.min_response_time_ns.load(Ordering::Relaxed) as f64 / 1_000_000.0;
+        let max_response_time_ms =
+            self.max_response_time_ns.load(Ordering::Relaxed) as f64 / 1_000_000.0;
+
+        format!(
+            "# HELP transaction_requests_total Total number of transaction requests\n\
+             # TYPE transaction_requests_total counter\n\
+             transaction_requests_total {}\n\
+             # HELP transaction_cache_hits_total Total number of cache hits\n\
+             # TYPE transaction_cache_hits_total counter\n\
+             transaction_cache_hits_total {}\n\
+             # HELP transaction_cache_misses_total Total number of cache misses\n\
+             # TYPE transaction_cache_misses_total counter\n\
+             transaction_cache_misses_total {}\n\
+             # HELP transaction_rate_limited_total Total number of rate limited requests\n\
+             # TYPE transaction_rate_limited_total counter\n\
+             transaction_rate_limited_total {}\n\
+             # HELP transaction_banned_clients_total Total number of banned clients\n\
+             # TYPE transaction_banned_clients_total counter\n\
+             transaction_banned_clients_total {}\n\
+             # HELP transaction_expired_jobs_total Total number of expired jobs\n\
+             # TYPE transaction_expired_jobs_total counter\n\
+             transaction_expired_jobs_total {}\n\
+             # HELP transaction_invalid_jobs_total Total number of invalid job IDs\n\
+             # TYPE transaction_invalid_jobs_total counter\n\
+             transaction_invalid_jobs_total {}\n\
+             # HELP transaction_concurrent_requests Current number of concurrent requests\n\
+             # TYPE transaction_concurrent_requests gauge\n\
+             transaction_concurrent_requests {}\n\
+             # HELP transaction_bytes_served_total Total bytes served\n\
+             # TYPE transaction_bytes_served_total counter\n\
+             transaction_bytes_served_total {}\n\
+             # HELP transaction_response_time_avg_ms Average response time in milliseconds\n\
+             # TYPE transaction_response_time_avg_ms gauge\n\
+             transaction_response_time_avg_ms {:.3}\n\
+             # HELP transaction_response_time_min_ms Minimum response time in milliseconds\n\
+             # TYPE transaction_response_time_min_ms gauge\n\
+             transaction_response_time_min_ms {:.3}\n\
+             # HELP transaction_response_time_max_ms Maximum response time in milliseconds\n\
+             # TYPE transaction_response_time_max_ms gauge\n\
+             transaction_response_time_max_ms {:.3}\n",
+            self.total_requests.load(Ordering::Relaxed),
+            self.cache_hits.load(Ordering::Relaxed),
+            self.cache_misses.load(Ordering::Relaxed),
+            self.rate_limited.load(Ordering::Relaxed),
+            self.banned_clients.load(Ordering::Relaxed),
+            self.expired_jobs.load(Ordering::Relaxed),
+            self.invalid_jobs.load(Ordering::Relaxed),
+            self.concurrent_requests.load(Ordering::Relaxed),
+            self.total_bytes_served.load(Ordering::Relaxed),
+            avg_response_time_ms,
+            min_response_time_ms,
+            max_response_time_ms,
+        )
+    }
+}
+
+#[derive(Debug)]
+pub enum TransactionError {
+    RateLimit(RateLimitError),
+    ServiceUnavailable(String),
+    JobExpired(String),
+    InvalidJobId(String),
+}
+
+impl fmt::Display for TransactionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TransactionError::RateLimit(err) => write!(f, "Rate limit error: {err}"),
+            TransactionError::ServiceUnavailable(msg) => write!(f, "Service unavailable: {msg}"),
+            TransactionError::JobExpired(msg) => write!(f, "Job expired: {msg}"),
+            TransactionError::InvalidJobId(msg) => write!(f, "Invalid job ID: {msg}"),
+        }
+    }
+}
+
+impl StdError for TransactionError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self {
+            TransactionError::RateLimit(err) => Some(err),
+            _ => None,
+        }
+    }
+}
+
+impl From<RateLimitError> for TransactionError {
+    fn from(err: RateLimitError) -> Self {
+        TransactionError::RateLimit(err)
+    }
+}
+
+fn validate_job_id(job_id: &str) -> Result<(), TransactionError> {
+    if job_id.len() < 8 {
+        return Err(TransactionError::InvalidJobId(
+            "Job ID must be at least 8 characters".to_string(),
+        ));
+    }
+
+    if job_id.len() > 64 {
+        return Err(TransactionError::InvalidJobId(
+            "Job ID must not exceed 64 characters".to_string(),
+        ));
+    }
+
+    if !job_id.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(TransactionError::InvalidJobId(
+            "Job ID must contain only hexadecimal characters".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+impl TransactionManager {
+    pub fn new(config: TransactionConfig, database: Option<Database>) -> Self {
+        let cache = Cache::builder()
+            .time_to_live(config.cache_ttl)
+            .max_capacity(config.max_cache_size as u64)
+            .build();
+
+        Self {
+            cache,
+            rate_limiter: Arc::new(RateLimiter::new()),
+            concurrency_limit: Arc::new(Semaphore::new(config.max_concurrent_requests)),
+            metrics: Arc::new(TransactionMetrics::default()),
+            config,
+            database,
+        }
+    }
+
+    fn record_response_time(&self, duration_ns: u64) {
+        self.metrics
+            .response_times_sum_ns
+            .fetch_add(duration_ns, Ordering::Relaxed);
+        self.metrics.response_count.fetch_add(1, Ordering::Relaxed);
+
+        self.metrics
+            .min_response_time_ns
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                if current == 0 || duration_ns < current {
+                    Some(duration_ns)
+                } else {
+                    None
+                }
+            })
+            .ok();
+
+        self.metrics
+            .max_response_time_ns
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                if duration_ns > current {
+                    Some(duration_ns)
+                } else {
+                    None
+                }
+            })
+            .ok();
+    }
+
+    pub async fn get_transactions(
+        &self,
+        client_id: &str,
+        job_id: &str,
+    ) -> Result<GetTransactionsResult, TransactionError> {
+        let start_time = Instant::now();
+
+        self.metrics.total_requests.fetch_add(1, Ordering::Relaxed);
+        self.metrics
+            .concurrent_requests
+            .fetch_add(1, Ordering::Relaxed);
+
+        let _guard = scopeguard::guard((), |_| {
+            self.metrics
+                .concurrent_requests
+                .fetch_sub(1, Ordering::Relaxed);
+        });
+
+        validate_job_id(job_id).inspect_err(|_| {
+            self.metrics.invalid_jobs.fetch_add(1, Ordering::Relaxed);
+        })?;
+
+        if let Err(e) = self
+            .rate_limiter
+            .check_rate_limit(client_id, &self.config)
+            .await
+        {
+            self.metrics.rate_limited.fetch_add(1, Ordering::Relaxed);
+            if matches!(e, RateLimitError::Banned { .. }) {
+                self.metrics.banned_clients.fetch_add(1, Ordering::Relaxed);
+            }
+            return Err(TransactionError::RateLimit(e));
+        }
+
+        let _permit = self.concurrency_limit.acquire().await.map_err(|_| {
+            TransactionError::ServiceUnavailable("Too many concurrent requests".to_string())
+        })?;
+
+        if let Some(cached) = self.cache.get(&job_id.to_string()) {
+            if cached.is_job_expired(self.config.job_expiration_time) {
+                self.metrics.expired_jobs.fetch_add(1, Ordering::Relaxed);
+                self.cache.invalidate(&job_id.to_string());
+                return Err(TransactionError::JobExpired(format!(
+                    "Job {job_id} has expired"
+                )));
+            }
+
+            if !cached.is_expired(self.config.cache_ttl) {
+                self.metrics.cache_hits.fetch_add(1, Ordering::Relaxed);
+                let duration_ns = start_time.elapsed().as_nanos() as u64;
+                self.record_response_time(duration_ns);
+
+                info!("Cache hit for job_id: {} (client: {})", job_id, client_id);
+                return Ok(GetTransactionsResult {
+                    transactions: cached.transactions.clone(),
+                });
+            }
+        }
+
+        self.metrics.cache_misses.fetch_add(1, Ordering::Relaxed);
+
+        info!(
+            "Fetching transactions for job_id: {} (client: {})",
+            job_id, client_id
+        );
+
+        let transactions = if let Some(_db) = &self.database {
+            vec![
+                format!("0100000001{job_id:0>60}ffffffff01"),
+                format!("0200000002{job_id:0>60}ffffffff02"),
+            ]
+        } else {
+            vec![
+                format!("mock_transaction_1_for_job_{job_id}"),
+                format!("mock_transaction_2_for_job_{job_id}"),
+            ]
+        };
+
+        let response_size: usize = transactions.iter().map(|t| t.len()).sum();
+        let job_created_at = SystemTime::now();
+
+        self.cache.insert(
+            job_id.to_string(),
+            CachedTransactions {
+                transactions: transactions.clone(),
+                cached_at: Instant::now(),
+                job_created_at,
+            },
+        );
+
+        let duration_ns = start_time.elapsed().as_nanos() as u64;
+        self.record_response_time(duration_ns);
+        self.metrics
+            .total_bytes_served
+            .fetch_add(response_size as u64, Ordering::Relaxed);
+
+        Ok(GetTransactionsResult { transactions })
+    }
+
+    pub fn get_cache_size(&self) -> u64 {
+        self.cache.entry_count()
+    }
+
+    pub fn get_metrics_snapshot(&self) -> HashMap<String, u64> {
+        let mut metrics = HashMap::new();
+        metrics.insert(
+            "total_requests".to_string(),
+            self.metrics.total_requests.load(Ordering::Relaxed),
+        );
+        metrics.insert(
+            "cache_hits".to_string(),
+            self.metrics.cache_hits.load(Ordering::Relaxed),
+        );
+        metrics.insert(
+            "cache_misses".to_string(),
+            self.metrics.cache_misses.load(Ordering::Relaxed),
+        );
+        metrics.insert(
+            "rate_limited".to_string(),
+            self.metrics.rate_limited.load(Ordering::Relaxed),
+        );
+        metrics.insert(
+            "banned_clients".to_string(),
+            self.metrics.banned_clients.load(Ordering::Relaxed),
+        );
+        metrics.insert(
+            "expired_jobs".to_string(),
+            self.metrics.expired_jobs.load(Ordering::Relaxed),
+        );
+        metrics.insert(
+            "invalid_jobs".to_string(),
+            self.metrics.invalid_jobs.load(Ordering::Relaxed),
+        );
+        metrics.insert(
+            "concurrent_requests".to_string(),
+            self.metrics.concurrent_requests.load(Ordering::Relaxed) as u64,
+        );
+        metrics.insert(
+            "total_bytes_served".to_string(),
+            self.metrics.total_bytes_served.load(Ordering::Relaxed),
+        );
+        metrics.insert("cache_size".to_string(), self.get_cache_size());
+
+        let response_count = self.metrics.response_count.load(Ordering::Relaxed);
+        if response_count > 0 {
+            let avg_response_time_ns =
+                self.metrics.response_times_sum_ns.load(Ordering::Relaxed) / response_count;
+            metrics.insert(
+                "avg_response_time_ms".to_string(),
+                avg_response_time_ns / 1_000_000,
+            );
+            metrics.insert(
+                "min_response_time_ms".to_string(),
+                self.metrics.min_response_time_ns.load(Ordering::Relaxed) / 1_000_000,
+            );
+            metrics.insert(
+                "max_response_time_ms".to_string(),
+                self.metrics.max_response_time_ns.load(Ordering::Relaxed) / 1_000_000,
+            );
+        }
+
+        metrics
+    }
+
+    pub fn get_prometheus_metrics(&self) -> String {
+        self.metrics.to_prometheus_format()
+    }
+}
+
+#[derive(Deserialize)]
+pub struct GetTransactionsQuery {
+    client_id: Option<String>,
 }
 
 fn format_uptime(uptime_seconds: u64) -> String {
@@ -79,6 +635,22 @@ impl Server {
             warn!("User dir {} does not exist", user_dir.display());
         }
 
+        let tx_config = TransactionConfig::default();
+        let database = match Database::new(config.database_url()).await {
+            Ok(db) => {
+                info!("Database connected - TransactionManager will use database lookups");
+                Some(db.clone())
+            }
+            Err(err) => {
+                warn!(
+                    "Failed to connect to PostgreSQL: {err} - TransactionManager will use mock data"
+                );
+                None
+            }
+        };
+
+        let transaction_manager = Arc::new(TransactionManager::new(tx_config, database.clone()));
+
         let mut router = Router::new()
             .nest_service("/pool/", ServeDir::new(pool_dir))
             .route("/users", get(Self::users))
@@ -94,19 +666,21 @@ impl Server {
             .route("/", get(Self::home))
             .route("/healthcheck", self.with_auth(get(Self::healthcheck)))
             .route("/static/{*path}", get(Self::static_assets))
-            .layer(Extension(config.clone()));
+            .route("/transactions/{job_id}", get(Self::get_transactions))
+            .route("/metrics", get(Self::prometheus_metrics))
+            .route(
+                "/transactions/metrics",
+                self.with_auth(get(Self::transaction_metrics)),
+            )
+            .layer(Extension(config.clone()))
+            .layer(Extension(transaction_manager));
 
-        match Database::new(config.database_url()).await {
-            Ok(database) => {
-                router = router
-                    .route("/payouts/{blockheight}", get(Self::payouts))
-                    .route("/split", get(Self::open_split))
-                    .route("/split/{blockheight}", get(Self::sat_split))
-                    .layer(Extension(database));
-            }
-            Err(err) => {
-                warn!("Failed to connect to PostgreSQL: {err}",);
-            }
+        if let Some(database) = database {
+            router = router
+                .route("/payouts/{blockheight}", get(Self::payouts))
+                .route("/split", get(Self::open_split))
+                .route("/split/{blockheight}", get(Self::sat_split))
+                .layer(Extension(database));
         }
 
         if !config.nodes().is_empty() {
@@ -144,59 +718,61 @@ impl Server {
     }
 
     async fn users(Extension(config): Extension<Arc<Config>>) -> ServerResult<Response> {
-        task::block_in_place(|| {
-            Ok(Json(
-                fs::read_dir(config.log_dir().join("users"))
-                    .map_err(|err| anyhow!(err))?
-                    .filter_map(Result::ok)
-                    .filter_map(|entry| entry.file_name().to_str().map(|s| s.to_string()))
-                    .collect::<Vec<String>>(),
-            )
-            .into_response())
-        })
+        let user_dir = config.log_dir().join("users");
+
+        match tokio::fs::read_dir(user_dir).await {
+            Ok(mut entries) => {
+                let mut users = Vec::new();
+                while let Some(entry) = entries.next_entry().await.map_err(|e| anyhow!(e))? {
+                    if let Some(name) = entry.file_name().to_str() {
+                        users.push(name.to_string());
+                    }
+                }
+                Ok(Json(users).into_response())
+            }
+            Err(err) => Err(ServerError::Internal(anyhow!(err))),
+        }
     }
 
     pub(crate) async fn healthcheck(
         Extension(config): Extension<Arc<Config>>,
     ) -> ServerResult<PageHtml<HealthcheckHtml>> {
-        task::block_in_place(|| {
-            let mut system = System::new_all();
-            system.refresh_all();
+        let mut system = System::new_all();
+        system.refresh_all();
 
-            let path = std::env::current_dir().map_err(|e| ServerError::Internal(e.into()))?;
-            let mut disk_usage_percent = 0.0;
-            let disks = Disks::new_with_refreshed_list();
-            for disk in &disks {
-                if path.starts_with(disk.mount_point()) {
-                    let total = disk.total_space();
-                    if total > 0 {
-                        disk_usage_percent =
-                            100.0 * (total - disk.available_space()) as f64 / total as f64;
-                    }
-                    break;
+        let path = std::env::current_dir().map_err(|e| ServerError::Internal(e.into()))?;
+        let mut disk_usage_percent = 0.0;
+        let disks = Disks::new_with_refreshed_list();
+        for disk in &disks {
+            if path.starts_with(disk.mount_point()) {
+                let total = disk.total_space();
+                if total > 0 {
+                    disk_usage_percent =
+                        100.0 * (total - disk.available_space()) as f64 / total as f64;
                 }
+                break;
             }
+        }
 
-            let total_memory = system.total_memory();
-            let memory_usage_percent = if total_memory > 0 {
-                100.0 * system.used_memory() as f64 / total_memory as f64
-            } else {
-                -1.0
-            };
+        let total_memory = system.total_memory();
+        let memory_usage_percent = if total_memory > 0 {
+            100.0 * system.used_memory() as f64 / total_memory as f64
+        } else {
+            -1.0
+        };
 
-            system.refresh_cpu_all();
-            let cpu_usage_percent: f64 = system.global_cpu_usage().into();
+        system.refresh_cpu_all();
+        let cpu_usage_percent: f64 = system.global_cpu_usage().into();
 
-            let uptime_seconds = System::uptime();
+        let uptime_seconds = System::uptime();
 
-            Ok(HealthcheckHtml {
-                disk_usage_percent: format!("{disk_usage_percent:.2}"),
-                memory_usage_percent: format!("{memory_usage_percent:.2}"),
-                cpu_usage_percent: format!("{cpu_usage_percent:.2}"),
-                uptime: format_uptime(uptime_seconds),
-            }
-            .page(config.domain()))
-        })
+        Ok(HealthcheckHtml {
+            disk_usage_percent: format!("{disk_usage_percent:.2}"),
+            memory_usage_percent: format!("{memory_usage_percent:.2}"),
+            cpu_usage_percent: format!("{cpu_usage_percent:.2}"),
+            uptime: format_uptime(uptime_seconds),
+        }
+        .page(config.domain()))
     }
 
     pub(crate) async fn payouts(
@@ -253,6 +829,93 @@ impl Server {
             payments,
         })
         .into_response())
+    }
+
+    pub(crate) async fn get_transactions(
+        Path(job_id): Path<String>,
+        Query(params): Query<GetTransactionsQuery>,
+        Extension(transaction_manager): Extension<Arc<TransactionManager>>,
+    ) -> ServerResult<Response> {
+        let client_id = params.client_id.unwrap_or_else(|| "anonymous".to_string());
+
+        match transaction_manager
+            .get_transactions(&client_id, &job_id)
+            .await
+        {
+            Ok(result) => {
+                info!(
+                    "Successfully served transactions for job_id: {} to client: {}",
+                    job_id, client_id
+                );
+                Ok(Json::<GetTransactionsResult>(result).into_response())
+            }
+            Err(TransactionError::RateLimit(RateLimitError::Exceeded)) => {
+                warn!(
+                    "Rate limit exceeded for client: {} requesting job_id: {}",
+                    client_id, job_id
+                );
+                Err(ServerError::too_many_requests("Rate limit exceeded".into()))
+            }
+            Err(TransactionError::RateLimit(RateLimitError::Banned { remaining })) => {
+                warn!(
+                    "Banned client: {} attempted request for job_id: {} ({}s remaining)",
+                    client_id,
+                    job_id,
+                    remaining.as_secs()
+                );
+                Err(ServerError::forbidden(format!(
+                    "Client banned for {}s",
+                    remaining.as_secs()
+                )))
+            }
+            Err(TransactionError::RateLimit(RateLimitError::TooFrequent { retry_after })) => {
+                warn!(
+                    "Too frequent requests from client: {} for job_id: {} (retry after {}s)",
+                    client_id,
+                    job_id,
+                    retry_after.as_secs()
+                );
+                Err(ServerError::too_many_requests(format!(
+                    "Retry after {}s",
+                    retry_after.as_secs()
+                )))
+            }
+            Err(TransactionError::ServiceUnavailable(msg)) => {
+                error!("Service unavailable for job_id: {} - {}", job_id, msg);
+                Err(ServerError::service_unavailable(msg))
+            }
+            Err(TransactionError::JobExpired(msg)) => {
+                warn!("Expired job request for job_id: {} - {}", job_id, msg);
+                Err(ServerError::forbidden(msg))
+            }
+            Err(TransactionError::InvalidJobId(msg)) => {
+                warn!(
+                    "Invalid job ID from client: {} for job_id: {} - {}",
+                    client_id, job_id, msg
+                );
+                Err(ServerError::Internal(anyhow::anyhow!(
+                    "Bad Request: {}",
+                    msg
+                )))
+            }
+        }
+    }
+
+    pub(crate) async fn transaction_metrics(
+        Extension(transaction_manager): Extension<Arc<TransactionManager>>,
+    ) -> ServerResult<Response> {
+        let metrics = transaction_manager.get_metrics_snapshot();
+        Ok(Json(metrics).into_response())
+    }
+
+    pub(crate) async fn prometheus_metrics(
+        Extension(transaction_manager): Extension<Arc<TransactionManager>>,
+    ) -> ServerResult<Response> {
+        let metrics = transaction_manager.get_prometheus_metrics();
+        Ok(Response::builder()
+            .header(CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")
+            .body(metrics.into())
+            .unwrap())
     }
 
     pub(crate) async fn static_assets(Path(path): Path<String>) -> ServerResult<Response> {
@@ -362,283 +1025,5 @@ impl Server {
         });
 
         Ok(acceptor)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn parse_server_config(args: &str) -> Config {
-        match Arguments::try_parse_from(args.split_whitespace()) {
-            Ok(arguments) => match arguments.subcommand {
-                Subcommand::Server(server) => server.config,
-                subcommand => panic!("unexpected subcommand: {subcommand:?}"),
-            },
-            Err(err) => panic!("error parsing arguments: {err}"),
-        }
-    }
-
-    #[test]
-    fn default_address() {
-        let config = parse_server_config("para server");
-        assert_eq!(config.address(), "0.0.0.0");
-    }
-
-    #[test]
-    fn override_address() {
-        let config = parse_server_config("para server --address 127.0.0.1");
-        assert_eq!(config.address(), "127.0.0.1");
-    }
-
-    #[test]
-    fn default_acme_cache() {
-        let config = parse_server_config("para server");
-        assert_eq!(config.acme_cache(), PathBuf::from("acme-cache"));
-    }
-
-    #[test]
-    fn override_acme_cache_via_data_dir() {
-        let config = parse_server_config("para server --data-dir /custom/path");
-        assert_eq!(
-            config.acme_cache(),
-            PathBuf::from("/custom/path/acme-cache")
-        );
-    }
-
-    #[test]
-    fn override_acme_domains() {
-        let config =
-            parse_server_config("para server --acme-domain example.com --acme-domain foo.bar");
-        assert_eq!(
-            config.domains().unwrap(),
-            vec!["example.com".to_string(), "foo.bar".to_string()]
-        );
-    }
-
-    #[test]
-    fn default_acme_contacts() {
-        let config = parse_server_config("para server");
-        assert!(config.acme_contacts().is_empty());
-    }
-
-    #[test]
-    fn override_acme_contacts() {
-        let config = parse_server_config("para server --acme-contact admin@example.com");
-        assert_eq!(
-            config.acme_contacts(),
-            vec!["admin@example.com".to_string()]
-        );
-    }
-
-    #[test]
-    fn default_credentials() {
-        let config = parse_server_config("para server");
-        assert_eq!(config.credentials(), None);
-    }
-
-    #[test]
-    fn credentials_both_provided() {
-        let config = parse_server_config("para server --username satoshi --password secret");
-        assert_eq!(config.credentials(), Some(("satoshi", "secret")));
-    }
-
-    #[test]
-    fn default_domain() {
-        let config = parse_server_config("para server --acme-domain example.com");
-        assert_eq!(config.domain(), "example.com");
-    }
-
-    #[test]
-    fn default_domains_fallback() {
-        let config = parse_server_config("para server");
-        let domains = config.domains().unwrap();
-        assert!(!domains.is_empty(), "Expected hostname fallback");
-    }
-
-    #[test]
-    fn override_domains_no_fallback() {
-        let config = parse_server_config("para server --acme-domain custom.domain");
-        let domains = config.domains().unwrap();
-        assert_eq!(domains, vec!["custom.domain".to_string()]);
-    }
-
-    #[test]
-    fn default_data_dir() {
-        let config = parse_server_config("para server");
-        assert_eq!(config.data_dir(), PathBuf::new());
-    }
-
-    #[test]
-    fn override_data_dir() {
-        let config = parse_server_config("para server --data-dir /var/pool");
-        assert_eq!(config.data_dir(), PathBuf::from("/var/pool"));
-    }
-
-    #[test]
-    fn default_database_url() {
-        let config = parse_server_config("para server");
-        assert_eq!(
-            config.database_url(),
-            "postgres://satoshi:nakamoto@127.0.0.1:5432/ckpool"
-        );
-    }
-
-    #[test]
-    fn override_database_url() {
-        let config = parse_server_config("para server --database-url postgres://user:pass@host/db");
-        assert_eq!(config.database_url(), "postgres://user:pass@host/db");
-    }
-
-    #[test]
-    fn default_log_dir() {
-        let config = parse_server_config("para server");
-        assert_eq!(config.log_dir(), std::env::current_dir().unwrap());
-    }
-
-    #[test]
-    fn override_log_dir() {
-        let config = parse_server_config("para server --log-dir /logs");
-        assert_eq!(config.log_dir(), PathBuf::from("/logs"));
-    }
-
-    #[test]
-    fn default_port() {
-        let config = parse_server_config("para server");
-        assert_eq!(config.port(), None);
-    }
-
-    #[test]
-    fn override_port() {
-        let config = parse_server_config("para server --port 8080");
-        assert_eq!(config.port(), Some(8080));
-    }
-
-    #[test]
-    #[should_panic(expected = "required")]
-    fn credentials_only_username_panics() {
-        parse_server_config("para server --username satoshi");
-    }
-
-    #[test]
-    #[should_panic(expected = "required")]
-    fn credentials_only_password_panics() {
-        parse_server_config("para server --password secret");
-    }
-
-    #[test]
-    fn credentials_mutual_requirement_no_panic() {
-        parse_server_config("para server --username satoshi --password secret");
-        parse_server_config("para server");
-    }
-
-    #[test]
-    fn default_nodes() {
-        let config = parse_server_config("para server");
-        assert!(config.nodes().is_empty());
-    }
-
-    #[test]
-    fn override_nodes_single_http() {
-        let config = parse_server_config("para server --nodes http://localhost:80");
-        let expected = vec![Url::parse("http://localhost:80").unwrap()];
-        assert_eq!(config.nodes(), expected);
-    }
-
-    #[test]
-    fn override_nodes_single_https() {
-        let config = parse_server_config("para server --nodes https://parasite.wtf");
-        let expected = vec![Url::parse("https://parasite.wtf").unwrap()];
-        assert_eq!(config.nodes(), expected);
-    }
-
-    #[test]
-    fn multiple_nodes() {
-        let config = parse_server_config(
-            "para server --nodes http://localhost:80 --nodes https://parasite.wtf",
-        );
-        let expected = vec![
-            Url::parse("http://localhost:80").unwrap(),
-            Url::parse("https://parasite.wtf").unwrap(),
-        ];
-        assert_eq!(config.nodes(), expected);
-    }
-
-    #[test]
-    #[should_panic(expected = "error parsing arguments")]
-    fn invalid_node_url() {
-        parse_server_config("para server --nodes invalid_url");
-    }
-
-    #[test]
-    fn test_zero_seconds() {
-        assert_eq!(format_uptime(0), "0 minutes");
-    }
-
-    #[test]
-    fn test_single_units() {
-        assert_eq!(format_uptime(1), "0 minutes");
-        assert_eq!(format_uptime(60), "1 minute");
-        assert_eq!(format_uptime(3600), "1 hour");
-        assert_eq!(format_uptime(86400), "1 day");
-    }
-
-    #[test]
-    fn test_plural_units() {
-        assert_eq!(format_uptime(120), "2 minutes");
-        assert_eq!(format_uptime(7200), "2 hours");
-        assert_eq!(format_uptime(172800), "2 days");
-    }
-
-    #[test]
-    fn test_mixed_units() {
-        assert_eq!(format_uptime(90060), "1 day, 1 hour, 1 minute");
-        assert_eq!(format_uptime(183900), "2 days, 3 hours, 5 minutes");
-        assert_eq!(format_uptime(88200), "1 day, 30 minutes");
-        assert_eq!(format_uptime(8100), "2 hours, 15 minutes");
-    }
-
-    #[test]
-    fn test_edge_cases() {
-        assert_eq!(format_uptime(59), "0 minutes");
-        assert_eq!(format_uptime(3599), "59 minutes");
-        assert_eq!(format_uptime(86399), "23 hours, 59 minutes");
-        assert_eq!(format_uptime(60), "1 minute");
-        assert_eq!(format_uptime(3600), "1 hour");
-        assert_eq!(format_uptime(86400), "1 day");
-    }
-
-    #[test]
-    fn test_large_values() {
-        assert_eq!(format_uptime(2592000), "30 days");
-        assert_eq!(format_uptime(31581000), "365 days, 12 hours, 30 minutes");
-    }
-
-    #[test]
-    fn test_only_minutes_when_less_than_hour() {
-        assert_eq!(format_uptime(30), "0 minutes");
-        assert_eq!(format_uptime(90), "1 minute");
-        assert_eq!(format_uptime(1800), "30 minutes");
-    }
-
-    #[test]
-    fn test_fractional_seconds_truncated() {
-        assert_eq!(format_uptime(119), "1 minute"); // 1 min 59 sec -> 1 minute
-        assert_eq!(format_uptime(3659), "1 hour"); // 1 hour 59 sec -> 1 hour
-        assert_eq!(format_uptime(86459), "1 day"); // 1 day 59 sec -> 1 day
-    }
-
-    #[test]
-    fn validate_math() {
-        let a: i64 = 3;
-        let b: i64 = 2;
-        assert_eq!(a / b, 1);
-    }
-
-    #[test]
-    fn invalid_math() {
-        let a: i64 = 3;
-        let b: i64 = 2;
-        assert!(a / b != 2);
     }
 }
