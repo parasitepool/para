@@ -14,6 +14,7 @@ impl Aggregator {
     pub(crate) fn init(nodes: Vec<Url>) -> Result<Router> {
         let client = ClientBuilder::new()
             .timeout(Duration::from_secs(10))
+            .use_rustls_tls()
             .build()?;
 
         let nodes = Arc::new(nodes);
