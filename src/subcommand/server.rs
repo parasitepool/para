@@ -1027,3 +1027,281 @@ impl Server {
         Ok(acceptor)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse_server_config(args: &str) -> Config {
+        match Arguments::try_parse_from(args.split_whitespace()) {
+            Ok(arguments) => match arguments.subcommand {
+                Subcommand::Server(server) => server.config,
+                subcommand => panic!("unexpected subcommand: {subcommand:?}"),
+            },
+            Err(err) => panic!("error parsing arguments: {err}"),
+        }
+    }
+
+    #[test]
+    fn default_address() {
+        let config = parse_server_config("para server");
+        assert_eq!(config.address(), "0.0.0.0");
+    }
+
+    #[test]
+    fn override_address() {
+        let config = parse_server_config("para server --address 127.0.0.1");
+        assert_eq!(config.address(), "127.0.0.1");
+    }
+
+    #[test]
+    fn default_acme_cache() {
+        let config = parse_server_config("para server");
+        assert_eq!(config.acme_cache(), PathBuf::from("acme-cache"));
+    }
+
+    #[test]
+    fn override_acme_cache_via_data_dir() {
+        let config = parse_server_config("para server --data-dir /custom/path");
+        assert_eq!(
+            config.acme_cache(),
+            PathBuf::from("/custom/path/acme-cache")
+        );
+    }
+
+    #[test]
+    fn override_acme_domains() {
+        let config =
+            parse_server_config("para server --acme-domain example.com --acme-domain foo.bar");
+        assert_eq!(
+            config.domains().unwrap(),
+            vec!["example.com".to_string(), "foo.bar".to_string()]
+        );
+    }
+
+    #[test]
+    fn default_acme_contacts() {
+        let config = parse_server_config("para server");
+        assert!(config.acme_contacts().is_empty());
+    }
+
+    #[test]
+    fn override_acme_contacts() {
+        let config = parse_server_config("para server --acme-contact admin@example.com");
+        assert_eq!(
+            config.acme_contacts(),
+            vec!["admin@example.com".to_string()]
+        );
+    }
+
+    #[test]
+    fn default_credentials() {
+        let config = parse_server_config("para server");
+        assert_eq!(config.credentials(), None);
+    }
+
+    #[test]
+    fn credentials_both_provided() {
+        let config = parse_server_config("para server --username satoshi --password secret");
+        assert_eq!(config.credentials(), Some(("satoshi", "secret")));
+    }
+
+    #[test]
+    fn default_domain() {
+        let config = parse_server_config("para server --acme-domain example.com");
+        assert_eq!(config.domain(), "example.com");
+    }
+
+    #[test]
+    fn default_domains_fallback() {
+        let config = parse_server_config("para server");
+        let domains = config.domains().unwrap();
+        assert!(!domains.is_empty(), "Expected hostname fallback");
+    }
+
+    #[test]
+    fn override_domains_no_fallback() {
+        let config = parse_server_config("para server --acme-domain custom.domain");
+        let domains = config.domains().unwrap();
+        assert_eq!(domains, vec!["custom.domain".to_string()]);
+    }
+
+    #[test]
+    fn default_data_dir() {
+        let config = parse_server_config("para server");
+        assert_eq!(config.data_dir(), PathBuf::new());
+    }
+
+    #[test]
+    fn override_data_dir() {
+        let config = parse_server_config("para server --data-dir /var/pool");
+        assert_eq!(config.data_dir(), PathBuf::from("/var/pool"));
+    }
+
+    #[test]
+    fn default_database_url() {
+        let config = parse_server_config("para server");
+        assert_eq!(
+            config.database_url(),
+            "postgres://satoshi:nakamoto@127.0.0.1:5432/ckpool"
+        );
+    }
+
+    #[test]
+    fn override_database_url() {
+        let config = parse_server_config("para server --database-url postgres://user:pass@host/db");
+        assert_eq!(config.database_url(), "postgres://user:pass@host/db");
+    }
+
+    #[test]
+    fn default_log_dir() {
+        let config = parse_server_config("para server");
+        assert_eq!(config.log_dir(), std::env::current_dir().unwrap());
+    }
+
+    #[test]
+    fn override_log_dir() {
+        let config = parse_server_config("para server --log-dir /logs");
+        assert_eq!(config.log_dir(), PathBuf::from("/logs"));
+    }
+
+    #[test]
+    fn default_port() {
+        let config = parse_server_config("para server");
+        assert_eq!(config.port(), None);
+    }
+
+    #[test]
+    fn override_port() {
+        let config = parse_server_config("para server --port 8080");
+        assert_eq!(config.port(), Some(8080));
+    }
+
+    #[test]
+    #[should_panic(expected = "required")]
+    fn credentials_only_username_panics() {
+        parse_server_config("para server --username satoshi");
+    }
+
+    #[test]
+    #[should_panic(expected = "required")]
+    fn credentials_only_password_panics() {
+        parse_server_config("para server --password secret");
+    }
+
+    #[test]
+    fn credentials_mutual_requirement_no_panic() {
+        parse_server_config("para server --username satoshi --password secret");
+        parse_server_config("para server");
+    }
+
+    #[test]
+    fn default_nodes() {
+        let config = parse_server_config("para server");
+        assert!(config.nodes().is_empty());
+    }
+
+    #[test]
+    fn override_nodes_single_http() {
+        let config = parse_server_config("para server --nodes http://localhost:80");
+        let expected = vec![Url::parse("http://localhost:80").unwrap()];
+        assert_eq!(config.nodes(), expected);
+    }
+
+    #[test]
+    fn override_nodes_single_https() {
+        let config = parse_server_config("para server --nodes https://parasite.wtf");
+        let expected = vec![Url::parse("https://parasite.wtf").unwrap()];
+        assert_eq!(config.nodes(), expected);
+    }
+
+    #[test]
+    fn multiple_nodes() {
+        let config = parse_server_config(
+            "para server --nodes http://localhost:80 --nodes https://parasite.wtf",
+        );
+        let expected = vec![
+            Url::parse("http://localhost:80").unwrap(),
+            Url::parse("https://parasite.wtf").unwrap(),
+        ];
+        assert_eq!(config.nodes(), expected);
+    }
+
+    #[test]
+    #[should_panic(expected = "error parsing arguments")]
+    fn invalid_node_url() {
+        parse_server_config("para server --nodes invalid_url");
+    }
+
+    #[test]
+    fn test_zero_seconds() {
+        assert_eq!(format_uptime(0), "0 minutes");
+    }
+
+    #[test]
+    fn test_single_units() {
+        assert_eq!(format_uptime(1), "0 minutes");
+        assert_eq!(format_uptime(60), "1 minute");
+        assert_eq!(format_uptime(3600), "1 hour");
+        assert_eq!(format_uptime(86400), "1 day");
+    }
+
+    #[test]
+    fn test_plural_units() {
+        assert_eq!(format_uptime(120), "2 minutes");
+        assert_eq!(format_uptime(7200), "2 hours");
+        assert_eq!(format_uptime(172800), "2 days");
+    }
+
+    #[test]
+    fn test_mixed_units() {
+        assert_eq!(format_uptime(90060), "1 day, 1 hour, 1 minute");
+        assert_eq!(format_uptime(183900), "2 days, 3 hours, 5 minutes");
+        assert_eq!(format_uptime(88200), "1 day, 30 minutes");
+        assert_eq!(format_uptime(8100), "2 hours, 15 minutes");
+    }
+
+    #[test]
+    fn test_edge_cases() {
+        assert_eq!(format_uptime(59), "0 minutes");
+        assert_eq!(format_uptime(3599), "59 minutes");
+        assert_eq!(format_uptime(86399), "23 hours, 59 minutes");
+        assert_eq!(format_uptime(60), "1 minute");
+        assert_eq!(format_uptime(3600), "1 hour");
+        assert_eq!(format_uptime(86400), "1 day");
+    }
+
+    #[test]
+    fn test_large_values() {
+        assert_eq!(format_uptime(2592000), "30 days");
+        assert_eq!(format_uptime(31581000), "365 days, 12 hours, 30 minutes");
+    }
+
+    #[test]
+    fn test_only_minutes_when_less_than_hour() {
+        assert_eq!(format_uptime(30), "0 minutes");
+        assert_eq!(format_uptime(90), "1 minute");
+        assert_eq!(format_uptime(1800), "30 minutes");
+    }
+
+    #[test]
+    fn test_fractional_seconds_truncated() {
+        assert_eq!(format_uptime(119), "1 minute");
+        assert_eq!(format_uptime(3659), "1 hour");
+        assert_eq!(format_uptime(86459), "1 day");
+    }
+
+    #[test]
+    fn validate_math() {
+        let a: i64 = 3;
+        let b: i64 = 2;
+        assert_eq!(a / b, 1);
+    }
+
+    #[test]
+    fn invalid_math() {
+        let a: i64 = 3;
+        let b: i64 = 2;
+        assert!(a / b != 2);
+    }
+}
