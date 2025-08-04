@@ -10,7 +10,7 @@ pub(crate) struct Hasher {
 
 impl Hasher {
     pub(crate) fn hash(&mut self, cancel: CancellationToken) -> Result<(Header, String, String)> {
-        let mut hashes = 0u64;
+        let mut hashes = 0;
         let start = Instant::now();
         let mut last_log = start;
 
