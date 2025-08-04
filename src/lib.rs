@@ -1,4 +1,4 @@
-#![allow(clippy::too_many_arguments)]
+#![allow(clippy::too_many_arguments, unused_imports)]
 use {
     anyhow::{Error, anyhow, ensure},
     arguments::Arguments,
