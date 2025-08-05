@@ -153,14 +153,12 @@ impl Aggregator {
             }
         }
 
-        Ok(HealthcheckaggHtml { checks }
-            .page(config.domain())
-            .into_response())
-
-        //  Ok(if accept_json {
-        //      Json(healthcheck).into_response()
-        //  } else {
-        //      healthcheck.page(config.domain()).into_response()
-        //  })
+        Ok(if accept_json {
+            Json(checks).into_response()
+        } else {
+            HealthcheckaggHtml { checks }
+                .page(config.domain())
+                .into_response()
+        })
     }
 }
