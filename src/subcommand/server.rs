@@ -5,7 +5,10 @@ use {
     config::Config,
     database::Database,
     error::{OptionExt, ServerError, ServerResult},
-    templates::{PageContent, PageHtml, healthcheck::HealthcheckHtml, home::HomeHtml},
+    templates::{
+        PageContent, PageHtml, healthcheck::HealthcheckHtml, healthcheckagg::HealthcheckaggHtml,
+        home::HomeHtml,
+    },
 };
 
 mod accept_json;
@@ -112,7 +115,7 @@ impl Server {
         }
 
         if !config.nodes().is_empty() {
-            let aggregator = Aggregator::init(config.nodes().clone())?;
+            let aggregator = Aggregator::init(config.clone())?;
             router = router.merge(aggregator);
         } else {
             warn!("No aggregator nodes configured: skipping aggregator routes.");

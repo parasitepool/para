@@ -46,9 +46,9 @@ server:
     --port 8080 \
     --username parasite \
     --password 2g1k3WxAthr5BpyHTs1zk5EZ8KEB6WTE \
-    --nodes https://fkb.parasite.wtf \
-    --nodes https://sin.parasite.wtf \
-    --nodes https://msn.parasite.wtf 
+    --nodes http://127.0.0.1:8080 \
+    --nodes http://127.0.0.1:8081 \
+    --nodes http://127.0.0.1:8082
 
 install:
   git submodule update --init

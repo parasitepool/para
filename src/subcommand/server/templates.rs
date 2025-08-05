@@ -5,6 +5,7 @@ use {
 };
 
 pub(crate) mod healthcheck;
+pub(crate) mod healthcheckagg;
 pub(crate) mod home;
 
 #[derive(Boilerplate)]

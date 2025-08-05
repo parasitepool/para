@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Boilerplate, Deserialize, Serialize, PartialEq)]
+#[derive(Boilerplate, Debug, Deserialize, Serialize, PartialEq)]
 pub(crate) struct HealthcheckHtml {
     pub(crate) disk_usage_percent: String,
     pub(crate) memory_usage_percent: String,
