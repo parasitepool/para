@@ -41,7 +41,14 @@ ping host='parasite.wtf':
   cargo run ping {{host}}:42069
 
 server: 
-  RUST_LOG=info cargo run -- server --log-dir copr/logs --port 8080
+  RUST_LOG=info cargo run -- server \
+    --log-dir copr/logs \
+    --port 8080 \
+    --username parasite \
+    --password 2g1k3WxAthr5BpyHTs1zk5EZ8KEB6WTE \
+    --nodes https://fkb.parasite.wtf \
+    --nodes https://sin.parasite.wtf \
+    --nodes https://msn.parasite.wtf 
 
 install:
   git submodule update --init
