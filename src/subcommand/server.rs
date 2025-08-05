@@ -1,5 +1,6 @@
 use {
     super::*,
+    accept_json::AcceptJson,
     aggregator::Aggregator,
     config::Config,
     database::Database,
@@ -7,6 +8,7 @@ use {
     templates::{PageContent, PageHtml, healthcheck::HealthcheckHtml, home::HomeHtml},
 };
 
+mod accept_json;
 mod aggregator;
 mod config;
 pub(crate) mod database;
@@ -158,7 +160,8 @@ impl Server {
 
     pub(crate) async fn healthcheck(
         Extension(config): Extension<Arc<Config>>,
-    ) -> ServerResult<PageHtml<HealthcheckHtml>> {
+        AcceptJson(accept_json): AcceptJson,
+    ) -> ServerResult<Response> {
         task::block_in_place(|| {
             let mut system = System::new_all();
             system.refresh_all();
@@ -189,13 +192,18 @@ impl Server {
 
             let uptime_seconds = System::uptime();
 
-            Ok(HealthcheckHtml {
+            let healthcheck = HealthcheckHtml {
                 disk_usage_percent: format!("{disk_usage_percent:.2}"),
                 memory_usage_percent: format!("{memory_usage_percent:.2}"),
                 cpu_usage_percent: format!("{cpu_usage_percent:.2}"),
                 uptime: format_uptime(uptime_seconds),
-            }
-            .page(config.domain()))
+            };
+
+            Ok(if accept_json {
+                Json(healthcheck).into_response()
+            } else {
+                healthcheck.page(config.domain()).into_response()
+            })
         })
     }
 
