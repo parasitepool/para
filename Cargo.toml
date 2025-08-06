@@ -39,6 +39,12 @@ tracing = "0.1.41"
 tracing-subscriber = { version =  "0.3.19", features = ["env-filter", "fmt"] }
 zmq = "0.10.0"
 
+[dev-dependencies]
+executable-path = "1.0.0"
+pretty_assertions = "1.4.1"
+regex = "1.11.1"
+tempfile = "3.20.0"
+
 [[bin]]
 name = "para"
 path = "src/bin/main.rs"
@@ -46,3 +52,7 @@ path = "src/bin/main.rs"
 [lib]
 name = "para"
 path = "src/lib.rs"
+
+[[test]]
+name = "integration"
+path = "tests/lib.rs"
