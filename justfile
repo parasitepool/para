@@ -37,8 +37,13 @@ miner-signet:
     --username tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.ParaMiner \
     --password x
 
+# Simple ping (mining.subscribe)
 ping host='parasite.wtf':
   cargo run ping {{host}}:42069
+
+# Authenticated ping (mining.authorize + mining.notify)
+ping-auth host='parasite.wtf' username='bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg6dzw5nk24r45dzasde25r3.ParaMiner' password='x':
+  cargo run ping --username {{username}} --password {{password}} {{host}}:42069
 
 server: 
   RUST_LOG=info cargo run -- server --log-dir copr/logs --port 8080
