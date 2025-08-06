@@ -28,59 +28,8 @@ impl ToArgs for Vec<String> {
     }
 }
 
-pub(crate) struct Spawn {
-    pub(crate) child: Child,
-    expected_exit_code: i32,
-    expected_stderr: Expected,
-    expected_stdout: Expected,
-    tempdir: Arc<TempDir>,
-}
-
-impl Spawn {
-    #[track_caller]
-    fn run(self) -> (Arc<TempDir>, String) {
-        let output = self.child.wait_with_output().unwrap();
-
-        let stdout = str::from_utf8(&output.stdout).unwrap();
-        let stderr = str::from_utf8(&output.stderr).unwrap();
-        if output.status.code() != Some(self.expected_exit_code) {
-            panic!(
-                "Test failed: {}\nstdout:\n{}\nstderr:\n{}",
-                output.status, stdout, stderr
-            );
-        }
-
-        self.expected_stderr.assert_match(stderr);
-        self.expected_stdout.assert_match(stdout);
-
-        (self.tempdir, stdout.into())
-    }
-
-    #[track_caller]
-    pub(crate) fn run_and_deserialize_output<T: DeserializeOwned>(self) -> T {
-        let stdout = self.stdout_regex(".*").run_and_extract_stdout();
-        serde_json::from_str(&stdout)
-            .unwrap_or_else(|err| panic!("Failed to deserialize JSON: {err}\n{stdout}"))
-    }
-
-    #[track_caller]
-    pub(crate) fn run_and_extract_stdout(self) -> String {
-        self.run().1
-    }
-
-    pub(crate) fn stdout_regex(self, expected_stdout: impl AsRef<str>) -> Self {
-        Self {
-            expected_stdout: Expected::regex(expected_stdout.as_ref()),
-            ..self
-        }
-    }
-}
-
 pub(crate) struct CommandBuilder {
     args: Vec<String>,
-    expected_exit_code: i32,
-    expected_stderr: Expected,
-    expected_stdout: Expected,
     integration_test: bool,
     stderr: bool,
     stdin: Vec<u8>,
@@ -92,9 +41,6 @@ impl CommandBuilder {
     pub(crate) fn new(args: impl ToArgs) -> Self {
         Self {
             args: args.to_args(),
-            expected_exit_code: 0,
-            expected_stderr: Expected::String(String::new()),
-            expected_stdout: Expected::String(String::new()),
             integration_test: true,
             stderr: true,
             stdin: Vec::new(),
@@ -110,6 +56,7 @@ impl CommandBuilder {
         }
     }
 
+    #[allow(unused)]
     pub(crate) fn write(self, path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> Self {
         fs::write(self.tempdir.path().join(path), contents).unwrap();
         self
@@ -120,45 +67,9 @@ impl CommandBuilder {
         Self { stderr, ..self }
     }
 
-    pub(crate) fn stdin(self, stdin: Vec<u8>) -> Self {
-        Self { stdin, ..self }
-    }
-
     #[allow(unused)]
     pub(crate) fn stdout(self, stdout: bool) -> Self {
         Self { stdout, ..self }
-    }
-
-    pub(crate) fn stdout_regex(self, expected_stdout: impl AsRef<str>) -> Self {
-        Self {
-            expected_stdout: Expected::regex(expected_stdout.as_ref()),
-            ..self
-        }
-    }
-
-    pub(crate) fn expected_stderr(self, expected_stderr: impl AsRef<str>) -> Self {
-        Self {
-            expected_stderr: Expected::String(expected_stderr.as_ref().to_owned()),
-            ..self
-        }
-    }
-
-    pub(crate) fn stderr_regex(self, expected_stderr: impl AsRef<str>) -> Self {
-        Self {
-            expected_stderr: Expected::regex(expected_stderr.as_ref()),
-            ..self
-        }
-    }
-
-    pub(crate) fn expected_exit_code(self, expected_exit_code: i32) -> Self {
-        Self {
-            expected_exit_code,
-            ..self
-        }
-    }
-
-    pub(crate) fn temp_dir(self, tempdir: Arc<TempDir>) -> Self {
-        Self { tempdir, ..self }
     }
 
     pub(crate) fn command(&self) -> Command {
@@ -168,6 +79,10 @@ impl CommandBuilder {
 
         for arg in self.args.iter() {
             args.push(arg.clone());
+            if arg == "server" {
+                args.push("--log-dir".to_string());
+                args.push(self.tempdir.path().display().to_string());
+            }
         }
 
         if self.integration_test {
@@ -187,15 +102,13 @@ impl CommandBuilder {
                 Stdio::inherit()
             })
             .current_dir(&*self.tempdir)
-            .arg("--datadir")
-            .arg(self.tempdir.path())
             .args(&args);
 
         command
     }
 
     #[track_caller]
-    pub(crate) fn spawn(self) -> Spawn {
+    pub(crate) fn spawn(self) -> Child {
         let mut command = self.command();
         let child = command.spawn().unwrap();
 
@@ -206,36 +119,6 @@ impl CommandBuilder {
             .write_all(&self.stdin)
             .unwrap();
 
-        Spawn {
-            child,
-            expected_exit_code: self.expected_exit_code,
-            expected_stderr: self.expected_stderr,
-            expected_stdout: self.expected_stdout,
-            tempdir: self.tempdir,
-        }
-    }
-
-    #[track_caller]
-    pub(crate) fn run(self) -> (Arc<TempDir>, String) {
-        self.spawn().run()
-    }
-
-    pub(crate) fn run_and_extract_file(self, path: impl AsRef<Path>) -> String {
-        let tempdir = self.run().0;
-        fs::read_to_string(tempdir.path().join(path)).unwrap()
-    }
-
-    #[track_caller]
-    pub(crate) fn run_and_extract_stdout(self) -> String {
-        self.run().1
-    }
-
-    #[track_caller]
-    pub(crate) fn run_and_deserialize_output<T: DeserializeOwned>(self) -> T {
-        let stdout = self.stdout_regex(".*").run_and_extract_stdout();
-        match serde_json::from_str(&stdout) {
-            Ok(output) => output,
-            Err(err) => panic!("Failed to deserialize JSON: {err}\n{stdout}"),
-        }
+        child
     }
 }

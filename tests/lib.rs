@@ -1,18 +1,19 @@
 use {
+    command_builder::CommandBuilder,
     executable_path::executable_path,
-    expected::Expected,
-    pretty_assertions::assert_eq as pretty_assert_eq,
-    regex::Regex,
-    serde::de::DeserializeOwned,
     std::{
         fs,
         io::Write,
+        net::TcpListener,
         path::Path,
         process::{Child, Command, Stdio},
         sync::Arc,
+        thread,
+        time::Duration,
     },
     tempfile::TempDir,
 };
 
 mod command_builder;
-mod expected;
+
+mod server;
