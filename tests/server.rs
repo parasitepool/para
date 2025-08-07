@@ -29,3 +29,19 @@ fn run() {
     child.kill().unwrap();
     child.wait().unwrap();
 }
+
+#[test]
+fn serve_stats() {
+    let port = TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+
+    let mut child = CommandBuilder::new(format!("server --address 127.0.0.1 --port {port}"))
+        .integration_test(true)
+        .spawn();
+}
+
+#[test]
+fn stats_aggregator() {}
