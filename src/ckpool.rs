@@ -1,5 +1,9 @@
 use super::*;
 
+pub(crate) use user::User;
+
+mod user;
+
 #[derive(Debug, DeserializeFromStr, SerializeDisplay, PartialEq, Clone, Copy)]
 pub(crate) struct Status {
     pub(crate) pool: PoolStatus,
