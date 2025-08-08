@@ -247,6 +247,19 @@ PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
   WHERE NOT EXISTS (SELECT 1 FROM blocks);
 "
 
+PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
+  DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE constraint_name = 'blocks_blockheight_unique'
+          AND table_name = 'blocks'
+      ) THEN
+        ALTER TABLE blocks ADD CONSTRAINT blocks_blockheight_unique UNIQUE (blockheight);
+      END IF;
+    END $$;
+"
+
 echo "PostgreSQL is running"
 echo "Database: ckpool"
 echo "User: satoshi"
