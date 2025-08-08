@@ -41,7 +41,7 @@ impl Database {
                     workername,
                     SUM(diff) AS worker_total
                 FROM
-                    shares
+                    remote_shares
                 GROUP BY
                     workername
             ),
@@ -71,10 +71,10 @@ impl Database {
     pub(crate) async fn get_total_coinbase(
         &self,
         blockheight: i32,
-    ) -> Result<Option<(i32, String, i64)>> {
-        sqlx::query_as::<_, (i32, String, i64)>(
+    ) -> Result<Option<(i32, String, i64, String, String)>> {
+        sqlx::query_as::<_, (i32, String, i64, String, String)>(
             "
-            SELECT blockheight, blockhash, coinbasevalue 
+            SELECT blockheight, blockhash, coinbasevalue, workername, username
             FROM blocks
             WHERE blockheight = $1
             ",
@@ -85,7 +85,11 @@ impl Database {
         .map_err(|err| anyhow!(err))
     }
 
-    pub(crate) async fn get_payouts(&self, blockheight: i32) -> Result<Vec<Payout>> {
+    pub(crate) async fn get_payouts(
+        &self,
+        blockheight: i32,
+        btcaddress: String,
+    ) -> Result<Vec<Payout>> {
         sqlx::query_as::<_, Payout>(
             "
             WITH target_block AS (
@@ -102,9 +106,10 @@ impl Database {
             ),
             qualified_shares AS (
                 SELECT s.workername, s.lnurl, s.username AS btcaddress, SUM(s.diff) as total_diff
-                FROM shares s, target_block tb, previous_block pb
+                FROM remote_shares s, target_block tb, previous_block pb
                 WHERE s.blockheight <= tb.blockheight
                     AND s.blockheight > pb.prev_height
+                    AND s.username != $2
                     AND s.reject_reason IS NULL
                 GROUP BY s.lnurl, s.username, s.workername
             ),
@@ -125,6 +130,7 @@ impl Database {
             ",
         )
         .bind(blockheight)
+        .bind(btcaddress)
         .fetch_all(&self.pool)
         .await
         .map_err(|err| anyhow!(err))
