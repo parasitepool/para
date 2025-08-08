@@ -96,7 +96,7 @@ impl Database {
                 SELECT id, blockheight
                 FROM blocks
                 WHERE blockheight = $1
-                ORDER BY id ASC
+                ORDER BY id
                 LIMIT 1
             ),
             previous_block AS (
