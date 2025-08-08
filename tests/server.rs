@@ -32,15 +32,7 @@ fn run() {
 
 #[test]
 fn serve_stats() {
-    let port = TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
-
-    let mut child = CommandBuilder::new(format!("server --address 127.0.0.1 --port {port}"))
-        .integration_test(true)
-        .spawn();
+    let _server = TestServer::spawn();
 }
 
 #[test]
