@@ -37,7 +37,6 @@ miner-signet:
     --username tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.ParaMiner \
     --password x
 
-# Simple ping (mining.subscribe)
 ping host='parasite.wtf':
   cargo run ping {{host}}:42069
 
