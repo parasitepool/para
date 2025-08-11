@@ -26,7 +26,7 @@ pub(crate) struct Ping {
     target: String,
     #[arg(long, help = "Stratum <USERNAME>")]
     username: Option<String>,
-    #[arg(long, help = "Password for authentication")]
+    #[arg(long, help = "Stratum <PASSWORD>")]
     password: Option<String>,
     #[arg(
         long,
