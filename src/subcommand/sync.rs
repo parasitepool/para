@@ -243,10 +243,11 @@ impl SyncSend {
         let current_blockheight = database.get_blockheight_for_id(*current_id).await?;
         let latest_blockheight = database.get_blockheight_for_id(max_id).await?;
 
-        if let (Some(current_bh), Some(latest_bh)) = (current_blockheight, latest_blockheight) {
-            if current_bh >= latest_bh {
+        match (current_blockheight, latest_blockheight) {
+            (Some(current_bh), Some(latest_bh)) if current_bh >= latest_bh => {
                 return Ok(SyncResult::WaitForNewBlock);
             }
+            _ => {}
         }
 
         let target_id = std::cmp::min(*current_id + self.batch_size, max_id - TARGET_ID_BUFFER);
