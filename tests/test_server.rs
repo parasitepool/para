@@ -26,10 +26,10 @@ impl TestServer {
         .spawn();
 
         for attempt in 0.. {
-            if let Ok(response) = reqwest::blocking::get(format!("http://127.0.0.1:{port}")) {
-                if response.status() == 200 {
-                    break;
-                }
+            if let Ok(response) = reqwest::blocking::get(format!("http://127.0.0.1:{port}"))
+                && response.status() == 200
+            {
+                break;
             }
 
             if attempt == 100 {
