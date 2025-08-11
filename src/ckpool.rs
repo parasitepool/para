@@ -1,14 +1,14 @@
 use super::*;
 
-pub(crate) use user::User;
+pub use user::User;
 
 mod user;
 
 #[derive(Debug, DeserializeFromStr, SerializeDisplay, PartialEq, Clone, Copy)]
-pub(crate) struct Status {
-    pub(crate) pool: PoolStatus,
-    pub(crate) hash_rates: HashRateStatus,
-    pub(crate) shares: ShareStatus,
+pub struct Status {
+    pub pool: PoolStatus,
+    pub hash_rates: HashRateStatus,
+    pub shares: ShareStatus,
 }
 
 impl FromStr for Status {
@@ -70,7 +70,7 @@ impl Add for Status {
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Copy, Clone)]
-pub(crate) struct PoolStatus {
+pub struct PoolStatus {
     runtime: u64,
     lastupdate: u64,
     #[serde(rename = "Users")]
@@ -99,7 +99,7 @@ impl Add for PoolStatus {
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone, Copy)]
-pub(crate) struct HashRateStatus {
+pub struct HashRateStatus {
     hashrate1m: HashRate,
     hashrate5m: HashRate,
     hashrate15m: HashRate,
@@ -126,7 +126,7 @@ impl Add for HashRateStatus {
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone, Copy)]
-pub(crate) struct ShareStatus {
+pub struct ShareStatus {
     diff: f64,
     accepted: u64,
     rejected: u64,
