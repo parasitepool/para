@@ -24,7 +24,7 @@ struct StratumFrame {
 #[command(about = "Ping a stratum mining server.")]
 pub(crate) struct Ping {
     target: String,
-    #[arg(long, help = "Username for authentication")]
+    #[arg(long, help = "Stratum <USERNAME>")]
     username: Option<String>,
     #[arg(long, help = "Password for authentication")]
     password: Option<String>,
