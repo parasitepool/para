@@ -1,23 +1,18 @@
-use {
-    super::*,
-    anyhow::{Context, bail},
-    serde::Deserialize,
-    std::net::SocketAddr,
-    tokio::time::sleep,
-};
+use super::*;
 
-#[derive(Deserialize)]
-struct BasicResponse {
-    result: Option<serde_json::Value>,
-    error: Option<serde_json::Value>,
+#[derive(Debug, Clone)]
+enum PingType {
+    Subscribe,
+    Authorized { username: String },
 }
 
-#[derive(Deserialize)]
-struct StratumFrame {
-    method: Option<String>,
-    params: Option<serde_json::Value>,
-    result: Option<serde_json::Value>,
-    error: Option<serde_json::Value>,
+impl fmt::Display for PingType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PingType::Subscribe => write!(f, "SUBSCRIBE PING"),
+            PingType::Authorized { .. } => write!(f, "AUTHORIZED PING"),
+        }
+    }
 }
 
 #[derive(Parser, Debug)]
@@ -46,10 +41,12 @@ impl Ping {
     pub(crate) async fn run(&self) -> Result {
         let addr = self.resolve_target().await?;
 
-        let ping_type = if self.username.is_some() {
-            "AUTHORIZED PING"
+        let ping_type = if let Some(ref username) = self.username {
+            PingType::Authorized {
+                username: username.clone(),
+            }
         } else {
-            "SUBSCRIBE PING"
+            PingType::Subscribe
         };
 
         println!("{} {} ({})", ping_type, self.target, addr);
@@ -65,7 +62,7 @@ impl Ping {
 
                     stats.record_attempt();
 
-                    match self.ping_once(addr, seq).await {
+                    match self.ping_once(addr, seq, &ping_type).await {
                         Ok((size, duration)) => {
                             stats.record_success(duration);
                             println!("Response from {addr}: seq={seq} size={size} time={:.3}ms", duration.as_secs_f64() * 1000.0);
@@ -83,35 +80,42 @@ impl Ping {
     }
 
     async fn resolve_target(&self) -> Result<SocketAddr> {
-        let addr = if self.target.contains(':') {
-            tokio::net::lookup_host(&self.target)
-                .await?
-                .next()
-                .with_context(|| "Failed to resolve hostname")?
+        let target = if self.target.contains(':') {
+            self.target.clone()
         } else {
-            tokio::net::lookup_host(&format!("{}:42069", self.target))
-                .await?
-                .next()
-                .with_context(|| "Failed to resolve hostname")?
+            format!("{}:42069", self.target)
         };
+
+        let addr = tokio::net::lookup_host(&target)
+            .await?
+            .next()
+            .with_context(|| "Failed to resolve hostname")?;
 
         Ok(addr)
     }
 
-    async fn ping_once(&self, addr: SocketAddr, sequence: u64) -> Result<(usize, Duration)> {
+    async fn ping_once(
+        &self,
+        addr: SocketAddr,
+        sequence: u64,
+        ping_type: &PingType,
+    ) -> Result<(usize, Duration)> {
         let mut stream =
             tokio::time::timeout(Duration::from_secs(10), TcpStream::connect(addr)).await??;
 
         let mut reader = BufReader::new(&mut stream);
 
-        if let Some(ref username) = self.username {
-            self.authenticated_ping(&mut reader, sequence, username)
-                .await
-        } else {
-            let start = Instant::now();
-            let bytes_read = self.send_subscribe(&mut reader, sequence).await?;
-            let duration = start.elapsed();
-            Ok((bytes_read, duration))
+        match ping_type {
+            PingType::Authorized { username } => {
+                self.authenticated_ping(&mut reader, sequence, username)
+                    .await
+            }
+            PingType::Subscribe => {
+                let start = Instant::now();
+                let bytes_read = self.send_subscribe(&mut reader, sequence).await?;
+                let duration = start.elapsed();
+                Ok((bytes_read, duration))
+            }
         }
     }
 
@@ -120,8 +124,8 @@ impl Ping {
         reader: &mut BufReader<&mut TcpStream>,
         sequence: u64,
     ) -> Result<usize> {
-        let request = Message::Request {
-            id: Id::Number(sequence),
+        let request = stratum::Message::Request {
+            id: stratum::Id::Number(sequence),
             method: "mining.subscribe".into(),
             params: serde_json::to_value(stratum::Subscribe {
                 user_agent: "user ParaPing/0.0.1".into(),
@@ -135,11 +139,19 @@ impl Ping {
         let mut response_line = String::new();
         let bytes_read = reader.read_line(&mut response_line).await?;
 
-        let response: BasicResponse = serde_json::from_str(response_line.trim())
+        let response: stratum::Message = serde_json::from_str(response_line.trim())
             .with_context(|| format!("Invalid JSON in subscribe response: {response_line:?}"))?;
 
-        if let Some(error) = response.error {
-            bail!("Server error in subscribe: {}", error);
+        match response {
+            stratum::Message::Response {
+                error: Some(error), ..
+            } => {
+                bail!("Server error in subscribe: {}", error);
+            }
+            stratum::Message::Response { .. } => {}
+            _ => {
+                bail!("Expected response, got: {:?}", response);
+            }
         }
 
         Ok(bytes_read)
@@ -154,8 +166,8 @@ impl Ping {
         self.send_subscribe(reader, sequence).await?;
 
         let password = self.password.as_deref().unwrap_or("x");
-        let authorize_request = Message::Request {
-            id: Id::Number(sequence + 1),
+        let authorize_request = stratum::Message::Request {
+            id: stratum::Id::Number(sequence + 1),
             method: "mining.authorize".into(),
             params: serde_json::to_value((username, password))?,
         };
@@ -166,18 +178,28 @@ impl Ping {
         let mut response_line = String::new();
         let _bytes_read = reader.read_line(&mut response_line).await?;
 
-        let authorize_response: BasicResponse = serde_json::from_str(response_line.trim())
+        let authorize_response: stratum::Message = serde_json::from_str(response_line.trim())
             .with_context(|| format!("Invalid JSON in authorize response: {response_line:?}"))?;
 
-        if let Some(error) = authorize_response.error {
-            bail!("Server error in authorize: {}", error);
-        }
-
-        if let Some(result) = authorize_response.result {
-            if let Some(result_bool) = result.as_bool() {
-                if !result_bool {
+        match authorize_response {
+            stratum::Message::Response {
+                error: Some(error), ..
+            } => {
+                bail!("Server error in authorize: {}", error);
+            }
+            stratum::Message::Response {
+                result: Some(result),
+                ..
+            } => {
+                if let Some(result_bool) = result.as_bool()
+                    && !result_bool
+                {
                     bail!("Authorization failed");
                 }
+            }
+            stratum::Message::Response { .. } => {}
+            _ => {
+                bail!("Expected response, got: {:?}", authorize_response);
             }
         }
 
@@ -228,19 +250,24 @@ impl Ping {
 
         let duration = start.elapsed();
 
-        let frame: StratumFrame = serde_json::from_str(response_line.trim())
+        let message: stratum::Message = serde_json::from_str(response_line.trim())
             .with_context(|| format!("Invalid JSON in server message: {response_line:?}"))?;
 
-        if let Some(error) = &frame.error {
+        if let stratum::Message::Response {
+            error: Some(error), ..
+        } = &message
+        {
             bail!("Server error in message: {}", error);
         }
 
-        let message_type = if let Some(ref method) = frame.method {
-            format!("method={method}")
-        } else if frame.result.is_some() {
-            "response".to_string()
-        } else {
-            "unknown".to_string()
+        let message_type = match &message {
+            stratum::Message::Notification { method, .. } => {
+                format!("method={method}")
+            }
+            stratum::Message::Response { .. } => "response".to_string(),
+            stratum::Message::Request { method, .. } => {
+                format!("request method={method}")
+            }
         };
 
         let prefix = if is_first_message {
@@ -253,33 +280,12 @@ impl Ping {
             duration.as_secs_f64() * 1000.0
         );
 
-        if let Some(ref method) = frame.method {
-            match method.as_str() {
-                "mining.notify" => {
-                    if let Some(params) = &frame.params {
-                        if let Some(params_array) = params.as_array() {
-                            if let Some(job_id) = params_array.first().and_then(|v| v.as_str()) {
-                                println!("    └─ Job ID: {job_id}");
-                            }
-                        }
-                    }
-                }
-                "mining.set_difficulty" => {
-                    if let Some(params) = &frame.params {
-                        if let Some(params_array) = params.as_array() {
-                            if let Some(difficulty) = params_array.first() {
-                                println!("    └─ Difficulty: {difficulty}");
-                            }
-                        }
-                    }
-                }
-                "mining.set_extranonce" => {
-                    println!("    └─ Extra nonce update received");
-                }
-                _ => {
-                    println!("    └─ Method: {method}");
-                }
-            }
+        if let stratum::Message::Notification { method, params } = &message
+            && method == "mining.notify"
+            && let Some(params_array) = params.as_array()
+            && let Some(job_id) = params_array.first().and_then(|v| v.as_str())
+        {
+            println!("    └─ Job ID: {job_id}");
         }
 
         Ok((bytes_read, duration))
