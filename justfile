@@ -40,7 +40,6 @@ miner-signet:
 ping host='parasite.wtf':
   cargo run ping {{host}}:42069
 
-# Authenticated ping (mining.authorize + mining.notify)
 ping-auth host='parasite.wtf' username='bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg6dzw5nk24r45dzasde25r3.ParaMiner' password='x':
   cargo run ping --username {{username}} --password {{password}} {{host}}:42069
 
