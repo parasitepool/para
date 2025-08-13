@@ -28,7 +28,7 @@ impl Database {
             pool: PgPoolOptions::new()
                 .max_connections(5)
                 .acquire_timeout(
-                    if std::env::var("PARA_INTEGRATION_TEST") // TODO
+                    if std::env::var("PARA_INTEGRATION_TEST")
                         .ok()
                         .filter(|v| v == "1")
                         .is_some()
