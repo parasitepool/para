@@ -29,12 +29,6 @@ impl CommandBuilder {
     }
 
     #[allow(unused)]
-    pub(crate) fn write(self, path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> Self {
-        fs::write(self.tempdir.path().join(path), contents).unwrap();
-        self
-    }
-
-    #[allow(unused)]
     pub(crate) fn stderr(self, stderr: bool) -> Self {
         Self { stderr, ..self }
     }
@@ -51,10 +45,6 @@ impl CommandBuilder {
 
         for arg in self.args.iter() {
             args.push(arg.clone());
-            if arg == "server" {
-                args.push("--log-dir".to_string());
-                args.push(self.tempdir.path().display().to_string());
-            }
         }
 
         if self.integration_test {
