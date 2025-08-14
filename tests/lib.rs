@@ -12,8 +12,8 @@ use {
     std::{
         collections::{BTreeMap, HashSet},
         fs,
-        io::Write,
-        net::TcpListener,
+        io::{Write, stderr},
+        net::{TcpListener, TcpStream},
         path::PathBuf,
         process::{Child, Command, Stdio},
         str::FromStr,
@@ -22,14 +22,19 @@ use {
         time::Duration,
     },
     tempfile::TempDir,
+    test_ckpool::TestCkpool,
     test_server::TestServer,
     to_args::ToArgs,
 };
 
 mod command_builder;
+#[cfg(target_os = "linux")]
+mod test_ckpool;
 mod test_server;
 mod to_args;
 
+#[cfg(target_os = "linux")]
+mod ping;
 mod server;
 
 pub(crate) fn address(n: u32) -> Address {

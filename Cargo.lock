@@ -2219,6 +2219,7 @@ dependencies = [
  "html-escaper",
  "lazy_static",
  "mime_guess",
+ "once_cell",
  "pretty_assertions",
  "primitive-types",
  "rand 0.9.1",
