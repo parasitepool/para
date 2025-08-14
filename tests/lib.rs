@@ -12,8 +12,8 @@ use {
     std::{
         collections::{BTreeMap, HashSet},
         fs,
-        io::{Write, stderr},
-        net::{TcpListener, TcpStream},
+        io::Write,
+        net::TcpListener,
         path::PathBuf,
         process::{Child, Command, Stdio},
         str::FromStr,
@@ -33,7 +33,10 @@ mod to_args;
 mod server;
 
 #[cfg(target_os = "linux")]
-use test_ckpool::TestCkpool;
+use {
+    std::{io::stderr, net::TcpStream},
+    test_ckpool::TestCkpool,
+};
 
 #[cfg(target_os = "linux")]
 mod ping;
