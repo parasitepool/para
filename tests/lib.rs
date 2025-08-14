@@ -22,20 +22,22 @@ use {
         time::Duration,
     },
     tempfile::TempDir,
-    test_ckpool::TestCkpool,
     test_server::TestServer,
     to_args::ToArgs,
 };
 
 mod command_builder;
-#[cfg(target_os = "linux")]
-mod test_ckpool;
 mod test_server;
 mod to_args;
 
+mod server;
+
+#[cfg(target_os = "linux")]
+use test_ckpool::TestCkpool;
 #[cfg(target_os = "linux")]
 mod ping;
-mod server;
+#[cfg(target_os = "linux")]
+mod test_ckpool;
 
 pub(crate) fn address(n: u32) -> Address {
     match n {
