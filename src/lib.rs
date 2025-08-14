@@ -78,6 +78,7 @@ use {
 };
 
 mod arguments;
+pub mod ckpool;
 pub mod difficulty;
 pub mod hash_rate;
 pub mod stratum;

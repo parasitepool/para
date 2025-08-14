@@ -1,12 +1,9 @@
 use {
     super::*,
+    crate::ckpool,
     futures::future::join_all,
-    pool::Status,
     reqwest::{Client, ClientBuilder},
 };
-
-mod pool;
-mod user;
 
 pub(crate) struct Aggregator;
 
@@ -37,7 +34,7 @@ impl Aggregator {
             async move {
                 let result = async {
                     let resp = client.get(url.join("/pool/pool.status")?).send().await?;
-                    Status::from_str(&resp.text().await?)
+                    ckpool::Status::from_str(&resp.text().await?)
                 }
                 .await;
 
@@ -45,9 +42,9 @@ impl Aggregator {
             }
         });
 
-        let results: Vec<(&Url, Result<Status>)> = join_all(fetches).await;
+        let results: Vec<(&Url, Result<ckpool::Status>)> = join_all(fetches).await;
 
-        let mut aggregated: Option<Status> = None;
+        let mut aggregated: Option<ckpool::Status> = None;
         for (url, result) in results {
             match result {
                 Ok(status) => {
@@ -83,7 +80,7 @@ impl Aggregator {
                         .send()
                         .await?;
 
-                    serde_json::from_str::<user::User>(&resp.text().await?).map_err(Into::into)
+                    serde_json::from_str::<ckpool::User>(&resp.text().await?).map_err(Into::into)
                 }
                 .await;
 
@@ -91,9 +88,9 @@ impl Aggregator {
             }
         });
 
-        let results: Vec<(&Url, Result<user::User>)> = join_all(fetches).await;
+        let results: Vec<(&Url, Result<ckpool::User>)> = join_all(fetches).await;
 
-        let mut aggregated: Option<user::User> = None;
+        let mut aggregated: Option<ckpool::User> = None;
         for (_, result) in results {
             if let Ok(user) = result {
                 aggregated = Some(if let Some(agg) = aggregated {

@@ -1,19 +1,19 @@
 use super::*;
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
-pub(crate) struct User {
-    pub(crate) hashrate1m: HashRate,
-    pub(crate) hashrate5m: HashRate,
-    pub(crate) hashrate1hr: HashRate,
-    pub(crate) hashrate1d: HashRate,
-    pub(crate) hashrate7d: HashRate,
-    pub(crate) lastshare: u64,
-    pub(crate) workers: u64,
-    pub(crate) shares: u64,
-    pub(crate) bestshare: f64,
-    pub(crate) bestever: u64,
-    pub(crate) authorised: u64,
-    pub(crate) worker: Vec<Worker>,
+pub struct User {
+    pub hashrate1m: HashRate,
+    pub hashrate5m: HashRate,
+    pub hashrate1hr: HashRate,
+    pub hashrate1d: HashRate,
+    pub hashrate7d: HashRate,
+    pub lastshare: u64,
+    pub workers: u64,
+    pub shares: u64,
+    pub bestshare: f64,
+    pub bestever: u64,
+    pub authorised: u64,
+    pub worker: Vec<Worker>,
 }
 
 impl Add for User {
@@ -51,17 +51,17 @@ impl Add for User {
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
-pub(crate) struct Worker {
-    pub(crate) workername: String,
-    pub(crate) hashrate1m: HashRate,
-    pub(crate) hashrate5m: HashRate,
-    pub(crate) hashrate1hr: HashRate,
-    pub(crate) hashrate1d: HashRate,
-    pub(crate) hashrate7d: HashRate,
-    pub(crate) lastshare: u64,
-    pub(crate) shares: u64,
-    pub(crate) bestshare: f64,
-    pub(crate) bestever: u64,
+pub struct Worker {
+    pub workername: String,
+    pub hashrate1m: HashRate,
+    pub hashrate5m: HashRate,
+    pub hashrate1hr: HashRate,
+    pub hashrate1d: HashRate,
+    pub hashrate7d: HashRate,
+    pub lastshare: u64,
+    pub shares: u64,
+    pub bestshare: f64,
+    pub bestever: u64,
 }
 
 impl Add for Worker {
