@@ -205,7 +205,7 @@ impl Server {
     ) -> ServerResult<Response> {
         Ok(Json(
             database
-                .get_payouts(blockheight.try_into().unwrap())
+                .get_payouts(blockheight.try_into().unwrap(), "no filter address".into())
                 .await?,
         )
         .into_response())
@@ -225,7 +225,7 @@ impl Server {
             return Err(ServerError::NotFound("block not mined by parasite".into()));
         }
 
-        let Some((blockheight, blockhash, coinbasevalue)) = database
+        let Some((blockheight, blockhash, coinbasevalue, _, username)) = database
             .get_total_coinbase(blockheight.try_into().unwrap())
             .await?
         else {
@@ -234,7 +234,7 @@ impl Server {
 
         let total_payment_amount = coinbasevalue.saturating_sub(COIN_VALUE.try_into().unwrap());
 
-        let payouts = database.get_payouts(blockheight).await?;
+        let payouts = database.get_payouts(blockheight, username).await?;
 
         let mut payments = Vec::new();
         for payout in payouts {
