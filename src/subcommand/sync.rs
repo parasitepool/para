@@ -115,8 +115,23 @@ pub(crate) struct Share {
     pub(crate) agent: Option<String>,
 }
 
+#[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone)]
+pub(crate) struct FoundBlockRecord {
+    pub(crate) id: i32,
+    pub(crate) blockheight: i32,
+    pub(crate) blockhash: String,
+    pub(crate) confirmed: Option<bool>,
+    pub(crate) workername: Option<String>,
+    pub(crate) username: Option<String>,
+    pub(crate) diff: Option<f64>,
+    pub(crate) time_found: Option<String>,
+    pub(crate) coinbasevalue: Option<i64>,
+    pub(crate) rewards_processed: Option<bool>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct ShareBatch {
+    block: Option<FoundBlockRecord>,
     shares: Vec<Share>,
     hostname: String,
     batch_id: u64,
@@ -228,10 +243,11 @@ impl SyncSend {
         let current_blockheight = database.get_blockheight_for_id(*current_id).await?;
         let latest_blockheight = database.get_blockheight_for_id(max_id).await?;
 
-        if let (Some(current_bh), Some(latest_bh)) = (current_blockheight, latest_blockheight) {
-            if current_bh >= latest_bh {
+        match (current_blockheight, latest_blockheight) {
+            (Some(current_bh), Some(latest_bh)) if current_bh >= latest_bh => {
                 return Ok(SyncResult::WaitForNewBlock);
             }
+            _ => {}
         }
 
         let target_id = std::cmp::min(*current_id + self.batch_size, max_id - TARGET_ID_BUFFER);
@@ -271,9 +287,14 @@ impl SyncSend {
         let shares = database
             .get_shares_by_id_range(*current_id + 1, target_id)
             .await?;
+        let block = if let Some(bh) = current_blockheight {
+            database.get_block_by_height(bh).await?
+        } else {
+            None
+        };
         let highest_id = shares.last().map(|share| share.id);
 
-        if shares.is_empty() {
+        if shares.is_empty() && block.is_none() {
             println!("No shares found in range, moving to next batch");
             *current_id = target_id;
             self.save_current_id(*current_id).await?;
@@ -285,7 +306,7 @@ impl SyncSend {
         // retry n times
         for attempt in 1..=MAX_RETRIES {
             match self
-                .send_batch_with_timeout(context, &shares, *current_id + 1, target_id)
+                .send_batch_with_timeout(context, &block, &shares, *current_id + 1, target_id)
                 .await
             {
                 Ok(_) => {
@@ -309,6 +330,7 @@ impl SyncSend {
     async fn send_batch_with_timeout(
         &self,
         context: &Context,
+        block: &Option<FoundBlockRecord>,
         shares: &[Share],
         start_id: i64,
         end_id: i64,
@@ -326,6 +348,7 @@ impl SyncSend {
             .as_secs();
 
         let batch = ShareBatch {
+            block: block.clone(),
             shares: shares.to_vec(),
             hostname: System::host_name().ok_or(anyhow!("no hostname found"))?,
             batch_id,
@@ -498,6 +521,16 @@ impl SyncReceive {
                     batch.start_id,
                     batch.end_id
                 );
+
+                if let Some(block) = &batch.block {
+                    match database.upsert_block(block).await {
+                        Ok(_) => println!(
+                            "Successfully upserted block for height {}",
+                            block.blockheight
+                        ),
+                        Err(e) => eprintln!("Warning: Failed to upsert block: {}", e),
+                    }
+                }
 
                 match self.process_share_batch(&batch, database).await {
                     Ok(_) => {
@@ -720,6 +753,53 @@ impl Database {
         .fetch_all(&self.pool)
         .await
         .map_err(|err| anyhow!("Database query failed: {err}"))
+    }
+
+    pub(crate) async fn upsert_block(&self, block: &FoundBlockRecord) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO blocks (
+                blockheight, blockhash, confirmed, workername, username,
+                diff, time_found, coinbasevalue, rewards_processed
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            ON CONFLICT (blockheight) DO UPDATE SET
+                blockhash = EXCLUDED.blockhash,
+                confirmed = EXCLUDED.confirmed,
+                workername = EXCLUDED.workername,
+                username = EXCLUDED.username,
+                diff = EXCLUDED.diff,
+                time_found = EXCLUDED.time_found,
+                coinbasevalue = EXCLUDED.coinbasevalue,
+                rewards_processed = EXCLUDED.rewards_processed",
+        )
+        .bind(block.blockheight)
+        .bind(&block.blockhash)
+        .bind(block.confirmed)
+        .bind(&block.workername)
+        .bind(&block.username)
+        .bind(block.diff)
+        .bind(&block.time_found)
+        .bind(block.coinbasevalue)
+        .bind(block.rewards_processed)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| anyhow!("Failed to upsert block: {e}"))?;
+
+        Ok(())
+    }
+
+    pub(crate) async fn get_block_by_height(
+        &self,
+        blockheight: i32,
+    ) -> Result<Option<FoundBlockRecord>, Error> {
+        if blockheight == 0 {
+            return Err(anyhow!("Invalid blockheight: {blockheight}"));
+        }
+
+        sqlx::query_as::<_, FoundBlockRecord>("SELECT * FROM blocks WHERE blockheight = $1")
+            .bind(blockheight)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|err| anyhow!("Database query failed: {err}"))
     }
 
     pub(crate) async fn compress_shares_range(&self, start_id: i64, end_id: i64) -> Result<i64> {

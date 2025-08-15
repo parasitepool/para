@@ -1,10 +1,14 @@
 use super::*;
 
+pub use user::{User, Worker};
+
+mod user;
+
 #[derive(Debug, DeserializeFromStr, SerializeDisplay, PartialEq, Clone, Copy)]
-pub(crate) struct Status {
-    pub(crate) pool: PoolStatus,
-    pub(crate) hash_rates: HashRateStatus,
-    pub(crate) shares: ShareStatus,
+pub struct Status {
+    pub pool: PoolStatus,
+    pub hash_rates: HashRateStatus,
+    pub shares: ShareStatus,
 }
 
 impl FromStr for Status {
@@ -66,17 +70,17 @@ impl Add for Status {
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Copy, Clone)]
-pub(crate) struct PoolStatus {
-    runtime: u64,
-    lastupdate: u64,
+pub struct PoolStatus {
+    pub runtime: u64,
+    pub lastupdate: u64,
     #[serde(rename = "Users")]
-    users: u64,
+    pub users: u64,
     #[serde(rename = "Workers")]
-    workers: u64,
+    pub workers: u64,
     #[serde(rename = "Idle")]
-    idle: u64,
+    pub idle: u64,
     #[serde(rename = "Disconnected")]
-    disconnected: u64,
+    pub disconnected: u64,
 }
 
 impl Add for PoolStatus {
@@ -95,14 +99,14 @@ impl Add for PoolStatus {
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone, Copy)]
-pub(crate) struct HashRateStatus {
-    hashrate1m: HashRate,
-    hashrate5m: HashRate,
-    hashrate15m: HashRate,
-    hashrate1hr: HashRate,
-    hashrate6hr: HashRate,
-    hashrate1d: HashRate,
-    hashrate7d: HashRate,
+pub struct HashRateStatus {
+    pub hashrate1m: HashRate,
+    pub hashrate5m: HashRate,
+    pub hashrate15m: HashRate,
+    pub hashrate1hr: HashRate,
+    pub hashrate6hr: HashRate,
+    pub hashrate1d: HashRate,
+    pub hashrate7d: HashRate,
 }
 
 impl Add for HashRateStatus {
@@ -122,19 +126,19 @@ impl Add for HashRateStatus {
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone, Copy)]
-pub(crate) struct ShareStatus {
-    diff: f64,
-    accepted: u64,
-    rejected: u64,
-    bestshare: u64,
+pub struct ShareStatus {
+    pub diff: f64,
+    pub accepted: u64,
+    pub rejected: u64,
+    pub bestshare: u64,
     #[serde(rename = "SPS1m")]
-    sps1m: f64,
+    pub sps1m: f64,
     #[serde(rename = "SPS5m")]
-    sps5m: f64,
+    pub sps5m: f64,
     #[serde(rename = "SPS15m")]
-    sps15m: f64,
+    pub sps15m: f64,
     #[serde(rename = "SPS1h")]
-    sps1h: f64,
+    pub sps1h: f64,
 }
 
 impl Add for ShareStatus {
