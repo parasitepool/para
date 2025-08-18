@@ -1,9 +1,17 @@
-use {super::*, std::net::SocketAddr, tokio::time::sleep};
+use {
+    super::*,
+    std::net::SocketAddr,
+    tokio::time::{Instant, sleep},
+};
 
 #[derive(Parser, Debug)]
 #[command(about = "Ping a stratum mining server.")]
 pub(crate) struct Ping {
     target: String,
+    #[arg(long, help = "Stop after <COUNT> replies")]
+    count: Option<u64>,
+    #[arg(long, default_value = "5", help = "Fail after <TIMEOUT> seconds")]
+    timeout: u64,
 }
 
 impl Ping {
@@ -15,6 +23,9 @@ impl Ping {
         let stats = Arc::new(PingStats::new());
         let sequence = AtomicU64::new(0);
 
+        let mut reply_count = 0;
+        let mut success = false;
+
         loop {
             tokio::select! {
                 _ = ctrl_c() => break,
@@ -23,6 +34,7 @@ impl Ping {
 
                     match self.ping_once(addr, seq).await {
                         Ok((size, duration)) => {
+                            success = true;
                             stats.record_success(duration);
                             println!("Response from {addr}: seq={seq} size={size} time={:.3}ms", duration.as_secs_f64() * 1000.0);
                         }
@@ -31,12 +43,22 @@ impl Ping {
                             println!("Request timeout for seq={seq} ({e})");
                         }
                     }
+                    reply_count += 1;
+                    if let Some(count) = self.count &&
+                         count == reply_count {
+                            break;
+                    }
                 }
             }
         }
 
         print_final_stats(&self.target, &stats);
-        Ok(())
+
+        if success {
+            Ok(())
+        } else {
+            Err(anyhow!("Ping timed out"))
+        }
     }
 
     async fn resolve_target(&self) -> Result<SocketAddr> {
@@ -55,9 +77,6 @@ impl Ping {
     }
 
     async fn ping_once(&self, addr: SocketAddr, sequence: u64) -> Result<(usize, Duration)> {
-        let mut stream =
-            tokio::time::timeout(Duration::from_secs(5), TcpStream::connect(addr)).await??;
-
         let request = Message::Request {
             id: Id::Number(sequence),
             method: "mining.subscribe".into(),
@@ -68,6 +87,10 @@ impl Ping {
         };
 
         let frame = serde_json::to_string(&request)? + "\n";
+
+        let mut stream =
+            tokio::time::timeout(Duration::from_secs(self.timeout), TcpStream::connect(addr))
+                .await??;
 
         let start = Instant::now();
 

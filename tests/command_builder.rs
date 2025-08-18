@@ -29,12 +29,12 @@ impl CommandBuilder {
     }
 
     #[allow(unused)]
-    pub(crate) fn stderr(self, stderr: bool) -> Self {
+    pub(crate) fn capture_stderr(self, stderr: bool) -> Self {
         Self { stderr, ..self }
     }
 
     #[allow(unused)]
-    pub(crate) fn stdout(self, stdout: bool) -> Self {
+    pub(crate) fn capture_stdout(self, stdout: bool) -> Self {
         Self { stdout, ..self }
     }
 

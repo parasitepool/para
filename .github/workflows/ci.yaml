@@ -37,10 +37,32 @@ jobs:
     - name: Format
       run: cargo fmt --all -- --check
 
+  test-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust Toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+
+    - uses: Swatinem/rust-cache@v2
+
+    - uses: egor-tensin/setup-gcc@v1
+
+    - name: Install bitcoind
+      run: |
+        ./bin/install-bitcoin-core-linux
+    
+    - name: Test
+      run: cargo test --all
+
   test:
     strategy:
       matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
+        os: [macos-latest, windows-latest]
 
     runs-on: ${{ matrix.os }}
 
