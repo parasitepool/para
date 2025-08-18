@@ -196,7 +196,7 @@ impl Server {
             let uptime_seconds = System::uptime();
 
             let healthcheck = HealthcheckHtml {
-                disk_usage_percent: format!("{disk_usage_percent:.2}"),
+                disk_usage_percent,
                 memory_usage_percent: format!("{memory_usage_percent:.2}"),
                 cpu_usage_percent: format!("{cpu_usage_percent:.2}"),
                 uptime: format_uptime(uptime_seconds),

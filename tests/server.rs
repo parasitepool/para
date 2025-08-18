@@ -155,3 +155,12 @@ fn aggregate_users() {
         pretty_assert_eq!(response, *user);
     }
 }
+
+// #[test]
+fn healthcheck_json() {
+    let server = TestServer::spawn();
+
+    // server.get_json::<Hea>("/healthcheck")
+
+
+}
