@@ -27,14 +27,14 @@ miner:
   RUST_LOG=info cargo run --release -- miner \
     --host parasite.wtf \
     --port 42069 \
-    --username bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg6dzw5nk24r45dzasde25r3.ParaMiner \
+    --username bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg6dzw5nk24r45dzasde25r3.tick \
     --password x
 
 miner-signet: 
   RUST_LOG=info cargo run --release -- miner \
-    --host 0.0.0.0 \
+    --host 127.0.0.1 \
     --port 42069 \
-    --username tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.ParaMiner \
+    --username tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.tick \
     --password x
 
 ping host='parasite.wtf':
@@ -94,6 +94,7 @@ ckpool:
     -B \
     -k \
     --config copr/ckpool.conf \
+    --sockdir copr/tmp
     --loglevel 7 \
     --log-shares \
     --signet \
