@@ -13,10 +13,8 @@ pub(crate) enum Subcommand {
     Ping(ping::Ping),
     #[command(about = "Run API server")]
     Server(server::Server),
-    #[command(about = "Send shares to ZMQ endpoint")]
+    #[command(about = "Send shares to HTTP endpoint")]
     SyncSend(sync::SyncSend),
-    #[command(about = "Receive and process shares from ZMQ endpoint")]
-    SyncReceive(sync::SyncReceive),
 }
 
 impl Subcommand {
@@ -30,29 +28,11 @@ impl Subcommand {
 
                 let mut sync_task = None;
 
-                if let Some(zmq_endpoint) = server.config.zmq_endpoint() {
+                if let Some(sync_endpoint) = server.config.sync_endpoint() {
                     let hostname = System::host_name().ok_or(anyhow!("no hostname found"))?;
-                    if zmq_endpoint.contains(&hostname) {
-                        let sync_receive = sync::SyncReceive::default();
-                        let sync_handle = handle.clone();
 
-                        let receive_task = rt.spawn_blocking(move || {
-                            let sync_rt =
-                                Runtime::new().expect("Failed to create sync receive runtime");
-                            sync_rt.block_on(async {
-                                if let Err(e) = sync_receive
-                                    .with_zmq_endpoint("tcp://0.0.0.0:5555".to_string())
-                                    .run(sync_handle)
-                                    .await
-                                {
-                                    error!("SyncReceive failed: {}", e);
-                                }
-                            });
-                        });
-                        sync_task = Some(receive_task);
-                        info!("Started SyncReceive due to configured nodes");
-                    } else {
-                        let sync_send = sync::SyncSend::default().with_zmq_endpoint(zmq_endpoint);
+                    if !sync_endpoint.contains(&hostname) {
+                        let sync_send = sync::SyncSend::default().with_endpoint(sync_endpoint);
                         let sync_handle = handle.clone();
 
                         let send_task = rt.spawn_blocking(move || {
@@ -67,7 +47,7 @@ impl Subcommand {
                         sync_task = Some(send_task);
                         info!(
                             "Started SyncSend to endpoint: {}",
-                            server.config.zmq_endpoint().unwrap()
+                            server.config.sync_endpoint().unwrap()
                         );
                     }
                 }
@@ -90,16 +70,7 @@ impl Subcommand {
             }
             Self::SyncSend(sync_send) => {
                 let handle = Handle::new();
-
                 Runtime::new()?.block_on(async { sync_send.run(handle).await.unwrap() });
-
-                Ok(())
-            }
-            Self::SyncReceive(sync_receive) => {
-                let handle = Handle::new();
-
-                Runtime::new()?.block_on(async { sync_receive.run(handle).await.unwrap() });
-
                 Ok(())
             }
         }

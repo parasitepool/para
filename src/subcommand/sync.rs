@@ -1,5 +1,6 @@
 use super::*;
 use crate::subcommand::server::database::Database;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -7,24 +8,23 @@ use std::{
     sync::Arc,
     sync::atomic::{AtomicBool, Ordering},
 };
-use tokio::time::{Duration, sleep, timeout};
-use zmq::{Context, SocketType};
+use tokio::time::{Duration, sleep};
 
 const ID_FILE: &str = "current_id.txt";
 const SYNC_DELAY_MS: u64 = 1000;
 const BLOCKHEIGHT_CHECK_DELAY_MS: u64 = 5000;
-const TARGET_ID_BUFFER: i64 = 0; // this may no longer be necessary since we are transferring by id now
-const ZMQ_TIMEOUT_MS: u64 = 10000;
+const TARGET_ID_BUFFER: i64 = 0;
+const HTTP_TIMEOUT_MS: u64 = 30000;
 const MAX_RETRIES: u32 = 3;
 
 #[derive(Debug, Parser)]
 pub(crate) struct SyncSend {
     #[arg(
         long,
-        help = "ZMQ endpoint to send shares to",
-        default_value = "tcp://127.0.0.1:5555"
+        help = "HTTP endpoint to send shares to",
+        default_value = "http://127.0.0.1:8080"
     )]
-    zmq_endpoint: String,
+    endpoint: String,
 
     #[arg(
         long,
@@ -52,36 +52,6 @@ pub(crate) struct SyncSend {
 }
 
 impl Default for SyncSend {
-    fn default() -> Self {
-        Self::try_parse_from(std::iter::empty::<String>()).unwrap()
-    }
-}
-
-#[derive(Debug, Parser)]
-pub(crate) struct SyncReceive {
-    #[arg(
-        long,
-        help = "ZMQ endpoint to receive shares from",
-        default_value = "tcp://127.0.0.1:5555"
-    )]
-    zmq_endpoint: String,
-
-    #[arg(
-        long,
-        help = "Number of worker threads for processing received batches",
-        default_value = "4"
-    )]
-    worker_threads: usize,
-
-    #[arg(
-        long,
-        help = "Connect to Postgres running at <DATABASE_URL>",
-        default_value = "postgres://satoshi:nakamoto@127.0.0.1:5432/ckpool"
-    )]
-    database_url: String,
-}
-
-impl Default for SyncReceive {
     fn default() -> Self {
         Self::try_parse_from(std::iter::empty::<String>()).unwrap()
     }
@@ -130,22 +100,22 @@ pub(crate) struct FoundBlockRecord {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-struct ShareBatch {
-    block: Option<FoundBlockRecord>,
-    shares: Vec<Share>,
-    hostname: String,
-    batch_id: u64,
-    total_shares: usize,
-    start_id: i64,
-    end_id: i64,
+pub(crate) struct ShareBatch {
+    pub(crate) block: Option<FoundBlockRecord>,
+    pub(crate) shares: Vec<Share>,
+    pub(crate) hostname: String,
+    pub(crate) batch_id: u64,
+    pub(crate) total_shares: usize,
+    pub(crate) start_id: i64,
+    pub(crate) end_id: i64,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct SyncResponse {
-    batch_id: u64,
-    received_count: usize,
-    status: String,
-    error_message: Option<String>,
+pub(crate) struct SyncResponse {
+    pub(crate) batch_id: u64,
+    pub(crate) received_count: usize,
+    pub(crate) status: String,
+    pub(crate) error_message: Option<String>,
 }
 
 #[derive(Debug)]
@@ -168,13 +138,13 @@ impl SyncSend {
             std::process::exit(0);
         });
 
-        println!("Starting ZMQ share sync send...");
+        println!("Starting HTTP share sync send...");
         if !self.terminate_when_complete {
             println!("Keep-alive mode enabled - will continue running even when caught up");
         }
 
         let database = Database::new(self.database_url.clone()).await?;
-        let context = Context::new();
+        let client = Client::new();
 
         let mut current_id = self.load_current_id().await?;
         let mut caught_up_logged = false;
@@ -188,7 +158,7 @@ impl SyncSend {
         println!("Starting sync send from ID: {current_id}");
 
         while !shutdown_flag.load(Ordering::Relaxed) {
-            match self.sync_batch(&database, &context, &mut current_id).await {
+            match self.sync_batch(&database, &client, &mut current_id).await {
                 Ok(SyncResult::Complete) => {
                     if !self.terminate_when_complete {
                         if !caught_up_logged {
@@ -231,7 +201,7 @@ impl SyncSend {
     async fn sync_batch(
         &self,
         database: &Database,
-        context: &Context,
+        client: &Client,
         current_id: &mut i64,
     ) -> Result<SyncResult> {
         let max_id = database.get_max_id().await?;
@@ -306,7 +276,7 @@ impl SyncSend {
         // retry n times
         for attempt in 1..=MAX_RETRIES {
             match self
-                .send_batch_with_timeout(context, &block, &shares, *current_id + 1, target_id)
+                .send_batch_http(client, &block, &shares, *current_id + 1, target_id)
                 .await
             {
                 Ok(_) => {
@@ -327,22 +297,14 @@ impl SyncSend {
         unreachable!()
     }
 
-    async fn send_batch_with_timeout(
+    async fn send_batch_http(
         &self,
-        context: &Context,
+        client: &Client,
         block: &Option<FoundBlockRecord>,
         shares: &[Share],
         start_id: i64,
         end_id: i64,
     ) -> Result<()> {
-        let socket = context
-            .socket(SocketType::REQ)
-            .map_err(|e| anyhow!("Failed to create ZMQ socket: {e}"))?;
-
-        socket
-            .connect(&self.zmq_endpoint)
-            .map_err(|e| anyhow!("Failed to connect to ZMQ endpoint: {e}"))?;
-
         let batch_id = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_secs();
@@ -357,27 +319,31 @@ impl SyncSend {
             end_id,
         };
 
-        let serialized = serde_json::to_string(&batch)
-            .map_err(|e| anyhow!("Failed to serialize batch: {}", e))?;
-
-        let send_future = async {
-            socket
-                .send(&serialized, 0)
-                .map_err(|e| anyhow!("Failed to send ZMQ message: {}", e))?;
-
-            let response = socket
-                .recv_string(0)
-                .map_err(|e| anyhow!("Failed to receive ZMQ response: {}", e))?
-                .map_err(|e| anyhow!("Invalid UTF-8 in ZMQ response: {:?}", e))?;
-
-            Ok::<String, anyhow::Error>(response)
+        // force url format
+        let url = if self.endpoint.starts_with("http") {
+            format!("{}/sync/batch", self.endpoint.trim_end_matches('/'))
+        } else {
+            format!("http://{}/sync/batch", self.endpoint)
         };
 
-        let response = timeout(Duration::from_millis(ZMQ_TIMEOUT_MS), send_future)
+        let response = client
+            .post(&url)
+            .json(&batch)
+            .timeout(Duration::from_millis(HTTP_TIMEOUT_MS))
+            .send()
             .await
-            .map_err(|_| anyhow!("ZMQ operation timed out after {}ms", ZMQ_TIMEOUT_MS))??;
+            .map_err(|e| anyhow!("Failed to send HTTP request: {}", e))?;
 
-        let sync_response: SyncResponse = serde_json::from_str(&response)
+        if !response.status().is_success() {
+            return Err(anyhow!(
+                "HTTP request failed with status: {}",
+                response.status()
+            ));
+        }
+
+        let sync_response: SyncResponse = response
+            .json()
+            .await
             .map_err(|e| anyhow!("Failed to parse sync response: {}", e))?;
 
         if sync_response.status != "OK" {
@@ -434,279 +400,8 @@ impl SyncSend {
         Ok(())
     }
 
-    pub(crate) fn with_zmq_endpoint(mut self, zmq_endpoint: String) -> Self {
-        self.zmq_endpoint = zmq_endpoint;
-        self
-    }
-}
-
-impl SyncReceive {
-    pub(crate) async fn run(self, _handle: Handle) -> Result<()> {
-        let shutdown_flag = Arc::new(AtomicBool::new(false));
-        let shutdown_flag_clone = shutdown_flag.clone();
-
-        // shutdown flags
-        tokio::spawn(async move {
-            let _ = tokio::signal::ctrl_c().await;
-            println!("Received shutdown signal, stopping sync receive...");
-            shutdown_flag_clone.store(true, Ordering::Relaxed);
-            std::process::exit(0);
-        });
-
-        println!("Starting ZMQ share sync receive server...");
-        println!("Listening on: {}", self.zmq_endpoint);
-        println!("Worker threads: {}", self.worker_threads);
-
-        let database = Database::new(self.database_url.clone()).await?;
-        let context = Context::new();
-
-        let socket = context
-            .socket(SocketType::REP)
-            .map_err(|e| anyhow!("Failed to create ZMQ socket: {e}"))?;
-
-        socket
-            .bind(&self.zmq_endpoint)
-            .map_err(|e| anyhow!("Failed to bind to ZMQ endpoint: {e}"))?;
-
-        socket
-            .set_rcvtimeo(1000) // 1 second timeout
-            .map_err(|e| anyhow!("Failed to set socket timeout: {e}"))?;
-
-        while !shutdown_flag.load(Ordering::Relaxed) {
-            match self.receive_and_process_batch(&socket, &database).await {
-                Ok(true) => {
-                    // success
-                }
-                Ok(false) => {
-                    // timeout
-                    continue;
-                }
-                Err(e) => {
-                    // error
-                    eprintln!("Error processing batch: {e}");
-                    let error_response = SyncResponse {
-                        batch_id: 0,
-                        received_count: 0,
-                        status: "ERROR".to_string(),
-                        error_message: Some(e.to_string()),
-                    };
-
-                    if let Ok(response_json) = serde_json::to_string(&error_response) {
-                        let _ = socket.send(&response_json, 0);
-                    }
-                }
-            }
-        }
-
-        println!("Sync receive server stopped");
-        Ok(())
-    }
-
-    async fn receive_and_process_batch(
-        &self,
-        socket: &zmq::Socket,
-        database: &Database,
-    ) -> Result<bool> {
-        match socket.recv_string(0) {
-            Ok(Ok(message)) => {
-                println!("Received batch message");
-
-                let batch: ShareBatch = serde_json::from_str(&message)
-                    .map_err(|e| anyhow!("Failed to parse batch JSON: {e}"))?;
-
-                println!(
-                    "Processing batch {} with {} shares (IDs {}-{})",
-                    batch.batch_id,
-                    batch.shares.len(),
-                    batch.start_id,
-                    batch.end_id
-                );
-
-                if let Some(block) = &batch.block {
-                    match database.upsert_block(block).await {
-                        Ok(_) => println!(
-                            "Successfully upserted block for height {}",
-                            block.blockheight
-                        ),
-                        Err(e) => eprintln!("Warning: Failed to upsert block: {}", e),
-                    }
-                }
-
-                match self.process_share_batch(&batch, database).await {
-                    Ok(_) => {
-                        let response = SyncResponse {
-                            batch_id: batch.batch_id,
-                            received_count: batch.shares.len(),
-                            status: "OK".to_string(),
-                            error_message: None,
-                        };
-
-                        let response_json = serde_json::to_string(&response)
-                            .map_err(|e| anyhow!("Failed to serialize response: {e}"))?;
-
-                        socket
-                            .send(&response_json, 0)
-                            .map_err(|e| anyhow!("Failed to send response: {e}"))?;
-
-                        println!("Successfully processed batch {}", batch.batch_id);
-                        Ok(true)
-                    }
-                    Err(e) => {
-                        let response = SyncResponse {
-                            batch_id: batch.batch_id,
-                            received_count: 0,
-                            status: "ERROR".to_string(),
-                            error_message: Some(e.to_string()),
-                        };
-
-                        let response_json = serde_json::to_string(&response)
-                            .unwrap_or_else(|_| r#"{"status":"ERROR","error_message":"Failed to serialize error response"}"#.to_string());
-
-                        socket
-                            .send(&response_json, 0)
-                            .map_err(|e| anyhow!("Failed to send error response: {e}"))?;
-
-                        Err(e)
-                    }
-                }
-            }
-            Ok(Err(e)) => Err(anyhow!("Invalid UTF-8 in received message: {:?}", e)),
-            Err(zmq::Error::EAGAIN) => Ok(false),
-            Err(e) => Err(anyhow!("Failed to receive ZMQ message: {e}")),
-        }
-    }
-
-    async fn process_share_batch(&self, batch: &ShareBatch, database: &Database) -> Result<()> {
-        println!(
-            "Processing {} shares from batch {}",
-            batch.shares.len(),
-            batch.batch_id
-        );
-
-        if batch.shares.is_empty() {
-            return Ok(());
-        }
-
-        const MAX_SHARES_PER_SUBBATCH: usize = 2500;
-        let mut tx = database
-            .pool
-            .begin()
-            .await
-            .map_err(|e| anyhow!("Failed to start transaction: {e}"))?;
-
-        // Process shares in chunks to avoid parameter limit
-        for (chunk_idx, chunk) in batch.shares.chunks(MAX_SHARES_PER_SUBBATCH).enumerate() {
-            println!(
-                "Processing sub-batch {}/{} with {} shares",
-                chunk_idx + 1,
-                batch.shares.len().div_ceil(MAX_SHARES_PER_SUBBATCH),
-                chunk.len()
-            );
-
-            let mut query_builder = sqlx::QueryBuilder::new(
-                "INSERT INTO remote_shares (
-            id, origin, blockheight, workinfoid, clientid, enonce1, nonce2, nonce, ntime,
-            diff, sdiff, hash, result, reject_reason, error, errn, createdate, createby,
-            createcode, createinet, workername, username, lnurl, address, agent
-        ) ",
-            );
-
-            // batch our inserts to reduce number of required transactions
-            query_builder.push_values(chunk, |mut b, share| {
-                b.push_bind(share.id)
-                    .push_bind(&batch.hostname)
-                    .push_bind(share.blockheight)
-                    .push_bind(share.workinfoid)
-                    .push_bind(share.clientid)
-                    .push_bind(&share.enonce1)
-                    .push_bind(&share.nonce2)
-                    .push_bind(&share.nonce)
-                    .push_bind(&share.ntime)
-                    .push_bind(share.diff)
-                    .push_bind(share.sdiff)
-                    .push_bind(&share.hash)
-                    .push_bind(share.result)
-                    .push_bind(&share.reject_reason)
-                    .push_bind(&share.error)
-                    .push_bind(share.errn)
-                    .push_bind(&share.createdate)
-                    .push_bind(&share.createby)
-                    .push_bind(&share.createcode)
-                    .push_bind(&share.createinet)
-                    .push_bind(&share.workername)
-                    .push_bind(&share.username)
-                    .push_bind(&share.lnurl)
-                    .push_bind(&share.address)
-                    .push_bind(&share.agent);
-            });
-
-            query_builder.push(
-                " ON CONFLICT (id, origin) DO UPDATE SET
-            blockheight = EXCLUDED.blockheight,
-            workinfoid = EXCLUDED.workinfoid,
-            clientid = EXCLUDED.clientid,
-            enonce1 = EXCLUDED.enonce1,
-            nonce2 = EXCLUDED.nonce2,
-            nonce = EXCLUDED.nonce,
-            ntime = EXCLUDED.ntime,
-            diff = EXCLUDED.diff,
-            sdiff = EXCLUDED.sdiff,
-            hash = EXCLUDED.hash,
-            result = EXCLUDED.result,
-            reject_reason = EXCLUDED.reject_reason,
-            error = EXCLUDED.error,
-            errn = EXCLUDED.errn,
-            createdate = EXCLUDED.createdate,
-            createby = EXCLUDED.createby,
-            createcode = EXCLUDED.createcode,
-            createinet = EXCLUDED.createinet,
-            workername = EXCLUDED.workername,
-            username = EXCLUDED.username,
-            lnurl = EXCLUDED.lnurl,
-            address = EXCLUDED.address,
-            agent = EXCLUDED.agent",
-            );
-
-            let query = query_builder.build();
-            query.execute(&mut *tx).await.map_err(|e| {
-                anyhow!(
-                    "Failed to batch insert shares in sub-batch {}: {e}",
-                    chunk_idx + 1
-                )
-            })?;
-        }
-
-        tx.commit()
-            .await
-            .map_err(|e| anyhow!("Failed to commit transaction: {e}"))?;
-
-        let total_diff: f64 = batch.shares.iter().filter_map(|s| s.diff).sum();
-        let worker_count = batch
-            .shares
-            .iter()
-            .filter_map(|s| s.workername.as_ref())
-            .collect::<std::collections::HashSet<_>>()
-            .len();
-
-        let min_blockheight = batch.shares.iter().filter_map(|s| s.blockheight).min();
-        let max_blockheight = batch.shares.iter().filter_map(|s| s.blockheight).max();
-
-        println!(
-            "Stored batch {} with {} shares: total difficulty: {:.2}, {} unique workers, blockheights: {:?}-{:?}, origin: {}",
-            batch.batch_id,
-            batch.shares.len(),
-            total_diff,
-            worker_count,
-            min_blockheight,
-            max_blockheight,
-            batch.hostname // Fixed: use batch.hostname instead of self.zmq_endpoint
-        );
-
-        Ok(())
-    }
-
-    pub(crate) fn with_zmq_endpoint(mut self, zmq_endpoint: String) -> Self {
-        self.zmq_endpoint = zmq_endpoint;
+    pub(crate) fn with_endpoint(mut self, endpoint: String) -> Self {
+        self.endpoint = endpoint;
         self
     }
 }
