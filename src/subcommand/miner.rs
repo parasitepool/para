@@ -13,7 +13,6 @@ pub(crate) struct Miner {
     username: String,
     #[arg(long, help = "Stratum <PASSWORD>")]
     password: String,
-    // add flag to exit on share submission or block found
 }
 
 impl Miner {
