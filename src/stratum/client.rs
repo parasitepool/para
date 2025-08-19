@@ -119,7 +119,7 @@ impl Client {
             .send_request(
                 "mining.subscribe",
                 serde_json::to_value(Subscribe {
-                    user_agent: "user ParaMiner/0.0.1".into(),
+                    user_agent: "paraminer/0.0.1".into(),
                     extranonce1: None,
                 })?,
             )

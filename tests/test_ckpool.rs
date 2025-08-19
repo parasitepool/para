@@ -31,10 +31,19 @@ pub(crate) struct TestCkpool {
 impl TestCkpool {
     pub(crate) fn spawn() -> Self {
         let tempdir = Arc::new(TempDir::new().unwrap());
+
         let bitcoind_data_dir = tempdir.path().join("bitcoin");
         fs::create_dir(&bitcoind_data_dir).unwrap();
 
-        let (bitcoind_port, zmq_port, ckpool_port) = (
+        let sockdir = tempdir.path().join("tmp");
+        fs::create_dir(&sockdir).unwrap();
+
+        let (bitcoind_port, rpc_port, zmq_port, ckpool_port) = (
+            TcpListener::bind("127.0.0.1:0")
+                .unwrap()
+                .local_addr()
+                .unwrap()
+                .port(),
             TcpListener::bind("127.0.0.1:0")
                 .unwrap()
                 .local_addr()
@@ -69,6 +78,8 @@ server=1
 txindex=1
 zmqpubhashblock=tcp://127.0.0.1:{zmq_port}
 
+port={bitcoind_port}
+
 datacarriersize=100000
 dbcache=8192
 maxconnections=256
@@ -78,7 +89,7 @@ minrelaytxfee=0.000001
 par=-2
 
 rpcbind=127.0.0.1
-rpcport={bitcoind_port}
+rpcport={rpc_port}
 rpcallowip=127.0.0.1
 rpcuser=foo
 rpcpassword=bar
@@ -122,7 +133,7 @@ rpcworkqueue=128
                 r#"{{
     "btcd" : [
         {{
-            "url" : "127.0.0.1:{bitcoind_port}",
+            "url" : "127.0.0.1:{rpc_port}",
             "auth" : "foo",
             "pass" : "bar",
             "notify" : true
@@ -153,6 +164,8 @@ rpcworkqueue=128
             .arg("-B")
             .arg("--config")
             .arg(format!("{}", ckpool_conf.display()))
+            .arg("--sockdir")
+            .arg(format!("{}", sockdir.display()))
             .arg("--loglevel")
             .arg("7")
             .arg("--signet")
