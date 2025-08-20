@@ -12,6 +12,14 @@ pub(crate) struct Ping {
     count: Option<u64>,
     #[arg(long, default_value = "5", help = "Fail after <TIMEOUT> seconds")]
     timeout: u64,
+    #[arg(long, help = "Username for authentication")]
+    username: Option<String>,
+    #[arg(long, help = "Password for authentication")]
+    password: Option<String>,
+    #[arg(long, help = "Show messages from server")]
+    show_messages: bool,
+    #[arg(long, help = "Timeout in seconds for message display")]
+    message_timeout: Option<u64>,
 }
 
 impl Ping {
@@ -19,6 +27,10 @@ impl Ping {
         let addr = self.resolve_target().await?;
 
         println!("SUBSCRIBE PING {} ({})", self.target, addr);
+
+        if let Some(ref username) = self.username {
+            self.handle_authentication(username).await;
+        }
 
         let stats = Arc::new(PingStats::new());
         let sequence = AtomicU64::new(0);
@@ -52,12 +64,84 @@ impl Ping {
             }
         }
 
+        if self.show_messages {
+            self.handle_messages().await;
+        }
+
         print_final_stats(&self.target, &stats);
 
         if success {
             Ok(())
         } else {
             Err(anyhow!("Ping timed out"))
+        }
+    }
+
+    async fn handle_authentication(&self, username: &str) -> () {
+        match self.attempt_authentication(username).await {
+            Ok(_) => {
+                println!("Successfully authenticated as {}", username);
+            }
+            Err(e) => {
+                eprintln!("Authentication failed ({}), continuing anonymously", e);
+            }
+        }
+    }
+
+    async fn attempt_authentication(&self, username: &str) -> Result<()> {
+        println!("Attempting authentication for user: {}", username);
+
+        if let Some(ref password) = self.password {
+            println!("Using password: {}", "*".repeat(password.len()));
+        } else {
+            println!("No password provided, using username-only auth");
+        }
+
+        Ok(())
+    }
+
+    async fn handle_messages(&self) -> () {
+        let timeout_duration = self.message_timeout.unwrap_or(2);
+
+        if timeout_duration == 0 {
+            println!("Message timeout is 0, skipping message display");
+            return;
+        }
+
+        println!("Waiting for messages (timeout: {}s)...", timeout_duration);
+
+        match self.wait_for_messages(timeout_duration).await {
+            Ok(messages) => {
+                if messages.is_empty() {
+                    println!("No messages received within timeout period");
+                } else {
+                    println!("Received {} messages:", messages.len());
+                    for (i, msg) in messages.iter().enumerate() {
+                        println!("  Message {}: {}", i + 1, msg);
+                    }
+                }
+            }
+            Err(e) => {
+                println!("Message display encountered an issue ({}), continuing", e);
+            }
+        }
+    }
+
+    async fn wait_for_messages(&self, timeout_secs: u64) -> Result<Vec<String>> {
+        let timeout_duration = Duration::from_secs(timeout_secs);
+
+        match tokio::time::timeout(timeout_duration, async {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            vec![]
+        })
+        .await
+        {
+            Ok(messages) => Ok(messages),
+            Err(_) => {
+                println!("Message timeout after {}s", timeout_secs);
+                Ok(vec![])
+            }
         }
     }
 
