@@ -1,4 +1,5 @@
 use super::*;
+#[cfg(target_os = "linux")]
 use pgtemp::{PgTempDB, PgTempDBBuilder};
 
 pub(crate) struct TestServer {
@@ -53,6 +54,7 @@ impl TestServer {
             child,
             port,
             tempdir,
+            #[cfg(target_os = "linux")]
             pg_db: None,
         }
     }
