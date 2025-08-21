@@ -17,7 +17,7 @@ impl Aggregator {
         let router = Router::new()
             .route("/aggregator/pool/pool.status", get(Self::pool_status))
             .route("/aggregator/users/{address}", get(Self::user_status))
-            .route("/aggregator/healthcheck", get(Self::healthcheck))
+            .route("/aggregator/dashboard", get(Self::dashboard))
             .layer(Extension(client))
             .layer(Extension(config));
 
@@ -108,10 +108,9 @@ impl Aggregator {
         Ok(Json(aggregated).into_response())
     }
 
-    pub(crate) async fn healthcheck(
+    pub(crate) async fn dashboard(
         Extension(client): Extension<Client>,
         Extension(config): Extension<Arc<Config>>,
-        AcceptJson(accept_json): AcceptJson,
     ) -> ServerResult<Response> {
         let nodes = config.nodes();
         let credentials = config.credentials();
@@ -129,7 +128,7 @@ impl Aggregator {
 
                     let resp = request_builder.send().await?;
 
-                    let healthcheck: Result<HealthcheckHtml> =
+                    let healthcheck: Result<api::Healthcheck> =
                         serde_json::from_str(&resp.text().await?).map_err(|err| anyhow!(err));
 
                     healthcheck
@@ -140,22 +139,20 @@ impl Aggregator {
             }
         });
 
-        let results: Vec<(&Url, Result<HealthcheckHtml>)> = join_all(fetches).await;
+        let results: Vec<(&Url, Result<api::Healthcheck>)> = join_all(fetches).await;
 
-        let mut checks = Vec::new();
+        let mut checks = BTreeMap::new();
 
-        for (_, result) in results {
+        for (url, result) in results {
             if let Ok(healthcheck) = result {
-                checks.push(healthcheck)
+                checks.insert(url.host_str().unwrap_or("unknown").to_string(), healthcheck);
             }
         }
 
-        Ok(if accept_json {
-            Json(checks).into_response()
-        } else {
-            DashboardHtml { checks }
-                .page(config.domain())
-                .into_response()
-        })
+        Ok(DashboardHtml {
+            healthchecks: checks,
+        }
+        .page(config.domain())
+        .into_response())
     }
 }

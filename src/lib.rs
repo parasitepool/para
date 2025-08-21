@@ -77,7 +77,7 @@ use {
     tracing_subscriber::EnvFilter,
 };
 
-pub use subcommand::server::api::Healthcheck;
+pub use subcommand::server::api;
 
 mod arguments;
 pub mod ckpool;

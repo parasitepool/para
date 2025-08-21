@@ -13,7 +13,7 @@ use {
 
 mod accept_json;
 mod aggregator;
-pub(crate) mod api;
+pub mod api;
 mod config;
 pub(crate) mod database;
 mod error;

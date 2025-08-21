@@ -2,7 +2,7 @@ use super::*;
 
 #[derive(Boilerplate, Debug, Deserialize, Serialize, PartialEq)]
 pub(crate) struct DashboardHtml {
-    pub(crate) checks: Vec<HealthcheckHtml>,
+    pub(crate) healthchecks: BTreeMap<String, HealthcheckHtml>,
 }
 
 impl PageContent for DashboardHtml {
