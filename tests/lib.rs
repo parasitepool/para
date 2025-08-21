@@ -26,10 +26,20 @@ use {
     to_args::ToArgs,
 };
 
+#[cfg(target_os = "linux")]
+use {
+    std::{io::stderr, net::TcpStream},
+    test_ckpool::TestCkpool,
+};
+
 mod command_builder;
+#[cfg(target_os = "linux")]
+mod test_ckpool;
 mod test_server;
 mod to_args;
 
+#[cfg(target_os = "linux")]
+mod ping;
 mod server;
 
 pub(crate) fn address(n: u32) -> Address {
