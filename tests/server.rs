@@ -156,11 +156,11 @@ fn aggregate_users() {
     }
 }
 
-// #[test]
+#[test]
 fn healthcheck_json() {
     let server = TestServer::spawn();
 
-    // server.get_json::<Hea>("/healthcheck")
+    let healthcheck = server.get_json::<Healthcheck>("/healthcheck");
 
-
+    assert!(healthcheck.disk_usage_percent > 0.0);
 }

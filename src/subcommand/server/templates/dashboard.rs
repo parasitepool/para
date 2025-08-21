@@ -1,12 +1,12 @@
 use super::*;
 
 #[derive(Boilerplate, Debug, Deserialize, Serialize, PartialEq)]
-pub(crate) struct HealthcheckaggHtml {
+pub(crate) struct DashboardHtml {
     pub(crate) checks: Vec<HealthcheckHtml>,
 }
 
-impl PageContent for HealthcheckaggHtml {
+impl PageContent for DashboardHtml {
     fn title(&self) -> String {
-        "Healthchecks".to_string()
+        "Dashboard".to_string()
     }
 }

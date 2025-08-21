@@ -153,7 +153,7 @@ impl Aggregator {
         Ok(if accept_json {
             Json(checks).into_response()
         } else {
-            HealthcheckaggHtml { checks }
+            DashboardHtml { checks }
                 .page(config.domain())
                 .into_response()
         })
