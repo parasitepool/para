@@ -3,7 +3,7 @@ use super::*;
 mod miner;
 mod ping;
 pub(crate) mod server;
-mod sync;
+pub mod sync;
 
 #[derive(Debug, Parser)]
 pub(crate) enum Subcommand {

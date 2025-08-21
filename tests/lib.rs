@@ -35,12 +35,14 @@ use {
 mod command_builder;
 #[cfg(target_os = "linux")]
 mod test_ckpool;
+mod test_psql;
 mod test_server;
 mod to_args;
 
 #[cfg(target_os = "linux")]
 mod ping;
 mod server;
+mod sync;
 
 pub(crate) fn address(n: u32) -> Address {
     match n {

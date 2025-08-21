@@ -2142,6 +2142,7 @@ dependencies = [
  "lazy_static",
  "mime_guess",
  "once_cell",
+ "pgtemp",
  "pretty_assertions",
  "primitive-types",
  "rand 0.9.1",
@@ -2243,6 +2244,18 @@ name = "percent-encoding"
 version = "2.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3148f5046208a5d56bcfc03053e3ca6334e51da8dfb19b6cdc8b306fae3283e"
+
+[[package]]
+name = "pgtemp"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f44c7106f7ce2df81a3223120eaf4b629317149d9613fc58ec3f9cd342aadcf5"
+dependencies = [
+ "libc",
+ "tempfile",
+ "tokio",
+ "url",
+]
 
 [[package]]
 name = "pin-project-lite"
@@ -2793,9 +2806,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-acme"
-version = "0.13.0"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "230907c587e32543b0b0b4a41db582dd9acd29775862d400dd799904dedcf4f8"
+checksum = "30fb8ee724c1b72179735e44646bda27838bb72ff7e7eff97c7ac5787b6f4fac"
 dependencies = [
  "async-io",
  "async-trait",
@@ -2817,7 +2830,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tower-service",
- "webpki-roots 0.26.11",
+ "webpki-roots 1.0.0",
  "x509-parser",
 ]
 
@@ -3397,9 +3410,9 @@ dependencies = [
 
 [[package]]
 name = "sysinfo"
-version = "0.35.2"
+version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c3ffa3e4ff2b324a57f7aeb3c349656c7b127c3c189520251a648102a92496e"
+checksum = "07cec4dc2d2e357ca1e610cfb07de2fa7a10fc3e9fe89f72545f3d244ea87753"
 dependencies = [
  "libc",
  "memchr",
@@ -3564,6 +3577,7 @@ dependencies = [
  "bytes",
  "libc",
  "mio",
+ "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2",

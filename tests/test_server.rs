@@ -1,9 +1,11 @@
 use super::*;
+use pgtemp::{PgTempDB, PgTempDBBuilder};
 
 pub(crate) struct TestServer {
     child: Child,
     port: u16,
     tempdir: Arc<TempDir>,
+    pg_db: Option<PgTempDB>,
 }
 
 impl TestServer {
@@ -50,6 +52,73 @@ impl TestServer {
             child,
             port,
             tempdir,
+            pg_db: None,
+        }
+    }
+
+    pub(crate) async fn spawn_with_sync_endpoint() -> Self {
+        let psql_binpath = match Command::new("pg_config").arg("--bindir").output() {
+            Ok(output) if output.status.success() => {
+                String::from_utf8(output.stdout)
+                    .ok()
+                    .map(|s| PathBuf::from(s.trim()))
+            }
+            _ => None,
+        };
+        let pg_db = PgTempDB::from_builder(PgTempDBBuilder{
+            temp_dir_prefix: None,
+            db_user: None,
+            password: None,
+            port: None,
+            dbname: None,
+            persist_data_dir: false,
+            dump_path: None,
+            load_path: None,
+            server_configs: Default::default(),
+            bin_path: psql_binpath,
+        });
+
+        let database_url = pg_db.connection_uri();
+
+        let port = TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+
+        let tempdir = Arc::new(TempDir::new().unwrap());
+        let logdir = tempdir.path().join("logs");
+        fs::create_dir(&logdir).unwrap();
+        fs::create_dir(logdir.join("pool")).unwrap();
+        fs::create_dir(logdir.join("users")).unwrap();
+
+        let child = CommandBuilder::new(format!(
+            "server --address 127.0.0.1 --port {port} --log-dir {} --database-url {}",
+            logdir.display(),
+            database_url
+        ))
+        .integration_test(true)
+        .spawn();
+
+        for attempt in 0.. {
+            if let Ok(response) = reqwest::get(format!("http://127.0.0.1:{port}")).await
+                && response.status() == 200
+            {
+                break;
+            }
+
+            if attempt == 100 {
+                panic!("Server did not respond to status check");
+            }
+
+            thread::sleep(Duration::from_millis(50));
+        }
+
+        Self {
+            child,
+            port,
+            tempdir,
+            pg_db: Some(pg_db),
         }
     }
 
@@ -59,6 +128,10 @@ impl TestServer {
 
     pub(crate) fn log_dir(&self) -> PathBuf {
         self.tempdir.path().join("logs")
+    }
+
+    pub(crate) fn database_url(&self) -> Option<String> {
+        self.pg_db.as_ref().map(|db| db.connection_uri())
     }
 
     #[track_caller]
@@ -91,6 +164,28 @@ impl TestServer {
         );
 
         response.json().unwrap()
+    }
+
+    pub(crate) async fn post_json<T: serde::Serialize, R: DeserializeOwned>(
+        &self,
+        path: impl AsRef<str>,
+        body: &T,
+    ) -> R {
+        let client = reqwest::Client::new();
+        let response = client
+            .post(self.url().join(path.as_ref()).unwrap())
+            .json(body)
+            .send().await
+            .unwrap();
+
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "Response: {}",
+            response.text().await.unwrap()
+        );
+
+        response.json().await.unwrap()
     }
 }
 

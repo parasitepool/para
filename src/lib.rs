@@ -82,7 +82,7 @@ pub mod ckpool;
 pub mod difficulty;
 pub mod hash_rate;
 pub mod stratum;
-mod subcommand;
+pub mod subcommand;
 
 pub const COIN_VALUE: u64 = 100_000_000;
 

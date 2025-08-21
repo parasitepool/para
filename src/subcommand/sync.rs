@@ -18,7 +18,7 @@ const HTTP_TIMEOUT_MS: u64 = 30000;
 const MAX_RETRIES: u32 = 3;
 
 #[derive(Debug, Parser)]
-pub(crate) struct SyncSend {
+pub struct SyncSend {
     #[arg(
         long,
         help = "HTTP endpoint to send shares to",
@@ -31,7 +31,7 @@ pub(crate) struct SyncSend {
         help = "Batch size for processing shares",
         default_value = "1000000"
     )]
-    batch_size: i64,
+    pub batch_size: i64,
 
     #[arg(long, help = "Force reset current ID to 0")]
     reset_id: bool,
@@ -41,14 +41,14 @@ pub(crate) struct SyncSend {
         help = "Terminate when no more records to process",
         action = clap::ArgAction::SetTrue
     )]
-    terminate_when_complete: bool,
+    pub terminate_when_complete: bool,
 
     #[arg(
         long,
         help = "Connect to Postgres running at <DATABASE_URL>",
         default_value = "postgres://satoshi:nakamoto@127.0.0.1:5432/ckpool"
     )]
-    database_url: String,
+    pub database_url: String,
 }
 
 impl Default for SyncSend {
@@ -58,64 +58,64 @@ impl Default for SyncSend {
 }
 
 #[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone)]
-pub(crate) struct Share {
-    pub(crate) id: i64,
-    pub(crate) blockheight: Option<i32>,
-    pub(crate) workinfoid: Option<i64>,
-    pub(crate) clientid: Option<i64>,
-    pub(crate) enonce1: Option<String>,
-    pub(crate) nonce2: Option<String>,
-    pub(crate) nonce: Option<String>,
-    pub(crate) ntime: Option<String>,
-    pub(crate) diff: Option<f64>,
-    pub(crate) sdiff: Option<f64>,
-    pub(crate) hash: Option<String>,
-    pub(crate) result: Option<bool>,
-    pub(crate) reject_reason: Option<String>,
-    pub(crate) error: Option<String>,
-    pub(crate) errn: Option<i32>,
-    pub(crate) createdate: Option<String>,
-    pub(crate) createby: Option<String>,
-    pub(crate) createcode: Option<String>,
-    pub(crate) createinet: Option<String>,
-    pub(crate) workername: Option<String>,
-    pub(crate) username: Option<String>,
-    pub(crate) lnurl: Option<String>,
-    pub(crate) address: Option<String>,
-    pub(crate) agent: Option<String>,
+pub struct Share {
+    pub id: i64,
+    pub blockheight: Option<i32>,
+    pub workinfoid: Option<i64>,
+    pub clientid: Option<i64>,
+    pub enonce1: Option<String>,
+    pub nonce2: Option<String>,
+    pub nonce: Option<String>,
+    pub ntime: Option<String>,
+    pub diff: Option<f64>,
+    pub sdiff: Option<f64>,
+    pub hash: Option<String>,
+    pub result: Option<bool>,
+    pub reject_reason: Option<String>,
+    pub error: Option<String>,
+    pub errn: Option<i32>,
+    pub createdate: Option<String>,
+    pub createby: Option<String>,
+    pub createcode: Option<String>,
+    pub createinet: Option<String>,
+    pub workername: Option<String>,
+    pub username: Option<String>,
+    pub lnurl: Option<String>,
+    pub address: Option<String>,
+    pub agent: Option<String>,
 }
 
 #[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone)]
-pub(crate) struct FoundBlockRecord {
-    pub(crate) id: i32,
-    pub(crate) blockheight: i32,
-    pub(crate) blockhash: String,
-    pub(crate) confirmed: Option<bool>,
-    pub(crate) workername: Option<String>,
-    pub(crate) username: Option<String>,
-    pub(crate) diff: Option<f64>,
-    pub(crate) time_found: Option<String>,
-    pub(crate) coinbasevalue: Option<i64>,
-    pub(crate) rewards_processed: Option<bool>,
+pub struct FoundBlockRecord {
+    pub id: i32,
+    pub blockheight: i32,
+    pub blockhash: String,
+    pub confirmed: Option<bool>,
+    pub workername: Option<String>,
+    pub username: Option<String>,
+    pub diff: Option<f64>,
+    pub time_found: Option<String>,
+    pub coinbasevalue: Option<i64>,
+    pub rewards_processed: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub(crate) struct ShareBatch {
-    pub(crate) block: Option<FoundBlockRecord>,
-    pub(crate) shares: Vec<Share>,
-    pub(crate) hostname: String,
-    pub(crate) batch_id: u64,
-    pub(crate) total_shares: usize,
-    pub(crate) start_id: i64,
-    pub(crate) end_id: i64,
+pub struct ShareBatch {
+    pub block: Option<FoundBlockRecord>,
+    pub shares: Vec<Share>,
+    pub hostname: String,
+    pub batch_id: u64,
+    pub total_shares: usize,
+    pub start_id: i64,
+    pub end_id: i64,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub(crate) struct SyncResponse {
-    pub(crate) batch_id: u64,
-    pub(crate) received_count: usize,
-    pub(crate) status: String,
-    pub(crate) error_message: Option<String>,
+pub struct SyncResponse {
+    pub batch_id: u64,
+    pub received_count: usize,
+    pub status: String,
+    pub error_message: Option<String>,
 }
 
 #[derive(Debug)]
@@ -400,7 +400,7 @@ impl SyncSend {
         Ok(())
     }
 
-    pub(crate) fn with_endpoint(mut self, endpoint: String) -> Self {
+    pub fn with_endpoint(mut self, endpoint: String) -> Self {
         self.endpoint = endpoint;
         self
     }
