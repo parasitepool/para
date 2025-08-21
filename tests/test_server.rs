@@ -58,14 +58,12 @@ impl TestServer {
 
     pub(crate) async fn spawn_with_sync_endpoint() -> Self {
         let psql_binpath = match Command::new("pg_config").arg("--bindir").output() {
-            Ok(output) if output.status.success() => {
-                String::from_utf8(output.stdout)
-                    .ok()
-                    .map(|s| PathBuf::from(s.trim()))
-            }
+            Ok(output) if output.status.success() => String::from_utf8(output.stdout)
+                .ok()
+                .map(|s| PathBuf::from(s.trim())),
             _ => None,
         };
-        let pg_db = PgTempDB::from_builder(PgTempDBBuilder{
+        let pg_db = PgTempDB::from_builder(PgTempDBBuilder {
             temp_dir_prefix: None,
             db_user: None,
             password: None,
@@ -175,7 +173,8 @@ impl TestServer {
         let response = client
             .post(self.url().join(path.as_ref()).unwrap())
             .json(body)
-            .send().await
+            .send()
+            .await
             .unwrap();
 
         assert_eq!(

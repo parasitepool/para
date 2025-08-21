@@ -116,7 +116,8 @@ pub(crate) async fn setup_test_schema(db_url: String) -> Result<(), Box<dyn std:
         agent TEXT,
 
         PRIMARY KEY (id, origin)
-    )"#)
+    )"#,
+    )
     .execute(&pool)
     .await?;
 
