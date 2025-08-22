@@ -1,8 +1,51 @@
-use {
-    super::*,
-    std::net::SocketAddr,
-    tokio::time::{Instant, sleep},
-};
+use super::*;
+
+#[derive(Debug, Clone)]
+enum PingType {
+    Subscribe,
+    Authorized { username: String, password: String },
+}
+
+impl PingType {
+    fn new(username: Option<&str>, password: Option<&str>) -> Self {
+        match username {
+            Some(user) => Self::Authorized {
+                username: user.to_string(),
+                password: password.unwrap_or("x").to_string(),
+            },
+            None => Self::Subscribe,
+        }
+    }
+
+    async fn execute_ping(
+        &self,
+        ping: &Ping,
+        reader: &mut BufReader<&mut TcpStream>,
+        sequence: u64,
+    ) -> Result<(usize, Duration)> {
+        match self {
+            PingType::Subscribe => {
+                let start = Instant::now();
+                let bytes_read = ping.send_subscribe(reader, sequence).await?;
+                let duration = start.elapsed();
+                Ok((bytes_read, duration))
+            }
+            PingType::Authorized { username, password } => {
+                ping.authenticated_ping(reader, sequence, username, password)
+                    .await
+            }
+        }
+    }
+}
+
+impl fmt::Display for PingType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PingType::Subscribe => write!(f, "SUBSCRIBE PING"),
+            PingType::Authorized { .. } => write!(f, "AUTHORIZED PING"),
+        }
+    }
+}
 
 #[derive(Parser, Debug)]
 #[command(about = "Ping a stratum mining server.")]
@@ -12,25 +55,19 @@ pub(crate) struct Ping {
     count: Option<u64>,
     #[arg(long, default_value = "5", help = "Fail after <TIMEOUT> seconds")]
     timeout: u64,
-    #[arg(long, help = "Username for authentication")]
+    #[arg(long, help = "Stratum <USERNAME>")]
     username: Option<String>,
-    #[arg(long, help = "Password for authentication")]
+    #[arg(long, help = "Stratum <PASSWORD>")]
     password: Option<String>,
-    #[arg(long, help = "Show messages from server")]
-    show_messages: bool,
-    #[arg(long, help = "Timeout in seconds for message display")]
-    message_timeout: Option<u64>,
 }
 
 impl Ping {
     pub(crate) async fn run(&self) -> Result {
         let addr = self.resolve_target().await?;
 
-        println!("SUBSCRIBE PING {} ({})", self.target, addr);
+        let ping_type = PingType::new(self.username.as_deref(), self.password.as_deref());
 
-        if let Some(ref username) = self.username {
-            self.handle_authentication(username).await;
-        }
+        println!("{} {} ({})", ping_type, self.target, addr);
 
         let stats = Arc::new(PingStats::new());
         let sequence = AtomicU64::new(0);
@@ -44,28 +81,25 @@ impl Ping {
                 _ = sleep(Duration::from_secs(1)) => {
                     let seq = sequence.fetch_add(1, Ordering::Relaxed);
 
-                    match self.ping_once(addr, seq).await {
+                    stats.record_attempt();
+
+                    match self.ping_once(addr, seq, &ping_type).await {
                         Ok((size, duration)) => {
                             success = true;
                             stats.record_success(duration);
                             println!("Response from {addr}: seq={seq} size={size} time={:.3}ms", duration.as_secs_f64() * 1000.0);
                         }
                         Err(e) => {
-                            stats.record_failure();
                             println!("Request timeout for seq={seq} ({e})");
                         }
                     }
+
                     reply_count += 1;
-                    if let Some(count) = self.count &&
-                         count == reply_count {
-                            break;
+                    if let Some(count) = self.count && count == reply_count {
+                        break;
                     }
                 }
             }
-        }
-
-        if self.show_messages {
-            self.handle_messages().await;
         }
 
         print_final_stats(&self.target, &stats);
@@ -77,92 +111,43 @@ impl Ping {
         }
     }
 
-    async fn handle_authentication(&self, username: &str) -> () {
-        match self.attempt_authentication(username).await {
-            Ok(_) => {
-                println!("Successfully authenticated as {}", username);
-            }
-            Err(e) => {
-                eprintln!("Authentication failed ({}), continuing anonymously", e);
-            }
-        }
-    }
-
-    async fn attempt_authentication(&self, username: &str) -> Result<()> {
-        println!("Attempting authentication for user: {}", username);
-
-        if let Some(ref password) = self.password {
-            println!("Using password: {}", "*".repeat(password.len()));
-        } else {
-            println!("No password provided, using username-only auth");
-        }
-
-        Ok(())
-    }
-
-    async fn handle_messages(&self) -> () {
-        let timeout_duration = self.message_timeout.unwrap_or(2);
-
-        if timeout_duration == 0 {
-            println!("Message timeout is 0, skipping message display");
-            return;
-        }
-
-        println!("Waiting for messages (timeout: {}s)...", timeout_duration);
-
-        match self.wait_for_messages(timeout_duration).await {
-            Ok(messages) => {
-                if messages.is_empty() {
-                    println!("No messages received within timeout period");
-                } else {
-                    println!("Received {} messages:", messages.len());
-                    for (i, msg) in messages.iter().enumerate() {
-                        println!("  Message {}: {}", i + 1, msg);
-                    }
-                }
-            }
-            Err(e) => {
-                println!("Message display encountered an issue ({}), continuing", e);
-            }
-        }
-    }
-
-    async fn wait_for_messages(&self, timeout_secs: u64) -> Result<Vec<String>> {
-        let timeout_duration = Duration::from_secs(timeout_secs);
-
-        match tokio::time::timeout(timeout_duration, async {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-
-            vec![]
-        })
-        .await
-        {
-            Ok(messages) => Ok(messages),
-            Err(_) => {
-                println!("Message timeout after {}s", timeout_secs);
-                Ok(vec![])
-            }
-        }
-    }
-
     async fn resolve_target(&self) -> Result<SocketAddr> {
-        let host_port = if self.target.contains(':') {
+        let target = if self.target.contains(':') {
             self.target.clone()
         } else {
             format!("{}:42069", self.target)
         };
 
-        let addr = tokio::net::lookup_host(&host_port)
+        let addr = tokio::net::lookup_host(&target)
             .await?
             .next()
-            .ok_or_else(|| anyhow::anyhow!("Failed to resolve hostname"))?;
+            .with_context(|| "Failed to resolve hostname")?;
 
         Ok(addr)
     }
 
-    async fn ping_once(&self, addr: SocketAddr, sequence: u64) -> Result<(usize, Duration)> {
-        let request = Message::Request {
-            id: Id::Number(sequence),
+    async fn ping_once(
+        &self,
+        addr: SocketAddr,
+        sequence: u64,
+        ping_type: &PingType,
+    ) -> Result<(usize, Duration)> {
+        let mut stream =
+            tokio::time::timeout(Duration::from_secs(self.timeout), TcpStream::connect(addr))
+                .await??;
+
+        let mut reader = BufReader::new(&mut stream);
+
+        ping_type.execute_ping(self, &mut reader, sequence).await
+    }
+
+    async fn send_subscribe(
+        &self,
+        reader: &mut BufReader<&mut TcpStream>,
+        sequence: u64,
+    ) -> Result<usize> {
+        let request = stratum::Message::Request {
+            id: stratum::Id::Number(sequence),
             method: "mining.subscribe".into(),
             params: serde_json::to_value(stratum::Subscribe {
                 user_agent: "user ParaPing/0.0.1".into(),
@@ -171,24 +156,179 @@ impl Ping {
         };
 
         let frame = serde_json::to_string(&request)? + "\n";
+        reader.get_mut().write_all(frame.as_bytes()).await?;
 
-        let mut stream =
-            tokio::time::timeout(Duration::from_secs(self.timeout), TcpStream::connect(addr))
-                .await??;
+        let mut response_line = String::new();
+        let bytes_read = tokio::time::timeout(
+            Duration::from_secs(self.timeout),
+            reader.read_line(&mut response_line),
+        )
+        .await??;
 
-        let start = Instant::now();
+        let response: stratum::Message = serde_json::from_str(response_line.trim())
+            .with_context(|| format!("Invalid JSON in subscribe response: {response_line:?}"))?;
 
-        stream.write_all(frame.as_bytes()).await?;
+        match response {
+            stratum::Message::Response {
+                error: Some(error), ..
+            } => {
+                bail!("Server error in subscribe: {}", error);
+            }
+            stratum::Message::Response { .. } => {}
+            _ => {
+                bail!("Expected response, got: {:?}", response);
+            }
+        }
 
-        let mut reader = BufReader::new(&mut stream);
+        Ok(bytes_read)
+    }
+
+    async fn authenticated_ping(
+        &self,
+        reader: &mut BufReader<&mut TcpStream>,
+        sequence: u64,
+        username: &str,
+        password: &str,
+    ) -> Result<(usize, Duration)> {
+        self.send_subscribe(reader, sequence).await?;
+
+        let auth_start = Instant::now();
+
+        let authorize_request = stratum::Message::Request {
+            id: stratum::Id::Number(sequence + 1),
+            method: "mining.authorize".into(),
+            params: serde_json::to_value((username, password))?,
+        };
+
+        let frame = serde_json::to_string(&authorize_request)? + "\n";
+        reader.get_mut().write_all(frame.as_bytes()).await?;
+
+        let mut auth_completed = false;
+        let mut total_bytes = 0;
+        let auth_deadline = tokio::time::Instant::now() + Duration::from_secs(self.timeout);
+
+        while tokio::time::Instant::now() < auth_deadline && !auth_completed {
+            match tokio::time::timeout(Duration::from_millis(500), self.read_next_message(reader))
+                .await
+            {
+                Ok(Ok((bytes, message))) => {
+                    total_bytes += bytes;
+
+                    match message {
+                        stratum::Message::Response {
+                            id, result, error, ..
+                        } => {
+                            if let stratum::Id::Number(response_id) = id
+                                && response_id == sequence + 1
+                            {
+                                match (result, error) {
+                                    (_, Some(error)) => {
+                                        println!("Authentication error: {}", error);
+                                    }
+                                    (Some(result), None) => {
+                                        if let Some(result_bool) = result.as_bool() {
+                                            if result_bool {
+                                                println!("Authentication successful");
+                                            } else {
+                                                println!("Authentication rejected by server");
+                                            }
+                                        } else {
+                                            println!(
+                                                "Authentication response received (non-boolean result)"
+                                            );
+                                        }
+                                    }
+                                    (None, None) => {
+                                        println!("Authentication response received");
+                                    }
+                                }
+                                auth_completed = true;
+                            }
+                        }
+                        stratum::Message::Notification { method, params } => {
+                            self.display_notification(&method, &params);
+                        }
+                        stratum::Message::Request { method, .. } => {
+                            println!("  Server request: method={}", method);
+                        }
+                    }
+                }
+                Ok(Err(_)) => {
+                    break;
+                }
+                Err(_) => {
+                    continue;
+                }
+            }
+        }
+
+        if !auth_completed {
+            println!("Authentication response not received within timeout");
+        }
+
+        let auth_duration = auth_start.elapsed();
+        Ok((total_bytes, auth_duration))
+    }
+
+    async fn read_next_message(
+        &self,
+        reader: &mut BufReader<&mut TcpStream>,
+    ) -> Result<(usize, stratum::Message)> {
         let mut response_line = String::new();
         let bytes_read = reader.read_line(&mut response_line).await?;
 
-        let duration = start.elapsed();
+        let message: stratum::Message = serde_json::from_str(response_line.trim())
+            .with_context(|| format!("Invalid JSON in server message: {response_line:?}"))?;
 
-        let _: serde_json::Value = serde_json::from_str(response_line.trim())?;
+        Ok((bytes_read, message))
+    }
 
-        Ok((bytes_read, duration))
+    fn display_notification(&self, method: &str, params: &serde_json::Value) {
+        match method {
+            "mining.set_difficulty" => {
+                if let Some(difficulty) = params
+                    .as_array()
+                    .and_then(|arr| arr.first())
+                    .and_then(|v| v.as_f64().or_else(|| v.as_u64().map(|u| u as f64)))
+                {
+                    println!("Difficulty set to: {}", difficulty);
+                } else {
+                    println!("Difficulty updated: {:?}", params);
+                }
+            }
+            "mining.notify" => {
+                if let Some(params_array) = params.as_array() {
+                    if let Some(job_id) = params_array.first().and_then(|v| v.as_str()) {
+                        let clean_jobs = params_array
+                            .get(8)
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+
+                        println!("New mining job: {} (clean_jobs: {})", job_id, clean_jobs);
+
+                        if params_array.len() >= 9
+                            && let Some(prev_hash) = params_array.get(1).and_then(|v| v.as_str())
+                        {
+                            println!(
+                                "    └─ Previous hash: {}...{}",
+                                &prev_hash[..8.min(prev_hash.len())],
+                                &prev_hash[prev_hash.len().saturating_sub(8)..]
+                            );
+                        }
+                    } else {
+                        println!("Mining notification: {:?}", params);
+                    }
+                } else {
+                    println!("Mining notification: {:?}", params);
+                }
+            }
+            "mining.set_extranonce" => {
+                println!("Extranonce updated: {:?}", params);
+            }
+            _ => {
+                println!("Notification {}: {:?}", method, params);
+            }
+        }
     }
 }
 
@@ -211,36 +351,35 @@ impl PingStats {
         }
     }
 
-    fn record_success(&self, duration: Duration) {
+    fn record_attempt(&self) {
         self.sent.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_success(&self, duration: Duration) {
         self.received.fetch_add(1, Ordering::Relaxed);
 
         let duration_ns = duration.as_nanos() as u64;
         self.total_time_ns.fetch_add(duration_ns, Ordering::Relaxed);
 
-        self.min_time_ns
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-                if duration_ns < current {
-                    Some(duration_ns)
-                } else {
-                    None
-                }
-            })
-            .ok();
+        let mut current = self.min_time_ns.load(Ordering::Relaxed);
+        while duration_ns < current
+            && self
+                .min_time_ns
+                .compare_exchange(current, duration_ns, Ordering::Relaxed, Ordering::Relaxed)
+                .is_err()
+        {
+            current = self.min_time_ns.load(Ordering::Relaxed);
+        }
 
-        self.max_time_ns
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-                if duration_ns > current {
-                    Some(duration_ns)
-                } else {
-                    None
-                }
-            })
-            .ok();
-    }
-
-    fn record_failure(&self) {
-        self.sent.fetch_add(1, Ordering::Relaxed);
+        let mut current = self.max_time_ns.load(Ordering::Relaxed);
+        while duration_ns > current
+            && self
+                .max_time_ns
+                .compare_exchange(current, duration_ns, Ordering::Relaxed, Ordering::Relaxed)
+                .is_err()
+        {
+            current = self.max_time_ns.load(Ordering::Relaxed);
+        }
     }
 
     fn get_stats(&self) -> (u64, u64, f64, f64, f64, f64) {
@@ -274,13 +413,27 @@ impl PingStats {
     }
 }
 
-fn print_final_stats(target: &str, stats: &PingStats) {
-    let (sent, received, loss_percent, min_ms, avg_ms, max_ms) = stats.get_stats();
+impl fmt::Display for PingStats {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (sent, received, loss_percent, min_ms, avg_ms, max_ms) = self.get_stats();
 
-    println!("\n--- {target} ping statistics ---");
-    println!("{sent} packets transmitted, {received} received, {loss_percent:.1}% packet loss");
+        writeln!(
+            f,
+            "{sent} packets transmitted, {received} received, {loss_percent:.1}% packet loss"
+        )?;
 
-    if received > 0 {
-        println!("round-trip min/avg/max = {min_ms:.3}/{avg_ms:.3}/{max_ms:.3} ms");
+        if received > 0 {
+            writeln!(
+                f,
+                "round-trip min/avg/max = {min_ms:.3}/{avg_ms:.3}/{max_ms:.3} ms"
+            )?;
+        }
+
+        Ok(())
     }
+}
+
+fn print_final_stats(target: &str, stats: &PingStats) {
+    println!("\n--- {target} ping statistics ---");
+    print!("{stats}");
 }
