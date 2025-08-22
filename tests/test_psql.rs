@@ -1,3 +1,5 @@
+#![cfg(all(target_os = "linux", feature = "sync-tests"))]
+
 use crate::address;
 use para::subcommand::sync::{FoundBlockRecord, Share};
 

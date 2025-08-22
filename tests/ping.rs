@@ -1,3 +1,5 @@
+#![cfg(all(target_os = "linux", feature = "ping-tests"))]
+
 use super::*;
 
 #[test]

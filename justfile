@@ -7,12 +7,12 @@ fmt:
   cargo fmt --all
 
 clippy:
-  cargo clippy --all --all-targets -- --deny warnings
+  cargo clippy --all --all-targets --features all-tests -- --deny warnings
 
 ci: clippy
   cargo fmt -- --check
-  cargo test --all
-  cargo test --all -- --ignored
+  cargo test --all --features all-tests
+  cargo test --all --features all-tests -- --ignored
 
 outdated:
   cargo outdated --root-deps-only --workspace

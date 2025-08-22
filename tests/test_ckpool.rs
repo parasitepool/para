@@ -1,3 +1,5 @@
+#![cfg(all(target_os = "linux", feature = "ping-tests"))]
+
 use {super::*, once_cell::sync::Lazy};
 
 static COMPILE_CKPOOL: Lazy<()> = Lazy::new(|| {

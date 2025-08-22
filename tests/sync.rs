@@ -1,3 +1,5 @@
+#![cfg(all(target_os = "linux", feature = "sync-tests"))]
+
 use super::*;
 use crate::test_psql::{
     create_test_block, create_test_shares, insert_test_block, insert_test_shares, setup_test_schema,
