@@ -63,7 +63,8 @@ pub(crate) struct Ping {
 
 impl Ping {
     pub(crate) async fn run(&self) -> Result {
-        let addr = self.resolve_target().await?;
+        let addr = self.resolve_target()
+        .await?;
 
         let ping_type = PingType::new(self.username.as_deref(), self.password.as_deref());
 
@@ -156,7 +157,8 @@ impl Ping {
         };
 
         let frame = serde_json::to_string(&request)? + "\n";
-        reader.get_mut().write_all(frame.as_bytes()).await?;
+        reader.get_mut().write_all(frame.as_bytes())
+        .await?;
 
         let mut response_line = String::new();
         let bytes_read = tokio::time::timeout(
@@ -190,7 +192,8 @@ impl Ping {
         username: &str,
         password: &str,
     ) -> Result<(usize, Duration)> {
-        self.send_subscribe(reader, sequence).await?;
+        self.send_subscribe(reader, sequence)
+        .await?;
 
         let auth_start = Instant::now();
 
@@ -201,7 +204,8 @@ impl Ping {
         };
 
         let frame = serde_json::to_string(&authorize_request)? + "\n";
-        reader.get_mut().write_all(frame.as_bytes()).await?;
+        reader.get_mut().write_all(frame.as_bytes())
+        .await?;
 
         let mut auth_completed = false;
         let mut total_bytes = 0;
@@ -275,7 +279,8 @@ impl Ping {
         reader: &mut BufReader<&mut TcpStream>,
     ) -> Result<(usize, stratum::Message)> {
         let mut response_line = String::new();
-        let bytes_read = reader.read_line(&mut response_line).await?;
+        let bytes_read = reader.read_line(&mut response_line)
+        .await?;
 
         let message: stratum::Message = serde_json::from_str(response_line.trim())
             .with_context(|| format!("Invalid JSON in server message: {response_line:?}"))?;
