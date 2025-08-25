@@ -88,9 +88,9 @@ impl Ping {
 
                 client.subscribe().await?;
                 let (duration, size) = client.authorize().await?;
-                
+
                 let instant = Instant::now();
-                
+
                 loop {
                     let Some(message) = client.incoming.recv().await else {
                         continue;
@@ -100,7 +100,7 @@ impl Ping {
                         continue;
                     };
 
-                    if method == "mining.notify".to_string() {
+                    if method == "mining.notify" {
                         break;
                     }
                 }
