@@ -18,8 +18,18 @@ pub(crate) struct Miner {
 impl Miner {
     pub(crate) fn run(&self) -> Result {
         Runtime::new()?.block_on(async {
-            let client =
-                Client::connect(&self.host, self.port, &self.username, &self.password).await?;
+            info!(
+                "Connecting to {}:{} with user {}",
+                self.host, self.port, self.username
+            );
+
+            let client = Client::connect(
+                (self.host.clone(), self.port),
+                &self.username,
+                &self.password,
+                Duration::from_secs(5),
+            )
+            .await?;
 
             let controller = Controller::new(client).await?;
 

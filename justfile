@@ -40,6 +40,9 @@ miner-signet:
 ping host='parasite.wtf':
   cargo run ping {{host}}:42069
 
+ping-auth host='parasite.wtf' username='bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg6dzw5nk24r45dzasde25r3.tick' password='x':
+  cargo run ping --username {{username}} --password {{password}} {{host}}:42069
+
 server: 
   RUST_LOG=info cargo run -- server --log-dir copr/logs --port 8080
 
