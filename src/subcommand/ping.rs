@@ -92,12 +92,7 @@ impl Ping {
         let mut reader = BufReader::new(&mut stream);
 
         match ping_type {
-            PingType::Subscribe => {
-                let start = Instant::now();
-                let bytes_read = self.send_subscribe(&mut reader, sequence).await?;
-                let duration = start.elapsed();
-                Ok((bytes_read, duration))
-            }
+            PingType::Subscribe => self.subscribe_ping(&mut reader, sequence).await,
             PingType::Authorized { username, password } => {
                 self.authenticated_ping(&mut reader, sequence, username, password)
                     .await
@@ -105,11 +100,11 @@ impl Ping {
         }
     }
 
-    async fn send_subscribe(
+    async fn subscribe_ping(
         &self,
         reader: &mut BufReader<&mut TcpStream>,
         sequence: u64,
-    ) -> Result<usize> {
+    ) -> Result<(usize, Duration)> {
         let request = stratum::Message::Request {
             id: stratum::Id::Number(sequence),
             method: "mining.subscribe".into(),
@@ -120,6 +115,9 @@ impl Ping {
         };
 
         let frame = serde_json::to_string(&request)? + "\n";
+
+        let start = Instant::now();
+
         reader.get_mut().write_all(frame.as_bytes()).await?;
 
         let mut response_line = String::new();
@@ -144,7 +142,9 @@ impl Ping {
             }
         }
 
-        Ok(bytes_read)
+        let duration = start.elapsed();
+
+        Ok((bytes_read, duration))
     }
 
     async fn authenticated_ping(
@@ -154,7 +154,7 @@ impl Ping {
         username: &str,
         password: &str,
     ) -> Result<(usize, Duration)> {
-        self.send_subscribe(reader, sequence).await?;
+        self.subscribe_ping(reader, sequence).await?;
 
         let auth_start = Instant::now();
 
