@@ -55,7 +55,7 @@ impl Controller {
                 }
                 _ = ctrl_c() => {
                     info!("Shutting down client and hasher");
-                    self.client.shutdown();
+                    self.client.disconnect().await?;
                     self.cancel_hasher();
                     break;
                 }

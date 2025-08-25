@@ -49,7 +49,7 @@ impl Client {
 
     pub async fn disconnect(&mut self) -> Result {
         self.tcp_writer.shutdown().await?;
-        self.shutdown();
+        self.listener.abort();
         Ok(())
     }
 
@@ -140,16 +140,14 @@ impl Client {
 
         let (message, bytes_read) = rx.await?;
 
+        let duration = instant.elapsed();
+
         match message {
             Message::Response {
                 result: Some(result),
                 error: None,
                 ..
-            } => Ok((
-                serde_json::from_value(result)?,
-                instant.elapsed(),
-                bytes_read,
-            )),
+            } => Ok((serde_json::from_value(result)?, duration, bytes_read)),
             Message::Response {
                 error: Some(err), ..
             } => Err(anyhow!("mining.subscribe error: {}", err)),
@@ -170,6 +168,8 @@ impl Client {
 
         let (message, bytes_read) = rx.await?;
 
+        let duration = instant.elapsed();
+
         match message {
             Message::Response {
                 result: Some(result),
@@ -177,7 +177,7 @@ impl Client {
                 ..
             } => {
                 if serde_json::from_value(result)? {
-                    Ok((instant.elapsed(), bytes_read))
+                    Ok((duration, bytes_read))
                 } else {
                     Err(anyhow!("Unauthorized"))
                 }
@@ -267,9 +267,5 @@ impl Client {
 
     fn next_id(&mut self) -> Id {
         Id::Number(self.id_counter.fetch_add(1, Ordering::Relaxed))
-    }
-
-    pub fn shutdown(&self) {
-        self.listener.abort()
     }
 }
