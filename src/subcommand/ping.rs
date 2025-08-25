@@ -114,7 +114,7 @@ impl Ping {
             id: stratum::Id::Number(sequence),
             method: "mining.subscribe".into(),
             params: serde_json::to_value(stratum::Subscribe {
-                user_agent: "user ParaPing/0.0.1".into(),
+                user_agent: USER_AGENT.into(),
                 extranonce1: None,
             })?,
         };

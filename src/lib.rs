@@ -86,6 +86,7 @@ pub mod stratum;
 mod subcommand;
 
 pub const COIN_VALUE: u64 = 100_000_000;
+pub const USER_AGENT: &str = "paraminer/0.0.1";
 
 type Result<T = (), E = Error> = std::result::Result<T, E>;
 
