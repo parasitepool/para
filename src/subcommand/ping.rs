@@ -1,52 +1,5 @@
 use super::*;
 
-#[derive(Debug, Clone)]
-enum PingType {
-    Subscribe,
-    Authorized { username: String, password: String },
-}
-
-impl PingType {
-    fn new(username: Option<&str>, password: Option<&str>) -> Self {
-        match username {
-            Some(user) => Self::Authorized {
-                username: user.to_string(),
-                password: password.unwrap_or("x").to_string(),
-            },
-            None => Self::Subscribe,
-        }
-    }
-
-    async fn execute_ping(
-        &self,
-        ping: &Ping,
-        reader: &mut BufReader<&mut TcpStream>,
-        sequence: u64,
-    ) -> Result<(usize, Duration)> {
-        match self {
-            PingType::Subscribe => {
-                let start = Instant::now();
-                let bytes_read = ping.send_subscribe(reader, sequence).await?;
-                let duration = start.elapsed();
-                Ok((bytes_read, duration))
-            }
-            PingType::Authorized { username, password } => {
-                ping.authenticated_ping(reader, sequence, username, password)
-                    .await
-            }
-        }
-    }
-}
-
-impl fmt::Display for PingType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            PingType::Subscribe => write!(f, "SUBSCRIBE PING"),
-            PingType::Authorized { .. } => write!(f, "AUTHORIZED PING"),
-        }
-    }
-}
-
 #[derive(Parser, Debug)]
 #[command(about = "Ping a stratum mining server.")]
 pub(crate) struct Ping {
@@ -138,7 +91,18 @@ impl Ping {
 
         let mut reader = BufReader::new(&mut stream);
 
-        ping_type.execute_ping(self, &mut reader, sequence).await
+        match ping_type {
+            PingType::Subscribe => {
+                let start = Instant::now();
+                let bytes_read = self.send_subscribe(&mut reader, sequence).await?;
+                let duration = start.elapsed();
+                Ok((bytes_read, duration))
+            }
+            PingType::Authorized { username, password } => {
+                self.authenticated_ping(&mut reader, sequence, username, password)
+                    .await
+            }
+        }
     }
 
     async fn send_subscribe(
@@ -328,6 +292,33 @@ impl Ping {
             _ => {
                 println!("Notification {}: {:?}", method, params);
             }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+enum PingType {
+    Subscribe,
+    Authorized { username: String, password: String },
+}
+
+impl PingType {
+    fn new(username: Option<&str>, password: Option<&str>) -> Self {
+        match username {
+            Some(user) => Self::Authorized {
+                username: user.to_string(),
+                password: password.unwrap_or("x").to_string(),
+            },
+            None => Self::Subscribe,
+        }
+    }
+}
+
+impl fmt::Display for PingType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PingType::Subscribe => write!(f, "SUBSCRIBE PING"),
+            PingType::Authorized { .. } => write!(f, "AUTHORIZED PING"),
         }
     }
 }
