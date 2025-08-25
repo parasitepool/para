@@ -187,33 +187,32 @@ impl Ping {
                             {
                                 match (result, error) {
                                     (_, Some(error)) => {
-                                        println!("Authentication error: {}", error);
+                                        debug!("Authentication error: {}", error);
                                     }
                                     (Some(result), None) => {
                                         if let Some(result_bool) = result.as_bool() {
                                             if result_bool {
-                                                println!("Authentication successful");
+                                                debug!("Authentication successful");
                                             } else {
-                                                println!("Authentication rejected by server");
+                                                debug!("Authentication rejected by server");
                                             }
                                         } else {
-                                            println!(
+                                            debug!(
                                                 "Authentication response received (non-boolean result)"
                                             );
                                         }
                                     }
                                     (None, None) => {
-                                        println!("Authentication response received");
+                                        debug!("Authentication response received");
                                     }
                                 }
                                 auth_completed = true;
                             }
                         }
                         stratum::Message::Notification { method, params } => {
-                            self.display_notification(&method, &params);
+                            // if mining notification record ping here
                         }
-                        stratum::Message::Request { method, .. } => {
-                            println!("  Server request: method={}", method);
+                        _ => { // do nothing 
                         }
                     }
                 }
@@ -245,54 +244,6 @@ impl Ping {
             .with_context(|| format!("Invalid JSON in server message: {response_line:?}"))?;
 
         Ok((bytes_read, message))
-    }
-
-    fn display_notification(&self, method: &str, params: &serde_json::Value) {
-        match method {
-            "mining.set_difficulty" => {
-                if let Some(difficulty) = params
-                    .as_array()
-                    .and_then(|arr| arr.first())
-                    .and_then(|v| v.as_f64().or_else(|| v.as_u64().map(|u| u as f64)))
-                {
-                    println!("Difficulty set to: {}", difficulty);
-                } else {
-                    println!("Difficulty updated: {:?}", params);
-                }
-            }
-            "mining.notify" => {
-                if let Some(params_array) = params.as_array() {
-                    if let Some(job_id) = params_array.first().and_then(|v| v.as_str()) {
-                        let clean_jobs = params_array
-                            .get(8)
-                            .and_then(|v| v.as_bool())
-                            .unwrap_or(false);
-
-                        println!("New mining job: {} (clean_jobs: {})", job_id, clean_jobs);
-
-                        if params_array.len() >= 9
-                            && let Some(prev_hash) = params_array.get(1).and_then(|v| v.as_str())
-                        {
-                            println!(
-                                "    └─ Previous hash: {}...{}",
-                                &prev_hash[..8.min(prev_hash.len())],
-                                &prev_hash[prev_hash.len().saturating_sub(8)..]
-                            );
-                        }
-                    } else {
-                        println!("Mining notification: {:?}", params);
-                    }
-                } else {
-                    println!("Mining notification: {:?}", params);
-                }
-            }
-            "mining.set_extranonce" => {
-                println!("Extranonce updated: {:?}", params);
-            }
-            _ => {
-                println!("Notification {}: {:?}", method, params);
-            }
-        }
     }
 }
 

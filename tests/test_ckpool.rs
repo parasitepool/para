@@ -123,7 +123,7 @@ rpcworkqueue=128
             "Failed to connect bitcoind after 5 seconds"
         );
 
-        Lazy::force(&COMPILE_CKPOOL);
+        // Lazy::force(&COMPILE_CKPOOL);
 
         let ckpool_conf = tempdir.path().join("ckpool.conf");
 
