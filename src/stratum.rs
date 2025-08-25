@@ -490,12 +490,12 @@ mod tests {
     #[test]
     fn subscribe() {
         case(
-            r#"{"id":1,"method":"mining.subscribe","params":["user ParaMiner/0.0.1"]}"#,
+            r#"{"id":1,"method":"mining.subscribe","params":["paraminer/0.0.1"]}"#,
             Message::Request {
                 id: Id::Number(1),
                 method: "mining.subscribe".into(),
                 params: serde_json::to_value(Subscribe {
-                    user_agent: "user ParaMiner/0.0.1".into(),
+                    user_agent: USER_AGENT.into(),
                     extranonce1: None,
                 })
                 .unwrap(),

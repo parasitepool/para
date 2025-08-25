@@ -1,6 +1,6 @@
 #![allow(clippy::too_many_arguments)]
 use {
-    anyhow::{Error, anyhow, ensure},
+    anyhow::{Context, Error, anyhow, ensure},
     arguments::Arguments,
     axum::{
         Extension, Router,
@@ -47,7 +47,7 @@ use {
     std::{
         collections::{BTreeMap, HashMap},
         env, fmt, fs, io,
-        net::ToSocketAddrs,
+        net::{SocketAddr, ToSocketAddrs},
         ops::Add,
         path::PathBuf,
         process,
@@ -67,6 +67,7 @@ use {
         signal::ctrl_c,
         sync::{Mutex, mpsc, oneshot},
         task::{self, JoinHandle},
+        time::sleep,
     },
     tokio_util::sync::CancellationToken,
     tower_http::{
@@ -85,6 +86,7 @@ pub mod stratum;
 pub mod subcommand;
 
 pub const COIN_VALUE: u64 = 100_000_000;
+pub const USER_AGENT: &str = "paraminer/0.0.1";
 
 type Result<T = (), E = Error> = std::result::Result<T, E>;
 

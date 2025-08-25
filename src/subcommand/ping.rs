@@ -1,8 +1,4 @@
-use {
-    super::*,
-    std::net::SocketAddr,
-    tokio::time::{Instant, sleep},
-};
+use super::*;
 
 #[derive(Parser, Debug)]
 #[command(about = "Ping a stratum mining server.")]
@@ -12,13 +8,19 @@ pub(crate) struct Ping {
     count: Option<u64>,
     #[arg(long, default_value = "5", help = "Fail after <TIMEOUT> seconds")]
     timeout: u64,
+    #[arg(long, help = "Stratum <USERNAME>")]
+    username: Option<String>,
+    #[arg(long, help = "Stratum <PASSWORD>")]
+    password: Option<String>,
 }
 
 impl Ping {
     pub(crate) async fn run(&self) -> Result {
         let addr = self.resolve_target().await?;
 
-        println!("SUBSCRIBE PING {} ({})", self.target, addr);
+        let ping_type = PingType::new(self.username.as_deref(), self.password.as_deref());
+
+        println!("{} {} ({})", ping_type, self.target, addr);
 
         let stats = Arc::new(PingStats::new());
         let sequence = AtomicU64::new(0);
@@ -32,21 +34,22 @@ impl Ping {
                 _ = sleep(Duration::from_secs(1)) => {
                     let seq = sequence.fetch_add(1, Ordering::Relaxed);
 
-                    match self.ping_once(addr, seq).await {
-                        Ok((size, duration)) => {
+                    stats.record_attempt();
+
+                    match self.ping_once(addr, &ping_type).await {
+                        Ok((duration, size)) => {
                             success = true;
                             stats.record_success(duration);
                             println!("Response from {addr}: seq={seq} size={size} time={:.3}ms", duration.as_secs_f64() * 1000.0);
                         }
                         Err(e) => {
-                            stats.record_failure();
                             println!("Request timeout for seq={seq} ({e})");
                         }
                     }
+
                     reply_count += 1;
-                    if let Some(count) = self.count &&
-                         count == reply_count {
-                            break;
+                    if let Some(count) = self.count && count == reply_count {
+                        break;
                     }
                 }
             }
@@ -61,50 +64,96 @@ impl Ping {
         }
     }
 
+    async fn ping_once(&self, addr: SocketAddr, ping_type: &PingType) -> Result<(Duration, usize)> {
+        match ping_type {
+            PingType::Subscribe => {
+                let mut client =
+                    stratum::Client::connect(addr, "", "", Duration::from_secs(self.timeout))
+                        .await?;
+
+                let (_, duration, size) = client.subscribe().await?;
+
+                client.disconnect().await?;
+
+                Ok((duration, size))
+            }
+            PingType::Authorized { username, password } => {
+                let mut client = stratum::Client::connect(
+                    addr,
+                    username,
+                    password,
+                    Duration::from_secs(self.timeout),
+                )
+                .await?;
+
+                client.subscribe().await?;
+                let (duration, size) = client.authorize().await?;
+
+                let instant = Instant::now();
+
+                loop {
+                    let Some(message) = client.incoming.recv().await else {
+                        continue;
+                    };
+
+                    let Message::Notification { method, params: _ } = message else {
+                        continue;
+                    };
+
+                    if method == "mining.notify" {
+                        break;
+                    }
+                }
+
+                let duration = duration + instant.elapsed();
+
+                client.disconnect().await?;
+
+                Ok((duration, size))
+            }
+        }
+    }
+
     async fn resolve_target(&self) -> Result<SocketAddr> {
-        let host_port = if self.target.contains(':') {
+        let target = if self.target.contains(':') {
             self.target.clone()
         } else {
             format!("{}:42069", self.target)
         };
 
-        let addr = tokio::net::lookup_host(&host_port)
+        let addr = tokio::net::lookup_host(&target)
             .await?
             .next()
-            .ok_or_else(|| anyhow::anyhow!("Failed to resolve hostname"))?;
+            .with_context(|| "Failed to resolve hostname")?;
 
         Ok(addr)
     }
+}
 
-    async fn ping_once(&self, addr: SocketAddr, sequence: u64) -> Result<(usize, Duration)> {
-        let request = Message::Request {
-            id: Id::Number(sequence),
-            method: "mining.subscribe".into(),
-            params: serde_json::to_value(stratum::Subscribe {
-                user_agent: "user ParaPing/0.0.1".into(),
-                extranonce1: None,
-            })?,
-        };
+#[derive(Debug, Clone)]
+enum PingType {
+    Subscribe,
+    Authorized { username: String, password: String },
+}
 
-        let frame = serde_json::to_string(&request)? + "\n";
+impl PingType {
+    fn new(username: Option<&str>, password: Option<&str>) -> Self {
+        match username {
+            Some(user) => Self::Authorized {
+                username: user.to_string(),
+                password: password.unwrap_or("x").to_string(),
+            },
+            None => Self::Subscribe,
+        }
+    }
+}
 
-        let mut stream =
-            tokio::time::timeout(Duration::from_secs(self.timeout), TcpStream::connect(addr))
-                .await??;
-
-        let start = Instant::now();
-
-        stream.write_all(frame.as_bytes()).await?;
-
-        let mut reader = BufReader::new(&mut stream);
-        let mut response_line = String::new();
-        let bytes_read = reader.read_line(&mut response_line).await?;
-
-        let duration = start.elapsed();
-
-        let _: serde_json::Value = serde_json::from_str(response_line.trim())?;
-
-        Ok((bytes_read, duration))
+impl fmt::Display for PingType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PingType::Subscribe => write!(f, "SUBSCRIBE PING"),
+            PingType::Authorized { .. } => write!(f, "AUTHORIZED PING"),
+        }
     }
 }
 
@@ -127,36 +176,35 @@ impl PingStats {
         }
     }
 
-    fn record_success(&self, duration: Duration) {
+    fn record_attempt(&self) {
         self.sent.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_success(&self, duration: Duration) {
         self.received.fetch_add(1, Ordering::Relaxed);
 
         let duration_ns = duration.as_nanos() as u64;
         self.total_time_ns.fetch_add(duration_ns, Ordering::Relaxed);
 
-        self.min_time_ns
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-                if duration_ns < current {
-                    Some(duration_ns)
-                } else {
-                    None
-                }
-            })
-            .ok();
+        let mut current = self.min_time_ns.load(Ordering::Relaxed);
+        while duration_ns < current
+            && self
+                .min_time_ns
+                .compare_exchange(current, duration_ns, Ordering::Relaxed, Ordering::Relaxed)
+                .is_err()
+        {
+            current = self.min_time_ns.load(Ordering::Relaxed);
+        }
 
-        self.max_time_ns
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-                if duration_ns > current {
-                    Some(duration_ns)
-                } else {
-                    None
-                }
-            })
-            .ok();
-    }
-
-    fn record_failure(&self) {
-        self.sent.fetch_add(1, Ordering::Relaxed);
+        let mut current = self.max_time_ns.load(Ordering::Relaxed);
+        while duration_ns > current
+            && self
+                .max_time_ns
+                .compare_exchange(current, duration_ns, Ordering::Relaxed, Ordering::Relaxed)
+                .is_err()
+        {
+            current = self.max_time_ns.load(Ordering::Relaxed);
+        }
     }
 
     fn get_stats(&self) -> (u64, u64, f64, f64, f64, f64) {
@@ -190,13 +238,27 @@ impl PingStats {
     }
 }
 
-fn print_final_stats(target: &str, stats: &PingStats) {
-    let (sent, received, loss_percent, min_ms, avg_ms, max_ms) = stats.get_stats();
+impl fmt::Display for PingStats {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (sent, received, loss_percent, min_ms, avg_ms, max_ms) = self.get_stats();
 
-    println!("\n--- {target} ping statistics ---");
-    println!("{sent} packets transmitted, {received} received, {loss_percent:.1}% packet loss");
+        writeln!(
+            f,
+            "{sent} packets transmitted, {received} received, {loss_percent:.1}% packet loss"
+        )?;
 
-    if received > 0 {
-        println!("round-trip min/avg/max = {min_ms:.3}/{avg_ms:.3}/{max_ms:.3} ms");
+        if received > 0 {
+            writeln!(
+                f,
+                "round-trip min/avg/max = {min_ms:.3}/{avg_ms:.3}/{max_ms:.3} ms"
+            )?;
+        }
+
+        Ok(())
     }
+}
+
+fn print_final_stats(target: &str, stats: &PingStats) {
+    println!("\n--- {target} ping statistics ---");
+    print!("{stats}");
 }
