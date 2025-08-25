@@ -1,7 +1,7 @@
 use super::*;
 
-fn test_username() -> String {
-    address(0).to_string()
+fn signet_username() -> String {
+    "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.tick.abcdef@lnurl.com".to_string()
 }
 
 #[test]
@@ -43,7 +43,7 @@ fn ping_fails() {
 fn ping_with_username() {
     let ckpool = TestCkpool::spawn();
     let stratum_endpoint = ckpool.stratum_endpoint();
-    let username = test_username();
+    let username = signet_username();
 
     let mut ping = CommandBuilder::new(format!(
         "ping --count 1 --timeout 1 --username {username} {stratum_endpoint}"
@@ -58,7 +58,7 @@ fn ping_with_username() {
 fn ping_with_username_and_password() {
     let ckpool = TestCkpool::spawn();
     let stratum_endpoint = ckpool.stratum_endpoint();
-    let username = test_username();
+    let username = signet_username();
 
     let mut ping = CommandBuilder::new(format!(
         "ping --count 1 --timeout 1 --username {username} --password testpass {stratum_endpoint}"

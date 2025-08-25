@@ -1,6 +1,6 @@
 #![allow(clippy::too_many_arguments)]
 use {
-    anyhow::{Context, Error, anyhow, bail, ensure},
+    anyhow::{Context, Error, anyhow, ensure},
     arguments::Arguments,
     axum::{
         Extension, Router,

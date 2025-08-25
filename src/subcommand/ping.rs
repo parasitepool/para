@@ -36,8 +36,8 @@ impl Ping {
 
                     stats.record_attempt();
 
-                    match self.ping_once(addr, seq, &ping_type).await {
-                        Ok((size, duration)) => {
+                    match self.ping_once(addr, &ping_type).await {
+                        Ok((duration, size)) => {
                             success = true;
                             stats.record_success(duration);
                             println!("Response from {addr}: seq={seq} size={size} time={:.3}ms", duration.as_secs_f64() * 1000.0);
@@ -64,6 +64,38 @@ impl Ping {
         }
     }
 
+    async fn ping_once(&self, addr: SocketAddr, ping_type: &PingType) -> Result<(Duration, usize)> {
+        match ping_type {
+            PingType::Subscribe => {
+                let mut client =
+                    stratum::Client::connect(addr, "", "", Duration::from_secs(self.timeout))
+                        .await?;
+
+                let (_, duration, size) = client.subscribe().await?;
+
+                client.disconnect().await?;
+
+                Ok((duration, size))
+            }
+            PingType::Authorized { username, password } => {
+                let mut client = stratum::Client::connect(
+                    addr,
+                    username,
+                    password,
+                    Duration::from_secs(self.timeout),
+                )
+                .await?;
+
+                client.subscribe().await?;
+                let (duration, size) = client.authorize().await?;
+
+                client.disconnect().await?;
+
+                Ok((duration, size))
+            }
+        }
+    }
+
     async fn resolve_target(&self) -> Result<SocketAddr> {
         let target = if self.target.contains(':') {
             self.target.clone()
@@ -77,173 +109,6 @@ impl Ping {
             .with_context(|| "Failed to resolve hostname")?;
 
         Ok(addr)
-    }
-
-    async fn ping_once(
-        &self,
-        addr: SocketAddr,
-        sequence: u64,
-        ping_type: &PingType,
-    ) -> Result<(usize, Duration)> {
-        let mut stream =
-            tokio::time::timeout(Duration::from_secs(self.timeout), TcpStream::connect(addr))
-                .await??;
-
-        let mut reader = BufReader::new(&mut stream);
-
-        match ping_type {
-            PingType::Subscribe => self.subscribe_ping(&mut reader, sequence).await,
-            PingType::Authorized { username, password } => {
-                self.authenticated_ping(&mut reader, sequence, username, password)
-                    .await
-            }
-        }
-    }
-
-    async fn subscribe_ping(
-        &self,
-        reader: &mut BufReader<&mut TcpStream>,
-        sequence: u64,
-    ) -> Result<(usize, Duration)> {
-        let request = stratum::Message::Request {
-            id: stratum::Id::Number(sequence),
-            method: "mining.subscribe".into(),
-            params: serde_json::to_value(stratum::Subscribe {
-                user_agent: USER_AGENT.into(),
-                extranonce1: None,
-            })?,
-        };
-
-        let frame = serde_json::to_string(&request)? + "\n";
-
-        let start = Instant::now();
-
-        reader.get_mut().write_all(frame.as_bytes()).await?;
-
-        let mut response_line = String::new();
-        let bytes_read = tokio::time::timeout(
-            Duration::from_secs(self.timeout),
-            reader.read_line(&mut response_line),
-        )
-        .await??;
-
-        let response: stratum::Message = serde_json::from_str(response_line.trim())
-            .with_context(|| format!("Invalid JSON in subscribe response: {response_line:?}"))?;
-
-        match response {
-            stratum::Message::Response {
-                error: Some(error), ..
-            } => {
-                bail!("Server error in subscribe: {}", error);
-            }
-            stratum::Message::Response { .. } => {}
-            _ => {
-                bail!("Expected response, got: {:?}", response);
-            }
-        }
-
-        let duration = start.elapsed();
-
-        Ok((bytes_read, duration))
-    }
-
-    async fn authenticated_ping(
-        &self,
-        reader: &mut BufReader<&mut TcpStream>,
-        sequence: u64,
-        username: &str,
-        password: &str,
-    ) -> Result<(usize, Duration)> {
-        self.subscribe_ping(reader, sequence).await?;
-
-        let auth_start = Instant::now();
-
-        let authorize_request = stratum::Message::Request {
-            id: stratum::Id::Number(sequence + 1),
-            method: "mining.authorize".into(),
-            params: serde_json::to_value((username, password))?,
-        };
-
-        let frame = serde_json::to_string(&authorize_request)? + "\n";
-        reader.get_mut().write_all(frame.as_bytes()).await?;
-
-        let mut auth_completed = false;
-        let mut total_bytes = 0;
-        let auth_deadline = tokio::time::Instant::now() + Duration::from_secs(self.timeout);
-
-        while tokio::time::Instant::now() < auth_deadline && !auth_completed {
-            match tokio::time::timeout(Duration::from_millis(500), self.read_next_message(reader))
-                .await
-            {
-                Ok(Ok((bytes, message))) => {
-                    total_bytes += bytes;
-
-                    match message {
-                        stratum::Message::Response {
-                            id, result, error, ..
-                        } => {
-                            if let stratum::Id::Number(response_id) = id
-                                && response_id == sequence + 1
-                            {
-                                match (result, error) {
-                                    (_, Some(error)) => {
-                                        debug!("Authentication error: {}", error);
-                                    }
-                                    (Some(result), None) => {
-                                        if let Some(result_bool) = result.as_bool() {
-                                            if result_bool {
-                                                debug!("Authentication successful");
-                                            } else {
-                                                debug!("Authentication rejected by server");
-                                            }
-                                        } else {
-                                            debug!(
-                                                "Authentication response received (non-boolean result)"
-                                            );
-                                        }
-                                    }
-                                    (None, None) => {
-                                        debug!("Authentication response received");
-                                    }
-                                }
-                                auth_completed = true;
-                            }
-                        }
-                        stratum::Message::Notification { method, params } => {
-                            // if mining notification record ping here
-                        }
-                        _ => { // do nothing 
-                        }
-                    }
-                }
-                Ok(Err(_)) => {
-                    break;
-                }
-                Err(_) => {
-                    continue;
-                }
-            }
-        }
-
-        if !auth_completed {
-            println!("Authentication response not received within timeout");
-        }
-
-        let auth_duration = auth_start.elapsed();
-        Ok((total_bytes, auth_duration))
-    }
-
-    async fn read_next_message(
-        &self,
-        reader: &mut BufReader<&mut TcpStream>,
-    ) -> Result<(usize, stratum::Message)> {
-        let mut response_line = String::new();
-        let bytes_read = reader.read_line(&mut response_line).await?;
-
-        let message: stratum::Message = serde_json::from_str(response_line.trim())
-            .with_context(|| format!("Invalid JSON in server message: {response_line:?}"))?;
-
-        Ok((bytes_read, message))
     }
 }
 
