@@ -540,7 +540,7 @@ impl Server {
         let min_blockheight = batch.shares.iter().filter_map(|s| s.blockheight).min();
         let max_blockheight = batch.shares.iter().filter_map(|s| s.blockheight).max();
 
-        println!(
+        log::info!(
             "Stored batch {} with {} shares: total difficulty: {:.2}, {} unique workers, blockheights: {:?}-{:?}, origin: {}",
             batch.batch_id,
             batch.shares.len(),
