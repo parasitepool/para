@@ -2,14 +2,20 @@ use crate::subcommand::sync::{ShareBatch, SyncResponse};
 use axum::routing::post;
 use {
     super::*,
+    accept_json::AcceptJson,
     aggregator::Aggregator,
     config::Config,
     database::Database,
     error::{OptionExt, ServerError, ServerResult},
-    templates::{PageContent, PageHtml, healthcheck::HealthcheckHtml, home::HomeHtml},
+    templates::{
+        PageContent, PageHtml, dashboard::DashboardHtml, healthcheck::HealthcheckHtml,
+        home::HomeHtml,
+    },
 };
 
+mod accept_json;
 mod aggregator;
+pub mod api;
 mod config;
 pub(crate) mod database;
 mod error;
@@ -113,7 +119,7 @@ impl Server {
         }
 
         if !config.nodes().is_empty() {
-            let aggregator = Aggregator::init(config.nodes().clone())?;
+            let aggregator = Aggregator::init(config.clone())?;
             router = router.merge(aggregator);
         } else {
             warn!("No aggregator nodes configured: skipping aggregator routes.");
@@ -161,12 +167,14 @@ impl Server {
 
     pub(crate) async fn healthcheck(
         Extension(config): Extension<Arc<Config>>,
-    ) -> ServerResult<PageHtml<HealthcheckHtml>> {
+        AcceptJson(accept_json): AcceptJson,
+    ) -> ServerResult<Response> {
         task::block_in_place(|| {
             let mut system = System::new_all();
             system.refresh_all();
 
-            let path = std::env::current_dir().map_err(|e| ServerError::Internal(e.into()))?;
+            let path = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+
             let mut disk_usage_percent = 0.0;
             let disks = Disks::new_with_refreshed_list();
             for disk in &disks {
@@ -190,15 +198,18 @@ impl Server {
             system.refresh_cpu_all();
             let cpu_usage_percent: f64 = system.global_cpu_usage().into();
 
-            let uptime_seconds = System::uptime();
+            let healthcheck = HealthcheckHtml {
+                disk_usage_percent,
+                memory_usage_percent,
+                cpu_usage_percent,
+                uptime: System::uptime(),
+            };
 
-            Ok(HealthcheckHtml {
-                disk_usage_percent: format!("{disk_usage_percent:.2}"),
-                memory_usage_percent: format!("{memory_usage_percent:.2}"),
-                cpu_usage_percent: format!("{cpu_usage_percent:.2}"),
-                uptime: format_uptime(uptime_seconds),
-            }
-            .page(config.domain()))
+            Ok(if accept_json {
+                Json(healthcheck).into_response()
+            } else {
+                healthcheck.page(config.domain()).into_response()
+            })
         })
     }
 

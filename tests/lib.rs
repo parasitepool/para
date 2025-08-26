@@ -3,6 +3,7 @@ use {
     command_builder::CommandBuilder,
     executable_path::executable_path,
     para::{
+        api::Healthcheck,
         ckpool::{HashRateStatus, PoolStatus, ShareStatus, Status, User, Worker},
         hash_rate::HashRate,
     },

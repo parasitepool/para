@@ -1,6 +1,6 @@
 Health Check<br>
 <br>
-Disk Usage: {{self.disk_usage_percent}}%<br>
-Memory Usage: {{self.memory_usage_percent}}%<br>
-CPU Usage: {{self.cpu_usage_percent}}%<br>
-Uptime: {{self.uptime}}
+Disk Usage: {{ self.display_disk_usage() }}%<br>
+Memory Usage: {{ self.display_memory_usage() }}%<br>
+CPU Usage: {{ self.display_cpu_usage() }}%<br>
+Uptime: {{ self.display_uptime() }}

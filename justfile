@@ -44,7 +44,9 @@ ping-auth host='parasite.wtf' username='bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg
   cargo run ping --username {{username}} --password {{password}} {{host}}:42069
 
 server: 
-  RUST_LOG=info cargo run -- server --log-dir copr/logs --port 8080
+  RUST_LOG=info cargo run -- server \
+    --log-dir copr/logs \
+    --port 8080
 
 install:
   git submodule update --init
