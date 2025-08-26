@@ -1,8 +1,7 @@
+use super::*;
+
 #[cfg(target_os = "linux")]
-use {
-    super::*,
-    pgtemp::{PgTempDB, PgTempDBBuilder},
-};
+use pgtemp::{PgTempDB, PgTempDBBuilder};
 
 pub(crate) struct TestServer {
     child: Child,
