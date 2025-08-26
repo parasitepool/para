@@ -32,7 +32,7 @@ jobs:
     - uses: Swatinem/rust-cache@v2
 
     - name: Clippy
-      run: cargo clippy --all --all-targets
+      run: cargo clippy --all --all-targets --features all-tests
 
     - name: Format
       run: cargo fmt --all -- --check
@@ -57,7 +57,7 @@ jobs:
         ./bin/install-bitcoin-core-linux
     
     - name: Test
-      run: cargo test --all
+      run: cargo test --all --features all-tests
 
   test:
     strategy:
