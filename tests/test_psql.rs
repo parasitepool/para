@@ -1,7 +1,8 @@
 #![cfg(all(target_os = "linux", feature = "sync-tests"))]
-
-use crate::address;
-use para::subcommand::sync::{FoundBlockRecord, Share};
+use {
+    crate::address,
+    para::subcommand::sync::{FoundBlockRecord, Share},
+};
 
 pub(crate) fn create_test_shares(count: u32, blockheight: i64) -> Vec<Share> {
     (0..count)

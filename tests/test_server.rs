@@ -1,6 +1,8 @@
-use super::*;
 #[cfg(all(target_os = "linux", feature = "sync-tests"))]
-use pgtemp::{PgTempDB, PgTempDBBuilder};
+use {
+    super::*,
+    pgtemp::{PgTempDB, PgTempDBBuilder},
+};
 
 pub(crate) struct TestServer {
     child: Child,

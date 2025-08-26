@@ -1,14 +1,6 @@
-use super::*;
-use crate::subcommand::server::database::Database;
-use reqwest::Client;
-use serde::{Deserialize, Serialize};
-use std::{
-    fs,
-    path::Path,
-    sync::Arc,
-    sync::atomic::{AtomicBool, Ordering},
+use {
+    super::*, crate::subcommand::server::database::Database, reqwest::Client, tokio::time::Duration,
 };
-use tokio::time::{Duration, sleep};
 
 const ID_FILE: &str = "current_id.txt";
 const SYNC_DELAY_MS: u64 = 1000;

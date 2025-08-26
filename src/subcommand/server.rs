@@ -1,9 +1,9 @@
-use crate::subcommand::sync::{ShareBatch, SyncResponse};
-use axum::routing::post;
 use {
     super::*,
+    crate::subcommand::sync::{ShareBatch, SyncResponse},
     accept_json::AcceptJson,
     aggregator::Aggregator,
+    axum::extract::Path,
     config::Config,
     database::Database,
     error::{OptionExt, ServerError, ServerResult},

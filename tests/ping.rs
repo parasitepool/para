@@ -1,5 +1,4 @@
 #![cfg(all(target_os = "linux", feature = "ping-tests"))]
-
 use super::*;
 
 fn signet_username() -> String {
