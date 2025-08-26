@@ -130,7 +130,7 @@ impl SyncSend {
             std::process::exit(0);
         });
 
-        println!("Starting HTTP share sync send...");
+        log::info!("Starting HTTP share sync send...");
         if !self.terminate_when_complete {
             println!("Keep-alive mode enabled - will continue running even when caught up");
         }
