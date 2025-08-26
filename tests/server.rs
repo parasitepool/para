@@ -164,3 +164,23 @@ fn healthcheck_json() {
 
     assert!(healthcheck.disk_usage_percent > 0.0);
 }
+
+#[test]
+fn healthcheck_with_auth() {
+    let server = TestServer::spawn_with_args("--username foo --password bar");
+
+    let response = reqwest::blocking::Client::new()
+        .get(format!("{}healthcheck", server.url()))
+        .send()
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let response = reqwest::blocking::Client::new()
+        .get(format!("{}healthcheck", server.url()))
+        .basic_auth("foo", Some("bar"))
+        .send()
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+}
