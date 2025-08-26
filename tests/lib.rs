@@ -27,24 +27,24 @@ use {
     to_args::ToArgs,
 };
 
-#[cfg(all(target_os = "linux", feature = "ping-tests"))]
+#[cfg(target_os = "linux")]
 use {
     std::{io::stderr, net::TcpStream},
     test_ckpool::TestCkpool,
 };
 
 mod command_builder;
-#[cfg(all(target_os = "linux", feature = "ping-tests"))]
+#[cfg(target_os = "linux")]
 mod test_ckpool;
-#[cfg(all(target_os = "linux", feature = "sync-tests"))]
+#[cfg(target_os = "linux")]
 mod test_psql;
 mod test_server;
 mod to_args;
 
-#[cfg(all(target_os = "linux", feature = "ping-tests"))]
+#[cfg(target_os = "linux")]
 mod ping;
 mod server;
-#[cfg(all(target_os = "linux", feature = "sync-tests"))]
+#[cfg(target_os = "linux")]
 mod sync;
 
 pub(crate) fn address(n: u32) -> Address {

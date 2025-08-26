@@ -1,4 +1,3 @@
-#![cfg(all(target_os = "linux", feature = "sync-tests"))]
 use {
     super::*,
     crate::test_psql::{

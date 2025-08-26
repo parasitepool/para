@@ -1,4 +1,4 @@
-#[cfg(all(target_os = "linux", feature = "sync-tests"))]
+#[cfg(target_os = "linux")]
 use {
     super::*,
     pgtemp::{PgTempDB, PgTempDBBuilder},
@@ -8,7 +8,7 @@ pub(crate) struct TestServer {
     child: Child,
     port: u16,
     tempdir: Arc<TempDir>,
-    #[cfg(all(target_os = "linux", feature = "sync-tests"))]
+    #[cfg(target_os = "linux")]
     pg_db: Option<PgTempDB>,
 }
 
@@ -56,12 +56,12 @@ impl TestServer {
             child,
             port,
             tempdir,
-            #[cfg(all(target_os = "linux", feature = "sync-tests"))]
+            #[cfg(target_os = "linux")]
             pg_db: None,
         }
     }
 
-    #[cfg(all(target_os = "linux", feature = "sync-tests"))]
+    #[cfg(target_os = "linux")]
     pub(crate) async fn spawn_with_sync_endpoint() -> Self {
         let psql_binpath = match Command::new("pg_config").arg("--bindir").output() {
             Ok(output) if output.status.success() => String::from_utf8(output.stdout)
@@ -134,7 +134,7 @@ impl TestServer {
         self.tempdir.path().join("logs")
     }
 
-    #[cfg(all(target_os = "linux", feature = "sync-tests"))]
+    #[cfg(target_os = "linux")]
     pub(crate) fn database_url(&self) -> Option<String> {
         self.pg_db.as_ref().map(|db| db.connection_uri())
     }
@@ -171,7 +171,7 @@ impl TestServer {
         response.json().unwrap()
     }
 
-    #[cfg(all(target_os = "linux", feature = "sync-tests"))]
+    #[cfg(target_os = "linux")]
     pub(crate) async fn post_json<T: serde::Serialize, R: DeserializeOwned>(
         &self,
         path: impl AsRef<str>,
