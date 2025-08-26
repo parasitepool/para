@@ -4,7 +4,7 @@ use {
     arguments::Arguments,
     axum::{
         Extension, Router,
-        extract::{Json, Path},
+        extract::{DefaultBodyLimit, Json, Path},
         http::{
             self, HeaderValue, StatusCode,
             header::{CONTENT_DISPOSITION, CONTENT_TYPE},

@@ -88,12 +88,13 @@ async fn test_sync_batch_with_block_only() {
 
 #[tokio::test]
 async fn test_sync_large_batch() {
+    let record_count_in_large_batch = 93000;
     let server = TestServer::spawn_with_sync_endpoint().await;
     setup_test_schema(server.database_url().unwrap())
         .await
         .unwrap();
 
-    let test_shares = create_test_shares(1000, 800002);
+    let test_shares = create_test_shares(record_count_in_large_batch, 800002);
     let test_block = create_test_block(800002);
 
     let batch = ShareBatch {
@@ -101,15 +102,15 @@ async fn test_sync_large_batch() {
         shares: test_shares,
         hostname: "test-node-large".to_string(),
         batch_id: BATCH_COUNTER.fetch_add(1, Ordering::SeqCst) as u64,
-        total_shares: 1000,
+        total_shares: record_count_in_large_batch as usize,
         start_id: 1,
-        end_id: 1000,
+        end_id: record_count_in_large_batch as i64,
     };
 
     let response: SyncResponse = server.post_json("/sync/batch", &batch).await;
 
     assert_eq!(response.status, "OK");
-    assert_eq!(response.received_count, 1000);
+    assert_eq!(response.received_count as u32, record_count_in_large_batch);
 }
 
 #[tokio::test]

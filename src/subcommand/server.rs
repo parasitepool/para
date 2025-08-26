@@ -110,7 +110,11 @@ impl Server {
                     .route("/payouts/{blockheight}", get(Self::payouts))
                     .route("/split", get(Self::open_split))
                     .route("/split/{blockheight}", get(Self::sat_split))
-                    .route("/sync/batch", post(Self::sync_batch))
+                    .route(
+                        "/sync/batch",
+                        post(Self::sync_batch)
+                            .layer(DefaultBodyLimit::max(52428800 /* 50MB */)),
+                    )
                     .layer(Extension(database));
             }
             Err(err) => {
