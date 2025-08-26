@@ -386,7 +386,7 @@ impl Server {
         Extension(database): Extension<Database>,
         Json(batch): Json<ShareBatch>,
     ) -> Result<Json<SyncResponse>, StatusCode> {
-        println!(
+        info!(
             "Received sync batch {} with {} shares from {}",
             batch.batch_id,
             batch.shares.len(),
@@ -395,11 +395,11 @@ impl Server {
 
         if let Some(block) = &batch.block {
             match database.upsert_block(block).await {
-                Ok(_) => println!(
+                Ok(_) => info!(
                     "Successfully upserted block for height {}",
                     block.blockheight
                 ),
-                Err(e) => eprintln!("Warning: Failed to upsert block: {}", e),
+                Err(e) => error!("Warning: Failed to upsert block: {}", e),
             }
         }
 
@@ -411,7 +411,7 @@ impl Server {
                     status: "OK".to_string(),
                     error_message: None,
                 };
-                println!("Successfully processed batch {}", batch.batch_id);
+                info!("Successfully processed batch {}", batch.batch_id);
                 Ok(Json(response))
             }
             Err(e) => {
@@ -421,14 +421,14 @@ impl Server {
                     status: "ERROR".to_string(),
                     error_message: Some(e.to_string()),
                 };
-                eprintln!("Failed to process batch {}: {}", batch.batch_id, e);
+                error!("Failed to process batch {}: {}", batch.batch_id, e);
                 Ok(Json(response))
             }
         }
     }
 
     async fn process_share_batch(batch: &ShareBatch, database: &Database) -> Result<()> {
-        println!(
+        info!(
             "Processing {} shares from batch {}",
             batch.shares.len(),
             batch.batch_id
@@ -446,7 +446,7 @@ impl Server {
             .map_err(|e| anyhow!("Failed to start transaction: {e}"))?;
 
         for (chunk_idx, chunk) in batch.shares.chunks(MAX_SHARES_PER_SUBBATCH).enumerate() {
-            println!(
+            info!(
                 "Processing sub-batch {}/{} with {} shares",
                 chunk_idx + 1,
                 batch.shares.len().div_ceil(MAX_SHARES_PER_SUBBATCH),
@@ -540,7 +540,7 @@ impl Server {
         let min_blockheight = batch.shares.iter().filter_map(|s| s.blockheight).min();
         let max_blockheight = batch.shares.iter().filter_map(|s| s.blockheight).max();
 
-        log::info!(
+        info!(
             "Stored batch {} with {} shares: total difficulty: {:.2}, {} unique workers, blockheights: {:?}-{:?}, origin: {}",
             batch.batch_id,
             batch.shares.len(),
