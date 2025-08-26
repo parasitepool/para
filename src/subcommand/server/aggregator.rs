@@ -8,27 +8,27 @@ use {
 pub(crate) struct Aggregator;
 
 impl Aggregator {
-    pub(crate) fn init(nodes: Vec<Url>) -> Result<Router> {
+    pub(crate) fn init(config: Arc<Config>) -> Result<Router> {
         let client = ClientBuilder::new()
             .timeout(Duration::from_secs(10))
             .use_rustls_tls()
             .build()?;
 
-        let nodes = Arc::new(nodes);
-
         let router = Router::new()
             .route("/aggregator/pool/pool.status", get(Self::pool_status))
             .route("/aggregator/users/{address}", get(Self::user_status))
+            .route("/aggregator/dashboard", get(Self::dashboard))
             .layer(Extension(client))
-            .layer(Extension(nodes));
+            .layer(Extension(config));
 
         Ok(router)
     }
 
     async fn pool_status(
         Extension(client): Extension<Client>,
-        Extension(nodes): Extension<Arc<Vec<Url>>>,
+        Extension(config): Extension<Arc<Config>>,
     ) -> ServerResult<Response> {
+        let nodes = config.nodes();
         let fetches = nodes.iter().map(|url| {
             let client = client.clone();
             async move {
@@ -68,8 +68,9 @@ impl Aggregator {
     async fn user_status(
         Path(address): Path<String>,
         Extension(client): Extension<Client>,
-        Extension(nodes): Extension<Arc<Vec<Url>>>,
+        Extension(config): Extension<Arc<Config>>,
     ) -> ServerResult<Response> {
+        let nodes = config.nodes();
         let fetches = nodes.iter().map(|url| {
             let client = client.clone();
             let address = address.clone();
@@ -105,5 +106,53 @@ impl Aggregator {
             aggregated.ok_or_else(|| anyhow!("User {address} not found on any node"))?;
 
         Ok(Json(aggregated).into_response())
+    }
+
+    pub(crate) async fn dashboard(
+        Extension(client): Extension<Client>,
+        Extension(config): Extension<Arc<Config>>,
+    ) -> ServerResult<Response> {
+        let nodes = config.nodes();
+        let credentials = config.credentials();
+        let fetches = nodes.iter().map(|url| {
+            let client = client.clone();
+            async move {
+                let result = async {
+                    let mut request_builder = client
+                        .get(url.join("/healthcheck")?)
+                        .header("accept", "application/json");
+
+                    if let Some((username, password)) = credentials {
+                        request_builder = request_builder.basic_auth(username, Some(password));
+                    }
+
+                    let resp = request_builder.send().await?;
+
+                    let healthcheck: Result<api::Healthcheck> =
+                        serde_json::from_str(&resp.text().await?).map_err(|err| anyhow!(err));
+
+                    healthcheck
+                }
+                .await;
+
+                (url, result)
+            }
+        });
+
+        let results: Vec<(&Url, Result<api::Healthcheck>)> = join_all(fetches).await;
+
+        let mut checks = BTreeMap::new();
+
+        for (url, result) in results {
+            if let Ok(healthcheck) = result {
+                checks.insert(url.host_str().unwrap_or("unknown").to_string(), healthcheck);
+            }
+        }
+
+        Ok(DashboardHtml {
+            healthchecks: checks,
+        }
+        .page(config.domain())
+        .into_response())
     }
 }

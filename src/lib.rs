@@ -6,7 +6,7 @@ use {
         Extension, Router,
         extract::{Json, Path},
         http::{
-            HeaderValue, StatusCode,
+            self, HeaderValue, StatusCode,
             header::{CONTENT_DISPOSITION, CONTENT_TYPE},
         },
         response::{IntoResponse, Response},
@@ -77,6 +77,8 @@ use {
     tracing::{debug, error, info, warn},
     tracing_subscriber::EnvFilter,
 };
+
+pub use subcommand::server::api;
 
 mod arguments;
 pub mod ckpool;
