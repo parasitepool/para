@@ -2806,9 +2806,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-acme"
-version = "0.14.0"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30fb8ee724c1b72179735e44646bda27838bb72ff7e7eff97c7ac5787b6f4fac"
+checksum = "230907c587e32543b0b0b4a41db582dd9acd29775862d400dd799904dedcf4f8"
 dependencies = [
  "async-io",
  "async-trait",
@@ -2830,7 +2830,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tower-service",
- "webpki-roots 1.0.0",
+ "webpki-roots 0.26.11",
  "x509-parser",
 ]
 
