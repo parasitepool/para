@@ -84,8 +84,9 @@ fn ping_output_comprehensive() {
     let ckpool = TestCkpool::spawn();
     let stratum_endpoint = ckpool.stratum_endpoint();
 
-    let ping =
-        CommandBuilder::new(format!("ping --count 2 --timeout 1 {stratum_endpoint}")).spawn();
+    let ping = CommandBuilder::new(format!("ping --count 2 --timeout 1 {stratum_endpoint}"))
+        .with_loglevel("info".into())
+        .spawn();
 
     let output = ping.wait_with_output().unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);

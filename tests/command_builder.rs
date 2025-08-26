@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::HashMap;
 
 pub(crate) struct CommandBuilder {
     args: Vec<String>,
@@ -7,6 +8,7 @@ pub(crate) struct CommandBuilder {
     stdin: Vec<u8>,
     stdout: bool,
     tempdir: Arc<TempDir>,
+    environment: HashMap<String, String>,
 }
 
 impl CommandBuilder {
@@ -18,6 +20,7 @@ impl CommandBuilder {
             stdin: Vec::new(),
             stdout: true,
             tempdir: Arc::new(TempDir::new().unwrap()),
+            environment: HashMap::new(),
         }
     }
 
@@ -26,6 +29,11 @@ impl CommandBuilder {
             integration_test,
             ..self
         }
+    }
+
+    pub(crate) fn with_loglevel(mut self, level: String) -> Self {
+        self.environment.insert("RUST_LOG".into(), level);
+        self
     }
 
     #[allow(unused)]
@@ -72,6 +80,11 @@ impl CommandBuilder {
     #[track_caller]
     pub(crate) fn spawn(self) -> Child {
         let mut command = self.command();
+
+        for (key, val) in self.environment.iter() {
+            command.env(key, val);
+        }
+
         let child = command.spawn().unwrap();
 
         child
