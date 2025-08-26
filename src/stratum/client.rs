@@ -1,20 +1,25 @@
 use super::*;
 
+type PendingResponses = Arc<Mutex<BTreeMap<Id, oneshot::Sender<(Message, usize)>>>>;
+
 pub struct Client {
     pub incoming: mpsc::Receiver<Message>,
     id_counter: AtomicU64,
     listener: JoinHandle<()>,
     password: String,
-    pending: Arc<Mutex<BTreeMap<Id, oneshot::Sender<Message>>>>,
+    pending: PendingResponses,
     tcp_writer: BufWriter<OwnedWriteHalf>,
     username: String,
 }
 
 impl Client {
-    pub async fn connect(host: &str, port: u16, username: &str, password: &str) -> Result<Self> {
-        info!("Connecting to {host}:{port} with user {username}");
-
-        let stream = TcpStream::connect((host, port)).await?;
+    pub async fn connect(
+        address: impl tokio::net::ToSocketAddrs,
+        username: &str,
+        password: &str,
+        timeout: Duration,
+    ) -> Result<Self> {
+        let stream = tokio::time::timeout(timeout, TcpStream::connect(address)).await??;
 
         let (tcp_reader, tcp_writer) = {
             let (rx, tx) = stream.into_split();
@@ -23,8 +28,7 @@ impl Client {
 
         let (incoming_tx, incoming_rx) = mpsc::channel(32);
 
-        let pending: Arc<Mutex<BTreeMap<Id, oneshot::Sender<Message>>>> =
-            Arc::new(Mutex::new(BTreeMap::new()));
+        let pending: PendingResponses = Arc::new(Mutex::new(BTreeMap::new()));
 
         let listener = {
             let incoming_tx = incoming_tx.clone();
@@ -39,14 +43,20 @@ impl Client {
             pending: pending.clone(),
             username: username.to_string(),
             password: password.to_string(),
-            id_counter: AtomicU64::new(1),
+            id_counter: AtomicU64::new(0),
         })
+    }
+
+    pub async fn disconnect(&mut self) -> Result {
+        self.tcp_writer.shutdown().await?;
+        self.listener.abort();
+        Ok(())
     }
 
     async fn listener<R>(
         mut tcp_reader: BufReader<R>,
         incoming: mpsc::Sender<Message>,
-        pending: Arc<Mutex<BTreeMap<Id, oneshot::Sender<Message>>>>,
+        pending: PendingResponses,
     ) where
         R: AsyncRead + Unpin,
     {
@@ -55,7 +65,7 @@ impl Client {
         loop {
             line.clear();
 
-            match tcp_reader.read_line(&mut line).await {
+            let bytes_read = match tcp_reader.read_line(&mut line).await {
                 Ok(0) => {
                     error!("Stratum server disconnected");
                     break;
@@ -89,15 +99,18 @@ impl Client {
 
                     if let Some(tx) = tx {
                         if tx
-                            .send(Message::Response {
-                                id: id.clone(),
-                                result,
-                                error,
-                                reject_reason,
-                            })
+                            .send((
+                                Message::Response {
+                                    id: id.clone(),
+                                    result,
+                                    error,
+                                    reject_reason,
+                                },
+                                bytes_read,
+                            ))
                             .is_err()
                         {
-                            debug!("Dropped response for id={id} — receiver went away");
+                            debug!("Dropped response for id={id}: receiver went away");
                         }
                     } else {
                         warn!("Unmatched response ID={id}: {line}");
@@ -114,23 +127,27 @@ impl Client {
         }
     }
 
-    pub async fn subscribe(&mut self) -> Result<SubscribeResult> {
-        let rx = self
+    pub async fn subscribe(&mut self) -> Result<(SubscribeResult, Duration, usize)> {
+        let (rx, instant) = self
             .send_request(
                 "mining.subscribe",
                 serde_json::to_value(Subscribe {
-                    user_agent: "paraminer/0.0.1".into(),
+                    user_agent: USER_AGENT.into(),
                     extranonce1: None,
                 })?,
             )
             .await?;
 
-        match rx.await? {
+        let (message, bytes_read) = rx.await?;
+
+        let duration = instant.elapsed();
+
+        match message {
             Message::Response {
                 result: Some(result),
                 error: None,
                 ..
-            } => Ok(serde_json::from_value(result)?),
+            } => Ok((serde_json::from_value(result)?, duration, bytes_read)),
             Message::Response {
                 error: Some(err), ..
             } => Err(anyhow!("mining.subscribe error: {}", err)),
@@ -138,8 +155,8 @@ impl Client {
         }
     }
 
-    pub async fn authorize(&mut self) -> Result {
-        let rx = self
+    pub async fn authorize(&mut self) -> Result<(Duration, usize)> {
+        let (rx, instant) = self
             .send_request(
                 "mining.authorize",
                 serde_json::to_value(Authorize {
@@ -149,14 +166,18 @@ impl Client {
             )
             .await?;
 
-        match rx.await? {
+        let (message, bytes_read) = rx.await?;
+
+        let duration = instant.elapsed();
+
+        match message {
             Message::Response {
                 result: Some(result),
                 error: None,
                 ..
             } => {
                 if serde_json::from_value(result)? {
-                    Ok(())
+                    Ok((duration, bytes_read))
                 } else {
                     Err(anyhow!("Unauthorized"))
                 }
@@ -175,7 +196,7 @@ impl Client {
         ntime: Ntime,
         nonce: Nonce,
     ) -> Result {
-        let rx = self
+        let (rx, _) = self
             .send_request(
                 "mining.submit",
                 serde_json::to_value(Submit {
@@ -188,7 +209,9 @@ impl Client {
             )
             .await?;
 
-        match rx.await? {
+        let (message, _) = rx.await?;
+
+        match message {
             Message::Response {
                 result: Some(result),
                 error: None,
@@ -216,7 +239,7 @@ impl Client {
         &mut self,
         method: &str,
         params: serde_json::Value,
-    ) -> Result<oneshot::Receiver<Message>> {
+    ) -> Result<(oneshot::Receiver<(Message, usize)>, Instant)> {
         let id = self.next_id();
 
         let msg = Message::Request {
@@ -229,23 +252,20 @@ impl Client {
 
         self.pending.lock().await.insert(id.clone(), tx);
 
-        self.send(&msg).await?;
+        let instant = self.send(&msg).await?;
 
-        Ok(rx)
+        Ok((rx, instant))
     }
 
-    async fn send(&mut self, message: &Message) -> Result {
+    async fn send(&mut self, message: &Message) -> Result<Instant> {
         let frame = serde_json::to_string(message)? + "\n";
         self.tcp_writer.write_all(frame.as_bytes()).await?;
+        let instant = Instant::now();
         self.tcp_writer.flush().await?;
-        Ok(())
+        Ok(instant)
     }
 
     fn next_id(&mut self) -> Id {
         Id::Number(self.id_counter.fetch_add(1, Ordering::Relaxed))
-    }
-
-    pub fn shutdown(&self) {
-        self.listener.abort()
     }
 }

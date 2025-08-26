@@ -12,7 +12,7 @@ pub(crate) struct Controller {
 
 impl Controller {
     pub(crate) async fn new(mut client: Client) -> Result<Self> {
-        let subscribe = client.subscribe().await?;
+        let (subscribe, _, _) = client.subscribe().await?;
         client.authorize().await?;
 
         info!(
@@ -55,7 +55,7 @@ impl Controller {
                 }
                 _ = ctrl_c() => {
                     info!("Shutting down client and hasher");
-                    self.client.shutdown();
+                    self.client.disconnect().await?;
                     self.cancel_hasher();
                     break;
                 }
