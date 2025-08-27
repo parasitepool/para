@@ -1,6 +1,6 @@
 #![allow(clippy::too_many_arguments)]
 use {
-    anyhow::{Context, Error, anyhow, ensure},
+    anyhow::{Context, Error, anyhow, bail, ensure},
     arguments::Arguments,
     axum::{
         Extension, Router,
@@ -14,12 +14,14 @@ use {
     },
     axum_server::Handle,
     bitcoin::{
-        BlockHash, CompactTarget, Target, TxMerkleNode,
+        BlockHash, CompactTarget, Network, Target, TxMerkleNode,
         block::{self, Header},
         consensus::Decodable,
         hashes::{Hash, sha256d},
     },
+    bitcoincore_rpc::{Auth, RpcApi},
     byteorder::{BigEndian, ByteOrder, LittleEndian},
+    chain::Chain,
     clap::Parser,
     derive_more::Display,
     difficulty::Difficulty,
@@ -46,7 +48,9 @@ use {
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
     std::{
         collections::{BTreeMap, HashMap},
-        env, fmt, fs, io,
+        env,
+        fmt::{self, Display, Formatter},
+        fs, io,
         net::{SocketAddr, ToSocketAddrs},
         ops::Add,
         path::{Path, PathBuf},
@@ -56,6 +60,7 @@ use {
             Arc, LazyLock,
             atomic::{AtomicBool, AtomicU64, Ordering},
         },
+        thread,
         time::{Duration, Instant},
     },
     stratum::{Id, Message, Notify, SetDifficulty},
@@ -81,6 +86,7 @@ use {
 pub use subcommand::server::api;
 
 mod arguments;
+mod chain;
 pub mod ckpool;
 pub mod difficulty;
 pub mod hash_rate;

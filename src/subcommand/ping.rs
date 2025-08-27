@@ -1,7 +1,6 @@
 use super::*;
 
 #[derive(Parser, Debug)]
-#[command(about = "Ping a stratum mining server.")]
 pub(crate) struct Ping {
     target: String,
     #[arg(long, help = "Stop after <COUNT> replies")]
