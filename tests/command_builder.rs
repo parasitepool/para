@@ -31,6 +31,7 @@ impl CommandBuilder {
         }
     }
 
+    #[cfg(target_os = "linux")]
     pub(crate) fn with_loglevel(mut self, level: String) -> Self {
         self.environment.insert("RUST_LOG".into(), level);
         self
