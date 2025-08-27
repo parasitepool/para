@@ -23,6 +23,7 @@ use {
         time::Duration,
     },
     tempfile::TempDir,
+    test_pool::TestPool,
     test_server::TestServer,
     to_args::ToArgs,
 };
@@ -37,12 +38,15 @@ mod command_builder;
 #[cfg(target_os = "linux")]
 mod test_ckpool;
 #[cfg(target_os = "linux")]
+mod test_pool;
+#[cfg(target_os = "linux")]
 mod test_psql;
 mod test_server;
 mod to_args;
 
 #[cfg(target_os = "linux")]
 mod ping;
+mod pool;
 mod server;
 #[cfg(target_os = "linux")]
 mod sync;

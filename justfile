@@ -43,6 +43,11 @@ ping host='parasite.wtf':
 ping-auth host='parasite.wtf' username='bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg6dzw5nk24r45dzasde25r3.tick' password='x':
   cargo run ping --username {{username}} --password {{password}} {{host}}:42069
 
+pool: 
+  RUST_LOG=info cargo run -- pool \
+    --address 127.0.0.1 \
+    --bitcoin-rpc-cookie-file /var/lib/bitcoind/.cookie
+
 server: 
   RUST_LOG=info cargo run -- server \
     --log-dir copr/logs \

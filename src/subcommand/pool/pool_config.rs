@@ -3,29 +3,29 @@ use super::*;
 #[derive(Clone, Debug, Parser)]
 pub(crate) struct PoolConfig {
     #[clap(long, help = "Listen at <ADDRESS>")]
-    pub(crate) address: Option<String>,
+    address: Option<String>,
     #[arg(long, help = "Load Bitcoin Core data dir from <BITCOIN_DATA_DIR>.")]
-    pub(crate) bitcoin_data_dir: Option<PathBuf>,
+    bitcoin_data_dir: Option<PathBuf>,
     #[arg(
         long,
         help = "Authenticate to Bitcoin Core RPC with <BITCOIN_RPC_PASSWORD>."
     )]
-    pub(crate) bitcoin_rpc_password: Option<String>,
+    bitcoin_rpc_password: Option<String>,
     #[arg(long, help = "Connect to Bitcoin Core RPC at <BITCOIN_RPC_PORT>.")]
-    pub(crate) bitcoin_rpc_port: Option<u16>,
+    bitcoin_rpc_port: Option<u16>,
     #[arg(
         long,
         help = "Authenticate to Bitcoin Core RPC as <BITCOIN_RPC_USERNAME>."
     )]
-    pub(crate) bitcoin_rpc_username: Option<String>,
+    bitcoin_rpc_username: Option<String>,
     #[arg(long, help = "Load Bitcoin Core RPC cookie file from <COOKIE_FILE>.")]
-    pub(crate) cookie_file: Option<PathBuf>,
+    bitcoin_rpc_cookie_file: Option<PathBuf>,
     #[arg(long = "chain", help = "Run on <CHAIN>")]
-    pub(crate) chain: Option<Chain>,
+    chain: Option<Chain>,
     #[arg(long, alias = "datadir", help = "Store acme cache in <DATA_DIR>")]
-    pub(crate) data_dir: Option<PathBuf>,
+    data_dir: Option<PathBuf>,
     #[clap(long, help = "Listen on <PORT>")]
-    pub(crate) port: Option<u16>,
+    port: Option<u16>,
 }
 
 impl PoolConfig {
@@ -113,7 +113,7 @@ impl PoolConfig {
     }
 
     pub fn cookie_file(&self) -> Result<PathBuf> {
-        if let Some(cookie_file) = &self.cookie_file {
+        if let Some(cookie_file) = &self.bitcoin_rpc_cookie_file {
             return Ok(cookie_file.clone());
         }
 
@@ -132,5 +132,13 @@ impl PoolConfig {
         let path = self.chain().join_with_data_dir(path);
 
         Ok(path.join(".cookie"))
+    }
+
+    pub fn port(&self) -> u16 {
+        self.port.unwrap_or(42069)
+    }
+
+    pub fn address(&self) -> String {
+        self.address.clone().unwrap_or("0.0.0.0".into())
     }
 }

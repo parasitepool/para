@@ -67,7 +67,7 @@ use {
     sysinfo::{Disks, System},
     tokio::{
         io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader, BufWriter},
-        net::{TcpStream, tcp::OwnedWriteHalf},
+        net::{TcpListener, TcpStream, tcp::OwnedWriteHalf},
         runtime::Runtime,
         signal::ctrl_c,
         sync::{Mutex, mpsc, oneshot},

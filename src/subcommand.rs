@@ -25,7 +25,7 @@ impl Subcommand {
         match self {
             Self::Miner(miner) => miner.run(),
             Self::Ping(ping) => Runtime::new()?.block_on(async { ping.run().await }),
-            Self::Pool(pool) => pool.run(),
+            Self::Pool(pool) => Runtime::new()?.block_on(async { pool.run().await }),
             Self::Server(server) => {
                 let handle = Handle::new();
                 let rt = Runtime::new()?;

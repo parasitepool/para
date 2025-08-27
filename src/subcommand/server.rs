@@ -4,7 +4,7 @@ use {
     accept_json::AcceptJson,
     aggregator::Aggregator,
     axum::extract::Path,
-    config::Config,
+    server_config::ServerConfig,
     database::Database,
     error::{OptionExt, ServerError, ServerResult},
     templates::{
@@ -16,7 +16,7 @@ use {
 mod accept_json;
 mod aggregator;
 pub mod api;
-mod config;
+mod server_config;
 pub(crate) mod database;
 mod error;
 mod templates;
@@ -69,7 +69,7 @@ fn format_uptime(uptime_seconds: u64) -> String {
 #[derive(Clone, Debug, Parser)]
 pub struct Server {
     #[command(flatten)]
-    pub(crate) config: Config,
+    pub(crate) config: ServerConfig,
 }
 
 impl Server {
@@ -147,7 +147,7 @@ impl Server {
         }
     }
 
-    async fn home(Extension(config): Extension<Arc<Config>>) -> ServerResult<PageHtml<HomeHtml>> {
+    async fn home(Extension(config): Extension<Arc<ServerConfig>>) -> ServerResult<PageHtml<HomeHtml>> {
         let domain = config.domain();
 
         Ok(HomeHtml {
@@ -156,7 +156,7 @@ impl Server {
         .page(domain))
     }
 
-    async fn users(Extension(config): Extension<Arc<Config>>) -> ServerResult<Response> {
+    async fn users(Extension(config): Extension<Arc<ServerConfig>>) -> ServerResult<Response> {
         task::block_in_place(|| {
             Ok(Json(
                 fs::read_dir(config.log_dir().join("users"))
@@ -170,7 +170,7 @@ impl Server {
     }
 
     pub(crate) async fn healthcheck(
-        Extension(config): Extension<Arc<Config>>,
+        Extension(config): Extension<Arc<ServerConfig>>,
         AcceptJson(accept_json): AcceptJson,
     ) -> ServerResult<Response> {
         task::block_in_place(|| {
@@ -291,7 +291,7 @@ impl Server {
 
     fn spawn(
         &self,
-        config: Arc<Config>,
+        config: Arc<ServerConfig>,
         router: Router,
         handle: Handle,
     ) -> Result<task::JoinHandle<io::Result<()>>> {
@@ -559,7 +559,7 @@ impl Server {
 mod tests {
     use super::*;
 
-    fn parse_server_config(args: &str) -> Config {
+    fn parse_server_config(args: &str) -> ServerConfig {
         match Arguments::try_parse_from(args.split_whitespace()) {
             Ok(arguments) => match arguments.subcommand {
                 Subcommand::Server(server) => server.config,
