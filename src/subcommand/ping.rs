@@ -20,7 +20,7 @@ impl Ping {
 
         let ping_type = PingType::new(self.username.as_deref(), self.password.as_deref());
 
-        info!("{} {} ({})", ping_type, self.target, addr);
+        println!("{} {} ({})", ping_type, self.target, addr);
 
         let stats = Arc::new(PingStats::new());
         let sequence = AtomicU64::new(0);
@@ -40,10 +40,10 @@ impl Ping {
                         Ok((duration, size)) => {
                             success = true;
                             stats.record_success(duration);
-                            info!("Response from {addr}: seq={seq} size={size} time={:.3}ms", duration.as_secs_f64() * 1000.0);
+                            println!("Response from {addr}: seq={seq} size={size} time={:.3}ms", duration.as_secs_f64() * 1000.0);
                         }
                         Err(e) => {
-                            error!("Request timeout for seq={seq} ({e})");
+                            println!("Request timeout for seq={seq} ({e})");
                         }
                     }
 
@@ -259,6 +259,6 @@ impl fmt::Display for PingStats {
 }
 
 fn print_final_stats(target: &str, stats: &PingStats) {
-    info!("\n--- {target} ping statistics ---");
-    info!("{stats}");
+    println!("\n--- {target} ping statistics ---");
+    println!("{stats}");
 }
