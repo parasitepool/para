@@ -260,5 +260,5 @@ impl fmt::Display for PingStats {
 
 fn print_final_stats(target: &str, stats: &PingStats) {
     println!("\n--- {target} ping statistics ---");
-    println!("{stats}");
+    print!("{stats}");
 }
