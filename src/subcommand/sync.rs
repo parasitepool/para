@@ -124,15 +124,15 @@ impl SyncSend {
 
         // shutdown flags
         tokio::spawn(async move {
-            let _ = tokio::signal::ctrl_c().await;
-            println!("Received shutdown signal, stopping sync send...");
+            let _ = ctrl_c().await;
+            info!("Received shutdown signal, stopping sync send...");
             shutdown_flag_clone.store(true, Ordering::Relaxed);
-            std::process::exit(0);
+            process::exit(0);
         });
 
-        println!("Starting HTTP share sync send...");
+        info!("Starting HTTP share sync send...");
         if !self.terminate_when_complete {
-            println!("Keep-alive mode enabled - will continue running even when caught up");
+            info!("Keep-alive mode enabled - will continue running even when caught up");
         }
 
         let database = Database::new(self.database_url.clone()).await?;
@@ -144,22 +144,22 @@ impl SyncSend {
         if self.reset_id {
             current_id = 0;
             self.save_current_id(current_id).await?;
-            println!("Reset current ID to 0");
+            info!("Reset current ID to 0");
         }
 
-        println!("Starting sync send from ID: {current_id}");
+        info!("Starting sync send from ID: {current_id}");
 
         while !shutdown_flag.load(Ordering::Relaxed) {
             match self.sync_batch(&database, &client, &mut current_id).await {
                 Ok(SyncResult::Complete) => {
                     if !self.terminate_when_complete {
                         if !caught_up_logged {
-                            println!("Sync send caught up, waiting for new data...");
+                            info!("Sync send caught up, waiting for new data...");
                             caught_up_logged = true;
                         }
                         sleep(Duration::from_millis(SYNC_DELAY_MS)).await;
                     } else {
-                        println!("Sync send completed successfully");
+                        info!("Sync send completed successfully");
                         break;
                     }
                 }
@@ -169,7 +169,7 @@ impl SyncSend {
                 }
                 Ok(SyncResult::WaitForNewBlock) => {
                     if !caught_up_logged {
-                        println!(
+                        info!(
                             "Current and latest records have same blockheight, waiting for new block..."
                         );
                         caught_up_logged = true;
@@ -177,14 +177,14 @@ impl SyncSend {
                     sleep(Duration::from_millis(BLOCKHEIGHT_CHECK_DELAY_MS)).await;
                 }
                 Err(e) => {
-                    eprintln!("Sync send error: {e}");
+                    error!("Sync send error: {e}");
                     sleep(Duration::from_millis(SYNC_DELAY_MS * 5)).await;
                 }
             }
         }
 
         if shutdown_flag.load(Ordering::Relaxed) {
-            println!("Sync send stopped due to shutdown signal");
+            info!("Sync send stopped due to shutdown signal");
         }
 
         Ok(())
@@ -214,7 +214,7 @@ impl SyncSend {
 
         let target_id = std::cmp::min(*current_id + self.batch_size, max_id - TARGET_ID_BUFFER);
 
-        println!(
+        info!(
             "Fetching shares from ID {} to {} (max: {}) - blockheights: {:?} -> {:?}",
             *current_id + 1,
             target_id,
@@ -224,7 +224,7 @@ impl SyncSend {
         );
 
         // Run share compression BEFORE transmitting
-        println!(
+        info!(
             "Compressing shares in range {} to {}",
             *current_id + 1,
             target_id
@@ -234,10 +234,10 @@ impl SyncSend {
             .await
         {
             Ok(compressed_count) => {
-                println!("Compressed {compressed_count} share records in range");
+                info!("Compressed {compressed_count} share records in range");
             }
             Err(e) => {
-                eprintln!(
+                error!(
                     "Warning: Failed to compress range {} to {}: {}",
                     *current_id + 1,
                     target_id,
@@ -257,13 +257,13 @@ impl SyncSend {
         let highest_id = shares.last().map(|share| share.id);
 
         if shares.is_empty() && block.is_none() {
-            println!("No shares found in range, moving to next batch");
+            info!("No shares found in range, moving to next batch");
             *current_id = target_id;
             self.save_current_id(*current_id).await?;
             return Ok(SyncResult::Continue);
         }
 
-        println!("Found {} shares to sync (after compression)", shares.len());
+        info!("Found {} shares to sync (after compression)", shares.len());
 
         // retry n times
         for attempt in 1..=MAX_RETRIES {
@@ -277,7 +277,7 @@ impl SyncSend {
                     return Ok(SyncResult::Continue);
                 }
                 Err(e) => {
-                    eprintln!("Attempt {attempt} failed: {e}");
+                    error!("Attempt {attempt} failed: {e}");
                     if attempt == MAX_RETRIES {
                         return Err(e);
                     }
@@ -362,7 +362,7 @@ impl SyncSend {
             ));
         }
 
-        println!(
+        info!(
             "Successfully synced batch {} with {} shares (IDs {}-{})",
             batch_id,
             shares.len(),

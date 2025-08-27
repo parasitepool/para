@@ -53,7 +53,7 @@ impl Subcommand {
                 let shutdown_handle = handle.clone();
                 rt.spawn(async move {
                     let _ = ctrl_c().await;
-                    println!("Received shutdown signal, stopping server...");
+                    info!("Received shutdown signal, stopping server...");
                     shutdown_handle.shutdown();
                 });
 
