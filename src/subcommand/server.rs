@@ -1,7 +1,9 @@
 use {
     super::*,
+    crate::subcommand::sync::{ShareBatch, SyncResponse},
     accept_json::AcceptJson,
     aggregator::Aggregator,
+    axum::extract::Path,
     config::Config,
     database::Database,
     error::{OptionExt, ServerError, ServerResult},
@@ -108,6 +110,11 @@ impl Server {
                     .route("/payouts/{blockheight}", get(Self::payouts))
                     .route("/split", get(Self::open_split))
                     .route("/split/{blockheight}", get(Self::sat_split))
+                    .route(
+                        "/sync/batch",
+                        post(Self::sync_batch)
+                            .layer(DefaultBodyLimit::max(52428800 /* 50MB */)),
+                    )
                     .layer(Extension(database));
             }
             Err(err) => {
@@ -373,6 +380,178 @@ impl Server {
         });
 
         Ok(acceptor)
+    }
+
+    pub(crate) async fn sync_batch(
+        Extension(database): Extension<Database>,
+        Json(batch): Json<ShareBatch>,
+    ) -> Result<Json<SyncResponse>, StatusCode> {
+        info!(
+            "Received sync batch {} with {} shares from {}",
+            batch.batch_id,
+            batch.shares.len(),
+            batch.hostname
+        );
+
+        if let Some(block) = &batch.block {
+            match database.upsert_block(block).await {
+                Ok(_) => info!(
+                    "Successfully upserted block for height {}",
+                    block.blockheight
+                ),
+                Err(e) => error!("Warning: Failed to upsert block: {}", e),
+            }
+        }
+
+        match Self::process_share_batch(&batch, &database).await {
+            Ok(_) => {
+                let response = SyncResponse {
+                    batch_id: batch.batch_id,
+                    received_count: batch.shares.len(),
+                    status: "OK".to_string(),
+                    error_message: None,
+                };
+                info!("Successfully processed batch {}", batch.batch_id);
+                Ok(Json(response))
+            }
+            Err(e) => {
+                let response = SyncResponse {
+                    batch_id: batch.batch_id,
+                    received_count: 0,
+                    status: "ERROR".to_string(),
+                    error_message: Some(e.to_string()),
+                };
+                error!("Failed to process batch {}: {}", batch.batch_id, e);
+                Ok(Json(response))
+            }
+        }
+    }
+
+    async fn process_share_batch(batch: &ShareBatch, database: &Database) -> Result<()> {
+        info!(
+            "Processing {} shares from batch {}",
+            batch.shares.len(),
+            batch.batch_id
+        );
+
+        if batch.shares.is_empty() {
+            return Ok(());
+        }
+
+        const MAX_SHARES_PER_SUBBATCH: usize = 2500;
+        let mut tx = database
+            .pool
+            .begin()
+            .await
+            .map_err(|e| anyhow!("Failed to start transaction: {e}"))?;
+
+        for (chunk_idx, chunk) in batch.shares.chunks(MAX_SHARES_PER_SUBBATCH).enumerate() {
+            info!(
+                "Processing sub-batch {}/{} with {} shares",
+                chunk_idx + 1,
+                batch.shares.len().div_ceil(MAX_SHARES_PER_SUBBATCH),
+                chunk.len()
+            );
+
+            let mut query_builder = sqlx::QueryBuilder::new(
+                "INSERT INTO remote_shares (
+                id, origin, blockheight, workinfoid, clientid, enonce1, nonce2, nonce, ntime,
+                diff, sdiff, hash, result, reject_reason, error, errn, createdate, createby,
+                createcode, createinet, workername, username, lnurl, address, agent
+            ) ",
+            );
+
+            query_builder.push_values(chunk, |mut b, share| {
+                b.push_bind(share.id)
+                    .push_bind(&batch.hostname)
+                    .push_bind(share.blockheight)
+                    .push_bind(share.workinfoid)
+                    .push_bind(share.clientid)
+                    .push_bind(&share.enonce1)
+                    .push_bind(&share.nonce2)
+                    .push_bind(&share.nonce)
+                    .push_bind(&share.ntime)
+                    .push_bind(share.diff)
+                    .push_bind(share.sdiff)
+                    .push_bind(&share.hash)
+                    .push_bind(share.result)
+                    .push_bind(&share.reject_reason)
+                    .push_bind(&share.error)
+                    .push_bind(share.errn)
+                    .push_bind(&share.createdate)
+                    .push_bind(&share.createby)
+                    .push_bind(&share.createcode)
+                    .push_bind(&share.createinet)
+                    .push_bind(&share.workername)
+                    .push_bind(&share.username)
+                    .push_bind(&share.lnurl)
+                    .push_bind(&share.address)
+                    .push_bind(&share.agent);
+            });
+
+            query_builder.push(
+                " ON CONFLICT (id, origin) DO UPDATE SET
+                blockheight = EXCLUDED.blockheight,
+                workinfoid = EXCLUDED.workinfoid,
+                clientid = EXCLUDED.clientid,
+                enonce1 = EXCLUDED.enonce1,
+                nonce2 = EXCLUDED.nonce2,
+                nonce = EXCLUDED.nonce,
+                ntime = EXCLUDED.ntime,
+                diff = EXCLUDED.diff,
+                sdiff = EXCLUDED.sdiff,
+                hash = EXCLUDED.hash,
+                result = EXCLUDED.result,
+                reject_reason = EXCLUDED.reject_reason,
+                error = EXCLUDED.error,
+                errn = EXCLUDED.errn,
+                createdate = EXCLUDED.createdate,
+                createby = EXCLUDED.createby,
+                createcode = EXCLUDED.createcode,
+                createinet = EXCLUDED.createinet,
+                workername = EXCLUDED.workername,
+                username = EXCLUDED.username,
+                lnurl = EXCLUDED.lnurl,
+                address = EXCLUDED.address,
+                agent = EXCLUDED.agent",
+            );
+
+            let query = query_builder.build();
+            query.execute(&mut *tx).await.map_err(|e| {
+                anyhow!(
+                    "Failed to batch insert shares in sub-batch {}: {e}",
+                    chunk_idx + 1
+                )
+            })?;
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| anyhow!("Failed to commit transaction: {e}"))?;
+
+        let total_diff: f64 = batch.shares.iter().filter_map(|s| s.diff).sum();
+        let worker_count = batch
+            .shares
+            .iter()
+            .filter_map(|s| s.workername.as_ref())
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+
+        let min_blockheight = batch.shares.iter().filter_map(|s| s.blockheight).min();
+        let max_blockheight = batch.shares.iter().filter_map(|s| s.blockheight).max();
+
+        info!(
+            "Stored batch {} with {} shares: total difficulty: {:.2}, {} unique workers, blockheights: {:?}-{:?}, origin: {}",
+            batch.batch_id,
+            batch.shares.len(),
+            total_diff,
+            worker_count,
+            min_blockheight,
+            max_blockheight,
+            batch.hostname
+        );
+
+        Ok(())
     }
 }
 

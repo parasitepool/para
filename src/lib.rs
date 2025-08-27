@@ -4,13 +4,13 @@ use {
     arguments::Arguments,
     axum::{
         Extension, Router,
-        extract::{Json, Path},
+        extract::{DefaultBodyLimit, Json},
         http::{
             self, HeaderValue, StatusCode,
             header::{CONTENT_DISPOSITION, CONTENT_TYPE},
         },
         response::{IntoResponse, Response},
-        routing::{MethodRouter, get},
+        routing::{MethodRouter, get, post},
     },
     axum_server::Handle,
     bitcoin::{
@@ -49,12 +49,12 @@ use {
         env, fmt, fs, io,
         net::{SocketAddr, ToSocketAddrs},
         ops::Add,
-        path::PathBuf,
+        path::{Path, PathBuf},
         process,
         str::FromStr,
         sync::{
             Arc, LazyLock,
-            atomic::{AtomicU64, Ordering},
+            atomic::{AtomicBool, AtomicU64, Ordering},
         },
         time::{Duration, Instant},
     },
@@ -85,7 +85,7 @@ pub mod ckpool;
 pub mod difficulty;
 pub mod hash_rate;
 pub mod stratum;
-mod subcommand;
+pub mod subcommand;
 
 pub const COIN_VALUE: u64 = 100_000_000;
 pub const USER_AGENT: &str = "paraminer/0.0.1";
