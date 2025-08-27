@@ -32,7 +32,8 @@ impl Subcommand {
                     let hostname = System::host_name().ok_or(anyhow!("no hostname found"))?;
 
                     if !sync_endpoint.contains(&hostname) {
-                        let sync_send = sync::SyncSend::default().with_endpoint(sync_endpoint);
+                        let sync_send =
+                            sync::SyncSend::default().with_endpoint(sync_endpoint.clone());
                         let sync_handle = handle.clone();
 
                         let send_task = rt.spawn_blocking(move || {
@@ -45,10 +46,7 @@ impl Subcommand {
                             });
                         });
                         sync_task = Some(send_task);
-                        info!(
-                            "Started SyncSend to endpoint: {}",
-                            server.config.sync_endpoint().unwrap()
-                        );
+                        info!("Started SyncSend to endpoint: {sync_endpoint}");
                     }
                 }
 
@@ -70,8 +68,7 @@ impl Subcommand {
             }
             Self::SyncSend(sync_send) => {
                 let handle = Handle::new();
-                Runtime::new()?.block_on(async { sync_send.run(handle).await.unwrap() });
-                Ok(())
+                Ok(Runtime::new()?.block_on(async { sync_send.run(handle).await })?)
             }
         }
     }
