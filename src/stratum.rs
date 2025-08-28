@@ -273,7 +273,7 @@ impl Serialize for Authorize {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, serde_json::json};
+    use super::*;
 
     #[track_caller]
     fn case(s: &str, expected: Message) {

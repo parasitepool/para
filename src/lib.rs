@@ -14,15 +14,19 @@ use {
     },
     axum_server::Handle,
     bitcoin::{
-        BlockHash, CompactTarget, Network, Target, TxMerkleNode,
+        Address, Amount, BlockHash, CompactTarget, Network, OutPoint, ScriptBuf, Sequence, Target,
+        Transaction, TxIn, TxMerkleNode, TxOut, Witness,
         block::{self, Header},
-        consensus::Decodable,
+        consensus::{Decodable, self},
         hashes::{Hash, sha256d},
+        locktime::absolute::LockTime,
+        script::{Builder, PushBytes, PushBytesBuf, write_scriptint},
     },
-    bitcoincore_rpc::{Auth, RpcApi},
+    bitcoincore_rpc::{Auth, RpcApi, json::GetBlockTemplateResult},
     byteorder::{BigEndian, ByteOrder, LittleEndian},
     chain::Chain,
     clap::Parser,
+    coinbase::CoinbaseBuilder,
     derive_more::Display,
     difficulty::Difficulty,
     futures::stream::StreamExt,
@@ -43,7 +47,7 @@ use {
         de::{self, Deserializer},
         ser::SerializeSeq,
     },
-    serde_json::Value,
+    serde_json::{Value, json},
     serde_with::{DeserializeFromStr, SerializeDisplay},
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
     std::{
@@ -63,7 +67,7 @@ use {
         thread,
         time::{Duration, Instant},
     },
-    stratum::{Id, Message, Notify, SetDifficulty},
+    stratum::{Id, Message, Nbits, Notify, Ntime, SetDifficulty, SubscribeResult, Version},
     sysinfo::{Disks, System},
     tokio::{
         io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader, BufWriter},
@@ -88,6 +92,7 @@ pub use subcommand::server::api;
 mod arguments;
 mod chain;
 pub mod ckpool;
+mod coinbase;
 pub mod difficulty;
 pub mod hash_rate;
 pub mod stratum;
@@ -95,6 +100,9 @@ pub mod subcommand;
 
 pub const COIN_VALUE: u64 = 100_000_000;
 pub const USER_AGENT: &str = "paraminer/0.0.1";
+// pub const EXTRANONCE1_SIZE: u32 = 4;
+pub const EXTRANONCE2_SIZE: usize = 8;
+pub const MAX_COINBASE_INPUT_SIZE: usize = 100;
 
 type Result<T = (), E = Error> = std::result::Result<T, E>;
 
