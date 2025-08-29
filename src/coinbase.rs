@@ -1,79 +1,143 @@
 use super::*;
 
+// Should I test round tripping. Going from the bin tx back to this struct?
+
 pub struct CoinbaseBuilder {
-    pub address: Address,
-    pub aux: HashMap<String, String>,
-    pub extranonce1: String,
-    pub extranonce2_size: usize,
-    pub height: u64,
-    pub value: Amount,
-    pub witness_commitment: ScriptBuf,
+    address: Address,
+    aux: HashMap<String, String>,
+    extranonce1: String,
+    extranonce2_size: usize,
+    height: u64,
+    pool_sig: Option<String>,
+    randomiser: bool,
+    timestamp: Option<u32>,
+    value: Amount,
+    witness_commitment: ScriptBuf,
 }
 
 impl CoinbaseBuilder {
+    const MAX_COINBASE_SCRIPT_SIG_SIZE: usize = 100;
+
+    pub fn new(
+        address: Address,
+        extranonce1: String,
+        extranonce2_size: usize,
+        height: u64,
+        value: Amount,
+        witness_commitment: ScriptBuf,
+    ) -> Self {
+        Self {
+            address,
+            aux: HashMap::new(),
+            extranonce1,
+            extranonce2_size,
+            height,
+            value,
+            witness_commitment,
+            timestamp: None,
+            randomiser: false,
+            pool_sig: None,
+        }
+    }
+
+    pub fn with_aux(mut self, aux: HashMap<String, String>) -> Self {
+        self.aux = aux;
+        self
+    }
+
+    #[allow(unused)]
+    pub fn with_timestamp(mut self, timestamp: u32) -> Self {
+        self.timestamp = Some(timestamp);
+        self
+    }
+
+    #[allow(unused)]
+    pub fn with_randomiser(mut self, randomiser: bool) -> Self {
+        self.randomiser = randomiser;
+        self
+    }
+
+    #[allow(unused)]
+    pub fn with_pool_sig(mut self, pool_sig: String) -> Self {
+        self.pool_sig = Some(pool_sig);
+        self
+    }
+
     pub fn build(self) -> Result<(Transaction, String, String)> {
         let mut offset = 4 + 36; // tx version len + previous_output
-        // TODO: just use a Vec and convert to ScriptBuf at the end
-        // BIP34 encode block height
-        let mut buf = [0u8; 8];
-        let len = write_scriptint(&mut buf, self.height.try_into().unwrap());
-        let mut builder = Builder::new().push_slice(&<&PushBytes>::from(&buf)[..len]);
+
+        let mut buf: Vec<u8> = Vec::new();
+
+        let mut bip34_encoded_blockheight = [0u8; 8];
+        let len = write_scriptint(
+            &mut bip34_encoded_blockheight,
+            self.height.try_into().unwrap(),
+        );
+        buf.extend_from_slice(&bip34_encoded_blockheight[..len]);
 
         for (_, value) in self.aux.into_iter() {
-            let mut buf = PushBytesBuf::new();
-            buf.extend_from_slice(hex::decode(value)?.as_slice())?;
-            builder = builder.push_slice(buf);
+            buf.extend_from_slice(hex::decode(value)?.as_slice());
         }
 
-        offset += builder.len();
+        offset += buf.len();
 
-        let mut buf = PushBytesBuf::new();
-        buf.extend_from_slice(hex::decode(self.extranonce1)?.as_slice())?;
-        builder = builder.push_slice(buf);
+        let extranonce1 = hex::decode(self.extranonce1)?;
 
-        let mut buf = PushBytesBuf::new();
-        buf.extend_from_slice(vec![0u8; self.extranonce2_size].as_slice())?;
-        builder = builder.push_slice(buf);
+        let total_extranonce_size = extranonce1.len() + self.extranonce2_size;
 
-        // not necessarily in that order
-        // TODO: timestamp
-        // TODO: unique randomiser based on the nsec timestamp
+        buf.extend_from_slice(extranonce1.as_slice());
+        buf.extend_from_slice(vec![0u8; self.extranonce2_size].as_slice());
+
+        if let Some(_sig) = self.pool_sig {
+            todo!();
+        }
+
         // TODO: hidden |parasite| sig (use hex values)
-        // TODO: configurabe pool sig
 
-        let script_sig = builder.into_script();
+        if let Some(ts) = self.timestamp {
+            buf.extend_from_slice(&ts.to_be_bytes());
+        }
 
-        assert!(script_sig.len() <= MAX_COINBASE_INPUT_SIZE);
+        if self.randomiser {
+            todo!();
+        }
 
-        let input = TxIn {
-            previous_output: OutPoint::null(),
-            script_sig,
-            sequence: Sequence::MAX, // TODO: MAX or ZERO?
-            witness: Witness::new(), // TODO?
-        };
+        let script_sig = ScriptBuf::from_bytes(buf);
 
-        let reward = TxOut {
-            value: self.value,
-            script_pubkey: self.address.script_pubkey(),
-        };
+        let script_sig_size = script_sig.len();
 
-        let wtxid_op_return = TxOut {
-            value: Amount::ZERO,
-            script_pubkey: self.witness_commitment,
-        };
+        info!("Script sig size: {script_sig_size}");
 
-        let tx = Transaction {
+        assert!(script_sig_size <= Self::MAX_COINBASE_SCRIPT_SIG_SIZE);
+
+        let coinbase = Transaction {
             version: bitcoin::transaction::Version::TWO,
             lock_time: LockTime::ZERO,
-            input: vec![input],
-            output: vec![reward, wtxid_op_return],
+            input: vec![TxIn {
+                previous_output: OutPoint::null(),
+                script_sig,
+                sequence: Sequence::MAX,
+                witness: Witness::new(),
+            }],
+            output: vec![
+                TxOut {
+                    value: self.value,
+                    script_pubkey: self.address.script_pubkey(),
+                },
+                TxOut {
+                    value: Amount::ZERO,
+                    script_pubkey: self.witness_commitment,
+                },
+            ],
         };
 
-        let bin = consensus::serialize(&tx);
+        let bin = consensus::serialize(&coinbase);
+
+        info!("Coinbase tx size: {}", bin.len());
 
         let coinb1 = hex::encode(&bin[..offset]);
-        let coinb2 = hex::encode(&bin[offset + EXTRANONCE2_SIZE + 2..]);
+        let coinb2 = hex::encode(&bin[offset + total_extranonce_size..]);
 
-        Ok((tx, coinb1, coinb2))
+        Ok((coinbase, coinb1, coinb2))
     }
 }

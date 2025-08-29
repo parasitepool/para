@@ -117,8 +117,7 @@ impl Pool {
                             .collect::<Vec<_>>()[0]
                     ))?
                     .require_network(self.config.chain().network())?;
-                    //
-                    // TODO: validate address
+
                     info!("Received authorize from {miner} with username {username}");
 
                     let message = Message::Response {
@@ -133,31 +132,31 @@ impl Pool {
                     tcp_writer.flush().await?;
 
                     let gbt = self.gbt()?;
-                    // I have to implement the Vec<u8> to CompactTarget algo (Uint256 bla bla)
 
-                    let (coinbase_tx, coinb1, coinb2) = CoinbaseBuilder {
+                    let (_coinbase_tx, coinb1, coinb2) = CoinbaseBuilder::new(
                         address,
-                        aux: gbt.coinbaseaux,
-                        extranonce1: EXTRANONCE1.into(),
-                        extranonce2_size: EXTRANONCE2_SIZE,
-                        height: gbt.height,
-                        value: gbt.coinbase_value,
-                        witness_commitment: gbt.default_witness_commitment,
-                    }
+                        EXTRANONCE1.into(),
+                        EXTRANONCE2_SIZE,
+                        gbt.height,
+                        gbt.coinbase_value,
+                        gbt.default_witness_commitment,
+                    )
+                    .with_aux(gbt.coinbaseaux)
                     .build()?;
 
-                    // all of this is wrong
+                    // I have to implement the Vec<u8> to CompactTarget algo (Uint256 bla bla)
                     let notify = Notify {
                         job_id: "def123".into(), // TODO
-                        prevhash: gbt.previous_block_hash.into(),
+                        prevhash: PrevHash::from(gbt.previous_block_hash),
                         coinb1,
                         coinb2,
-                        merkle_branch: Vec::new(),
+                        merkle_branches: Vec::new(), // TODO
                         version: Version(block::Version::from_consensus(
                             gbt.version.try_into().unwrap(),
                         )),
-                        nbits: Nbits::from_str("1c2ac4af").unwrap(),
-                        ntime: Ntime::from_str("12345678").unwrap(),
+                        nbits: Nbits::from_str("1c2ac4af").unwrap(), // TODO
+                        ntime: Ntime::try_from(gbt.current_time)
+                            .expect("should fit into u32 until the year 2106"),
                         clean_jobs: true,
                     };
 
@@ -185,13 +184,6 @@ impl Pool {
             Ok(n) => n,
             Err(e) => {
                 bail!("Read error: {e}");
-            }
-        };
-
-        let msg: Message = match serde_json::from_str(&line) {
-            Ok(msg) => msg,
-            Err(e) => {
-                bail!("Invalid JSON message: {line:?} - {e}");
             }
         };
 

@@ -144,6 +144,8 @@ impl Controller {
 
         let coinbase_bin = hex::decode(&coinbase_hex)?;
 
+        info!("Coinbase tx size: {}", coinbase_bin.len());
+
         let mut cursor = bitcoin::io::Cursor::new(&coinbase_bin);
         let coinbase_tx = bitcoin::Transaction::consensus_decode_from_finite_reader(&mut cursor)?;
 
@@ -156,7 +158,7 @@ impl Controller {
 
         let mut merkle_root = coinbase_hash;
 
-        for branch in &notify.merkle_branch {
+        for branch in &notify.merkle_branches {
             let mut concat = Vec::with_capacity(64);
             concat.extend_from_slice(&merkle_root[..]);
             concat.extend_from_slice(branch.as_byte_array());

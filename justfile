@@ -46,7 +46,8 @@ ping-auth host='parasite.wtf' username='bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg
 pool: 
   RUST_LOG=info cargo run -- pool \
     --address 127.0.0.1 \
-    --bitcoin-rpc-cookie-file /var/lib/bitcoind/.cookie
+    --bitcoin-rpc-username satoshi \
+    --bitcoin-rpc-password nakamoto
 
 server: 
   RUST_LOG=info cargo run -- server \

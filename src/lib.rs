@@ -17,10 +17,10 @@ use {
         Address, Amount, BlockHash, CompactTarget, Network, OutPoint, ScriptBuf, Sequence, Target,
         Transaction, TxIn, TxMerkleNode, TxOut, Witness,
         block::{self, Header},
-        consensus::{Decodable, self},
+        consensus::{self, Decodable},
         hashes::{Hash, sha256d},
         locktime::absolute::LockTime,
-        script::{Builder, PushBytes, PushBytesBuf, write_scriptint},
+        script::write_scriptint,
     },
     bitcoincore_rpc::{Auth, RpcApi, json::GetBlockTemplateResult},
     byteorder::{BigEndian, ByteOrder, LittleEndian},
@@ -67,7 +67,9 @@ use {
         thread,
         time::{Duration, Instant},
     },
-    stratum::{Id, Message, Nbits, Notify, Ntime, SetDifficulty, SubscribeResult, Version},
+    stratum::{
+        Id, Message, Nbits, Notify, Ntime, PrevHash, SetDifficulty, SubscribeResult, Version,
+    },
     sysinfo::{Disks, System},
     tokio::{
         io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader, BufWriter},
@@ -102,7 +104,6 @@ pub const COIN_VALUE: u64 = 100_000_000;
 pub const USER_AGENT: &str = "paraminer/0.0.1";
 // pub const EXTRANONCE1_SIZE: u32 = 4;
 pub const EXTRANONCE2_SIZE: usize = 8;
-pub const MAX_COINBASE_INPUT_SIZE: usize = 100;
 
 type Result<T = (), E = Error> = std::result::Result<T, E>;
 
