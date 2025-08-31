@@ -15,9 +15,9 @@ use {
     axum_server::Handle,
     bitcoin::{
         Address, Amount, BlockHash, CompactTarget, Network, OutPoint, ScriptBuf, Sequence, Target,
-        Transaction, TxIn, TxMerkleNode, TxOut, Witness,
+        Transaction, TxIn, TxMerkleNode, TxOut, Txid, Witness,
         block::{self, Header},
-        consensus::{self, Decodable},
+        consensus::{self, Decodable, Encodable},
         hashes::{Hash, sha256d},
         locktime::absolute::LockTime,
         script::write_scriptint,

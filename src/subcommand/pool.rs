@@ -109,13 +109,13 @@ impl Pool {
                     // TODO: this will panic if params empty
                     let username = &params[0];
 
-                    let address = Address::from_str(dbg!(
+                    let address = Address::from_str(
                         username
                             .to_string()
                             .trim_matches('"')
                             .split('.')
-                            .collect::<Vec<_>>()[0]
-                    ))?
+                            .collect::<Vec<_>>()[0],
+                    )?
                     .require_network(self.config.chain().network())?;
 
                     info!("Received authorize from {miner} with username {username}");
@@ -144,17 +144,32 @@ impl Pool {
                     .with_aux(gbt.coinbaseaux)
                     .build()?;
 
-                    // I have to implement the Vec<u8> to CompactTarget algo (Uint256 bla bla)
+                    let set_difficulty = SetDifficulty(vec![Difficulty(1)]);
+
+                    let message = Message::Notification {
+                        method: "mining.set_difficulty".into(),
+                        params: json!(set_difficulty),
+                    };
+
+                    let frame = serde_json::to_string(&message)? + "\n";
+                    tcp_writer.write_all(frame.as_bytes()).await?;
+                    tcp_writer.flush().await?;
+
                     let notify = Notify {
                         job_id: "def123".into(), // TODO
                         prevhash: PrevHash::from(gbt.previous_block_hash),
                         coinb1,
                         coinb2,
-                        merkle_branches: Vec::new(), // TODO
+                        merkle_branches: stratum::merkle_branches(
+                            gbt.transactions
+                                .into_iter()
+                                .map(|result| result.txid)
+                                .collect(),
+                        ),
                         version: Version(block::Version::from_consensus(
                             gbt.version.try_into().unwrap(),
                         )),
-                        nbits: Nbits::from_str("1c2ac4af").unwrap(), // TODO
+                        nbits: Nbits::from_str(&hex::encode(gbt.bits))?, // TODO: inefficient
                         ntime: Ntime::try_from(gbt.current_time)
                             .expect("should fit into u32 until the year 2106"),
                         clean_jobs: true,
@@ -205,6 +220,7 @@ impl Pool {
         Ok(self
             .config
             .bitcoin_rpc_client()?
+            // TODO: Use own GetBlockTemplateResult so I can deserialize directly from hex myself
             .call::<GetBlockTemplateResult>("getblocktemplate", &[params])?)
     }
 }

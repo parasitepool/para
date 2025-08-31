@@ -1,6 +1,7 @@
 use super::*;
 
 mod client;
+mod merkle;
 mod nbits;
 mod nonce;
 mod ntime;
@@ -8,7 +9,13 @@ mod prevhash;
 mod version;
 
 pub use {
-    client::Client, nbits::Nbits, nonce::Nonce, ntime::Ntime, prevhash::PrevHash, version::Version,
+    client::Client,
+    merkle::{merkle_branches, merkle_root},
+    nbits::Nbits,
+    nonce::Nonce,
+    ntime::Ntime,
+    prevhash::PrevHash,
+    version::Version,
 };
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord, Display, Clone)]
@@ -195,7 +202,7 @@ pub struct Notify {
     pub prevhash: PrevHash,
     pub coinb1: String,
     pub coinb2: String,
-    pub merkle_branches: Vec<sha256d::Hash>,
+    pub merkle_branches: Vec<TxMerkleNode>,
     pub version: Version,
     pub nbits: Nbits,
     pub ntime: Ntime,
