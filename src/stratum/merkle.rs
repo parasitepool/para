@@ -11,15 +11,10 @@ pub fn merkle_root(
 
     let coinbase_bin = hex::decode(&coinbase_hex)?;
 
-    info!("Coinbase tx size: {}", coinbase_bin.len());
-
+    // This is just a sanity check, remove for performance
     let mut cursor = bitcoin::io::Cursor::new(&coinbase_bin);
     let coinbase_tx = bitcoin::Transaction::consensus_decode_from_finite_reader(&mut cursor)?;
-
-    info!(
-        "Building merkle root with coinbase txid {:?}",
-        coinbase_tx.compute_txid()
-    );
+    let _ = coinbase_tx.compute_txid();
 
     let coinbase_hash = sha256d::Hash::hash(&coinbase_bin);
 
@@ -41,7 +36,6 @@ pub fn merkle_branches(non_coinbase_txids: Vec<Txid>) -> Vec<TxMerkleNode> {
         return vec![];
     }
 
-    // Initialize bottom level: placeholder for coinbase + actual tx hashes
     let mut level: Vec<TxMerkleNode> = vec![TxMerkleNode::all_zeros()];
     level.extend(
         non_coinbase_txids
@@ -50,25 +44,21 @@ pub fn merkle_branches(non_coinbase_txids: Vec<Txid>) -> Vec<TxMerkleNode> {
     );
 
     let mut branches: Vec<TxMerkleNode> = Vec::new();
-    let mut coinbase_idx = 0usize; // Track coinbase path index (starts at leaf 0)
+    let mut coinbase_idx = 0usize;
 
     while level.len() > 1 {
-        // Find sibling of current coinbase path node
-        let sibling_idx = coinbase_idx ^ 1; // XOR flips the least significant bit for pair
+        let sibling_idx = coinbase_idx ^ 1;
         let sibling = if sibling_idx < level.len() {
             level[sibling_idx]
         } else {
-            // Odd length: duplicate self as sibling
             level[coinbase_idx]
         };
         branches.push(sibling);
 
-        // Build next level by hashing pairs, adapting calculate_root's pairing and encoding
         let mut next_level = Vec::with_capacity(level.len() / 2 + 1);
         let mut i = 0;
         while i < level.len() {
             let hash1 = level[i];
-            // If odd, duplicate last
             let hash2 = if i + 1 < level.len() {
                 level[i + 1]
             } else {
@@ -88,7 +78,7 @@ pub fn merkle_branches(non_coinbase_txids: Vec<Txid>) -> Vec<TxMerkleNode> {
         }
 
         level = next_level;
-        coinbase_idx /= 2; // Move up to parent index
+        coinbase_idx /= 2;
     }
 
     branches

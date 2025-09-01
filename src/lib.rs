@@ -26,7 +26,7 @@ use {
     byteorder::{BigEndian, ByteOrder, LittleEndian},
     chain::Chain,
     clap::Parser,
-    coinbase::CoinbaseBuilder,
+    coinbase_builder::CoinbaseBuilder,
     derive_more::Display,
     difficulty::Difficulty,
     futures::stream::StreamExt,
@@ -65,7 +65,7 @@ use {
             atomic::{AtomicBool, AtomicU64, Ordering},
         },
         thread,
-        time::{Duration, Instant},
+        time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     },
     stratum::{
         Id, Message, Nbits, Notify, Ntime, PrevHash, SetDifficulty, SubscribeResult, Version,
@@ -94,7 +94,7 @@ pub use subcommand::server::api;
 mod arguments;
 mod chain;
 pub mod ckpool;
-mod coinbase;
+pub mod coinbase_builder;
 pub mod difficulty;
 pub mod hash_rate;
 pub mod stratum;

@@ -34,6 +34,8 @@ use {
     test_ckpool::TestCkpool,
 };
 
+#[cfg(target_os = "linux")]
+mod bitcoind;
 mod command_builder;
 #[cfg(target_os = "linux")]
 mod test_ckpool;

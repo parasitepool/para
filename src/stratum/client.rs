@@ -147,7 +147,7 @@ impl Client {
                 result: Some(result),
                 error: None,
                 ..
-            } => Ok((serde_json::from_value(result)?, duration, bytes_read)), 
+            } => Ok((serde_json::from_value(result)?, duration, bytes_read)),
             Message::Response {
                 error: Some(err), ..
             } => Err(anyhow!("mining.subscribe error: {}", err)),

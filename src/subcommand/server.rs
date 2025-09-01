@@ -4,9 +4,9 @@ use {
     accept_json::AcceptJson,
     aggregator::Aggregator,
     axum::extract::Path,
-    server_config::ServerConfig,
     database::Database,
     error::{OptionExt, ServerError, ServerResult},
+    server_config::ServerConfig,
     templates::{
         PageContent, PageHtml, dashboard::DashboardHtml, healthcheck::HealthcheckHtml,
         home::HomeHtml,
@@ -16,9 +16,9 @@ use {
 mod accept_json;
 mod aggregator;
 pub mod api;
-mod server_config;
 pub(crate) mod database;
 mod error;
+mod server_config;
 mod templates;
 
 #[derive(RustEmbed)]
@@ -147,7 +147,9 @@ impl Server {
         }
     }
 
-    async fn home(Extension(config): Extension<Arc<ServerConfig>>) -> ServerResult<PageHtml<HomeHtml>> {
+    async fn home(
+        Extension(config): Extension<Arc<ServerConfig>>,
+    ) -> ServerResult<PageHtml<HomeHtml>> {
         let domain = config.domain();
 
         Ok(HomeHtml {

@@ -32,9 +32,6 @@ impl TestCkpool {
     pub(crate) fn spawn() -> Self {
         let tempdir = Arc::new(TempDir::new().unwrap());
 
-        let bitcoind_data_dir = tempdir.path().join("bitcoin");
-        fs::create_dir(&bitcoind_data_dir).unwrap();
-
         let sockdir = tempdir.path().join("tmp");
         fs::create_dir(&sockdir).unwrap();
 
@@ -61,63 +58,7 @@ impl TestCkpool {
                 .port(),
         );
 
-        let bitcoind_conf = tempdir.path().join("bitcoin.conf");
-
-        fs::write(
-            &bitcoind_conf,
-            format!(
-                "
-signet=1
-datadir={}
-
-[signet]
-# OP_TRUE
-signetchallenge=51
-
-server=1
-txindex=1
-zmqpubhashblock=tcp://127.0.0.1:{zmq_port}
-
-port={bitcoind_port}
-
-datacarriersize=100000
-maxconnections=256
-maxmempool=2048
-mempoolfullrbf=1
-minrelaytxfee=0.000001
-
-rpcbind=127.0.0.1
-rpcport={rpc_port}
-rpcallowip=127.0.0.1
-rpcuser=foo
-rpcpassword=bar
-",
-                &bitcoind_data_dir.display()
-            ),
-        )
-        .unwrap();
-
-        let bitcoind_handle = Command::new("bitcoind")
-            .arg(format!("-conf={}", bitcoind_conf.display()))
-            .stdout(Stdio::null())
-            .spawn()
-            .unwrap();
-
-        let status = Command::new("bitcoin-cli")
-            .args([
-                &format!("-conf={}", bitcoind_conf.display()),
-                "-rpcwait",
-                "-rpcwaittimeout=5",
-                "getblockchaininfo",
-            ])
-            .stdout(Stdio::null())
-            .status()
-            .unwrap();
-
-        assert!(
-            status.success(),
-            "Failed to connect bitcoind after 5 seconds"
-        );
+        let bitcoind_handle = bitcoind::spawn(tempdir.clone(), bitcoind_port, rpc_port, zmq_port);
 
         Lazy::force(&COMPILE_CKPOOL);
 

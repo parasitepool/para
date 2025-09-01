@@ -2,8 +2,6 @@ use {super::*, pool_config::PoolConfig};
 
 mod pool_config;
 
-const EXTRANONCE1: &str = "abcd";
-
 #[derive(Parser, Debug)]
 pub(crate) struct Pool {
     #[command(flatten)]
@@ -12,14 +10,8 @@ pub(crate) struct Pool {
 
 impl Pool {
     pub(crate) async fn run(&self) -> Result {
-        let config = &self.config;
-        let client = config.bitcoin_rpc_client()?;
-
-        client.get_blockchain_info()?;
-        // println!("{:?}", client.get_block_template(mode, rules, capabilities));
-
-        let address = config.address();
-        let port = config.port();
+        let address = self.config.address();
+        let port = self.config.port();
 
         let listener = TcpListener::bind((address.clone(), port)).await?;
 
@@ -55,6 +47,8 @@ impl Pool {
             }
         };
 
+        let extranonce1 = "abcdef12".to_string();
+
         match msg {
             Message::Request { id, method, params } => {
                 if method == "mining.subscribe" {
@@ -63,7 +57,7 @@ impl Pool {
                     info!("Received subscribe from {miner} with user agent {user_agent}");
                     let result = SubscribeResult {
                         subscriptions: Vec::new(), //TODO
-                        extranonce1: EXTRANONCE1.into(),
+                        extranonce1: extranonce1.clone(),
                         extranonce2_size: EXTRANONCE2_SIZE.try_into().unwrap(),
                     };
 
@@ -135,13 +129,16 @@ impl Pool {
 
                     let (_coinbase_tx, coinb1, coinb2) = CoinbaseBuilder::new(
                         address,
-                        EXTRANONCE1.into(),
+                        extranonce1,
                         EXTRANONCE2_SIZE,
                         gbt.height,
                         gbt.coinbase_value,
                         gbt.default_witness_commitment,
                     )
-                    .with_aux(gbt.coinbaseaux)
+                    .with_aux(gbt.coinbaseaux.into_iter().collect())
+                    .with_randomiser(true)
+                    .with_timestamp(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs())
+                    .with_pool_sig("|parasite|".into())
                     .build()?;
 
                     let set_difficulty = SetDifficulty(vec![Difficulty(1)]);
@@ -220,7 +217,8 @@ impl Pool {
         Ok(self
             .config
             .bitcoin_rpc_client()?
-            // TODO: Use own GetBlockTemplateResult so I can deserialize directly from hex myself
+            // TODO: Use own GetBlockTemplateResult so I can deserialize directly from hex myself.
+            // Use BTreeMap instead of HashMap
             .call::<GetBlockTemplateResult>("getblocktemplate", &[params])?)
     }
 }
