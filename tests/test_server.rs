@@ -1,5 +1,6 @@
 use super::*;
 
+use para::subcommand::sync::HTTP_TIMEOUT_MS;
 #[cfg(target_os = "linux")]
 use pgtemp::{PgTempDB, PgTempDBBuilder};
 
@@ -96,7 +97,7 @@ impl TestServer {
         fs::create_dir(logdir.join("users")).unwrap();
 
         let child = CommandBuilder::new(format!(
-            "server --address 127.0.0.1 --port {port} --log-dir {} --database-url {}",
+            "server --address 127.0.0.1 --port {port} --username test_user --password test_pass --log-dir {} --database-url {}",
             logdir.display(),
             database_url
         ))
@@ -180,7 +181,8 @@ impl TestServer {
         let response = client
             .post(self.url().join(path.as_ref()).unwrap())
             .json(body)
-            .send()
+            .timeout(Duration::from_millis(HTTP_TIMEOUT_MS))
+            .basic_auth("test_user", Some("test_pass")).send()
             .await
             .unwrap();
 
