@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(target_os = "linux")]
 use para::subcommand::sync::HTTP_TIMEOUT_MS;
 #[cfg(target_os = "linux")]
 use pgtemp::{PgTempDB, PgTempDBBuilder};
@@ -182,7 +183,8 @@ impl TestServer {
             .post(self.url().join(path.as_ref()).unwrap())
             .json(body)
             .timeout(Duration::from_millis(HTTP_TIMEOUT_MS))
-            .basic_auth("test_user", Some("test_pass")).send()
+            .basic_auth("test_user", Some("test_pass"))
+            .send()
             .await
             .unwrap();
 
