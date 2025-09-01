@@ -6,7 +6,7 @@ const ID_FILE: &str = "current_id.txt";
 const SYNC_DELAY_MS: u64 = 1000;
 const BLOCKHEIGHT_CHECK_DELAY_MS: u64 = 5000;
 const TARGET_ID_BUFFER: i64 = 0;
-pub const HTTP_TIMEOUT_MS: u64 = 30000;
+const HTTP_TIMEOUT_MS: u64 = 30000;
 const MAX_RETRIES: u32 = 3;
 
 #[derive(Debug, Parser)]
