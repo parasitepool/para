@@ -6,9 +6,10 @@ use {
         api::Healthcheck,
         ckpool::{HashRateStatus, PoolStatus, ShareStatus, Status, User, Worker},
         hash_rate::HashRate,
+        subcommand::sync::{ShareBatch, SyncResponse, SyncSend},
     },
     pretty_assertions::assert_eq as pretty_assert_eq,
-    reqwest::{StatusCode, Url},
+    reqwest::{Response, StatusCode, Url},
     serde::de::DeserializeOwned,
     std::{
         collections::{BTreeMap, HashSet},
@@ -18,7 +19,10 @@ use {
         path::PathBuf,
         process::{Child, Command, Stdio},
         str::FromStr,
-        sync::Arc,
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
         thread,
         time::Duration,
     },

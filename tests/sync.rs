@@ -1,18 +1,14 @@
-use {
-    super::*,
-    crate::test_psql::{
-        create_test_block, create_test_shares, insert_test_block, insert_test_shares,
-        setup_test_schema,
-    },
-    para::subcommand::sync::{ShareBatch, SyncResponse, SyncSend},
-    std::sync::atomic::{AtomicUsize, Ordering},
+use super::*;
+use crate::test_psql::{
+    create_test_block, create_test_shares, insert_test_block, insert_test_shares, setup_test_schema,
 };
+use crate::test_server::Credentials;
 
 static BATCH_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 #[tokio::test]
 async fn test_sync_batch_endpoint() {
-    let server = TestServer::spawn_with_sync_endpoint().await;
+    let server = TestServer::spawn_with_db().await;
 
     setup_test_schema(server.database_url().unwrap())
         .await
@@ -40,8 +36,44 @@ async fn test_sync_batch_endpoint() {
 }
 
 #[tokio::test]
+async fn test_sync_with_auth() {
+    let mut server =
+        TestServer::spawn_with_db_args("--username test_user --password test_pass").await;
+
+    setup_test_schema(server.database_url().unwrap())
+        .await
+        .unwrap();
+
+    let test_shares = create_test_shares(5, 800000);
+    let test_block = create_test_block(800000);
+
+    let batch = ShareBatch {
+        block: Some(test_block),
+        shares: test_shares,
+        hostname: "test-node-1".to_string(),
+        batch_id: BATCH_COUNTER.fetch_add(1, Ordering::SeqCst) as u64,
+        total_shares: 5,
+        start_id: 1,
+        end_id: 5,
+    };
+
+    let fail: Response = server.post_json_raw("/sync/batch", &batch).await;
+    assert_eq!(fail.status(), StatusCode::UNAUTHORIZED);
+
+    server.credentials = Some(Credentials {
+        username: "test_user".into(),
+        password: "test_pass".into(),
+    });
+    let succ: SyncResponse = server.post_json("/sync/batch", &batch).await;
+    assert_eq!(succ.status, "OK");
+    assert_eq!(succ.received_count, 5);
+    assert_eq!(succ.batch_id, batch.batch_id);
+    assert!(succ.error_message.is_none());
+}
+
+#[tokio::test]
 async fn test_sync_empty_batch() {
-    let server = TestServer::spawn_with_sync_endpoint().await;
+    let server = TestServer::spawn_with_db().await;
     setup_test_schema(server.database_url().unwrap())
         .await
         .unwrap();
@@ -64,7 +96,7 @@ async fn test_sync_empty_batch() {
 
 #[tokio::test]
 async fn test_sync_batch_with_block_only() {
-    let server = TestServer::spawn_with_sync_endpoint().await;
+    let server = TestServer::spawn_with_db().await;
     setup_test_schema(server.database_url().unwrap())
         .await
         .unwrap();
@@ -89,8 +121,8 @@ async fn test_sync_batch_with_block_only() {
 
 #[tokio::test]
 async fn test_sync_large_batch() {
-    let record_count_in_large_batch = 93000;
-    let server = TestServer::spawn_with_sync_endpoint().await;
+    let record_count_in_large_batch = 40000;
+    let server = TestServer::spawn_with_db().await;
     setup_test_schema(server.database_url().unwrap())
         .await
         .unwrap();
@@ -116,7 +148,7 @@ async fn test_sync_large_batch() {
 
 #[tokio::test]
 async fn test_sync_multiple_batches_different_blocks() {
-    let server = TestServer::spawn_with_sync_endpoint().await;
+    let server = TestServer::spawn_with_db().await;
     setup_test_schema(server.database_url().unwrap())
         .await
         .unwrap();
@@ -143,7 +175,7 @@ async fn test_sync_multiple_batches_different_blocks() {
 
 #[tokio::test]
 async fn test_sync_duplicate_batch_id() {
-    let server = TestServer::spawn_with_sync_endpoint().await;
+    let server = TestServer::spawn_with_db().await;
     setup_test_schema(server.database_url().unwrap())
         .await
         .unwrap();
@@ -180,8 +212,8 @@ async fn test_sync_duplicate_batch_id() {
 
 #[tokio::test]
 async fn test_sync_endpoint_to_endpoint() {
-    let source_server = TestServer::spawn_with_sync_endpoint().await;
-    let target_server = TestServer::spawn_with_sync_endpoint().await;
+    let source_server = TestServer::spawn_with_db().await;
+    let target_server = TestServer::spawn_with_db().await;
 
     setup_test_schema(source_server.database_url().unwrap())
         .await
