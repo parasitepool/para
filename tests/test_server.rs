@@ -14,6 +14,7 @@ pub(crate) struct TestServer {
     pub(crate) credentials: Option<Credentials>,
 }
 
+#[cfg(target_os = "linux")]
 pub(crate) struct Credentials {
     pub(crate) username: String,
     pub(crate) password: String,
@@ -65,6 +66,7 @@ impl TestServer {
             tempdir,
             #[cfg(target_os = "linux")]
             pg_db: None,
+            #[cfg(target_os = "linux")]
             credentials: None,
         }
     }

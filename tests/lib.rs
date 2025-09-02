@@ -6,10 +6,9 @@ use {
         api::Healthcheck,
         ckpool::{HashRateStatus, PoolStatus, ShareStatus, Status, User, Worker},
         hash_rate::HashRate,
-        subcommand::sync::{ShareBatch, SyncResponse, SyncSend},
     },
     pretty_assertions::assert_eq as pretty_assert_eq,
-    reqwest::{Response, StatusCode, Url},
+    reqwest::{StatusCode, Url},
     serde::de::DeserializeOwned,
     std::{
         collections::{BTreeMap, HashSet},
@@ -19,10 +18,7 @@ use {
         path::PathBuf,
         process::{Child, Command, Stdio},
         str::FromStr,
-        sync::{
-            Arc,
-            atomic::{AtomicUsize, Ordering},
-        },
+        sync::Arc,
         thread,
         time::Duration,
     },
@@ -33,7 +29,13 @@ use {
 
 #[cfg(target_os = "linux")]
 use {
-    std::{io::stderr, net::TcpStream},
+    para::subcommand::sync::{ShareBatch, SyncResponse, SyncSend},
+    reqwest::Response,
+    std::{
+        io::stderr,
+        net::TcpStream,
+        sync::atomic::{AtomicUsize, Ordering},
+    },
     test_ckpool::TestCkpool,
 };
 
