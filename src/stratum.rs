@@ -150,28 +150,44 @@ impl fmt::Display for JsonRpcError {
     }
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
+#[serde(try_from = "Vec<serde_json::Value>", into = "Vec<String>")]
 pub struct Subscribe {
     pub user_agent: String,
     pub extranonce1: Option<String>,
 }
 
-impl Serialize for Subscribe {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut seq_len = 1;
-        if self.extranonce1.is_some() {
-            seq_len += 1;
-        }
+// I dont know about this. Def add test for deserializing
+impl TryFrom<Vec<serde_json::Value>> for Subscribe {
+    type Error = String;
 
-        let mut seq = serializer.serialize_seq(Some(seq_len))?;
-        seq.serialize_element(&self.user_agent)?;
-        if let Some(ref extranonce1) = self.extranonce1 {
-            seq.serialize_element(extranonce1)?;
+    fn try_from(v: Vec<serde_json::Value>) -> Result<Self, Self::Error> {
+        match v.as_slice() {
+            [user_agent] => Ok(Subscribe {
+                user_agent: user_agent
+                    .as_str()
+                    .ok_or("params[0] must be string")?
+                    .to_string(),
+                extranonce1: None,
+            }),
+            [user_agent, extranonce1] => Ok(Subscribe {
+                user_agent: user_agent
+                    .as_str()
+                    .ok_or("params[0] must be string")?
+                    .to_string(),
+                extranonce1: extranonce1.as_str().map(str::to_string),
+            }),
+            _ => Err(format!("expected 1 or 2 elems, got {}", v.len())),
         }
-        seq.end()
+    }
+}
+
+impl From<Subscribe> for Vec<String> {
+    fn from(s: Subscribe) -> Self {
+        match s.extranonce1 {
+            Some(extranonce1) => vec![s.user_agent, extranonce1],
+            None => vec![s.user_agent],
+        }
     }
 }
 

@@ -2,7 +2,7 @@ use super::*;
 
 mod miner;
 mod ping;
-mod pool;
+pub(crate) mod pool;
 pub(crate) mod server;
 pub mod sync;
 

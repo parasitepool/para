@@ -45,7 +45,6 @@ use {
     serde::{
         Deserialize, Serialize, Serializer,
         de::{self, Deserializer},
-        ser::SerializeSeq,
     },
     serde_json::{Value, json},
     serde_with::{DeserializeFromStr, SerializeDisplay},
@@ -67,12 +66,14 @@ use {
         thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     },
+    stratifier::Connection,
     stratum::{
-        Id, Message, Nbits, Notify, Ntime, PrevHash, SetDifficulty, SubscribeResult, Version,
+        Id, Message, Nbits, Notify, Ntime, PrevHash, SetDifficulty, Subscribe, SubscribeResult,
+        Version,
     },
     sysinfo::{Disks, System},
     tokio::{
-        io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader, BufWriter},
+        io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, BufWriter},
         net::{TcpListener, TcpStream, tcp::OwnedWriteHalf},
         runtime::Runtime,
         signal::ctrl_c,
@@ -97,6 +98,7 @@ pub mod ckpool;
 pub mod coinbase_builder;
 pub mod difficulty;
 pub mod hash_rate;
+pub mod stratifier;
 pub mod stratum;
 pub mod subcommand;
 
