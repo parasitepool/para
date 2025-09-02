@@ -1,6 +1,5 @@
 use super::*;
 
-// TODO: dedup bitcoind with test_ckpool.rs
 pub(crate) struct TestPool {
     bitcoind_handle: Child,
     pool_handle: Child,
