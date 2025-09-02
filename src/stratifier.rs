@@ -36,6 +36,7 @@ where
                     if method == "mining.subscribe" =>
                 {
                     let subscribe = serde_json::from_value::<Subscribe>(params)?;
+
                     info!(
                         "SUBSCRIBE from {} with user agent {}",
                         self.peer, subscribe.user_agent
@@ -58,18 +59,14 @@ where
 
                     self.state = State::Subscribed;
                 }
-
                 (State::Subscribed, Message::Request { id, method, params })
                     if method == "mining.authorize" =>
                 {
-                    let username = params
-                        .get(0)
-                        .and_then(|v| v.as_str())
-                        .ok_or_else(|| anyhow!("authorize params[0] missing"))?
-                        .to_string();
+                    let authorize = serde_json::from_value::<Authorize>(params)?;
 
                     let address = Address::from_str(
-                        username
+                        authorize
+                            .username
                             .trim_matches('"')
                             .split('.')
                             .next()
@@ -77,7 +74,10 @@ where
                     )?
                     .require_network(self.config.chain().network())?;
 
-                    info!("AUTHORIZE from {} with username {}", self.peer, username);
+                    info!(
+                        "AUTHORIZE from {} with username {}",
+                        self.peer, authorize.username
+                    );
 
                     self.send(Message::Response {
                         id,
@@ -168,7 +168,7 @@ where
             }
         }
 
-        bail!("Miner {} disconnected", self.peer)
+        Ok(())
     }
 
     async fn read_message(&mut self) -> Result<Option<Message>> {

@@ -68,8 +68,8 @@ use {
     },
     stratifier::Connection,
     stratum::{
-        Id, Message, Nbits, Notify, Ntime, PrevHash, SetDifficulty, Subscribe, SubscribeResult,
-        Version,
+        Authorize, Id, Message, Nbits, Notify, Ntime, PrevHash, SetDifficulty, Subscribe,
+        SubscribeResult, Version,
     },
     sysinfo::{Disks, System},
     tokio::{

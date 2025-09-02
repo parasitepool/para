@@ -279,18 +279,23 @@ impl Serialize for Submit {
     }
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+// TODO: get rid of these clone
+#[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
+#[serde(from = "(String, String)", into = "(String, String)")]
 pub struct Authorize {
     pub username: String,
     pub password: String,
 }
 
-impl Serialize for Authorize {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        (&self.username, &self.password).serialize(serializer)
+impl From<(String, String)> for Authorize {
+    fn from((username, password): (String, String)) -> Self {
+        Self { username, password }
+    }
+}
+
+impl From<Authorize> for (String, String) {
+    fn from(a: Authorize) -> Self {
+        (a.username, a.password)
     }
 }
 
