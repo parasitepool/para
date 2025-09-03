@@ -20,7 +20,11 @@ impl Pool {
 
         loop {
             tokio::select! {
-                _ = Self::handle_single_user(config.clone(), &listener) => {}
+                result = Self::handle_single_worker(config.clone(), &listener) => {
+                    if let Err(err) = result {
+                        error!("Worker connection error: {err}")
+                    }
+                }
                 _ = ctrl_c() => {
                         info!("Shutting down stratum server");
                         break;
@@ -31,17 +35,17 @@ impl Pool {
         Ok(())
     }
 
-    async fn handle_single_user(config: Arc<PoolConfig>, listener: &TcpListener) -> Result {
-        let (stream, peer) = listener.accept().await?;
+    async fn handle_single_worker(config: Arc<PoolConfig>, listener: &TcpListener) -> Result {
+        let (stream, worker) = listener.accept().await?;
 
-        info!("Accepted connection from {peer}");
+        info!("Accepted connection from {worker}");
 
         let (reader, writer) = {
             let (rx, tx) = stream.into_split();
             (BufReader::new(rx), BufWriter::new(tx))
         };
 
-        let mut conn = Connection::new(config.clone(), peer, reader, writer);
+        let mut conn = Connection::new(config.clone(), worker, reader, writer);
 
         conn.serve().await
     }

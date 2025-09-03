@@ -26,6 +26,12 @@ pub(crate) struct PoolConfig {
     data_dir: Option<PathBuf>,
     #[clap(long, help = "Listen on <PORT>")]
     port: Option<u16>,
+    #[clap(
+        long,
+        help = "Use version rolling with <VERSION_MASK>",
+        default_value = "1fffe000"
+    )]
+    version_mask: Version,
 }
 
 impl PoolConfig {
@@ -140,5 +146,9 @@ impl PoolConfig {
 
     pub fn address(&self) -> String {
         self.address.clone().unwrap_or("0.0.0.0".into())
+    }
+
+    pub fn version_mask(&self) -> Version {
+        self.version_mask
     }
 }

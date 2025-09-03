@@ -205,6 +205,7 @@ impl Client {
                     extranonce2,
                     ntime,
                     nonce,
+                    version_bits: None,
                 })?,
             )
             .await?;

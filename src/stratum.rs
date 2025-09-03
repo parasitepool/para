@@ -150,6 +150,18 @@ impl fmt::Display for JsonRpcError {
     }
 }
 
+// pub struct Configure
+// method: "mining.configure",
+// params: Array [
+// Array [
+// String("version-rolling"),
+// ],
+// Object {
+// "version-rolling.mask": String("ffffffff"),
+// },
+// ],
+// }
+
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 #[serde(try_from = "Vec<serde_json::Value>", into = "Vec<String>")]
 pub struct Subscribe {
@@ -254,13 +266,14 @@ impl SetDifficulty {
     }
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct Submit {
     pub username: String,
     pub job_id: String,
     pub extranonce2: String,
     pub ntime: Ntime,
     pub nonce: Nonce,
+    pub version_bits: Option<Version>,
 }
 
 impl Serialize for Submit {
@@ -268,14 +281,49 @@ impl Serialize for Submit {
     where
         S: Serializer,
     {
+        let len = if self.version_bits.is_some() { 6 } else { 5 };
+        let mut seq = serializer.serialize_seq(Some(len))?;
+        seq.serialize_element(&self.username)?;
+        seq.serialize_element(&self.job_id)?;
+        seq.serialize_element(&self.extranonce2)?;
+        seq.serialize_element(&self.ntime)?;
+        seq.serialize_element(&self.nonce)?;
+        if let Some(v) = &self.version_bits {
+            seq.serialize_element(v)?;
+        }
+        seq.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for Submit {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let (username, job_id, extranonce2, ntime, nonce, version_bits) =
+            <(String, String, String, Ntime, Nonce, Option<Version>)>::deserialize(deserializer)?;
+
+        Ok(Submit {
+            username,
+            job_id,
+            extranonce2,
+            ntime,
+            nonce,
+            version_bits,
+        })
+    }
+}
+
+impl From<Submit> for (String, String, String, Ntime, Nonce, Option<Version>) {
+    fn from(s: Submit) -> Self {
         (
-            &self.username,
-            &self.job_id,
-            &self.extranonce2,
-            &self.ntime,
-            &self.nonce,
+            s.username,
+            s.job_id,
+            s.extranonce2,
+            s.ntime,
+            s.nonce,
+            s.version_bits,
         )
-            .serialize(serializer)
     }
 }
 
@@ -306,13 +354,13 @@ mod tests {
     #[track_caller]
     fn case(s: &str, expected: Message) {
         let actual = serde_json::from_str::<Message>(s).unwrap();
-        assert_eq!(actual, expected);
+        assert_eq!(actual, expected, "from Message");
 
         let serialized = serde_json::to_string(&actual).unwrap();
-        assert_eq!(serialized, s);
+        assert_eq!(serialized, s, "string equality");
 
         let round_trip = serde_json::from_str::<Message>(&serialized).unwrap();
-        assert_eq!(round_trip, expected);
+        assert_eq!(round_trip, expected, "roundtrip");
     }
 
     #[test]
@@ -460,6 +508,7 @@ mod tests {
                     extranonce2: "00000001".into(),
                     ntime: Ntime::from_str("504e86ed").unwrap(),
                     nonce: Nonce::from_str("b2957c02").unwrap(),
+                    version_bits: None,
                 })
                 .unwrap(),
             },
@@ -475,6 +524,36 @@ mod tests {
             },
         );
     }
+
+    // #[test]
+    // fn submit_with_version() {
+    //     case(
+    //         r#"{"id":4,"method":"mining.submit","params":["slush.miner1","bf","00000001","504e86ed","b2957c02","04d46000"]}"#,
+    //         Message::Request {
+    //             id: Id::Number(4),
+    //             method: "mining.submit".into(),
+    //             params: serde_json::to_value(&Submit {
+    //                 username: "slush.miner1".into(),
+    //                 job_id: "bf".into(),
+    //                 extranonce2: "00000001".into(),
+    //                 ntime: Ntime::from_str("504e86ed").unwrap(),
+    //                 nonce: Nonce::from_str("b2957c02").unwrap(),
+    //                 version: Version::from_str("04d46000").unwrap(),
+    //             })
+    //             .unwrap(),
+    //         },
+    //     );
+
+    //     case(
+    //         r#"{"id":4,"result":true,"error":null}"#,
+    //         Message::Response {
+    //             reject_reason: None,
+    //             id: Id::Number(4),
+    //             result: Some(json!(true)),
+    //             error: None,
+    //         },
+    //     );
+    // }
 
     #[test]
     fn set_difficulty() {

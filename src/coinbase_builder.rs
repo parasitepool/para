@@ -69,12 +69,14 @@ impl CoinbaseBuilder {
 
         let mut buf: Vec<u8> = Vec::with_capacity(Self::MAX_COINBASE_SCRIPT_SIG_SIZE);
 
-        let mut bip34_encoded_blockheight = [0u8; 8];
+        // BIP34
+        let mut minimally_encoded_serialized_cscript = [0u8; 8];
         let len = write_scriptint(
-            &mut bip34_encoded_blockheight,
+            &mut minimally_encoded_serialized_cscript,
             self.height.try_into().expect("height should always fit"),
         );
-        buf.extend_from_slice(&bip34_encoded_blockheight[..len]);
+        buf.push(len as u8); // byte length should be fine for the next 150 years
+        buf.extend_from_slice(&minimally_encoded_serialized_cscript[..len]);
 
         for (_, value) in self.aux.into_iter() {
             buf.extend_from_slice(hex::decode(value)?.as_slice());

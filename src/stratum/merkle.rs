@@ -7,19 +7,10 @@ pub fn merkle_root(
     extranonce2: &str,
     merkle_branches: &[TxMerkleNode],
 ) -> Result<TxMerkleNode> {
-    let coinbase_hex = format!("{coinb1}{extranonce1}{extranonce2}{coinb2}");
-
-    let coinbase_bin = hex::decode(&coinbase_hex)?;
-
-    // This is just a sanity check, remove for performance
-    let mut cursor = bitcoin::io::Cursor::new(&coinbase_bin);
-    let coinbase_tx = bitcoin::Transaction::consensus_decode_from_finite_reader(&mut cursor)?;
-    let _ = coinbase_tx.compute_txid();
-
+    let coinbase_bin = hex::decode(format!("{coinb1}{extranonce1}{extranonce2}{coinb2}"))?;
     let coinbase_hash = sha256d::Hash::hash(&coinbase_bin);
 
     let mut merkle_root = coinbase_hash;
-
     for branch in merkle_branches {
         let mut concat = Vec::with_capacity(64);
         concat.extend_from_slice(&merkle_root[..]);
@@ -32,11 +23,13 @@ pub fn merkle_root(
 
 pub fn merkle_branches(non_coinbase_txids: Vec<Txid>) -> Vec<TxMerkleNode> {
     let total_txs = non_coinbase_txids.len() + 1;
+
     if total_txs <= 1 {
         return vec![];
     }
 
     let mut level: Vec<TxMerkleNode> = vec![TxMerkleNode::all_zeros()];
+
     level.extend(
         non_coinbase_txids
             .iter()
@@ -48,11 +41,13 @@ pub fn merkle_branches(non_coinbase_txids: Vec<Txid>) -> Vec<TxMerkleNode> {
 
     while level.len() > 1 {
         let sibling_idx = coinbase_idx ^ 1;
+
         let sibling = if sibling_idx < level.len() {
             level[sibling_idx]
         } else {
             level[coinbase_idx]
         };
+
         branches.push(sibling);
 
         let mut next_level = Vec::with_capacity(level.len() / 2 + 1);
@@ -66,12 +61,15 @@ pub fn merkle_branches(non_coinbase_txids: Vec<Txid>) -> Vec<TxMerkleNode> {
             };
 
             let mut engine = <TxMerkleNode as Hash>::engine();
+
             hash1
                 .consensus_encode(&mut engine)
                 .expect("in-memory writers don't error");
+
             hash2
                 .consensus_encode(&mut engine)
                 .expect("in-memory writers don't error");
+
             next_level.push(TxMerkleNode::from_engine(engine));
 
             i += 2;

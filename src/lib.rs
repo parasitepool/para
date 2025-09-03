@@ -45,6 +45,7 @@ use {
     serde::{
         Deserialize, Serialize, Serializer,
         de::{self, Deserializer},
+        ser::SerializeSeq,
     },
     serde_json::{Value, json},
     serde_with::{DeserializeFromStr, SerializeDisplay},
@@ -55,7 +56,7 @@ use {
         fmt::{self, Display, Formatter},
         fs, io,
         net::{SocketAddr, ToSocketAddrs},
-        ops::Add,
+        ops::{Add, BitAnd, BitOr, BitXor, Not},
         path::{Path, PathBuf},
         process,
         str::FromStr,
@@ -68,7 +69,7 @@ use {
     },
     stratifier::Connection,
     stratum::{
-        Authorize, Id, Message, Nbits, Notify, Ntime, PrevHash, SetDifficulty, Subscribe,
+        Authorize, Id, Message, Nbits, Notify, Ntime, PrevHash, SetDifficulty, Submit, Subscribe,
         SubscribeResult, Version,
     },
     sysinfo::{Disks, System},

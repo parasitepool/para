@@ -91,7 +91,7 @@ impl Controller {
                 info!("Spawning hasher thread");
                 let mut hasher = Hasher {
                     header: Header {
-                        version: notify.version.clone().into(),
+                        version: notify.version.into(),
                         prev_blockhash: notify.prevhash.clone().into(),
                         merkle_root: stratum::merkle_root(
                             &notify.coinb1,
