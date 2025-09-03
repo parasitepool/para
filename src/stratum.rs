@@ -1,20 +1,32 @@
 use super::*;
 
+mod authorize;
 mod client;
+mod configure;
 mod merkle;
 mod nbits;
 mod nonce;
+mod notify;
 mod ntime;
 mod prevhash;
+mod set_difficulty;
+mod submit;
+mod subscribe;
 mod version;
 
 pub use {
+    authorize::Authorize,
     client::Client,
+    configure::Configure,
     merkle::{merkle_branches, merkle_root},
     nbits::Nbits,
     nonce::Nonce,
+    notify::Notify,
     ntime::Ntime,
     prevhash::PrevHash,
+    set_difficulty::SetDifficulty,
+    submit::Submit,
+    subscribe::{Subscribe, SubscribeResult},
     version::Version,
 };
 
@@ -47,10 +59,10 @@ pub enum Message {
     },
 }
 
-// Stratum does id: null, which is technically wrong according to the JSON-RPC spec, which
-// states that no id field should be present. This is a work around to allow both cases. If
-// a server sends a notification with an id field other than null it will be classified as
-// a request and should just be ignored by any client.
+/// Stratum does id: null, which is technically wrong according to the JSON-RPC spec, which
+/// states that no id field should be present. This is a work around to allow both cases. If
+/// a server sends a notification with an id field other than null it will be classified as
+/// a request and should just be ignored by any client.
 impl<'de> Deserialize<'de> for Message {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -150,203 +162,6 @@ impl fmt::Display for JsonRpcError {
     }
 }
 
-// pub struct Configure
-// method: "mining.configure",
-// params: Array [
-// Array [
-// String("version-rolling"),
-// ],
-// Object {
-// "version-rolling.mask": String("ffffffff"),
-// },
-// ],
-// }
-
-#[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
-#[serde(try_from = "Vec<serde_json::Value>", into = "Vec<String>")]
-pub struct Subscribe {
-    pub user_agent: String,
-    pub extranonce1: Option<String>,
-}
-
-// I dont know about this. Def add test for deserializing
-impl TryFrom<Vec<serde_json::Value>> for Subscribe {
-    type Error = String;
-
-    fn try_from(v: Vec<serde_json::Value>) -> Result<Self, Self::Error> {
-        match v.as_slice() {
-            [user_agent] => Ok(Subscribe {
-                user_agent: user_agent
-                    .as_str()
-                    .ok_or("params[0] must be string")?
-                    .to_string(),
-                extranonce1: None,
-            }),
-            [user_agent, extranonce1] => Ok(Subscribe {
-                user_agent: user_agent
-                    .as_str()
-                    .ok_or("params[0] must be string")?
-                    .to_string(),
-                extranonce1: extranonce1.as_str().map(str::to_string),
-            }),
-            _ => Err(format!("expected 1 or 2 elems, got {}", v.len())),
-        }
-    }
-}
-
-impl From<Subscribe> for Vec<String> {
-    fn from(s: Subscribe) -> Self {
-        match s.extranonce1 {
-            Some(extranonce1) => vec![s.user_agent, extranonce1],
-            None => vec![s.user_agent],
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-pub struct SubscribeResult {
-    pub subscriptions: Vec<(String, String)>,
-    pub extranonce1: String,
-    pub extranonce2_size: u32,
-}
-
-impl Serialize for SubscribeResult {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        (
-            &self.subscriptions,
-            &self.extranonce1,
-            &self.extranonce2_size,
-        )
-            .serialize(serializer)
-    }
-}
-
-#[derive(Debug, Deserialize, PartialEq, Clone)]
-pub struct Notify {
-    pub job_id: String,
-    pub prevhash: PrevHash,
-    pub coinb1: String,
-    pub coinb2: String,
-    pub merkle_branches: Vec<TxMerkleNode>,
-    pub version: Version,
-    pub nbits: Nbits,
-    pub ntime: Ntime,
-    pub clean_jobs: bool,
-}
-
-impl Serialize for Notify {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        (
-            &self.job_id,
-            &self.prevhash,
-            &self.coinb1,
-            &self.coinb2,
-            &self.merkle_branches,
-            &self.version,
-            &self.nbits,
-            &self.ntime,
-            &self.clean_jobs,
-        )
-            .serialize(serializer)
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SetDifficulty(pub Vec<Difficulty>);
-
-impl SetDifficulty {
-    pub fn difficulty(&self) -> Difficulty {
-        *self.0.first().unwrap()
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct Submit {
-    pub username: String,
-    pub job_id: String,
-    pub extranonce2: String,
-    pub ntime: Ntime,
-    pub nonce: Nonce,
-    pub version_bits: Option<Version>,
-}
-
-impl Serialize for Submit {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let len = if self.version_bits.is_some() { 6 } else { 5 };
-        let mut seq = serializer.serialize_seq(Some(len))?;
-        seq.serialize_element(&self.username)?;
-        seq.serialize_element(&self.job_id)?;
-        seq.serialize_element(&self.extranonce2)?;
-        seq.serialize_element(&self.ntime)?;
-        seq.serialize_element(&self.nonce)?;
-        if let Some(v) = &self.version_bits {
-            seq.serialize_element(v)?;
-        }
-        seq.end()
-    }
-}
-
-impl<'de> Deserialize<'de> for Submit {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let (username, job_id, extranonce2, ntime, nonce, version_bits) =
-            <(String, String, String, Ntime, Nonce, Option<Version>)>::deserialize(deserializer)?;
-
-        Ok(Submit {
-            username,
-            job_id,
-            extranonce2,
-            ntime,
-            nonce,
-            version_bits,
-        })
-    }
-}
-
-impl From<Submit> for (String, String, String, Ntime, Nonce, Option<Version>) {
-    fn from(s: Submit) -> Self {
-        (
-            s.username,
-            s.job_id,
-            s.extranonce2,
-            s.ntime,
-            s.nonce,
-            s.version_bits,
-        )
-    }
-}
-
-// TODO: get rid of these clone
-#[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
-#[serde(from = "(String, String)", into = "(String, String)")]
-pub struct Authorize {
-    pub username: String,
-    pub password: String,
-}
-
-impl From<(String, String)> for Authorize {
-    fn from((username, password): (String, String)) -> Self {
-        Self { username, password }
-    }
-}
-
-impl From<Authorize> for (String, String) {
-    fn from(a: Authorize) -> Self {
-        (a.username, a.password)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -354,10 +169,12 @@ mod tests {
     #[track_caller]
     fn case(s: &str, expected: Message) {
         let actual = serde_json::from_str::<Message>(s).unwrap();
-        assert_eq!(actual, expected, "from Message");
+        assert_eq!(actual, expected, "deserialize Message from str");
 
         let serialized = serde_json::to_string(&actual).unwrap();
-        assert_eq!(serialized, s, "string equality");
+        let lhs: serde_json::Value = serde_json::from_str(s).unwrap();
+        let rhs: serde_json::Value = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(lhs, rhs, "JSON semantic equality");
 
         let round_trip = serde_json::from_str::<Message>(&serialized).unwrap();
         assert_eq!(round_trip, expected, "roundtrip");
@@ -525,35 +342,35 @@ mod tests {
         );
     }
 
-    // #[test]
-    // fn submit_with_version() {
-    //     case(
-    //         r#"{"id":4,"method":"mining.submit","params":["slush.miner1","bf","00000001","504e86ed","b2957c02","04d46000"]}"#,
-    //         Message::Request {
-    //             id: Id::Number(4),
-    //             method: "mining.submit".into(),
-    //             params: serde_json::to_value(&Submit {
-    //                 username: "slush.miner1".into(),
-    //                 job_id: "bf".into(),
-    //                 extranonce2: "00000001".into(),
-    //                 ntime: Ntime::from_str("504e86ed").unwrap(),
-    //                 nonce: Nonce::from_str("b2957c02").unwrap(),
-    //                 version: Version::from_str("04d46000").unwrap(),
-    //             })
-    //             .unwrap(),
-    //         },
-    //     );
+    #[test]
+    fn submit_with_version_bits() {
+        case(
+            r#"{"id":4,"method":"mining.submit","params":["slush.miner1","bf","00000001","504e86ed","b2957c02","04d46000"]}"#,
+            Message::Request {
+                id: Id::Number(4),
+                method: "mining.submit".into(),
+                params: serde_json::to_value(&Submit {
+                    username: "slush.miner1".into(),
+                    job_id: "bf".into(),
+                    extranonce2: "00000001".into(),
+                    ntime: Ntime::from_str("504e86ed").unwrap(),
+                    nonce: Nonce::from_str("b2957c02").unwrap(),
+                    version_bits: Some(Version::from_str("04d46000").unwrap()),
+                })
+                .unwrap(),
+            },
+        );
 
-    //     case(
-    //         r#"{"id":4,"result":true,"error":null}"#,
-    //         Message::Response {
-    //             reject_reason: None,
-    //             id: Id::Number(4),
-    //             result: Some(json!(true)),
-    //             error: None,
-    //         },
-    //     );
-    // }
+        case(
+            r#"{"id":4,"result":true,"error":null}"#,
+            Message::Response {
+                reject_reason: None,
+                id: Id::Number(4),
+                result: Some(json!(true)),
+                error: None,
+            },
+        );
+    }
 
     #[test]
     fn set_difficulty() {
@@ -577,7 +394,7 @@ mod tests {
                 method: "mining.authorize".into(),
                 params: serde_json::to_value(Authorize {
                     username: "slush.miner1".into(),
-                    password: "password".into(),
+                    password: Some("password".into()),
                 })
                 .unwrap(),
             },
@@ -590,6 +407,22 @@ mod tests {
                 result: Some(json!(true)),
                 error: None,
                 reject_reason: None,
+            },
+        );
+    }
+
+    #[test]
+    fn authorize_optional_password() {
+        case(
+            r#"{"id":2,"method":"mining.authorize","params":["slush.miner1"]}"#,
+            Message::Request {
+                id: Id::Number(2),
+                method: "mining.authorize".into(),
+                params: serde_json::to_value(Authorize {
+                    username: "slush.miner1".into(),
+                    password: None,
+                })
+                .unwrap(),
             },
         );
     }
@@ -609,6 +442,22 @@ mod tests {
             },
         );
 
+        case(
+            r#"{"id":2,"method":"mining.subscribe","params":["para/0.1","abcd"]}"#,
+            Message::Request {
+                id: Id::Number(2),
+                method: "mining.subscribe".into(),
+                params: serde_json::to_value(Subscribe {
+                    user_agent: "para/0.1".into(),
+                    extranonce1: Some("abcd".into()),
+                })
+                .unwrap(),
+            },
+        );
+    }
+
+    #[test]
+    fn subscribe_result() {
         case(
             r#"{"id":1,"result":[[["mining.set_difficulty","b4b6693b72a50c7116db18d6497cac52"],["mining.notify","ae6812eb4cd7735a302a8a9dd95cf71f"]],"08000002",4],"error":null}"#,
             Message::Response {
@@ -632,6 +481,42 @@ mod tests {
                 ),
                 error: None,
                 reject_reason: None,
+            },
+        );
+    }
+
+    #[test]
+    fn configure_minimal() {
+        case(
+            r#"{"id":3,"method":"mining.configure","params":[["version-rolling"]]}"#,
+            Message::Request {
+                id: Id::Number(3),
+                method: "mining.configure".into(),
+                params: serde_json::to_value(Configure {
+                    extensions: vec!["version-rolling".into()],
+                    minimum_difficulty_value: None,
+                    version_rolling_mask: None,
+                    version_rolling_min_bit_count: None,
+                })
+                .unwrap(),
+            },
+        );
+    }
+
+    #[test]
+    fn configure_with_options() {
+        case(
+            r#"{"id":5,"method":"mining.configure","params":[["minimum-difficulty","version-rolling"],{"minimum-difficulty.value":2048,"version-rolling.mask":"00fff000","version-rolling.min-bit-count":2}]}"#,
+            Message::Request {
+                id: Id::Number(5),
+                method: "mining.configure".into(),
+                params: serde_json::to_value(Configure {
+                    extensions: vec!["minimum-difficulty".into(), "version-rolling".into()],
+                    minimum_difficulty_value: Some(2048),
+                    version_rolling_mask: Some(Version::from_str("00fff000").unwrap()),
+                    version_rolling_min_bit_count: Some(2),
+                })
+                .unwrap(),
             },
         );
     }

@@ -62,6 +62,9 @@ where
             match (&mut self.state, method.as_str()) {
                 (State::Init, "mining.configure") => {
                     info!("CONFIGURE from {}: {params}", self.worker);
+
+                    let _configure = serde_json::from_value::<Configure>(params)?;
+
                     self.send(Message::Response {
                         id,
                         result: Some(json!({"version-rolling": true, "version-rolling.mask": self.config.version_mask()})),

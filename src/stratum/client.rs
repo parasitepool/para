@@ -161,7 +161,7 @@ impl Client {
                 "mining.authorize",
                 serde_json::to_value(Authorize {
                     username: self.username.clone(),
-                    password: self.password.clone(),
+                    password: Some(self.password.clone()),
                 })?,
             )
             .await?;
