@@ -1,4 +1,5 @@
 use {
+    anyhow::anyhow,
     bitcoin::{Address, address::NetworkUnchecked},
     command_builder::CommandBuilder,
     executable_path::executable_path,
@@ -6,10 +7,13 @@ use {
         api::Healthcheck,
         ckpool::{HashRateStatus, PoolStatus, ShareStatus, Status, User, Worker},
         hash_rate::HashRate,
+        subcommand::server::notifications::{
+            NotificationHandler, NotificationPriority, NotificationType,
+        },
     },
     pretty_assertions::assert_eq as pretty_assert_eq,
     reqwest::{StatusCode, Url},
-    serde::de::DeserializeOwned,
+    serde::{Deserialize, Serialize, de::DeserializeOwned},
     std::{
         collections::{BTreeMap, HashSet},
         fs,
@@ -25,6 +29,7 @@ use {
     tempfile::TempDir,
     test_server::TestServer,
     to_args::ToArgs,
+    tokio::time::timeout,
 };
 
 #[cfg(target_os = "linux")]
@@ -41,6 +46,7 @@ mod test_psql;
 mod test_server;
 mod to_args;
 
+mod alerts;
 #[cfg(target_os = "linux")]
 mod ping;
 mod server;
