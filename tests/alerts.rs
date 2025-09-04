@@ -17,7 +17,7 @@ async fn listen_for_ntfy_message(
     timeout_duration: Duration,
 ) -> Result<NtfyMessage, anyhow::Error> {
     let client = reqwest::Client::new();
-    let url = format!("https://ntfy.sh/{}/json?poll=1&since=1s", channel);
+    let url = format!("https://ntfy.sh/{}/json?poll=1&since=5s", channel);
 
     let response = timeout(timeout_duration, client.get(&url).send())
         .await
@@ -118,7 +118,7 @@ async fn test_send_block_notification() {
     );
 
     // processing delay on ntfy's side was causing failing tests
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    tokio::time::sleep(Duration::from_millis(800)).await;
 
     match listen_for_ntfy_message(&test_channel, Duration::from_secs(5)).await {
         Ok(received_msg) => {
