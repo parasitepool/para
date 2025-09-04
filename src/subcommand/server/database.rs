@@ -201,12 +201,12 @@ impl Database {
         ORDER BY qs.total_diff DESC;
         ",
         )
-            .bind(start_blockheight)
-            .bind(end_blockheight)
-            .bind(&exclusion_list)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|err| anyhow!(err))
+        .bind(start_blockheight)
+        .bind(end_blockheight)
+        .bind(&exclusion_list)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))
     }
 
     pub(crate) async fn get_user_payout_range(
@@ -285,12 +285,12 @@ impl Database {
         ORDER BY us.total_diff DESC;
         ",
         )
-            .bind(start_blockheight)
-            .bind(end_blockheight)
-            .bind(&target_username)
-            .bind(&exclusion_list)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|err| anyhow!(err))
+        .bind(start_blockheight)
+        .bind(end_blockheight)
+        .bind(&target_username)
+        .bind(&exclusion_list)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))
     }
 }

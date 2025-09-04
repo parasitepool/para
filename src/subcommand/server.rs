@@ -117,7 +117,10 @@ impl Server {
                 router = router
                     .route("/payouts/{blockheight}", get(Self::payouts))
                     .route("/payouts/range/:start/:end", get(Self::payouts_range))
-                    .route("/payouts/range/:start/:end/user/:username", get(Self::user_payout_range))
+                    .route(
+                        "/payouts/range/:start/:end/user/:username",
+                        get(Self::user_payout_range),
+                    )
                     .route("/split", get(Self::open_split))
                     .route("/split/{blockheight}", get(Self::sat_split))
                     .route(
@@ -299,7 +302,7 @@ impl Server {
                 )
                 .await?,
         )
-            .into_response())
+        .into_response())
     }
 
     pub(crate) async fn user_payout_range(
@@ -319,7 +322,7 @@ impl Server {
                 )
                 .await?,
         )
-            .into_response())
+        .into_response())
     }
 
     pub(crate) async fn static_assets(Path(path): Path<String>) -> ServerResult<Response> {
