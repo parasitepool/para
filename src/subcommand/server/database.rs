@@ -145,4 +145,152 @@ impl Database {
         .await
         .map_err(|err| anyhow!(err))
     }
+    pub(crate) async fn get_payouts_range(
+        &self,
+        start_blockheight: i32,
+        end_blockheight: i32,
+        excluded_usernames: Vec<String>,
+    ) -> Result<Vec<Payout>> {
+        let exclusion_list = if excluded_usernames.is_empty() {
+            vec!["".to_string()]
+        } else {
+            excluded_usernames
+        };
+
+        sqlx::query_as::<_, Payout>(
+            "
+        WITH block_range AS (
+            SELECT MIN(blockheight) as min_block, MAX(blockheight) as max_block
+            FROM blocks
+            WHERE blockheight >= $1 AND blockheight <= $2
+        ),
+        previous_block AS (
+            SELECT MAX(blockheight) AS prev_height
+            FROM blocks
+            WHERE blockheight < $1
+        ),
+        qualified_shares AS (
+            SELECT
+                s.workername,
+                s.lnurl,
+                s.username AS btcaddress,
+                SUM(s.diff) as total_diff
+            FROM remote_shares s
+            CROSS JOIN block_range br
+            CROSS JOIN previous_block pb
+            WHERE s.blockheight <= br.max_block
+                AND s.blockheight > COALESCE(pb.prev_height, -1)
+                AND s.username != ALL($3)
+                AND s.reject_reason IS NULL
+            GROUP BY s.lnurl, s.username, s.workername
+        ),
+        sum_shares AS (
+            SELECT SUM(total_diff) as grand_total
+            FROM qualified_shares
+        )
+        SELECT
+            qs.workername AS worker_name,
+            qs.btcaddress,
+            qs.lnurl,
+            CAST(qs.total_diff as INT8) AS payable_shares,
+            CAST(ss.grand_total as INT8) AS total_shares,
+            ROUND((qs.total_diff / NULLIF(ss.grand_total, 0))::numeric, 8)::FLOAT8 as percentage
+        FROM qualified_shares qs
+        CROSS JOIN sum_shares ss
+        WHERE ss.grand_total > 0
+        ORDER BY qs.total_diff DESC;
+        ",
+        )
+            .bind(start_blockheight)
+            .bind(end_blockheight)
+            .bind(&exclusion_list)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|err| anyhow!(err))
+    }
+
+    pub(crate) async fn get_user_payout_range(
+        &self,
+        start_blockheight: i32,
+        end_blockheight: i32,
+        target_username: String,
+        excluded_usernames: Vec<String>,
+    ) -> Result<Vec<Payout>> {
+        if excluded_usernames.contains(&target_username) {
+            return Ok(vec![]);
+        }
+
+        let exclusion_list = if excluded_usernames.is_empty() {
+            vec!["".to_string()]
+        } else {
+            excluded_usernames
+        };
+
+        sqlx::query_as::<_, Payout>(
+            "
+        WITH block_range AS (
+            SELECT MIN(blockheight) as min_block, MAX(blockheight) as max_block
+            FROM blocks
+            WHERE blockheight >= $1 AND blockheight <= $2
+        ),
+        previous_block AS (
+            SELECT MAX(blockheight) AS prev_height
+            FROM blocks
+            WHERE blockheight < $1
+        ),
+        qualified_shares AS (
+            SELECT
+                s.workername,
+                s.lnurl,
+                s.username AS btcaddress,
+                SUM(s.diff) as total_diff
+            FROM remote_shares s
+            CROSS JOIN block_range br
+            CROSS JOIN previous_block pb
+            WHERE s.blockheight <= br.max_block
+                AND s.blockheight > COALESCE(pb.prev_height, -1)
+                AND s.username != ALL($4)
+                AND s.reject_reason IS NULL
+            GROUP BY s.lnurl, s.username, s.workername
+        ),
+        sum_shares AS (
+            SELECT SUM(total_diff) as grand_total
+            FROM qualified_shares
+        ),
+        user_shares AS (
+            SELECT
+                s.workername,
+                s.lnurl,
+                s.username AS btcaddress,
+                SUM(s.diff) as total_diff
+            FROM remote_shares s
+            CROSS JOIN block_range br
+            CROSS JOIN previous_block pb
+            WHERE s.blockheight <= br.max_block
+                AND s.blockheight > COALESCE(pb.prev_height, -1)
+                AND s.username = $3
+                AND s.reject_reason IS NULL
+            GROUP BY s.lnurl, s.username, s.workername
+        )
+        SELECT
+            us.workername AS worker_name,
+            us.btcaddress,
+            us.lnurl,
+            CAST(us.total_diff as INT8) AS payable_shares,
+            CAST(ss.grand_total as INT8) AS total_shares,
+            ROUND((us.total_diff / NULLIF(ss.grand_total, 0))::numeric, 8)::FLOAT8 as percentage
+        FROM user_shares us
+        CROSS JOIN sum_shares ss
+        WHERE ss.grand_total > 0
+        ORDER BY us.total_diff DESC;
+        ",
+        )
+            .bind(start_blockheight)
+            .bind(end_blockheight)
+            .bind(&target_username)
+            .bind(&exclusion_list)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|err| anyhow!(err))
+    }
 }

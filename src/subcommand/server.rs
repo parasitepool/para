@@ -1,3 +1,4 @@
+use axum::extract::Query;
 use {
     super::*,
     crate::subcommand::sync::{ShareBatch, SyncResponse},
@@ -66,6 +67,13 @@ fn format_uptime(uptime_seconds: u64) -> String {
     parts.join(", ")
 }
 
+fn exclusion_list_from_params(params: HashMap<String, String>) -> Vec<String> {
+    params
+        .get("excluded")
+        .map(|s| s.split(',').map(String::from).collect::<Vec<_>>())
+        .unwrap_or_default()
+}
+
 #[derive(Clone, Debug, Parser)]
 pub struct Server {
     #[command(flatten)]
@@ -115,6 +123,8 @@ impl Server {
                         post(Self::sync_batch)
                             .layer(DefaultBodyLimit::max(52428800 /* 50MB */)),
                     )
+                    .route("/payouts/range/:start/:end", get(Self::payouts_range))
+                    .route("/payouts/range/:start/:end/user/:username", get(Self::user_payout_range))
                     .layer(Extension(database));
             }
             Err(err) => {
@@ -271,6 +281,45 @@ impl Server {
             payments,
         })
         .into_response())
+    }
+
+    pub(crate) async fn payouts_range(
+        Path((start_height, end_height)): Path<(u32, u32)>,
+        Query(params): Query<HashMap<String, String>>,
+        Extension(database): Extension<Database>,
+    ) -> ServerResult<Response> {
+        let excluded_usernames = exclusion_list_from_params(params);
+
+        Ok(Json(
+            database
+                .get_payouts_range(
+                    start_height.try_into().unwrap(),
+                    end_height.try_into().unwrap(),
+                    excluded_usernames.into(),
+                )
+                .await?,
+        )
+            .into_response())
+    }
+
+    pub(crate) async fn user_payout_range(
+        Path((start_height, end_height, username)): Path<(u32, u32, String)>,
+        Query(params): Query<HashMap<String, String>>,
+        Extension(database): Extension<Database>,
+    ) -> ServerResult<Response> {
+        let excluded_usernames = exclusion_list_from_params(params);
+
+        Ok(Json(
+            database
+                .get_user_payout_range(
+                    start_height.try_into().unwrap(),
+                    end_height.try_into().unwrap(),
+                    username,
+                    excluded_usernames.into(),
+                )
+                .await?,
+        )
+            .into_response())
     }
 
     pub(crate) async fn static_assets(Path(path): Path<String>) -> ServerResult<Response> {
