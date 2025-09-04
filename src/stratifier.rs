@@ -75,9 +75,11 @@ where
                     self.state = State::Configured;
                 }
                 (State::Init | State::Configured, "mining.subscribe") => {
+                    debug!("SUBSCRIBE from {} with {}", self.worker, params);
+
                     let subscribe = serde_json::from_value::<Subscribe>(params)?;
 
-                    info!(
+                    debug!(
                         "SUBSCRIBE from {} with user agent {}",
                         self.worker, subscribe.user_agent
                     );
@@ -134,7 +136,7 @@ where
 
                     self.send(Message::Notification {
                         method: "mining.set_difficulty".into(),
-                        params: json!(SetDifficulty(vec![Difficulty(1)])),
+                        params: json!(SetDifficulty(Difficulty(1))),
                     })
                     .await?;
 
@@ -253,9 +255,11 @@ where
                     .await?;
                 }
                 (state, method) => {
+                    // TODO: log state and method, try to parse and display
                     dbg!(&state);
                     dbg!(&method);
                     dbg!(&params);
+                    info!("{params}");
                 }
             }
         }

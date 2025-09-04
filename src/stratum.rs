@@ -12,6 +12,7 @@ mod prevhash;
 mod set_difficulty;
 mod submit;
 mod subscribe;
+mod suggest_difficulty;
 mod version;
 
 pub use {
@@ -27,6 +28,7 @@ pub use {
     set_difficulty::SetDifficulty,
     submit::Submit,
     subscribe::{Subscribe, SubscribeResult},
+    suggest_difficulty::SuggestDifficulty,
     version::Version,
 };
 
@@ -380,7 +382,7 @@ mod tests {
             serde_json::from_str::<Message>(set_difficulty_str).unwrap(),
             Message::Notification {
                 method: "mining.set_difficulty".into(),
-                params: serde_json::to_value(SetDifficulty(vec![Difficulty(2)])).unwrap(),
+                params: serde_json::to_value(SetDifficulty(Difficulty(2))).unwrap(),
             },
         );
     }
@@ -488,14 +490,14 @@ mod tests {
     #[test]
     fn configure_minimal() {
         case(
-            r#"{"id":3,"method":"mining.configure","params":[["version-rolling"]]}"#,
+            r#"{"id":3,"method":"mining.configure","params":[["version-rolling"],{"version-rolling.mask":"ffffffff"}]}"#,
             Message::Request {
                 id: Id::Number(3),
                 method: "mining.configure".into(),
                 params: serde_json::to_value(Configure {
                     extensions: vec!["version-rolling".into()],
                     minimum_difficulty_value: None,
-                    version_rolling_mask: None,
+                    version_rolling_mask: Some(Version::from_str("ffffffff").unwrap()),
                     version_rolling_min_bit_count: None,
                 })
                 .unwrap(),

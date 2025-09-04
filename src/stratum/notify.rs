@@ -63,3 +63,93 @@ impl<'de> Deserialize<'de> for Notify {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bitcoin::block;
+
+    #[track_caller]
+    fn case(json: &str, expected: Notify) {
+        let parsed: Notify = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed, expected, "deserialize equality");
+
+        let ser = serde_json::to_string(&parsed).unwrap();
+        let lhs: Value = serde_json::from_str(json).unwrap();
+        let rhs: Value = serde_json::from_str(&ser).unwrap();
+        assert_eq!(lhs, rhs, "semantic JSON equality");
+
+        let back: Notify = serde_json::from_str(&ser).unwrap();
+        assert_eq!(back, expected, "roundtrip equality");
+    }
+
+    fn sample_notify(clean_jobs: bool) -> Notify {
+        Notify {
+            job_id: "bf".into(),
+            prevhash: "4d16b6f85af6e2198f44ae2a6de67f78487ae5611b77c6c0440b921e00000000"
+                .parse()
+                .unwrap(),
+            coinb1: "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff20020862062f503253482f04b8864e5008".into(),
+            coinb2: "072f736c7573682f000000000100f2052a010000001976a914d23fcdf86f7e756a64a7a9688ef9903327048ed988ac00000000".into(),
+            merkle_branches: Vec::new(),
+            version: Version(block::Version::TWO),
+            nbits: Nbits::from_str("1c2ac4af").unwrap(),
+            ntime: Ntime::from_str("504e86b9").unwrap(),
+            clean_jobs,
+        }
+    }
+
+    #[test]
+    fn notify_roundtrip_false() {
+        let json = r#"[
+            "bf",
+            "4d16b6f85af6e2198f44ae2a6de67f78487ae5611b77c6c0440b921e00000000",
+            "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff20020862062f503253482f04b8864e5008",
+            "072f736c7573682f000000000100f2052a010000001976a914d23fcdf86f7e756a64a7a9688ef9903327048ed988ac00000000",
+            [],
+            "00000002",
+            "1c2ac4af",
+            "504e86b9",
+            false
+        ]"#;
+
+        case(json, sample_notify(false));
+    }
+
+    #[test]
+    fn notify_serialize_shape() {
+        let n = sample_notify(false);
+        let v = serde_json::to_value(&n).unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!([
+                "bf",
+                "4d16b6f85af6e2198f44ae2a6de67f78487ae5611b77c6c0440b921e00000000",
+                "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff20020862062f503253482f04b8864e5008",
+                "072f736c7573682f000000000100f2052a010000001976a914d23fcdf86f7e756a64a7a9688ef9903327048ed988ac00000000",
+                [],
+                "00000002",
+                "1c2ac4af",
+                "504e86b9",
+                false
+            ])
+        );
+    }
+
+    #[test]
+    fn notify_roundtrip_true() {
+        let json = r#"[
+            "bf",
+            "4d16b6f85af6e2198f44ae2a6de67f78487ae5611b77c6c0440b921e00000000",
+            "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff20020862062f503253482f04b8864e5008",
+            "072f736c7573682f000000000100f2052a010000001976a914d23fcdf86f7e756a64a7a9688ef9903327048ed988ac00000000",
+            [],
+            "00000002",
+            "1c2ac4af",
+            "504e86b9",
+            true
+        ]"#;
+
+        case(json, sample_notify(true));
+    }
+}
