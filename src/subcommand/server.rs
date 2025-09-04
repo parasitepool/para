@@ -102,8 +102,7 @@ impl Server {
             ))
             .route("/", get(Self::home))
             .route("/healthcheck", self.with_auth(get(Self::healthcheck)))
-            .route("/static/{*path}", get(Self::static_assets))
-            .layer(Extension(config.clone()));
+            .route("/static/{*path}", get(Self::static_assets));
 
         match Database::new(config.database_url()).await {
             Ok(database) => {
@@ -122,6 +121,8 @@ impl Server {
                 warn!("Failed to connect to PostgreSQL: {err}",);
             }
         }
+
+        router = router.layer(Extension(config.clone()));
 
         if !config.nodes().is_empty() {
             let aggregator = Aggregator::init(config.clone())?;
