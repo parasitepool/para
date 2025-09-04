@@ -116,6 +116,8 @@ impl Server {
             Ok(database) => {
                 router = router
                     .route("/payouts/{blockheight}", get(Self::payouts))
+                    .route("/payouts/range/:start/:end", get(Self::payouts_range))
+                    .route("/payouts/range/:start/:end/user/:username", get(Self::user_payout_range))
                     .route("/split", get(Self::open_split))
                     .route("/split/{blockheight}", get(Self::sat_split))
                     .route(
@@ -123,8 +125,6 @@ impl Server {
                         post(Self::sync_batch)
                             .layer(DefaultBodyLimit::max(52428800 /* 50MB */)),
                     )
-                    .route("/payouts/range/:start/:end", get(Self::payouts_range))
-                    .route("/payouts/range/:start/:end/user/:username", get(Self::user_payout_range))
                     .layer(Extension(database));
             }
             Err(err) => {
@@ -295,7 +295,7 @@ impl Server {
                 .get_payouts_range(
                     start_height.try_into().unwrap(),
                     end_height.try_into().unwrap(),
-                    excluded_usernames.into(),
+                    excluded_usernames,
                 )
                 .await?,
         )
@@ -315,7 +315,7 @@ impl Server {
                     start_height.try_into().unwrap(),
                     end_height.try_into().unwrap(),
                     username,
-                    excluded_usernames.into(),
+                    excluded_usernames,
                 )
                 .await?,
         )
