@@ -1,7 +1,6 @@
 use super::*;
 
 // Should I test round tripping. Going from the bin tx back to this struct?
-
 // coinbase is made up of fixes size slots (variable sized slots?)
 
 #[derive(Clone)]
