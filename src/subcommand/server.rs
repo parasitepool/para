@@ -116,9 +116,9 @@ impl Server {
             Ok(database) => {
                 router = router
                     .route("/payouts/{blockheight}", get(Self::payouts))
-                    .route("/payouts/range/:start/:end", get(Self::payouts_range))
+                    .route("/payouts/range/{start_height}/{end_height}", get(Self::payouts_range))
                     .route(
-                        "/payouts/range/:start/:end/user/:username",
+                        "/payouts/range/{start_height}/{end_height}/user/{username}",
                         get(Self::user_payout_range),
                     )
                     .route("/split", get(Self::open_split))
