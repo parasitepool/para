@@ -8,13 +8,13 @@ pub(crate) struct Split {
 }
 
 #[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub(crate) struct Payout {
+pub struct Payout {
     pub(crate) worker_name: String,
-    pub(crate) btcaddress: Option<String>,
+    pub btcaddress: Option<String>,
     pub(crate) lnurl: Option<String>,
-    pub(crate) payable_shares: i64,
-    pub(crate) total_shares: i64,
-    pub(crate) percentage: f64,
+    pub payable_shares: i64,
+    pub total_shares: i64,
+    pub percentage: f64,
 }
 
 #[derive(Debug, Clone)]

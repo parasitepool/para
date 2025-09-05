@@ -18,7 +18,7 @@ mod accept_json;
 mod aggregator;
 pub mod api;
 mod config;
-pub(crate) mod database;
+pub mod database;
 mod error;
 mod templates;
 

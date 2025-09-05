@@ -171,6 +171,26 @@ impl TestServer {
     }
 
     #[cfg(target_os = "linux")]
+    pub(crate) async fn get_json_async<T: DeserializeOwned>(&self, path: impl AsRef<str>) -> T {
+        let client = reqwest::Client::new();
+        let response = client
+            .get(self.url().join(path.as_ref()).unwrap())
+            .header(reqwest::header::ACCEPT, "application/json")
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "Response: {}",
+            response.text().await.unwrap()
+        );
+
+        response.json().await.unwrap()
+    }
+
+    #[cfg(target_os = "linux")]
     pub(crate) async fn post_json<T: serde::Serialize, R: DeserializeOwned>(
         &self,
         path: impl AsRef<str>,
