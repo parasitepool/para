@@ -1,4 +1,4 @@
-use {super::*, crate::subcommand::pool::pool_config::PoolConfig, bitcoin::Block};
+use {super::*, crate::subcommand::pool::pool_config::PoolConfig};
 
 #[derive(Debug, Display)]
 pub(crate) enum State {
@@ -12,8 +12,8 @@ pub(crate) enum State {
 pub(crate) struct Connection<R, W> {
     config: Arc<PoolConfig>,
     worker: SocketAddr,
-    reader: R,
-    writer: W,
+    reader: FramedRead<R, LinesCodec>,
+    writer: FramedWrite<W, LinesCodec>,
     state: State,
 }
 
@@ -26,8 +26,8 @@ where
         Self {
             config,
             worker,
-            reader,
-            writer,
+            reader: FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_MESSAGE_SIZE)),
+            writer: FramedWrite::new(writer, LinesCodec::new()),
             state: State::Init,
         }
     }
@@ -257,7 +257,7 @@ where
         extranonce1: String,
         gbt: &GetBlockTemplateResult,
         prevhash: &PrevHash,
-        merkle_branches: &Vec<TxMerkleNode>,
+        merkle_branches: &[TxMerkleNode],
         coinb1_foo: &mut Option<String>,
         coinb2_foo: &mut Option<String>,
     ) -> Result {
@@ -282,7 +282,7 @@ where
                 &coinb2_foo.clone().unwrap(),
                 &extranonce1,
                 &submit.extranonce2,
-                &merkle_branches,
+                merkle_branches,
             )?,
             time: submit.ntime.into(),
             bits: nbits.into(),
@@ -337,33 +337,33 @@ where
     }
 
     async fn read_message(&mut self) -> Result<Option<Message>> {
-        // TODO: this should def be sized
-        let mut line = String::new();
-        match self.reader.read_line(&mut line).await {
-            Ok(0) => {
+        match self.reader.next().await {
+            Some(Ok(line)) => {
+                let message = serde_json::from_str::<Message>(&line).map_err(|e| {
+                    anyhow!(
+                        "invalid stratum message from {}: {e}; line={line:?}",
+                        self.worker
+                    )
+                })?;
+                Ok(Some(message))
+            }
+            Some(Err(e)) => Err(anyhow!("read error from {}: {e}", self.worker)),
+            None => {
                 info!("Worker {} disconnected", self.worker);
-                return Ok(None);
+                Ok(None)
             }
-            Ok(n) => info!("{n} bytes read"),
-            Err(e) => {
-                error!("Read error: {e}");
-            }
-        };
-
-        match serde_json::from_str::<Message>(&line) {
-            Ok(msg) => Ok(Some(msg)),
-            Err(e) => Err(anyhow!("Invalid stratum message: {line:?}: {e}")),
         }
     }
 
     async fn send(&mut self, message: Message) -> Result<()> {
-        let frame = serde_json::to_string(&message)? + "\n";
-        self.writer.write_all(frame.as_bytes()).await?;
-        self.writer.flush().await?;
+        let frame = serde_json::to_string(&message)?;
+        self.writer.send(frame).await?;
         Ok(())
     }
 
     fn gbt(&self) -> Result<GetBlockTemplateResult> {
+        //
+        //
         // TODO: make signet configurable
         // TODO: what other capabilities and rules are there?
         let params = json!({

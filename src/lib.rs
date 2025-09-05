@@ -14,8 +14,8 @@ use {
     },
     axum_server::Handle,
     bitcoin::{
-        Address, Amount, BlockHash, CompactTarget, Network, OutPoint, ScriptBuf, Sequence, Target,
-        Transaction, TxIn, TxMerkleNode, TxOut, Txid, Witness,
+        Address, Amount, Block, BlockHash, CompactTarget, Network, OutPoint, ScriptBuf, Sequence,
+        Target, Transaction, TxIn, TxMerkleNode, TxOut, Txid, Witness,
         block::{self, Header},
         consensus::{self, Decodable, Encodable},
         hashes::{Hash, sha256d},
@@ -29,7 +29,7 @@ use {
     coinbase_builder::CoinbaseBuilder,
     derive_more::Display,
     difficulty::Difficulty,
-    futures::stream::StreamExt,
+    futures::{sink::SinkExt, stream::StreamExt},
     hash_rate::HashRate,
     hex::FromHex,
     lazy_static::lazy_static,
@@ -82,7 +82,10 @@ use {
         task::{self, JoinHandle},
         time::sleep,
     },
-    tokio_util::sync::CancellationToken,
+    tokio_util::{
+        codec::{FramedRead, FramedWrite, LinesCodec},
+        sync::CancellationToken,
+    },
     tower_http::{
         services::ServeDir, set_header::SetResponseHeaderLayer,
         validate_request::ValidateRequestHeaderLayer,
@@ -107,6 +110,7 @@ pub const COIN_VALUE: u64 = 100_000_000;
 pub const USER_AGENT: &str = "paraminer/0.0.1";
 // pub const EXTRANONCE1_SIZE: u32 = 4;
 pub const EXTRANONCE2_SIZE: usize = 8;
+pub const MAX_MESSAGE_SIZE: usize = 256 * 1024; // 256 KiB too much?
 
 type Result<T = (), E = Error> = std::result::Result<T, E>;
 
