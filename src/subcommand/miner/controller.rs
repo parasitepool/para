@@ -87,8 +87,8 @@ impl Controller {
 
                 info!("Network target:\t{}", target_as_block_hash(network_target));
                 info!("Pool target:\t{}", target_as_block_hash(pool_target));
-
                 info!("Spawning hasher thread");
+
                 let mut hasher = Hasher {
                     header: Header {
                         version: notify.version.into(),
@@ -108,8 +108,6 @@ impl Controller {
                     extranonce2: extranonce2.to_string(),
                     job_id: notify.job_id,
                 };
-
-                info!("Spawning hasher thread");
 
                 // CPU-heavy task so spawning in it's own thread pool
                 tokio::spawn(async move {

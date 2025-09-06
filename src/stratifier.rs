@@ -1,12 +1,99 @@
 use {super::*, crate::subcommand::pool::pool_config::PoolConfig};
 
-#[derive(Debug, Display)]
+#[derive(Debug)]
 pub(crate) enum State {
     Init,
-    Configured,
-    Subscribed,
+    Configured {
+        version_mask: Option<Version>,
+    },
+    Subscribed {
+        extranonce1: String,
+        _user_agent: String,
+        version_mask: Option<Version>,
+    },
     Authorized,
-    Working,
+    Working {
+        job: Box<Job>,
+    },
+}
+
+#[derive(Debug)]
+pub(crate) struct Job {
+    pub(crate) coinb1: String,
+    pub(crate) coinb2: String,
+    pub(crate) extranonce1: String,
+    pub(crate) gbt: GetBlockTemplateResult,
+    pub(crate) job_id: String,
+    pub(crate) merkle_branches: Vec<TxMerkleNode>,
+    pub(crate) version_mask: Option<Version>,
+}
+
+impl Job {
+    pub(crate) fn new(
+        address: Address,
+        extranonce1: String,
+        version_mask: Option<Version>,
+        gbt: GetBlockTemplateResult,
+    ) -> Result<Self> {
+        let job_id = "deadbeef".to_string();
+
+        let (_coinbase_tx, coinb1, coinb2) = CoinbaseBuilder::new(
+            address,
+            extranonce1.clone(),
+            EXTRANONCE2_SIZE,
+            gbt.height,
+            gbt.coinbase_value,
+            gbt.default_witness_commitment.clone(),
+        )
+        .with_pool_sig("|parasite|".into())
+        .build()?;
+
+        let merkle_branches = stratum::merkle_branches(
+            gbt.transactions
+                .clone()
+                .into_iter()
+                .map(|r| r.txid)
+                .collect(),
+        );
+
+        Ok(Self {
+            coinb1,
+            coinb2,
+            extranonce1,
+            gbt,
+            job_id,
+            merkle_branches,
+            version_mask,
+        })
+    }
+
+    pub(crate) fn nbits(&self) -> Result<Nbits> {
+        Nbits::from_str(&hex::encode(&self.gbt.bits))
+    }
+
+    pub(crate) fn prevhash(&self) -> PrevHash {
+        PrevHash::from(self.gbt.previous_block_hash)
+    }
+
+    pub(crate) fn version(&self) -> Version {
+        Version(block::Version::from_consensus(
+            self.gbt.version.try_into().unwrap(),
+        ))
+    }
+
+    pub(crate) fn notify(&self) -> Result<Notify> {
+        Ok(Notify {
+            job_id: self.job_id.clone(),
+            prevhash: self.prevhash(),
+            coinb1: self.coinb1.clone(),
+            coinb2: self.coinb2.clone(),
+            merkle_branches: self.merkle_branches.clone(),
+            version: self.version(),
+            nbits: self.nbits()?,
+            ntime: Ntime::try_from(self.gbt.current_time).expect("fits until ~2106"),
+            clean_jobs: true,
+        })
+    }
 }
 
 pub(crate) struct Connection<R, W> {
@@ -31,75 +118,60 @@ where
             state: State::Init,
         }
     }
+
     pub(crate) async fn serve(&mut self) -> Result {
-        let extranonce1 = "abcdef12".to_string();
-        let gbt = self.gbt()?;
-        let prevhash = PrevHash::from(gbt.previous_block_hash);
-        let merkle_branches = stratum::merkle_branches(
-            gbt.transactions
-                .clone()
-                .into_iter()
-                .map(|r| r.txid)
-                .collect(),
-        );
-        let version = Version(block::Version::from_consensus(
-            gbt.version.try_into().unwrap(),
-        ));
-
-        let nbits = Nbits::from_str(&hex::encode(gbt.bits.clone()))?;
-        let ntime = Ntime::try_from(gbt.current_time).expect("fits into u32 until ~2106");
-
-        let mut coinb1_foo: Option<String> = None;
-        let mut coinb2_foo: Option<String> = None;
-
         while let Some(message) = self.read_message().await? {
             let Message::Request { id, method, params } = message else {
-                warn!(?message, "Ignoring non-request");
+                warn!(?message, "Ignoring any notifications or responses");
                 continue;
             };
 
             match (&mut self.state, method.as_str()) {
-                (State::Init, "mining.configure") => self.handle_configure(id, params).await?,
-                (State::Init | State::Configured, "mining.subscribe") => {
-                    self.handle_subscribe(id, params, extranonce1.clone())
-                        .await?
+                (State::Init, "mining.configure") => {
+                    info!("CONFIGURE from {} with {params}", self.worker);
+
+                    let configure = serde_json::from_value::<Configure>(params)
+                        .context(format!("failed to deserialize {method}"))?;
+
+                    self.on_configure(id, configure).await?
                 }
-                (State::Subscribed, "mining.authorize") => {
-                    self.handle_authorize(
-                        id,
-                        params,
-                        extranonce1.clone(),
-                        &gbt,
-                        version,
-                        ntime,
-                        nbits,
-                        prevhash.clone(),
-                        merkle_branches.clone(),
-                        &mut coinb1_foo,
-                        &mut coinb2_foo,
-                    )
-                    .await?
+                (State::Init, "mining.subscribe") => {
+                    info!("SUBSCRIBE from {} with {params}", self.worker);
+
+                    let subscribe = serde_json::from_value::<Subscribe>(params)
+                        .context(format!("failed to deserialize {method}"))?;
+
+                    self.on_subscribe(id, subscribe).await?
+                }
+                (State::Configured { .. }, "mining.subscribe") => {
+                    info!("SUBSCRIBE from {} with {params}", self.worker);
+
+                    let subscribe = serde_json::from_value::<Subscribe>(params)
+                        .context(format!("failed to deserialize {method}"))?;
+
+                    self.on_subscribe(id, subscribe).await?
+                }
+                (State::Subscribed { .. }, "mining.authorize") => {
+                    info!("AUTHORIZE from {} with {params}", self.worker);
+
+                    let authorize = serde_json::from_value::<Authorize>(params)
+                        .context(format!("failed to deserialize {method}"))?;
+
+                    self.on_authorize(id, authorize).await?
                 }
 
-                (State::Working, "mining.submit") => {
-                    self.handle_submit(
-                        id,
-                        params,
-                        version,
-                        nbits,
-                        extranonce1.clone(),
-                        &gbt,
-                        &prevhash,
-                        &merkle_branches,
-                        &mut coinb1_foo,
-                        &mut coinb2_foo,
-                    )
-                    .await?
+                (State::Working { .. }, "mining.submit") => {
+                    info!("SUBMIT from {} with params {params}", self.worker);
+
+                    let submit = serde_json::from_value::<Submit>(params)
+                        .context(format!("failed to deserialize {method}"))?;
+
+                    self.on_submit(id, submit).await?;
+
+                    break;
                 }
-                (state, method) => {
-                    warn!(
-                        "Unhandled combination, state: {state}, method: {method}, params: {params}"
-                    );
+                (_state, method) => {
+                    warn!("UNKNOWN method {method} with {params} from {}", self.worker);
                 }
             }
         }
@@ -107,12 +179,14 @@ where
         Ok(())
     }
 
-    async fn handle_configure(&mut self, id: Id, params: Value) -> Result {
-        info!("CONFIGURE from {} with {params}", self.worker);
-
-        let configure = serde_json::from_value::<Configure>(params)?;
-
+    async fn on_configure(&mut self, id: Id, configure: Configure) -> Result {
         if configure.version_rolling_mask.is_some() {
+            let version_mask = self.config.version_mask();
+            info!(
+                "Configuring version rolling for {} with version mask {version_mask}",
+                self.worker
+            );
+
             let message = Message::Response {
                 id,
                 result: Some(
@@ -123,27 +197,54 @@ where
             };
 
             self.send(message).await?;
-            self.state = State::Configured;
+
+            self.state = State::Configured {
+                version_mask: Some(version_mask),
+            };
         } else {
             warn!("Unsupported extension {:?}", configure);
+
+            let message = Message::Response {
+                id,
+                result: None,
+                error: Some(JsonRpcError {
+                    error_code: -1,
+                    message: "Unsupported extension".into(),
+                    traceback: Some(serde_json::to_value(configure)?),
+                }),
+                reject_reason: None,
+            };
+
+            self.send(message).await?;
+            self.state = State::Init;
         }
 
         Ok(())
     }
 
-    async fn handle_subscribe(&mut self, id: Id, params: Value, extranonce1: String) -> Result {
-        info!("SUBSCRIBE from {} with {params}", self.worker);
-
-        let subscribe = serde_json::from_value::<Subscribe>(params)?;
+    async fn on_subscribe(&mut self, id: Id, subscribe: Subscribe) -> Result {
+        let version_mask = match &self.state {
+            State::Init => None,
+            State::Configured { version_mask } => version_mask.clone(),
+            _ => bail!("SUBSCRIBE not allowed in current state"),
+        };
 
         if let Some(extranonce1) = subscribe.extranonce1 {
             warn!("Ignoring extranonce1 suggestion: {extranonce1}");
         }
 
+        let extranonce1 = "ffeeddcc".to_string();
+
         let result = SubscribeResult {
-            subscriptions: vec![("mining.notify".into(), "todo".into())],
-            extranonce1,
+            subscriptions: vec![("mining.notify".to_string(), "todo".to_string())],
+            extranonce1: extranonce1.clone(),
             extranonce2_size: EXTRANONCE2_SIZE.try_into().unwrap(),
+        };
+
+        self.state = State::Subscribed {
+            _user_agent: subscribe.user_agent,
+            extranonce1,
+            version_mask,
         };
 
         self.send(Message::Response {
@@ -154,28 +255,18 @@ where
         })
         .await?;
 
-        self.state = State::Subscribed;
-
         Ok(())
     }
 
-    async fn handle_authorize(
-        &mut self,
-        id: Id,
-        params: Value,
-        extranonce1: String,
-        gbt: &GetBlockTemplateResult,
-        version: Version,
-        ntime: Ntime,
-        nbits: Nbits,
-        prevhash: PrevHash,
-        merkle_branches: Vec<TxMerkleNode>,
-        coinb1_foo: &mut Option<String>,
-        coinb2_foo: &mut Option<String>,
-    ) -> Result {
-        info!("AUTHORIZE from {} with {params}", self.worker);
-
-        let authorize = serde_json::from_value::<Authorize>(params)?;
+    async fn on_authorize(&mut self, id: Id, authorize: Authorize) -> Result {
+        let State::Subscribed {
+            extranonce1,
+            version_mask,
+            ..
+        } = &self.state
+        else {
+            bail!("AUTHORIZE not allowed in current state");
+        };
 
         let address = Address::from_str(
             authorize
@@ -183,13 +274,15 @@ where
                 .trim_matches('"')
                 .split('.')
                 .next()
-                .ok_or_else(|| anyhow!("invalid username format"))?,
+                .ok_or_else(|| anyhow!("invalid username {}", authorize.username))?,
         )?
         .require_network(self.config.chain().network())
         .context(format!(
             "invalid username {} for worker {}",
             authorize.username, self.worker
         ))?;
+
+        let job = Job::new(address, extranonce1.to_string(), *version_mask, self.gbt()?)?;
 
         self.send(Message::Response {
             id,
@@ -201,7 +294,7 @@ where
 
         self.state = State::Authorized;
 
-        info!("Sending set difficulty");
+        info!("Sending SET DIFFICULTY");
 
         self.send(Message::Notification {
             method: "mining.set_difficulty".into(),
@@ -209,96 +302,60 @@ where
         })
         .await?;
 
-        let (_coinbase_tx, coinb1, coinb2) = CoinbaseBuilder::new(
-            address.clone(),
-            extranonce1.clone(),
-            EXTRANONCE2_SIZE,
-            gbt.height,
-            gbt.coinbase_value,
-            gbt.default_witness_commitment.clone(),
-        )
-        .with_pool_sig("|parasite|".into())
-        .build()?;
-
-        *coinb1_foo = Some(coinb1.clone());
-        *coinb2_foo = Some(coinb2.clone());
-
-        let notify = Notify {
-            job_id: "def123".into(), // TODO
-            prevhash,
-            coinb1,
-            coinb2,
-            merkle_branches,
-            version,
-            nbits,
-            ntime,
-            clean_jobs: true,
-        };
-
         info!("Sending NOTIFY");
 
         self.send(Message::Notification {
             method: "mining.notify".into(),
-            params: json!(notify),
+            params: json!(job.notify()?),
         })
         .await?;
 
-        self.state = State::Working;
+        self.state = State::Working { job: Box::new(job) };
 
         Ok(())
     }
 
-    async fn handle_submit(
-        &mut self,
-        id: Id,
-        params: Value,
-        version: Version,
-        nbits: Nbits,
-        extranonce1: String,
-        gbt: &GetBlockTemplateResult,
-        prevhash: &PrevHash,
-        merkle_branches: &[TxMerkleNode],
-        coinb1_foo: &mut Option<String>,
-        coinb2_foo: &mut Option<String>,
-    ) -> Result {
-        info!("SUBMIT from {} with params {}", self.worker, params);
-
-        let submit = serde_json::from_value::<Submit>(params)?;
+    async fn on_submit(&mut self, id: Id, submit: Submit) -> Result {
+        let State::Working { job } = &self.state else {
+            bail!("SUBMIT not allowed in current state");
+        };
 
         let version = if let Some(version_bits) = submit.version_bits {
+            let _version_mask = job.version_mask.unwrap(); // TODO
             assert!(version_bits != 0.into());
-            // assert!((!self.config.version_mask() & version_bits) != 0.into());
+            // (header_version & !version_mask) | (bits & version_mask)
+            // assert!((!version_mask & version_bits) != 0.into());
 
-            version | version_bits
+            job.version() | version_bits
         } else {
-            version
+            job.version()
         };
+
+        let nbits = job.nbits()?;
 
         let header = Header {
             version: version.into(),
-            prev_blockhash: prevhash.clone().into(),
+            prev_blockhash: job.prevhash().into(),
             merkle_root: stratum::merkle_root(
-                &coinb1_foo.clone().unwrap(),
-                &coinb2_foo.clone().unwrap(),
-                &extranonce1,
+                &job.coinb1,
+                &job.coinb2,
+                &job.extranonce1,
                 &submit.extranonce2,
-                merkle_branches,
+                &job.merkle_branches,
             )?,
             time: submit.ntime.into(),
             bits: nbits.into(),
             nonce: submit.nonce.into(),
         };
 
+        // TODO: check pool diff here
         let blockhash = header.validate_pow(Target::from_compact(nbits.into()))?;
 
         info!("Block with hash {blockhash} mets PoW");
 
         let coinbase_bin = hex::decode(format!(
             "{}{}{}{}",
-            coinb1_foo.clone().unwrap(),
-            extranonce1,
-            submit.extranonce2,
-            coinb2_foo.clone().unwrap()
+            job.coinb1, job.extranonce1, submit.extranonce2, job.coinb2,
         ))?;
         let mut cursor = bitcoin::io::Cursor::new(&coinbase_bin);
         let coinbase_tx = bitcoin::Transaction::consensus_decode_from_finite_reader(&mut cursor)?;
@@ -306,7 +363,8 @@ where
         let txdata = vec![coinbase_tx]
             .into_iter()
             .chain(
-                gbt.clone()
+                job.gbt
+                    .clone()
                     .transactions
                     .iter()
                     .map(|result| {
@@ -321,7 +379,7 @@ where
         // TODO: put this in tests
         assert!(block.bip34_block_height().is_ok());
 
-        info!("submitting block solve");
+        info!("Submitting block solve");
 
         self.config.bitcoin_rpc_client()?.submit_block(&block)?;
 
@@ -332,6 +390,8 @@ where
             reject_reason: None,
         })
         .await?;
+
+        info!("SUCCESS");
 
         Ok(())
     }
@@ -362,20 +422,19 @@ where
     }
 
     fn gbt(&self) -> Result<GetBlockTemplateResult> {
-        //
-        //
-        // TODO: make signet configurable
-        // TODO: what other capabilities and rules are there?
+        let mut rules = vec!["segwit"];
+        if self.config.chain().network() == Network::Signet {
+            rules.push("signet");
+        }
+
         let params = json!({
             "capabilities": ["coinbasetxn", "workid", "coinbase/append"],
-            "rules": ["segwit", "signet"]
+            "rules": rules,
         });
 
         Ok(self
             .config
             .bitcoin_rpc_client()?
-            // TODO: Use own GetBlockTemplateResult so I can deserialize directly from hex myself.
-            // Use BTreeMap instead of HashMap
             .call::<GetBlockTemplateResult>("getblocktemplate", &[params])?)
     }
 }

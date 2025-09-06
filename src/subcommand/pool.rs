@@ -21,8 +21,9 @@ impl Pool {
         loop {
             tokio::select! {
                 result = Self::handle_single_worker(config.clone(), &listener) => {
-                    if let Err(err) = result {
-                        error!("Worker connection error: {err}")
+                    match result {
+                        Ok(_) => break,
+                        Err(err) => error!("Worker connection error: {err}"),
                     }
                 }
                 _ = ctrl_c() => {
