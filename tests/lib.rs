@@ -48,6 +48,7 @@ mod to_args;
 
 #[cfg(target_os = "linux")]
 mod ping;
+#[cfg(target_os = "linux")]
 mod pool;
 mod server;
 #[cfg(target_os = "linux")]
