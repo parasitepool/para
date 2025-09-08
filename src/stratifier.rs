@@ -225,7 +225,7 @@ where
     async fn on_subscribe(&mut self, id: Id, subscribe: Subscribe) -> Result {
         let version_mask = match &self.state {
             State::Init => None,
-            State::Configured { version_mask } => version_mask.clone(),
+            State::Configured { version_mask } => *version_mask,
             _ => bail!("SUBSCRIBE not allowed in current state"),
         };
 
