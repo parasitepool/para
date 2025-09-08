@@ -23,7 +23,6 @@ use {
         time::Duration,
     },
     tempfile::TempDir,
-    test_pool::TestPool,
     test_server::TestServer,
     to_args::ToArgs,
 };
@@ -32,6 +31,7 @@ use {
 use {
     std::{io::stderr, net::TcpStream},
     test_ckpool::TestCkpool,
+    test_pool::TestPool,
 };
 
 #[cfg(target_os = "linux")]
