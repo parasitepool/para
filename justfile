@@ -44,7 +44,7 @@ ping-auth host='parasite.wtf' username='bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg
   cargo run ping --username {{username}} --password {{password}} {{host}}:42069
 
 pool: 
-  RUST_LOG=debug cargo run -- pool \
+  RUST_LOG=info cargo run -- pool \
     --chain signet \
     --address 0.0.0.0 \
     --bitcoin-rpc-username satoshi \

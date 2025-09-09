@@ -17,9 +17,8 @@ impl Job {
         extranonce1: Extranonce,
         version_mask: Option<Version>,
         gbt: GetBlockTemplateResult,
+        job_id: String,
     ) -> Result<Self> {
-        let job_id = "deadbeef".to_string();
-
         let (_coinbase_tx, coinb1, coinb2) = CoinbaseBuilder::new(
             address,
             extranonce1.clone(),
@@ -28,6 +27,8 @@ impl Job {
             gbt.coinbase_value,
             gbt.default_witness_commitment.clone(),
         )
+        .with_aux(gbt.coinbaseaux.clone().into_iter().collect())
+        .with_timestamp(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs())
         .with_pool_sig("|parasite|".into())
         .build()?;
 
@@ -73,7 +74,7 @@ impl Job {
             merkle_branches: self.merkle_branches.clone(),
             version: self.version(),
             nbits: self.nbits()?,
-            ntime: Ntime::try_from(self.gbt.current_time).expect("fits until ~2106"),
+            ntime: Ntime::try_from(self.gbt.current_time).expect("should fit until the year 2106"),
             clean_jobs: true,
         })
     }

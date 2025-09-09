@@ -198,7 +198,13 @@ where
             authorize.username, self.worker
         ))?;
 
-        let job = Job::new(address, extranonce1.clone(), *version_mask, self.gbt()?)?;
+        let job = Job::new(
+            address,
+            extranonce1.clone(),
+            *version_mask,
+            self.gbt()?,
+            "deadbeef".to_string(), // TODO
+        )?;
 
         self.send(Message::Response {
             id,
