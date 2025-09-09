@@ -1,5 +1,4 @@
 use {
-    anyhow::anyhow,
     bitcoin::{Address, address::NetworkUnchecked},
     command_builder::CommandBuilder,
     executable_path::executable_path,
