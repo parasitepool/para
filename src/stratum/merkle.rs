@@ -3,8 +3,8 @@ use super::*;
 pub fn merkle_root(
     coinb1: &str,
     coinb2: &str,
-    extranonce1: &str,
-    extranonce2: &str,
+    extranonce1: &Extranonce,
+    extranonce2: &Extranonce,
     merkle_branches: &[TxMerkleNode],
 ) -> Result<TxMerkleNode> {
     let coinbase_bin = hex::decode(format!("{coinb1}{extranonce1}{extranonce2}{coinb2}"))?;

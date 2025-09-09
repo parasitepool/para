@@ -1,4 +1,7 @@
-use {super::*, crate::subcommand::pool::pool_config::PoolConfig};
+use {
+    super::*,
+    crate::{job::Job, subcommand::pool::pool_config::PoolConfig},
+};
 
 #[derive(Debug)]
 pub(crate) enum State {
@@ -7,7 +10,7 @@ pub(crate) enum State {
         version_mask: Option<Version>,
     },
     Subscribed {
-        extranonce1: String,
+        extranonce1: Extranonce,
         _user_agent: String,
         version_mask: Option<Version>,
     },
@@ -15,85 +18,6 @@ pub(crate) enum State {
     Working {
         job: Box<Job>,
     },
-}
-
-#[derive(Debug)]
-pub(crate) struct Job {
-    pub(crate) coinb1: String,
-    pub(crate) coinb2: String,
-    pub(crate) extranonce1: String,
-    pub(crate) gbt: GetBlockTemplateResult,
-    pub(crate) job_id: String,
-    pub(crate) merkle_branches: Vec<TxMerkleNode>,
-    pub(crate) version_mask: Option<Version>,
-}
-
-impl Job {
-    pub(crate) fn new(
-        address: Address,
-        extranonce1: String,
-        version_mask: Option<Version>,
-        gbt: GetBlockTemplateResult,
-    ) -> Result<Self> {
-        let job_id = "deadbeef".to_string();
-
-        let (_coinbase_tx, coinb1, coinb2) = CoinbaseBuilder::new(
-            address,
-            extranonce1.clone(),
-            EXTRANONCE2_SIZE,
-            gbt.height,
-            gbt.coinbase_value,
-            gbt.default_witness_commitment.clone(),
-        )
-        .with_pool_sig("|parasite|".into())
-        .build()?;
-
-        let merkle_branches = stratum::merkle_branches(
-            gbt.transactions
-                .clone()
-                .into_iter()
-                .map(|r| r.txid)
-                .collect(),
-        );
-
-        Ok(Self {
-            coinb1,
-            coinb2,
-            extranonce1,
-            gbt,
-            job_id,
-            merkle_branches,
-            version_mask,
-        })
-    }
-
-    pub(crate) fn nbits(&self) -> Result<Nbits> {
-        Nbits::from_str(&hex::encode(&self.gbt.bits))
-    }
-
-    pub(crate) fn prevhash(&self) -> PrevHash {
-        PrevHash::from(self.gbt.previous_block_hash)
-    }
-
-    pub(crate) fn version(&self) -> Version {
-        Version(block::Version::from_consensus(
-            self.gbt.version.try_into().unwrap(),
-        ))
-    }
-
-    pub(crate) fn notify(&self) -> Result<Notify> {
-        Ok(Notify {
-            job_id: self.job_id.clone(),
-            prevhash: self.prevhash(),
-            coinb1: self.coinb1.clone(),
-            coinb2: self.coinb2.clone(),
-            merkle_branches: self.merkle_branches.clone(),
-            version: self.version(),
-            nbits: self.nbits()?,
-            ntime: Ntime::try_from(self.gbt.current_time).expect("fits until ~2106"),
-            clean_jobs: true,
-        })
-    }
 }
 
 pub(crate) struct Connection<R, W> {
@@ -126,51 +50,43 @@ where
                 continue;
             };
 
-            match (&mut self.state, method.as_str()) {
-                (State::Init, "mining.configure") => {
+            match method.as_str() {
+                "mining.configure" => {
                     info!("CONFIGURE from {} with {params}", self.worker);
 
                     let configure = serde_json::from_value::<Configure>(params)
                         .context(format!("failed to deserialize {method}"))?;
 
-                    self.on_configure(id, configure).await?
+                    self.configure(id, configure).await?
                 }
-                (State::Init, "mining.subscribe") => {
+                "mining.subscribe" => {
                     info!("SUBSCRIBE from {} with {params}", self.worker);
 
                     let subscribe = serde_json::from_value::<Subscribe>(params)
                         .context(format!("failed to deserialize {method}"))?;
 
-                    self.on_subscribe(id, subscribe).await?
+                    self.subscribe(id, subscribe).await?
                 }
-                (State::Configured { .. }, "mining.subscribe") => {
-                    info!("SUBSCRIBE from {} with {params}", self.worker);
-
-                    let subscribe = serde_json::from_value::<Subscribe>(params)
-                        .context(format!("failed to deserialize {method}"))?;
-
-                    self.on_subscribe(id, subscribe).await?
-                }
-                (State::Subscribed { .. }, "mining.authorize") => {
+                "mining.authorize" => {
                     info!("AUTHORIZE from {} with {params}", self.worker);
 
                     let authorize = serde_json::from_value::<Authorize>(params)
                         .context(format!("failed to deserialize {method}"))?;
 
-                    self.on_authorize(id, authorize).await?
+                    self.authorize(id, authorize).await?
                 }
 
-                (State::Working { .. }, "mining.submit") => {
+                "mining.submit" => {
                     info!("SUBMIT from {} with params {params}", self.worker);
 
                     let submit = serde_json::from_value::<Submit>(params)
                         .context(format!("failed to deserialize {method}"))?;
 
-                    self.on_submit(id, submit).await?;
+                    self.submit(id, submit).await?;
 
                     break;
                 }
-                (_state, method) => {
+                method => {
                     warn!("UNKNOWN method {method} with {params} from {}", self.worker);
                 }
             }
@@ -179,7 +95,7 @@ where
         Ok(())
     }
 
-    async fn on_configure(&mut self, id: Id, configure: Configure) -> Result {
+    async fn configure(&mut self, id: Id, configure: Configure) -> Result {
         if configure.version_rolling_mask.is_some() {
             let version_mask = self.config.version_mask();
             info!(
@@ -222,7 +138,7 @@ where
         Ok(())
     }
 
-    async fn on_subscribe(&mut self, id: Id, subscribe: Subscribe) -> Result {
+    async fn subscribe(&mut self, id: Id, subscribe: Subscribe) -> Result {
         let version_mask = match &self.state {
             State::Init => None,
             State::Configured { version_mask } => *version_mask,
@@ -233,7 +149,7 @@ where
             warn!("Ignoring extranonce1 suggestion: {extranonce1}");
         }
 
-        let extranonce1 = "ffeeddcc".to_string();
+        let extranonce1 = Extranonce::generate(EXTRANONCE1_SIZE);
 
         let result = SubscribeResult {
             subscriptions: vec![("mining.notify".to_string(), "todo".to_string())],
@@ -258,7 +174,7 @@ where
         Ok(())
     }
 
-    async fn on_authorize(&mut self, id: Id, authorize: Authorize) -> Result {
+    async fn authorize(&mut self, id: Id, authorize: Authorize) -> Result {
         let State::Subscribed {
             extranonce1,
             version_mask,
@@ -282,7 +198,7 @@ where
             authorize.username, self.worker
         ))?;
 
-        let job = Job::new(address, extranonce1.to_string(), *version_mask, self.gbt()?)?;
+        let job = Job::new(address, extranonce1.clone(), *version_mask, self.gbt()?)?;
 
         self.send(Message::Response {
             id,
@@ -315,7 +231,7 @@ where
         Ok(())
     }
 
-    async fn on_submit(&mut self, id: Id, submit: Submit) -> Result {
+    async fn submit(&mut self, id: Id, submit: Submit) -> Result {
         let State::Working { job } = &self.state else {
             bail!("SUBMIT not allowed in current state");
         };

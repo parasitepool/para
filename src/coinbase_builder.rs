@@ -7,7 +7,7 @@ use super::*;
 pub struct CoinbaseBuilder {
     address: Address,
     aux: BTreeMap<String, String>,
-    extranonce1: String,
+    extranonce1: Extranonce,
     extranonce2_size: usize,
     height: u64,
     pool_sig: Option<String>,
@@ -22,7 +22,7 @@ impl CoinbaseBuilder {
 
     pub fn new(
         address: Address,
-        extranonce1: String,
+        extranonce1: Extranonce,
         extranonce2_size: usize,
         height: u64,
         value: Amount,
@@ -83,11 +83,9 @@ impl CoinbaseBuilder {
 
         offset += buf.len();
 
-        let extranonce1 = hex::decode(self.extranonce1)?;
+        let total_extranonce_size = self.extranonce1.len() + self.extranonce2_size;
 
-        let total_extranonce_size = extranonce1.len() + self.extranonce2_size;
-
-        buf.extend_from_slice(extranonce1.as_slice());
+        buf.extend_from_slice(self.extranonce1.as_bytes());
         buf.extend_from_slice(vec![0u8; self.extranonce2_size].as_slice());
 
         if let Some(sig) = self.pool_sig {
@@ -165,7 +163,7 @@ mod tests {
     fn exceed_script_size_limit() {
         let result = CoinbaseBuilder::new(
             address(),
-            "abcd1234".into(),
+            Extranonce::from_str("abcd1234").unwrap(),
             8,
             0,
             Amount::from_sat(50 * COIN_VALUE),
@@ -186,7 +184,7 @@ mod tests {
     fn split_reassembles_with_zero_extranonce2() {
         let (tx, coinb1, coinb2) = CoinbaseBuilder::new(
             address(),
-            "abcd1234".into(),
+            Extranonce::from_str("abcd1234").unwrap(),
             8,
             500_000,
             Amount::from_sat(50 * COIN_VALUE),
@@ -214,7 +212,7 @@ mod tests {
     fn split_allows_custom_extranonce2() {
         let (tx, coinb1, coinb2) = CoinbaseBuilder::new(
             address(),
-            "abcd1234".into(),
+            Extranonce::from_str("abcd1234").unwrap(),
             8,
             0,
             Amount::from_sat(50 * COIN_VALUE),
@@ -246,7 +244,7 @@ mod tests {
     fn deterministic_with_same_inputs() {
         let base = CoinbaseBuilder::new(
             address(),
-            "abcd1234".into(),
+            Extranonce::from_str("abcd1234").unwrap(),
             8,
             0,
             Amount::from_sat(50 * COIN_VALUE),
@@ -271,7 +269,7 @@ mod tests {
 
         let err = CoinbaseBuilder::new(
             address(),
-            "abcd1234".into(),
+            Extranonce::from_str("abcd1234").unwrap(),
             8,
             800_000,
             Amount::from_sat(50 * COIN_VALUE),
@@ -289,7 +287,7 @@ mod tests {
     fn coinb1_ends_before_extranonce1() {
         let (_tx, coinb1, _coinb2) = CoinbaseBuilder::new(
             address(),
-            "abcd1234".into(),
+            Extranonce::from_str("abcd1234").unwrap(),
             8,
             1_000_000,
             Amount::from_sat(50 * COIN_VALUE),
@@ -298,10 +296,8 @@ mod tests {
         .build()
         .unwrap();
 
-        let extranonce1_hex = "abcd1234";
-
         assert!(
-            !coinb1.contains(extranonce1_hex),
+            !coinb1.contains("abcd1234"),
             "coinb1 must end before extranonce1 bytes"
         );
     }
@@ -310,7 +306,7 @@ mod tests {
     fn extranonce2_boundary_occurs_once() {
         let (tx, coinb1, coinb2) = CoinbaseBuilder::new(
             address(),
-            "abcd1234".into(),
+            Extranonce::from_str("abcd1234").unwrap(),
             8,
             900_000,
             Amount::from_sat(50 * COIN_VALUE),
@@ -346,7 +342,7 @@ mod tests {
         let tag = "|parasite|".as_bytes();
         let (tx, _, _) = CoinbaseBuilder::new(
             address(),
-            "abcd1234".into(),
+            Extranonce::from_str("abcd1234").unwrap(),
             8,
             0,
             Amount::from_sat(50 * COIN_VALUE),

@@ -261,7 +261,7 @@ mod tests {
                 params: serde_json::to_value(&Submit {
                     username: "slush.miner1".into(),
                     job_id: "bf".into(),
-                    extranonce2: "00000001".into(),
+                    extranonce2: Extranonce::from_str("00000001").unwrap(),
                     ntime: Ntime::from_str("504e86ed").unwrap(),
                     nonce: Nonce::from_str("b2957c02").unwrap(),
                     version_bits: None,
@@ -291,7 +291,7 @@ mod tests {
                 params: serde_json::to_value(&Submit {
                     username: "slush.miner1".into(),
                     job_id: "bf".into(),
-                    extranonce2: "00000001".into(),
+                    extranonce2: Extranonce::from_str("00000001").unwrap(),
                     ntime: Ntime::from_str("504e86ed").unwrap(),
                     nonce: Nonce::from_str("b2957c02").unwrap(),
                     version_bits: Some(Version::from_str("04d46000").unwrap()),
@@ -413,7 +413,7 @@ mod tests {
                                 "ae6812eb4cd7735a302a8a9dd95cf71f".into(),
                             ),
                         ],
-                        extranonce1: "08000002".into(),
+                        extranonce1: Extranonce::from_str("08000002").unwrap(),
                         extranonce2_size: 4,
                     })
                     .unwrap(),

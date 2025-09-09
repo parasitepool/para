@@ -192,7 +192,7 @@ impl Client {
     pub async fn submit(
         &mut self,
         job_id: String,
-        extranonce2: String,
+        extranonce2: Extranonce,
         ntime: Ntime,
         nonce: Nonce,
     ) -> Result {

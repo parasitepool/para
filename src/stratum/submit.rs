@@ -4,7 +4,7 @@ use super::*;
 pub struct Submit {
     pub username: String,
     pub job_id: String,
-    pub extranonce2: String,
+    pub extranonce2: Extranonce,
     pub ntime: Ntime,
     pub nonce: Nonce,
     pub version_bits: Option<Version>,
@@ -37,8 +37,8 @@ impl<'de> Deserialize<'de> for Submit {
         #[derive(Deserialize)]
         #[serde(untagged)]
         enum Raw {
-            Five((String, String, String, Ntime, Nonce)),
-            Six((String, String, String, Ntime, Nonce, Option<Version>)),
+            Five((String, String, Extranonce, Ntime, Nonce)),
+            Six((String, String, Extranonce, Ntime, Nonce, Option<Version>)),
         }
 
         match Raw::deserialize(deserializer)? {
@@ -87,7 +87,7 @@ mod tests {
             Submit {
                 username: "slush.miner1".into(),
                 job_id: "bf".into(),
-                extranonce2: "00000001".into(),
+                extranonce2: Extranonce::from_str("00000001").unwrap(),
                 ntime: Ntime::from_str("504e86ed").unwrap(),
                 nonce: Nonce::from_str("b2957c02").unwrap(),
                 version_bits: None,
@@ -102,7 +102,7 @@ mod tests {
             Submit {
                 username: "slush.miner1".into(),
                 job_id: "bf".into(),
-                extranonce2: "00000001".into(),
+                extranonce2: Extranonce::from_str("00000001").unwrap(),
                 ntime: Ntime::from_str("504e86ed").unwrap(),
                 nonce: Nonce::from_str("b2957c02").unwrap(),
                 version_bits: Some(Version::from_str("04d46000").unwrap()),
@@ -115,7 +115,7 @@ mod tests {
         let a = Submit {
             username: "u".into(),
             job_id: "j".into(),
-            extranonce2: "01".into(),
+            extranonce2: Extranonce::from_str("01").unwrap(),
             ntime: Ntime::from_str("00000000").unwrap(),
             nonce: Nonce::from_str("00000000").unwrap(),
             version_bits: None,

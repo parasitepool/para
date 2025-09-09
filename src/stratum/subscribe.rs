@@ -49,7 +49,7 @@ impl<'de> Deserialize<'de> for Subscribe {
 #[derive(Debug, PartialEq, Clone)]
 pub struct SubscribeResult {
     pub subscriptions: Vec<(String, String)>,
-    pub extranonce1: String,
+    pub extranonce1: Extranonce,
     pub extranonce2_size: u32,
 }
 
@@ -72,7 +72,7 @@ impl<'de> Deserialize<'de> for SubscribeResult {
         D: Deserializer<'de>,
     {
         let (subscriptions, extranonce1, extranonce2_size) =
-            <(Vec<(String, String)>, String, u32)>::deserialize(deserializer)?;
+            <(Vec<(String, String)>, Extranonce, u32)>::deserialize(deserializer)?;
 
         Ok(SubscribeResult {
             subscriptions,
@@ -175,7 +175,7 @@ mod tests {
                     "ae6812eb4cd7735a302a8a9dd95cf71f".into(),
                 ),
             ],
-            extranonce1: "08000002".into(),
+            extranonce1: Extranonce::from_str("08000002").unwrap(),
             extranonce2_size: 4,
         };
 
@@ -197,7 +197,7 @@ mod tests {
     fn subscribe_result_empty_subscriptions() {
         let sr = SubscribeResult {
             subscriptions: vec![],
-            extranonce1: "deadbeef".into(),
+            extranonce1: Extranonce::from_str("deadbeef").unwrap(),
             extranonce2_size: 8,
         };
 
@@ -207,13 +207,17 @@ mod tests {
 
     #[test]
     fn subscribe_result_serialize_shape() {
+        let extranonce1 = Extranonce::generate(EXTRANONCE1_SIZE);
         let sr = SubscribeResult {
             subscriptions: vec![("mining.notify".into(), "tag".into())],
-            extranonce1: "00".into(),
+            extranonce1: extranonce1.clone(),
             extranonce2_size: 16,
         };
 
         let v = serde_json::to_value(&sr).unwrap();
-        assert_eq!(v, serde_json::json!([[["mining.notify", "tag"]], "00", 16]));
+        assert_eq!(
+            v,
+            serde_json::json!([[["mining.notify", "tag"]], extranonce1.to_string(), 16])
+        );
     }
 }

@@ -4,6 +4,7 @@ mod authorize;
 mod client;
 mod configure;
 mod error;
+mod extranonce;
 mod merkle;
 mod message;
 mod nbits;
@@ -22,6 +23,7 @@ pub use {
     client::Client,
     configure::Configure,
     error::JsonRpcError,
+    extranonce::Extranonce,
     merkle::{merkle_branches, merkle_root},
     message::{Id, Message},
     nbits::Nbits,

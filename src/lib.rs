@@ -33,7 +33,7 @@ use {
     hash_rate::HashRate,
     hex::FromHex,
     lazy_static::lazy_static,
-    rand::Rng,
+    rand::RngCore,
     reqwest::Url,
     rust_embed::RustEmbed,
     rustls_acme::{
@@ -69,8 +69,8 @@ use {
     },
     stratifier::Connection,
     stratum::{
-        Authorize, Configure, Id, JsonRpcError, Message, Nbits, Notify, Ntime, PrevHash,
-        SetDifficulty, Submit, Subscribe, SubscribeResult, Version,
+        Authorize, Configure, Extranonce, Id, JsonRpcError, Message, Nbits, Notify, Ntime,
+        PrevHash, SetDifficulty, Submit, Subscribe, SubscribeResult, Version,
     },
     sysinfo::{Disks, System},
     tokio::{
@@ -102,13 +102,15 @@ pub mod ckpool;
 pub mod coinbase_builder;
 pub mod difficulty;
 pub mod hash_rate;
-pub mod stratifier;
+mod job;
+mod stratifier;
 pub mod stratum;
 pub mod subcommand;
 
 pub const COIN_VALUE: u64 = 100_000_000;
-pub const USER_AGENT: &str = "paraminer/0.0.1";
-// pub const EXTRANONCE1_SIZE: u32 = 4;
+pub const USER_AGENT: &str = "paraminer/0.0.1"; // change this to para?
+
+pub const EXTRANONCE1_SIZE: usize = 4;
 pub const EXTRANONCE2_SIZE: usize = 8;
 pub const MAX_MESSAGE_SIZE: usize = 256 * 1024; // 256 KiB too much?
 

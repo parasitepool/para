@@ -2,14 +2,17 @@ use super::*;
 
 #[derive(Debug)]
 pub(crate) struct Hasher {
-    pub(crate) extranonce2: String,
+    pub(crate) extranonce2: Extranonce,
     pub(crate) header: Header,
     pub(crate) job_id: String,
     pub(crate) pool_target: Target,
 }
 
 impl Hasher {
-    pub(crate) fn hash(&mut self, cancel: CancellationToken) -> Result<(Header, String, String)> {
+    pub(crate) fn hash(
+        &mut self,
+        cancel: CancellationToken,
+    ) -> Result<(Header, Extranonce, String)> {
         let mut hashes = 0;
         let start = Instant::now();
         let mut last_log = start;
@@ -139,7 +142,7 @@ mod tests {
         let mut hasher = Hasher {
             header: header(None, None),
             pool_target: target,
-            extranonce2: "00000000000".into(),
+            extranonce2: Extranonce::from_str("0000000000").unwrap(),
             job_id: "bf".into(),
         };
 
@@ -153,7 +156,7 @@ mod tests {
         let mut hasher = Hasher {
             header: header(None, Some(u32::MAX - 1)),
             pool_target: target,
-            extranonce2: "00000000000".into(),
+            extranonce2: Extranonce::from_str("0000000000").unwrap(),
             job_id: "bg".into(),
         };
 
@@ -206,7 +209,7 @@ mod tests {
             let mut hasher = Hasher {
                 header: header(None, None),
                 pool_target: target,
-                extranonce2: "00000000000".into(),
+                extranonce2: Extranonce::from_str("0000000000").unwrap(),
                 job_id: format!("test_{zeros}"),
             };
 

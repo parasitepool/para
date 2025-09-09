@@ -3,10 +3,10 @@ use super::*;
 pub(crate) struct Controller {
     client: Client,
     pool_difficulty: Arc<Mutex<Difficulty>>,
-    extranonce1: String,
+    extranonce1: Extranonce,
     extranonce2_size: u32,
-    share_rx: mpsc::Receiver<(Header, String, String)>,
-    share_tx: mpsc::Sender<(Header, String, String)>,
+    share_rx: mpsc::Receiver<(Header, Extranonce, String)>,
+    share_tx: mpsc::Sender<(Header, Extranonce, String)>,
     cancel: CancellationToken,
 }
 
@@ -70,11 +70,7 @@ impl Controller {
             "mining.notify" => {
                 let notify = serde_json::from_value::<Notify>(params)?;
 
-                let extranonce2 = {
-                    let mut bytes = vec![0u8; self.extranonce2_size.try_into().unwrap()];
-                    rand::rng().fill(&mut bytes[..]);
-                    hex::encode(bytes)
-                };
+                let extranonce2 = Extranonce::generate(self.extranonce2_size.try_into().unwrap());
 
                 let share_tx = self.share_tx.clone();
 
@@ -105,7 +101,7 @@ impl Controller {
                         nonce: 0,
                     },
                     pool_target,
-                    extranonce2: extranonce2.to_string(),
+                    extranonce2,
                     job_id: notify.job_id,
                 };
 
