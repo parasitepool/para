@@ -40,6 +40,7 @@ impl CommandBuilder {
         Self { stdout, ..self }
     }
 
+    #[allow(unused)]
     pub(crate) fn env(mut self, key: &str, value: impl AsRef<OsStr>) -> Self {
         self.env.insert(key.into(), value.as_ref().into());
         self
