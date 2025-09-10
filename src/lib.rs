@@ -108,11 +108,11 @@ pub mod stratum;
 pub mod subcommand;
 
 pub const COIN_VALUE: u64 = 100_000_000;
-pub const USER_AGENT: &str = "paraminer/0.0.1"; // change this to para?
+pub const USER_AGENT: &str = "para/0.0.1";
 
 pub const EXTRANONCE1_SIZE: usize = 4;
 pub const EXTRANONCE2_SIZE: usize = 8;
-pub const MAX_MESSAGE_SIZE: usize = 256 * 1024; // 256 KiB too much?
+pub const MAX_MESSAGE_SIZE: usize = 32 * 1024;
 
 type Result<T = (), E = Error> = std::result::Result<T, E>;
 
@@ -123,6 +123,7 @@ fn target_as_block_hash(target: bitcoin::Target) -> BlockHash {
 pub fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
+        .with_target(false)
         .init();
 
     let args = Arguments::parse();
