@@ -388,7 +388,7 @@ mod tests {
                 method: "mining.subscribe".into(),
                 params: serde_json::to_value(Subscribe {
                     user_agent: "para/0.1".into(),
-                    extranonce1: Some("abcd".into()),
+                    extranonce1: Some("abcd".parse().unwrap()),
                 })
                 .unwrap(),
             },
@@ -451,7 +451,7 @@ mod tests {
                 method: "mining.configure".into(),
                 params: serde_json::to_value(Configure {
                     extensions: vec!["minimum-difficulty".into(), "version-rolling".into()],
-                    minimum_difficulty_value: Some(2048),
+                    minimum_difficulty_value: Some(Difficulty(2048)),
                     version_rolling_mask: Some("00fff000".parse().unwrap()),
                     version_rolling_min_bit_count: Some(2),
                 })

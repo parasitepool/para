@@ -3,7 +3,7 @@ use super::*;
 #[derive(Debug, PartialEq, Clone)]
 pub struct Configure {
     pub extensions: Vec<String>,
-    pub minimum_difficulty_value: Option<u64>,
+    pub minimum_difficulty_value: Option<Difficulty>,
     pub version_rolling_mask: Option<Version>,
     pub version_rolling_min_bit_count: Option<u32>,
 }
@@ -14,7 +14,7 @@ struct ConfigureOptions {
         rename = "minimum-difficulty.value",
         skip_serializing_if = "Option::is_none"
     )]
-    minimum_difficulty_value: Option<u64>,
+    minimum_difficulty_value: Option<Difficulty>,
 
     #[serde(
         rename = "version-rolling.mask",
@@ -47,17 +47,17 @@ impl Serialize for Configure {
 impl<'de> Deserialize<'de> for Configure {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: serde::Deserializer<'de>,
+        D: Deserializer<'de>,
     {
         #[derive(Deserialize)]
         #[serde(untagged)]
         enum Raw {
-            One([Vec<String>; 1]),
+            One((Vec<String>,)),
             Two((Vec<String>, ConfigureOptions)),
         }
 
         match Raw::deserialize(deserializer)? {
-            Raw::One([extensions]) => Ok(Configure {
+            Raw::One((extensions,)) => Ok(Configure {
                 extensions,
                 minimum_difficulty_value: None,
                 version_rolling_mask: None,
@@ -129,7 +129,7 @@ mod tests {
             r#"[["minimum-difficulty","version-rolling"],{"minimum-difficulty.value":2048,"version-rolling.mask":"00fff000","version-rolling.min-bit-count":2}]"#,
             Configure {
                 extensions: vec!["minimum-difficulty".into(), "version-rolling".into()],
-                minimum_difficulty_value: Some(2048),
+                minimum_difficulty_value: Some(Difficulty(2048)),
                 version_rolling_mask: Some(Version::from_str("00fff000").unwrap()),
                 version_rolling_min_bit_count: Some(2),
             },
@@ -140,7 +140,7 @@ mod tests {
     fn configure_serialize_shape_includes_only_present_fields() {
         let cfg = Configure {
             extensions: vec!["minimum-difficulty".into(), "version-rolling".into()],
-            minimum_difficulty_value: Some(1024),
+            minimum_difficulty_value: Some(Difficulty(1024)),
             version_rolling_mask: None,
             version_rolling_min_bit_count: Some(3),
         };

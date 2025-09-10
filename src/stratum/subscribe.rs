@@ -3,7 +3,7 @@ use super::*;
 #[derive(Debug, PartialEq)]
 pub struct Subscribe {
     pub user_agent: String,
-    pub extranonce1: Option<String>,
+    pub extranonce1: Option<Extranonce>,
 }
 
 impl Serialize for Subscribe {
@@ -30,17 +30,17 @@ impl<'de> Deserialize<'de> for Subscribe {
         #[serde(untagged)]
         enum Raw {
             One((String,)),
-            Two((String, Option<String>)),
+            Two((String, Option<Extranonce>)),
         }
 
         match Raw::deserialize(deserializer)? {
-            Raw::One((ua,)) => Ok(Subscribe {
-                user_agent: ua,
+            Raw::One((user_agent,)) => Ok(Subscribe {
+                user_agent,
                 extranonce1: None,
             }),
-            Raw::Two((ua, x1)) => Ok(Subscribe {
-                user_agent: ua,
-                extranonce1: x1,
+            Raw::Two((user_agent, extranonce1)) => Ok(Subscribe {
+                user_agent,
+                extranonce1,
             }),
         }
     }
@@ -117,10 +117,10 @@ mod tests {
     #[test]
     fn subscribe_user_agent_and_extranonce1() {
         case::<Subscribe>(
-            r#"["para/BM1623/0.1","abcd12345"]"#,
+            r#"["para/BM1623/0.1","abcd1234"]"#,
             Subscribe {
                 user_agent: "para/BM1623/0.1".into(),
-                extranonce1: Some("abcd12345".into()),
+                extranonce1: Some("abcd1234".parse().unwrap()),
             },
         );
     }
@@ -147,18 +147,21 @@ mod tests {
     #[test]
     fn subscribe_serialize_shapes() {
         let a = Subscribe {
-            user_agent: "ua".into(),
+            user_agent: "my_miner".into(),
             extranonce1: None,
         };
-        assert_eq!(serde_json::to_value(&a).unwrap(), serde_json::json!(["ua"]));
+        assert_eq!(
+            serde_json::to_value(&a).unwrap(),
+            serde_json::json!(["my_miner"])
+        );
 
         let b = Subscribe {
-            user_agent: "ua".into(),
-            extranonce1: Some("x1".into()),
+            user_agent: "my_miner".into(),
+            extranonce1: Some("cafedade".parse().unwrap()),
         };
         assert_eq!(
             serde_json::to_value(&b).unwrap(),
-            serde_json::json!(["ua", "x1"])
+            serde_json::json!(["my_miner", "cafedade"])
         );
     }
 

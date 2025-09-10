@@ -40,6 +40,7 @@ pub fn merkle_branches(non_coinbase_txids: Vec<Txid>) -> Vec<TxMerkleNode> {
     let mut coinbase_idx = 0usize;
 
     while level.len() > 1 {
+        // XOR to get sibling (can be right or left sibling)
         let sibling_idx = coinbase_idx ^ 1;
 
         let sibling = if sibling_idx < level.len() {
