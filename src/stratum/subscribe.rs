@@ -175,7 +175,7 @@ mod tests {
                     "ae6812eb4cd7735a302a8a9dd95cf71f".into(),
                 ),
             ],
-            extranonce1: Extranonce::from_str("08000002").unwrap(),
+            extranonce1: "08000002".parse().unwrap(),
             extranonce2_size: 4,
         };
 
@@ -197,7 +197,7 @@ mod tests {
     fn subscribe_result_empty_subscriptions() {
         let sr = SubscribeResult {
             subscriptions: vec![],
-            extranonce1: Extranonce::from_str("deadbeef").unwrap(),
+            extranonce1: "deadbeef".parse().unwrap(),
             extranonce2_size: 8,
         };
 

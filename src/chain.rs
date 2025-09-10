@@ -8,8 +8,8 @@ pub enum Chain {
     Mainnet,
     Regtest,
     Signet,
-    #[value(alias("test"))]
     Testnet,
+    #[value(alias("test"))]
     Testnet4,
 }
 

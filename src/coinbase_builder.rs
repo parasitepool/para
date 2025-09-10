@@ -153,7 +153,7 @@ mod tests {
     fn exceed_script_size_limit() {
         let result = CoinbaseBuilder::new(
             address(),
-            Extranonce::from_str("abcd1234").unwrap(),
+            "abcd1234".parse().unwrap(),
             8,
             0,
             Amount::from_sat(50 * COIN_VALUE),
@@ -174,7 +174,7 @@ mod tests {
     fn split_reassembles_with_zero_extranonce2() {
         let (tx, coinb1, coinb2) = CoinbaseBuilder::new(
             address(),
-            Extranonce::from_str("abcd1234").unwrap(),
+            "abcd1234".parse().unwrap(),
             8,
             500_000,
             Amount::from_sat(50 * COIN_VALUE),
@@ -202,7 +202,7 @@ mod tests {
     fn split_allows_custom_extranonce2() {
         let (tx, coinb1, coinb2) = CoinbaseBuilder::new(
             address(),
-            Extranonce::from_str("abcd1234").unwrap(),
+            "abcd1234".parse().unwrap(),
             8,
             0,
             Amount::from_sat(50 * COIN_VALUE),
@@ -234,7 +234,7 @@ mod tests {
     fn deterministic_with_same_inputs() {
         let base = CoinbaseBuilder::new(
             address(),
-            Extranonce::from_str("abcd1234").unwrap(),
+            "abcd1234".parse().unwrap(),
             8,
             0,
             Amount::from_sat(50 * COIN_VALUE),
@@ -259,7 +259,7 @@ mod tests {
 
         let err = CoinbaseBuilder::new(
             address(),
-            Extranonce::from_str("abcd1234").unwrap(),
+            "abcd1234".parse().unwrap(),
             8,
             800_000,
             Amount::from_sat(50 * COIN_VALUE),
@@ -277,7 +277,7 @@ mod tests {
     fn coinb1_ends_before_extranonce1() {
         let (_tx, coinb1, _coinb2) = CoinbaseBuilder::new(
             address(),
-            Extranonce::from_str("abcd1234").unwrap(),
+            "abcd1234".parse().unwrap(),
             8,
             1_000_000,
             Amount::from_sat(50 * COIN_VALUE),
@@ -296,7 +296,7 @@ mod tests {
     fn extranonce2_boundary_occurs_once() {
         let (tx, coinb1, coinb2) = CoinbaseBuilder::new(
             address(),
-            Extranonce::from_str("abcd1234").unwrap(),
+            "abcd1234".parse().unwrap(),
             8,
             900_000,
             Amount::from_sat(50 * COIN_VALUE),
@@ -332,7 +332,7 @@ mod tests {
         let tag = "|parasite|".as_bytes();
         let (tx, _, _) = CoinbaseBuilder::new(
             address(),
-            Extranonce::from_str("abcd1234").unwrap(),
+            "abcd1234".parse().unwrap(),
             8,
             0,
             Amount::from_sat(50 * COIN_VALUE),
@@ -353,7 +353,7 @@ mod tests {
     fn coinb1_prefix_bytes_constant_when_only_tail_changes() {
         let base = CoinbaseBuilder::new(
             address(),
-            Extranonce::from_str("abcd1234").unwrap(),
+            "abcd1234".parse().unwrap(),
             8,
             0,
             Amount::from_sat(50 * COIN_VALUE),
@@ -388,7 +388,7 @@ mod tests {
     fn coinb1_varint_len_stable_but_value_changes_with_tail() {
         let base = CoinbaseBuilder::new(
             address(),
-            Extranonce::from_str("abcd1234").unwrap(),
+            "abcd1234".parse().unwrap(),
             8,
             0,
             Amount::from_sat(50 * COIN_VALUE),
@@ -410,7 +410,7 @@ mod tests {
         for x2 in [0usize, 1, 8, 16, 32] {
             let (tx, c1, c2) = CoinbaseBuilder::new(
                 address(),
-                Extranonce::from_str("abcd1234").unwrap(),
+                "abcd1234".parse().unwrap(),
                 x2,
                 0,
                 Amount::from_sat(50 * COIN_VALUE),
@@ -435,7 +435,7 @@ mod tests {
     fn aux_bytes_extend_prefix_and_shift_boundary() {
         let base = CoinbaseBuilder::new(
             address(),
-            Extranonce::from_str("abcd1234").unwrap(),
+            "abcd1234".parse().unwrap(),
             8,
             0,
             Amount::from_sat(50 * COIN_VALUE),
@@ -460,7 +460,7 @@ mod tests {
 
         let (tx, c1, _c2) = CoinbaseBuilder::new(
             address(),
-            Extranonce::from_str("abcd1234").unwrap(),
+            "abcd1234".parse().unwrap(),
             8,
             height,
             Amount::from_sat(50 * COIN_VALUE),
@@ -494,7 +494,7 @@ mod tests {
         let tag = "|parasite|";
         let (_tx, c1, c2) = CoinbaseBuilder::new(
             address(),
-            Extranonce::from_str("abcd1234").unwrap(),
+            "abcd1234".parse().unwrap(),
             8,
             0,
             Amount::from_sat(50 * COIN_VALUE),
@@ -514,7 +514,7 @@ mod tests {
         let extranonce2_size = CoinbaseBuilder::MAX_COINBASE_SCRIPT_SIG_SIZE;
         let err = CoinbaseBuilder::new(
             address(),
-            Extranonce::from_str("abcd1234").unwrap(),
+            "abcd1234".parse().unwrap(),
             extranonce2_size,
             2222,
             Amount::from_sat(50 * COIN_VALUE),
@@ -531,7 +531,7 @@ mod tests {
     fn coinbase_script_sig_too_large_via_aux_bytes_errors() {
         let err = CoinbaseBuilder::new(
             address(),
-            Extranonce::from_str("abcd1234").unwrap(),
+            "abcd1234".parse().unwrap(),
             8,
             1111,
             Amount::from_sat(50 * COIN_VALUE),

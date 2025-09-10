@@ -87,9 +87,9 @@ mod tests {
             Submit {
                 username: "slush.miner1".into(),
                 job_id: "bf".into(),
-                extranonce2: Extranonce::from_str("00000001").unwrap(),
-                ntime: Ntime::from_str("504e86ed").unwrap(),
-                nonce: Nonce::from_str("b2957c02").unwrap(),
+                extranonce2: "00000001".parse().unwrap(),
+                ntime: "504e86ed".parse().unwrap(),
+                nonce: "b2957c02".parse().unwrap(),
                 version_bits: None,
             },
         );
@@ -102,10 +102,10 @@ mod tests {
             Submit {
                 username: "slush.miner1".into(),
                 job_id: "bf".into(),
-                extranonce2: Extranonce::from_str("00000001").unwrap(),
-                ntime: Ntime::from_str("504e86ed").unwrap(),
-                nonce: Nonce::from_str("b2957c02").unwrap(),
-                version_bits: Some(Version::from_str("04d46000").unwrap()),
+                extranonce2: "00000001".parse().unwrap(),
+                ntime: "504e86ed".parse().unwrap(),
+                nonce: "b2957c02".parse().unwrap(),
+                version_bits: Some("04d46000".parse().unwrap()),
             },
         );
     }
@@ -115,9 +115,9 @@ mod tests {
         let a = Submit {
             username: "u".into(),
             job_id: "j".into(),
-            extranonce2: Extranonce::from_str("01").unwrap(),
-            ntime: Ntime::from_str("00000000").unwrap(),
-            nonce: Nonce::from_str("00000000").unwrap(),
+            extranonce2: "01".parse().unwrap(),
+            ntime: "00000000".parse().unwrap(),
+            nonce: "00000000".parse().unwrap(),
             version_bits: None,
         };
         assert_eq!(
@@ -126,7 +126,7 @@ mod tests {
         );
 
         let b = Submit {
-            version_bits: Some(Version::from_str("ffffffff").unwrap()),
+            version_bits: Some("ffffffff".parse().unwrap()),
             ..a.clone()
         };
         assert_eq!(

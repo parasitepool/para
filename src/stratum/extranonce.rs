@@ -63,7 +63,8 @@ mod tests {
     #[test]
     fn deserialize_rejects_odd_length_hex() {
         assert!(
-            Extranonce::from_str("abc")
+            "abc"
+                .parse::<Extranonce>()
                 .unwrap_err()
                 .to_string()
                 .contains("Odd number of digits")
@@ -73,7 +74,7 @@ mod tests {
     #[test]
     fn deserialize_rejects_non_hex() {
         assert!(
-            Extranonce::from_str("zz")
+            "zz".parse::<Extranonce>()
                 .unwrap_err()
                 .to_string()
                 .contains("Invalid character")

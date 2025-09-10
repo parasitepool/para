@@ -142,7 +142,7 @@ mod tests {
         let mut hasher = Hasher {
             header: header(None, None),
             pool_target: target,
-            extranonce2: Extranonce::from_str("0000000000").unwrap(),
+            extranonce2: "0000000000".parse().unwrap(),
             job_id: "bf".into(),
         };
 
@@ -156,7 +156,7 @@ mod tests {
         let mut hasher = Hasher {
             header: header(None, Some(u32::MAX - 1)),
             pool_target: target,
-            extranonce2: Extranonce::from_str("0000000000").unwrap(),
+            extranonce2: "0000000000".parse().unwrap(),
             job_id: "bg".into(),
         };
 
@@ -209,7 +209,7 @@ mod tests {
             let mut hasher = Hasher {
                 header: header(None, None),
                 pool_target: target,
-                extranonce2: Extranonce::from_str("0000000000").unwrap(),
+                extranonce2: "0000000000".parse().unwrap(),
                 job_id: format!("test_{zeros}"),
             };
 

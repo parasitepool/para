@@ -224,8 +224,8 @@ mod tests {
             coinb2: "072f736c7573682f000000000100f2052a010000001976a914d23fcdf86f7e756a64a7a9688ef9903327048ed988ac00000000".into(),
             merkle_branches: Vec::new(),
             version: Version(block::Version::TWO),
-            nbits: Nbits::from_str("1c2ac4af").unwrap(),
-            ntime: Ntime::from_str("504e86b9").unwrap(), 
+            nbits: "1c2ac4af".parse().unwrap(),
+            ntime: "504e86b9".parse().unwrap(), 
             clean_jobs: false,
         };
 
@@ -261,9 +261,9 @@ mod tests {
                 params: serde_json::to_value(&Submit {
                     username: "slush.miner1".into(),
                     job_id: "bf".into(),
-                    extranonce2: Extranonce::from_str("00000001").unwrap(),
-                    ntime: Ntime::from_str("504e86ed").unwrap(),
-                    nonce: Nonce::from_str("b2957c02").unwrap(),
+                    extranonce2: "00000001".parse().unwrap(),
+                    ntime: "504e86ed".parse().unwrap(),
+                    nonce: "b2957c02".parse().unwrap(),
                     version_bits: None,
                 })
                 .unwrap(),
@@ -291,10 +291,10 @@ mod tests {
                 params: serde_json::to_value(&Submit {
                     username: "slush.miner1".into(),
                     job_id: "bf".into(),
-                    extranonce2: Extranonce::from_str("00000001").unwrap(),
-                    ntime: Ntime::from_str("504e86ed").unwrap(),
-                    nonce: Nonce::from_str("b2957c02").unwrap(),
-                    version_bits: Some(Version::from_str("04d46000").unwrap()),
+                    extranonce2: "00000001".parse().unwrap(),
+                    ntime: "504e86ed".parse().unwrap(),
+                    nonce: "b2957c02".parse().unwrap(),
+                    version_bits: Some("04d46000".parse().unwrap()),
                 })
                 .unwrap(),
             },
@@ -413,7 +413,7 @@ mod tests {
                                 "ae6812eb4cd7735a302a8a9dd95cf71f".into(),
                             ),
                         ],
-                        extranonce1: Extranonce::from_str("08000002").unwrap(),
+                        extranonce1: "08000002".parse().unwrap(),
                         extranonce2_size: 4,
                     })
                     .unwrap(),
@@ -434,7 +434,7 @@ mod tests {
                 params: serde_json::to_value(Configure {
                     extensions: vec!["version-rolling".into()],
                     minimum_difficulty_value: None,
-                    version_rolling_mask: Some(Version::from_str("ffffffff").unwrap()),
+                    version_rolling_mask: Some("ffffffff".parse().unwrap()),
                     version_rolling_min_bit_count: None,
                 })
                 .unwrap(),
@@ -452,7 +452,7 @@ mod tests {
                 params: serde_json::to_value(Configure {
                     extensions: vec!["minimum-difficulty".into(), "version-rolling".into()],
                     minimum_difficulty_value: Some(2048),
-                    version_rolling_mask: Some(Version::from_str("00fff000").unwrap()),
+                    version_rolling_mask: Some("00fff000".parse().unwrap()),
                     version_rolling_min_bit_count: Some(2),
                 })
                 .unwrap(),

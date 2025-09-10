@@ -93,8 +93,8 @@ mod tests {
             coinb2: "072f736c7573682f000000000100f2052a010000001976a914d23fcdf86f7e756a64a7a9688ef9903327048ed988ac00000000".into(),
             merkle_branches: Vec::new(),
             version: Version(block::Version::TWO),
-            nbits: Nbits::from_str("1c2ac4af").unwrap(),
-            ntime: Ntime::from_str("504e86b9").unwrap(),
+            nbits: "1c2ac4af".parse().unwrap(),
+            ntime: "504e86b9".parse().unwrap(),
             clean_jobs,
         }
     }

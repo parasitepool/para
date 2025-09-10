@@ -23,9 +23,9 @@ unused:
 doc:
   cargo doc --workspace --open
 
-miner: 
+miner host='127.0.0.1': 
   RUST_LOG=info cargo run --release -- miner \
-    --host 127.0.0.1 \
+    --host {{host}} \
     --port 42069 \
     --username bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg6dzw5nk24r45dzasde25r3.tick \
     --password x
