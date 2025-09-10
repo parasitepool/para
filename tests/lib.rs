@@ -12,6 +12,7 @@ use {
     serde::de::DeserializeOwned,
     std::{
         collections::{BTreeMap, HashSet},
+        ffi::{OsStr, OsString},
         fs,
         io::Write,
         net::TcpListener,
@@ -71,6 +72,10 @@ pub(crate) fn address(n: u32) -> Address {
     .parse::<Address<NetworkUnchecked>>()
     .unwrap()
     .assume_checked()
+}
+
+fn signet_username() -> String {
+    "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.tick.abcdef@lnurl.com".to_string()
 }
 
 fn zero_status() -> Status {

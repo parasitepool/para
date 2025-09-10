@@ -1,9 +1,5 @@
 use super::*;
 
-fn signet_username() -> String {
-    "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.tick.abcdef@lnurl.com".to_string()
-}
-
 #[test]
 fn ping() {
     let ckpool = TestCkpool::spawn();

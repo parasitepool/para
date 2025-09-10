@@ -2,7 +2,7 @@ use super::*;
 
 pub(crate) struct TestPool {
     bitcoind_handle: Child,
-    pool_handle: Child,
+    pub pool_handle: Child,
     pool_port: u16,
     _tempdir: Arc<TempDir>,
 }
@@ -51,6 +51,9 @@ impl TestPool {
                 {}",
             args.to_args().join(" ")
         ))
+        .capture_stderr(true)
+        .capture_stdout(true)
+        .env("RUST_LOG", "info")
         .integration_test(true)
         .spawn();
 

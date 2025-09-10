@@ -366,7 +366,7 @@ mod tests {
 
         let mut tmp = [0u8; 8];
         let hlen = write_scriptint(&mut tmp, 0);
-        let aux_len = 0usize; // no aux in this test
+        let aux_len = 0usize;
         let script_prefix_len = 1 + hlen + aux_len;
 
         let b_a = hex::decode(&c1_a).unwrap();

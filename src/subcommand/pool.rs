@@ -22,7 +22,7 @@ impl Pool {
             tokio::select! {
                 result = Self::handle_single_worker(config.clone(), &listener) => {
                     match result {
-                        Ok(_) => break,
+                        Ok(_) => continue,
                         Err(err) => error!("Worker connection error: {err}"),
                     }
                 }
