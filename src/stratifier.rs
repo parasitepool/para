@@ -152,7 +152,7 @@ where
         let extranonce1 = Extranonce::generate(EXTRANONCE1_SIZE);
 
         let result = SubscribeResult {
-            subscriptions: vec![("mining.notify".to_string(), "todo".to_string())],
+            subscriptions: vec![("mining.notify".to_string(), "deadbeef".to_string())],
             extranonce1: extranonce1.clone(),
             extranonce2_size: EXTRANONCE2_SIZE.try_into().unwrap(),
         };
@@ -203,7 +203,7 @@ where
             extranonce1.clone(),
             *version_mask,
             self.gbt()?,
-            "deadbeef".to_string(), // TODO
+            "deadbeef".to_string(),
         )?;
 
         self.send(Message::Response {
@@ -243,12 +243,20 @@ where
         };
 
         let version = if let Some(version_bits) = submit.version_bits {
-            let _version_mask = job.version_mask.unwrap(); // TODO
-            assert!(version_bits != 0.into());
-            // (header_version & !version_mask) | (bits & version_mask)
-            // assert!((!version_mask & version_bits) != 0.into());
+            let Some(version_mask) = job.version_mask else {
+                bail!("Version bits found but no version rolling was negotiated");
+            };
 
-            job.version() | version_bits
+            assert!(version_bits != Version::from(0));
+
+            let disallowed = version_bits & !version_mask;
+
+            ensure!(
+                disallowed == Version::from(0),
+                "miner set disallowed version bits: {disallowed}"
+            );
+
+            (job.version() & !version_mask) | (version_bits & version_mask)
         } else {
             job.version()
         };
@@ -270,7 +278,6 @@ where
             nonce: submit.nonce.into(),
         };
 
-        // TODO: check pool diff here
         let blockhash = header.validate_pow(Target::from_compact(nbits.into()))?;
 
         info!("Block with hash {blockhash} mets PoW");
@@ -298,7 +305,6 @@ where
 
         let block = Block { header, txdata };
 
-        // TODO: put this in tests
         assert!(block.bip34_block_height().is_ok());
 
         info!("Submitting block solve");
@@ -313,7 +319,7 @@ where
         })
         .await?;
 
-        info!("SUCCESS");
+        info!("SUCCESS: mined block {}", block.block_hash());
 
         Ok(())
     }
