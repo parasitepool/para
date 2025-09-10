@@ -1,4 +1,3 @@
-#![allow(clippy::too_many_arguments)]
 use {
     anyhow::{Context, Error, anyhow, bail, ensure},
     arguments::Arguments,
