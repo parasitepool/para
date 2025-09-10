@@ -12,6 +12,7 @@ use {
     serde::de::DeserializeOwned,
     std::{
         collections::{BTreeMap, HashSet},
+        ffi::{OsStr, OsString},
         fs,
         io::Write,
         net::TcpListener,
@@ -31,11 +32,16 @@ use {
 use {
     std::{io::stderr, net::TcpStream},
     test_ckpool::TestCkpool,
+    test_pool::TestPool,
 };
 
+#[cfg(target_os = "linux")]
+mod bitcoind;
 mod command_builder;
 #[cfg(target_os = "linux")]
 mod test_ckpool;
+#[cfg(target_os = "linux")]
+mod test_pool;
 #[cfg(target_os = "linux")]
 mod test_psql;
 mod test_server;
@@ -43,9 +49,16 @@ mod to_args;
 
 #[cfg(target_os = "linux")]
 mod ping;
+#[cfg(target_os = "linux")]
+mod pool;
 mod server;
 #[cfg(target_os = "linux")]
 mod sync;
+
+#[cfg(target_os = "linux")]
+fn signet_username() -> String {
+    "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.tick.abcdef@lnurl.com".to_string()
+}
 
 pub(crate) fn address(n: u32) -> Address {
     match n {

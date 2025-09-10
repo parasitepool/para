@@ -2,6 +2,7 @@ use super::*;
 
 pub(crate) struct CommandBuilder {
     args: Vec<String>,
+    env: BTreeMap<String, OsString>,
     integration_test: bool,
     stderr: bool,
     stdin: Vec<u8>,
@@ -13,6 +14,7 @@ impl CommandBuilder {
     pub(crate) fn new(args: impl ToArgs) -> Self {
         Self {
             args: args.to_args(),
+            env: BTreeMap::new(),
             integration_test: true,
             stderr: true,
             stdin: Vec::new(),
@@ -38,6 +40,12 @@ impl CommandBuilder {
         Self { stdout, ..self }
     }
 
+    #[allow(unused)]
+    pub(crate) fn env(mut self, key: &str, value: impl AsRef<OsStr>) -> Self {
+        self.env.insert(key.into(), value.as_ref().into());
+        self
+    }
+
     pub(crate) fn command(&self) -> Command {
         let mut command = Command::new(executable_path("para"));
 
@@ -45,6 +53,10 @@ impl CommandBuilder {
 
         for arg in self.args.iter() {
             args.push(arg.clone());
+        }
+
+        for (key, value) in &self.env {
+            command.env(key, value);
         }
 
         if self.integration_test {
