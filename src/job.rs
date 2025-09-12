@@ -7,7 +7,7 @@ pub(crate) struct Job {
     pub(crate) extranonce1: Extranonce,
     pub(crate) gbt: GetBlockTemplateResult,
     pub(crate) job_id: String,
-    pub(crate) merkle_branches: Vec<TxMerkleNode>,
+    pub(crate) merkle_branches: Vec<MerkleNode>,
     pub(crate) version_mask: Option<Version>,
 }
 

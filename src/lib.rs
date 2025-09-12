@@ -68,8 +68,8 @@ use {
     },
     stratifier::Connection,
     stratum::{
-        Authorize, Configure, Extranonce, Id, JsonRpcError, Message, Nbits, Notify, Ntime,
-        PrevHash, SetDifficulty, Submit, Subscribe, SubscribeResult, Version,
+        Authorize, Configure, Extranonce, Id, JsonRpcError, MerkleNode, Message, Nbits, Notify,
+        Ntime, PrevHash, SetDifficulty, Submit, Subscribe, SubscribeResult, Version,
     },
     sysinfo::{Disks, System},
     tokio::{

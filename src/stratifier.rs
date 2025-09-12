@@ -272,7 +272,7 @@ where
                 &job.extranonce1,
                 &submit.extranonce2,
                 &job.merkle_branches,
-            )?,
+            )?.into(),
             time: submit.ntime.into(),
             bits: nbits.into(),
             nonce: submit.nonce.into(),

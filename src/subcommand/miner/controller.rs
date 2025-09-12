@@ -81,6 +81,8 @@ impl Controller {
                 let network_target: Target = network_nbits.into();
                 let pool_target = self.pool_difficulty.lock().await.to_target();
 
+                info!("{:?}", notify.merkle_branches);
+
                 info!("Network target:\t{}", target_as_block_hash(network_target));
                 info!("Pool target:\t{}", target_as_block_hash(pool_target));
                 info!("Spawning hasher thread");
@@ -95,7 +97,7 @@ impl Controller {
                             &self.extranonce1,
                             &extranonce2,
                             &notify.merkle_branches,
-                        )?,
+                        )?.into(),
                         time: notify.ntime.into(),
                         bits: notify.nbits.into(),
                         nonce: 0,
