@@ -1,7 +1,4 @@
 use super::*;
-// use bitcoin::hashes::{Hash, sha256d};
-// use core::fmt;
-// use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct MerkleNode(sha256d::Hash);
@@ -22,10 +19,6 @@ impl MerkleNode {
     pub fn to_raw_hash(self) -> sha256d::Hash {
         self.0
     }
-
-    // pub fn from_engine(e: sha256d::HashEngine) -> Self {
-    // Self(sha256d::Hash::from_engine(e))
-    // }
 
     pub fn all_zeros() -> Self {
         Self(sha256d::Hash::all_zeros())
@@ -53,7 +46,6 @@ impl<'de> Deserialize<'de> for MerkleNode {
     }
 }
 
-/// Display how it looks on the wire
 impl fmt::Display for MerkleNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut b = *self.as_byte_array();
