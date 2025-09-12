@@ -33,6 +33,7 @@ use {
     hex::FromHex,
     lazy_static::lazy_static,
     rand::RngCore,
+    rayon::prelude::*,
     reqwest::Url,
     rust_embed::RustEmbed,
     rustls_acme::{
@@ -61,7 +62,7 @@ use {
         str::FromStr,
         sync::{
             Arc, LazyLock,
-            atomic::{AtomicBool, AtomicU64, Ordering},
+            atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
         },
         thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
