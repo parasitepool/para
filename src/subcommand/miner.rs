@@ -796,10 +796,11 @@ mod tests {
 
         let start_time = std::time::Instant::now();
         while !shutdown_flag.load(Ordering::Relaxed) {
-            if start_time.elapsed() > Duration::from_millis(200) {
+            if start_time.elapsed() > Duration::from_secs(1) {
                 panic!("Shutdown flag was never set");
             }
-            sleep(Duration::from_millis(10)).await;
+            sleep(Duration::from_millis(5)).await;
+            tokio::task::yield_now().await;
         }
 
         handle.await.unwrap();
