@@ -1,9 +1,10 @@
 Health Check Dashboard<br>
 <br>
 %% for (hostname, check) in &self.healthchecks {
-Host: {{ hostname }}%<br>
+Host: {{ hostname }}<br>
 Disk Usage: {{ check.display_disk_usage() }}%<br>
 Memory Usage: {{ check.display_memory_usage() }}%<br>
 CPU Usage: {{ check.display_cpu_usage() }}%<br>
-Uptime: {{ check.display_uptime() }}
+Uptime: {{ check.display_uptime() }}<br>
+<br>
 %% }
