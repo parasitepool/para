@@ -314,7 +314,7 @@ out:
     return ret;
 }
 
-bool submit_block(connsock_t* cs, const char* params, bool signet) {
+bool submit_block(connsock_t* cs, const char* params) {
     json_t *    val, *res_val;
     int         len, retries = 0;
     const char* res_ret;
