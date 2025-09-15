@@ -1,10 +1,9 @@
-use axum::extract::Query;
 use {
     super::*,
     crate::subcommand::sync::{ShareBatch, SyncResponse},
     accept_json::AcceptJson,
     aggregator::Aggregator,
-    axum::extract::Path,
+    axum::extract::{Path, Query},
     database::Database,
     error::{OptionExt, ServerError, ServerResult},
     server_config::ServerConfig,
