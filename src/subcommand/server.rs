@@ -18,6 +18,7 @@ mod aggregator;
 pub mod api;
 pub(crate) mod database;
 mod error;
+pub mod notifications;
 mod server_config;
 mod templates;
 
@@ -101,8 +102,7 @@ impl Server {
             ))
             .route("/", get(Self::home))
             .route("/healthcheck", self.with_auth(get(Self::healthcheck)))
-            .route("/static/{*path}", get(Self::static_assets))
-            .layer(Extension(config.clone()));
+            .route("/static/{*path}", get(Self::static_assets));
 
         match Database::new(config.database_url()).await {
             Ok(database) => {
@@ -123,6 +123,8 @@ impl Server {
                 warn!("Failed to connect to PostgreSQL: {err}",);
             }
         }
+
+        router = router.layer(Extension(config.clone()));
 
         if !config.nodes().is_empty() {
             let aggregator = Aggregator::init(config.clone())?;
@@ -388,6 +390,7 @@ impl Server {
 
     pub(crate) async fn sync_batch(
         Extension(database): Extension<Database>,
+        Extension(config): Extension<Arc<ServerConfig>>,
         Json(batch): Json<ShareBatch>,
     ) -> Result<Json<SyncResponse>, StatusCode> {
         info!(
@@ -399,10 +402,29 @@ impl Server {
 
         if let Some(block) = &batch.block {
             match database.upsert_block(block).await {
-                Ok(_) => info!(
-                    "Successfully upserted block for height {}",
-                    block.blockheight
-                ),
+                Ok(_) => {
+                    info!(
+                        "Successfully upserted block for height {}",
+                        block.blockheight
+                    );
+
+                    let notification_result = notifications::notify_block_found(
+                        &config.alerts_ntfy_channel,
+                        block.blockheight,
+                        block.blockhash.clone(),
+                        block.coinbasevalue.unwrap_or(0),
+                        block
+                            .username
+                            .clone()
+                            .unwrap_or_else(|| "unknown".to_string()),
+                    )
+                    .await;
+
+                    match notification_result {
+                        Ok(_) => info!("Block notification sent successfully"),
+                        Err(e) => error!("Failed to send block notification: {}", e),
+                    }
+                }
                 Err(e) => error!("Warning: Failed to upsert block: {}", e),
             }
         }

@@ -32,6 +32,11 @@ pub(crate) struct ServerConfig {
     nodes: Vec<Url>,
     #[arg(long, help = "Send shares to HTTP sync endpoint <SYNC_ENDPOINT>")]
     sync_endpoint: Option<String>,
+    #[arg(
+        long,
+        help = "The channel at ntfy.sh to use for block found notifications"
+    )]
+    pub(crate) alerts_ntfy_channel: Option<String>,
 }
 
 impl ServerConfig {

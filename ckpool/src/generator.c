@@ -346,7 +346,7 @@ bool generator_submitblock(ckpool_t* ckp, const char* buf) {
     }
     cs = &si->cs;
     LOGNOTICE("Submitting block data!");
-    return submit_block(cs, buf, ckp->signet);
+    return submit_block(cs, buf);
 }
 
 void generator_preciousblock(ckpool_t* ckp, const char* hash) {
@@ -463,7 +463,7 @@ retry:
         bool ret;
 
         LOGNOTICE("Submitting block data!");
-        ret = submit_block(cs, buf + 12 + 64 + 1, ckp->signet);
+        ret = submit_block(cs, buf + 12 + 64 + 1);
         memset(buf + 12 + 64, 0, 1);
         sprintf(blockmsg, "%sblock:%s", ret ? "" : "no", buf + 12);
         send_proc(ckp->stratifier, blockmsg);
@@ -3080,7 +3080,7 @@ retry:
         bool ret;
 
         LOGNOTICE("Submitting likely block solve share from upstream pool");
-        ret = submit_block(cs, buf + 12 + 64 + 1, ckp->signet);
+        ret = submit_block(cs, buf + 12 + 64 + 1);
         memset(buf + 12 + 64, 0, 1);
         sprintf(blockmsg, "%sblock:%s", ret ? "" : "no", buf + 12);
         send_proc(ckp->stratifier, blockmsg);
