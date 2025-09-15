@@ -97,7 +97,8 @@ impl Controller {
                             &self.extranonce1,
                             &extranonce2,
                             &notify.merkle_branches,
-                        )?.into(),
+                        )?
+                        .into(),
                         time: notify.ntime.into(),
                         bits: notify.nbits.into(),
                         nonce: 0,

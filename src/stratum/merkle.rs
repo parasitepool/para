@@ -1,20 +1,10 @@
 use super::*;
 
-
 /// Stratum uses the the natural big-endian hex encoding of a hash but for some reason Txid and other
-/// sha256d::Hash are displayed in little-endian hex in Bitcoin.
+/// sha256d::Hash are displayed in little-endian hex in Bitcoin. To ensure correct
+/// serialization/deserialization and display this wrapper type was created.
 #[derive(
-    Copy,
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    DeserializeFromStr,
-    SerializeDisplay,
-    Display,
+    Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, DeserializeFromStr, SerializeDisplay,
 )]
 pub struct MerkleNode(sha256d::Hash);
 
@@ -40,47 +30,22 @@ impl MerkleNode {
     }
 }
 
-//impl Serialize for MerkleNode {
-//    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-//        let mut bytes = *self.as_byte_array();
-//        bytes.reverse();
-//        serializer.serialize_str(&hex::encode(bytes))
-//    }
-//}
-//
-//impl<'de> Deserialize<'de> for MerkleNode {
-//    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-//        let string = String::deserialize(deserializer)?;
-//        if string.len() != 64 {
-//            return Err(de::Error::custom("merkle node hex must be 64 chars"));
-//        }
-//        let mut bytes = [0u8; 32];
-//        hex::decode_to_slice(&string, &mut bytes).map_err(|e| de::Error::custom(e.to_string()))?;
-//        // bytes.reverse();
-//        Ok(MerkleNode::from_byte_array(bytes))
-//    }
-//}
-
-/// Display as it would on the wire
-// impl fmt::Display for MerkleNode {
-// wire = little-endian hex
-// fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-// let mut b = *self.0.as_byte_array();
-// b.reverse();
-// write!(f, "{}", hex::encode(b))
-// }
-// }
-
 impl FromStr for MerkleNode {
-    type Err = anyhow::Error;
+    type Err = Error;
 
-    // parse wire LE hex
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         ensure!(s.len() == 64, "merkle node hex must be 64 chars");
-        let mut b = [0u8; 32];
-        hex::decode_to_slice(s, &mut b)?;
-        // b.reverse(); // LE -> internal
-        Ok(MerkleNode(sha256d::Hash::from_byte_array(b)))
+        let mut bytes = [0u8; 32];
+        hex::decode_to_slice(s, &mut bytes)?;
+        Ok(MerkleNode(sha256d::Hash::from_byte_array(bytes)))
+    }
+}
+
+/// Display as it would on the wire for a stratum message.
+/// Reversed to how it is normally displayed in Bitcoin.
+impl fmt::Display for MerkleNode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", hex::encode(*self.0.as_byte_array()))
     }
 }
 
@@ -194,43 +159,6 @@ pub fn merkle_branches(non_coinbase_txids: Vec<Txid>) -> Vec<MerkleNode> {
 mod tests {
     use super::*;
 
-    #[track_caller]
-    fn case(wire_hex: &str, display_hex: &str) {
-        dbg!(&wire_hex);
-        let from_wire: MerkleNode = serde_json::from_str(&format!("\"{wire_hex}\"")).unwrap();
-
-        let raw_hash: sha256d::Hash = serde_json::from_str(&format!("\"{wire_hex}\"")).unwrap();
-
-        dbg!(&from_wire);
-        dbg!(&raw_hash);
-
-        assert_eq!(
-            from_wire.to_string(),
-            wire_hex,
-            "Display renders wire format"
-        );
-
-        // Underlying raw hash (big-endian hex) must match be_hex
-        // let raw_from_wire: sha256d::Hash = ;
-        assert_eq!(
-            from_wire.to_raw_hash(),
-            sha256d::Hash::from_str(display_hex).unwrap()
-        );
-
-        // Construct from raw BE hash and verify equivalences
-        // let raw = sha256d::Hash::from_str(be_hex).unwrap();
-        // let merkle_node = MerkleNode::from_raw_hash(raw);
-        // assert_eq!(node_from_raw, from_wire);
-        // assert_eq!(sha256d::Hash::from(node_from_raw), raw);
-
-        // JSON round-trip preserves wire form
-        // let serialized = serde_json::to_string(&merkle_node).unwrap();
-        // assert_eq!(serialized, format!("\"{wire_hex}\""));
-
-        // let round_trip = serde_json::from_str::<MerkleNode>(&serialized).unwrap();
-        // assert_eq!(round_trip, merkle_node);
-    }
-
     fn extranonce1() -> Extranonce {
         "abcd1234".parse().unwrap()
     }
@@ -257,22 +185,37 @@ mod tests {
     }
 
     #[test]
-    fn roundtrip_all_zero() {
-        let z = "0".repeat(64);
-        case(&z, &z);
-    }
+    fn roundtrip_merkle_node() {
+        let bitcoin_hex = "adc3a8d948de28cf8747dfafa39768770e2dc56fcd08bd5e21e2b943345ef6c0";
+        let stratum_hex = "c0f65e3443b9e2215ebd08cd6fc52d0e776897a3afdf4787cf28de48d9a8c3ad";
 
-    #[test]
-    fn roundtrip_sequential_bytes() {
-        let display_hex = "adc3a8d948de28cf8747dfafa39768770e2dc56fcd08bd5e21e2b943345ef6c0";
-        let wire_hex = "c0f65e3443b9e2215ebd08cd6fc52d0e776897a3afdf4787cf28de48d9a8c3ad";
-        case(wire_hex, display_hex);
-    }
+        let hash = sha256d::Hash::from_str(bitcoin_hex).unwrap();
+        let merkle_node = MerkleNode::from_str(stratum_hex).unwrap();
 
-    #[test]
-    fn roundtrip_all_ff() {
-        let f = "f".repeat(64);
-        case(&f, &f);
+        assert_eq!(
+            hash.to_byte_array(),
+            merkle_node.to_raw_hash().to_byte_array()
+        );
+
+        assert_eq!(hash.to_string(), bitcoin_hex);
+        assert_eq!(merkle_node.to_string(), stratum_hex);
+
+        let raw_hash_from_wire: sha256d::Hash =
+            serde_json::from_str(&format!("\"{bitcoin_hex}\"")).unwrap();
+
+        let merkle_from_wire: MerkleNode =
+            serde_json::from_str(&format!("\"{stratum_hex}\"")).unwrap();
+
+        assert_eq!(
+            raw_hash_from_wire.to_byte_array(),
+            merkle_from_wire.to_raw_hash().to_byte_array()
+        );
+
+        let serialized = serde_json::to_string(&merkle_node).unwrap();
+        assert_eq!(serialized, format!("\"{stratum_hex}\""));
+
+        let round_trip = serde_json::from_str::<MerkleNode>(&serialized).unwrap();
+        assert_eq!(round_trip, merkle_node);
     }
 
     #[test]
