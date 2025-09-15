@@ -1,6 +1,6 @@
 use super::*;
 
-/// Stratum uses the the natural big-endian hex encoding of a hash but for some reason 
+/// Stratum uses the the natural big-endian hex encoding of a hash but for some reason
 /// all double sha256d::Hash are displayed in little-endian hex in Bitcoin. To ensure correct
 /// serialization/deserialization and display this wrapper type was created.
 #[derive(
