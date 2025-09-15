@@ -1,7 +1,7 @@
 use super::*;
 
-/// Stratum uses the the natural big-endian hex encoding of a hash but for some reason Txid and other
-/// sha256d::Hash are displayed in little-endian hex in Bitcoin. To ensure correct
+/// Stratum uses the the natural big-endian hex encoding of a hash but for some reason 
+/// all double sha256d::Hash are displayed in little-endian hex in Bitcoin. To ensure correct
 /// serialization/deserialization and display this wrapper type was created.
 #[derive(
     Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, DeserializeFromStr, SerializeDisplay,
@@ -41,8 +41,8 @@ impl FromStr for MerkleNode {
     }
 }
 
-/// Display as it would on the wire for a stratum message.
-/// Reversed to how it is normally displayed in Bitcoin.
+/// Double-SHA256 hashes in Bitcoin are usually displayed in little-endian format. Here we
+/// specifically do not do that and instead display it in natural big-endian format.
 impl fmt::Display for MerkleNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", hex::encode(*self.0.as_byte_array()))
