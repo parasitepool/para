@@ -17,7 +17,7 @@ use {
 mod accept_json;
 mod aggregator;
 pub mod api;
-pub(crate) mod database;
+pub mod database;
 mod error;
 mod server_config;
 mod templates;

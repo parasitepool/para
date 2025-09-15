@@ -3,7 +3,7 @@ use super::*;
 mod miner;
 mod ping;
 pub(crate) mod pool;
-pub(crate) mod server;
+pub mod server;
 pub mod sync;
 
 #[derive(Debug, Parser)]
