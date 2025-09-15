@@ -36,8 +36,13 @@ impl Subcommand {
                     let hostname = System::host_name().ok_or(anyhow!("no hostname found"))?;
 
                     if !sync_endpoint.contains(&hostname) {
-                        let sync_send =
+                        let mut sync_send =
                             sync::SyncSend::default().with_endpoint(sync_endpoint.clone());
+
+                        if let Some((username, password)) = server.config.credentials() {
+                            sync_send = sync_send.with_credentials(username, password);
+                        }
+
                         let sync_handle = handle.clone();
 
                         let send_task = rt.spawn_blocking(move || {

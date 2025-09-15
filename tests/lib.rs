@@ -34,7 +34,13 @@ use {
 
 #[cfg(target_os = "linux")]
 use {
-    std::{io::stderr, net::TcpStream},
+    para::subcommand::sync::{ShareBatch, SyncResponse, SyncSend},
+    reqwest::Response,
+    std::{
+        io::stderr,
+        net::TcpStream,
+        sync::atomic::{AtomicUsize, Ordering},
+    },
     test_ckpool::TestCkpool,
     test_pool::TestPool,
 };
