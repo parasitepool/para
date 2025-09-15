@@ -193,7 +193,7 @@ mod payout_range_tests {
 
     #[tokio::test]
     async fn test_payouts_range_basic() {
-        let server = TestServer::spawn_with_sync_endpoint().await;
+        let server = TestServer::spawn_with_db().await;
         setup_test_schema(server.database_url().unwrap())
             .await
             .unwrap();
@@ -219,7 +219,7 @@ mod payout_range_tests {
 
     #[tokio::test]
     async fn test_payouts_range_with_exclusions() {
-        let server = TestServer::spawn_with_sync_endpoint().await;
+        let server = TestServer::spawn_with_db().await;
         setup_test_schema(server.database_url().unwrap())
             .await
             .unwrap();
@@ -258,7 +258,7 @@ mod payout_range_tests {
 
     #[tokio::test]
     async fn test_payouts_range_empty_result() {
-        let server = TestServer::spawn_with_sync_endpoint().await;
+        let server = TestServer::spawn_with_db().await;
         setup_test_schema(server.database_url().unwrap())
             .await
             .unwrap();
@@ -270,7 +270,7 @@ mod payout_range_tests {
 
     #[tokio::test]
     async fn test_user_payout_range_basic() {
-        let server = TestServer::spawn_with_sync_endpoint().await;
+        let server = TestServer::spawn_with_db().await;
         setup_test_schema(server.database_url().unwrap())
             .await
             .unwrap();
@@ -309,7 +309,7 @@ mod payout_range_tests {
 
     #[tokio::test]
     async fn test_user_payout_range_with_exclusions() {
-        let server = TestServer::spawn_with_sync_endpoint().await;
+        let server = TestServer::spawn_with_db().await;
         setup_test_schema(server.database_url().unwrap())
             .await
             .unwrap();
@@ -348,7 +348,7 @@ mod payout_range_tests {
 
     #[tokio::test]
     async fn test_user_payout_range_excluded_user() {
-        let server = TestServer::spawn_with_sync_endpoint().await;
+        let server = TestServer::spawn_with_db().await;
         setup_test_schema(server.database_url().unwrap())
             .await
             .unwrap();
@@ -380,7 +380,7 @@ mod payout_range_tests {
 
     #[tokio::test]
     async fn test_payouts_range_single_block() {
-        let server = TestServer::spawn_with_sync_endpoint().await;
+        let server = TestServer::spawn_with_db().await;
         setup_test_schema(server.database_url().unwrap())
             .await
             .unwrap();
@@ -399,7 +399,7 @@ mod payout_range_tests {
 
     #[tokio::test]
     async fn test_payouts_range_large_range() {
-        let server = TestServer::spawn_with_sync_endpoint().await;
+        let server = TestServer::spawn_with_db().await;
         setup_test_schema(server.database_url().unwrap())
             .await
             .unwrap();
@@ -422,7 +422,7 @@ mod payout_range_tests {
 
     #[tokio::test]
     async fn test_payouts_range_url_encoded_exclusions() {
-        let server = TestServer::spawn_with_sync_endpoint().await;
+        let server = TestServer::spawn_with_db().await;
         setup_test_schema(server.database_url().unwrap())
             .await
             .unwrap();
