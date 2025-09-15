@@ -131,7 +131,7 @@ async fn test_send_block_notification() {
 
 #[tokio::test]
 async fn test_notification_failure_handling() {
-    let handler = NotificationHandler::with_custom_server(
+    let handler = NotificationHandler::_with_custom_server(
         "http://invalid.ntfy.server.local".to_string(),
         "test_channel".to_string(),
     );

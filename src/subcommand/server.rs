@@ -388,7 +388,7 @@ impl Server {
 
     pub(crate) async fn sync_batch(
         Extension(database): Extension<Database>,
-        Extension(config): Extension<Arc<Config>>,
+        Extension(config): Extension<Arc<ServerConfig>>,
         Json(batch): Json<ShareBatch>,
     ) -> Result<Json<SyncResponse>, StatusCode> {
         info!(

@@ -8,9 +8,8 @@ pub enum NotificationType {
         value: i64,
         miner: String,
     },
-    SystemWarning {
-        message: String,
-    },
+    #[allow(dead_code)]
+    SystemWarning { message: String },
 }
 
 #[allow(dead_code)]
@@ -41,7 +40,7 @@ impl NotificationHandler {
         }
     }
 
-    pub fn with_custom_server(server_url: String, channel: String) -> Self {
+    pub fn _with_custom_server(server_url: String, channel: String) -> Self {
         Self {
             ntfy_url: server_url,
             channel,
@@ -144,7 +143,7 @@ impl NotificationHandler {
         }
     }
 
-    pub async fn send_test(&self) -> Result<()> {
+    pub async fn _send_test(&self) -> Result<()> {
         self.send_raw(
             "🔔 Test Notification".to_string(),
             "This is a test notification from the parasite pool server.".to_string(),
