@@ -29,3 +29,11 @@ impl From<u32> for Ntime {
         Ntime(n)
     }
 }
+
+impl TryFrom<u64> for Ntime {
+    type Error = <u32 as TryFrom<u64>>::Error;
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        Ok(Ntime(u32::try_from(value)?))
+    }
+}
