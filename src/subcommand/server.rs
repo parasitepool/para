@@ -3,7 +3,7 @@ use {
     crate::subcommand::sync::{ShareBatch, SyncResponse},
     accept_json::AcceptJson,
     aggregator::Aggregator,
-    axum::extract::Path,
+    axum::extract::{Path, Query},
     database::Database,
     error::{OptionExt, ServerError, ServerResult},
     server_config::ServerConfig,
@@ -16,7 +16,7 @@ use {
 mod accept_json;
 mod aggregator;
 pub mod api;
-pub(crate) mod database;
+pub mod database;
 mod error;
 pub mod notifications;
 mod server_config;
@@ -67,6 +67,13 @@ fn format_uptime(uptime_seconds: u64) -> String {
     parts.join(", ")
 }
 
+fn exclusion_list_from_params(params: HashMap<String, String>) -> Vec<String> {
+    params
+        .get("excluded")
+        .map(|s| s.split(',').map(String::from).collect::<Vec<_>>())
+        .unwrap_or_default()
+}
+
 #[derive(Clone, Debug, Parser)]
 pub struct Server {
     #[command(flatten)]
@@ -108,6 +115,14 @@ impl Server {
             Ok(database) => {
                 router = router
                     .route("/payouts/{blockheight}", get(Self::payouts))
+                    .route(
+                        "/payouts/range/{start_height}/{end_height}",
+                        get(Self::payouts_range),
+                    )
+                    .route(
+                        "/payouts/range/{start_height}/{end_height}/user/{username}",
+                        get(Self::user_payout_range),
+                    )
                     .route("/split", get(Self::open_split))
                     .route("/split/{blockheight}", get(Self::sat_split))
                     .route(
@@ -276,6 +291,45 @@ impl Server {
             total_payment_amount,
             payments,
         })
+        .into_response())
+    }
+
+    pub(crate) async fn payouts_range(
+        Path((start_height, end_height)): Path<(u32, u32)>,
+        Query(params): Query<HashMap<String, String>>,
+        Extension(database): Extension<Database>,
+    ) -> ServerResult<Response> {
+        let excluded_usernames = exclusion_list_from_params(params);
+
+        Ok(Json(
+            database
+                .get_payouts_range(
+                    start_height.try_into().unwrap(),
+                    end_height.try_into().unwrap(),
+                    excluded_usernames,
+                )
+                .await?,
+        )
+        .into_response())
+    }
+
+    pub(crate) async fn user_payout_range(
+        Path((start_height, end_height, username)): Path<(u32, u32, String)>,
+        Query(params): Query<HashMap<String, String>>,
+        Extension(database): Extension<Database>,
+    ) -> ServerResult<Response> {
+        let excluded_usernames = exclusion_list_from_params(params);
+
+        Ok(Json(
+            database
+                .get_user_payout_range(
+                    start_height.try_into().unwrap(),
+                    end_height.try_into().unwrap(),
+                    username,
+                    excluded_usernames,
+                )
+                .await?,
+        )
         .into_response())
     }
 
