@@ -4,7 +4,7 @@ lazy_static! {
     pub static ref DIFFICULTY_1_TARGET: U256 = U256::from_big_endian(&Target::MAX.to_be_bytes());
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize, Display)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize, Display, Eq)]
 #[serde(transparent)]
 pub struct Difficulty(pub u64);
 

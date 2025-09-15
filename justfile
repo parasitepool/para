@@ -23,9 +23,9 @@ unused:
 doc:
   cargo doc --workspace --open
 
-miner: 
+miner host='127.0.0.1': 
   RUST_LOG=info cargo run --release -- miner \
-    --host parasite.wtf \
+    --host {{host}} \
     --port 42069 \
     --username bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg6dzw5nk24r45dzasde25r3.tick \
     --password x
@@ -42,6 +42,13 @@ ping host='parasite.wtf':
 
 ping-auth host='parasite.wtf' username='bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg6dzw5nk24r45dzasde25r3.tick' password='x':
   cargo run ping --username {{username}} --password {{password}} {{host}}:42069
+
+pool: 
+  RUST_LOG=info cargo run -- pool \
+    --chain signet \
+    --address 0.0.0.0 \
+    --bitcoin-rpc-username satoshi \
+    --bitcoin-rpc-password nakamoto
 
 server: 
   RUST_LOG=info cargo run -- server \
