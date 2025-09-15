@@ -12,38 +12,30 @@ struct NtfyMessage {
     tags: Option<Vec<String>>,
 }
 
-async fn listen_for_ntfy_message(
-    channel: &str,
-    timeout_duration: Duration,
-) -> Result<NtfyMessage, anyhow::Error> {
+async fn listen_for_ntfy_message(channel: &str, timeout_duration: Duration) -> NtfyMessage {
     let client = reqwest::Client::new();
     let url = format!("https://ntfy.sh/{}/json?poll=1&since=30s", channel);
 
     let response = timeout(timeout_duration, client.get(&url).send())
         .await
-        .map_err(|_| anyhow!("Timeout waiting for ntfy message"))?
-        .map_err(|e| anyhow!("Failed to poll ntfy: {}", e))?;
+        .unwrap()
+        .unwrap();
 
-    if !response.status().is_success() {
-        return Err(anyhow!("Failed to poll ntfy: {}", response.status()));
-    }
+    assert!(response.status().is_success());
 
-    let text = response
-        .text()
-        .await
-        .map_err(|e| anyhow!("Failed to read response: {}", e))?;
+    let text = response.text().await.unwrap();
 
     let messages: Vec<NtfyMessage> = text
         .lines()
         .filter(|line| !line.is_empty())
         .map(serde_json::from_str)
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| anyhow!("Failed to parse ntfy response: {}", e))?;
+        .unwrap();
 
     messages
         .into_iter()
         .find(|msg| msg.event == "message")
-        .ok_or_else(|| anyhow!("No message events found in ntfy response"))
+        .unwrap()
 }
 
 fn generate_test_channel() -> String {
@@ -117,27 +109,23 @@ async fn test_send_block_notification() {
         send_result
     );
 
-    // processing delay on ntfy's side was causing failing tests
     tokio::time::sleep(Duration::from_millis(1500)).await;
 
-    match listen_for_ntfy_message(&test_channel, Duration::from_secs(5)).await {
-        Ok(received_msg) => {
-            assert!(received_msg.title.unwrap_or_default().contains("850000"));
-            assert!(
-                received_msg
-                    .message
-                    .unwrap_or_default()
-                    .contains("6.25000000 BTC")
-            );
-            assert_eq!(received_msg.priority, Some(4));
+    let received_msg = listen_for_ntfy_message(&test_channel, Duration::from_secs(5)).await;
 
-            if let Some(tags) = received_msg.tags {
-                assert!(tags.iter().any(|t| t.contains("mining")));
-            }
-        }
-        Err(e) => {
-            panic!("Failed to receive notification from ntfy: {}", e);
-        }
+    assert!(received_msg.title.unwrap_or_default().contains("850000"));
+
+    assert!(
+        received_msg
+            .message
+            .unwrap_or_default()
+            .contains("6.25000000 BTC")
+    );
+
+    assert_eq!(received_msg.priority, Some(4));
+
+    if let Some(tags) = received_msg.tags {
+        assert!(tags.iter().any(|t| t.contains("mining")));
     }
 }
 
