@@ -9,6 +9,15 @@ pub(crate) struct TestServer {
     tempdir: Arc<TempDir>,
     #[cfg(target_os = "linux")]
     pg_db: Option<PgTempDB>,
+
+    #[cfg(target_os = "linux")]
+    pub(crate) credentials: Option<Credentials>,
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) struct Credentials {
+    pub(crate) username: String,
+    pub(crate) password: String,
 }
 
 impl TestServer {
@@ -57,11 +66,17 @@ impl TestServer {
             tempdir,
             #[cfg(target_os = "linux")]
             pg_db: None,
+            #[cfg(target_os = "linux")]
+            credentials: None,
         }
     }
 
     #[cfg(target_os = "linux")]
-    pub(crate) async fn spawn_with_sync_endpoint() -> Self {
+    pub(crate) async fn spawn_with_db() -> Self {
+        Self::spawn_with_db_args([]).await
+    }
+    #[cfg(target_os = "linux")]
+    pub(crate) async fn spawn_with_db_args(args: impl ToArgs) -> Self {
         let psql_binpath = match Command::new("pg_config").arg("--bindir").output() {
             Ok(output) if output.status.success() => String::from_utf8(output.stdout)
                 .ok()
@@ -96,9 +111,10 @@ impl TestServer {
         fs::create_dir(logdir.join("users")).unwrap();
 
         let child = CommandBuilder::new(format!(
-            "server --address 127.0.0.1 --port {port} --log-dir {} --database-url {}",
+            "server --address 127.0.0.1 --port {port} --log-dir {} --database-url {} {}",
             logdir.display(),
-            database_url
+            database_url,
+            args.to_args().join(" ")
         ))
         .integration_test(true)
         .spawn();
@@ -122,6 +138,7 @@ impl TestServer {
             port,
             tempdir,
             pg_db: Some(pg_db),
+            credentials: None,
         }
     }
 
@@ -196,13 +213,7 @@ impl TestServer {
         path: impl AsRef<str>,
         body: &T,
     ) -> R {
-        let client = reqwest::Client::new();
-        let response = client
-            .post(self.url().join(path.as_ref()).unwrap())
-            .json(body)
-            .send()
-            .await
-            .unwrap();
+        let response = self.post_json_raw(path, body).await;
 
         assert_eq!(
             response.status(),
@@ -212,6 +223,23 @@ impl TestServer {
         );
 
         response.json().await.unwrap()
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(crate) async fn post_json_raw<T: serde::Serialize>(
+        &self,
+        path: impl AsRef<str>,
+        body: &T,
+    ) -> Response {
+        let mut client = reqwest::Client::new()
+            .post(self.url().join(path.as_ref()).unwrap())
+            .json(body);
+
+        if let Some(user) = &self.credentials {
+            client = client.basic_auth(user.username.clone(), Some(user.password.clone()));
+        }
+
+        client.send().await.unwrap()
     }
 }
 
