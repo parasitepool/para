@@ -41,6 +41,12 @@ pub struct SyncSend {
         default_value = "postgres://satoshi:nakamoto@127.0.0.1:5432/ckpool"
     )]
     pub database_url: String,
+
+    #[arg(long, help = "Username for basic auth on sync endpoint")]
+    sync_username: Option<String>,
+
+    #[arg(long, help = "Password for basic auth on sync endpoint")]
+    sync_password: Option<String>,
 }
 
 impl Default for SyncSend {
@@ -318,10 +324,16 @@ impl SyncSend {
             format!("http://{}/sync/batch", self.endpoint)
         };
 
-        let response = client
+        let mut req_client = client
             .post(&url)
             .json(&batch)
-            .timeout(Duration::from_millis(HTTP_TIMEOUT_MS))
+            .timeout(Duration::from_millis(HTTP_TIMEOUT_MS));
+
+        if let Some((username, password)) = self.get_credentials() {
+            req_client = req_client.basic_auth(username, Some(password));
+        }
+
+        let response = req_client
             .send()
             .await
             .map_err(|e| anyhow!("Failed to send HTTP request: {}", e))?;
@@ -394,6 +406,18 @@ impl SyncSend {
 
     pub fn with_endpoint(mut self, endpoint: String) -> Self {
         self.endpoint = endpoint;
+        self
+    }
+
+    fn get_credentials(&self) -> Option<(&str, &str)> {
+        self.sync_username
+            .as_deref()
+            .zip(self.sync_password.as_deref())
+    }
+
+    pub fn with_credentials(mut self, user: &str, pass: &str) -> Self {
+        self.sync_username = Some(user.to_string());
+        self.sync_password = Some(pass.to_string());
         self
     }
 }
