@@ -1,7 +1,7 @@
 use super::*;
 
 #[derive(Clone, Debug, Parser)]
-pub(crate) struct Config {
+pub(crate) struct ServerConfig {
     #[clap(long, help = "Listen at <ADDRESS>")]
     address: Option<String>,
     #[arg(long, help = "Request ACME TLS certificate for <ACME_DOMAIN>")]
@@ -34,7 +34,7 @@ pub(crate) struct Config {
     sync_endpoint: Option<String>,
 }
 
-impl Config {
+impl ServerConfig {
     pub(crate) fn address(&self) -> String {
         self.address.clone().unwrap_or_else(|| "0.0.0.0".into())
     }

@@ -8,7 +8,7 @@ use {
 pub(crate) struct Aggregator;
 
 impl Aggregator {
-    pub(crate) fn init(config: Arc<Config>) -> Result<Router> {
+    pub(crate) fn init(config: Arc<ServerConfig>) -> Result<Router> {
         let client = ClientBuilder::new()
             .timeout(Duration::from_secs(10))
             .use_rustls_tls()
@@ -26,7 +26,7 @@ impl Aggregator {
 
     async fn pool_status(
         Extension(client): Extension<Client>,
-        Extension(config): Extension<Arc<Config>>,
+        Extension(config): Extension<Arc<ServerConfig>>,
     ) -> ServerResult<Response> {
         let nodes = config.nodes();
         let fetches = nodes.iter().map(|url| {
@@ -68,7 +68,7 @@ impl Aggregator {
     async fn user_status(
         Path(address): Path<String>,
         Extension(client): Extension<Client>,
-        Extension(config): Extension<Arc<Config>>,
+        Extension(config): Extension<Arc<ServerConfig>>,
     ) -> ServerResult<Response> {
         let nodes = config.nodes();
         let fetches = nodes.iter().map(|url| {
@@ -110,7 +110,7 @@ impl Aggregator {
 
     pub(crate) async fn dashboard(
         Extension(client): Extension<Client>,
-        Extension(config): Extension<Arc<Config>>,
+        Extension(config): Extension<Arc<ServerConfig>>,
     ) -> ServerResult<Response> {
         let nodes = config.nodes();
         let credentials = config.credentials();

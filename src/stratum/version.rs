@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Debug, Clone, PartialEq, Eq, DeserializeFromStr, SerializeDisplay)]
+#[derive(Debug, Clone, PartialEq, Eq, DeserializeFromStr, SerializeDisplay, Copy)]
 pub struct Version(pub block::Version);
 
 impl FromStr for Version {
@@ -31,6 +31,46 @@ impl From<Version> for block::Version {
     }
 }
 
+impl From<i32> for Version {
+    fn from(value: i32) -> Self {
+        Self(block::Version::from_consensus(value))
+    }
+}
+
+impl BitAnd for Version {
+    type Output = Self;
+    fn bitand(self, rhs: Self) -> Self {
+        Self(block::Version::from_consensus(
+            self.0.to_consensus() & rhs.0.to_consensus(),
+        ))
+    }
+}
+
+impl BitOr for Version {
+    type Output = Self;
+    fn bitor(self, rhs: Self) -> Self {
+        Self(block::Version::from_consensus(
+            self.0.to_consensus() | rhs.0.to_consensus(),
+        ))
+    }
+}
+
+impl BitXor for Version {
+    type Output = Self;
+    fn bitxor(self, rhs: Self) -> Self {
+        Self(block::Version::from_consensus(
+            self.0.to_consensus() ^ rhs.0.to_consensus(),
+        ))
+    }
+}
+
+impl Not for Version {
+    type Output = Self;
+    fn not(self) -> Self {
+        Self(block::Version::from_consensus(!self.0.to_consensus()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -51,7 +91,7 @@ mod tests {
             "Consensus i32 value mismatch"
         );
 
-        let as_block_version: block::Version = version.clone().into();
+        let as_block_version: block::Version = version.into();
         assert_eq!(
             as_block_version.to_consensus(),
             expected_consensus,

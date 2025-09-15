@@ -3,10 +3,10 @@ use super::*;
 pub(crate) struct Controller {
     client: Client,
     pool_difficulty: Arc<Mutex<Difficulty>>,
-    extranonce1: String,
+    extranonce1: Extranonce,
     extranonce2_size: u32,
-    share_rx: mpsc::Receiver<(Header, String, String)>,
-    share_tx: mpsc::Sender<(Header, String, String)>,
+    share_rx: mpsc::Receiver<(Header, Extranonce, String)>,
+    share_tx: mpsc::Sender<(Header, Extranonce, String)>,
     cancel: CancellationToken,
 }
 
@@ -70,11 +70,7 @@ impl Controller {
             "mining.notify" => {
                 let notify = serde_json::from_value::<Notify>(params)?;
 
-                let extranonce2 = {
-                    let mut bytes = vec![0u8; self.extranonce2_size.try_into().unwrap()];
-                    rand::rng().fill(&mut bytes[..]);
-                    hex::encode(bytes)
-                };
+                let extranonce2 = Extranonce::generate(self.extranonce2_size.try_into().unwrap());
 
                 let share_tx = self.share_tx.clone();
 
@@ -87,18 +83,25 @@ impl Controller {
 
                 info!("Network target:\t{}", target_as_block_hash(network_target));
                 info!("Pool target:\t{}", target_as_block_hash(pool_target));
+                info!("Spawning hasher thread");
 
                 let mut hasher = Hasher {
                     header: Header {
-                        version: notify.version.clone().into(),
+                        version: notify.version.into(),
                         prev_blockhash: notify.prevhash.clone().into(),
-                        merkle_root: self.build_merkle_root(&notify, &extranonce2)?,
+                        merkle_root: stratum::merkle_root(
+                            &notify.coinb1,
+                            &notify.coinb2,
+                            &self.extranonce1,
+                            &extranonce2,
+                            &notify.merkle_branches,
+                        )?,
                         time: notify.ntime.into(),
                         bits: notify.nbits.into(),
                         nonce: 0,
                     },
                     pool_target,
-                    extranonce2: extranonce2.to_string(),
+                    extranonce2,
                     job_id: notify.job_id,
                 };
 
@@ -131,36 +134,6 @@ impl Controller {
         info!("Got request method={method} with id={id} with params={params}");
 
         Ok(())
-    }
-
-    fn build_merkle_root(&self, notify: &Notify, extranonce2: &str) -> Result<TxMerkleNode> {
-        let coinbase_hex = format!(
-            "{}{}{}{}",
-            notify.coinb1, self.extranonce1, extranonce2, notify.coinb2
-        );
-
-        let coinbase_bin = hex::decode(&coinbase_hex)?;
-
-        let mut cursor = bitcoin::io::Cursor::new(&coinbase_bin);
-        let coinbase_tx = bitcoin::Transaction::consensus_decode_from_finite_reader(&mut cursor)?;
-
-        info!(
-            "Building merkle root with coinbase txid {:?}",
-            coinbase_tx.compute_txid()
-        );
-
-        let coinbase_hash = sha256d::Hash::hash(&coinbase_bin);
-
-        let mut merkle_root = coinbase_hash;
-
-        for branch in &notify.merkle_branch {
-            let mut concat = Vec::with_capacity(64);
-            concat.extend_from_slice(&merkle_root[..]);
-            concat.extend_from_slice(branch.as_byte_array());
-            merkle_root = sha256d::Hash::hash(&concat);
-        }
-
-        Ok(TxMerkleNode::from_raw_hash(merkle_root))
     }
 
     fn cancel_hasher(&mut self) {
