@@ -32,3 +32,15 @@ A full development/build environment is bundled using hermit and can be activate
 ```
 . ./bin/activate-hermit
 ```
+
+
+## Building the docs
+
+```
+cargo install mdbook mdbook-linkcheck
+just build-docs
+just serve-docs
+```
+
+Then you can customize CSS and javascript by following [this
+guide](https://github.com/rust-lang/mdBook/tree/master/guide/src/format/theme).
