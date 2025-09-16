@@ -61,11 +61,8 @@ build-docs:
 serve-docs: build-docs
   python3 -m http.server --directory docs/build/html --bind 127.0.0.1 8080
 
-update-mdbook-theme:
-  curl \
-    https://raw.githubusercontent.com/rust-lang/mdBook/v0.4.35/src/theme/index.hbs \
-    > docs/theme/index.hbs
-
+init-mdbook-theme:
+  mdbook init --theme docs/tmp --force
 
 install:
   git submodule update --init
