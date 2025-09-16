@@ -113,7 +113,7 @@ impl Server {
 
         match Database::new(config.database_url()).await {
             Ok(database) => {
-                router = router
+                let db_router = Router::new()
                     .route("/payouts/{blockheight}", get(Self::payouts))
                     .route(
                         "/payouts/range/{start_height}/{end_height}",
@@ -127,12 +127,12 @@ impl Server {
                     .route("/split/{blockheight}", get(Self::sat_split))
                     .route(
                         "/sync/batch",
-                        self.with_auth(
-                            post(Self::sync_batch)
-                                .layer(DefaultBodyLimit::max(52428800 /* 50MB */)),
-                        ),
+                        post(Self::sync_batch)
+                            .layer(DefaultBodyLimit::max(52428800 /* 50MB */)),
                     )
                     .layer(Extension(database));
+
+                router = router.merge(self.with_auth_router(db_router));
             }
             Err(err) => {
                 warn!("Failed to connect to PostgreSQL: {err}",);
@@ -163,6 +163,19 @@ impl Server {
             method_router.layer(ValidateRequestHeaderLayer::basic(username, password))
         } else {
             method_router
+        }
+    }
+
+    fn with_auth_router<S>(&self, router: Router<S>) -> Router<S>
+    where
+        S: Clone + Send + Sync + 'static,
+    {
+        if let Some((username, password)) = self.config.credentials() {
+            Router::new()
+                .merge(router)
+                .layer(ValidateRequestHeaderLayer::basic(username, password))
+        } else {
+            router
         }
     }
 
