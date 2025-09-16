@@ -132,4 +132,3 @@ psql:
 
 psql-reset:
   ./bin/postgres-reset
-
