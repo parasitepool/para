@@ -46,7 +46,6 @@ pub(crate) fn create_test_block(blockheight: i64) -> FoundBlockRecord {
         workername: Some("test_worker".to_string()),
         username: Some("test_user".to_string()),
         diff: Some(1000000.0),
-        time_found: Some("2024-01-01 12:00:00".to_string()),
         coinbasevalue: Some(625000000),
         rewards_processed: Some(false),
     }
