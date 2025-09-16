@@ -55,6 +55,18 @@ server:
     --log-dir copr/logs \
     --port 8080
 
+build-docs:
+  mdbook build docs -d build
+
+serve-docs: build-docs
+  python3 -m http.server --directory docs/build/html --bind 127.0.0.1 8080
+
+update-mdbook-theme:
+  curl \
+    https://raw.githubusercontent.com/rust-lang/mdBook/v0.4.35/src/theme/index.hbs \
+    > docs/theme/index.hbs
+
+
 install:
   git submodule update --init
   sudo apt-get install --yes \
@@ -123,3 +135,4 @@ psql:
 
 psql-reset:
   ./bin/postgres-reset
+

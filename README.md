@@ -32,3 +32,12 @@ A full development/build environment is bundled using hermit and can be activate
 ```
 . ./bin/activate-hermit
 ```
+
+
+## Building the docs
+
+```
+cargo install mdbook mdbook-linkcheck
+just build-docs
+just serve-docs
+```
