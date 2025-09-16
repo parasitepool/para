@@ -92,7 +92,6 @@ pub struct FoundBlockRecord {
     pub workername: Option<String>,
     pub username: Option<String>,
     pub diff: Option<f64>,
-    pub time_found: Option<String>,
     pub coinbasevalue: Option<i64>,
     pub rewards_processed: Option<bool>,
 }
@@ -469,31 +468,29 @@ impl Database {
     pub(crate) async fn upsert_block(&self, block: &FoundBlockRecord) -> Result<()> {
         sqlx::query(
             "INSERT INTO blocks (
-                blockheight, blockhash, confirmed, workername, username,
-                diff, time_found, coinbasevalue, rewards_processed
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            ON CONFLICT (blockheight) DO UPDATE SET
-                blockhash = EXCLUDED.blockhash,
-                confirmed = EXCLUDED.confirmed,
-                workername = EXCLUDED.workername,
-                username = EXCLUDED.username,
-                diff = EXCLUDED.diff,
-                time_found = EXCLUDED.time_found,
-                coinbasevalue = EXCLUDED.coinbasevalue,
-                rewards_processed = EXCLUDED.rewards_processed",
+            blockheight, blockhash, confirmed, workername, username,
+            diff, coinbasevalue, rewards_processed
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        ON CONFLICT (blockheight) DO UPDATE SET
+            blockhash = EXCLUDED.blockhash,
+            confirmed = EXCLUDED.confirmed,
+            workername = EXCLUDED.workername,
+            username = EXCLUDED.username,
+            diff = EXCLUDED.diff,
+            coinbasevalue = EXCLUDED.coinbasevalue,
+            rewards_processed = EXCLUDED.rewards_processed",
         )
-        .bind(block.blockheight)
-        .bind(&block.blockhash)
-        .bind(block.confirmed)
-        .bind(&block.workername)
-        .bind(&block.username)
-        .bind(block.diff)
-        .bind(&block.time_found)
-        .bind(block.coinbasevalue)
-        .bind(block.rewards_processed)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| anyhow!("Failed to upsert block: {e}"))?;
+            .bind(block.blockheight)
+            .bind(&block.blockhash)
+            .bind(block.confirmed)
+            .bind(&block.workername)
+            .bind(&block.username)
+            .bind(block.diff)
+            .bind(block.coinbasevalue)
+            .bind(block.rewards_processed)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| anyhow!("Failed to upsert block: {e}"))?;
 
         Ok(())
     }
@@ -506,7 +503,10 @@ impl Database {
             return Err(anyhow!("Invalid blockheight: {blockheight}"));
         }
 
-        sqlx::query_as::<_, FoundBlockRecord>("SELECT * FROM blocks WHERE blockheight = $1")
+        sqlx::query_as::<_, FoundBlockRecord>(
+            "SELECT id, blockheight, blockhash, confirmed, workername, username,
+         diff, coinbasevalue, rewards_processed FROM blocks WHERE blockheight = $1"
+        )
             .bind(blockheight)
             .fetch_optional(&self.pool)
             .await
