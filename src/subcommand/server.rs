@@ -3,7 +3,7 @@ use {
     crate::subcommand::sync::{ShareBatch, SyncResponse},
     accept_json::AcceptJson,
     aggregator::Aggregator,
-    axum::extract::Path,
+    axum::extract::{Path, Query},
     database::Database,
     error::{OptionExt, ServerError, ServerResult},
     server_config::ServerConfig,
@@ -16,8 +16,9 @@ use {
 mod accept_json;
 mod aggregator;
 pub mod api;
-pub(crate) mod database;
+pub mod database;
 mod error;
+pub mod notifications;
 mod server_config;
 mod templates;
 
@@ -66,6 +67,13 @@ fn format_uptime(uptime_seconds: u64) -> String {
     parts.join(", ")
 }
 
+fn exclusion_list_from_params(params: HashMap<String, String>) -> Vec<String> {
+    params
+        .get("excluded")
+        .map(|s| s.split(',').map(String::from).collect::<Vec<_>>())
+        .unwrap_or_default()
+}
+
 #[derive(Clone, Debug, Parser)]
 pub struct Server {
     #[command(flatten)]
@@ -101,13 +109,20 @@ impl Server {
             ))
             .route("/", get(Self::home))
             .route("/healthcheck", self.with_auth(get(Self::healthcheck)))
-            .route("/static/{*path}", get(Self::static_assets))
-            .layer(Extension(config.clone()));
+            .route("/static/{*path}", get(Self::static_assets));
 
         match Database::new(config.database_url()).await {
             Ok(database) => {
                 router = router
                     .route("/payouts/{blockheight}", get(Self::payouts))
+                    .route(
+                        "/payouts/range/{start_height}/{end_height}",
+                        get(Self::payouts_range),
+                    )
+                    .route(
+                        "/payouts/range/{start_height}/{end_height}/user/{username}",
+                        get(Self::user_payout_range),
+                    )
                     .route("/split", get(Self::open_split))
                     .route("/split/{blockheight}", get(Self::sat_split))
                     .route(
@@ -123,6 +138,8 @@ impl Server {
                 warn!("Failed to connect to PostgreSQL: {err}",);
             }
         }
+
+        router = router.layer(Extension(config.clone()));
 
         if !config.nodes().is_empty() {
             let aggregator = Aggregator::init(config.clone())?;
@@ -277,6 +294,45 @@ impl Server {
         .into_response())
     }
 
+    pub(crate) async fn payouts_range(
+        Path((start_height, end_height)): Path<(u32, u32)>,
+        Query(params): Query<HashMap<String, String>>,
+        Extension(database): Extension<Database>,
+    ) -> ServerResult<Response> {
+        let excluded_usernames = exclusion_list_from_params(params);
+
+        Ok(Json(
+            database
+                .get_payouts_range(
+                    start_height.try_into().unwrap(),
+                    end_height.try_into().unwrap(),
+                    excluded_usernames,
+                )
+                .await?,
+        )
+        .into_response())
+    }
+
+    pub(crate) async fn user_payout_range(
+        Path((start_height, end_height, username)): Path<(u32, u32, String)>,
+        Query(params): Query<HashMap<String, String>>,
+        Extension(database): Extension<Database>,
+    ) -> ServerResult<Response> {
+        let excluded_usernames = exclusion_list_from_params(params);
+
+        Ok(Json(
+            database
+                .get_user_payout_range(
+                    start_height.try_into().unwrap(),
+                    end_height.try_into().unwrap(),
+                    username,
+                    excluded_usernames,
+                )
+                .await?,
+        )
+        .into_response())
+    }
+
     pub(crate) async fn static_assets(Path(path): Path<String>) -> ServerResult<Response> {
         let content = StaticAssets::get(if let Some(stripped) = path.strip_prefix('/') {
             stripped
@@ -388,6 +444,7 @@ impl Server {
 
     pub(crate) async fn sync_batch(
         Extension(database): Extension<Database>,
+        Extension(config): Extension<Arc<ServerConfig>>,
         Json(batch): Json<ShareBatch>,
     ) -> Result<Json<SyncResponse>, StatusCode> {
         info!(
@@ -399,10 +456,29 @@ impl Server {
 
         if let Some(block) = &batch.block {
             match database.upsert_block(block).await {
-                Ok(_) => info!(
-                    "Successfully upserted block for height {}",
-                    block.blockheight
-                ),
+                Ok(_) => {
+                    info!(
+                        "Successfully upserted block for height {}",
+                        block.blockheight
+                    );
+
+                    let notification_result = notifications::notify_block_found(
+                        &config.alerts_ntfy_channel,
+                        block.blockheight,
+                        block.blockhash.clone(),
+                        block.coinbasevalue.unwrap_or(0),
+                        block
+                            .username
+                            .clone()
+                            .unwrap_or_else(|| "unknown".to_string()),
+                    )
+                    .await;
+
+                    match notification_result {
+                        Ok(_) => info!("Block notification sent successfully"),
+                        Err(e) => error!("Failed to send block notification: {}", e),
+                    }
+                }
                 Err(e) => error!("Warning: Failed to upsert block: {}", e),
             }
         }

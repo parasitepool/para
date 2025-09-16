@@ -42,10 +42,12 @@ tracing-subscriber = { version =  "0.3.19", features = ["env-filter", "fmt"] }
 
 [dev-dependencies]
 bitcoin = "0.32.6"
+chrono = "0.4.41"
 executable-path = "1.0.0"
 once_cell = "1.21.3"
 pretty_assertions = "1.4.1"
 tempfile = "3.20.0"
+urlencoding = "2.1.3"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 pgtemp = "0.6.0"
