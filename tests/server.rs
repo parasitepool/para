@@ -569,3 +569,40 @@ mod payout_range_tests {
         Ok(())
     }
 }
+
+#[cfg(target_os = "linux")]
+mod auth_tests {
+    use super::*;
+    use crate::test_psql::setup_test_schema;
+    use crate::test_server::Credentials;
+
+    #[tokio::test]
+    async fn test_invalid_auth() {
+        let server =
+            TestServer::spawn_with_db_args("--username test_user --password test_pass").await;
+
+        setup_test_schema(server.database_url().unwrap())
+            .await
+            .unwrap();
+
+        let res: Response = server.get_json_async_raw("/split").await;
+        assert!(!res.status().is_success());
+    }
+
+    #[tokio::test]
+    async fn test_valid_auth() {
+        let mut server =
+            TestServer::spawn_with_db_args("--username test_user --password test_pass").await;
+
+        setup_test_schema(server.database_url().unwrap())
+            .await
+            .unwrap();
+
+        server.credentials = Some(Credentials {
+            username: "test_user".into(),
+            password: "test_pass".into(),
+        });
+        let res: Response = server.get_json_async_raw("/split").await;
+        assert!(res.status().is_success());
+    }
+}
