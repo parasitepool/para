@@ -1,3 +1,3 @@
-Ordinal Theory Overview
-=======================
+Overview
+========
 
