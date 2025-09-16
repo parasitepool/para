@@ -480,17 +480,17 @@ impl Database {
             coinbasevalue = EXCLUDED.coinbasevalue,
             rewards_processed = EXCLUDED.rewards_processed",
         )
-            .bind(block.blockheight)
-            .bind(&block.blockhash)
-            .bind(block.confirmed)
-            .bind(&block.workername)
-            .bind(&block.username)
-            .bind(block.diff)
-            .bind(block.coinbasevalue)
-            .bind(block.rewards_processed)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| anyhow!("Failed to upsert block: {e}"))?;
+        .bind(block.blockheight)
+        .bind(&block.blockhash)
+        .bind(block.confirmed)
+        .bind(&block.workername)
+        .bind(&block.username)
+        .bind(block.diff)
+        .bind(block.coinbasevalue)
+        .bind(block.rewards_processed)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| anyhow!("Failed to upsert block: {e}"))?;
 
         Ok(())
     }
@@ -505,12 +505,12 @@ impl Database {
 
         sqlx::query_as::<_, FoundBlockRecord>(
             "SELECT id, blockheight, blockhash, confirmed, workername, username,
-         diff, coinbasevalue, rewards_processed FROM blocks WHERE blockheight = $1"
+         diff, coinbasevalue, rewards_processed FROM blocks WHERE blockheight = $1",
         )
-            .bind(blockheight)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|err| anyhow!("Database query failed: {err}"))
+        .bind(blockheight)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|err| anyhow!("Database query failed: {err}"))
     }
 
     pub(crate) async fn compress_shares_range(&self, start_id: i64, end_id: i64) -> Result<i64> {
