@@ -41,6 +41,12 @@ pub struct SyncSend {
         default_value = "postgres://satoshi:nakamoto@127.0.0.1:5432/ckpool"
     )]
     pub database_url: String,
+
+    #[arg(long, help = "Username for basic auth on sync endpoint")]
+    sync_username: Option<String>,
+
+    #[arg(long, help = "Password for basic auth on sync endpoint")]
+    sync_password: Option<String>,
 }
 
 impl Default for SyncSend {
@@ -86,7 +92,6 @@ pub struct FoundBlockRecord {
     pub workername: Option<String>,
     pub username: Option<String>,
     pub diff: Option<f64>,
-    pub time_found: Option<String>,
     pub coinbasevalue: Option<i64>,
     pub rewards_processed: Option<bool>,
 }
@@ -318,10 +323,16 @@ impl SyncSend {
             format!("http://{}/sync/batch", self.endpoint)
         };
 
-        let response = client
+        let mut req_client = client
             .post(&url)
             .json(&batch)
-            .timeout(Duration::from_millis(HTTP_TIMEOUT_MS))
+            .timeout(Duration::from_millis(HTTP_TIMEOUT_MS));
+
+        if let Some((username, password)) = self.get_credentials() {
+            req_client = req_client.basic_auth(username, Some(password));
+        }
+
+        let response = req_client
             .send()
             .await
             .map_err(|e| anyhow!("Failed to send HTTP request: {}", e))?;
@@ -396,6 +407,18 @@ impl SyncSend {
         self.endpoint = endpoint;
         self
     }
+
+    fn get_credentials(&self) -> Option<(&str, &str)> {
+        self.sync_username
+            .as_deref()
+            .zip(self.sync_password.as_deref())
+    }
+
+    pub fn with_credentials(mut self, user: &str, pass: &str) -> Self {
+        self.sync_username = Some(user.to_string());
+        self.sync_password = Some(pass.to_string());
+        self
+    }
 }
 
 impl Database {
@@ -445,18 +468,17 @@ impl Database {
     pub(crate) async fn upsert_block(&self, block: &FoundBlockRecord) -> Result<()> {
         sqlx::query(
             "INSERT INTO blocks (
-                blockheight, blockhash, confirmed, workername, username,
-                diff, time_found, coinbasevalue, rewards_processed
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            ON CONFLICT (blockheight) DO UPDATE SET
-                blockhash = EXCLUDED.blockhash,
-                confirmed = EXCLUDED.confirmed,
-                workername = EXCLUDED.workername,
-                username = EXCLUDED.username,
-                diff = EXCLUDED.diff,
-                time_found = EXCLUDED.time_found,
-                coinbasevalue = EXCLUDED.coinbasevalue,
-                rewards_processed = EXCLUDED.rewards_processed",
+            blockheight, blockhash, confirmed, workername, username,
+            diff, coinbasevalue, rewards_processed
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        ON CONFLICT (blockheight) DO UPDATE SET
+            blockhash = EXCLUDED.blockhash,
+            confirmed = EXCLUDED.confirmed,
+            workername = EXCLUDED.workername,
+            username = EXCLUDED.username,
+            diff = EXCLUDED.diff,
+            coinbasevalue = EXCLUDED.coinbasevalue,
+            rewards_processed = EXCLUDED.rewards_processed",
         )
         .bind(block.blockheight)
         .bind(&block.blockhash)
@@ -464,7 +486,6 @@ impl Database {
         .bind(&block.workername)
         .bind(&block.username)
         .bind(block.diff)
-        .bind(&block.time_found)
         .bind(block.coinbasevalue)
         .bind(block.rewards_processed)
         .execute(&self.pool)
@@ -482,11 +503,14 @@ impl Database {
             return Err(anyhow!("Invalid blockheight: {blockheight}"));
         }
 
-        sqlx::query_as::<_, FoundBlockRecord>("SELECT * FROM blocks WHERE blockheight = $1")
-            .bind(blockheight)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|err| anyhow!("Database query failed: {err}"))
+        sqlx::query_as::<_, FoundBlockRecord>(
+            "SELECT id, blockheight, blockhash, confirmed, workername, username,
+         diff, coinbasevalue, rewards_processed FROM blocks WHERE blockheight = $1",
+        )
+        .bind(blockheight)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|err| anyhow!("Database query failed: {err}"))
     }
 
     pub(crate) async fn compress_shares_range(&self, start_id: i64, end_id: i64) -> Result<i64> {

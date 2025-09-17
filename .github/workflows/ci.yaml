@@ -15,7 +15,7 @@ defaults:
 env:
   RUSTFLAGS: --deny warnings
 
-jobs:
+jobs:  
   lint:
     runs-on: ubuntu-latest
 

@@ -1,3 +1,5 @@
-logs
 copr/signet*
+copr/tmp
+docs/build
+logs
 target
