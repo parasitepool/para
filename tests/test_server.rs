@@ -208,6 +208,19 @@ impl TestServer {
     }
 
     #[cfg(target_os = "linux")]
+    pub(crate) async fn get_json_async_raw(&self, path: impl AsRef<str>) -> Response {
+        let mut client = reqwest::Client::new()
+            .get(self.url().join(path.as_ref()).unwrap())
+            .header(reqwest::header::ACCEPT, "application/json");
+
+        if let Some(user) = &self.credentials {
+            client = client.basic_auth(user.username.clone(), Some(user.password.clone()));
+        }
+
+        client.send().await.unwrap()
+    }
+
+    #[cfg(target_os = "linux")]
     pub(crate) async fn post_json<T: serde::Serialize, R: DeserializeOwned>(
         &self,
         path: impl AsRef<str>,
