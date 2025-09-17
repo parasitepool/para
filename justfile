@@ -55,6 +55,45 @@ server:
     --log-dir copr/logs \
     --port 8080
 
+# Template monitoring commands
+template url='stratum+tcp://parasite.wtf:42069' username='bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg6dzw5nk24r45dzasde25r3' password='x' interval='10':
+  #!/usr/bin/env bash
+  args="cargo run -- template {{url}} --interval {{interval}}"
+  if [ -n "{{username}}" ]; then
+    args="$args --username {{username}}"
+  fi
+  if [ -n "{{password}}" ]; then
+    args="$args --password {{password}}"
+  fi
+  eval $args
+
+template-once url='stratum+tcp://parasite.wtf:42069' username='' password='':
+  #!/usr/bin/env bash
+  args="cargo run -- template {{url}} --once"
+  if [ -n "{{username}}" ]; then
+    args="$args --username {{username}}"
+  fi
+  if [ -n "{{password}}" ]; then
+    args="$args --password {{password}}"
+  fi
+  eval $args
+
+# Common pool presets
+template-parasite username='' password='':
+  just template 'stratum+tcp://parasite.wtf:42069' {{username}} {{password}}
+
+template-ocean username='' password='':
+  just template 'stratum+tcp://mine.ocean.xyz:3334' {{username}} {{password}}
+
+template-antpool username='' password='':
+  just template 'stratum+tcp://stratum.antpool.com:3333' {{username}} {{password}}
+
+template-braiins username='' password='':
+  just template 'stratum+tcp://stratum.braiins.com:3333' {{username}} {{password}}
+
+template-local:
+  just template 'stratum+tcp://127.0.0.1:42069'
+
 build-docs:
   mdbook build docs -d build
 
