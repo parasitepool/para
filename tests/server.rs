@@ -218,7 +218,7 @@ fn aggregator_dashboard_with_auth() {
     assert_eq!(response.status(), StatusCode::OK);
 }
 
-// #[cfg(target_os = "linux")]
+#[cfg(target_os = "linux")]
 mod payout_range_tests {
     use super::*;
     use crate::test_psql::{insert_test_block, setup_test_schema};
@@ -603,7 +603,7 @@ mod payout_range_tests {
     }
 }
 
-// #[cfg(target_os = "linux")]
+#[cfg(target_os = "linux")]
 mod auth_tests {
     use super::*;
     use crate::test_psql::setup_test_schema;
