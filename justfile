@@ -70,9 +70,11 @@ install:
     autoconf \
     automake \
     build-essential \
+    capnproto \
     clang-format \
     cmake \
     libboost-dev \
+    libcapnp-dev \
     libevent-dev \
     libpq-dev \
     libsqlite3-dev \
