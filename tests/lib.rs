@@ -64,6 +64,8 @@ mod ping;
 mod pool;
 mod server;
 #[cfg(target_os = "linux")]
+mod server_with_db;
+#[cfg(target_os = "linux")]
 mod sync;
 
 #[cfg(target_os = "linux")]
