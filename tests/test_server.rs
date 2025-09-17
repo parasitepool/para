@@ -1,20 +1,20 @@
 use super::*;
 
-#[cfg(target_os = "linux")]
+// #[cfg(target_os = "linux")]
 use pgtemp::{PgTempDB, PgTempDBBuilder};
 
 pub(crate) struct TestServer {
     child: Child,
     port: u16,
     tempdir: Arc<TempDir>,
-    #[cfg(target_os = "linux")]
+    // #[cfg(target_os = "linux")]
     pg_db: Option<PgTempDB>,
 
-    #[cfg(target_os = "linux")]
+    // #[cfg(target_os = "linux")]
     pub(crate) credentials: Option<Credentials>,
 }
 
-#[cfg(target_os = "linux")]
+// #[cfg(target_os = "linux")]
 pub(crate) struct Credentials {
     pub(crate) username: String,
     pub(crate) password: String,
@@ -64,18 +64,19 @@ impl TestServer {
             child,
             port,
             tempdir,
-            #[cfg(target_os = "linux")]
+            // #[cfg(target_os = "linux")]
             pg_db: None,
-            #[cfg(target_os = "linux")]
+            // #[cfg(target_os = "linux")]
             credentials: None,
         }
     }
 
-    #[cfg(target_os = "linux")]
+    // #[cfg(target_os = "linux")]
     pub(crate) async fn spawn_with_db() -> Self {
         Self::spawn_with_db_args([]).await
     }
-    #[cfg(target_os = "linux")]
+
+    // #[cfg(target_os = "linux")]
     pub(crate) async fn spawn_with_db_args(args: impl ToArgs) -> Self {
         let psql_binpath = match Command::new("pg_config").arg("--bindir").output() {
             Ok(output) if output.status.success() => String::from_utf8(output.stdout)
@@ -150,7 +151,7 @@ impl TestServer {
         self.tempdir.path().join("logs")
     }
 
-    #[cfg(target_os = "linux")]
+    // #[cfg(target_os = "linux")]
     pub(crate) fn database_url(&self) -> Option<String> {
         self.pg_db.as_ref().map(|db| db.connection_uri())
     }
@@ -187,7 +188,7 @@ impl TestServer {
         response.json().unwrap()
     }
 
-    #[cfg(target_os = "linux")]
+    // #[cfg(target_os = "linux")]
     pub(crate) async fn get_json_async<T: DeserializeOwned>(&self, path: impl AsRef<str>) -> T {
         let client = reqwest::Client::new();
         let response = client
@@ -207,7 +208,7 @@ impl TestServer {
         response.json().await.unwrap()
     }
 
-    #[cfg(target_os = "linux")]
+    // #[cfg(target_os = "linux")]
     pub(crate) async fn get_json_async_raw(&self, path: impl AsRef<str>) -> Response {
         let mut client = reqwest::Client::new()
             .get(self.url().join(path.as_ref()).unwrap())
@@ -220,7 +221,7 @@ impl TestServer {
         client.send().await.unwrap()
     }
 
-    #[cfg(target_os = "linux")]
+    // #[cfg(target_os = "linux")]
     pub(crate) async fn post_json<T: serde::Serialize, R: DeserializeOwned>(
         &self,
         path: impl AsRef<str>,
@@ -238,7 +239,7 @@ impl TestServer {
         response.json().await.unwrap()
     }
 
-    #[cfg(target_os = "linux")]
+    // #[cfg(target_os = "linux")]
     pub(crate) async fn post_json_raw<T: serde::Serialize>(
         &self,
         path: impl AsRef<str>,
