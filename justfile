@@ -12,7 +12,6 @@ clippy:
 ci: clippy
   cargo fmt -- --check
   cargo test --all
-  cargo test --all -- --ignored
 
 outdated:
   cargo outdated --root-deps-only --workspace
@@ -22,6 +21,9 @@ unused:
 
 doc:
   cargo doc --workspace --open
+
+test-without-ckpool:
+  cargo test --all -- --skip with_ckpool
 
 miner host='127.0.0.1': 
   RUST_LOG=info cargo run --release -- miner \
