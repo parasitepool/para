@@ -185,7 +185,40 @@ fn healthcheck_with_auth() {
     assert_eq!(response.status(), StatusCode::OK);
 }
 
-#[cfg(target_os = "linux")]
+#[test]
+fn aggregator_dashboard_with_auth() {
+    let mut servers = Vec::new();
+    for _ in 0..3 {
+        let server = TestServer::spawn_with_args("--username foo --password bar");
+        servers.push(server)
+    }
+
+    assert_eq!(servers.len(), 3);
+
+    let aggregator = TestServer::spawn_with_args(format!(
+        "--username foo --password bar --nodes {} --nodes {} --nodes {}",
+        servers[0].url(),
+        servers[1].url(),
+        servers[2].url()
+    ));
+
+    let response = reqwest::blocking::Client::new()
+        .get(format!("{}aggregator/dashboard", aggregator.url()))
+        .send()
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let response = reqwest::blocking::Client::new()
+        .get(format!("{}aggregator/dashboard", aggregator.url()))
+        .basic_auth("foo", Some("bar"))
+        .send()
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+// #[cfg(target_os = "linux")]
 mod payout_range_tests {
     use super::*;
     use crate::test_psql::{insert_test_block, setup_test_schema};
@@ -570,7 +603,7 @@ mod payout_range_tests {
     }
 }
 
-#[cfg(target_os = "linux")]
+// #[cfg(target_os = "linux")]
 mod auth_tests {
     use super::*;
     use crate::test_psql::setup_test_schema;
