@@ -5,6 +5,7 @@ mod ping;
 pub(crate) mod pool;
 pub mod server;
 pub mod sync;
+mod template;
 
 #[derive(Debug, Parser)]
 pub(crate) enum Subcommand {
@@ -18,6 +19,8 @@ pub(crate) enum Subcommand {
     Server(server::Server),
     #[command(about = "Send shares to HTTP endpoint")]
     SyncSend(sync::SyncSend),
+    #[command(about = "Monitor merkle branch updates from mining pool")]
+    Template(template::Template),
 }
 
 impl Subcommand {
@@ -79,6 +82,7 @@ impl Subcommand {
                 let handle = Handle::new();
                 Ok(Runtime::new()?.block_on(async { sync_send.run(handle).await })?)
             }
+            Self::Template(template) => Runtime::new()?.block_on(async { template.run().await }),
         }
     }
 }
