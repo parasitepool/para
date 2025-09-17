@@ -1,0 +1,21 @@
+[book]
+title = "Parasite"
+authors = ["paratoxic", "parasegfault", "parabit"]
+language = "en"
+src = "src"
+
+[build]
+build-dir = "build"
+create-missing = false
+
+[output.html]
+cname = "docs.parasite.wtf"
+default-theme = "coal"
+git-repository-url = "https://github.com/parasitepool/para"
+preferred-dark-theme = "coal"
+additional-css = ["index.css"]
+
+[output.linkcheck]
+
+[preprocessor.gettext]
+after = ["links"]
