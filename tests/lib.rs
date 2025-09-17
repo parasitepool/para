@@ -52,7 +52,7 @@ mod command_builder;
 mod test_ckpool;
 #[cfg(target_os = "linux")]
 mod test_pool;
-#[cfg(target_os = "linux")]
+// #[cfg(target_os = "linux")]
 mod test_psql;
 mod test_server;
 mod to_args;
