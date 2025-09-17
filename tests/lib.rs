@@ -73,6 +73,7 @@ fn signet_username() -> String {
     "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.tick.abcdef@lnurl.com".to_string()
 }
 
+
 pub(crate) fn address(n: u32) -> Address {
     match n {
         0 => "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",
