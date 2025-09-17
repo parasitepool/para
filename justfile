@@ -117,7 +117,7 @@ ckpool:
     -B \
     -k \
     --config copr/ckpool.conf \
-    --sockdir copr/tmp
+    --sockdir copr/tmp \
     --loglevel 7 \
     --log-shares \
     --signet \
