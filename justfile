@@ -70,9 +70,11 @@ install:
     autoconf \
     automake \
     build-essential \
+    capnproto \
     clang-format \
     cmake \
     libboost-dev \
+    libcapnp-dev \
     libevent-dev \
     libpq-dev \
     libsqlite3-dev \
@@ -115,7 +117,7 @@ ckpool:
     -B \
     -k \
     --config copr/ckpool.conf \
-    --sockdir copr/tmp
+    --sockdir copr/tmp \
     --loglevel 7 \
     --log-shares \
     --signet \
