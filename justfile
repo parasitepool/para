@@ -55,10 +55,12 @@ server:
     --log-dir copr/logs \
     --port 8080
 
-# Template monitoring commands
-template url='stratum+tcp://parasite.wtf:42069' username='bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg6dzw5nk24r45dzasde25r3' password='x' interval='10':
+template url='parasite.wtf:42069' username='bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg6dzw5nk24r45dzasde25r3' password='x':
   #!/usr/bin/env bash
-  args="cargo run -- template {{url}} --interval {{interval}}"
+  url="{{url}}"
+  host="${url%:*}"
+  port="${url##*:}"
+  args="cargo run -- template --host $host --port $port"
   if [ -n "{{username}}" ]; then
     args="$args --username {{username}}"
   fi
@@ -67,9 +69,12 @@ template url='stratum+tcp://parasite.wtf:42069' username='bc1p4r54k6ju6h92x8rvuc
   fi
   eval $args
 
-template-once url='stratum+tcp://parasite.wtf:42069' username='' password='':
+template-watch url='parasite.wtf:42069' username='bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg6dzw5nk24r45dzasde25r3' password='x':
   #!/usr/bin/env bash
-  args="cargo run -- template {{url}} --once"
+  url="{{url}}"
+  host="${url%:*}"
+  port="${url##*:}"
+  args="cargo run -- template --host $host --port $port --watch"
   if [ -n "{{username}}" ]; then
     args="$args --username {{username}}"
   fi
@@ -78,21 +83,20 @@ template-once url='stratum+tcp://parasite.wtf:42069' username='' password='':
   fi
   eval $args
 
-# Common pool presets
 template-parasite username='' password='':
-  just template 'stratum+tcp://parasite.wtf:42069' {{username}} {{password}}
+  just template 'parasite.wtf:42069' {{username}} {{password}}
 
 template-ocean username='' password='':
-  just template 'stratum+tcp://mine.ocean.xyz:3334' {{username}} {{password}}
+  just template 'mine.ocean.xyz:3334' {{username}} {{password}}
 
 template-antpool username='' password='':
-  just template 'stratum+tcp://stratum.antpool.com:3333' {{username}} {{password}}
+  just template 'stratum.antpool.com:3333' {{username}} {{password}}
 
 template-braiins username='' password='':
-  just template 'stratum+tcp://stratum.braiins.com:3333' {{username}} {{password}}
+  just template 'stratum.braiins.com:3333' {{username}} {{password}}
 
 template-local:
-  just template 'stratum+tcp://127.0.0.1:42069'
+  just template '127.0.0.1:42069'
 
 build-docs:
   mdbook build docs -d build
