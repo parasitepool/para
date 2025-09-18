@@ -17,7 +17,10 @@ impl Aggregator {
         let router = Router::new()
             .route("/aggregator/pool/pool.status", get(Self::pool_status))
             .route("/aggregator/users/{address}", get(Self::user_status))
-            .route("/aggregator/dashboard", get(Self::dashboard))
+            .route(
+                "/aggregator/dashboard",
+                Server::with_auth(config.clone(), get(Self::dashboard)),
+            )
             .layer(Extension(client))
             .layer(Extension(config));
 

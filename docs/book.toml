@@ -1,6 +1,6 @@
 [book]
 title = "Parasite"
-authors = ["paratoxic", "parasegfault", "parabit"]
+authors = ["The Parasite Devs"]
 language = "en"
 src = "src"
 
@@ -9,7 +9,7 @@ build-dir = "build"
 create-missing = false
 
 [output.html]
-cname = "docs.parasite.wtf"
+cname = "docs.parasite.xyz"
 default-theme = "coal"
 git-repository-url = "https://github.com/parasitepool/para"
 preferred-dark-theme = "coal"
