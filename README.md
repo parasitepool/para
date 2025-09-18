@@ -26,6 +26,10 @@ cd para
 just run
 ```
 
+## Contributing
+
+"If I had more time, I would have written you a shorter letter." - Mark Twain
+
 ## Hermit Environment
 
 A full development/build environment is bundled using hermit and can be activated as follows:

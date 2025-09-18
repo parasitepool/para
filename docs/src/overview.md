@@ -1,6 +1,8 @@
 Overview
 ========
 
+We are currently using a for of ckpool.
+
 Connect
 -------
 `parasite:wtf:42069`
