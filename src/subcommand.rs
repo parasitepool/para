@@ -19,7 +19,7 @@ pub(crate) enum Subcommand {
     Server(server::Server),
     #[command(about = "Send shares to HTTP endpoint")]
     SyncSend(sync::SyncSend),
-    #[command(about = "Monitor merkle branch updates from mining pool")]
+    #[command(about = "Monitor block template & merkle branches from mining pool")]
     Template(template::Template),
 }
 
