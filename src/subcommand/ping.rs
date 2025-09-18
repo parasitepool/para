@@ -2,7 +2,7 @@ use super::*;
 
 #[derive(Parser, Debug)]
 pub(crate) struct Ping {
-    target: String,
+    stratum_endpoint: String,
     #[arg(long, help = "Stop after <COUNT> replies")]
     count: Option<u64>,
     #[arg(long, default_value = "5", help = "Fail after <TIMEOUT> seconds")]
@@ -15,11 +15,11 @@ pub(crate) struct Ping {
 
 impl Ping {
     pub(crate) async fn run(&self) -> Result {
-        let addr = self.resolve_target().await?;
+        let addr = resolve_stratum_endpoint(&self.stratum_endpoint).await?;
 
         let ping_type = PingType::new(self.username.as_deref(), self.password.as_deref());
 
-        println!("{} {} ({})", ping_type, self.target, addr);
+        println!("{} {} ({})", ping_type, self.stratum_endpoint, addr);
 
         let stats = Arc::new(PingStats::new());
         let sequence = AtomicU64::new(0);
@@ -54,7 +54,7 @@ impl Ping {
             }
         }
 
-        print_final_stats(&self.target, &stats);
+        print_final_stats(&self.stratum_endpoint, &stats);
 
         if success {
             Ok(())
@@ -111,21 +111,6 @@ impl Ping {
                 Ok((duration, size))
             }
         }
-    }
-
-    async fn resolve_target(&self) -> Result<SocketAddr> {
-        let target = if self.target.contains(':') {
-            self.target.clone()
-        } else {
-            format!("{}:42069", self.target)
-        };
-
-        let addr = tokio::net::lookup_host(&target)
-            .await?
-            .next()
-            .with_context(|| "Failed to resolve hostname")?;
-
-        Ok(addr)
     }
 }
 
@@ -257,7 +242,7 @@ impl fmt::Display for PingStats {
     }
 }
 
-fn print_final_stats(target: &str, stats: &PingStats) {
-    println!("\n--- {target} ping statistics ---");
+fn print_final_stats(stratum_endpoint: &str, stats: &PingStats) {
+    println!("\n--- {stratum_endpoint} ping statistics ---");
     print!("{stats}");
 }
