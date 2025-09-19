@@ -12,6 +12,7 @@ clippy:
 ci: clippy
   cargo fmt -- --check
   cargo test --all
+  cargo test --all -- --ignored
 
 outdated:
   cargo outdated --root-deps-only --workspace
@@ -22,16 +23,13 @@ unused:
 doc:
   cargo doc --workspace --open
 
-test-without-ckpool:
-  cargo test --all -- --skip with_ckpool
-
-miner stratum_endpoint='127.0.0.1:42069': 
+miner host='127.0.0.1':
   RUST_LOG=info cargo run --release -- miner \
-    {{stratum_endpoint}} \
+    {{host}}:42069 \
     --username bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg6dzw5nk24r45dzasde25r3.tick \
     --password x
 
-miner-signet: 
+miner-signet:
   RUST_LOG=info cargo run --release -- miner \
     127.0.0.1:42069 \
     --username tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.tick \
