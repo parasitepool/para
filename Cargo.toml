@@ -7,6 +7,10 @@ authors = ["The Parasite Devs"]
 homepage = "https://parasite.wtf"
 autotests = false
 
+[features]
+default = ["miner"]
+miner = ["dep:rayon"]
+
 [dependencies]
 anyhow = { version = "1.0.98", features = ["backtrace"] }
 axum = { version = "0.8.3", features = ["http2"] }
@@ -23,11 +27,10 @@ hex = "0.4.3"
 html-escaper = "0.2.0"
 lazy_static = "1.5.0"
 mime_guess = "2.0.5"
-num_cpus = "1.17.0"
 parking_lot = "0.12.4"
 primitive-types = "0.13.1"
 rand = "0.9.1"
-rayon = "1.11.0"
+rayon = { version = "1.11.0", optional = true }
 reqwest = { version = "0.12.22", features = ["rustls-tls", "blocking", "json"] }
 rust-embed = "8.7.1"
 rustls = { version = "0.23.26", features = ["ring"] }
