@@ -72,8 +72,8 @@ impl TestCkpool {
     "btcd" : [
         {{
             "url" : "127.0.0.1:{rpc_port}",
-            "auth" : "foo",
-            "pass" : "bar",
+            "auth" : "satoshi",
+            "pass" : "nakamoto",
             "notify" : true
         }}
     ],

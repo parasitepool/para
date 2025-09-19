@@ -22,8 +22,8 @@ impl Bitcoind {
         let bitcoind_conf = bitcoind_data_dir.join("bitcoin.conf");
 
         let network = Network::Signet;
-        let rpc_user = "foo".to_string();
-        let rpc_password = "bar".to_string();
+        let rpc_user = "satoshi".to_string();
+        let rpc_password = "nakamoto".to_string();
 
         fs::write(
             &bitcoind_conf,
@@ -46,13 +46,15 @@ datacarriersize=100000
 maxconnections=256
 maxmempool=2048
 mempoolfullrbf=1
-minrelaytxfee=0.000001
+minrelaytxfee=0
 
 rpcbind=127.0.0.1
 rpcport={rpc_port}
 rpcallowip=127.0.0.1
 rpcuser={rpc_user}
 rpcpassword={rpc_password}
+
+maxtxfee=1000000
 ",
                 &bitcoind_data_dir.display()
             ),
@@ -89,7 +91,7 @@ rpcpassword={rpc_password}
         })
     }
 
-    pub fn get_spendable_utxos(&self) -> Result<Vec<OutPoint>> {
+    pub fn get_spendable_utxos(&self) -> Result<Vec<(OutPoint, Amount)>> {
         let descriptor = format!("addr({})", self.op_true_address());
 
         let result = self
@@ -101,10 +103,13 @@ rpcpassword={rpc_password}
         let mut outpoints = Vec::new();
         for utxo in result.unspents {
             if block_count - utxo.height >= MATURITY {
-                outpoints.push(OutPoint {
-                    txid: utxo.txid,
-                    vout: utxo.vout,
-                });
+                outpoints.push((
+                    OutPoint {
+                        txid: utxo.txid,
+                        vout: utxo.vout,
+                    },
+                    utxo.amount,
+                ));
             }
         }
 

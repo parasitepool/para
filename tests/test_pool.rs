@@ -46,9 +46,9 @@ impl TestPool {
                 --chain signet
                 --address 127.0.0.1 
                 --port {pool_port} 
-                --bitcoin-rpc-username foo 
-                --bitcoin-rpc-password bar 
-                --bitcoin-rpc-port {rpc_port} 
+                --bitcoin-rpc-username satoshi
+                --bitcoin-rpc-password nakamoto
+                --bitcoin-rpc-port {rpc_port}
                 {}",
             args.to_args().join(" ")
         ))
