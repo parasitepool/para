@@ -102,6 +102,20 @@ struct MinerRuntime {
 }
 
 impl Miner {
+    fn parse_endpoint(&self) -> Result<(String, u16)> {
+        let parts: Vec<&str> = self.stratum_endpoint.split(':').collect();
+        if parts.len() != 2 {
+            return Err(anyhow!(
+                "Invalid stratum endpoint format. Expected host:port"
+            ));
+        }
+        let host = parts[0].to_string();
+        let port = parts[1]
+            .parse::<u16>()
+            .map_err(|_| anyhow!("Invalid port number"))?;
+        Ok((host, port))
+    }
+
     pub(crate) fn run(&self) -> Result {
         let runtime = self.build_runtime()?;
         let performance_tracker = runtime.performance_tracker.clone();
@@ -125,10 +139,11 @@ impl Miner {
         let client = match self.connect_client().await {
             Ok(client) => client,
             Err(e) => {
+                let (host, port) = self.parse_endpoint().unwrap_or(("unknown".to_string(), 0));
                 error!(
                     error = %e,
-                    host = %self.host,
-                    port = self.port,
+                    host = %host,
+                    port = port,
                     "Failed to connect to stratum server"
                 );
                 shutdown_flag.store(true, Ordering::Relaxed);
@@ -166,9 +181,11 @@ impl Miner {
     }
 
     async fn connect_client(&self) -> Result<Client> {
+        let (host, port) = self.parse_endpoint()?;
+
         info!(
-            host = %self.host,
-            port = self.port,
+            host = %host,
+            port = port,
             username = %self.username,
             "Connecting to stratum server"
         );
@@ -176,7 +193,7 @@ impl Miner {
         info!("Attempting TCP connection...");
 
         let result = Client::connect(
-            (self.host.clone(), self.port),
+            (host, port),
             &self.username,
             &self.password,
             Duration::from_secs(10),
@@ -526,9 +543,7 @@ mod tests {
     #[test]
     fn parse_args_with_cpu_cores() {
         let miner = parse_miner_args(
-            "para miner \
-                --host parasite.wtf \
-                --port 42069 \
+            "para miner parasite.wtf:42069 \
                 --username test.worker \
                 --password x \
                 --cpu-cores 8 \
@@ -597,10 +612,24 @@ mod tests {
     }
 
     #[test]
+    fn test_endpoint_parsing() {
+        let miner = Miner {
+            stratum_endpoint: "localhost:42069".to_string(),
+            username: "test_user".to_string(),
+            password: "x".to_string(),
+            cpu_cores: Some(2),
+            monitor_performance: true,
+        };
+
+        let (host, port) = miner.parse_endpoint().unwrap();
+        assert_eq!(host, "localhost");
+        assert_eq!(port, 42069);
+    }
+
+    #[test]
     fn test_miner_configuration_validation() {
         let miner = Miner {
-            host: "localhost".to_string(),
-            port: 42069,
+            stratum_endpoint: "localhost:42069".to_string(),
             username: "test_user".to_string(),
             password: "x".to_string(),
             cpu_cores: Some(2),
@@ -645,8 +674,7 @@ mod tests {
     #[tokio::test]
     async fn test_miner_connection_failure() {
         let miner = Miner {
-            host: "127.0.0.1".to_string(),
-            port: 12345,
+            stratum_endpoint: "127.0.0.1:12345".to_string(),
             username: "test_user".to_string(),
             password: "x".to_string(),
             cpu_cores: Some(1),
