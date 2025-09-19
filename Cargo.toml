@@ -19,14 +19,17 @@ repository = "https://github.com/parasitepool/para"
 rust-version = "1.90.0"
 
 [workspace.dependencies]
+anyhow = { version = "1.0.98", features = ["backtrace"] }
 bitcoin = { version = "0.32.7", features = ["serde"] }
+bitcoincore-rpc = "0.19.0"
+serde_json = "1.0.140"
 
 [dependencies]
-anyhow = { version = "1.0.98", features = ["backtrace"] }
+anyhow.workspace = true
 axum = { version = "0.8.3", features = ["http2"] }
 axum-server = "0.7.2"
 bitcoin.workspace = true
-bitcoincore-rpc = "0.19.0"
+bitcoincore-rpc.workspace = true
 boilerplate = { version = "1.0.1", features = ["axum"] }
 byteorder = "1.5.0"
 clap = { version = "4.5.36", features = ["derive", "env"] }
@@ -44,7 +47,7 @@ rust-embed = "8.7.1"
 rustls = { version = "0.23.26", features = ["ring"] }
 rustls-acme = { version = "0.14.0", features = ["axum"] }
 serde = { version = "1.0.219", features = ["derive"] }
-serde_json = "1.0.140"
+serde_json.workspace = true
 serde_with = "3.14.0"
 sqlx = { version =  "0.8.5", features = ["postgres", "runtime-tokio"] }
 sysinfo = "0.37.0"

@@ -1,82 +1,74 @@
 use {
+    anyhow::Error,
+    bitcoin::{
+        Address, Network, OutPoint, ScriptBuf, blockdata::opcodes::OP_TRUE,
+        blockdata::script::Builder,
+    },
+    bitcoincore_rpc::{
+        Auth, Client, RpcApi,
+        json::{ScanTxOutRequest, ScanTxOutResult},
+    },
+    bitcoind::Bitcoind,
     std::{
         fs,
-        process::{Child, Command, Stdio},
-        sync::Arc,
+        net::TcpListener,
+        path::PathBuf,
+        process::{self, Child, Command, Stdio},
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        },
+        time::Duration,
     },
     tempfile::TempDir,
 };
 
-pub(crate) fn spawn(
-    tempdir: Arc<TempDir>,
-    bitcoind_port: u16,
-    rpc_port: u16,
-    zmq_port: u16,
-) -> Child {
-    let bitcoind_data_dir = tempdir.path().join("bitcoin");
-    fs::create_dir(&bitcoind_data_dir).unwrap();
+mod bitcoind;
 
-    let bitcoind_conf = bitcoind_data_dir.join("bitcoin.conf");
+type Result<T = (), E = Error> = std::result::Result<T, E>;
 
-    fs::write(
-        &bitcoind_conf,
-        format!(
-            "
-signet=1
-datadir={}
+const COIN_VALUE: u64 = 100_000_000;
+const MATURITY: u64 = 100;
 
-[signet]
-# OP_TRUE
-signetchallenge=51
-
-server=1
-txindex=1
-zmqpubhashblock=tcp://127.0.0.1:{zmq_port}
-
-port={bitcoind_port}
-
-datacarriersize=100000
-maxconnections=256
-maxmempool=2048
-mempoolfullrbf=1
-minrelaytxfee=0.000001
-
-rpcbind=127.0.0.1
-rpcport={rpc_port}
-rpcallowip=127.0.0.1
-rpcuser=foo
-rpcpassword=bar
-",
-            &bitcoind_data_dir.display()
-        ),
-    )
-    .unwrap();
-
-    let bitcoind_handle = Command::new("bitcoind")
-        .arg(format!("-conf={}", bitcoind_conf.display()))
-        .stdout(Stdio::null())
-        .spawn()
-        .unwrap();
-
-    let status = Command::new("bitcoin-cli")
-        .args([
-            &format!("-conf={}", bitcoind_conf.display()),
-            "-rpcwait",
-            "-rpcwaittimeout=5",
-            "getblockchaininfo",
-        ])
-        .stdout(Stdio::null())
-        .status()
-        .unwrap();
-
-    assert!(
-        status.success(),
-        "Failed to connect bitcoind after 5 seconds"
-    );
-
-    bitcoind_handle
-}
+static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 
 fn main() {
-    println!("Hello, world!");
+    ctrlc::set_handler(move || {
+        if SHUTTING_DOWN.fetch_or(true, Ordering::Relaxed) {
+            process::exit(1);
+        }
+
+        eprintln!("Shutting down");
+    })
+    .expect("Error setting <CTRL-C> handler");
+
+    let tempdir = Arc::new(TempDir::new().unwrap());
+
+    let (bitcoind_port, rpc_port, zmq_port) = (
+        TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port(),
+        TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port(),
+        TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port(),
+    );
+
+    let bitcoind = Bitcoind::spawn(tempdir.clone(), bitcoind_port, rpc_port, zmq_port).unwrap();
+
+    bitcoind.mine_blocks(110).unwrap();
+
+    println!("{:?}", bitcoind.get_spendable_utxos().unwrap());
+
+    while !SHUTTING_DOWN.load(Ordering::Relaxed) {
+        std::thread::sleep(Duration::from_millis(250));
+    }
 }

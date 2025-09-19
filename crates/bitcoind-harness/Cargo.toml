@@ -9,5 +9,9 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+anyhow.workspace = true
 bitcoin.workspace = true
+bitcoincore-rpc.workspace = true
+ctrlc = { version = "3.5", features = ["termination"] }
+serde_json.workspace = true
 tempfile = "3.20.0"
