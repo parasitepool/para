@@ -141,6 +141,7 @@ impl Controller {
                         (core_id + 1) as u32 * nonce_range_per_core
                     };
 
+                    #[allow(clippy::useless_conversion)]
                     let mut hasher = Hasher::new(
                         Header {
                             version: notify.version.into(),
@@ -151,7 +152,8 @@ impl Controller {
                                 &self.extranonce1,
                                 &extranonce2,
                                 &notify.merkle_branches,
-                            )?,
+                            )?
+                            .into(),
                             time: notify.ntime.into(),
                             bits: notify.nbits.into(),
                             nonce: start_nonce,
