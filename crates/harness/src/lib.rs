@@ -4,10 +4,7 @@ use {
         Address, Network, OutPoint, ScriptBuf, blockdata::opcodes::OP_TRUE,
         blockdata::script::Builder,
     },
-    bitcoincore_rpc::{
-        Auth, Client, RpcApi,
-        json::{ScanTxOutRequest, ScanTxOutResult},
-    },
+    bitcoincore_rpc::{Auth, Client, RpcApi, json::ScanTxOutRequest},
     bitcoind::Bitcoind,
     std::{
         fs,
@@ -23,16 +20,16 @@ use {
     tempfile::TempDir,
 };
 
-mod bitcoind;
+pub mod bitcoind;
 
 type Result<T = (), E = Error> = std::result::Result<T, E>;
 
-const COIN_VALUE: u64 = 100_000_000;
+// const COIN_VALUE: u64 = 100_000_000;
 const MATURITY: u64 = 100;
 
 static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 
-fn main() {
+pub fn main() {
     ctrlc::set_handler(move || {
         if SHUTTING_DOWN.fetch_or(true, Ordering::Relaxed) {
             process::exit(1);

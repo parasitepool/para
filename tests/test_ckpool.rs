@@ -22,7 +22,7 @@ static COMPILE_CKPOOL: Lazy<()> = Lazy::new(|| {
 });
 
 pub(crate) struct TestCkpool {
-    bitcoind_handle: Child,
+    bitcoind_handle: Bitcoind,
     ckpool_handle: Child,
     ckpool_port: u16,
     _tempdir: Arc<TempDir>,
@@ -58,7 +58,8 @@ impl TestCkpool {
                 .port(),
         );
 
-        let bitcoind_handle = bitcoind::spawn(tempdir.clone(), bitcoind_port, rpc_port, zmq_port);
+        let bitcoind_handle =
+            Bitcoind::spawn(tempdir.clone(), bitcoind_port, rpc_port, zmq_port).unwrap();
 
         Lazy::force(&COMPILE_CKPOOL);
 
@@ -140,9 +141,8 @@ impl TestCkpool {
 
 impl Drop for TestCkpool {
     fn drop(&mut self) {
-        self.bitcoind_handle.kill().unwrap();
+        self.bitcoind_handle.shutdown();
         self.ckpool_handle.kill().unwrap();
-        self.bitcoind_handle.wait().unwrap();
         self.ckpool_handle.wait().unwrap();
     }
 }

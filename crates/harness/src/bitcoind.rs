@@ -60,8 +60,8 @@ rpcpassword={rpc_password}
 
         let handle = Command::new("bitcoind")
             .arg(format!("-conf={}", bitcoind_conf.display()))
-            .stderr(Stdio::inherit())
-            .stdout(Stdio::inherit())
+            .stderr(Stdio::null())
+            .stdout(Stdio::null())
             .spawn()?;
 
         let status = Command::new("bitcoin-cli")
@@ -101,7 +101,10 @@ rpcpassword={rpc_password}
         let mut outpoints = Vec::new();
         for utxo in result.unspents {
             if block_count - utxo.height >= MATURITY {
-                outpoints.push(OutPoint { txid: utxo.txid, vout: utxo.vout });
+                outpoints.push(OutPoint {
+                    txid: utxo.txid,
+                    vout: utxo.vout,
+                });
             }
         }
 

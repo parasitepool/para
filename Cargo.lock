@@ -508,18 +508,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bitcoind-harness"
-version = "0.0.1"
-dependencies = [
- "anyhow",
- "bitcoin",
- "bitcoincore-rpc",
- "ctrlc",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
 name = "bitflags"
 version = "2.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1356,6 +1344,18 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+]
+
+[[package]]
+name = "harness"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "bitcoincore-rpc",
+ "ctrlc",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -2259,6 +2259,7 @@ dependencies = [
  "dirs",
  "executable-path",
  "futures",
+ "harness",
  "hex",
  "html-escaper",
  "lazy_static",

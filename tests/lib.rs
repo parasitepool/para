@@ -34,6 +34,7 @@ use {
 
 #[cfg(target_os = "linux")]
 use {
+    harness::bitcoind::Bitcoind,
     para::subcommand::sync::{ShareBatch, SyncResponse, SyncSend},
     reqwest::Response,
     std::{
@@ -45,8 +46,6 @@ use {
     test_pool::TestPool,
 };
 
-#[cfg(target_os = "linux")]
-mod bitcoind;
 mod command_builder;
 #[cfg(target_os = "linux")]
 mod test_ckpool;
