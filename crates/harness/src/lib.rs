@@ -6,8 +6,10 @@ use {
         blockdata::{opcodes::OP_TRUE, script::Builder},
         transaction::Version,
     },
-    bitcoincore_rpc::{Auth, Client, RpcApi, json::ScanTxOutRequest},
+    bitcoincore_rpc::{Auth, Client, RpcApi},
     bitcoind::Bitcoind,
+    serde::{Deserialize, Serialize},
+    serde_json::json,
     std::{
         fs,
         net::TcpListener,
@@ -25,8 +27,6 @@ use {
 pub mod bitcoind;
 
 type Result<T = (), E = Error> = std::result::Result<T, E>;
-
-const MATURITY: u64 = 100;
 
 static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 
@@ -62,61 +62,23 @@ pub fn main() {
 
     let bitcoind = Bitcoind::spawn(tempdir.clone(), bitcoind_port, rpc_port, zmq_port).unwrap();
 
-    bitcoind.mine_blocks(121).unwrap();
+    println!("Mining 101 blocks to get a mature output...");
 
-    let mut witness = Witness::new();
-    witness.push(
-        Builder::new()
-            .push_opcode(OP_TRUE)
-            .into_script()
-            .into_bytes(),
-    );
+    bitcoind.mine_blocks(101).unwrap();
 
-    // create 25 dependan transactions for every input
-    let utxos = bitcoind.get_spendable_utxos().unwrap();
-
-    println!("{:?}", utxos);
-
-    for (outpoint, amount) in &utxos {
-        let mut outpoint = *outpoint;
-        for _ in 0..25 {
-            let tx = Transaction {
-                version: Version::TWO,
-                lock_time: LockTime::ZERO,
-                input: vec![TxIn {
-                    previous_output: outpoint,
-                    script_sig: ScriptBuf::new(),
-                    sequence: Sequence::ENABLE_RBF_NO_LOCKTIME,
-                    witness: witness.clone(),
-                }],
-                output: vec![TxOut {
-                    script_pubkey: bitcoind.op_true_address().script_pubkey(),
-                    value: *amount,
-                }],
-            };
-
-            outpoint = OutPoint {
-                txid: tx.compute_txid(),
-                vout: 0,
-            };
-
-            let result = bitcoind
-                .client()
-                .unwrap()
-                .send_raw_transaction(&tx)
-                .unwrap();
-
-            println!("{:?}", result);
-        }
-    }
-
-    let result = bitcoind.client().unwrap().get_mempool_info().unwrap();
-
-    println!("Mempool size: {} bytes", result.bytes);
-    println!("Mempool size: {} transactions", result.size);
-    println!("Bitcoind rpc port: {}", bitcoind.rpc_port);
+    println!("Done creating 101 blocks");
 
     while !SHUTTING_DOWN.load(Ordering::Relaxed) {
-        std::thread::sleep(Duration::from_millis(250));
+        let result = bitcoind.client().unwrap().get_mempool_info().unwrap();
+        println!("Mempool size: {} bytes", result.bytes);
+        println!("Mempool size: {} transactions", result.size);
+        println!("Bitcoin rpc port: {}", bitcoind.rpc_port);
+        println!("Bitcoin zmq port: {}", zmq_port);
+
+        if result.bytes < 5000000 {
+            bitcoind.flood_mempool(Some(2)).unwrap();
+        }
+
+        std::thread::sleep(Duration::from_millis(3000));
     }
 }

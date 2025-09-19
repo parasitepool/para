@@ -1354,6 +1354,7 @@ dependencies = [
  "bitcoin",
  "bitcoincore-rpc",
  "ctrlc",
+ "serde",
  "serde_json",
  "tempfile",
 ]
