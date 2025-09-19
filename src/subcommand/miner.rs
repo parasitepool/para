@@ -79,10 +79,7 @@ fn get_system_info() -> &'static SystemInfo {
 
 #[derive(Debug, Parser)]
 pub(crate) struct Miner {
-    #[arg(long, help = "Stratum <HOST>")]
-    host: String,
-    #[arg(long, help = "Stratum <PORT>")]
-    port: u16,
+    stratum_endpoint: String,
     #[arg(long, help = "Stratum <USERNAME>")]
     username: String,
     #[arg(long, help = "Stratum <PASSWORD>")]
@@ -520,9 +517,7 @@ mod tests {
     #[test]
     fn parse_basic_args() {
         parse_miner_args(
-            "para miner \
-                --host parasite.wtf \
-                --port 42069 \
+            "para miner parasite.wtf:42069 \
                 --username bc1q8jx6g9ujlqmdx3jnt3ap6ll2fdwqjdkdgs959m.worker1.aed48ef@parasite.sati.pro \
                 --password x",
         );

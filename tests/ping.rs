@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn ping() {
+fn ping_with_ckpool() {
     let ckpool = TestCkpool::spawn();
 
     let stratum_endpoint = ckpool.stratum_endpoint();
@@ -15,7 +15,9 @@ fn ping() {
 }
 
 #[test]
-fn ping_fails() {
+fn ping_fails_with_ckpool() {
+    let _ = TestCkpool::spawn();
+
     let mut ping = CommandBuilder::new("ping --count 1 --timeout 1 127.0.0.1:1234").spawn();
 
     let exit_status = ping.wait().unwrap();
@@ -24,7 +26,7 @@ fn ping_fails() {
 }
 
 #[test]
-fn ping_with_username() {
+fn ping_with_username_with_ckpool() {
     let ckpool = TestCkpool::spawn();
     let stratum_endpoint = ckpool.stratum_endpoint();
     let username = signet_username();
@@ -39,7 +41,7 @@ fn ping_with_username() {
 }
 
 #[test]
-fn ping_with_username_and_password() {
+fn ping_with_username_and_password_with_ckpool() {
     let ckpool = TestCkpool::spawn();
     let stratum_endpoint = ckpool.stratum_endpoint();
     let username = signet_username();
@@ -54,7 +56,7 @@ fn ping_with_username_and_password() {
 }
 
 #[test]
-fn ping_invalid_hostname_fails() {
+fn ping_invalid_hostname_fails_with_ckpool() {
     let mut ping =
         CommandBuilder::new("ping --count 1 --timeout 1 invalid.hostname.that.does.not.exist")
             .spawn();
@@ -64,7 +66,7 @@ fn ping_invalid_hostname_fails() {
 }
 
 #[test]
-fn ping_multiple_counts() {
+fn ping_multiple_counts_with_ckpool() {
     let ckpool = TestCkpool::spawn();
     let stratum_endpoint = ckpool.stratum_endpoint();
 
@@ -76,7 +78,7 @@ fn ping_multiple_counts() {
 }
 
 #[test]
-fn ping_output_comprehensive() {
+fn ping_output_comprehensive_with_ckpool() {
     let ckpool = TestCkpool::spawn();
     let stratum_endpoint = ckpool.stratum_endpoint();
 

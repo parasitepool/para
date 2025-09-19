@@ -68,8 +68,8 @@ use {
     },
     stratifier::Connection,
     stratum::{
-        Authorize, Configure, Extranonce, Id, JsonRpcError, Message, Nbits, Notify, Ntime,
-        PrevHash, SetDifficulty, Submit, Subscribe, SubscribeResult, Version,
+        Authorize, Configure, Extranonce, Id, JsonRpcError, MerkleNode, Message, Nbits, Notify,
+        Ntime, PrevHash, SetDifficulty, Submit, Subscribe, SubscribeResult, Version,
     },
     sysinfo::{Disks, System},
     tokio::{
@@ -121,6 +121,21 @@ type Result<T = (), E = Error> = std::result::Result<T, E>;
 
 fn target_as_block_hash(target: bitcoin::Target) -> BlockHash {
     BlockHash::from_raw_hash(Hash::from_byte_array(target.to_le_bytes()))
+}
+
+async fn resolve_stratum_endpoint(stratum_endpoint: &str) -> Result<SocketAddr> {
+    let endpoint = if stratum_endpoint.contains(':') {
+        stratum_endpoint.to_string()
+    } else {
+        format!("{}:42069", stratum_endpoint)
+    };
+
+    let addr = tokio::net::lookup_host(&endpoint)
+        .await?
+        .next()
+        .with_context(|| "Failed to resolve hostname")?;
+
+    Ok(addr)
 }
 
 pub fn main() {
