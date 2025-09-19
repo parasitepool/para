@@ -18,7 +18,7 @@ impl Controller {
         let (subscribe, _, _) = client.subscribe().await?;
         client.authorize().await?;
 
-        let num_cores = cpu_cores.unwrap_or_else(num_cpus::get);
+        let num_cores = cpu_cores.unwrap_or_else(system_utils::get_cpu_count);
 
         info!(
             "Authorized: extranonce1={}, extranonce2_size={}",
