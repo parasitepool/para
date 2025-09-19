@@ -54,44 +54,16 @@ impl PerformanceTracker {
 pub struct SystemInfo {
     pub architecture: &'static str,
     pub os: &'static str,
-    pub memory_total_kb: Option<String>,
+    pub memory_total_kb: Option<u64>,
 }
 
 impl SystemInfo {
-    fn read_memory_total() -> Option<String> {
-        #[cfg(target_os = "linux")]
-        {
-            if std::path::Path::new("/proc/meminfo").exists()
-                && let Ok(meminfo) = std::fs::read_to_string("/proc/meminfo")
-            {
-                for line in meminfo.lines() {
-                    if line.starts_with("MemTotal")
-                        && let Some(value) = line.split_whitespace().nth(1)
-                    {
-                        return Some(value.to_string());
-                    }
-                }
-            }
-        }
-        None
+    fn read_memory_total() -> Option<u64> {
+        Some(system_utils::get_total_memory() / 1024)
     }
 
-    pub fn get_memory_available_kb() -> Option<String> {
-        #[cfg(target_os = "linux")]
-        {
-            if std::path::Path::new("/proc/meminfo").exists()
-                && let Ok(meminfo) = std::fs::read_to_string("/proc/meminfo")
-            {
-                for line in meminfo.lines() {
-                    if line.starts_with("MemAvailable")
-                        && let Some(value) = line.split_whitespace().nth(1)
-                    {
-                        return Some(value.to_string());
-                    }
-                }
-            }
-        }
-        None
+    pub fn get_memory_available_kb() -> Option<u64> {
+        Some(system_utils::get_available_memory() / 1024)
     }
 }
 
@@ -121,12 +93,6 @@ pub(crate) struct Miner {
         value_name = "CORES"
     )]
     cpu_cores: Option<usize>,
-    #[arg(
-        long,
-        help = "Number of Tokio threads to use (default: auto-detect)",
-        value_name = "THREADS"
-    )]
-    tokio_threads: Option<usize>,
     #[arg(long, help = "Enable performance monitoring")]
     monitor_performance: bool,
 }
@@ -173,7 +139,7 @@ impl Miner {
             }
         };
 
-        let controller = match self.create_controller(client, shutdown_flag.clone()).await {
+        let controller = match self.create_controller(client).await {
             Ok(controller) => controller,
             Err(e) => {
                 error!(error = %e, "Failed to create controller");
@@ -197,7 +163,6 @@ impl Miner {
     }
 
     fn setup_environment(&self, thread_pool: &rayon::ThreadPool) -> Result<()> {
-        self.initialize_logging()?;
         mining_utils::validate_thread_pool(thread_pool)?;
         self.log_system_info(thread_pool);
         Ok(())
@@ -211,20 +176,32 @@ impl Miner {
             "Connecting to stratum server"
         );
 
-        Client::connect(
+        info!("Attempting TCP connection...");
+
+        let result = Client::connect(
             (self.host.clone(), self.port),
             &self.username,
             &self.password,
             Duration::from_secs(10),
         )
-        .await
+        .await;
+
+        match &result {
+            Ok(_) => {
+                info!("Successfully connected to stratum server");
+            }
+            Err(e) => {
+                error!(
+                    error = %e,
+                    "Failed to connect to stratum server"
+                );
+            }
+        }
+
+        result
     }
 
-    async fn create_controller(
-        &self,
-        client: Client,
-        _shutdown_flag: Arc<AtomicBool>,
-    ) -> Result<Controller> {
+    async fn create_controller(&self, client: Client) -> Result<Controller> {
         Controller::new(client, self.cpu_cores).await
     }
 
@@ -241,10 +218,8 @@ impl Miner {
 
     fn build_runtime(&self) -> Result<MinerRuntime> {
         let thread_pool = mining_utils::configure_rayon_for_mining(self.cpu_cores)?;
-        let num_cores = num_cpus::get();
-        let tokio_threads = self
-            .tokio_threads
-            .unwrap_or_else(|| std::cmp::max(2, num_cores / 4));
+        let num_cores = system_utils::get_cpu_count();
+        let tokio_threads = std::cmp::max(2, num_cores / 4);
 
         info!(
             tokio_threads = tokio_threads,
@@ -268,24 +243,8 @@ impl Miner {
         })
     }
 
-    fn initialize_logging(&self) -> Result<()> {
-        use tracing_subscriber::{EnvFilter, FmtSubscriber};
-
-        let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-
-        let subscriber = FmtSubscriber::builder()
-            .with_env_filter(filter)
-            .with_target(false)
-            .with_thread_ids(true)
-            .with_line_number(true)
-            .finish();
-
-        tracing::subscriber::set_global_default(subscriber)
-            .map_err(|e| anyhow!("Failed to set tracing subscriber: {}", e))
-    }
-
     fn log_system_info(&self, thread_pool: &rayon::ThreadPool) {
-        let num_cores = num_cpus::get();
+        let num_cores = system_utils::get_cpu_count();
         let cores = self.cpu_cores.unwrap_or(num_cores);
         let actual_threads = mining_utils::get_pool_thread_count(thread_pool);
 
@@ -409,9 +368,10 @@ impl Miner {
 
 pub mod mining_utils {
     use super::*;
+    use crate::system_utils;
 
     pub fn calculate_optimal_chunk_size() -> u32 {
-        let num_cores = num_cpus::get();
+        let num_cores = system_utils::get_cpu_count();
 
         match num_cores {
             1..=2 => 100_000,
@@ -423,7 +383,7 @@ pub mod mining_utils {
     }
 
     pub fn configure_rayon_for_mining(cpu_cores: Option<usize>) -> Result<rayon::ThreadPool> {
-        let num_cores = cpu_cores.unwrap_or_else(num_cpus::get);
+        let num_cores = cpu_cores.unwrap_or_else(system_utils::get_cpu_count);
 
         let create_builder = || {
             rayon::ThreadPoolBuilder::new()
@@ -585,20 +545,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_args_with_tokio_threads() {
-        let miner = parse_miner_args(
-            "para miner \
-                --host parasite.wtf \
-                --port 42069 \
-                --username test.worker \
-                --password x \
-                --tokio-threads 4",
-        );
-
-        assert_eq!(miner.tokio_threads, Some(4));
-    }
-
-    #[test]
     fn test_chunk_size_calculation() {
         let chunk_size = mining_utils::calculate_optimal_chunk_size();
         assert!(chunk_size > 0);
@@ -645,12 +591,14 @@ mod tests {
 
         assert_eq!(mem1.is_some(), mem2.is_some());
 
-        #[cfg(target_os = "linux")]
-        {
-            if std::path::Path::new("/proc/meminfo").exists() {
-                assert!(mem1.is_some(), "Should read memory info on Linux");
-            }
-        }
+        assert!(
+            mem1.is_some(),
+            "Should read memory info on all supported platforms"
+        );
+        assert!(
+            mem1.unwrap() > 0,
+            "Available memory should be greater than 0"
+        );
     }
 
     #[test]
@@ -661,7 +609,6 @@ mod tests {
             username: "test_user".to_string(),
             password: "x".to_string(),
             cpu_cores: Some(2),
-            tokio_threads: Some(2),
             monitor_performance: true,
         };
 
@@ -708,7 +655,6 @@ mod tests {
             username: "test_user".to_string(),
             password: "x".to_string(),
             cpu_cores: Some(1),
-            tokio_threads: Some(1),
             monitor_performance: false,
         };
 
