@@ -1,17 +1,31 @@
 [package]
 name = "para"
-description = "Parasite pool server"
+description = "Parasite Toolkit"
 version = "0.0.1"
-edition = "2024"
-authors = ["The Parasite Devs"]
-homepage = "https://parasite.wtf"
 autotests = false
+
+authors.workspace = true
+edition.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[workspace]
+members = [".", "crates/*"]
+
+[workspace.package]
+authors = ["The Parasite Devs"]
+edition = "2024"
+repository = "https://github.com/parasitepool/para"
+rust-version = "1.90.0"
+
+[workspace.dependencies]
+bitcoin = { version = "0.32.7", features = ["serde"] }
 
 [dependencies]
 anyhow = { version = "1.0.98", features = ["backtrace"] }
 axum = { version = "0.8.3", features = ["http2"] }
 axum-server = "0.7.2"
-bitcoin = { version = "0.32.6", features = ["serde"] }
+bitcoin.workspace = true
 bitcoincore-rpc = "0.19.0"
 boilerplate = { version = "1.0.1", features = ["axum"] }
 byteorder = "1.5.0"

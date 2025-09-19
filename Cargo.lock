@@ -508,6 +508,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "bitcoind-harness"
+version = "0.0.1"
+dependencies = [
+ "bitcoin",
+ "tempfile",
+]
+
+[[package]]
 name = "bitflags"
 version = "2.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
