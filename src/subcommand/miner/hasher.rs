@@ -201,7 +201,7 @@ impl Hasher {
         let mut best_local_hash = u64::MAX;
 
         for nonce in start_nonce..end_nonce {
-            if local_hashes % 10000 == 0
+            if local_hashes.is_multiple_of(10000)
                 && (cancel.is_cancelled() || mining_state.found_solution.load(Ordering::Relaxed))
             {
                 mining_state
