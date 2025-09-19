@@ -25,17 +25,15 @@ doc:
 test-without-ckpool:
   cargo test --all -- --skip with_ckpool
 
-miner host='127.0.0.1': 
+miner stratum_endpoint='127.0.0.1:42069': 
   RUST_LOG=info cargo run --release -- miner \
-    --host {{host}} \
-    --port 42069 \
+    {{stratum_endpoint}} \
     --username bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg6dzw5nk24r45dzasde25r3.tick \
     --password x
 
 miner-signet: 
   RUST_LOG=info cargo run --release -- miner \
-    --host 127.0.0.1 \
-    --port 42069 \
+    127.0.0.1:42069 \
     --username tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.tick \
     --password x
 
