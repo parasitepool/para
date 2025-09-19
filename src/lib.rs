@@ -33,7 +33,6 @@ use {
     hex::FromHex,
     lazy_static::lazy_static,
     rand::RngCore,
-    rayon::prelude::*,
     reqwest::Url,
     rust_embed::RustEmbed,
     rustls_acme::{
@@ -94,6 +93,9 @@ use {
     tracing_subscriber::EnvFilter,
 };
 
+#[cfg(feature = "miner")]
+use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
+
 pub use subcommand::server::api;
 
 mod arguments;
@@ -106,6 +108,7 @@ mod job;
 mod stratifier;
 pub mod stratum;
 pub mod subcommand;
+pub mod system_utils;
 
 pub const COIN_VALUE: u64 = 100_000_000;
 pub const USER_AGENT: &str = "para/0.0.1";
