@@ -1,10 +1,12 @@
 [package]
 name = "para"
-description = "Parasite pool server"
+description = "Parasite toolkit"
 version = "0.0.1"
+license = "CC0-1.0"
 edition = "2024"
 authors = ["The Parasite Devs"]
-homepage = "https://parasite.wtf"
+homepage = "https://github.com/parasitepool/para"
+repository = "https://github.com/parasitepool/para"
 autotests = false
 
 [dependencies]
