@@ -77,7 +77,7 @@ impl FromStr for Chain {
             "signet" => Ok(Self::Signet),
             "testnet" => Ok(Self::Testnet),
             "testnet4" => Ok(Self::Testnet4),
-            _ => Err(anyhow!("Invalid chain `{}`", s.to_string())),
+            _ => Err(anyhow!("Invalid chain `{s}`")),
         }
     }
 }
