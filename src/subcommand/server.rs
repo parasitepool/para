@@ -22,6 +22,8 @@ pub mod notifications;
 mod server_config;
 mod templates;
 
+const MEBIBYTE: usize = 1 << 20;
+
 #[derive(RustEmbed)]
 #[folder = "static"]
 struct StaticAssets;
@@ -97,8 +99,8 @@ impl Server {
 
         let mut router = Router::new()
             .nest_service("/pool/", ServeDir::new(pool_dir))
-            .route("/users", get(Self::users))
             .nest_service("/users/", ServeDir::new(user_dir))
+            .route("/users", get(Self::users))
             .layer(SetResponseHeaderLayer::overriding(
                 CONTENT_TYPE,
                 HeaderValue::from_static("text/plain"),
@@ -108,7 +110,10 @@ impl Server {
                 HeaderValue::from_static("inline"),
             ))
             .route("/", get(Self::home))
-            .route("/healthcheck", self.with_auth(get(Self::healthcheck)))
+            .route(
+                "/healthcheck",
+                Self::with_auth(config.clone(), get(Self::healthcheck)),
+            )
             .route("/static/{*path}", get(Self::static_assets));
 
         match Database::new(config.database_url()).await {
@@ -127,12 +132,11 @@ impl Server {
                     .route("/split/{blockheight}", get(Self::sat_split))
                     .route(
                         "/sync/batch",
-                        post(Self::sync_batch)
-                            .layer(DefaultBodyLimit::max(52428800 /* 50MB */)),
+                        post(Self::sync_batch).layer(DefaultBodyLimit::max(50 * MEBIBYTE)),
                     )
                     .layer(Extension(database));
 
-                router = router.merge(self.with_auth_router(db_router));
+                router = router.merge(Self::with_auth_router(config.clone(), db_router));
             }
             Err(err) => {
                 warn!("Failed to connect to PostgreSQL: {err}",);
@@ -155,22 +159,22 @@ impl Server {
         Ok(())
     }
 
-    fn with_auth<S>(&self, method_router: MethodRouter<S>) -> MethodRouter<S>
+    fn with_auth<S>(config: Arc<ServerConfig>, method_router: MethodRouter<S>) -> MethodRouter<S>
     where
         S: Clone + Send + Sync + 'static,
     {
-        if let Some((username, password)) = self.config.credentials() {
+        if let Some((username, password)) = config.credentials() {
             method_router.layer(ValidateRequestHeaderLayer::basic(username, password))
         } else {
             method_router
         }
     }
 
-    fn with_auth_router<S>(&self, router: Router<S>) -> Router<S>
+    fn with_auth_router<S>(config: Arc<ServerConfig>, router: Router<S>) -> Router<S>
     where
         S: Clone + Send + Sync + 'static,
     {
-        if let Some((username, password)) = self.config.credentials() {
+        if let Some((username, password)) = config.credentials() {
             Router::new()
                 .merge(router)
                 .layer(ValidateRequestHeaderLayer::basic(username, password))

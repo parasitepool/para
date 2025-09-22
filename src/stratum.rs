@@ -24,7 +24,7 @@ pub use {
     configure::Configure,
     error::JsonRpcError,
     extranonce::Extranonce,
-    merkle::{merkle_branches, merkle_root},
+    merkle::{MerkleNode, merkle_branches, merkle_root},
     message::{Id, Message},
     nbits::Nbits,
     nonce::Nonce,

@@ -12,7 +12,6 @@ clippy:
 ci: clippy
   cargo fmt -- --check
   cargo test --all
-  cargo test --all -- --ignored
 
 outdated:
   cargo outdated --root-deps-only --workspace
@@ -23,17 +22,18 @@ unused:
 doc:
   cargo doc --workspace --open
 
-miner host='127.0.0.1': 
+test-without-ckpool:
+  cargo test --all -- --skip with_ckpool
+
+miner stratum_endpoint='127.0.0.1:42069': 
   RUST_LOG=info cargo run --release -- miner \
-    --host {{host}} \
-    --port 42069 \
+    {{stratum_endpoint}} \
     --username bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg6dzw5nk24r45dzasde25r3.tick \
     --password x
 
 miner-signet: 
   RUST_LOG=info cargo run --release -- miner \
-    --host 127.0.0.1 \
-    --port 42069 \
+    127.0.0.1:42069 \
     --username tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.tick \
     --password x
 
@@ -177,3 +177,30 @@ psql:
 
 psql-reset:
   ./bin/postgres-reset
+
+prepare-release revision='master':
+  #!/usr/bin/env bash
+  set -euxo pipefail
+  git checkout {{ revision }}
+  git pull origin {{ revision }}
+  echo >> CHANGELOG.md
+  git log --pretty='format:- %s' >> CHANGELOG.md
+  $EDITOR CHANGELOG.md
+  $EDITOR Cargo.toml
+  version=`sed -En 's/version[[:space:]]*=[[:space:]]*"([^"]+)"/\1/p' Cargo.toml | head -1`
+  cargo check
+  git checkout -b release-$version
+  git add -u
+  git commit -m "Release $version"
+  gh pr create --web
+
+publish-release revision='master':
+  #!/usr/bin/env bash
+  set -euxo pipefail
+  rm -rf tmp/release
+  git clone git@github.com:parasitepool/para.git tmp/release
+  cd tmp/release
+  git checkout {{ revision }}
+  cargo publish
+  cd ../..
+  rm -rf tmp/release

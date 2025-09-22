@@ -5,10 +5,7 @@ mod hasher;
 
 #[derive(Debug, Parser)]
 pub(crate) struct Miner {
-    #[arg(long, help = "Stratum <HOST>")]
-    host: String,
-    #[arg(long, help = "Stratum <PORT>")]
-    port: u16,
+    stratum_endpoint: String,
     #[arg(long, help = "Stratum <USERNAME>")]
     username: String,
     #[arg(long, help = "Stratum <PASSWORD>")]
@@ -19,17 +16,15 @@ impl Miner {
     pub(crate) fn run(&self) -> Result {
         Runtime::new()?.block_on(async {
             info!(
-                "Connecting to {}:{} with user {}",
-                self.host, self.port, self.username
+                "Connecting to {} with user {}",
+                self.stratum_endpoint, self.username
             );
 
-            let client = Client::connect(
-                (self.host.clone(), self.port),
-                &self.username,
-                &self.password,
-                Duration::from_secs(5),
-            )
-            .await?;
+            let addr = resolve_stratum_endpoint(&self.stratum_endpoint).await?;
+
+            let client =
+                Client::connect(addr, &self.username, &self.password, Duration::from_secs(5))
+                    .await?;
 
             let controller = Controller::new(client).await?;
 
@@ -55,9 +50,7 @@ mod tests {
     #[test]
     fn parse_args() {
         parse_miner_args(
-            "para miner \
-                --host parasite.wtf \
-                --port 42069 \
+            "para miner parasite.wtf:42069 \
                 --username bc1q8jx6g9ujlqmdx3jnt3ap6ll2fdwqjdkdgs959m.worker1.aed48ef@parasite.sati.pro \
                 --password x",
         );
