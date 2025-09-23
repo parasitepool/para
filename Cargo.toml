@@ -1,11 +1,13 @@
 [package]
 name = "para"
-description = "Parasite Toolkit"
-version = "0.0.1"
+description = "Parasite toolkit"
+version = "0.5.0"
+homepage = "https://github.com/parasitepool/para"
 autotests = false
 
 authors.workspace = true
 edition.workspace = true
+license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
@@ -15,6 +17,7 @@ members = [".", "crates/*"]
 [workspace.package]
 authors = ["The Parasite Devs"]
 edition = "2024"
+license = "CC0-1.0"
 repository = "https://github.com/parasitepool/para"
 rust-version = "1.90.0"
 
@@ -41,7 +44,7 @@ hex = "0.4.3"
 html-escaper = "0.2.0"
 lazy_static = "1.5.0"
 mime_guess = "2.0.5"
-primitive-types = "0.13.1"
+primitive-types = "0.14.0"
 rand = "0.9.1"
 reqwest = { version = "0.12.22", features = ["rustls-tls", "blocking", "json"] }
 rust-embed = "8.7.1"
