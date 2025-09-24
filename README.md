@@ -13,14 +13,27 @@
 </div>
 <br>
 
-Building
+Setup Environment
 --------
 
-You'll need Rust:
+### Requirements:
+* [Rust](#rust)
+* Just ([Install Instructions](https://github.com/casey/just?tab=readme-ov-file#installation))
 
+#### Manual Install
+[Just](https://github.com/casey/just?tab=readme-ov-file#installation) is used as the projects command runner and is highly recommended. Rust is required to build, text, and develop. To install Rust:
 ```
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
+
+#### Bundled Environment
+This repo includes a bundled development environment with [Hermit](https://github.com/cashapp/hermit) that provides the above requirements.
+```
+. ./bin/activate-hermit
+```
+
+Building
+--------
 
 Clone the `para` repo:
 
@@ -46,13 +59,6 @@ Once built, the `para` binary can be found at `./target/release/para`.
 `para` requires `rustc` version 1.90.0 or later. Run `rustc --version` to ensure
 you have this version. Run `rustup update` to get the latest stable release.
 
-Hermit Environment
-------------------
-
-A full development/build environment is bundled using hermit and can be activated as follows:
-```
-. ./bin/activate-hermit
-```
 
 Building the docs
 -----------------
