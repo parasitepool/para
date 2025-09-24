@@ -119,6 +119,21 @@ fn target_as_block_hash(target: bitcoin::Target) -> BlockHash {
     BlockHash::from_raw_hash(Hash::from_byte_array(target.to_le_bytes()))
 }
 
+async fn resolve_stratum_endpoint(stratum_endpoint: &str) -> Result<SocketAddr> {
+    let endpoint = if stratum_endpoint.contains(':') {
+        stratum_endpoint.to_string()
+    } else {
+        format!("{}:42069", stratum_endpoint)
+    };
+
+    let addr = tokio::net::lookup_host(&endpoint)
+        .await?
+        .next()
+        .with_context(|| "Failed to resolve hostname")?;
+
+    Ok(addr)
+}
+
 pub fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())

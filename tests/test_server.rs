@@ -75,6 +75,7 @@ impl TestServer {
     pub(crate) async fn spawn_with_db() -> Self {
         Self::spawn_with_db_args([]).await
     }
+
     #[cfg(target_os = "linux")]
     pub(crate) async fn spawn_with_db_args(args: impl ToArgs) -> Self {
         let psql_binpath = match Command::new("pg_config").arg("--bindir").output() {

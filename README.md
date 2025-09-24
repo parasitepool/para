@@ -1,30 +1,17 @@
-# Parasite Pool
+<h1 align=center><code>para</code></h1>
 
-## Stratum Messages
-
-|Method|Implemented|Tested|
-|------|-----------|------|
-|mining.notify|[x]|[x]|
-|mining.submit|[x]|[x]|
-|mining.set_difficulty|[x]|[x]|
-|mining.authorize|[x]|[x]|
-|mining.subscribe|[x]|[x]|
-|mining.get_transactions|[ ]|[ ]|
-|client.reconnect|[ ]|[ ]|
-|client.show_message|[ ]|[ ]|
-|mining.set_extranonce|[ ]|[ ]|
-
-
-## Local development
-```
-just build
-just bitcoind
-just mine
-just psql
-just ckpool
-cd para
-just run
-```
+<div align=center>
+  <a href=https://crates.io/crates/para>
+    <img src=https://img.shields.io/crates/v/para.svg alt="crates.io version">
+  </a>
+  <a href=https://github.com/parasitepool/para/actions/workflows/ci.yaml>
+    <img src=https://github.com/parasitepool/para/actions/workflows/ci.yaml/badge.svg alt="build status">
+  </a>
+  <a href=https://github.com/parasitepool/para/releases>
+    <img src=https://img.shields.io/github/downloads/parasitepool/para/total.svg alt=downloads>
+  </a>
+</div>
+<br>
 
 ## Contributing
 
