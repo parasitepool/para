@@ -1,6 +1,8 @@
 Introduction
 ============
 
+"If I had more time, I would have written you a shorter letter." - Mark Twain
+
 Notes
 -----
 - A platform for tinkering
