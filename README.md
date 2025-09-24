@@ -66,6 +66,11 @@ Once built, the `para` binary can be found at `./target/release/para`.
 `para` requires `rustc` version 1.90.0 or later. Run `rustc --version` to ensure
 you have this version. Run `rustup update` to get the latest stable release.
 
+You can also install `para` directly into your path by doing:
+
+```
+cargo install --path .
+```
 
 Building the docs
 -----------------
