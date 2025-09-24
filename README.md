@@ -18,7 +18,7 @@ Setup Environment
 
 ### Requirements:
 
-* [Rust](#Manual-Install)
+* [Rust](#manual-install)
 * [Just](https://github.com/casey/just?tab=readme-ov-file#installation)
 
 #### Manual Install
