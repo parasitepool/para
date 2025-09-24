@@ -29,4 +29,13 @@ just serve-docs
 ```
 
 Then you can customize CSS and javascript by following [this
-guide](https://github.com/rust-lang/mdBook/tree/master/guide/src/format/theme).
+guide](https://github.com/rust-lang/mdBook/tree/master/guide/src/format/theme)
+and doing:
+
+```
+just init-mdbook-theme
+```
+
+This will create the default `mdbook` layout and CSS files inside
+`docs/tmp/theme`, which you can then pick, chose and adapt and then copy into
+`docs/theme` to tweak the defaults.
