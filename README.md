@@ -13,14 +13,67 @@
 </div>
 <br>
 
-## Hermit Environment
+Setup Environment
+-----------------
 
-A full development/build environment is bundled using hermit and can be activated as follows:
+### Requirements:
+
+* [Rust](#manual-install)
+* [Just](https://github.com/casey/just?tab=readme-ov-file#installation)
+
+#### Manual Install
+
+Rust is required to build, test, and develop. To install: 
+
+``` 
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh 
+```
+
+#### Bundled Environment
+
+This repo includes a bundled development environment with
+[Hermit](https://github.com/cashapp/hermit) that provides the above
+requirements. 
+
 ```
 . ./bin/activate-hermit
 ```
 
-## Building the docs
+Building
+--------
+
+Clone the `para` repo:
+
+```
+git clone https://github.com/parasitepool/para.git
+cd para
+```
+
+To build a specific version of `para`, first checkout that version:
+
+```
+git checkout <VERSION>
+```
+
+And finally to actually build `para`:
+
+```
+cargo build --release
+```
+
+Once built, the `para` binary can be found at `./target/release/para`.
+
+`para` requires `rustc` version 1.90.0 or later. Run `rustc --version` to ensure
+you have this version. Run `rustup update` to get the latest stable release.
+
+You can also install `para` directly into your path by doing:
+
+```
+cargo install --path .
+```
+
+Building the docs
+-----------------
 
 ```
 cargo install mdbook mdbook-linkcheck
