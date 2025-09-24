@@ -14,20 +14,27 @@
 <br>
 
 Setup Environment
---------
+-----------------
 
 ### Requirements:
-* [Rust](#rust)
-* Just ([Install Instructions](https://github.com/casey/just?tab=readme-ov-file#installation))
+
+* [Rust](#Manual-Install)
+* [Just](https://github.com/casey/just?tab=readme-ov-file#installation)
 
 #### Manual Install
-[Just](https://github.com/casey/just?tab=readme-ov-file#installation) is used as the projects command runner and is highly recommended. Rust is required to build, text, and develop. To install Rust:
-```
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+Rust is required to build, test, and develop. To install: 
+
+``` 
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh 
 ```
 
 #### Bundled Environment
-This repo includes a bundled development environment with [Hermit](https://github.com/cashapp/hermit) that provides the above requirements.
+
+This repo includes a bundled development environment with
+[Hermit](https://github.com/cashapp/hermit) that provides the above
+requirements. 
+
 ```
 . ./bin/activate-hermit
 ```
