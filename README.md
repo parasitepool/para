@@ -13,14 +13,49 @@
 </div>
 <br>
 
-## Hermit Environment
+Building
+--------
+
+You'll need Rust:
+
+```
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+Clone the `para` repo:
+
+```
+git clone https://github.com/parasitepool/para.git
+cd para
+```
+
+To build a specific version of `para`, first checkout that version:
+
+```
+git checkout <VERSION>
+```
+
+And finally to actually build `para`:
+
+```
+cargo build --release
+```
+
+Once built, the `para` binary can be found at `./target/release/para`.
+
+`para` requires `rustc` version 1.90.0 or later. Run `rustc --version` to ensure
+you have this version. Run `rustup update` to get the latest stable release.
+
+Hermit Environment
+------------------
 
 A full development/build environment is bundled using hermit and can be activated as follows:
 ```
 . ./bin/activate-hermit
 ```
 
-## Building the docs
+Building the docs
+-----------------
 
 ```
 cargo install mdbook mdbook-linkcheck
