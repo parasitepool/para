@@ -1,20 +1,20 @@
 use super::*;
 
 #[derive(Boilerplate, Debug, Deserialize, Serialize, PartialEq)]
-pub struct HealthcheckHtml {
+pub struct StatusHtml {
     pub cpu_usage_percent: f64,
     pub disk_usage_percent: f64,
     pub memory_usage_percent: f64,
     pub uptime: u64,
 }
 
-impl PageContent for HealthcheckHtml {
+impl PageContent for StatusHtml {
     fn title(&self) -> String {
-        "Healthcheck".to_string()
+        "Status".to_string()
     }
 }
 
-impl HealthcheckHtml {
+impl StatusHtml {
     pub fn display_cpu_usage(&self) -> String {
         format!("{:.2}", self.cpu_usage_percent)
     }

@@ -157,27 +157,27 @@ fn aggregate_users() {
 }
 
 #[test]
-fn healthcheck_json() {
+fn status_json() {
     let server = TestServer::spawn();
 
-    let healthcheck = server.get_json::<Healthcheck>("/healthcheck");
+    let status = server.get_json::<Status>("/status");
 
-    assert!(healthcheck.disk_usage_percent > 0.0);
+    assert!(status.disk_usage_percent > 0.0);
 }
 
 #[test]
-fn healthcheck_with_auth() {
+fn status_with_auth() {
     let server = TestServer::spawn_with_args("--username foo --password bar");
 
     let response = reqwest::blocking::Client::new()
-        .get(format!("{}healthcheck", server.url()))
+        .get(format!("{}status", server.url()))
         .send()
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
     let response = reqwest::blocking::Client::new()
-        .get(format!("{}healthcheck", server.url()))
+        .get(format!("{}status", server.url()))
         .basic_auth("foo", Some("bar"))
         .send()
         .unwrap();

@@ -8,8 +8,7 @@ use {
     error::{OptionExt, ServerError, ServerResult},
     server_config::ServerConfig,
     templates::{
-        PageContent, PageHtml, dashboard::DashboardHtml, healthcheck::HealthcheckHtml,
-        home::HomeHtml,
+        PageContent, PageHtml, dashboard::DashboardHtml, home::HomeHtml, status::StatusHtml,
     },
 };
 
@@ -111,8 +110,8 @@ impl Server {
             ))
             .route("/", get(Self::home))
             .route(
-                "/healthcheck",
-                Self::with_auth(config.clone(), get(Self::healthcheck)),
+                "/status",
+                Self::with_auth(config.clone(), get(Self::status)),
             )
             .route("/static/{*path}", get(Self::static_assets));
 
@@ -207,7 +206,7 @@ impl Server {
         })
     }
 
-    pub(crate) async fn healthcheck(
+    pub(crate) async fn status(
         Extension(config): Extension<Arc<ServerConfig>>,
         AcceptJson(accept_json): AcceptJson,
     ) -> ServerResult<Response> {
@@ -240,7 +239,7 @@ impl Server {
             system.refresh_cpu_all();
             let cpu_usage_percent: f64 = system.global_cpu_usage().into();
 
-            let healthcheck = HealthcheckHtml {
+            let status = StatusHtml {
                 disk_usage_percent,
                 memory_usage_percent,
                 cpu_usage_percent,
@@ -248,9 +247,9 @@ impl Server {
             };
 
             Ok(if accept_json {
-                Json(healthcheck).into_response()
+                Json(status).into_response()
             } else {
-                healthcheck.page(config.domain()).into_response()
+                status.page(config.domain()).into_response()
             })
         })
     }

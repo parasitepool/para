@@ -122,7 +122,7 @@ impl Aggregator {
             async move {
                 let result = async {
                     let mut request_builder = client
-                        .get(url.join("/healthcheck")?)
+                        .get(url.join("/healthcheck")?) // TODO: change to status
                         .header("accept", "application/json");
 
                     if let Some((username, password)) = credentials {
@@ -131,10 +131,10 @@ impl Aggregator {
 
                     let resp = request_builder.send().await?;
 
-                    let healthcheck: Result<api::Healthcheck> =
+                    let status: Result<api::Status> =
                         serde_json::from_str(&resp.text().await?).map_err(|err| anyhow!(err));
 
-                    healthcheck
+                    status
                 }
                 .await;
 
@@ -142,20 +142,18 @@ impl Aggregator {
             }
         });
 
-        let results: Vec<(&Url, Result<api::Healthcheck>)> = join_all(fetches).await;
+        let results: Vec<(&Url, Result<api::Status>)> = join_all(fetches).await;
 
         let mut checks = BTreeMap::new();
 
         for (url, result) in results {
-            if let Ok(healthcheck) = result {
-                checks.insert(url.host_str().unwrap_or("unknown").to_string(), healthcheck);
+            if let Ok(status) = result {
+                checks.insert(url.host_str().unwrap_or("unknown").to_string(), status);
             }
         }
 
-        Ok(DashboardHtml {
-            healthchecks: checks,
-        }
-        .page(config.domain())
-        .into_response())
+        Ok(DashboardHtml { statuses: checks }
+            .page(config.domain())
+            .into_response())
     }
 }
