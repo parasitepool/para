@@ -207,17 +207,26 @@ impl SyncSend {
             return Ok(SyncResult::Complete);
         }
 
-        let current_blockheight = database.get_blockheight_for_id(*current_id).await?;
+        let current_blockheight = database
+            .get_blockheight_for_id(*current_id)
+            .await?
+            .unwrap_or(0);
         let latest_blockheight = database.get_blockheight_for_id(max_id).await?;
 
         match (current_blockheight, latest_blockheight) {
-            (Some(current_bh), Some(latest_bh)) if current_bh >= latest_bh => {
+            (current_bh, Some(latest_bh)) if current_bh >= latest_bh => {
                 return Ok(SyncResult::WaitForNewBlock);
             }
             _ => {}
         }
 
-        let target_id = std::cmp::min(*current_id + self.batch_size, max_id - TARGET_ID_BUFFER);
+        let target_id = std::cmp::min(
+            *current_id + self.batch_size,
+            database
+                .get_last_id_for_blockheight(current_blockheight)
+                .await?
+                .unwrap_or(i64::MAX),
+        );
 
         info!(
             "Fetching shares from ID {} to {} (max: {}) - blockheights: {:?} -> {:?}",
@@ -254,12 +263,12 @@ impl SyncSend {
         let shares = database
             .get_shares_by_id_range(*current_id + 1, target_id)
             .await?;
-        let block = if let Some(bh) = current_blockheight {
-            database.get_block_by_height(bh).await?
+        let block = if current_blockheight > 0 {
+            database.get_block_by_height(current_blockheight).await?
         } else {
             None
         };
-        let highest_id = shares.last().map(|share| share.id);
+        let highest_id = shares.last().map(|share| share.id).unwrap_or(target_id);
 
         if shares.is_empty() && block.is_none() {
             info!("No shares found in range, moving to next batch");
@@ -273,11 +282,11 @@ impl SyncSend {
         // retry n times
         for attempt in 1..=MAX_RETRIES {
             match self
-                .send_batch_http(client, &block, &shares, *current_id + 1, target_id)
+                .send_batch_http(client, &block, &shares, *current_id + 1, highest_id)
                 .await
             {
                 Ok(_) => {
-                    *current_id = highest_id.unwrap_or(target_id);
+                    *current_id = highest_id;
                     self.save_current_id(*current_id).await?;
                     return Ok(SyncResult::Continue);
                 }
@@ -438,6 +447,21 @@ impl Database {
                 .fetch_optional(&self.pool)
                 .await
                 .map_err(|e| anyhow!("Failed to get blockheight for ID {}: {}", id, e))?;
+
+        Ok(result.flatten())
+    }
+
+    pub(crate) async fn get_last_id_for_blockheight(
+        &self,
+        blockheight: i32,
+    ) -> Result<Option<i64>> {
+        let result = sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT MAX(id) FROM shares WHERE blockheight = $1",
+        )
+        .bind(blockheight)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| anyhow!("Failed to get ID for blockheight {}: {}", blockheight, e))?;
 
         Ok(result.flatten())
     }
