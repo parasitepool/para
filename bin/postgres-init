@@ -71,7 +71,7 @@ PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
 # Create blockheight index if it it does not exist
 PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
   CREATE INDEX CONCURRENTLY IF NOT EXISTS
-      idx_remote_shares_blockheight ON
+      idx_shares_blockheight ON
       shares (blockheight);
   "
 
