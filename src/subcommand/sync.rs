@@ -123,7 +123,7 @@ enum SyncResult {
 }
 
 impl SyncSend {
-    pub(crate) async fn run(self, _handle: Handle) -> Result<()> {
+    pub async fn run(self) -> Result<()> {
         let shutdown_flag = Arc::new(AtomicBool::new(false));
         let shutdown_flag_clone = shutdown_flag.clone();
 
