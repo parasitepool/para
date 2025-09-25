@@ -2,7 +2,6 @@ use {
     super::*, crate::subcommand::server::database::Database, reqwest::Client, tokio::time::Duration,
 };
 
-const ID_FILE: &str = "current_id.txt";
 const SYNC_DELAY_MS: u64 = 1000;
 const BLOCKHEIGHT_CHECK_DELAY_MS: u64 = 5000;
 const TARGET_ID_BUFFER: i64 = 0;
@@ -47,6 +46,13 @@ pub struct SyncSend {
 
     #[arg(long, help = "Password for basic auth on sync endpoint")]
     sync_password: Option<String>,
+
+    #[arg(
+        long,
+        help = "File to store sync progress to",
+        default_value = "current_id.txt"
+    )]
+    pub id_file: String,
 }
 
 impl Default for SyncSend {
@@ -394,8 +400,8 @@ impl SyncSend {
     }
 
     async fn load_current_id(&self) -> Result<i64> {
-        if Path::new(ID_FILE).exists() {
-            let content = fs::read_to_string(ID_FILE)
+        if Path::new(&self.id_file).exists() {
+            let content = fs::read_to_string(&self.id_file)
                 .map_err(|e| anyhow!("Failed to read ID file: {}", e))?;
             let id = content
                 .trim()
@@ -408,7 +414,8 @@ impl SyncSend {
     }
 
     async fn save_current_id(&self, id: i64) -> Result<()> {
-        fs::write(ID_FILE, id.to_string()).map_err(|e| anyhow!("Failed to save ID file: {e}"))?;
+        fs::write(&self.id_file, id.to_string())
+            .map_err(|e| anyhow!("Failed to save ID file: {e}"))?;
         Ok(())
     }
 
