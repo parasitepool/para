@@ -1,16 +1,22 @@
 <section>
-  %% for (hostname, check) in &self.statuses {
+%% for (hostname, status) in &self.statuses {
   <article>
     <h2>{{ hostname }}</h2>
     <ul>
-      <li>Disk: {{ check.display_disk_usage() }}%</li>
-      <li>Memory: {{ check.display_memory_usage() }}%</li>
-      <li>CPU: {{ check.display_cpu_usage() }}%</li>
-      <li>Uptime: {{ check.display_uptime() }}</li>
+      <li>Disk: {{ status.display_disk_usage() }}%</li>
+      <li>Memory: {{ status.display_memory_usage() }}%</li>
+      <li>CPU: {{ status.display_cpu_usage() }}%</li>
+      <li>Uptime: {{ status.display_uptime() }}</li>
+%% if let Some(hashrate) = status.hashrate {
+      <li> Hashrate: {{ hashrate }}</li>
+%% }
+%% if let Some(workers) = status.workers {
+      <li>Workers: {{ workers }}</li>
+%% }
     </ul>
   </article>
   <br>
-  %% }
+%% }
 </section>
 
 <div id="refresh" role="status" aria-live="polite">

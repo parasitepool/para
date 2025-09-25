@@ -1,9 +1,4 @@
-use {
-    super::*,
-    crate::ckpool,
-    futures::future::join_all,
-    reqwest::{Client, ClientBuilder},
-};
+use super::*;
 
 pub(crate) struct Aggregator;
 
@@ -122,7 +117,7 @@ impl Aggregator {
             async move {
                 let result = async {
                     let mut request_builder = client
-                        .get(url.join("/healthcheck")?) // TODO: change to status
+                        .get(url.join("/status")?)
                         .header("accept", "application/json");
 
                     if let Some((username, password)) = credentials {
