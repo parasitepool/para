@@ -213,18 +213,14 @@ impl SyncSend {
             return Ok(SyncResult::Complete);
         }
 
-        let current_blockheight = database
+        let last_blockheight = database
             .get_blockheight_for_id(*current_id)
             .await?
             .unwrap_or(0);
-        let latest_blockheight = database.get_blockheight_for_id(max_id).await?;
-
-        match (current_blockheight, latest_blockheight) {
-            (current_bh, Some(latest_bh)) if current_bh >= latest_bh => {
-                return Ok(SyncResult::WaitForNewBlock);
-            }
-            _ => {}
-        }
+        let current_blockheight = database
+            .get_blockheight_for_id(*current_id + 1)
+            .await?
+            .unwrap_or(0);
 
         let target_id = std::cmp::min(
             *current_id + self.batch_size,
@@ -233,6 +229,14 @@ impl SyncSend {
                 .await?
                 .unwrap_or(i64::MAX),
         );
+        let latest_blockheight = database.get_blockheight_for_id(target_id).await?;
+
+        match (last_blockheight, latest_blockheight) {
+            (current_bh, Some(latest_bh)) if current_bh >= latest_bh => {
+                return Ok(SyncResult::WaitForNewBlock);
+            }
+            _ => {}
+        }
 
         info!(
             "Fetching shares from ID {} to {} (max: {}) - blockheights: {:?} -> {:?}",
@@ -269,17 +273,13 @@ impl SyncSend {
         let shares = database
             .get_shares_by_id_range(*current_id + 1, target_id)
             .await?;
-        let block = if current_blockheight > 0 {
-            database.get_block_by_height(current_blockheight).await?
-        } else {
-            None
-        };
+        let block = database.get_block_finds(current_blockheight).await?;
         let highest_id = shares.last().map(|share| share.id).unwrap_or(target_id);
 
         if shares.is_empty() && block.is_none() {
             info!("No shares found in range, moving to next batch");
             *current_id = target_id;
-            self.save_current_id(*current_id).await?;
+            self.save_current_id(target_id).await?;
             return Ok(SyncResult::Continue);
         }
 
@@ -526,17 +526,17 @@ impl Database {
         Ok(())
     }
 
-    pub(crate) async fn get_block_by_height(
+    pub(crate) async fn get_block_finds(
         &self,
-        blockheight: i32,
+        mut blockheight: i32,
     ) -> Result<Option<FoundBlockRecord>, Error> {
         if blockheight == 0 {
-            return Err(anyhow!("Invalid blockheight: {blockheight}"));
+            blockheight = 1
         }
 
         sqlx::query_as::<_, FoundBlockRecord>(
             "SELECT id, blockheight, blockhash, confirmed, workername, username,
-         diff, coinbasevalue, rewards_processed FROM blocks WHERE blockheight = $1",
+         diff, coinbasevalue, rewards_processed FROM blocks WHERE blockheight >= $1 ORDER BY blockheight ASC",
         )
         .bind(blockheight)
         .fetch_optional(&self.pool)
