@@ -9,11 +9,7 @@ impl Aggregator {
             .use_rustls_tls()
             .build()?;
 
-        let cache = Arc::new(Cache::new(
-            client.clone(),
-            config.clone(),
-            Duration::from_secs(30),
-        ));
+        let cache = Arc::new(Cache::new(client.clone(), config.clone()));
 
         let router = Router::new()
             .route("/aggregator/pool/pool.status", get(Self::pool_status))
@@ -30,7 +26,10 @@ impl Aggregator {
     }
 
     async fn pool_status(Extension(cache): Extension<Arc<Cache>>) -> ServerResult<Response> {
-        let aggregated = cache.pool_status().await?;
+        let aggregated = cache
+            .pool_status()
+            .await?
+            .ok_or_not_found(|| "Pool status")?;
 
         Ok(aggregated.to_string().into_response())
     }
@@ -42,7 +41,7 @@ impl Aggregator {
         let aggregated = cache
             .user_status(address.clone())
             .await?
-            .ok_or_else(|| anyhow!("User {address} not found on any node"))?;
+            .ok_or_not_found(|| format!("User {address}"))?;
 
         Ok(Json(aggregated).into_response())
     }

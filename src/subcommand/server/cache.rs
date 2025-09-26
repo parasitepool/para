@@ -1,11 +1,19 @@
 use {super::*, dashmap::DashMap};
 
+#[derive(Debug)]
 struct Cached<T> {
     value: Option<T>,
     last_updated: Instant,
 }
 
 impl<T: Clone> Cached<T> {
+    fn init(ttl: Duration) -> Self {
+        Self {
+            value: None,
+            last_updated: Instant::now() - ttl,
+        }
+    }
+
     fn new(value: Option<T>) -> Self {
         Self {
             value,
@@ -13,38 +21,37 @@ impl<T: Clone> Cached<T> {
         }
     }
 
-    fn value(&self, ttl: Duration) -> Option<T> {
-        if self.value.is_none() || self.last_updated.elapsed() >= ttl {
-            None
-        } else {
-            self.value.clone()
-        }
+    fn is_fresh(&self, ttl: Duration) -> bool {
+        self.last_updated.elapsed() < ttl
+    }
+
+    fn value(&self) -> Option<T> {
+        self.value.clone()
     }
 }
 
+#[derive(Debug)]
 pub(super) struct Cache {
     client: Client,
     config: Arc<ServerConfig>,
-    ttl: Duration,
     pool_status: Mutex<Cached<ckpool::Status>>,
     users: DashMap<String, Arc<Mutex<Cached<ckpool::User>>>>,
 }
 
 impl Cache {
-    pub(super) fn new(client: Client, config: Arc<ServerConfig>, ttl: Duration) -> Self {
+    pub(super) fn new(client: Client, config: Arc<ServerConfig>) -> Self {
         Self {
             client,
-            config,
-            ttl,
-            pool_status: Mutex::new(Cached::new(None)),
+            config: config.clone(),
+            pool_status: Mutex::new(Cached::init(config.ttl())),
             users: DashMap::new(),
         }
     }
 
-    pub(super) async fn pool_status(&self) -> Result<ckpool::Status> {
+    pub(super) async fn pool_status(&self) -> Result<Option<ckpool::Status>> {
         let mut cached = self.pool_status.lock().await;
-        if let Some(status) = cached.value(self.ttl) {
-            return Ok(status);
+        if cached.is_fresh(self.config.ttl()) {
+            return Ok(cached.value());
         }
 
         let nodes = self.config.nodes();
@@ -76,21 +83,25 @@ impl Cache {
             }
         }
 
+        if aggregated.is_none() {
+            error!("Failed aggregate pool statistics");
+        }
+
         *cached = Cached::new(aggregated);
 
-        aggregated.ok_or_else(|| anyhow!("Failed to aggregate statistics"))
+        Ok(aggregated)
     }
 
     pub(super) async fn user_status(&self, address: String) -> Result<Option<ckpool::User>> {
         let cell = self
             .users
             .entry(address.clone())
-            .or_insert_with(|| Arc::new(Mutex::new(Cached::new(None))))
+            .or_insert_with(|| Arc::new(Mutex::new(Cached::init(self.config.ttl()))))
             .clone();
 
         let mut cached = cell.lock().await;
-        if let Some(user) = cached.value(self.ttl) {
-            return Ok(Some(user));
+        if cached.is_fresh(self.config.ttl()) {
+            return Ok(cached.value());
         }
 
         let nodes = self.config.nodes();
@@ -121,6 +132,10 @@ impl Cache {
                     user
                 });
             }
+        }
+
+        if aggregated.is_none() {
+            error!("Failed to find user {address} on any node");
         }
 
         *cached = Cached::new(aggregated.clone());

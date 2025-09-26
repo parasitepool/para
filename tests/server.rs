@@ -217,3 +217,127 @@ fn aggregator_dashboard_with_auth() {
 
     assert_eq!(response.status(), StatusCode::OK);
 }
+
+#[test]
+fn aggregator_cache_ttl() {
+    let mut users = Vec::new();
+    for i in 0..9 {
+        let user = typical_user();
+        let user_address = address(i);
+
+        users.push((user_address.to_string(), user));
+    }
+
+    assert_eq!(users.len(), 9);
+
+    let mut servers = Vec::new();
+    for (address, user) in users.iter().take(3) {
+        let server = TestServer::spawn();
+
+        fs::write(
+            server.log_dir().join(format!("users/{address}")),
+            serde_json::to_string(&user).unwrap(),
+        )
+        .unwrap();
+
+        fs::write(
+            server.log_dir().join("pool/pool.status"),
+            typical_status().to_string(),
+        )
+        .unwrap();
+
+        servers.push(server)
+    }
+
+    assert_eq!(servers.len(), 3);
+
+    let aggregator = TestServer::spawn_with_args(format!(
+        "--nodes {} --nodes {} --nodes {} --ttl 1",
+        servers[0].url(),
+        servers[1].url(),
+        servers[2].url()
+    ));
+
+    aggregator.assert_response(
+        "/aggregator/pool/pool.status",
+        &(typical_status() + typical_status() + typical_status()).to_string(),
+    );
+
+    for (address, user) in users.iter().take(3) {
+        let response = aggregator.get_json::<User>(format!("/aggregator/users/{address}"));
+        pretty_assert_eq!(response, *user);
+    }
+
+    fs::write(
+        servers[1].log_dir().join("pool/pool.status"),
+        zero_status().to_string(),
+    )
+    .unwrap();
+
+    fs::write(
+        servers[0].log_dir().join(format!("users/{}", users[0].0)),
+        serde_json::to_string(&zero_user()).unwrap(),
+    )
+    .unwrap();
+
+    aggregator.assert_response(
+        "/aggregator/pool/pool.status",
+        &(typical_status() + typical_status() + typical_status()).to_string(),
+    );
+
+    let response = aggregator.get_json::<User>(format!("/aggregator/users/{}", users[0].0));
+    pretty_assert_eq!(response, typical_user());
+
+    thread::sleep(Duration::from_secs(1));
+
+    aggregator.assert_response(
+        "/aggregator/pool/pool.status",
+        &(zero_status() + typical_status() + typical_status()).to_string(),
+    );
+
+    let response = aggregator.get_json::<User>(format!("/aggregator/users/{}", users[0].0));
+    pretty_assert_eq!(response, zero_user());
+}
+
+#[test]
+fn aggregator_negative_cache_on_users() {
+    let mut servers = Vec::new();
+    for _ in 0..3 {
+        let server = TestServer::spawn();
+        servers.push(server)
+    }
+
+    assert_eq!(servers.len(), 3);
+
+    let aggregator = TestServer::spawn_with_args(format!(
+        "--nodes {} --nodes {} --nodes {} --ttl 1",
+        servers[0].url(),
+        servers[1].url(),
+        servers[2].url()
+    ));
+
+    let non_existent_user = "bc1ghostuser";
+
+    aggregator.assert_response_code(
+        format!("/aggregator/users/{non_existent_user}"),
+        StatusCode::NOT_FOUND,
+    );
+
+    fs::write(
+        servers[0]
+            .log_dir()
+            .join(format!("users/{non_existent_user}")),
+        serde_json::to_string(&typical_user()).unwrap(),
+    )
+    .unwrap();
+
+    aggregator.assert_response_code(
+        format!("/aggregator/users/{non_existent_user}"),
+        StatusCode::NOT_FOUND,
+    );
+
+    thread::sleep(Duration::from_secs(1));
+
+    let response = aggregator.get_json::<User>(format!("/aggregator/users/{non_existent_user}"));
+    pretty_assert_eq!(response, typical_user());
+}
