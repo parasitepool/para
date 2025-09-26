@@ -43,13 +43,11 @@ impl Subcommand {
                             sync_send = sync_send.with_credentials(username, password);
                         }
 
-                        let sync_handle = handle.clone();
-
                         let send_task = rt.spawn_blocking(move || {
                             let sync_rt =
                                 Runtime::new().expect("Failed to create sync send runtime");
                             sync_rt.block_on(async {
-                                if let Err(e) = sync_send.run(sync_handle).await {
+                                if let Err(e) = sync_send.run().await {
                                     error!("SyncSend failed: {}", e);
                                 }
                             });
@@ -76,8 +74,7 @@ impl Subcommand {
                 server_result
             }
             Self::SyncSend(sync_send) => {
-                let handle = Handle::new();
-                Ok(Runtime::new()?.block_on(async { sync_send.run(handle).await })?)
+                Ok(Runtime::new()?.block_on(async { sync_send.run().await })?)
             }
         }
     }

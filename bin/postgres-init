@@ -68,6 +68,12 @@ PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
       agent TEXT
   )
   "
+# Create blockheight index if it it does not exist
+PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
+  CREATE INDEX CONCURRENTLY IF NOT EXISTS
+      idx_shares_blockheight ON
+      shares (blockheight);
+  "
 
 # Create remote_share table if it doesn't exist (now using -h localhost to force TCP connection)
 PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
@@ -100,6 +106,12 @@ PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
 
       PRIMARY KEY (id, origin)
   )
+  "
+# Create blockheight index if it it does not exist
+PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
+  CREATE INDEX CONCURRENTLY IF NOT EXISTS
+      idx_remote_shares_blockheight ON
+      remote_shares (blockheight);
   "
 
 # This is wildly unacceptable and demonstrates why we made need to move to an internal query-library model
