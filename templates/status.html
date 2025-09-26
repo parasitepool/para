@@ -1,0 +1,12 @@
+Status<br>
+<br>
+Disk Usage: {{ self.display_disk_usage() }}%<br>
+Memory Usage: {{ self.display_memory_usage() }}%<br>
+CPU Usage: {{ self.display_cpu_usage() }}%<br>
+Uptime: {{ self.display_uptime() }}<br>
+%% if let Some(hashrate) = self.hashrate {
+Hashrate: {{ hashrate }}<br>
+%% }
+%% if let Some(workers) = self.workers {
+Workers: {{ workers }}<br>
+%% }

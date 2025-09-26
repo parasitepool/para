@@ -5,8 +5,8 @@ use {
 };
 
 pub(crate) mod dashboard;
-pub(crate) mod healthcheck;
 pub(crate) mod home;
+pub(crate) mod status;
 
 #[derive(Boilerplate)]
 pub struct PageHtml<T: PageContent> {
