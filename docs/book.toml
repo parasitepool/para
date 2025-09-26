@@ -5,7 +5,7 @@ language = "en"
 src = "src"
 
 [build]
-build-dir = "build/html"
+build-dir = "build"
 create-missing = false
 
 [output.html]
