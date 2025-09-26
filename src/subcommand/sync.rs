@@ -215,10 +215,7 @@ impl SyncSend {
 
         let next_id = database.get_next_id(*current_id).await.unwrap_or(0);
 
-        let current_blockheight = database
-            .get_blockheight_for_id(next_id)
-            .await?
-            .unwrap_or(0);
+        let current_blockheight = database.get_blockheight_for_id(next_id).await?.unwrap_or(0);
 
         let last_id_in_block = database
             .get_last_id_for_blockheight(current_blockheight)
@@ -238,39 +235,24 @@ impl SyncSend {
 
         info!(
             "Fetching shares from ID {} to {} (max: {}) - blockheights: {:?} -> {:?}",
-            next_id,
-            target_id,
-            max_id,
-            current_blockheight,
-            latest_blockheight
+            next_id, target_id, max_id, current_blockheight, latest_blockheight
         );
 
         // Run share compression BEFORE transmitting
-        info!(
-            "Compressing shares in range {} to {}",
-            next_id,
-            target_id
-        );
-        match database
-            .compress_shares_range(next_id, target_id)
-            .await
-        {
+        info!("Compressing shares in range {} to {}", next_id, target_id);
+        match database.compress_shares_range(next_id, target_id).await {
             Ok(compressed_count) => {
                 info!("Compressed {compressed_count} share records in range");
             }
             Err(e) => {
                 error!(
                     "Warning: Failed to compress range {} to {}: {}",
-                    next_id,
-                    target_id,
-                    e
+                    next_id, target_id, e
                 );
             }
         }
 
-        let shares = database
-            .get_shares_by_id_range(next_id, target_id)
-            .await?;
+        let shares = database.get_shares_by_id_range(next_id, target_id).await?;
         let block = database.get_block_finds(current_blockheight).await?;
         let highest_id = shares.last().map(|share| share.id).unwrap_or(target_id);
 
@@ -446,11 +428,13 @@ impl Database {
     }
 
     pub(crate) async fn get_next_id(&self, id: i64) -> Result<i64> {
-        let result = sqlx::query_scalar::<_, Option<i64>>("SELECT id FROM shares WHERE id > $1 ORDER BY id ASC LIMIT 1")
-            .bind(id)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|e| anyhow!("Failed to get next ID: {e}"))?;
+        let result = sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT id FROM shares WHERE id > $1 ORDER BY id ASC LIMIT 1",
+        )
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| anyhow!("Failed to get next ID: {e}"))?;
 
         Ok(result.unwrap_or(0))
     }
