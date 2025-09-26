@@ -7,6 +7,7 @@ use {
     accept_json::AcceptJson,
     aggregator::Aggregator,
     axum::extract::{Path, Query},
+    cache::Cache,
     database::Database,
     error::{OptionExt, ServerError, ServerResult},
     futures::future::join_all,
@@ -15,13 +16,12 @@ use {
     templates::{
         PageContent, PageHtml, dashboard::DashboardHtml, home::HomeHtml, status::StatusHtml,
     },
-    cache::Cache,
 };
 
 mod accept_json;
 mod aggregator;
-mod cache;
 pub mod api;
+mod cache;
 pub mod database;
 mod error;
 pub mod notifications;

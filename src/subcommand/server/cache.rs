@@ -42,11 +42,9 @@ impl Cache {
     }
 
     pub(super) async fn pool_status(&self) -> Result<ckpool::Status> {
-        {
-            let cached = self.pool_status.lock().await;
-            if let Some(status) = cached.value(self.ttl) {
-                return Ok(status);
-            }
+        let mut cached = self.pool_status.lock().await;
+        if let Some(status) = cached.value(self.ttl) {
+            return Ok(status);
         }
 
         let nodes = self.config.nodes();
@@ -58,7 +56,6 @@ impl Cache {
                     ckpool::Status::from_str(&resp.text().await?)
                 }
                 .await;
-
                 (url, result)
             }
         });
@@ -75,29 +72,25 @@ impl Cache {
                         status
                     });
                 }
-                Err(err) => {
-                    warn!("Failed to fetch status from {url} with: {err}");
-                }
+                Err(err) => warn!("Failed to fetch status from {url} with: {err}"),
             }
         }
 
-        {
-            let mut cached = self.pool_status.lock().await;
-            *cached = Cached::new(aggregated);
-        }
+        *cached = Cached::new(aggregated);
 
         aggregated.ok_or_else(|| anyhow!("Failed to aggregate statistics"))
     }
 
     pub(super) async fn user_status(&self, address: String) -> Result<Option<ckpool::User>> {
-            let entry = self
-                .users
-                .entry(address.clone())
-                .or_insert_with(|| Arc::new(Mutex::new(Cached::new(None)))).clone();
+        let cell = self
+            .users
+            .entry(address.clone())
+            .or_insert_with(|| Arc::new(Mutex::new(Cached::new(None))))
+            .clone();
 
-        {
-            let cached = self.users.get(&address);
-            if let Some(user) = 
+        let mut cached = cell.lock().await;
+        if let Some(user) = cached.value(self.ttl) {
+            return Ok(Some(user));
         }
 
         let nodes = self.config.nodes();
@@ -110,11 +103,9 @@ impl Cache {
                         .get(url.join(&format!("/users/{address}"))?)
                         .send()
                         .await?;
-
                     serde_json::from_str::<ckpool::User>(&resp.text().await?).map_err(Into::into)
                 }
                 .await;
-
                 (url, result)
             }
         });
@@ -131,6 +122,8 @@ impl Cache {
                 });
             }
         }
+
+        *cached = Cached::new(aggregated.clone());
 
         Ok(aggregated)
     }
