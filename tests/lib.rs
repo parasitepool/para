@@ -22,7 +22,7 @@ use {
         path::PathBuf,
         process::{Child, Command, Stdio},
         str::FromStr,
-        sync::Arc,
+        sync::{Arc, Barrier},
         thread,
         time::Duration,
     },

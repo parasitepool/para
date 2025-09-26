@@ -34,9 +34,11 @@ pub(crate) struct ServerConfig {
     sync_endpoint: Option<String>,
     #[arg(
         long,
-        help = "The channel at ntfy.sh to use for block found notifications"
+        help = "The <CHANNEL> at ntfy.sh to use for block found notifications."
     )]
     pub(crate) alerts_ntfy_channel: Option<String>,
+    #[clap(long, help = "Cache <TTL> in seconds.", default_value = "30")]
+    ttl: u64,
 }
 
 impl ServerConfig {
@@ -106,5 +108,9 @@ impl ServerConfig {
 
     pub(crate) fn sync_endpoint(&self) -> Option<String> {
         self.sync_endpoint.clone()
+    }
+
+    pub(crate) fn ttl(&self) -> Duration {
+        Duration::from_secs(self.ttl)
     }
 }
