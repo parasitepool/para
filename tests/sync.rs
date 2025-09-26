@@ -1,9 +1,12 @@
-use super::*;
-use crate::test_psql::{
-    create_test_block, create_test_shares, insert_test_block, insert_test_shares, setup_test_schema,
+use {
+    super::*,
+    crate::test_psql::{
+        create_test_block, create_test_shares, insert_test_block, insert_test_shares,
+        setup_test_schema,
+    },
+    crate::test_server::Credentials,
+    tempfile::tempdir,
 };
-use crate::test_server::Credentials;
-use tempfile::tempdir;
 
 static BATCH_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
