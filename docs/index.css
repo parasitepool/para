@@ -18,8 +18,7 @@ html body .search-wrapper #searchbar {
     background: #000 !important;
     color: #fff !important;
 }
-html body .search-wrapper #searchbar:focus,
-html body .search-wrapper #searchbar:focus-visible {
+#searchbar:focus-visible {
     outline: none !important;
 }
 .header-logo {
