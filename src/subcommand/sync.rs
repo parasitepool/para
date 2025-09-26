@@ -447,6 +447,7 @@ impl Database {
 
     pub(crate) async fn get_next_id(&self, id: i64) -> Result<i64> {
         let result = sqlx::query_scalar::<_, Option<i64>>("SELECT id FROM shares WHERE id > $1 ORDER BY id ASC LIMIT 1")
+            .bind(id)
             .fetch_one(&self.pool)
             .await
             .map_err(|e| anyhow!("Failed to get next ID: {e}"))?;
