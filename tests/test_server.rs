@@ -43,6 +43,9 @@ impl TestServer {
             logdir.display(),
             args.to_args().join(" ")
         ))
+        .capture_stderr(true)
+        .capture_stdout(true)
+        .env("RUST_LOG", "info")
         .integration_test(true)
         .spawn();
 
@@ -168,6 +171,18 @@ impl TestServer {
         );
 
         pretty_assert_eq!(response.text().unwrap(), expected_response);
+    }
+
+    #[track_caller]
+    pub(crate) fn assert_response_code(&self, path: impl AsRef<str>, expected_code: StatusCode) {
+        let response = reqwest::blocking::get(self.url().join(path.as_ref()).unwrap()).unwrap();
+
+        assert_eq!(
+            response.status(),
+            expected_code,
+            "{}",
+            response.text().unwrap()
+        );
     }
 
     #[track_caller]
