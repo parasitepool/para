@@ -415,15 +415,15 @@ async fn test_sync_endpoint_to_endpoint() {
     assert!(stored_block.is_some());
     assert_eq!(stored_block.unwrap().0, 800030);
 
-    let block_count: Vec<(i64, i32, i32)> =
+    let block_count: (i64, i32, i32) =
         sqlx::query_as("SELECT count(*), min(blockheight), max(blockheight) FROM blocks")
-            .fetch_all(&pool)
+            .fetch_one(&pool)
             .await
             .unwrap();
 
-    assert_eq!(block_count[0].0, 3);
-    assert_eq!(block_count[0].1, 800030);
-    assert_eq!(block_count[0].2, 800032);
+    assert_eq!(block_count.0, 3);
+    assert_eq!(block_count.1, 800030);
+    assert_eq!(block_count.2, 800032);
 
     pool.close().await;
 }
