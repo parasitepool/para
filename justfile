@@ -12,6 +12,7 @@ clippy:
 ci: clippy
   cargo fmt -- --check
   cargo test --all
+  cargo test --all -- --ignored
 
 outdated:
   cargo outdated --root-deps-only --workspace
