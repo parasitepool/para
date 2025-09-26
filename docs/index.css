@@ -10,6 +10,20 @@ html.para #sidebar {
 #menu-bar {
     border-bottom: 1px solid #ffffff;
 }
+.header-logo {
+    max-width: 50%;
+    padding-top: 1%;
+}
+#menu-bar img.header-logo {
+    width: auto;
+    height: 2vw;
+}
+@media (max-width: 640px) {
+    #menu-bar img.header-logo {
+        height: 4vw;
+        width: auto;
+    }
+}
 html body .search-wrapper #searchbar {
     border-radius: 0 !important;
     font-family: "Courier New", monospace !important;
@@ -18,13 +32,11 @@ html body .search-wrapper #searchbar {
     background: #000 !important;
     color: #fff !important;
 }
+
 #searchbar:focus-visible {
     outline: none !important;
 }
-.header-logo {
-    max-width: 50%;
-    padding-top: 1%;
-}
+
 th {
     color: var(--table-header-fg);
 }
