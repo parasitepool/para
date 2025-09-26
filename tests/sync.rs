@@ -232,6 +232,7 @@ async fn test_sync_large_batch() {
             .fetch_all(&pool)
             .await
             .unwrap();
+
     assert_eq!(stored_shares.len() as u32, record_count_in_large_batch);
 
     let stored_block: Option<(i32, String)> =
@@ -240,6 +241,7 @@ async fn test_sync_large_batch() {
             .fetch_optional(&pool)
             .await
             .unwrap();
+
     assert!(stored_block.is_some());
     assert_eq!(stored_block.unwrap().1, test_block.blockhash);
 
@@ -252,7 +254,7 @@ async fn test_sync_multiple_batches_different_blocks() {
     let db_url = server.database_url().unwrap();
     setup_test_schema(db_url.clone()).await.unwrap();
 
-    for block_height in 800010i64..800015i64 {
+    for block_height in 800010..800015 {
         let test_shares = create_test_shares(10, block_height);
         let test_block = create_test_block(block_height);
 
@@ -277,9 +279,10 @@ async fn test_sync_multiple_batches_different_blocks() {
         .fetch_all(&pool)
         .await
         .unwrap();
+
     assert_eq!(stored_shares.len(), 50);
 
-    for block_height in 800010i64..800015i64 {
+    for block_height in 800010..800015 {
         let test_block = create_test_block(block_height);
         let stored_block: Option<(i32, String)> =
             sqlx::query_as("SELECT blockheight, blockhash FROM blocks WHERE blockheight = $1")
@@ -287,6 +290,7 @@ async fn test_sync_multiple_batches_different_blocks() {
                 .fetch_optional(&pool)
                 .await
                 .unwrap();
+
         assert!(stored_block.is_some());
         assert_eq!(stored_block.unwrap().1, test_block.blockhash);
     }
@@ -338,6 +342,7 @@ async fn test_sync_duplicate_batch_id() {
         .fetch_all(&pool)
         .await
         .unwrap();
+
     assert_eq!(stored_shares.len() as u32, 6);
 
     let stored_block: Option<(i32, String)> =
@@ -345,6 +350,7 @@ async fn test_sync_duplicate_batch_id() {
             .fetch_optional(&pool)
             .await
             .unwrap();
+
     assert!(stored_block.is_none());
 
     pool.close().await;
@@ -357,10 +363,11 @@ async fn test_sync_endpoint_to_endpoint() {
 
     let source_db_url = source_server.database_url().unwrap();
     setup_test_schema(source_db_url.clone()).await.unwrap();
+
     let target_db_url = target_server.database_url().unwrap();
     setup_test_schema(target_db_url.clone()).await.unwrap();
 
-    for block_height in 800030i64..=800032i64 {
+    for block_height in 800030..=800032 {
         insert_test_shares(source_db_url.clone(), 100, block_height)
             .await
             .unwrap();
@@ -376,6 +383,7 @@ async fn test_sync_endpoint_to_endpoint() {
         .with_temp_file();
 
     let client = reqwest::Client::new();
+
     let health_check = client
         .get(target_server.url().join("/sync/batch").unwrap())
         .send()
@@ -394,20 +402,24 @@ async fn test_sync_endpoint_to_endpoint() {
         .fetch_all(&pool)
         .await
         .unwrap();
+
     assert_eq!(stored_shares.len() as u32, 300);
 
     let stored_block: Option<(i32, String)> =
-        sqlx::query_as("SELECT blockheight, blockhash FROM blocks LIMIT 1")
+        sqlx::query_as("SELECT blockheight, blockhash FROM blocks ORDER BY blockheight ASC LIMIT 1")
             .fetch_optional(&pool)
             .await
             .unwrap();
+
     assert!(stored_block.is_some());
     assert_eq!(stored_block.unwrap().0, 800030);
+
     let block_count: Vec<(i64, i32, i32)> =
         sqlx::query_as("SELECT count(*), min(blockheight), max(blockheight) FROM blocks")
             .fetch_all(&pool)
             .await
             .unwrap();
+
     assert_eq!(block_count[0].0, 3);
     assert_eq!(block_count[0].1, 800030);
     assert_eq!(block_count[0].2, 800032);
