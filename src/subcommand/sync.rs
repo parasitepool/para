@@ -2,7 +2,6 @@ use {
     super::*, crate::subcommand::server::database::Database, reqwest::Client, tokio::time::Duration,
 };
 
-const ID_FILE: &str = "current_id.txt";
 const SYNC_DELAY_MS: u64 = 1000;
 const BLOCKHEIGHT_CHECK_DELAY_MS: u64 = 5000;
 const TARGET_ID_BUFFER: i64 = 0;
@@ -47,6 +46,13 @@ pub struct SyncSend {
 
     #[arg(long, help = "Password for basic auth on sync endpoint")]
     sync_password: Option<String>,
+
+    #[arg(
+        long,
+        help = "File to store sync progress to",
+        default_value = "current_id.txt"
+    )]
+    pub id_file: String,
 }
 
 impl Default for SyncSend {
@@ -123,7 +129,7 @@ enum SyncResult {
 }
 
 impl SyncSend {
-    pub(crate) async fn run(self, _handle: Handle) -> Result<()> {
+    pub async fn run(self) -> Result<()> {
         let shutdown_flag = Arc::new(AtomicBool::new(false));
         let shutdown_flag_clone = shutdown_flag.clone();
 
@@ -207,17 +213,30 @@ impl SyncSend {
             return Ok(SyncResult::Complete);
         }
 
-        let current_blockheight = database.get_blockheight_for_id(*current_id).await?;
-        let latest_blockheight = database.get_blockheight_for_id(max_id).await?;
+        let last_blockheight = database
+            .get_blockheight_for_id(*current_id)
+            .await?
+            .unwrap_or(0);
+        let current_blockheight = database
+            .get_blockheight_for_id(*current_id + 1)
+            .await?
+            .unwrap_or(0);
 
-        match (current_blockheight, latest_blockheight) {
-            (Some(current_bh), Some(latest_bh)) if current_bh >= latest_bh => {
+        let target_id = std::cmp::min(
+            *current_id + self.batch_size,
+            database
+                .get_last_id_for_blockheight(current_blockheight)
+                .await?
+                .unwrap_or(i64::MAX),
+        );
+        let latest_blockheight = database.get_blockheight_for_id(target_id).await?;
+
+        match (last_blockheight, latest_blockheight) {
+            (current_bh, Some(latest_bh)) if current_bh >= latest_bh => {
                 return Ok(SyncResult::WaitForNewBlock);
             }
             _ => {}
         }
-
-        let target_id = std::cmp::min(*current_id + self.batch_size, max_id - TARGET_ID_BUFFER);
 
         info!(
             "Fetching shares from ID {} to {} (max: {}) - blockheights: {:?} -> {:?}",
@@ -254,17 +273,13 @@ impl SyncSend {
         let shares = database
             .get_shares_by_id_range(*current_id + 1, target_id)
             .await?;
-        let block = if let Some(bh) = current_blockheight {
-            database.get_block_by_height(bh).await?
-        } else {
-            None
-        };
-        let highest_id = shares.last().map(|share| share.id);
+        let block = database.get_block_finds(current_blockheight).await?;
+        let highest_id = shares.last().map(|share| share.id).unwrap_or(target_id);
 
         if shares.is_empty() && block.is_none() {
             info!("No shares found in range, moving to next batch");
             *current_id = target_id;
-            self.save_current_id(*current_id).await?;
+            self.save_current_id(target_id).await?;
             return Ok(SyncResult::Continue);
         }
 
@@ -273,11 +288,11 @@ impl SyncSend {
         // retry n times
         for attempt in 1..=MAX_RETRIES {
             match self
-                .send_batch_http(client, &block, &shares, *current_id + 1, target_id)
+                .send_batch_http(client, &block, &shares, *current_id + 1, highest_id)
                 .await
             {
                 Ok(_) => {
-                    *current_id = highest_id.unwrap_or(target_id);
+                    *current_id = highest_id;
                     self.save_current_id(*current_id).await?;
                     return Ok(SyncResult::Continue);
                 }
@@ -385,8 +400,8 @@ impl SyncSend {
     }
 
     async fn load_current_id(&self) -> Result<i64> {
-        if Path::new(ID_FILE).exists() {
-            let content = fs::read_to_string(ID_FILE)
+        if Path::new(&self.id_file).exists() {
+            let content = fs::read_to_string(&self.id_file)
                 .map_err(|e| anyhow!("Failed to read ID file: {}", e))?;
             let id = content
                 .trim()
@@ -399,7 +414,8 @@ impl SyncSend {
     }
 
     async fn save_current_id(&self, id: i64) -> Result<()> {
-        fs::write(ID_FILE, id.to_string()).map_err(|e| anyhow!("Failed to save ID file: {e}"))?;
+        fs::write(&self.id_file, id.to_string())
+            .map_err(|e| anyhow!("Failed to save ID file: {e}"))?;
         Ok(())
     }
 
@@ -438,6 +454,21 @@ impl Database {
                 .fetch_optional(&self.pool)
                 .await
                 .map_err(|e| anyhow!("Failed to get blockheight for ID {}: {}", id, e))?;
+
+        Ok(result.flatten())
+    }
+
+    pub(crate) async fn get_last_id_for_blockheight(
+        &self,
+        blockheight: i32,
+    ) -> Result<Option<i64>> {
+        let result = sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT MAX(id) FROM shares WHERE blockheight = $1",
+        )
+        .bind(blockheight)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| anyhow!("Failed to get ID for blockheight {}: {}", blockheight, e))?;
 
         Ok(result.flatten())
     }
@@ -495,17 +526,17 @@ impl Database {
         Ok(())
     }
 
-    pub(crate) async fn get_block_by_height(
+    pub(crate) async fn get_block_finds(
         &self,
-        blockheight: i32,
+        mut blockheight: i32,
     ) -> Result<Option<FoundBlockRecord>, Error> {
         if blockheight == 0 {
-            return Err(anyhow!("Invalid blockheight: {blockheight}"));
+            blockheight = 1
         }
 
         sqlx::query_as::<_, FoundBlockRecord>(
             "SELECT id, blockheight, blockhash, confirmed, workername, username,
-         diff, coinbasevalue, rewards_processed FROM blocks WHERE blockheight = $1",
+         diff, coinbasevalue, rewards_processed FROM blocks WHERE blockheight >= $1 ORDER BY blockheight ASC",
         )
         .bind(blockheight)
         .fetch_optional(&self.pool)
