@@ -15,10 +15,12 @@ use {
     templates::{
         PageContent, PageHtml, dashboard::DashboardHtml, home::HomeHtml, status::StatusHtml,
     },
+    cache::Cache,
 };
 
 mod accept_json;
 mod aggregator;
+mod cache;
 pub mod api;
 pub mod database;
 mod error;

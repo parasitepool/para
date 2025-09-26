@@ -9,6 +9,12 @@ impl Aggregator {
             .use_rustls_tls()
             .build()?;
 
+        let cache = Arc::new(Cache::new(
+            client.clone(),
+            config.clone(),
+            Duration::from_secs(30),
+        ));
+
         let router = Router::new()
             .route("/aggregator/pool/pool.status", get(Self::pool_status))
             .route("/aggregator/users/{address}", get(Self::user_status))
@@ -16,92 +22,27 @@ impl Aggregator {
                 "/aggregator/dashboard",
                 Server::with_auth(config.clone(), get(Self::dashboard)),
             )
+            .layer(Extension(cache))
             .layer(Extension(client))
             .layer(Extension(config));
 
         Ok(router)
     }
 
-    async fn pool_status(
-        Extension(client): Extension<Client>,
-        Extension(config): Extension<Arc<ServerConfig>>,
-    ) -> ServerResult<Response> {
-        let nodes = config.nodes();
-        let fetches = nodes.iter().map(|url| {
-            let client = client.clone();
-            async move {
-                let result = async {
-                    let resp = client.get(url.join("/pool/pool.status")?).send().await?;
-                    ckpool::Status::from_str(&resp.text().await?)
-                }
-                .await;
-
-                (url, result)
-            }
-        });
-
-        let results: Vec<(&Url, Result<ckpool::Status>)> = join_all(fetches).await;
-
-        let mut aggregated: Option<ckpool::Status> = None;
-        for (url, result) in results {
-            match result {
-                Ok(status) => {
-                    aggregated = Some(if let Some(agg) = aggregated {
-                        agg + status
-                    } else {
-                        status
-                    });
-                }
-                Err(err) => {
-                    warn!("Failed to fetch status from {url} with: {err}");
-                }
-            }
-        }
-
-        let aggregated = aggregated.ok_or_else(|| anyhow!("Failed to aggregate statistics"))?;
+    async fn pool_status(Extension(cache): Extension<Arc<Cache>>) -> ServerResult<Response> {
+        let aggregated = cache.pool_status().await?;
 
         Ok(aggregated.to_string().into_response())
     }
 
     async fn user_status(
         Path(address): Path<String>,
-        Extension(client): Extension<Client>,
-        Extension(config): Extension<Arc<ServerConfig>>,
+        Extension(cache): Extension<Arc<Cache>>,
     ) -> ServerResult<Response> {
-        let nodes = config.nodes();
-        let fetches = nodes.iter().map(|url| {
-            let client = client.clone();
-            let address = address.clone();
-            async move {
-                let result = async {
-                    let resp = client
-                        .get(url.join(&format!("/users/{address}"))?)
-                        .send()
-                        .await?;
-
-                    serde_json::from_str::<ckpool::User>(&resp.text().await?).map_err(Into::into)
-                }
-                .await;
-
-                (url, result)
-            }
-        });
-
-        let results: Vec<(&Url, Result<ckpool::User>)> = join_all(fetches).await;
-
-        let mut aggregated: Option<ckpool::User> = None;
-        for (_, result) in results {
-            if let Ok(user) = result {
-                aggregated = Some(if let Some(agg) = aggregated {
-                    agg + user
-                } else {
-                    user
-                });
-            }
-        }
-
-        let aggregated =
-            aggregated.ok_or_else(|| anyhow!("User {address} not found on any node"))?;
+        let aggregated = cache
+            .user_status(address.clone())
+            .await?
+            .ok_or_else(|| anyhow!("User {address} not found on any node"))?;
 
         Ok(Json(aggregated).into_response())
     }
