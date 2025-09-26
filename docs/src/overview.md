@@ -1,7 +1,7 @@
 Overview
 ========
 
-We are currently using a for of ckpool.
+We are currently using a fork of ckpool.
 
 Connect
 -------
