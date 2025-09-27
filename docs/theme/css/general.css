@@ -21,6 +21,7 @@ body {
     line-height: 2.5;
 }
 
+
 code {
     font-family: var(--mono-font) !important;
     font-size: var(--code-font-size);
