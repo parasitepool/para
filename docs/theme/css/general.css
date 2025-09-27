@@ -18,7 +18,7 @@ body {
     margin: 0;
     font-size: 1.6rem;
     overflow-x: hidden;
-
+    line-height: 2.5;
 }
 
 code {
