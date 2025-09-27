@@ -376,6 +376,9 @@ async fn test_sync_endpoint_to_endpoint() {
             .await
             .unwrap();
     }
+    insert_test_shares(source_db_url.clone(), 1, 800033)
+        .await
+        .unwrap();
 
     let sync_sender = SyncSend::default()
         .with_endpoint(target_server.url().to_string())
