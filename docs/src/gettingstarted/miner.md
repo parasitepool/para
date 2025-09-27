@@ -15,14 +15,14 @@ Connecting Your Miners
 - Connect your Bitcoin miner and go to the "Pool Settings" tab
   - Configure your mining settings:
     - Stratum URL: parasite.wtf
-    - Port: 42069
+    - Port: 42069 (high-diff port, for non-home mining is 42068)
     - Set your username using this format:
       - `YourL1Address.workername.staticlnaddress@staticdomain`
       - !!! Important: Use the same ending/domain (@sati.pro or @parasite.sati.pro) that appears in your generated static ln address !!!
       - Examples:
-        - bc1qnotarealaddress.steveMiner.d1a7a1bef2@sati.pro
-        - bc1qnotarealaddress.jillAxe.a5f9b2c8e1@parasite.sati.pro
-        - Use any password (it's not checked)
+        - `bc1qnotarealaddress.steveMiner.d1a7a1bef2@sati.pro`
+        - `bc1qnotarealaddress.jillAxe.a5f9b2c8e1@parasite.sati.pro`
+    - Use any password (it's not checked)
   - Save your configuration and restart if needed
 - Verify on your miner that shares begin to accumulate after a few minutes
 

@@ -2,10 +2,9 @@ Developer Quick Start
 ===
 ---
 
-Setup Environment
----
-
-### Requirements:
+First Step
+----------
+Install dependencies/tools
 
 * [Rust](#manual-install)
 * [Just](https://github.com/casey/just?tab=readme-ov-file#installation)
