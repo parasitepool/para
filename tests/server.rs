@@ -119,17 +119,17 @@ fn aggregate_pool_status() {
 #[test]
 fn aggregate_users() {
     let mut users = Vec::new();
-    for i in 0..9 {
+    for i in 0..3 {
         let user = typical_user();
         let user_address = address(i);
 
         users.push((user_address.to_string(), user));
     }
 
-    assert_eq!(users.len(), 9);
+    assert_eq!(users.len(), 3);
 
     let mut servers = Vec::new();
-    for (address, user) in users.iter().take(3) {
+    for (address, user) in users.iter() {
         let server = TestServer::spawn();
 
         fs::write(
@@ -150,10 +150,22 @@ fn aggregate_users() {
         servers[2].url()
     ));
 
-    for (address, user) in users.iter().take(3) {
+    for (address, user) in users.iter() {
         let response = aggregator.get_json::<User>(format!("/aggregator/users/{address}"));
         pretty_assert_eq!(response, *user);
     }
+
+    let users_response = aggregator.get_json::<Vec<String>>("/aggregator/users");
+
+    assert_eq!(users_response.len(), users.len());
+
+    assert_eq!(
+        users_response.into_iter().collect::<HashSet<String>>(),
+        users
+            .into_iter()
+            .map(|(address, _)| address)
+            .collect::<HashSet<String>>()
+    );
 }
 
 #[test]
