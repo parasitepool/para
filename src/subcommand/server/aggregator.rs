@@ -14,6 +14,7 @@ impl Aggregator {
         let router = Router::new()
             .route("/aggregator/pool/pool.status", get(Self::pool_status))
             .route("/aggregator/users/{address}", get(Self::user_status))
+            .route("/aggregator/users", get(Self::users))
             .route(
                 "/aggregator/dashboard",
                 Server::with_auth(config.clone(), get(Self::dashboard)),
@@ -26,24 +27,29 @@ impl Aggregator {
     }
 
     async fn pool_status(Extension(cache): Extension<Arc<Cache>>) -> ServerResult<Response> {
-        let aggregated = cache
+        Ok(cache
             .pool_status()
             .await?
-            .ok_or_not_found(|| "Pool status")?;
-
-        Ok(aggregated.to_string().into_response())
+            .ok_or_not_found(|| "Pool status")?
+            .to_string()
+            .into_response())
     }
 
     async fn user_status(
         Path(address): Path<String>,
         Extension(cache): Extension<Arc<Cache>>,
     ) -> ServerResult<Response> {
-        let aggregated = cache
-            .user_status(address.clone())
-            .await?
-            .ok_or_not_found(|| format!("User {address}"))?;
+        Ok(Json(
+            cache
+                .user_status(address.clone())
+                .await?
+                .ok_or_not_found(|| format!("User {address}"))?,
+        )
+        .into_response())
+    }
 
-        Ok(Json(aggregated).into_response())
+    async fn users(Extension(cache): Extension<Arc<Cache>>) -> ServerResult<Response> {
+        Ok(Json(cache.users().await?.ok_or_not_found(|| "Users")?).into_response())
     }
 
     pub(crate) async fn dashboard(
