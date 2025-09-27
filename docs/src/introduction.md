@@ -3,6 +3,10 @@ Introduction
 
 "If I had more time, I would have written you a shorter letter." - Mark Twain
 
+About Us
+--------
+Parasite
+
 Notes
 -----
 - A platform for tinkering
