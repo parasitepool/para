@@ -22,6 +22,7 @@ html.para #sidebar {
     #menu-bar img.header-logo {
         height: 9vw;
         width: auto;
+        padding-top: 5%;
     }
 }
 html body .search-wrapper #searchbar {
