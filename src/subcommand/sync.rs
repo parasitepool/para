@@ -9,53 +9,46 @@ const HTTP_TIMEOUT_MS: u64 = 30000;
 const MAX_RETRIES: u32 = 3;
 
 #[derive(Debug, Parser)]
-pub struct SyncSend {
+pub struct Sync {
     #[arg(
         long,
-        help = "HTTP endpoint to send shares to",
+        help = "Send shares to HTTP <ENDPOINT>.",
         default_value = "http://127.0.0.1:8080"
     )]
     endpoint: String,
-
     #[arg(
         long,
-        help = "Batch size for processing shares",
+        help = "Process shares in <BATCH_SIZE>.",
         default_value = "1000000"
     )]
     pub batch_size: i64,
-
-    #[arg(long, help = "Force reset current ID to 0")]
+    #[arg(long, help = "<RESET> current id to 0.")]
     reset_id: bool,
-
     #[arg(
         long,
-        help = "Terminate when no more records to process",
+        help = "Terminate when no more records to process.",
         action = clap::ArgAction::SetTrue
     )]
     pub terminate_when_complete: bool,
-
     #[arg(
         long,
-        help = "Connect to Postgres running at <DATABASE_URL>",
+        help = "Connect to Postgres running at <DATABASE_URL>.",
         default_value = "postgres://satoshi:nakamoto@127.0.0.1:5432/ckpool"
     )]
     pub database_url: String,
-
-    #[arg(long, help = "Username for basic auth on sync endpoint")]
+    #[arg(long, help = "<USERNAME> for basic auth on sync endpoint.")]
     sync_username: Option<String>,
-
-    #[arg(long, help = "Password for basic auth on sync endpoint")]
+    #[arg(long, help = "<PASSWORD> for basic auth on sync endpoint.")]
     sync_password: Option<String>,
-
     #[arg(
         long,
-        help = "File to store sync progress to",
+        help = "Set <ID_FILE> to store sync progress to.",
         default_value = "current_id.txt"
     )]
     pub id_file: String,
 }
 
-impl Default for SyncSend {
+impl Default for Sync {
     fn default() -> Self {
         Self::try_parse_from(std::iter::empty::<String>()).unwrap()
     }
@@ -128,7 +121,7 @@ enum SyncResult {
     WaitForNewBlock,
 }
 
-impl SyncSend {
+impl Sync {
     pub async fn run(self) -> Result<()> {
         let shutdown_flag = Arc::new(AtomicBool::new(false));
         let shutdown_flag_clone = shutdown_flag.clone();

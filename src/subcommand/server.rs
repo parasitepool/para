@@ -496,7 +496,7 @@ impl Server {
                     );
 
                     let notification_result = notifications::notify_block_found(
-                        &config.alerts_ntfy_channel,
+                        config.alerts_ntfy_channel(),
                         block.blockheight,
                         block.blockhash.clone(),
                         block.coinbasevalue.unwrap_or(0),

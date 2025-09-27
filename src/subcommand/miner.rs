@@ -6,9 +6,9 @@ mod hasher;
 #[derive(Debug, Parser)]
 pub(crate) struct Miner {
     stratum_endpoint: String,
-    #[arg(long, help = "Stratum <USERNAME>")]
+    #[arg(long, help = "Stratum <USERNAME>.")]
     username: String,
-    #[arg(long, help = "Stratum <PASSWORD>")]
+    #[arg(long, help = "Stratum <PASSWORD>.")]
     password: String,
 }
 

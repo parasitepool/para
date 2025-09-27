@@ -380,7 +380,7 @@ async fn test_sync_endpoint_to_endpoint() {
         .await
         .unwrap();
 
-    let sync_sender = SyncSend::default()
+    let sync_sender = Sync::default()
         .with_endpoint(target_server.url().to_string())
         .with_database_url(source_db_url.clone())
         .with_terminate_when_complete(true)
@@ -438,7 +438,7 @@ trait SyncSendTestExt {
     fn with_temp_file(self) -> Self;
 }
 
-impl SyncSendTestExt for SyncSend {
+impl SyncSendTestExt for Sync {
     fn with_database_url(mut self, database_url: String) -> Self {
         self.database_url = database_url;
         self

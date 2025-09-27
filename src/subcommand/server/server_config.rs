@@ -2,19 +2,24 @@ use super::*;
 
 #[derive(Clone, Debug, Parser)]
 pub(crate) struct ServerConfig {
-    #[clap(long, help = "Listen at <ADDRESS>")]
+    #[arg(long, help = "Listen at <ADDRESS>.")]
     address: Option<String>,
-    #[arg(long, help = "Request ACME TLS certificate for <ACME_DOMAIN>")]
+    #[arg(long, help = "Request ACME TLS certificate for <ACME_DOMAIN>.")]
     acme_domain: Vec<String>,
-    #[arg(long, help = "Provide ACME contact <ACME_CONTACT>")]
+    #[arg(long, help = "Provide ACME contact <ACME_CONTACT>.")]
     acme_contact: Vec<String>,
-    #[arg(long, alias = "datadir", help = "Store acme cache in <DATA_DIR>")]
+    #[arg(
+        long,
+        help = "The <CHANNEL> at ntfy.sh to use for block found notifications."
+    )]
+    alerts_ntfy_channel: Option<String>,
+    #[arg(long, alias = "datadir", help = "Store acme cache in <DATA_DIR>.")]
     data_dir: Option<PathBuf>,
-    #[arg(long, help = "Connect to Postgres running at <DATABASE_URL>")]
+    #[arg(long, help = "Connect to Postgres running at <DATABASE_URL>.")]
     database_url: Option<String>,
-    #[arg(long, help = "CKpool <LOG_DIR>")]
+    #[arg(long, help = "CKpool <LOG_DIR>.")]
     log_dir: Option<PathBuf>,
-    #[clap(long, help = "Listen on <PORT>")]
+    #[arg(long, help = "Listen on <PORT>.")]
     port: Option<u16>,
     #[arg(
         long,
@@ -28,16 +33,11 @@ pub(crate) struct ServerConfig {
         requires = "username"
     )]
     password: Option<String>,
-    #[clap(long, help = "Collect statistics from <NODES>.")]
+    #[arg(long, help = "Collect statistics from <NODES>.")]
     nodes: Vec<Url>,
-    #[arg(long, help = "Send shares to HTTP sync endpoint <SYNC_ENDPOINT>")]
+    #[arg(long, help = "Send shares to HTTP sync endpoint <SYNC_ENDPOINT>.")]
     sync_endpoint: Option<String>,
-    #[arg(
-        long,
-        help = "The <CHANNEL> at ntfy.sh to use for block found notifications."
-    )]
-    pub(crate) alerts_ntfy_channel: Option<String>,
-    #[clap(long, help = "Cache <TTL> in seconds.", default_value = "30")]
+    #[arg(long, help = "Cache <TTL> in seconds.", default_value = "30")]
     ttl: u64,
 }
 
@@ -52,6 +52,10 @@ impl ServerConfig {
 
     pub(crate) fn acme_contacts(&self) -> Vec<String> {
         self.acme_contact.clone()
+    }
+
+    pub(crate) fn alerts_ntfy_channel(&self) -> Option<String> {
+        self.alerts_ntfy_channel.clone()
     }
 
     pub(crate) fn credentials(&self) -> Option<(&str, &str)> {
