@@ -1,3 +1,42 @@
 table {
-  float: left;
+    float: left;
+}
+html.para body {
+    font-family: "Courier New", Courier, monospace;
+}
+html.para #sidebar {
+    border-right: 1px solid #ffffff;
+}
+#menu-bar {
+    border-bottom: 1px solid #ffffff;
+}
+.header-logo {
+    max-width: 50%;
+    padding-top: 1%;
+}
+#menu-bar img.header-logo {
+    width: auto;
+    height: 2vw;
+}
+@media (max-width: 640px) {
+    #menu-bar img.header-logo {
+        height: 4vw;
+        width: auto;
+    }
+}
+html body .search-wrapper #searchbar {
+    border-radius: 0 !important;
+    font-family: "Courier New", monospace !important;
+    border: 1px solid white !important;
+    padding: 6px !important;
+    background: #000 !important;
+    color: #fff !important;
+}
+
+#searchbar:focus-visible {
+    outline: none !important;
+}
+
+th {
+    color: var(--table-header-fg);
 }
