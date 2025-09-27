@@ -159,46 +159,34 @@ impl Database {
 
         sqlx::query_as::<_, Payout>(
             "
-        WITH block_range AS (
-            SELECT MIN(blockheight) as min_block, MAX(blockheight) as max_block
-            FROM blocks
-            WHERE blockheight >= $1 AND blockheight <= $2
-        ),
-        previous_block AS (
-            SELECT MAX(blockheight) AS prev_height
-            FROM blocks
-            WHERE blockheight < $1
-        ),
-        qualified_shares AS (
+            WITH qualified_shares AS (
+                SELECT
+                    s.workername,
+                    s.lnurl,
+                    s.username AS btcaddress,
+                    SUM(s.diff) as total_diff
+                FROM remote_shares s
+                WHERE s.blockheight >= $1
+                    AND s.blockheight < $2
+                    AND s.username != ALL($3)
+                    AND s.reject_reason IS NULL
+                GROUP BY s.lnurl, s.username, s.workername
+            ),
+            sum_shares AS (
+                SELECT SUM(total_diff) as grand_total
+                FROM qualified_shares
+            )
             SELECT
-                s.workername,
-                s.lnurl,
-                s.username AS btcaddress,
-                SUM(s.diff) as total_diff
-            FROM remote_shares s
-            CROSS JOIN block_range br
-            CROSS JOIN previous_block pb
-            WHERE s.blockheight <= br.max_block
-                AND s.blockheight > COALESCE(pb.prev_height, -1)
-                AND s.username != ALL($3)
-                AND s.reject_reason IS NULL
-            GROUP BY s.lnurl, s.username, s.workername
-        ),
-        sum_shares AS (
-            SELECT SUM(total_diff) as grand_total
-            FROM qualified_shares
-        )
-        SELECT
-            qs.workername AS worker_name,
-            qs.btcaddress,
-            qs.lnurl,
-            CAST(qs.total_diff as INT8) AS payable_shares,
-            CAST(ss.grand_total as INT8) AS total_shares,
-            ROUND((qs.total_diff / NULLIF(ss.grand_total, 0))::numeric, 8)::FLOAT8 as percentage
-        FROM qualified_shares qs
-        CROSS JOIN sum_shares ss
-        WHERE ss.grand_total > 0
-        ORDER BY qs.total_diff DESC;
+                qs.workername AS worker_name,
+                qs.btcaddress,
+                qs.lnurl,
+                CAST(qs.total_diff as INT8) AS payable_shares,
+                CAST(ss.grand_total as INT8) AS total_shares,
+                ROUND((qs.total_diff / NULLIF(ss.grand_total, 0))::numeric, 8)::FLOAT8 as percentage
+            FROM qualified_shares qs
+            CROSS JOIN sum_shares ss
+            WHERE ss.grand_total > 0
+            ORDER BY qs.total_diff DESC;
         ",
         )
         .bind(start_blockheight)
@@ -228,27 +216,15 @@ impl Database {
 
         sqlx::query_as::<_, Payout>(
             "
-        WITH block_range AS (
-            SELECT MIN(blockheight) as min_block, MAX(blockheight) as max_block
-            FROM blocks
-            WHERE blockheight >= $1 AND blockheight <= $2
-        ),
-        previous_block AS (
-            SELECT MAX(blockheight) AS prev_height
-            FROM blocks
-            WHERE blockheight < $1
-        ),
-        qualified_shares AS (
+        WITH qualified_shares AS (
             SELECT
                 s.workername,
                 s.lnurl,
                 s.username AS btcaddress,
                 SUM(s.diff) as total_diff
             FROM remote_shares s
-            CROSS JOIN block_range br
-            CROSS JOIN previous_block pb
-            WHERE s.blockheight <= br.max_block
-                AND s.blockheight > COALESCE(pb.prev_height, -1)
+            WHERE s.blockheight >= $1
+                AND s.blockheight < $2
                 AND s.username != ALL($4)
                 AND s.reject_reason IS NULL
             GROUP BY s.lnurl, s.username, s.workername
@@ -264,10 +240,8 @@ impl Database {
                 s.username AS btcaddress,
                 SUM(s.diff) as total_diff
             FROM remote_shares s
-            CROSS JOIN block_range br
-            CROSS JOIN previous_block pb
-            WHERE s.blockheight <= br.max_block
-                AND s.blockheight > COALESCE(pb.prev_height, -1)
+            WHERE s.blockheight >= $1
+                AND s.blockheight < $2
                 AND s.username = $3
                 AND s.reject_reason IS NULL
             GROUP BY s.lnurl, s.username, s.workername
