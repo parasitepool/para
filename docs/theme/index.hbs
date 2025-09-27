@@ -160,7 +160,11 @@
                     </div>
 
                     <h1 class="menu-title">
-                        <img src="{{ path_to_root }}parasite-white.webp" alt="{{ book_title }}" class="header-logo">
+                        <picture>
+                            <source media="(max-width: 640px)" srcset="{{ path_to_root }}bug.webp">
+
+                            <img src="{{ path_to_root }}parasite-white.webp" alt="{{ book_title }}" class="header-logo">
+                        </picture>
                     </h1>
 
                     <div class="right-buttons">
