@@ -34,7 +34,7 @@ use {
 
 #[cfg(target_os = "linux")]
 use {
-    para::subcommand::sync::{ShareBatch, SyncResponse, SyncSend},
+    para::subcommand::sync::{ShareBatch, Sync, SyncResponse},
     reqwest::Response,
     std::{
         io::stderr,
