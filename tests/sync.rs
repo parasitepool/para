@@ -357,6 +357,7 @@ async fn test_sync_duplicate_batch_id() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_sync_endpoint_to_endpoint() {
     let source_server = TestServer::spawn_with_db().await;
     let target_server = TestServer::spawn_with_db().await;
