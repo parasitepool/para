@@ -207,31 +207,26 @@ impl SyncSend {
         client: &Client,
         current_id: &mut i64,
     ) -> Result<SyncResult> {
-        let max_id = database.get_max_id().await?;
+        let max_id = database.get_max_id().await.unwrap_or(0);
 
         if *current_id + TARGET_ID_BUFFER >= max_id {
             return Ok(SyncResult::Complete);
         }
 
-        let last_blockheight = database
-            .get_blockheight_for_id(*current_id)
-            .await?
-            .unwrap_or(0);
-        let current_blockheight = database
-            .get_blockheight_for_id(*current_id + 1)
-            .await?
-            .unwrap_or(0);
+        let next_id = database.get_next_id(*current_id).await.unwrap_or(0);
 
-        let target_id = std::cmp::min(
-            *current_id + self.batch_size,
-            database
-                .get_last_id_for_blockheight(current_blockheight)
-                .await?
-                .unwrap_or(i64::MAX),
-        );
-        let latest_blockheight = database.get_blockheight_for_id(target_id).await?;
+        let current_blockheight = database.get_blockheight_for_id(next_id).await?.unwrap_or(0);
 
-        match (last_blockheight, latest_blockheight) {
+        let last_id_in_block = database
+            .get_last_id_for_blockheight(current_blockheight)
+            .await;
+        if last_id_in_block.is_err() {
+            return Ok(SyncResult::Continue);
+        }
+        let target_id = std::cmp::min(*current_id + self.batch_size, last_id_in_block?.unwrap());
+        let latest_blockheight = database.get_blockheight_for_id(max_id).await?;
+
+        match (current_blockheight, latest_blockheight) {
             (current_bh, Some(latest_bh)) if current_bh >= latest_bh => {
                 return Ok(SyncResult::WaitForNewBlock);
             }
@@ -240,39 +235,24 @@ impl SyncSend {
 
         info!(
             "Fetching shares from ID {} to {} (max: {}) - blockheights: {:?} -> {:?}",
-            *current_id + 1,
-            target_id,
-            max_id,
-            current_blockheight,
-            latest_blockheight
+            next_id, target_id, max_id, current_blockheight, latest_blockheight
         );
 
         // Run share compression BEFORE transmitting
-        info!(
-            "Compressing shares in range {} to {}",
-            *current_id + 1,
-            target_id
-        );
-        match database
-            .compress_shares_range(*current_id + 1, target_id)
-            .await
-        {
+        info!("Compressing shares in range {} to {}", next_id, target_id);
+        match database.compress_shares_range(next_id, target_id).await {
             Ok(compressed_count) => {
                 info!("Compressed {compressed_count} share records in range");
             }
             Err(e) => {
                 error!(
                     "Warning: Failed to compress range {} to {}: {}",
-                    *current_id + 1,
-                    target_id,
-                    e
+                    next_id, target_id, e
                 );
             }
         }
 
-        let shares = database
-            .get_shares_by_id_range(*current_id + 1, target_id)
-            .await?;
+        let shares = database.get_shares_by_id_range(next_id, target_id).await?;
         let block = database.get_block_finds(current_blockheight).await?;
         let highest_id = shares.last().map(|share| share.id).unwrap_or(target_id);
 
@@ -288,7 +268,7 @@ impl SyncSend {
         // retry n times
         for attempt in 1..=MAX_RETRIES {
             match self
-                .send_batch_http(client, &block, &shares, *current_id + 1, highest_id)
+                .send_batch_http(client, &block, &shares, next_id, highest_id)
                 .await
             {
                 Ok(_) => {
@@ -443,6 +423,18 @@ impl Database {
             .fetch_one(&self.pool)
             .await
             .map_err(|e| anyhow!("Failed to get max ID: {e}"))?;
+
+        Ok(result.unwrap_or(0))
+    }
+
+    pub(crate) async fn get_next_id(&self, id: i64) -> Result<i64> {
+        let result = sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT id FROM shares WHERE id > $1 ORDER BY id ASC LIMIT 1",
+        )
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| anyhow!("Failed to get next ID: {e}"))?;
 
         Ok(result.unwrap_or(0))
     }
