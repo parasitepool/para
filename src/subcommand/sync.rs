@@ -224,7 +224,7 @@ impl SyncSend {
             return Ok(SyncResult::Continue);
         }
         let target_id = std::cmp::min(*current_id + self.batch_size, last_id_in_block?.unwrap());
-        let latest_blockheight = database.get_blockheight_for_id(target_id).await?;
+        let latest_blockheight = database.get_blockheight_for_id(max_id).await?;
 
         match (current_blockheight, latest_blockheight) {
             (current_bh, Some(latest_bh)) if current_bh >= latest_bh => {
