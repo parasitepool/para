@@ -1,20 +1,9 @@
-<h1 align=center><code>para</code></h1>
-
-<div align=center>
-  <a href=https://crates.io/crates/para>
-    <img src=https://img.shields.io/crates/v/para.svg alt="crates.io version">
-  </a>
-  <a href=https://github.com/parasitepool/para/actions/workflows/ci.yaml>
-    <img src=https://github.com/parasitepool/para/actions/workflows/ci.yaml/badge.svg alt="build status">
-  </a>
-  <a href=https://github.com/parasitepool/para/releases>
-    <img src=https://img.shields.io/github/downloads/parasitepool/para/total.svg alt=downloads>
-  </a>
-</div>
-<br>
+Developer Quick Start
+===
+---
 
 Setup Environment
------------------
+---
 
 ### Requirements:
 
@@ -23,7 +12,7 @@ Setup Environment
 
 #### Manual Install
 
-Rust is required to build, test, and develop. To install: 
+Rust is required to build, test, and develop. To install:
 
 ``` 
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh 
@@ -33,7 +22,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 This repo includes a bundled development environment with
 [Hermit](https://github.com/cashapp/hermit) that provides the above
-requirements. 
+requirements.
 
 ```
 . ./bin/activate-hermit
@@ -66,10 +55,18 @@ Once built, the `para` binary can be found at `./target/release/para`.
 `para` requires `rustc` version 1.90.0 or later. Run `rustc --version` to ensure
 you have this version. Run `rustup update` to get the latest stable release.
 
-You can also install `para` directly into your path by doing:
 
-```
+Install
+--------
+
+Complete the instructions in [Build](#build) and then either:
+#### Install with Cargo
+```shell
 cargo install --path .
+```
+#### Install Manually
+```shell
+cp ./target/release/para /usr/local/bin/para
 ```
 
 Build (Docs)
@@ -92,3 +89,4 @@ just init-mdbook-theme
 This will create the default `mdbook` layout and CSS files inside
 `docs/tmp/theme`, which you can then pick, chose and adapt and then copy into
 `docs/theme` to tweak the defaults.
+
