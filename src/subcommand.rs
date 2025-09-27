@@ -16,7 +16,7 @@ pub(crate) enum Subcommand {
     Pool(pool::Pool),
     #[command(about = "Run API server")]
     Server(server::Server),
-    #[command(about = "Send shares to HTTP endpoint")]
+    #[command(about = "Sync shares via HTTP")]
     Sync(sync::Sync),
 }
 
