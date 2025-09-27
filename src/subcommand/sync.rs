@@ -179,6 +179,10 @@ impl SyncSend {
                     sleep(Duration::from_millis(SYNC_DELAY_MS)).await;
                 }
                 Ok(SyncResult::WaitForNewBlock) => {
+                    if self.terminate_when_complete {
+                        info!("Sync send completed successfully");
+                        break;
+                    }
                     if !caught_up_logged {
                         info!(
                             "Current and latest records have same blockheight, waiting for new block..."
