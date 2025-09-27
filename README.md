@@ -40,7 +40,7 @@ requirements.
 ```
 
 Build
---------
+-----
 
 Clone the `para` repo:
 
@@ -73,7 +73,7 @@ cargo install --path .
 ```
 
 Build (Docs)
------------------
+------------
 
 ```
 cargo install mdbook mdbook-linkcheck
