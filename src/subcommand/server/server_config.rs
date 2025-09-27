@@ -35,7 +35,7 @@ pub(crate) struct ServerConfig {
     password: Option<String>,
     #[arg(long, help = "Collect statistics from <NODES>.")]
     nodes: Vec<Url>,
-    #[arg(long, help = "Send shares to HTTP sync endpoint <SYNC_ENDPOINT>.")]
+    #[arg(long, help = "Send shares to HTTP <SYNC_ENDPOINT>.")]
     sync_endpoint: Option<String>,
     #[arg(long, help = "Cache <TTL> in seconds.", default_value = "30")]
     ttl: u64,
