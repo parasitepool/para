@@ -155,7 +155,7 @@ impl NotificationHandler {
 }
 
 pub async fn notify_block_found(
-    alerts_ntfy_channel: &Option<String>,
+    alerts_ntfy_channel: Option<String>,
     height: i32,
     hash: String,
     value: i64,

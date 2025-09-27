@@ -16,8 +16,8 @@ pub(crate) enum Subcommand {
     Pool(pool::Pool),
     #[command(about = "Run API server")]
     Server(server::Server),
-    #[command(about = "Send shares to HTTP endpoint")]
-    SyncSend(sync::SyncSend),
+    #[command(about = "Sync shares via HTTP")]
+    Sync(sync::Sync),
 }
 
 impl Subcommand {
@@ -36,24 +36,23 @@ impl Subcommand {
                     let hostname = System::host_name().ok_or(anyhow!("no hostname found"))?;
 
                     if !sync_endpoint.contains(&hostname) {
-                        let mut sync_send =
-                            sync::SyncSend::default().with_endpoint(sync_endpoint.clone());
+                        let mut sync = sync::Sync::default().with_endpoint(sync_endpoint.clone());
 
                         if let Some((username, password)) = server.config.credentials() {
-                            sync_send = sync_send.with_credentials(username, password);
+                            sync = sync.with_credentials(username, password);
                         }
 
                         let send_task = rt.spawn_blocking(move || {
                             let sync_rt =
                                 Runtime::new().expect("Failed to create sync send runtime");
                             sync_rt.block_on(async {
-                                if let Err(e) = sync_send.run().await {
+                                if let Err(e) = sync.run().await {
                                     error!("SyncSend failed: {}", e);
                                 }
                             });
                         });
                         sync_task = Some(send_task);
-                        info!("Started SyncSend to endpoint: {sync_endpoint}");
+                        info!("Started sync to endpoint: {sync_endpoint}");
                     }
                 }
 
@@ -73,9 +72,7 @@ impl Subcommand {
 
                 server_result
             }
-            Self::SyncSend(sync_send) => {
-                Ok(Runtime::new()?.block_on(async { sync_send.run().await })?)
-            }
+            Self::Sync(sync) => Ok(Runtime::new()?.block_on(async { sync.run().await })?),
         }
     }
 }

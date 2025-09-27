@@ -3,13 +3,13 @@ use super::*;
 #[derive(Parser, Debug)]
 pub(crate) struct Ping {
     stratum_endpoint: String,
-    #[arg(long, help = "Stop after <COUNT> replies")]
+    #[arg(long, help = "Stop after <COUNT> replies.")]
     count: Option<u64>,
-    #[arg(long, default_value = "5", help = "Fail after <TIMEOUT> seconds")]
+    #[arg(long, default_value = "5", help = "Fail after <TIMEOUT> seconds.")]
     timeout: u64,
-    #[arg(long, help = "Stratum <USERNAME>")]
+    #[arg(long, help = "Stratum <USERNAME>.")]
     username: Option<String>,
-    #[arg(long, help = "Stratum <PASSWORD>")]
+    #[arg(long, help = "Stratum <PASSWORD>.")]
     password: Option<String>,
 }
 

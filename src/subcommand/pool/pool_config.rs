@@ -2,7 +2,7 @@ use super::*;
 
 #[derive(Clone, Debug, Parser)]
 pub(crate) struct PoolConfig {
-    #[clap(long, help = "Listen at <ADDRESS>")]
+    #[arg(long, help = "Listen at <ADDRESS>.")]
     address: Option<String>,
     #[arg(long, help = "Load Bitcoin Core data dir from <BITCOIN_DATA_DIR>.")]
     bitcoin_data_dir: Option<PathBuf>,
@@ -20,15 +20,15 @@ pub(crate) struct PoolConfig {
     bitcoin_rpc_username: Option<String>,
     #[arg(long, help = "Load Bitcoin Core RPC cookie file from <COOKIE_FILE>.")]
     bitcoin_rpc_cookie_file: Option<PathBuf>,
-    #[arg(long = "chain", help = "Run on <CHAIN>")]
+    #[arg(long = "chain", help = "Run on <CHAIN>.")]
     chain: Option<Chain>,
-    #[arg(long, alias = "datadir", help = "Store acme cache in <DATA_DIR>")]
+    #[arg(long, alias = "datadir", help = "Store acme cache in <DATA_DIR>.")]
     data_dir: Option<PathBuf>,
-    #[clap(long, help = "Listen on <PORT>")]
+    #[arg(long, help = "Listen on <PORT>.")]
     port: Option<u16>,
-    #[clap(
+    #[arg(
         long,
-        help = "Use version rolling with <VERSION_MASK>",
+        help = "Use version rolling with <VERSION_MASK>.",
         default_value = "1fffe000"
     )]
     version_mask: Version,
