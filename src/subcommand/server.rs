@@ -7,6 +7,7 @@ use {
     accept_json::AcceptJson,
     aggregator::Aggregator,
     axum::extract::{Path, Query},
+    cache::Cache,
     database::Database,
     error::{OptionExt, ServerError, ServerResult},
     futures::future::join_all,
@@ -20,6 +21,7 @@ use {
 mod accept_json;
 mod aggregator;
 pub mod api;
+mod cache;
 pub mod database;
 mod error;
 pub mod notifications;
