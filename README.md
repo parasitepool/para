@@ -19,9 +19,12 @@ software with no warranty. See [LICENSE](LICENSE) for more details.
 This repository includes a modified fork of
 [ckpool](https://bitbucket.org/ckolivas/ckpool/src/master/), which currently
 runs on `parasite.wtf:42069`. For instructions on how to connect, please visit
-[parasite.space/help](https://parasite.space/help]).
+[parasite.space?help](https://parasite.space?help).
 
-
+In addition to adding a postgres database for share logging and some helpful
+flags it modifies the coinbase payout logic found in `stratifier.c`. To glean
+more information on the rationale behind that refer to [this
+article](https://zkshark.substack.com/p/parasite-pool-igniting-the-mining).
 
 ```c 
 // Generation value
@@ -49,10 +52,11 @@ if (ckp->donvalid && ckp->donation > 0) {
 }
 ```
 
-`para` is more than just glue code around ckpool. It implements a Rust library
-for the Stratum protocol and includes helpful command-line tools that measure
-ping, inspect block templates and mimic mining machines. To see a full list of
-available commands just follow the instructions below and do `para help`.
+`para` is more than just glue code around ckpool though. It implements a Rust
+library for the Stratum protocol and includes helpful command-line tools that
+measure ping, inspect block templates and mimic mining machines. To see a full
+list of available commands just follow the instructions below and do `para
+help`.
 
 Setup Environment
 -----------------
