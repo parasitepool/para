@@ -7,6 +7,6 @@ Summary
 - [Getting Started]()
   - [Miner](gettingstarted/miner.md)
   - [Developer](gettingstarted/developer.md)
-- [Our Stack](stack.md)
+- [Stack](stack.md)
 - [Contributing](contributing.md)
 - [Acknowledgements](acknowledgments.md)
