@@ -1,7 +1,7 @@
 Tech Stack
 ==========
 
-- [Parasite Pool](#parasite-pool) (currently a fork of ckpool)
+- [ParaPool](#parapool) (currently a fork of ckpool)
 - [Para](#para) (our ongoing development and glue that holds the backend of parasite together)
 
 ParaPool
@@ -11,9 +11,6 @@ and contains the core logic for calculating the coinbase transaction with our [p
 
 This is an open source pool implementation that we utilized to quickly build the proof of concept for what we want
 parasite pool to be.
-
-Longterm it is likely that we will move from our fork of ckpool to a pure Rust pool implementation that will be bundled
-with Para.
 
 Para
 ----

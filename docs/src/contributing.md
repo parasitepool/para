@@ -37,3 +37,4 @@ We are cypherpunks of the bitcoiner variety, as such Parasite Pool does not curr
   - Not all users are *shadowy super coders*, while good tech is the goal, it is important to remember other's limitations
 - Be respectful of ideas/work even if you disagree with the goal/content
   - This does not mean that we shouldn't discuss and even enforce improvements, but make improvements in humans to make improvements in our tech
+- Additionally, our policy regarding things like doxing or privacy is informed by *[A Cypherpunk's Manifesto](https://www.activism.net/cypherpunk/manifesto.html)* by Eric Hughes

@@ -3,8 +3,8 @@ Overview
 
 About Us
 --------
-Parasite is a Bitcoin-focused group of people that wish to infest every part of the stack with a pervasive ideology
-about privacy and freedom that is reminiscent of cypherpunk ideals.
+Parasite is a loose collective of Bitcoin-focused individuals who wish to infest every part of the stack with a 
+pervasive ideology about privacy and freedom that is reminiscent of cypherpunk ideals.
 
 Developers
 ----------
