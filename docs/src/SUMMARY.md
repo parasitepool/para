@@ -9,4 +9,4 @@ Summary
   - [Developer](gettingstarted/developer.md)
 - [Our Stack](stack.md)
 - [Contributing](contributing.md)
-- [Acknowledgements](thanks.md)
+- [Acknowledgements](acknowledgments.md)
