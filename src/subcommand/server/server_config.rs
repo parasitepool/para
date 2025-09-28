@@ -2,6 +2,8 @@ use super::*;
 
 #[derive(Clone, Debug, Parser)]
 pub(crate) struct ServerConfig {
+    #[arg(long, help = "Grant access with <ADMIN_TOKEN>.")]
+    admin_token: Option<String>,
     #[arg(long, help = "Listen at <ADDRESS>.")]
     address: Option<String>,
     #[arg(long, help = "Request ACME TLS certificate for <ACME_DOMAIN>.")]
