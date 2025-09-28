@@ -2,7 +2,7 @@ Summary
 =======
 
 - [Overview](overview.md)
-- [FAQ](faq.md)
+- [FAQ]()
   - [Payout](payout.md)
 - [Getting Started]()
   - [Miner](gettingstarted/miner.md)
