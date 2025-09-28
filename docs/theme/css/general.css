@@ -33,7 +33,6 @@ main {
     overflow-wrap: break-word;
 }
 
-
 /* make wide tables scroll if they overflow */
 .table-wrapper {
     overflow-x: auto;
