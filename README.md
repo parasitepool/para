@@ -19,7 +19,7 @@ software with no warranty. See [LICENSE](LICENSE) for more details.
 This repository includes a modified fork of
 [ckpool](https://bitbucket.org/ckolivas/ckpool/src/master/), which currently
 runs on `parasite.wtf:42069`. For instructions on how to connect, please visit
-[parasite.space?help](https://parasite.space?help).
+[parasite.space](https://parasite.space?help).
 
 In addition to adding a postgres database for share logging and some helpful
 flags it modifies the coinbase payout logic found in `stratifier.c`. To glean
