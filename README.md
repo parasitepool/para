@@ -58,8 +58,8 @@ measure ping, inspect block templates and mimic mining machines. To see a full
 list of available commands just follow the instructions below and do `para
 help`.
 
-Setup Environment
------------------
+Setup
+-----
 
 ### Requirements:
 
