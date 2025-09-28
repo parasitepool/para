@@ -41,3 +41,12 @@ html body .search-wrapper #searchbar {
 th {
     color: var(--table-header-fg);
 }
+.para ::selection {
+    background: #FF9900;
+    color: #000000;
+}
+
+.para ::-moz-selection {
+    background: #FF9900;
+    color: #000000;
+}
