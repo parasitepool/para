@@ -5,7 +5,7 @@ mod ping;
 pub(crate) mod pool;
 pub mod server;
 pub mod sync;
-mod template;
+pub mod template;
 
 #[derive(Debug, Parser)]
 pub(crate) enum Subcommand {
