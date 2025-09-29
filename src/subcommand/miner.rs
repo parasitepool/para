@@ -80,10 +80,10 @@ fn get_system_info() -> &'static SystemInfo {
 #[derive(Debug, Parser)]
 pub(crate) struct Miner {
     stratum_endpoint: String,
-    #[arg(long, help = "Stratum <USERNAME>")]
+    #[arg(long, help = "Stratum <USERNAME>.")]
     username: String,
     #[arg(long, help = "Stratum <PASSWORD>")]
-    password: String,
+    password: Option<String>,
     #[arg(
         long,
         help = "Number of CPU cores to use (default: auto-detect)",
@@ -194,8 +194,8 @@ impl Miner {
 
         let result = Client::connect(
             (host, port),
-            &self.username,
-            &self.password,
+            self.username.clone(),
+            self.password.clone(),
             Duration::from_secs(10),
         )
         .await;
@@ -616,7 +616,7 @@ mod tests {
         let miner = Miner {
             stratum_endpoint: "localhost:42069".to_string(),
             username: "test_user".to_string(),
-            password: "x".to_string(),
+            password: Some("x".to_string()),
             cpu_cores: Some(2),
             monitor_performance: true,
         };
@@ -631,7 +631,7 @@ mod tests {
         let miner = Miner {
             stratum_endpoint: "localhost:42069".to_string(),
             username: "test_user".to_string(),
-            password: "x".to_string(),
+            password: Some("x".to_string()),
             cpu_cores: Some(2),
             monitor_performance: true,
         };
@@ -676,7 +676,7 @@ mod tests {
         let miner = Miner {
             stratum_endpoint: "127.0.0.1:12345".to_string(),
             username: "test_user".to_string(),
-            password: "x".to_string(),
+            password: Some("x".to_string()),
             cpu_cores: Some(1),
             monitor_performance: false,
         };

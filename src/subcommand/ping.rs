@@ -3,13 +3,13 @@ use super::*;
 #[derive(Parser, Debug)]
 pub(crate) struct Ping {
     stratum_endpoint: String,
-    #[arg(long, help = "Stop after <COUNT> replies")]
+    #[arg(long, help = "Stop after <COUNT> replies.")]
     count: Option<u64>,
-    #[arg(long, default_value = "5", help = "Fail after <TIMEOUT> seconds")]
+    #[arg(long, default_value = "5", help = "Fail after <TIMEOUT> seconds.")]
     timeout: u64,
-    #[arg(long, help = "Stratum <USERNAME>")]
+    #[arg(long, help = "Stratum <USERNAME>.")]
     username: Option<String>,
-    #[arg(long, help = "Stratum <PASSWORD>")]
+    #[arg(long, help = "Stratum <PASSWORD>.")]
     password: Option<String>,
 }
 
@@ -66,9 +66,13 @@ impl Ping {
     async fn ping_once(&self, addr: SocketAddr, ping_type: &PingType) -> Result<(Duration, usize)> {
         match ping_type {
             PingType::Subscribe => {
-                let mut client =
-                    stratum::Client::connect(addr, "", "", Duration::from_secs(self.timeout))
-                        .await?;
+                let mut client = stratum::Client::connect(
+                    addr,
+                    "".into(),
+                    None,
+                    Duration::from_secs(self.timeout),
+                )
+                .await?;
 
                 let (_, duration, size) = client.subscribe().await?;
 
@@ -79,8 +83,8 @@ impl Ping {
             PingType::Authorized { username, password } => {
                 let mut client = stratum::Client::connect(
                     addr,
-                    username,
-                    password,
+                    username.clone(),
+                    Some(password.clone()),
                     Duration::from_secs(self.timeout),
                 )
                 .await?;

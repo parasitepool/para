@@ -1,13 +1,23 @@
-Health Check Dashboard<br>
-<br>
-%% for (hostname, check) in &self.healthchecks {
-Host: {{ hostname }}<br>
-Disk Usage: {{ check.display_disk_usage() }}%<br>
-Memory Usage: {{ check.display_memory_usage() }}%<br>
-CPU Usage: {{ check.display_cpu_usage() }}%<br>
-Uptime: {{ check.display_uptime() }}<br>
-<br>
+<section>
+%% for (hostname, status) in &self.statuses {
+  <article>
+    <h2>{{ hostname }}</h2>
+    <ul>
+      <li>Disk: {{ status.display_disk_usage() }}%</li>
+      <li>Memory: {{ status.display_memory_usage() }}%</li>
+      <li>CPU: {{ status.display_cpu_usage() }}%</li>
+      <li>Uptime: {{ status.display_uptime() }}</li>
+%% if let Some(hashrate) = status.hashrate {
+      <li> Hashrate: {{ hashrate }}</li>
 %% }
+%% if let Some(workers) = status.workers {
+      <li>Workers: {{ workers }}</li>
+%% }
+    </ul>
+  </article>
+  <br>
+%% }
+</section>
 
 <div id="refresh" role="status" aria-live="polite">
   Updating in <strong id="count">60</strong>s

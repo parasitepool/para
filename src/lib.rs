@@ -50,7 +50,7 @@ use {
     serde_with::{DeserializeFromStr, SerializeDisplay},
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
     std::{
-        collections::{BTreeMap, HashMap},
+        collections::{BTreeMap, HashMap, HashSet},
         env,
         fmt::{self, Display, Formatter},
         fs, io,

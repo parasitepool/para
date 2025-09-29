@@ -1,3 +1,3 @@
 use super::*;
 
-pub type Healthcheck = HealthcheckHtml;
+pub type Status = StatusHtml;

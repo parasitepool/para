@@ -208,7 +208,7 @@ async fn test_payouts_range_single_block() {
         .await
         .unwrap();
 
-    let payouts: Vec<Payout> = server.get_json_async("/payouts/range/600/600").await;
+    let payouts: Vec<Payout> = server.get_json_async("/payouts/range/600/601").await;
 
     assert!(!payouts.is_empty());
 }
