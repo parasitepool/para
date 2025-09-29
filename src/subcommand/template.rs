@@ -3,19 +3,12 @@ use crate::stratum::{Client, Message};
 
 #[derive(Debug, Parser)]
 pub struct Template {
-    #[arg(long, help = "Stratum <HOST>")]
-    pub host: String,
-
-    #[arg(long, help = "Stratum <PORT>")]
-    pub port: u16,
-
-    #[arg(long, help = "Stratum <USERNAME>")]
-    pub username: Option<String>,
-
-    #[arg(long, help = "Stratum <PASSWORD>")]
+    stratum_endpoint: String,
+    #[arg(long, help = "Stratum <USERNAME>.")]
+    pub username: String,
+    #[arg(long, help = "Stratum <PASSWORD>.")]
     pub password: Option<String>,
-
-    #[arg(long, help = "Continue watching for template updates")]
+    #[arg(long, help = "Continue watching for template updates.")]
     pub watch: bool,
 }
 
@@ -38,19 +31,26 @@ pub struct TemplateData {
 
 impl Template {
     pub async fn run(self) -> anyhow::Result<()> {
-        let username = self.username.as_deref().unwrap_or("");
-        let password = self.password.as_deref().unwrap_or("");
-        let address = (self.host.as_str(), self.port);
-        let timeout = Duration::from_secs(30);
+        info!(
+            "Connecting to {} with user {}",
+            self.stratum_endpoint, self.username
+        );
 
-        let mut client = Client::connect(address, username, password, timeout).await?;
+        let address = resolve_stratum_endpoint(&self.stratum_endpoint).await?;
+
+        let mut client = Client::connect(
+            address,
+            self.username,
+            self.password,
+            Duration::from_secs(5),
+        )
+        .await?;
+
         let (subscription, _, _) = client.subscribe().await?;
 
-        if self.username.is_some() && self.password.is_some() {
-            client.authorize().await?;
-        }
+        client.authorize().await?;
 
-        let pool_url = format!("{}:{}", self.host, self.port);
+        let pool_url = format!("{}", address);
 
         loop {
             if let Some(message) = client.incoming.recv().await {
