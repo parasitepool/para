@@ -1,5 +1,7 @@
-use super::*;
-use crate::stratum::{Client, Message};
+use {
+    super::*,
+    crate::stratum::{Client, Message},
+};
 
 #[derive(Debug, Parser)]
 pub struct Template {
