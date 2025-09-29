@@ -15,8 +15,8 @@ pub struct Client {
 impl Client {
     pub async fn connect(
         address: impl tokio::net::ToSocketAddrs,
-        username: &str,
-        password: &str,
+        username: String,
+        password: Option<String>,
         timeout: Duration,
     ) -> Result<Self> {
         let stream = tokio::time::timeout(timeout, TcpStream::connect(address)).await??;
@@ -41,8 +41,8 @@ impl Client {
             incoming: incoming_rx,
             listener,
             pending: pending.clone(),
-            username: username.to_string(),
-            password: password.to_string(),
+            username,
+            password: password.unwrap_or("x".to_string()),
             id_counter: AtomicU64::new(0),
         })
     }

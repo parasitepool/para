@@ -66,9 +66,13 @@ impl Ping {
     async fn ping_once(&self, addr: SocketAddr, ping_type: &PingType) -> Result<(Duration, usize)> {
         match ping_type {
             PingType::Subscribe => {
-                let mut client =
-                    stratum::Client::connect(addr, "", "", Duration::from_secs(self.timeout))
-                        .await?;
+                let mut client = stratum::Client::connect(
+                    addr,
+                    "".into(),
+                    None,
+                    Duration::from_secs(self.timeout),
+                )
+                .await?;
 
                 let (_, duration, size) = client.subscribe().await?;
 
@@ -79,8 +83,8 @@ impl Ping {
             PingType::Authorized { username, password } => {
                 let mut client = stratum::Client::connect(
                     addr,
-                    username,
-                    password,
+                    username.clone(),
+                    Some(password.clone()),
                     Duration::from_secs(self.timeout),
                 )
                 .await?;

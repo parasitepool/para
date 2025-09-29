@@ -5,6 +5,7 @@ mod ping;
 pub(crate) mod pool;
 pub mod server;
 pub mod sync;
+pub mod template;
 
 #[derive(Debug, Parser)]
 pub(crate) enum Subcommand {
@@ -18,6 +19,8 @@ pub(crate) enum Subcommand {
     Server(server::Server),
     #[command(about = "Sync shares via HTTP")]
     Sync(sync::Sync),
+    #[command(about = "Monitor block templates")]
+    Template(template::Template),
 }
 
 impl Subcommand {
@@ -73,6 +76,7 @@ impl Subcommand {
                 server_result
             }
             Self::Sync(sync) => Ok(Runtime::new()?.block_on(async { sync.run().await })?),
+            Self::Template(template) => Runtime::new()?.block_on(async { template.run().await }),
         }
     }
 }
