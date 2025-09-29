@@ -56,49 +56,6 @@ server:
     --log-dir copr/logs \
     --port 8080
 
-template url='parasite.wtf:42069' username='bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg6dzw5nk24r45dzasde25r3' password='x':
-  #!/usr/bin/env bash
-  url="{{url}}"
-  host="${url%:*}"
-  port="${url##*:}"
-  args="cargo run -- template --host $host --port $port"
-  if [ -n "{{username}}" ]; then
-    args="$args --username {{username}}"
-  fi
-  if [ -n "{{password}}" ]; then
-    args="$args --password {{password}}"
-  fi
-  eval $args
-
-template-watch url='parasite.wtf:42069' username='bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg6dzw5nk24r45dzasde25r3' password='x':
-  #!/usr/bin/env bash
-  url="{{url}}"
-  host="${url%:*}"
-  port="${url##*:}"
-  args="cargo run -- template --host $host --port $port --watch"
-  if [ -n "{{username}}" ]; then
-    args="$args --username {{username}}"
-  fi
-  if [ -n "{{password}}" ]; then
-    args="$args --password {{password}}"
-  fi
-  eval $args
-
-template-parasite username='' password='':
-  just template 'parasite.wtf:42069' {{username}} {{password}}
-
-template-ocean username='' password='':
-  just template 'mine.ocean.xyz:3334' {{username}} {{password}}
-
-template-antpool username='' password='':
-  just template 'stratum.antpool.com:3333' {{username}} {{password}}
-
-template-braiins username='' password='':
-  just template 'stratum.braiins.com:3333' {{username}} {{password}}
-
-template-local:
-  just template '127.0.0.1:42069'
-
 build-docs:
   mdbook build docs -d build
 
