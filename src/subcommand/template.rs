@@ -13,20 +13,21 @@ pub struct Template {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct TemplateData {
+pub struct Output {
+    pub stratum_endpoint: String,
+    pub ip_address: String,
     pub timestamp: u64,
-    pub pool_url: String,
-    pub job_id: Option<String>,
-    pub prev_hash: Option<String>,
-    pub coinbase1: Option<String>,
-    pub coinbase2: Option<String>,
-    pub merkle_branches: Option<Vec<String>>,
-    pub version: Option<String>,
-    pub nbits: Option<String>,
-    pub ntime: Option<String>,
-    pub clean_jobs: Option<bool>,
     pub extranonce1: Option<String>,
     pub extranonce2_length: Option<u64>,
+    pub job_id: String,
+    pub prevhash: PrevHash,
+    pub coinb1: String,
+    pub coinb2: String,
+    pub merkle_branches: Vec<MerkleNode>,
+    pub version: Version,
+    pub nbits: Nbits,
+    pub ntime: Ntime,
+    pub clean_jobs: bool,
 }
 
 impl Template {
@@ -50,43 +51,33 @@ impl Template {
 
         client.authorize().await?;
 
-        let pool_url = format!("{}", address);
-
         loop {
             if let Some(message) = client.incoming.recv().await {
-                eprintln!("Received message: {:?}", message);
-
                 if let Message::Notification { method, params } = message
                     && method == "mining.notify"
-                    && let Ok(notify) = serde_json::from_value::<crate::stratum::Notify>(params)
+                    && let Ok(notify) = serde_json::from_value::<Notify>(params)
                 {
-                    let template = TemplateData {
+                    let output = Output {
+                        stratum_endpoint: self.stratum_endpoint.clone(),
+                        ip_address: address.ip().to_string(),
                         timestamp: std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
                             .unwrap()
                             .as_secs(),
-                        pool_url: pool_url.clone(),
-                        job_id: Some(notify.job_id.clone()),
-                        prev_hash: Some(notify.prevhash.to_string()),
-                        coinbase1: Some(notify.coinb1.clone()),
-                        coinbase2: Some(notify.coinb2.clone()),
-                        merkle_branches: Some(
-                            notify
-                                .merkle_branches
-                                .iter()
-                                .map(|b| b.to_string())
-                                .collect(),
-                        ),
-                        version: Some(notify.version.to_string()),
-                        nbits: Some(notify.nbits.to_string()),
-                        ntime: Some(notify.ntime.to_string()),
-                        clean_jobs: Some(notify.clean_jobs),
                         extranonce1: Some(subscription.extranonce1.to_string()),
                         extranonce2_length: Some(subscription.extranonce2_size as u64),
+                        job_id: notify.job_id,
+                        prevhash: notify.prevhash,
+                        coinb1: notify.coinb1,
+                        coinb2: notify.coinb2,
+                        merkle_branches: notify.merkle_branches,
+                        version: notify.version,
+                        nbits: notify.nbits,
+                        ntime: notify.ntime,
+                        clean_jobs: notify.clean_jobs,
                     };
 
-                    let output = serde_json::to_string(&template)?;
-                    println!("{}", output);
+                    println!("{}", serde_json::to_string_pretty(&output)?);
 
                     if !self.watch {
                         break;
