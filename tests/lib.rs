@@ -3,8 +3,8 @@ use {
     command_builder::CommandBuilder,
     executable_path::executable_path,
     para::{
-        api::Healthcheck,
-        ckpool::{HashRateStatus, PoolStatus, ShareStatus, Status, User, Worker},
+        api::Status,
+        ckpool::{self, HashRateStatus, PoolStatus, ShareStatus, User, Worker},
         hash_rate::HashRate,
         subcommand::server::notifications::{
             NotificationHandler, NotificationPriority, NotificationType,
@@ -22,7 +22,7 @@ use {
         path::PathBuf,
         process::{Child, Command, Stdio},
         str::FromStr,
-        sync::Arc,
+        sync::{Arc, Barrier},
         thread,
         time::Duration,
     },
@@ -34,7 +34,7 @@ use {
 
 #[cfg(target_os = "linux")]
 use {
-    para::subcommand::sync::{ShareBatch, SyncResponse, SyncSend},
+    para::subcommand::sync::{ShareBatch, Sync, SyncResponse},
     reqwest::Response,
     std::{
         io::stderr,
@@ -92,8 +92,8 @@ pub(crate) fn address(n: u32) -> Address {
     .assume_checked()
 }
 
-fn zero_status() -> Status {
-    Status {
+fn zero_status() -> ckpool::Status {
+    ckpool::Status {
         pool: PoolStatus {
             runtime: 0,
             lastupdate: 0,
@@ -124,8 +124,8 @@ fn zero_status() -> Status {
     }
 }
 
-fn typical_status() -> Status {
-    Status {
+fn typical_status() -> ckpool::Status {
+    ckpool::Status {
         pool: PoolStatus {
             runtime: 86400,
             lastupdate: 0,
