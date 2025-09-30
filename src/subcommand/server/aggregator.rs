@@ -4,7 +4,16 @@ pub(crate) struct Aggregator;
 
 impl Aggregator {
     pub(crate) fn init(config: Arc<ServerConfig>) -> Result<Router> {
+        let mut headers = header::HeaderMap::new();
+        if let Some(token) = config.api_token() {
+            headers.insert(
+                header::AUTHORIZATION,
+                header::HeaderValue::from_str(&format!("Bearer {token}"))?,
+            );
+        }
+
         let client = ClientBuilder::new()
+            .default_headers(headers)
             .timeout(Duration::from_secs(10))
             .use_rustls_tls()
             .build()?;
