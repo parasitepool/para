@@ -11,13 +11,7 @@ pub(crate) struct TestServer {
     pg_db: Option<PgTempDB>,
 
     #[cfg(target_os = "linux")]
-    pub(crate) credentials: Option<Credentials>,
-}
-
-#[cfg(target_os = "linux")]
-pub(crate) struct Credentials {
-    pub(crate) username: String,
-    pub(crate) password: String,
+    pub(crate) admin_token: Option<String>,
 }
 
 impl TestServer {
@@ -70,7 +64,7 @@ impl TestServer {
             #[cfg(target_os = "linux")]
             pg_db: None,
             #[cfg(target_os = "linux")]
-            credentials: None,
+            admin_token: None,
         }
     }
 
@@ -142,7 +136,7 @@ impl TestServer {
             port,
             tempdir,
             pg_db: Some(pg_db),
-            credentials: None,
+            admin_token: None,
         }
     }
 
@@ -229,8 +223,8 @@ impl TestServer {
             .get(self.url().join(path.as_ref()).unwrap())
             .header(reqwest::header::ACCEPT, "application/json");
 
-        if let Some(user) = &self.credentials {
-            client = client.basic_auth(user.username.clone(), Some(user.password.clone()));
+        if let Some(token) = &self.admin_token {
+            client = client.bearer_auth(token);
         }
 
         client.send().await.unwrap()
@@ -264,8 +258,8 @@ impl TestServer {
             .post(self.url().join(path.as_ref()).unwrap())
             .json(body);
 
-        if let Some(user) = &self.credentials {
-            client = client.basic_auth(user.username.clone(), Some(user.password.clone()));
+        if let Some(token) = &self.admin_token {
+            client = client.bearer_auth(token);
         }
 
         client.send().await.unwrap()

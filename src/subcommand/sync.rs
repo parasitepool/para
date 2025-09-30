@@ -36,10 +36,8 @@ pub struct Sync {
         default_value = "postgres://satoshi:nakamoto@127.0.0.1:5432/ckpool"
     )]
     pub database_url: String,
-    #[arg(long, help = "<USERNAME> for basic auth on sync endpoint.")]
-    sync_username: Option<String>,
-    #[arg(long, help = "<PASSWORD> for basic auth on sync endpoint.")]
-    sync_password: Option<String>,
+    #[arg(long, help = "<ADMIN_TOKEN> for bearer auth on sync endpoint.")]
+    admin_token: Option<String>,
     #[arg(
         long,
         help = "Set <ID_FILE> to store sync progress to.",
@@ -320,8 +318,8 @@ impl Sync {
             .json(&batch)
             .timeout(Duration::from_millis(HTTP_TIMEOUT_MS));
 
-        if let Some((username, password)) = self.get_credentials() {
-            req_client = req_client.basic_auth(username, Some(password));
+        if let Some(token) = self.get_admin_token() {
+            req_client = req_client.bearer_auth(token);
         }
 
         let response = req_client
@@ -401,15 +399,12 @@ impl Sync {
         self
     }
 
-    fn get_credentials(&self) -> Option<(&str, &str)> {
-        self.sync_username
-            .as_deref()
-            .zip(self.sync_password.as_deref())
+    fn get_admin_token(&self) -> Option<String> {
+        self.admin_token.clone()
     }
 
-    pub fn with_credentials(mut self, user: &str, pass: &str) -> Self {
-        self.sync_username = Some(user.to_string());
-        self.sync_password = Some(pass.to_string());
+    pub fn with_admin_token(mut self, admin_token: &str) -> Self {
+        self.admin_token = Some(admin_token.to_string());
         self
     }
 }
