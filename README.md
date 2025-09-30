@@ -13,8 +13,53 @@
 </div>
 <br>
 
-Setup Environment
------------------
+`para` is a command-line tool for miners and pools. It is experimental
+software with no warranty. See [LICENSE](LICENSE) for more details.
+
+This repository includes a modified fork of
+[ckpool](https://bitbucket.org/ckolivas/ckpool/src/master/), which currently
+runs on `parasite.wtf:42069`. For instructions on how to connect, please visit
+[parasite.space](https://parasite.space?help).
+
+In addition to adding a postgres database for share logging and some helpful
+flags it modifies the coinbase payout logic found in `stratifier.c`. To glean
+more information on the rationale behind that refer to [this
+article](https://zkshark.substack.com/p/parasite-pool-igniting-the-mining).
+
+```c 
+// Generation value
+g64 = COIN;
+d64 = wb->coinbasevalue - COIN;
+wb->coinb2bin[wb->coinb2len++] = 2 + wb->insert_witness;
+
+u64 = (uint64_t*)&wb->coinb2bin[wb->coinb2len];
+*u64 = htole64(g64);
+wb->coinb2len += 8;
+
+/* Coinb2 address goes here, takes up 23~25 bytes + 1 byte for length */
+
+wb->coinb3len = 0;
+wb->coinb3bin = ckzalloc(256 + wb->insert_witness * (8 + witnessdata_size + 2));
+
+if (ckp->donvalid && ckp->donation > 0) {
+    u64 = (uint64_t*)wb->coinb3bin;
+    *u64 = htole64(d64);
+    wb->coinb3len += 8;
+
+    wb->coinb3bin[wb->coinb3len++] = sdata->dontxnlen;
+    memcpy(wb->coinb3bin + wb->coinb3len, sdata->dontxnbin, sdata->dontxnlen);
+    wb->coinb3len += sdata->dontxnlen;
+}
+```
+
+`para` is more than just glue code around ckpool though. It implements a Rust
+library for the Stratum protocol and includes helpful command-line tools that
+measure ping, inspect block templates and mimic mining machines. To see a full
+list of available commands just follow the instructions below and do `para
+help`.
+
+Setup
+-----
 
 ### Requirements:
 
@@ -39,8 +84,8 @@ requirements.
 . ./bin/activate-hermit
 ```
 
-Building
---------
+Build
+-----
 
 Clone the `para` repo:
 
@@ -71,24 +116,3 @@ You can also install `para` directly into your path by doing:
 ```
 cargo install --path .
 ```
-
-Building the docs
------------------
-
-```
-cargo install mdbook mdbook-linkcheck
-just build-docs
-just serve-docs
-```
-
-Then you can customize CSS and javascript by following [this
-guide](https://github.com/rust-lang/mdBook/tree/master/guide/src/format/theme)
-and doing:
-
-```
-just init-mdbook-theme
-```
-
-This will create the default `mdbook` layout and CSS files inside
-`docs/tmp/theme`, which you can then pick, chose and adapt and then copy into
-`docs/theme` to tweak the defaults.
