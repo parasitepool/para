@@ -11,7 +11,7 @@ use {
     database::Database,
     error::{OptionExt, ServerError, ServerResult},
     futures::future::join_all,
-    reqwest::{Client, ClientBuilder},
+    reqwest::{Client, ClientBuilder, header},
     server_config::ServerConfig,
     templates::{
         PageContent, PageHtml, dashboard::DashboardHtml, home::HomeHtml, status::StatusHtml,
@@ -114,7 +114,15 @@ impl Server {
             .layer(SetResponseHeaderLayer::overriding(
                 CONTENT_DISPOSITION,
                 HeaderValue::from_static("inline"),
-            ))
+            ));
+
+        router = if let Some(token) = config.api_token() {
+            router.layer(ValidateRequestHeaderLayer::bearer(token))
+        } else {
+            router
+        };
+
+        router = router
             .route("/", get(Self::home))
             .route(
                 "/status",

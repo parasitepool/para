@@ -4,6 +4,8 @@ use super::*;
 pub(crate) struct ServerConfig {
     #[arg(long, help = "Require <ADMIN_TOKEN> for HTTP authentication.")]
     admin_token: Option<String>,
+    #[arg(long, help = "Require <API_TOKEN> for HTTP authentication.")]
+    api_token: Option<String>,
     #[arg(long, help = "Listen at <ADDRESS>.")]
     address: Option<String>,
     #[arg(long, help = "Request ACME TLS certificate for <ACME_DOMAIN>.")]
@@ -50,6 +52,10 @@ impl ServerConfig {
 
     pub(crate) fn admin_token(&self) -> Option<&str> {
         self.admin_token.as_deref()
+    }
+
+    pub(crate) fn api_token(&self) -> Option<&str> {
+        self.api_token.as_deref()
     }
 
     pub(crate) fn domain(&self) -> String {
