@@ -4,7 +4,6 @@ use {
         create_test_block, create_test_shares, insert_test_block, insert_test_shares,
         setup_test_schema,
     },
-    crate::test_server::Credentials,
     tempfile::tempdir,
 };
 
@@ -60,9 +59,10 @@ async fn test_sync_batch_endpoint() {
 
 #[tokio::test]
 async fn test_sync_with_auth() {
-    let mut server =
-        TestServer::spawn_with_db_args("--username test_user --password test_pass").await;
+    let mut server = TestServer::spawn_with_db_args("--admin-token verysecrettoken").await;
+
     let db_url = server.database_url().unwrap();
+
     setup_test_schema(db_url.clone()).await.unwrap();
 
     let test_shares = create_test_shares(5, 800000);
@@ -79,13 +79,13 @@ async fn test_sync_with_auth() {
     };
 
     let fail: Response = server.post_json_raw("/sync/batch", &batch).await;
+
     assert_eq!(fail.status(), StatusCode::UNAUTHORIZED);
 
-    server.credentials = Some(Credentials {
-        username: "test_user".into(),
-        password: "test_pass".into(),
-    });
+    server.admin_token = Some("verysecrettoken".into());
+
     let succ: SyncResponse = server.post_json("/sync/batch", &batch).await;
+
     assert_eq!(succ.status, "OK");
     assert_eq!(succ.received_count, 5);
     assert_eq!(succ.batch_id, batch.batch_id);
@@ -107,6 +107,7 @@ async fn test_sync_with_auth() {
             .fetch_optional(&pool)
             .await
             .unwrap();
+
     assert!(stored_block.is_some());
     assert_eq!(stored_block.unwrap().1, test_block.blockhash);
 

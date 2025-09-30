@@ -57,7 +57,7 @@ impl Aggregator {
         Extension(config): Extension<Arc<ServerConfig>>,
     ) -> ServerResult<Response> {
         let nodes = config.nodes();
-        let credentials = config.credentials();
+        let admin_token = config.admin_token();
         let fetches = nodes.iter().map(|url| {
             let client = client.clone();
             async move {
@@ -66,8 +66,8 @@ impl Aggregator {
                         .get(url.join("/status")?)
                         .header("accept", "application/json");
 
-                    if let Some((username, password)) = credentials {
-                        request_builder = request_builder.basic_auth(username, Some(password));
+                    if let Some(token) = admin_token {
+                        request_builder = request_builder.bearer_auth(token);
                     }
 
                     let resp = request_builder.send().await?;

@@ -41,8 +41,8 @@ impl Subcommand {
                     if !sync_endpoint.contains(&hostname) {
                         let mut sync = sync::Sync::default().with_endpoint(sync_endpoint.clone());
 
-                        if let Some((username, password)) = server.config.credentials() {
-                            sync = sync.with_credentials(username, password);
+                        if let Some(token) = server.config.admin_token() {
+                            sync = sync.with_admin_token(token);
                         }
 
                         let send_task = rt.spawn_blocking(move || {

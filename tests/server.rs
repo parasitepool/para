@@ -179,7 +179,7 @@ fn status_json() {
 
 #[test]
 fn status_with_auth() {
-    let server = TestServer::spawn_with_args("--username foo --password bar");
+    let server = TestServer::spawn_with_args("--admin-token verysecrettoken");
 
     let response = reqwest::blocking::Client::new()
         .get(format!("{}status", server.url()))
@@ -190,7 +190,7 @@ fn status_with_auth() {
 
     let response = reqwest::blocking::Client::new()
         .get(format!("{}status", server.url()))
-        .basic_auth("foo", Some("bar"))
+        .bearer_auth("verysecrettoken")
         .send()
         .unwrap();
 
@@ -201,14 +201,14 @@ fn status_with_auth() {
 fn aggregator_dashboard_with_auth() {
     let mut servers = Vec::new();
     for _ in 0..3 {
-        let server = TestServer::spawn_with_args("--username foo --password bar");
+        let server = TestServer::spawn_with_args("--admin-token verysecrettoken");
         servers.push(server)
     }
 
     assert_eq!(servers.len(), 3);
 
     let aggregator = TestServer::spawn_with_args(format!(
-        "--username foo --password bar --nodes {} --nodes {} --nodes {}",
+        "--admin-token verysecrettoken --nodes {} --nodes {} --nodes {}",
         servers[0].url(),
         servers[1].url(),
         servers[2].url()
@@ -223,7 +223,7 @@ fn aggregator_dashboard_with_auth() {
 
     let response = reqwest::blocking::Client::new()
         .get(format!("{}aggregator/dashboard", aggregator.url()))
-        .basic_auth("foo", Some("bar"))
+        .bearer_auth("verysecrettoken")
         .send()
         .unwrap();
 

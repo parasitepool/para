@@ -1,9 +1,6 @@
 use {
     super::*,
-    crate::{
-        test_psql::{insert_test_block, setup_test_schema},
-        test_server::Credentials,
-    },
+    crate::test_psql::{insert_test_block, setup_test_schema},
     para::subcommand::server::database::Payout,
 };
 
@@ -387,7 +384,7 @@ async fn insert_test_shares_with_users(
 
 #[tokio::test]
 async fn test_invalid_auth() {
-    let server = TestServer::spawn_with_db_args("--username test_user --password test_pass").await;
+    let server = TestServer::spawn_with_db_args("--admin-token verysecrettoken").await;
 
     setup_test_schema(server.database_url().unwrap())
         .await
@@ -399,17 +396,14 @@ async fn test_invalid_auth() {
 
 #[tokio::test]
 async fn test_valid_auth() {
-    let mut server =
-        TestServer::spawn_with_db_args("--username test_user --password test_pass").await;
+    let mut server = TestServer::spawn_with_db_args("--admin-token verysecrettoken").await;
 
     setup_test_schema(server.database_url().unwrap())
         .await
         .unwrap();
 
-    server.credentials = Some(Credentials {
-        username: "test_user".into(),
-        password: "test_pass".into(),
-    });
+    server.admin_token = Some("verysecrettoken".into());
+
     let res: Response = server.get_json_async_raw("/split").await;
     assert!(res.status().is_success());
 }
