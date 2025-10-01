@@ -130,7 +130,7 @@ impl Database {
             SELECT
                 qs.workername AS worker_name,
                 qs.btcaddress,
-                qs.lnurl,
+                qs.lnurl as lnurl,
                 CAST(qs.total_diff as INT8) AS payable_shares,
                 CAST(ss.grand_total as INT8) AS total_shares,
                 ROUND((qs.total_diff / ss.grand_total)::numeric, 8)::FLOAT8 as percentage
@@ -161,7 +161,6 @@ impl Database {
             "
             WITH qualified_shares AS (
                 SELECT
-                    s.workername,
                     s.lnurl,
                     s.username AS btcaddress,
                     SUM(s.diff) as total_diff
@@ -170,16 +169,15 @@ impl Database {
                     AND s.blockheight < $2
                     AND s.username != ALL($3)
                     AND s.reject_reason IS NULL
-                GROUP BY s.lnurl, s.username, s.workername
+                GROUP BY s.lnurl, s.username
             ),
             sum_shares AS (
                 SELECT SUM(total_diff) as grand_total
                 FROM qualified_shares
             )
             SELECT
-                qs.workername AS worker_name,
                 qs.btcaddress,
-                qs.lnurl,
+                qs.lnurl as lnurl,
                 CAST(qs.total_diff as INT8) AS payable_shares,
                 CAST(ss.grand_total as INT8) AS total_shares,
                 ROUND((qs.total_diff / NULLIF(ss.grand_total, 0))::numeric, 8)::FLOAT8 as percentage
