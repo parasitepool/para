@@ -1,6 +1,35 @@
 Changelog
 =========
 
+[0.5.1](https://github.com/parasitepool/para/releases/tag/0.5.1) - 2025-10-01
+-----------------------------------------------------------------------------
+
+### Added
+- Small README tweaks (#216)
+- API token for aggregator (#215)
+- Add API token auth (#214)
+- Add bearer authentication (#213)
+- Add `template` command to monitor block templates (#178)
+- Delete some CSS (#212)
+- Add some documentation (#206)
+- Add intro to README (#211)
+- Text highlight (#210)
+- Refine args and commands (#208)
+- Responsive Logo for Docs (#207)
+- Correct some SQL statements (#205)
+- Aggregate and cache users (#202)
+- Fix sync test (#204)
+- Sync fixes (#203)
+- Add parasite themed docs (#200)
+- Create aggregator cache (#199)
+- Database Audit/Cleanup (#198)
+- Rename healthcheck to status (#197)
+- Add Building section to README (#196)
+- Parasite Cookbook (#186)
+- Improve README (#191)
+- Tweak testing confs (#187)
+- Release 0.5.0 (#190)
+
 [0.5.0](https://github.com/parasitepool/para/releases/tag/0.5.0) - 2025-09-21
 -----------------------------------------------------------------------------
 
