@@ -6,10 +6,10 @@ mod hasher;
 #[derive(Debug, Parser)]
 pub(crate) struct Miner {
     stratum_endpoint: String,
-    #[arg(long, help = "Stratum <USERNAME>")]
+    #[arg(long, help = "Stratum <USERNAME>.")]
     username: String,
-    #[arg(long, help = "Stratum <PASSWORD>")]
-    password: String,
+    #[arg(long, help = "Stratum <PASSWORD>.")]
+    password: Option<String>,
 }
 
 impl Miner {
@@ -20,11 +20,15 @@ impl Miner {
                 self.stratum_endpoint, self.username
             );
 
-            let addr = resolve_stratum_endpoint(&self.stratum_endpoint).await?;
+            let address = resolve_stratum_endpoint(&self.stratum_endpoint).await?;
 
-            let client =
-                Client::connect(addr, &self.username, &self.password, Duration::from_secs(5))
-                    .await?;
+            let client = Client::connect(
+                address,
+                self.username.clone(),
+                self.password.clone(),
+                Duration::from_secs(5),
+            )
+            .await?;
 
             let controller = Controller::new(client).await?;
 

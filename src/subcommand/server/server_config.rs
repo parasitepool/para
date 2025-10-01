@@ -2,41 +2,35 @@ use super::*;
 
 #[derive(Clone, Debug, Parser)]
 pub(crate) struct ServerConfig {
-    #[clap(long, help = "Listen at <ADDRESS>")]
+    #[arg(long, help = "Require <ADMIN_TOKEN> for HTTP authentication.")]
+    admin_token: Option<String>,
+    #[arg(long, help = "Require <API_TOKEN> for HTTP authentication.")]
+    api_token: Option<String>,
+    #[arg(long, help = "Listen at <ADDRESS>.")]
     address: Option<String>,
-    #[arg(long, help = "Request ACME TLS certificate for <ACME_DOMAIN>")]
+    #[arg(long, help = "Request ACME TLS certificate for <ACME_DOMAIN>.")]
     acme_domain: Vec<String>,
-    #[arg(long, help = "Provide ACME contact <ACME_CONTACT>")]
+    #[arg(long, help = "Provide ACME contact <ACME_CONTACT>.")]
     acme_contact: Vec<String>,
-    #[arg(long, alias = "datadir", help = "Store acme cache in <DATA_DIR>")]
+    #[arg(
+        long,
+        help = "The <CHANNEL> at ntfy.sh to use for block found notifications."
+    )]
+    alerts_ntfy_channel: Option<String>,
+    #[arg(long, alias = "datadir", help = "Store acme cache in <DATA_DIR>.")]
     data_dir: Option<PathBuf>,
-    #[arg(long, help = "Connect to Postgres running at <DATABASE_URL>")]
+    #[arg(long, help = "Connect to Postgres running at <DATABASE_URL>.")]
     database_url: Option<String>,
-    #[arg(long, help = "CKpool <LOG_DIR>")]
+    #[arg(long, help = "CKpool <LOG_DIR>.")]
     log_dir: Option<PathBuf>,
-    #[clap(long, help = "Listen on <PORT>")]
+    #[arg(long, help = "Listen on <PORT>.")]
     port: Option<u16>,
-    #[arg(
-        long,
-        help = "Require basic HTTP authentication with <USERNAME>.",
-        requires = "password"
-    )]
-    username: Option<String>,
-    #[arg(
-        long,
-        help = "Require basic HTTP authentication with <PASSWORD>.",
-        requires = "username"
-    )]
-    password: Option<String>,
-    #[clap(long, help = "Collect statistics from <NODES>.")]
+    #[arg(long, help = "Collect statistics from <NODES>.")]
     nodes: Vec<Url>,
-    #[arg(long, help = "Send shares to HTTP sync endpoint <SYNC_ENDPOINT>")]
+    #[arg(long, help = "Send shares to HTTP <SYNC_ENDPOINT>.")]
     sync_endpoint: Option<String>,
-    #[arg(
-        long,
-        help = "The channel at ntfy.sh to use for block found notifications"
-    )]
-    pub(crate) alerts_ntfy_channel: Option<String>,
+    #[arg(long, help = "Cache <TTL> in seconds.", default_value = "30")]
+    ttl: u64,
 }
 
 impl ServerConfig {
@@ -52,8 +46,16 @@ impl ServerConfig {
         self.acme_contact.clone()
     }
 
-    pub(crate) fn credentials(&self) -> Option<(&str, &str)> {
-        self.username.as_deref().zip(self.password.as_deref())
+    pub(crate) fn alerts_ntfy_channel(&self) -> Option<String> {
+        self.alerts_ntfy_channel.clone()
+    }
+
+    pub(crate) fn admin_token(&self) -> Option<&str> {
+        self.admin_token.as_deref()
+    }
+
+    pub(crate) fn api_token(&self) -> Option<&str> {
+        self.api_token.as_deref()
     }
 
     pub(crate) fn domain(&self) -> String {
@@ -106,5 +108,9 @@ impl ServerConfig {
 
     pub(crate) fn sync_endpoint(&self) -> Option<String> {
         self.sync_endpoint.clone()
+    }
+
+    pub(crate) fn ttl(&self) -> Duration {
+        Duration::from_secs(self.ttl)
     }
 }

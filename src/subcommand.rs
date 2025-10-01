@@ -5,6 +5,7 @@ mod ping;
 pub(crate) mod pool;
 pub mod server;
 pub mod sync;
+pub mod template;
 
 #[derive(Debug, Parser)]
 pub(crate) enum Subcommand {
@@ -16,8 +17,10 @@ pub(crate) enum Subcommand {
     Pool(pool::Pool),
     #[command(about = "Run API server")]
     Server(server::Server),
-    #[command(about = "Send shares to HTTP endpoint")]
-    SyncSend(sync::SyncSend),
+    #[command(about = "Sync shares via HTTP")]
+    Sync(sync::Sync),
+    #[command(about = "Monitor block templates")]
+    Template(template::Template),
 }
 
 impl Subcommand {
@@ -36,26 +39,23 @@ impl Subcommand {
                     let hostname = System::host_name().ok_or(anyhow!("no hostname found"))?;
 
                     if !sync_endpoint.contains(&hostname) {
-                        let mut sync_send =
-                            sync::SyncSend::default().with_endpoint(sync_endpoint.clone());
+                        let mut sync = sync::Sync::default().with_endpoint(sync_endpoint.clone());
 
-                        if let Some((username, password)) = server.config.credentials() {
-                            sync_send = sync_send.with_credentials(username, password);
+                        if let Some(token) = server.config.admin_token() {
+                            sync = sync.with_admin_token(token);
                         }
-
-                        let sync_handle = handle.clone();
 
                         let send_task = rt.spawn_blocking(move || {
                             let sync_rt =
                                 Runtime::new().expect("Failed to create sync send runtime");
                             sync_rt.block_on(async {
-                                if let Err(e) = sync_send.run(sync_handle).await {
+                                if let Err(e) = sync.run().await {
                                     error!("SyncSend failed: {}", e);
                                 }
                             });
                         });
                         sync_task = Some(send_task);
-                        info!("Started SyncSend to endpoint: {sync_endpoint}");
+                        info!("Started sync to endpoint: {sync_endpoint}");
                     }
                 }
 
@@ -75,10 +75,8 @@ impl Subcommand {
 
                 server_result
             }
-            Self::SyncSend(sync_send) => {
-                let handle = Handle::new();
-                Ok(Runtime::new()?.block_on(async { sync_send.run(handle).await })?)
-            }
+            Self::Sync(sync) => Ok(Runtime::new()?.block_on(async { sync.run().await })?),
+            Self::Template(template) => Runtime::new()?.block_on(async { template.run().await }),
         }
     }
 }

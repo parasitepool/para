@@ -1,21 +1,27 @@
 use {
     super::*,
-    crate::subcommand::sync::{ShareBatch, SyncResponse},
+    crate::{
+        ckpool,
+        subcommand::sync::{ShareBatch, SyncResponse},
+    },
     accept_json::AcceptJson,
     aggregator::Aggregator,
     axum::extract::{Path, Query},
+    cache::Cache,
     database::Database,
     error::{OptionExt, ServerError, ServerResult},
+    futures::future::join_all,
+    reqwest::{Client, ClientBuilder, header},
     server_config::ServerConfig,
     templates::{
-        PageContent, PageHtml, dashboard::DashboardHtml, healthcheck::HealthcheckHtml,
-        home::HomeHtml,
+        PageContent, PageHtml, dashboard::DashboardHtml, home::HomeHtml, status::StatusHtml,
     },
 };
 
 mod accept_json;
 mod aggregator;
 pub mod api;
+mod cache;
 pub mod database;
 mod error;
 pub mod notifications;
@@ -108,11 +114,19 @@ impl Server {
             .layer(SetResponseHeaderLayer::overriding(
                 CONTENT_DISPOSITION,
                 HeaderValue::from_static("inline"),
-            ))
+            ));
+
+        router = if let Some(token) = config.api_token() {
+            router.layer(ValidateRequestHeaderLayer::bearer(token))
+        } else {
+            router
+        };
+
+        router = router
             .route("/", get(Self::home))
             .route(
-                "/healthcheck",
-                Self::with_auth(config.clone(), get(Self::healthcheck)),
+                "/status",
+                Self::with_auth(config.clone(), get(Self::status)),
             )
             .route("/static/{*path}", get(Self::static_assets));
 
@@ -163,8 +177,8 @@ impl Server {
     where
         S: Clone + Send + Sync + 'static,
     {
-        if let Some((username, password)) = config.credentials() {
-            method_router.layer(ValidateRequestHeaderLayer::basic(username, password))
+        if let Some(token) = config.admin_token() {
+            method_router.layer(ValidateRequestHeaderLayer::bearer(token))
         } else {
             method_router
         }
@@ -174,10 +188,10 @@ impl Server {
     where
         S: Clone + Send + Sync + 'static,
     {
-        if let Some((username, password)) = config.credentials() {
+        if let Some(token) = config.admin_token() {
             Router::new()
                 .merge(router)
-                .layer(ValidateRequestHeaderLayer::basic(username, password))
+                .layer(ValidateRequestHeaderLayer::bearer(token))
         } else {
             router
         }
@@ -207,7 +221,7 @@ impl Server {
         })
     }
 
-    pub(crate) async fn healthcheck(
+    pub(crate) async fn status(
         Extension(config): Extension<Arc<ServerConfig>>,
         AcceptJson(accept_json): AcceptJson,
     ) -> ServerResult<Response> {
@@ -240,17 +254,27 @@ impl Server {
             system.refresh_cpu_all();
             let cpu_usage_percent: f64 = system.global_cpu_usage().into();
 
-            let healthcheck = HealthcheckHtml {
+            let status_file = config.log_dir().join("pool/pool.status");
+
+            let (hashrate, workers) = std::fs::read_to_string(&status_file)
+                .ok()
+                .and_then(|s| ckpool::Status::from_str(&s).ok())
+                .map(|st| (Some(st.hash_rates.hashrate1m), Some(st.pool.workers)))
+                .unwrap_or((None, None));
+
+            let status = StatusHtml {
                 disk_usage_percent,
                 memory_usage_percent,
                 cpu_usage_percent,
                 uptime: System::uptime(),
+                hashrate,
+                workers,
             };
 
             Ok(if accept_json {
-                Json(healthcheck).into_response()
+                Json(status).into_response()
             } else {
-                healthcheck.page(config.domain()).into_response()
+                status.page(config.domain()).into_response()
             })
         })
     }
@@ -480,7 +504,7 @@ impl Server {
                     );
 
                     let notification_result = notifications::notify_block_found(
-                        &config.alerts_ntfy_channel,
+                        config.alerts_ntfy_channel(),
                         block.blockheight,
                         block.blockhash.clone(),
                         block.coinbasevalue.unwrap_or(0),
@@ -719,15 +743,15 @@ mod tests {
     }
 
     #[test]
-    fn default_credentials() {
+    fn default_no_admin_token() {
         let config = parse_server_config("para server");
-        assert_eq!(config.credentials(), None);
+        assert_eq!(config.admin_token(), None);
     }
 
     #[test]
-    fn credentials_both_provided() {
-        let config = parse_server_config("para server --username satoshi --password secret");
-        assert_eq!(config.credentials(), Some(("satoshi", "secret")));
+    fn admin_token() {
+        let config = parse_server_config("para server --admin-token verysecrettoken");
+        assert_eq!(config.admin_token(), Some("verysecrettoken"));
     }
 
     #[test]
@@ -799,24 +823,6 @@ mod tests {
     fn override_port() {
         let config = parse_server_config("para server --port 8080");
         assert_eq!(config.port(), Some(8080));
-    }
-
-    #[test]
-    #[should_panic(expected = "required")]
-    fn credentials_only_username_panics() {
-        parse_server_config("para server --username satoshi");
-    }
-
-    #[test]
-    #[should_panic(expected = "required")]
-    fn credentials_only_password_panics() {
-        parse_server_config("para server --password secret");
-    }
-
-    #[test]
-    fn credentials_mutual_requirement_no_panic() {
-        parse_server_config("para server --username satoshi --password secret");
-        parse_server_config("para server");
     }
 
     #[test]

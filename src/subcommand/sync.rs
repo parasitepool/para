@@ -2,7 +2,6 @@ use {
     super::*, crate::subcommand::server::database::Database, reqwest::Client, tokio::time::Duration,
 };
 
-const ID_FILE: &str = "current_id.txt";
 const SYNC_DELAY_MS: u64 = 1000;
 const BLOCKHEIGHT_CHECK_DELAY_MS: u64 = 5000;
 const TARGET_ID_BUFFER: i64 = 0;
@@ -10,46 +9,44 @@ const HTTP_TIMEOUT_MS: u64 = 30000;
 const MAX_RETRIES: u32 = 3;
 
 #[derive(Debug, Parser)]
-pub struct SyncSend {
+pub struct Sync {
     #[arg(
         long,
-        help = "HTTP endpoint to send shares to",
+        help = "Send shares to HTTP <ENDPOINT>.",
         default_value = "http://127.0.0.1:8080"
     )]
     endpoint: String,
-
     #[arg(
         long,
-        help = "Batch size for processing shares",
+        help = "Process shares in <BATCH_SIZE>.",
         default_value = "1000000"
     )]
     pub batch_size: i64,
-
-    #[arg(long, help = "Force reset current ID to 0")]
+    #[arg(long, help = "<RESET> current id to 0.")]
     reset_id: bool,
-
     #[arg(
         long,
-        help = "Terminate when no more records to process",
+        help = "Terminate when no more records to process.",
         action = clap::ArgAction::SetTrue
     )]
     pub terminate_when_complete: bool,
-
     #[arg(
         long,
-        help = "Connect to Postgres running at <DATABASE_URL>",
+        help = "Connect to Postgres running at <DATABASE_URL>.",
         default_value = "postgres://satoshi:nakamoto@127.0.0.1:5432/ckpool"
     )]
     pub database_url: String,
-
-    #[arg(long, help = "Username for basic auth on sync endpoint")]
-    sync_username: Option<String>,
-
-    #[arg(long, help = "Password for basic auth on sync endpoint")]
-    sync_password: Option<String>,
+    #[arg(long, help = "<ADMIN_TOKEN> for bearer auth on sync endpoint.")]
+    admin_token: Option<String>,
+    #[arg(
+        long,
+        help = "Set <ID_FILE> to store sync progress to.",
+        default_value = "current_id.txt"
+    )]
+    pub id_file: String,
 }
 
-impl Default for SyncSend {
+impl Default for Sync {
     fn default() -> Self {
         Self::try_parse_from(std::iter::empty::<String>()).unwrap()
     }
@@ -122,8 +119,8 @@ enum SyncResult {
     WaitForNewBlock,
 }
 
-impl SyncSend {
-    pub(crate) async fn run(self, _handle: Handle) -> Result<()> {
+impl Sync {
+    pub async fn run(self) -> Result<()> {
         let shutdown_flag = Arc::new(AtomicBool::new(false));
         let shutdown_flag_clone = shutdown_flag.clone();
 
@@ -173,6 +170,10 @@ impl SyncSend {
                     sleep(Duration::from_millis(SYNC_DELAY_MS)).await;
                 }
                 Ok(SyncResult::WaitForNewBlock) => {
+                    if self.terminate_when_complete {
+                        info!("Sync send completed successfully");
+                        break;
+                    }
                     if !caught_up_logged {
                         info!(
                             "Current and latest records have same blockheight, waiting for new block..."
@@ -201,70 +202,59 @@ impl SyncSend {
         client: &Client,
         current_id: &mut i64,
     ) -> Result<SyncResult> {
-        let max_id = database.get_max_id().await?;
+        let max_id = database.get_max_id().await.unwrap_or(0);
 
         if *current_id + TARGET_ID_BUFFER >= max_id {
             return Ok(SyncResult::Complete);
         }
 
-        let current_blockheight = database.get_blockheight_for_id(*current_id).await?;
+        let next_id = database.get_next_id(*current_id).await.unwrap_or(0);
+
+        let current_blockheight = database.get_blockheight_for_id(next_id).await?.unwrap_or(0);
+
+        let last_id_in_block = database
+            .get_last_id_for_blockheight(current_blockheight)
+            .await;
+        if last_id_in_block.is_err() {
+            return Ok(SyncResult::Continue);
+        }
+        let target_id = std::cmp::min(*current_id + self.batch_size, last_id_in_block?.unwrap());
         let latest_blockheight = database.get_blockheight_for_id(max_id).await?;
 
         match (current_blockheight, latest_blockheight) {
-            (Some(current_bh), Some(latest_bh)) if current_bh >= latest_bh => {
+            (current_bh, Some(latest_bh)) if current_bh >= latest_bh => {
                 return Ok(SyncResult::WaitForNewBlock);
             }
             _ => {}
         }
 
-        let target_id = std::cmp::min(*current_id + self.batch_size, max_id - TARGET_ID_BUFFER);
-
         info!(
             "Fetching shares from ID {} to {} (max: {}) - blockheights: {:?} -> {:?}",
-            *current_id + 1,
-            target_id,
-            max_id,
-            current_blockheight,
-            latest_blockheight
+            next_id, target_id, max_id, current_blockheight, latest_blockheight
         );
 
         // Run share compression BEFORE transmitting
-        info!(
-            "Compressing shares in range {} to {}",
-            *current_id + 1,
-            target_id
-        );
-        match database
-            .compress_shares_range(*current_id + 1, target_id)
-            .await
-        {
+        info!("Compressing shares in range {} to {}", next_id, target_id);
+        match database.compress_shares_range(next_id, target_id).await {
             Ok(compressed_count) => {
                 info!("Compressed {compressed_count} share records in range");
             }
             Err(e) => {
                 error!(
                     "Warning: Failed to compress range {} to {}: {}",
-                    *current_id + 1,
-                    target_id,
-                    e
+                    next_id, target_id, e
                 );
             }
         }
 
-        let shares = database
-            .get_shares_by_id_range(*current_id + 1, target_id)
-            .await?;
-        let block = if let Some(bh) = current_blockheight {
-            database.get_block_by_height(bh).await?
-        } else {
-            None
-        };
-        let highest_id = shares.last().map(|share| share.id);
+        let shares = database.get_shares_by_id_range(next_id, target_id).await?;
+        let block = database.get_block_finds(current_blockheight).await?;
+        let highest_id = shares.last().map(|share| share.id).unwrap_or(target_id);
 
         if shares.is_empty() && block.is_none() {
             info!("No shares found in range, moving to next batch");
             *current_id = target_id;
-            self.save_current_id(*current_id).await?;
+            self.save_current_id(target_id).await?;
             return Ok(SyncResult::Continue);
         }
 
@@ -273,11 +263,11 @@ impl SyncSend {
         // retry n times
         for attempt in 1..=MAX_RETRIES {
             match self
-                .send_batch_http(client, &block, &shares, *current_id + 1, target_id)
+                .send_batch_http(client, &block, &shares, next_id, highest_id)
                 .await
             {
                 Ok(_) => {
-                    *current_id = highest_id.unwrap_or(target_id);
+                    *current_id = highest_id;
                     self.save_current_id(*current_id).await?;
                     return Ok(SyncResult::Continue);
                 }
@@ -328,8 +318,8 @@ impl SyncSend {
             .json(&batch)
             .timeout(Duration::from_millis(HTTP_TIMEOUT_MS));
 
-        if let Some((username, password)) = self.get_credentials() {
-            req_client = req_client.basic_auth(username, Some(password));
+        if let Some(token) = self.get_admin_token() {
+            req_client = req_client.bearer_auth(token);
         }
 
         let response = req_client
@@ -385,8 +375,8 @@ impl SyncSend {
     }
 
     async fn load_current_id(&self) -> Result<i64> {
-        if Path::new(ID_FILE).exists() {
-            let content = fs::read_to_string(ID_FILE)
+        if Path::new(&self.id_file).exists() {
+            let content = fs::read_to_string(&self.id_file)
                 .map_err(|e| anyhow!("Failed to read ID file: {}", e))?;
             let id = content
                 .trim()
@@ -399,7 +389,8 @@ impl SyncSend {
     }
 
     async fn save_current_id(&self, id: i64) -> Result<()> {
-        fs::write(ID_FILE, id.to_string()).map_err(|e| anyhow!("Failed to save ID file: {e}"))?;
+        fs::write(&self.id_file, id.to_string())
+            .map_err(|e| anyhow!("Failed to save ID file: {e}"))?;
         Ok(())
     }
 
@@ -408,15 +399,12 @@ impl SyncSend {
         self
     }
 
-    fn get_credentials(&self) -> Option<(&str, &str)> {
-        self.sync_username
-            .as_deref()
-            .zip(self.sync_password.as_deref())
+    fn get_admin_token(&self) -> Option<String> {
+        self.admin_token.clone()
     }
 
-    pub fn with_credentials(mut self, user: &str, pass: &str) -> Self {
-        self.sync_username = Some(user.to_string());
-        self.sync_password = Some(pass.to_string());
+    pub fn with_admin_token(mut self, admin_token: &str) -> Self {
+        self.admin_token = Some(admin_token.to_string());
         self
     }
 }
@@ -431,6 +419,18 @@ impl Database {
         Ok(result.unwrap_or(0))
     }
 
+    pub(crate) async fn get_next_id(&self, id: i64) -> Result<i64> {
+        let result = sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT id FROM shares WHERE id > $1 ORDER BY id ASC LIMIT 1",
+        )
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| anyhow!("Failed to get next ID: {e}"))?;
+
+        Ok(result.unwrap_or(0))
+    }
+
     pub(crate) async fn get_blockheight_for_id(&self, id: i64) -> Result<Option<i32>> {
         let result =
             sqlx::query_scalar::<_, Option<i32>>("SELECT blockheight FROM shares WHERE id = $1")
@@ -438,6 +438,21 @@ impl Database {
                 .fetch_optional(&self.pool)
                 .await
                 .map_err(|e| anyhow!("Failed to get blockheight for ID {}: {}", id, e))?;
+
+        Ok(result.flatten())
+    }
+
+    pub(crate) async fn get_last_id_for_blockheight(
+        &self,
+        blockheight: i32,
+    ) -> Result<Option<i64>> {
+        let result = sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT MAX(id) FROM shares WHERE blockheight = $1",
+        )
+        .bind(blockheight)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| anyhow!("Failed to get ID for blockheight {}: {}", blockheight, e))?;
 
         Ok(result.flatten())
     }
@@ -495,17 +510,17 @@ impl Database {
         Ok(())
     }
 
-    pub(crate) async fn get_block_by_height(
+    pub(crate) async fn get_block_finds(
         &self,
-        blockheight: i32,
+        mut blockheight: i32,
     ) -> Result<Option<FoundBlockRecord>, Error> {
         if blockheight == 0 {
-            return Err(anyhow!("Invalid blockheight: {blockheight}"));
+            blockheight = 1
         }
 
         sqlx::query_as::<_, FoundBlockRecord>(
             "SELECT id, blockheight, blockhash, confirmed, workername, username,
-         diff, coinbasevalue, rewards_processed FROM blocks WHERE blockheight = $1",
+         diff, coinbasevalue, rewards_processed FROM blocks WHERE blockheight >= $1 ORDER BY blockheight ASC",
         )
         .bind(blockheight)
         .fetch_optional(&self.pool)

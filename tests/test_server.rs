@@ -2,6 +2,7 @@ use super::*;
 
 #[cfg(target_os = "linux")]
 use pgtemp::{PgTempDB, PgTempDBBuilder};
+use reqwest::header;
 
 pub(crate) struct TestServer {
     child: Child,
@@ -11,13 +12,7 @@ pub(crate) struct TestServer {
     pg_db: Option<PgTempDB>,
 
     #[cfg(target_os = "linux")]
-    pub(crate) credentials: Option<Credentials>,
-}
-
-#[cfg(target_os = "linux")]
-pub(crate) struct Credentials {
-    pub(crate) username: String,
-    pub(crate) password: String,
+    pub(crate) admin_token: Option<String>,
 }
 
 impl TestServer {
@@ -43,6 +38,9 @@ impl TestServer {
             logdir.display(),
             args.to_args().join(" ")
         ))
+        .capture_stderr(true)
+        .capture_stdout(true)
+        .env("RUST_LOG", "info")
         .integration_test(true)
         .spawn();
 
@@ -67,7 +65,7 @@ impl TestServer {
             #[cfg(target_os = "linux")]
             pg_db: None,
             #[cfg(target_os = "linux")]
-            credentials: None,
+            admin_token: None,
         }
     }
 
@@ -139,7 +137,7 @@ impl TestServer {
             port,
             tempdir,
             pg_db: Some(pg_db),
-            credentials: None,
+            admin_token: None,
         }
     }
 
@@ -157,8 +155,22 @@ impl TestServer {
     }
 
     #[track_caller]
-    pub(crate) fn assert_response(&self, path: impl AsRef<str>, expected_response: &str) {
-        let response = reqwest::blocking::get(self.url().join(path.as_ref()).unwrap()).unwrap();
+    pub(crate) fn assert_response(
+        &self,
+        path: impl AsRef<str>,
+        expected_response: &str,
+        api_token: Option<&str>,
+    ) {
+        let mut request =
+            reqwest::blocking::Client::new().get(self.url().join(path.as_ref()).unwrap());
+
+        request = if let Some(token) = api_token {
+            request.bearer_auth(token)
+        } else {
+            request
+        };
+
+        let response = request.send().unwrap();
 
         assert_eq!(
             response.status(),
@@ -171,10 +183,32 @@ impl TestServer {
     }
 
     #[track_caller]
-    pub(crate) fn get_json<T: DeserializeOwned>(&self, path: impl AsRef<str>) -> T {
-        let request = reqwest::blocking::Client::new()
+    pub(crate) fn assert_response_code(&self, path: impl AsRef<str>, expected_code: StatusCode) {
+        let response = reqwest::blocking::get(self.url().join(path.as_ref()).unwrap()).unwrap();
+
+        assert_eq!(
+            response.status(),
+            expected_code,
+            "{}",
+            response.text().unwrap()
+        );
+    }
+
+    #[track_caller]
+    pub(crate) fn get_json<T: DeserializeOwned>(
+        &self,
+        path: impl AsRef<str>,
+        api_token: Option<&str>,
+    ) -> T {
+        let mut request = reqwest::blocking::Client::new()
             .get(self.url().join(path.as_ref()).unwrap())
-            .header(reqwest::header::ACCEPT, "application/json");
+            .header(header::ACCEPT, "application/json");
+
+        request = if let Some(token) = api_token {
+            request.header(header::AUTHORIZATION, &format!("Bearer {token}"))
+        } else {
+            request
+        };
 
         let response = request.send().unwrap();
 
@@ -214,8 +248,8 @@ impl TestServer {
             .get(self.url().join(path.as_ref()).unwrap())
             .header(reqwest::header::ACCEPT, "application/json");
 
-        if let Some(user) = &self.credentials {
-            client = client.basic_auth(user.username.clone(), Some(user.password.clone()));
+        if let Some(token) = &self.admin_token {
+            client = client.bearer_auth(token);
         }
 
         client.send().await.unwrap()
@@ -249,8 +283,8 @@ impl TestServer {
             .post(self.url().join(path.as_ref()).unwrap())
             .json(body);
 
-        if let Some(user) = &self.credentials {
-            client = client.basic_auth(user.username.clone(), Some(user.password.clone()));
+        if let Some(token) = &self.admin_token {
+            client = client.bearer_auth(token);
         }
 
         client.send().await.unwrap()

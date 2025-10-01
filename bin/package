@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+
+set -euxo pipefail
+
+VERSION=${REF#"refs/tags/"}
+DIST=`pwd`/dist
+
+echo "Packaging para $VERSION for $TARGET..."
+
+test -f Cargo.lock || cargo generate-lockfile
+
+echo "Building para..."
+RUSTFLAGS="--deny warnings $TARGET_RUSTFLAGS" \
+  cargo build --bin para --target $TARGET --release
+EXECUTABLE=target/$TARGET/release/para
+
+if [[ $OS == windows-latest ]]; then
+  EXECUTABLE=$EXECUTABLE.exe
+fi
+
+echo "Copying release files..."
+mkdir -p dist/para-$VERSION
+cp \
+  $EXECUTABLE \
+  Cargo.lock \
+  Cargo.toml \
+  LICENSE \
+  README.md \
+  $DIST/para-$VERSION
+
+cd $DIST
+echo "Creating release archive..."
+case $OS in
+  ubuntu-latest | macos-latest)
+    ARCHIVE=$DIST/para-$VERSION-$TARGET.tar.gz
+    tar czf $ARCHIVE *
+    echo "::set-output name=archive::$ARCHIVE"
+    ;;
+  windows-latest)
+    ARCHIVE=$DIST/para-$VERSION-$TARGET.zip
+    7z a $ARCHIVE *
+    echo "::set-output name=archive::`pwd -W`/para-$VERSION-$TARGET.zip"
+    ;;
+esac
