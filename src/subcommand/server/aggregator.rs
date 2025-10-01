@@ -36,7 +36,7 @@ impl Aggregator {
         )
         .layer(Extension(cache))
         .layer(Extension(client))
-        .layer(Extension(config.clone()));
+        .layer(Extension(config));
 
         Ok(router)
     }
