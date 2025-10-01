@@ -56,6 +56,11 @@ server:
     --log-dir copr/logs \
     --port 8080
 
+harness: build-bitcoind
+  #!/usr/bin/env bash
+  cd crates/harness
+  cargo run
+
 install:
   git submodule update --init
   sudo apt-get install --yes \

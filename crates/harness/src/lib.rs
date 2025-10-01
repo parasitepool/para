@@ -60,13 +60,16 @@ pub fn main() {
             .port(),
     );
 
-    let bitcoind = Bitcoind::spawn(tempdir.clone(), bitcoind_port, rpc_port, zmq_port).unwrap();
+    let bitcoind =
+        Bitcoind::spawn(tempdir.clone(), bitcoind_port, rpc_port, zmq_port, true).unwrap();
 
     println!("Mining 101 blocks to get a mature output...");
 
     bitcoind.mine_blocks(101).unwrap();
 
     println!("Done creating 101 blocks");
+    println!("Bitcoin rpc port: {}", bitcoind.rpc_port);
+    println!("Bitcoin zmq port: {}", zmq_port);
 
     while !SHUTTING_DOWN.load(Ordering::Relaxed) {
         let result = bitcoind.client().unwrap().get_mempool_info().unwrap();
@@ -79,6 +82,6 @@ pub fn main() {
             bitcoind.flood_mempool(Some(2)).unwrap();
         }
 
-        std::thread::sleep(Duration::from_millis(3000));
+        std::thread::sleep(Duration::from_millis(5000));
     }
 }

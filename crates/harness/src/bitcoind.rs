@@ -7,6 +7,7 @@ pub struct Bitcoind {
     pub rpc_port: u16,
     pub rpc_user: String,
     pub rpc_password: String,
+    pub with_output: bool,
 }
 
 impl Bitcoind {
@@ -15,6 +16,7 @@ impl Bitcoind {
         bitcoind_port: u16,
         rpc_port: u16,
         zmq_port: u16,
+        with_output: bool,
     ) -> Result<Self> {
         let bitcoind_data_dir = tempdir.path().join("bitcoin");
         fs::create_dir(&bitcoind_data_dir)?;
@@ -62,8 +64,16 @@ maxtxfee=1000000
 
         let handle = Command::new("bitcoind")
             .arg(format!("-conf={}", bitcoind_conf.display()))
-            .stderr(Stdio::null())
-            .stdout(Stdio::null())
+            .stdout(if with_output {
+                Stdio::inherit()
+            } else {
+                Stdio::null()
+            })
+            .stderr(if with_output {
+                Stdio::inherit()
+            } else {
+                Stdio::null()
+            })
             .spawn()?;
 
         let status = Command::new("bitcoin-cli")
@@ -88,6 +98,7 @@ maxtxfee=1000000
             rpc_port,
             rpc_user,
             rpc_password,
+            with_output,
         })
     }
 
@@ -129,7 +140,7 @@ maxtxfee=1000000
             #[serde(with = "bitcoin::amount::serde::as_btc")]
             pub amount: bitcoin::Amount,
             pub height: u64,
-            pub coinbase: bool, // needed to add this
+            pub coinbase: bool,
         }
 
         #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
@@ -242,19 +253,19 @@ maxtxfee=1000000
         Ok(())
     }
 
-    // quick hack, refactor later
     pub fn mine_blocks(&self, n: usize) -> Result {
         self.create_or_load_wallet()?;
 
+        // quick hack, refactor later
         let script = format!(
             r#"#!/usr/bin/env bash
 set -euo pipefail
-CLI="../../bitcoin/build/bin/bitcoin-cli -datadir={} -signet -rpcport={}"
-MINER="../../bitcoin/contrib/signet/miner"
-GRIND="../../bitcoin/build/bin/bitcoin-util grind"
-ADDR={}
-NBITS=1d00ffff
-$MINER --cli="$CLI" generate --grind-cmd="$GRIND" --address="$ADDR" --nbits=$NBITS
+../../bitcoin/contrib/signet/miner \
+    --cli="../../bitcoin/build/bin/bitcoin-cli -datadir={} -signet -rpcport={}" \
+    generate \
+    --grind-cmd="../../bitcoin/build/bin/bitcoin-util grind" \
+    --address="{}" \
+    --nbits=1d00ffff
 "#,
             self.datadir.display(),
             self.rpc_port,
@@ -266,8 +277,16 @@ $MINER --cli="$CLI" generate --grind-cmd="$GRIND" --address="$ADDR" --nbits=$NBI
                 .arg("-c")
                 .arg(script.clone())
                 .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
+                .stdout(if self.with_output {
+                    Stdio::inherit()
+                } else {
+                    Stdio::null()
+                })
+                .stderr(if self.with_output {
+                    Stdio::inherit()
+                } else {
+                    Stdio::null()
+                })
                 .status()?;
 
             if !status.success() {
