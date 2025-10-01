@@ -1,6 +1,14 @@
 Changelog
 =========
 
+[0.5.2](https://github.com/parasitepool/para/releases/tag/0.5.2) - 2025-10-01
+-----------------------------------------------------------------------------
+
+### Changed
+- Some things (#219)
+- Fix packaging (#218)
+- Release 0.5.1 (#217)
+
 [0.5.1](https://github.com/parasitepool/para/releases/tag/0.5.1) - 2025-10-01
 -----------------------------------------------------------------------------
 
