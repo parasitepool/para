@@ -63,7 +63,6 @@ tracing = "0.1.41"
 tracing-subscriber = { version =  "0.3.19", features = ["env-filter", "fmt"] }
 
 [dev-dependencies]
-bitcoin = "0.32.6"
 chrono = "0.4.41"
 executable-path = "1.0.0"
 harness = { path = "crates/harness" }
