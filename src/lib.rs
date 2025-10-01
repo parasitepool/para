@@ -107,7 +107,7 @@ pub mod stratum;
 pub mod subcommand;
 
 pub const COIN_VALUE: u64 = 100_000_000;
-pub const USER_AGENT: &str = "para/0.5.1";
+pub const USER_AGENT: &str = "para/0.5.2";
 
 pub const EXTRANONCE1_SIZE: usize = 4;
 pub const EXTRANONCE2_SIZE: usize = 8;
