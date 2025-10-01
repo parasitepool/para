@@ -56,9 +56,6 @@ server:
     --log-dir copr/logs \
     --port 8080
 
-init-mdbook-theme:
-  mdbook init --theme docs/tmp --force
-
 install:
   git submodule update --init
   sudo apt-get install --yes \
