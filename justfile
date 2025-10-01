@@ -49,7 +49,8 @@ pool:
     --chain signet \
     --address 0.0.0.0 \
     --bitcoin-rpc-username satoshi \
-    --bitcoin-rpc-password nakamoto
+    --bitcoin-rpc-password nakamoto \
+    --bitcoin-rpc-port 38332
 
 server: 
   RUST_LOG=info cargo run -- server \
