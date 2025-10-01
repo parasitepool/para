@@ -369,7 +369,7 @@ mod tests {
     #[test]
     fn subscribe() {
         case(
-            r#"{"id":1,"method":"mining.subscribe","params":["para/0.0.1"]}"#,
+            r#"{"id":1,"method":"mining.subscribe","params":["para/0.5.1"]}"#,
             Message::Request {
                 id: Id::Number(1),
                 method: "mining.subscribe".into(),
