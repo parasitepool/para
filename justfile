@@ -56,15 +56,6 @@ server:
     --log-dir copr/logs \
     --port 8080
 
-build-docs:
-  mdbook build docs -d build
-
-serve-docs: build-docs
-  python3 -m http.server --directory docs/build/html --bind 127.0.0.1 8080
-
-init-mdbook-theme:
-  mdbook init --theme docs/tmp --force
-
 install:
   git submodule update --init
   sudo apt-get install --yes \
