@@ -19,7 +19,7 @@ authors = ["The Parasite Devs"]
 edition = "2024"
 license = "CC0-1.0"
 repository = "https://github.com/parasitepool/para"
-rust-version = "1.90.0"
+rust-version = "1.89.0"
 
 [workspace.dependencies]
 anyhow = { version = "1.0.98", features = ["backtrace"] }
