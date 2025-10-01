@@ -203,16 +203,6 @@ fn aggregate_pool_status_with_api_token() {
 
     assert_eq!(servers.len(), 3);
 
-    let aggregator_no_api_token = TestServer::spawn_with_args(format!(
-        "--nodes {} --nodes {} --nodes {}",
-        servers[0].url(),
-        servers[1].url(),
-        servers[2].url()
-    ));
-
-    aggregator_no_api_token
-        .assert_response_code("/aggregator/pool/pool.status", StatusCode::NOT_FOUND);
-
     let aggregator = TestServer::spawn_with_args(format!(
         "--api-token crazysecrettoken --nodes {} --nodes {} --nodes {}",
         servers[0].url(),
@@ -220,10 +210,12 @@ fn aggregate_pool_status_with_api_token() {
         servers[2].url()
     ));
 
+    aggregator.assert_response_code("/aggregator/pool/pool.status", StatusCode::UNAUTHORIZED);
+
     aggregator.assert_response(
         "/aggregator/pool/pool.status",
         &(typical_status() + typical_status() + typical_status()).to_string(),
-        None,
+        Some("crazysecrettoken"),
     );
 }
 
@@ -280,7 +272,7 @@ fn aggregate_users() {
 }
 
 #[test]
-fn aggregate_users_with_api_token() {
+fn aggregate_users_with_auth_with_api_token() {
     let mut users = Vec::new();
     for i in 0..3 {
         let user = typical_user();
@@ -306,18 +298,6 @@ fn aggregate_users_with_api_token() {
 
     assert_eq!(servers.len(), 3);
 
-    let aggregator_no_api_token = TestServer::spawn_with_args(format!(
-        "--nodes {} --nodes {} --nodes {}",
-        servers[0].url(),
-        servers[1].url(),
-        servers[2].url()
-    ));
-
-    aggregator_no_api_token.assert_response_code(
-        format!("/aggregator/users/{}", users[0].0),
-        StatusCode::NOT_FOUND,
-    );
-
     let aggregator = TestServer::spawn_with_args(format!(
         "--api-token crazysecrettoken --nodes {} --nodes {} --nodes {}",
         servers[0].url(),
@@ -325,12 +305,32 @@ fn aggregate_users_with_api_token() {
         servers[2].url()
     ));
 
+    for (address, _) in users.iter() {
+        aggregator.assert_response_code(
+            format!("/aggregator/users/{address}"),
+            StatusCode::UNAUTHORIZED,
+        );
+    }
+
     for (address, user) in users.iter() {
-        let response = aggregator.get_json::<User>(format!("/aggregator/users/{address}"), None);
+        let response = aggregator.get_json::<User>(
+            format!("/aggregator/users/{address}"),
+            Some("crazysecrettoken"),
+        );
+
         pretty_assert_eq!(response, *user);
     }
 
-    let users_response = aggregator.get_json::<Vec<String>>("/aggregator/users", None);
+    for (address, user) in users.iter() {
+        let response = aggregator.get_json::<User>(
+            format!("/aggregator/users/{address}"),
+            Some("crazysecrettoken"),
+        );
+        pretty_assert_eq!(response, *user);
+    }
+
+    let users_response =
+        aggregator.get_json::<Vec<String>>("/aggregator/users", Some("crazysecrettoken"));
 
     assert_eq!(users_response.len(), users.len());
 
@@ -383,7 +383,7 @@ fn aggregator_dashboard_with_auth() {
     assert_eq!(servers.len(), 3);
 
     let aggregator = TestServer::spawn_with_args(format!(
-        "--admin-token verysecrettoken --nodes {} --nodes {} --nodes {}",
+        "--admin-token verysecrettoken --api-token crazysecrettoken --nodes {} --nodes {} --nodes {}",
         servers[0].url(),
         servers[1].url(),
         servers[2].url()
