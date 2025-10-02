@@ -5,11 +5,14 @@ mod hasher;
 
 #[derive(Debug, Parser)]
 pub(crate) struct Miner {
+    #[arg(help = "Stratum <HOST:PORT>.")]
     stratum_endpoint: String,
     #[arg(long, help = "Stratum <USERNAME>.")]
     username: String,
     #[arg(long, help = "Stratum <PASSWORD>.")]
     password: Option<String>,
+    #[arg(long, help = "Exit <ONCE> a share is found.")]
+    once: bool,
 }
 
 impl Miner {
@@ -30,7 +33,7 @@ impl Miner {
             )
             .await?;
 
-            let controller = Controller::new(client).await?;
+            let controller = Controller::new(client, self.once).await?;
 
             controller.run().await
         })

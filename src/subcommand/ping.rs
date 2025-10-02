@@ -2,6 +2,7 @@ use super::*;
 
 #[derive(Parser, Debug)]
 pub(crate) struct Ping {
+    #[arg(help = "Stratum <HOST:PORT>.")]
     stratum_endpoint: String,
     #[arg(long, help = "Stop after <COUNT> replies.")]
     count: Option<u64>,
