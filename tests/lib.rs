@@ -59,6 +59,8 @@ mod to_args;
 
 mod alerts;
 #[cfg(target_os = "linux")]
+mod miner;
+#[cfg(target_os = "linux")]
 mod ping;
 #[cfg(target_os = "linux")]
 mod pool;
