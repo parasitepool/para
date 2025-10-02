@@ -108,8 +108,13 @@ cargo build --release
 
 Once built, the `para` binary can be found at `./target/release/para`.
 
+Build Notes
+-----------
+
 `para` requires `rustc` version 1.90.0 or later. Run `rustc --version` to ensure
 you have this version. Run `rustup update` to get the latest stable release.
+
+If your system is using `gcc`, there is a known `memcmp` compiler bug found in several versions (confirmed for `10.2.1`, `9.3.0`, `9.4.0`, and `9.5.0`) which may cause a cargo build error. To remedy this issue, you can upgrade `gcc` to >= `10.3.0`. Additional details on the bug can be found [here](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=95189). After upgrading, you can confirm your version by running `gcc --version` and retry the cargo build step above.
 
 You can also install `para` directly into your path by doing:
 
