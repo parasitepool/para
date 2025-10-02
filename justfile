@@ -13,10 +13,11 @@ clippy:
 ci: clippy
   cargo fmt -- --check
   cargo test --all
-  cargo test --all -- --ignored
 
 ignored:
   cargo test --all -- --ignored
+
+all: ci ignored
 
 outdated:
   cargo outdated --root-deps-only --workspace
