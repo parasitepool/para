@@ -10,7 +10,7 @@ pub struct Difficulty(pub u64);
 
 impl Difficulty {
     pub fn to_target(self) -> Target {
-        let target_be_bytes = DIFFICULTY_1_TARGET
+        let target_be_bytes = Target::MAX
             .checked_div(U256::from(self.0))
             .expect("difficulty must not be 0")
             .to_big_endian();
