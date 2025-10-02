@@ -11,16 +11,21 @@ pub(crate) struct Controller {
     current_mining_cancel: Option<CancellationToken>,
     cpu_cores: usize,
     extranonce2_counters: Vec<u32>,
+    once: bool,
 }
 
 impl Controller {
-    pub(crate) async fn new(mut client: Client, cpu_cores: Option<usize>) -> Result<Self> {
+    pub(crate) async fn new(
+        mut client: Client,
+        cpu_cores: Option<usize>,
+        once: bool,
+    ) -> Result<Self> {
         let (subscribe, _, _) = client.subscribe().await?;
         client.authorize().await?;
 
         let num_cores = cpu_cores.unwrap_or_else(|| {
             let mut system = sysinfo::System::new();
-            system.refresh_cpu_all(); // Fixed: was refresh_cpu()
+            system.refresh_cpu_all();
             system.cpus().len()
         });
 
@@ -96,7 +101,6 @@ impl Controller {
         }
 
         self.client.disconnect().await?;
-        self.cancel_hasher();
 
         Ok(())
     }
