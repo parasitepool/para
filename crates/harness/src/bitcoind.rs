@@ -53,12 +53,12 @@ minrelaytxfee=0.00001
 rpcbind=127.0.0.1
 rpcport={rpc_port}
 rpcallowip=127.0.0.1
-rpcuser={rpc_user}
-rpcpassword={rpc_password}
+rpcauth={}
 
 maxtxfee=1000000
 ",
-                &bitcoind_data_dir.display()
+                &bitcoind_data_dir.display(),
+                Self::generate_rpcauth(rpc_user.as_str(), rpc_password.as_str(), None)
             ),
         )?;
 
@@ -100,6 +100,26 @@ maxtxfee=1000000
             rpc_password,
             with_output,
         })
+    }
+
+    pub fn generate_rpcauth(username: &str, password: &str, salt_overide: Option<&str>) -> String {
+        let salt = if let Some(salt_overide) = salt_overide {
+            salt_overide.to_string()
+        } else {
+            let mut salt_bytes = [0u8; 16];
+            thread_rng().fill_bytes(&mut salt_bytes);
+            salt_bytes
+                .clone()
+                .iter()
+                .map(|b| format!("{:02x}", b))
+                .collect::<String>()
+        };
+
+        let mut engine = hmac::HmacEngine::<sha256::Hash>::new(salt.as_bytes());
+        engine.input(password.as_bytes());
+        let password_hmac = Hmac::<sha256::Hash>::from_engine(engine);
+
+        format!("{}:{}${}", username, salt, password_hmac)
     }
 
     pub fn client(&self) -> Result<Client> {

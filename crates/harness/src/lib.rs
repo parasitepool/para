@@ -4,6 +4,8 @@ use {
         Address, Amount, Network, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness,
         absolute::LockTime,
         blockdata::{opcodes::OP_TRUE, script::Builder},
+        hashes::{Hash, HashEngine, Hmac, hmac, sha256},
+        key::rand::{RngCore, thread_rng},
         transaction::Version,
     },
     bitcoincore_rpc::{Auth, Client, RpcApi},
