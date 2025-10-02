@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(feature = "miner")]
 mod miner;
 mod ping;
 pub(crate) mod pool;
@@ -9,6 +10,7 @@ pub mod template;
 
 #[derive(Debug, Parser)]
 pub(crate) enum Subcommand {
+    #[cfg(feature = "miner")]
     #[command(about = "Run a toy miner")]
     Miner(miner::Miner),
     #[command(about = "Measure Stratum message ping")]
@@ -26,6 +28,7 @@ pub(crate) enum Subcommand {
 impl Subcommand {
     pub(crate) fn run(self) -> Result {
         match self {
+            #[cfg(feature = "miner")]
             Self::Miner(miner) => miner.run(),
             Self::Ping(ping) => Runtime::new()?.block_on(async { ping.run().await }),
             Self::Pool(pool) => Runtime::new()?.block_on(async { pool.run().await }),
