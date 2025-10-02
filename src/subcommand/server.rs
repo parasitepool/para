@@ -11,7 +11,7 @@ use {
     database::Database,
     error::{OptionExt, ServerError, ServerResult},
     futures::future::join_all,
-    reqwest::{Client, ClientBuilder},
+    reqwest::{Client, ClientBuilder, header},
     server_config::ServerConfig,
     templates::{
         PageContent, PageHtml, dashboard::DashboardHtml, home::HomeHtml, status::StatusHtml,
@@ -114,7 +114,15 @@ impl Server {
             .layer(SetResponseHeaderLayer::overriding(
                 CONTENT_DISPOSITION,
                 HeaderValue::from_static("inline"),
-            ))
+            ));
+
+        router = if let Some(token) = config.api_token() {
+            router.layer(ValidateRequestHeaderLayer::bearer(token))
+        } else {
+            router
+        };
+
+        router = router
             .route("/", get(Self::home))
             .route(
                 "/status",
@@ -169,8 +177,8 @@ impl Server {
     where
         S: Clone + Send + Sync + 'static,
     {
-        if let Some((username, password)) = config.credentials() {
-            method_router.layer(ValidateRequestHeaderLayer::basic(username, password))
+        if let Some(token) = config.admin_token() {
+            method_router.layer(ValidateRequestHeaderLayer::bearer(token))
         } else {
             method_router
         }
@@ -180,10 +188,10 @@ impl Server {
     where
         S: Clone + Send + Sync + 'static,
     {
-        if let Some((username, password)) = config.credentials() {
+        if let Some(token) = config.admin_token() {
             Router::new()
                 .merge(router)
-                .layer(ValidateRequestHeaderLayer::basic(username, password))
+                .layer(ValidateRequestHeaderLayer::bearer(token))
         } else {
             router
         }
@@ -735,15 +743,15 @@ mod tests {
     }
 
     #[test]
-    fn default_credentials() {
+    fn default_no_admin_token() {
         let config = parse_server_config("para server");
-        assert_eq!(config.credentials(), None);
+        assert_eq!(config.admin_token(), None);
     }
 
     #[test]
-    fn credentials_both_provided() {
-        let config = parse_server_config("para server --username satoshi --password secret");
-        assert_eq!(config.credentials(), Some(("satoshi", "secret")));
+    fn admin_token() {
+        let config = parse_server_config("para server --admin-token verysecrettoken");
+        assert_eq!(config.admin_token(), Some("verysecrettoken"));
     }
 
     #[test]
@@ -815,24 +823,6 @@ mod tests {
     fn override_port() {
         let config = parse_server_config("para server --port 8080");
         assert_eq!(config.port(), Some(8080));
-    }
-
-    #[test]
-    #[should_panic(expected = "required")]
-    fn credentials_only_username_panics() {
-        parse_server_config("para server --username satoshi");
-    }
-
-    #[test]
-    #[should_panic(expected = "required")]
-    fn credentials_only_password_panics() {
-        parse_server_config("para server --password secret");
-    }
-
-    #[test]
-    fn credentials_mutual_requirement_no_panic() {
-        parse_server_config("para server --username satoshi --password secret");
-        parse_server_config("para server");
     }
 
     #[test]

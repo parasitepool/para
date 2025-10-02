@@ -22,9 +22,9 @@ runs on `parasite.wtf:42069`. For instructions on how to connect, please visit
 [parasite.space](https://parasite.space?help).
 
 In addition to adding a postgres database for share logging and some helpful
-flags it modifies the coinbase payout logic found in `stratifier.c`. To glean
-more information on the rationale behind that refer to [this
-article](https://zkshark.substack.com/p/parasite-pool-igniting-the-mining).
+flags it modifies the coinbase payout logic found in `stratifier.c`. For more
+information go
+[here](https://zkshark.substack.com/p/parasite-pool-igniting-the-mining).
 
 ```c 
 // Generation value

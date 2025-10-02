@@ -2,6 +2,10 @@ use super::*;
 
 #[derive(Clone, Debug, Parser)]
 pub(crate) struct ServerConfig {
+    #[arg(long, help = "Require <ADMIN_TOKEN> for HTTP authentication.")]
+    admin_token: Option<String>,
+    #[arg(long, help = "Require <API_TOKEN> for HTTP authentication.")]
+    api_token: Option<String>,
     #[arg(long, help = "Listen at <ADDRESS>.")]
     address: Option<String>,
     #[arg(long, help = "Request ACME TLS certificate for <ACME_DOMAIN>.")]
@@ -21,18 +25,6 @@ pub(crate) struct ServerConfig {
     log_dir: Option<PathBuf>,
     #[arg(long, help = "Listen on <PORT>.")]
     port: Option<u16>,
-    #[arg(
-        long,
-        help = "Require basic HTTP authentication with <USERNAME>.",
-        requires = "password"
-    )]
-    username: Option<String>,
-    #[arg(
-        long,
-        help = "Require basic HTTP authentication with <PASSWORD>.",
-        requires = "username"
-    )]
-    password: Option<String>,
     #[arg(long, help = "Collect statistics from <NODES>.")]
     nodes: Vec<Url>,
     #[arg(long, help = "Send shares to HTTP <SYNC_ENDPOINT>.")]
@@ -58,8 +50,12 @@ impl ServerConfig {
         self.alerts_ntfy_channel.clone()
     }
 
-    pub(crate) fn credentials(&self) -> Option<(&str, &str)> {
-        self.username.as_deref().zip(self.password.as_deref())
+    pub(crate) fn admin_token(&self) -> Option<&str> {
+        self.admin_token.as_deref()
+    }
+
+    pub(crate) fn api_token(&self) -> Option<&str> {
+        self.api_token.as_deref()
     }
 
     pub(crate) fn domain(&self) -> String {

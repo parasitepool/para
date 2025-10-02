@@ -4,24 +4,39 @@ pub(crate) struct Aggregator;
 
 impl Aggregator {
     pub(crate) fn init(config: Arc<ServerConfig>) -> Result<Router> {
+        let mut headers = header::HeaderMap::new();
+        if let Some(token) = config.api_token() {
+            headers.insert(
+                header::AUTHORIZATION,
+                header::HeaderValue::from_str(&format!("Bearer {token}"))?,
+            );
+        }
+
         let client = ClientBuilder::new()
+            .default_headers(headers)
             .timeout(Duration::from_secs(10))
             .use_rustls_tls()
             .build()?;
 
         let cache = Arc::new(Cache::new(client.clone(), config.clone()));
 
-        let router = Router::new()
+        let mut router = Router::new()
             .route("/aggregator/pool/pool.status", get(Self::pool_status))
             .route("/aggregator/users/{address}", get(Self::user_status))
-            .route("/aggregator/users", get(Self::users))
-            .route(
-                "/aggregator/dashboard",
-                Server::with_auth(config.clone(), get(Self::dashboard)),
-            )
-            .layer(Extension(cache))
-            .layer(Extension(client))
-            .layer(Extension(config));
+            .route("/aggregator/users", get(Self::users));
+
+        router = if let Some(token) = config.api_token() {
+            router.layer(ValidateRequestHeaderLayer::bearer(token))
+        } else {
+            router
+        }
+        .route(
+            "/aggregator/dashboard",
+            Server::with_auth(config.clone(), get(Self::dashboard)),
+        )
+        .layer(Extension(cache))
+        .layer(Extension(client))
+        .layer(Extension(config));
 
         Ok(router)
     }
@@ -57,7 +72,7 @@ impl Aggregator {
         Extension(config): Extension<Arc<ServerConfig>>,
     ) -> ServerResult<Response> {
         let nodes = config.nodes();
-        let credentials = config.credentials();
+        let admin_token = config.admin_token();
         let fetches = nodes.iter().map(|url| {
             let client = client.clone();
             async move {
@@ -66,8 +81,8 @@ impl Aggregator {
                         .get(url.join("/status")?)
                         .header("accept", "application/json");
 
-                    if let Some((username, password)) = credentials {
-                        request_builder = request_builder.basic_auth(username, Some(password));
+                    if let Some(token) = admin_token {
+                        request_builder = request_builder.bearer_auth(token);
                     }
 
                     let resp = request_builder.send().await?;
