@@ -9,9 +9,13 @@ fmt:
 clippy:
   cargo clippy --all --all-targets -- --deny warnings
 
+
 ci: clippy
   cargo fmt -- --check
   cargo test --all
+  cargo test --all -- --ignored
+
+ignored:
   cargo test --all -- --ignored
 
 outdated:
