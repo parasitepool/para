@@ -287,6 +287,7 @@ where
             "{}{}{}{}",
             job.coinb1, job.extranonce1, submit.extranonce2, job.coinb2,
         ))?;
+
         let mut cursor = bitcoin::io::Cursor::new(&coinbase_bin);
         let coinbase_tx = bitcoin::Transaction::consensus_decode_from_finite_reader(&mut cursor)?;
 

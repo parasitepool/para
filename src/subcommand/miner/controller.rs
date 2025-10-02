@@ -44,6 +44,7 @@ impl Controller {
             current_mining_cancel: None,
             cpu_cores: num_cores,
             extranonce2_counters: vec![0; num_cores],
+            once,
         })
     }
 
@@ -79,6 +80,11 @@ impl Controller {
                     } else {
                         info!("Share submitted successfully!");
                     }
+
+                    if self.once {
+                        info!("Share found, exiting");
+                        break;
+                    }
                 }
                 _ = ctrl_c() => {
                     info!("Shutting down controller and mining operations");
@@ -88,6 +94,9 @@ impl Controller {
                 }
             }
         }
+
+        self.client.disconnect().await?;
+        self.cancel_hasher();
 
         Ok(())
     }

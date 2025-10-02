@@ -5,19 +5,14 @@ mod hasher;
 
 #[derive(Debug, Parser)]
 pub(crate) struct Miner {
+    #[arg(help = "Stratum <HOST:PORT>.")]
     stratum_endpoint: String,
     #[arg(long, help = "Stratum <USERNAME>.")]
     username: String,
     #[arg(long, help = "Stratum <PASSWORD>.")]
     password: Option<String>,
-    #[arg(
-        long,
-        help = "Number of CPU cores to use (default: auto-detect)",
-        value_name = "CORES"
-    )]
-    cpu_cores: Option<usize>,
-    #[arg(long, help = "Enable performance monitoring")]
-    monitor_performance: bool,
+    #[arg(long, help = "Exit <ONCE> a share is found.")]
+    once: bool,
 }
 
 impl Miner {
@@ -50,6 +45,7 @@ impl Miner {
             if self.monitor_performance {
                 self.spawn_performance_monitor();
             }
+            let controller = Controller::new(client, self.once).await?;
 
             controller.run().await
         })

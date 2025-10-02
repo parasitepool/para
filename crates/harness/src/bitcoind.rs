@@ -276,14 +276,16 @@ maxtxfee=1000000
     pub fn mine_blocks(&self, n: usize) -> Result {
         self.create_or_load_wallet()?;
 
+        let workspace = workspace_root();
+
         // quick hack, refactor later
         let script = format!(
             r#"#!/usr/bin/env bash
 set -euo pipefail
-../../bitcoin/contrib/signet/miner \
-    --cli="../../bitcoin/build/bin/bitcoin-cli -datadir={} -signet -rpcport={}" \
+{workspace}/bitcoin/contrib/signet/miner \
+    --cli="{workspace}/bitcoin/build/bin/bitcoin-cli -datadir={} -signet -rpcport={}" \
     generate \
-    --grind-cmd="../../bitcoin/build/bin/bitcoin-util grind" \
+    --grind-cmd="{workspace}/bitcoin/build/bin/bitcoin-util grind" \
     --address="{}" \
     --nbits=1d00ffff
 "#,

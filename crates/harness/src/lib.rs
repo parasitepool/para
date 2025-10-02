@@ -10,6 +10,7 @@ use {
     },
     bitcoincore_rpc::{Auth, Client, RpcApi},
     bitcoind::Bitcoind,
+    cargo_metadata::MetadataCommand,
     serde::{Deserialize, Serialize},
     serde_json::json,
     std::{
@@ -31,6 +32,17 @@ pub mod bitcoind;
 type Result<T = (), E = Error> = std::result::Result<T, E>;
 
 static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
+
+fn workspace_root() -> String {
+    MetadataCommand::new()
+        .no_deps()
+        .exec()
+        .expect("cargo metadata")
+        .workspace_root
+        .into_std_path_buf()
+        .display()
+        .to_string()
+}
 
 pub fn main() {
     ctrlc::set_handler(move || {
