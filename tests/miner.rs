@@ -5,6 +5,10 @@ use super::*;
 fn miner() {
     let pool = TestPool::spawn();
 
+    let bitcoind = pool.bitcoind_handle();
+
+    bitcoind.mine_blocks(16).unwrap();
+
     let stratum_endpoint = pool.stratum_endpoint();
 
     let mut miner = CommandBuilder::new(format!(
