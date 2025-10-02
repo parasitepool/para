@@ -13,6 +13,10 @@ pub(crate) struct Miner {
     password: Option<String>,
     #[arg(long, help = "Exit <ONCE> a share is found.")]
     once: bool,
+    #[arg(long, help = "Number of CPU cores to use.")]
+    cpu_cores: Option<usize>,
+    #[arg(long, help = "Enable performance monitoring.")]
+    monitor_performance: bool,
 }
 
 impl Miner {
@@ -40,12 +44,11 @@ impl Miner {
             )
             .await?;
 
-            let controller = Controller::new(client, self.cpu_cores).await?;
-
             if self.monitor_performance {
                 self.spawn_performance_monitor();
             }
-            let controller = Controller::new(client, self.once).await?;
+
+            let controller = Controller::new(client, self.cpu_cores, self.once).await?;
 
             controller.run().await
         })
@@ -83,7 +86,6 @@ impl Miner {
             .with_line_number(true)
             .finish();
 
-        // Only set the subscriber if one hasn't been set already
         let _ = tracing::subscriber::set_global_default(subscriber);
     }
 
@@ -136,7 +138,7 @@ pub mod mining_utils {
 
     pub fn get_cpu_count() -> usize {
         let mut system = System::new();
-        system.refresh_cpu_all(); // Fixed: was refresh_cpu()
+        system.refresh_cpu_all();
         system.cpus().len()
     }
 
