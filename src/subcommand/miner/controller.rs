@@ -93,13 +93,12 @@ impl Controller {
                 }
                 _ = ctrl_c() => {
                     info!("Shutting down controller and mining operations");
-                    self.shutdown_mining().await;
-                    self.client.disconnect().await?;
                     break;
                 }
             }
         }
 
+        self.shutdown_mining().await;
         self.client.disconnect().await?;
 
         Ok(())
