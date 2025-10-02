@@ -1,7 +1,7 @@
 use super::*;
 
 pub(crate) struct TestPool {
-    bitcoind_handle: Child,
+    bitcoind_handle: Bitcoind,
     pub pool_handle: Child,
     pool_port: u16,
     _tempdir: Arc<TempDir>,
@@ -38,16 +38,17 @@ impl TestPool {
                 .port(),
         );
 
-        let bitcoind_handle = bitcoind::spawn(tempdir.clone(), bitcoind_port, rpc_port, zmq_port);
+        let bitcoind_handle =
+            Bitcoind::spawn(tempdir.clone(), bitcoind_port, rpc_port, zmq_port, false).unwrap();
 
         let pool_handle = CommandBuilder::new(format!(
             "pool 
                 --chain signet
                 --address 127.0.0.1 
                 --port {pool_port} 
-                --bitcoin-rpc-username foo 
-                --bitcoin-rpc-password bar 
-                --bitcoin-rpc-port {rpc_port} 
+                --bitcoin-rpc-username satoshi
+                --bitcoin-rpc-password nakamoto
+                --bitcoin-rpc-port {rpc_port}
                 {}",
             args.to_args().join(" ")
         ))
@@ -85,9 +86,8 @@ impl TestPool {
 
 impl Drop for TestPool {
     fn drop(&mut self) {
-        self.bitcoind_handle.kill().unwrap();
+        self.bitcoind_handle.shutdown();
         self.pool_handle.kill().unwrap();
-        self.bitcoind_handle.wait().unwrap();
         self.pool_handle.wait().unwrap();
     }
 }

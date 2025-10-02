@@ -93,7 +93,6 @@ use {
     tracing_subscriber::EnvFilter,
 };
 
-#[cfg(feature = "miner")]
 use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 
 pub use subcommand::server::api;
