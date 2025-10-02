@@ -2,7 +2,7 @@ use super::*;
 
 pub(crate) struct TestPool {
     bitcoind_handle: Bitcoind,
-    pub pool_handle: Child,
+    pool_handle: Child,
     pool_port: u16,
     _tempdir: Arc<TempDir>,
 }
@@ -81,6 +81,10 @@ impl TestPool {
 
     pub(crate) fn stratum_endpoint(&self) -> String {
         format!("127.0.0.1:{}", self.pool_port)
+    }
+
+    pub(crate) fn bitcoind_handle(&self) -> &Bitcoind {
+        &self.bitcoind_handle
     }
 }
 

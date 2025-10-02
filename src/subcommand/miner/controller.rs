@@ -11,10 +11,15 @@ pub(crate) struct Controller {
     current_mining_cancel: Option<CancellationToken>,
     cpu_cores: usize,
     extranonce2_counters: Vec<u32>,
+    once: bool,
 }
 
 impl Controller {
-    pub(crate) async fn new(mut client: Client, cpu_cores: Option<usize>) -> Result<Self> {
+    pub(crate) async fn new(
+        mut client: Client,
+        cpu_cores: Option<usize>,
+        once: bool,
+    ) -> Result<Self> {
         let (subscribe, _, _) = client.subscribe().await?;
         client.authorize().await?;
 
@@ -49,6 +54,7 @@ impl Controller {
             current_mining_cancel: None,
             cpu_cores: num_cores,
             extranonce2_counters: vec![0; num_cores],
+            once,
         })
     }
 
@@ -74,25 +80,25 @@ impl Controller {
                 Some((header, extranonce2, job_id)) = self.share_rx.recv() => {
                     info!("Valid share found: nonce={}, hash={:?}", header.nonce, header.block_hash());
 
-                    if let Err(e) = self.client.submit(
-                        job_id,
-                        extranonce2,
-                        header.time.into(),
-                        header.nonce.into()
-                    ).await {
+                    if let Err(e) = self.client.submit(job_id, extranonce2, header.time.into(), header.nonce.into()).await {
                         warn!("Failed to submit share: {e}");
                     } else {
                         info!("Share submitted successfully!");
                     }
+
+                    if self.once {
+                        info!("Share found, exiting");
+                        break;
+                    }
                 }
                 _ = ctrl_c() => {
                     info!("Shutting down controller and mining operations");
-                    self.shutdown_mining().await;
-                    self.client.disconnect().await?;
                     break;
                 }
             }
         }
+
+        self.client.disconnect().await?;
 
         Ok(())
     }

@@ -79,6 +79,7 @@ fn get_system_info() -> &'static SystemInfo {
 
 #[derive(Debug, Parser)]
 pub(crate) struct Miner {
+    #[arg(help = "Stratum <HOST:PORT>.")]
     stratum_endpoint: String,
     #[arg(long, help = "Stratum <USERNAME>.")]
     username: String,
@@ -92,6 +93,8 @@ pub(crate) struct Miner {
     cpu_cores: Option<usize>,
     #[arg(long, help = "Enable performance monitoring")]
     monitor_performance: bool,
+    #[arg(long, help = "Exit <ONCE> a share is found.")]
+    once: bool,
 }
 
 struct MinerRuntime {
@@ -216,7 +219,7 @@ impl Miner {
     }
 
     async fn create_controller(&self, client: Client) -> Result<Controller> {
-        Controller::new(client, self.cpu_cores).await
+        Controller::new(client, self.cpu_cores, self.once).await
     }
 
     fn start_monitoring(
@@ -619,6 +622,7 @@ mod tests {
             password: Some("x".to_string()),
             cpu_cores: Some(2),
             monitor_performance: true,
+            once: false,
         };
 
         let (host, port) = miner.parse_endpoint().unwrap();
@@ -634,6 +638,7 @@ mod tests {
             password: Some("x".to_string()),
             cpu_cores: Some(2),
             monitor_performance: true,
+            once: false,
         };
 
         let thread_pool_result = mining_utils::configure_rayon_for_mining(miner.cpu_cores);
@@ -679,6 +684,7 @@ mod tests {
             password: Some("x".to_string()),
             cpu_cores: Some(1),
             monitor_performance: false,
+            once: false,
         };
 
         let result = tokio::time::timeout(Duration::from_secs(15), miner.connect_client()).await;
