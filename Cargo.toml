@@ -2,19 +2,38 @@
 name = "para"
 description = "Parasite toolkit"
 version = "0.5.2"
-license = "CC0-1.0"
-edition = "2024"
-authors = ["The Parasite Devs"]
 homepage = "https://github.com/parasitepool/para"
-repository = "https://github.com/parasitepool/para"
 autotests = false
 
-[dependencies]
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[workspace]
+members = [".", "crates/*"]
+
+[workspace.package]
+authors = ["The Parasite Devs"]
+edition = "2024"
+license = "CC0-1.0"
+repository = "https://github.com/parasitepool/para"
+rust-version = "1.89.0"
+
+[workspace.dependencies]
 anyhow = { version = "1.0.98", features = ["backtrace"] }
+bitcoin = { version = "0.32.7", features = ["rand", "serde"] }
+bitcoincore-rpc = "0.19.0"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
+
+[dependencies]
+anyhow.workspace = true
 axum = { version = "0.8.3", features = ["http2"] }
 axum-server = "0.7.2"
-bitcoin = { version = "0.32.6", features = ["serde"] }
-bitcoincore-rpc = "0.19.0"
+bitcoin.workspace = true
+bitcoincore-rpc.workspace = true
 boilerplate = { version = "1.0.1", features = ["axum"] }
 byteorder = "1.5.0"
 clap = { version = "4.5.36", features = ["derive", "env"] }
@@ -32,8 +51,8 @@ reqwest = { version = "0.12.22", features = ["rustls-tls", "blocking", "json"] }
 rust-embed = "8.7.1"
 rustls = { version = "0.23.26", features = ["ring"] }
 rustls-acme = { version = "0.14.0", features = ["axum"] }
-serde = { version = "1.0.219", features = ["derive"] }
-serde_json = "1.0.140"
+serde.workspace = true
+serde_json.workspace = true
 serde_with = "3.14.0"
 sqlx = { version =  "0.8.5", features = ["postgres", "runtime-tokio"] }
 sysinfo = "0.37.0"
@@ -44,12 +63,12 @@ tracing = "0.1.41"
 tracing-subscriber = { version =  "0.3.19", features = ["env-filter", "fmt"] }
 
 [dev-dependencies]
-bitcoin = "0.32.6"
 chrono = "0.4.41"
 executable-path = "1.0.0"
+harness = { path = "crates/harness" }
 once_cell = "1.21.3"
 pretty_assertions = "1.4.1"
-tempfile = "3.20.0"
+tempfile = "3.23.0"
 urlencoding = "2.1.3"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
