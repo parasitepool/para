@@ -114,7 +114,7 @@ You can also install `para` directly into your path by doing:
 cargo install --path .
 ```
 
-Build Notes
+Troubleshooting Notes
 -----------
 
 `para` requires `rustc` version 1.90.0 or later. Run `rustc --version` to ensure
