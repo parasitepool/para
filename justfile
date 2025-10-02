@@ -63,9 +63,7 @@ server:
     --port 8080
 
 harness: build-bitcoind
-  #!/usr/bin/env bash
-  cd crates/harness
-  cargo run
+  cargo run -p harness
 
 install:
   git submodule update --init
