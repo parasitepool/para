@@ -9,7 +9,6 @@ fmt:
 clippy:
   cargo clippy --all --all-targets -- --deny warnings
 
-
 ci: clippy
   cargo fmt -- --check
   cargo test --all
