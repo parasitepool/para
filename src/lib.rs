@@ -61,7 +61,7 @@ use {
         str::FromStr,
         sync::{
             Arc, LazyLock,
-            atomic::{AtomicBool, AtomicU64, Ordering},
+            atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
         },
         thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -92,6 +92,9 @@ use {
     tracing::{debug, error, info, warn},
     tracing_subscriber::EnvFilter,
 };
+
+#[cfg(feature = "miner")]
+use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 
 pub use subcommand::server::api;
 

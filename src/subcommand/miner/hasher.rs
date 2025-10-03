@@ -8,51 +8,234 @@ pub(crate) struct Hasher {
     pub(crate) pool_target: Target,
 }
 
+struct MiningState {
+    found_solution: AtomicBool,
+    total_hashes: AtomicU64,
+    solution_nonce: AtomicU32,
+    solution_header: parking_lot::Mutex<Option<Header>>,
+    best_hash: AtomicU64,
+    active_threads: AtomicU32,
+}
+
 impl Hasher {
-    pub(crate) fn hash(
+    pub(crate) fn hash_with_range(
         &mut self,
         cancel: CancellationToken,
+        start_nonce: u32,
+        end_nonce: u32,
     ) -> Result<(Header, Extranonce, String)> {
-        let mut hashes = 0;
-        let start = Instant::now();
-        let mut last_log = start;
-
         let span =
             tracing::info_span!("hasher", job_id = %self.job_id, extranonce2 = %self.extranonce2);
-        let _ = span.enter();
+        let _guard = span.enter();
 
-        loop {
-            if cancel.is_cancelled() {
-                return Err(anyhow!("hasher cancelled"));
-            }
+        let start = Instant::now();
+        let mining_state = Arc::new(MiningState {
+            found_solution: AtomicBool::new(false),
+            total_hashes: AtomicU64::new(0),
+            solution_nonce: AtomicU32::new(0),
+            solution_header: parking_lot::Mutex::new(None),
+            best_hash: AtomicU64::new(u64::MAX),
+            active_threads: AtomicU32::new(0),
+        });
 
-            for _ in 0..10000 {
-                let hash = self.header.block_hash();
-                hashes += 1;
+        let chunk_size = crate::subcommand::miner::mining_utils::calculate_optimal_chunk_size();
+        const PROGRESS_INTERVAL: u64 = 1_000_000;
 
-                if self.pool_target.is_met_by(hash) {
-                    info!("Solved block with hash: {hash}");
-                    return Ok((self.header, self.extranonce2.clone(), self.job_id.clone()));
+        let base_header = self.header;
+        let pool_target = self.pool_target;
+        let cancel_clone = cancel.clone();
+
+        // Spawn progress monitor using std::thread instead of tokio
+        let progress_state = Arc::clone(&mining_state);
+        let progress_cancel = cancel.clone();
+        let progress_handle = std::thread::spawn(move || {
+            let mut last_hashes = 0u64;
+            let mut last_time = start;
+
+            while !progress_cancel.is_cancelled()
+                && !progress_state.found_solution.load(Ordering::Relaxed)
+            {
+                std::thread::sleep(Duration::from_secs(5));
+
+                let current_hashes = progress_state.total_hashes.load(Ordering::Relaxed);
+                let now = Instant::now();
+                let elapsed = now.duration_since(last_time).as_secs_f64().max(1e-6);
+
+                if current_hashes > last_hashes
+                    && (current_hashes - last_hashes) >= PROGRESS_INTERVAL
+                {
+                    let recent_hashes = current_hashes - last_hashes;
+                    let current_hashrate = recent_hashes as f64 / elapsed;
+                    info!("Hashrate: {}", HashRate(current_hashrate));
                 }
 
-                self.header.nonce = self
-                    .header
-                    .nonce
-                    .checked_add(1)
-                    .ok_or_else(|| anyhow!("nonce space exhausted"))?;
+                last_hashes = current_hashes;
+                last_time = now;
+            }
+        });
+
+        if start_nonce >= end_nonce {
+            return Err(anyhow!(
+                "invalid nonce range: {} >= {}",
+                start_nonce,
+                end_nonce
+            ));
+        }
+
+        let nonce_range = start_nonce..end_nonce;
+        let chunks: Vec<u32> = nonce_range.step_by(chunk_size as usize).collect();
+
+        chunks.par_iter().find_any(|&&chunk_start| {
+            if cancel_clone.is_cancelled() || mining_state.found_solution.load(Ordering::Relaxed) {
+                return false;
             }
 
-            let now = Instant::now();
-            let elapsed_since_last = now.duration_since(last_log).as_secs();
+            let chunk_end = std::cmp::min(chunk_start.saturating_add(chunk_size), end_nonce);
 
-            if elapsed_since_last >= 5 {
-                let total_elapsed = now.duration_since(start).as_secs_f64().max(1e-6);
-                let current_hashrate = hashes as f64 / total_elapsed;
+            self.process_nonce_chunk(
+                chunk_start,
+                chunk_end,
+                base_header,
+                pool_target,
+                &mining_state,
+                &cancel_clone,
+            )
+        });
 
-                info!("Hashrate: {}", HashRate(current_hashrate));
+        // Signal progress thread to stop and wait for it
+        drop(progress_handle);
 
-                last_log = now;
+        if cancel.is_cancelled() {
+            return Err(anyhow!("hasher cancelled"));
+        }
+
+        if mining_state.found_solution.load(Ordering::Relaxed) {
+            let solution_nonce = mining_state.solution_nonce.load(Ordering::Relaxed);
+            let solution_header = mining_state.solution_header.lock().take();
+
+            if let Some(mut header) = solution_header {
+                header.nonce = solution_nonce;
+                let hash = header.block_hash();
+                info!("Solution found: nonce={}, hash={:?}", header.nonce, hash);
+                return Ok((header, self.extranonce2.clone(), self.job_id.clone()));
+            } else {
+                let mut final_header = self.header;
+                final_header.nonce = solution_nonce;
+                let hash = final_header.block_hash();
+                info!(
+                    "Solution found: nonce={}, hash={:?}",
+                    final_header.nonce, hash
+                );
+                return Ok((final_header, self.extranonce2.clone(), self.job_id.clone()));
             }
+        }
+
+        Err(anyhow!(
+            "nonce range exhausted: {}-{}",
+            start_nonce,
+            end_nonce
+        ))
+    }
+
+    fn process_nonce_chunk(
+        &self,
+        start_nonce: u32,
+        end_nonce: u32,
+        mut header: Header,
+        pool_target: Target,
+        mining_state: &Arc<MiningState>,
+        cancel: &CancellationToken,
+    ) -> bool {
+        mining_state.active_threads.fetch_add(1, Ordering::Relaxed);
+
+        let mut local_hashes = 0u64;
+        let mut best_local_hash = u64::MAX;
+
+        for nonce in start_nonce..end_nonce {
+            if local_hashes.is_multiple_of(10000)
+                && (cancel.is_cancelled() || mining_state.found_solution.load(Ordering::Relaxed))
+            {
+                mining_state
+                    .total_hashes
+                    .fetch_add(local_hashes, Ordering::Relaxed);
+                mining_state.active_threads.fetch_sub(1, Ordering::Relaxed);
+                return false;
+            }
+
+            header.nonce = nonce;
+            let hash = header.block_hash();
+            local_hashes += 1;
+
+            let hash_u64 = self.hash_to_u64(&hash);
+            if hash_u64 < best_local_hash {
+                best_local_hash = hash_u64;
+
+                let mut current_best = mining_state.best_hash.load(Ordering::Relaxed);
+                while hash_u64 < current_best {
+                    match mining_state.best_hash.compare_exchange_weak(
+                        current_best,
+                        hash_u64,
+                        Ordering::Relaxed,
+                        Ordering::Relaxed,
+                    ) {
+                        Ok(_) => break,
+                        Err(new_current) => current_best = new_current,
+                    }
+                }
+            }
+
+            if pool_target.is_met_by(hash) {
+                if mining_state
+                    .found_solution
+                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::Relaxed)
+                    .is_ok()
+                {
+                    mining_state.solution_nonce.store(nonce, Ordering::Relaxed);
+                    *mining_state.solution_header.lock() = Some(header);
+                    mining_state
+                        .total_hashes
+                        .fetch_add(local_hashes, Ordering::Relaxed);
+
+                    info!("Thread found solution at nonce: {}", nonce);
+                    mining_state.active_threads.fetch_sub(1, Ordering::Relaxed);
+                    return true;
+                }
+                break;
+            }
+        }
+
+        mining_state
+            .total_hashes
+            .fetch_add(local_hashes, Ordering::Relaxed);
+        mining_state.active_threads.fetch_sub(1, Ordering::Relaxed);
+        false
+    }
+
+    fn hash_to_u64(&self, hash: &bitcoin::BlockHash) -> u64 {
+        let bytes = hash.as_byte_array();
+        u64::from_be_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ])
+    }
+}
+
+#[derive(Debug)]
+pub struct HashRate(pub f64);
+
+impl std::fmt::Display for HashRate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let rate = self.0;
+
+        if rate >= 1_000_000_000_000.0 {
+            write!(f, "{:.2} TH/s", rate / 1_000_000_000_000.0)
+        } else if rate >= 1_000_000_000.0 {
+            write!(f, "{:.2} GH/s", rate / 1_000_000_000.0)
+        } else if rate >= 1_000_000.0 {
+            write!(f, "{:.2} MH/s", rate / 1_000_000.0)
+        } else if rate >= 1_000.0 {
+            write!(f, "{:.2} KH/s", rate / 1_000.0)
+        } else {
+            write!(f, "{:.2} H/s", rate)
         }
     }
 }
@@ -87,6 +270,7 @@ mod tests {
 
         Target::from_be_bytes(bytes)
     }
+
     fn header(network_target: Option<Target>, nonce: Option<u32>) -> Header {
         Header {
             version: Version::TWO,
@@ -136,8 +320,8 @@ mod tests {
         assert_eq!(bytes_12[2], 0xFF);
     }
 
-    #[test]
-    fn hasher_hashes_with_very_low_leading_zeros() {
+    #[tokio::test]
+    async fn hasher_hashes_with_very_low_leading_zeros() {
         let target = shift(1);
         let mut hasher = Hasher {
             header: header(None, None),
@@ -146,12 +330,14 @@ mod tests {
             job_id: "bf".into(),
         };
 
-        let (header, _extranonce2, _job_id) = hasher.hash(CancellationToken::new()).unwrap();
+        let (header, _extranonce2, _job_id) = hasher
+            .hash_with_range(CancellationToken::new(), 0, 1_000_000)
+            .unwrap();
         assert!(target.is_met_by(header.block_hash()));
     }
 
-    #[test]
-    fn hasher_nonce_space_exhausted() {
+    #[tokio::test]
+    async fn hasher_nonce_space_exhausted() {
         let target = shift(32);
         let mut hasher = Hasher {
             header: header(None, Some(u32::MAX - 1)),
@@ -160,10 +346,9 @@ mod tests {
             job_id: "bg".into(),
         };
 
+        let result = hasher.hash_with_range(CancellationToken::new(), u32::MAX - 1, u32::MAX);
         assert!(
-            hasher
-                .hash(CancellationToken::new())
-                .is_err_and(|err| err.to_string() == "nonce space exhausted")
+            result.is_err_and(|err| err.to_string() == "nonce range exhausted: 4294967294-4294967295")
         );
     }
 
@@ -200,8 +385,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_multiple_leading_zeros_levels() {
+    #[tokio::test]
+    async fn test_multiple_leading_zeros_levels() {
         let leading_zeros = [1, 2, 3, 4];
 
         for zeros in leading_zeros {
@@ -213,7 +398,7 @@ mod tests {
                 job_id: format!("test_{zeros}"),
             };
 
-            let result = hasher.hash(CancellationToken::new());
+            let result = hasher.hash_with_range(CancellationToken::new(), 0, 10_000_000);
             assert!(result.is_ok(), "Failed at {zeros} leading zeros");
 
             let (header, _, _) = result.unwrap();
@@ -222,5 +407,55 @@ mod tests {
                 "Invalid PoW at {zeros} leading zeros"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn test_parallel_mining_easy_target() {
+        let target = shift(1);
+        let mut hasher = Hasher {
+            header: header(None, None),
+            pool_target: target,
+            extranonce2: "0000000000".parse().unwrap(),
+            job_id: "parallel_test".into(),
+        };
+
+        let result = hasher.hash_with_range(CancellationToken::new(), 0, 100000);
+        assert!(
+            result.is_ok(),
+            "Parallel mining should find solution for easy target"
+        );
+
+        let (header, _, _) = result.unwrap();
+        assert!(
+            target.is_met_by(header.block_hash()),
+            "Solution should meet target"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_parallel_mining_cancellation() {
+        let target = shift(30);
+        let mut hasher = Hasher {
+            header: header(None, None),
+            pool_target: target,
+            extranonce2: "0000000000".parse().unwrap(),
+            job_id: "cancel_test".into(),
+        };
+
+        let cancel_token = CancellationToken::new();
+
+        cancel_token.cancel();
+
+        let result = hasher.hash_with_range(cancel_token, 0, u32::MAX);
+        assert!(result.is_err(), "Should be cancelled");
+        assert!(result.unwrap_err().to_string().contains("cancelled"));
+    }
+
+    #[test]
+    fn test_hashrate_display() {
+        assert_eq!(format!("{}", HashRate(1500.0)), "1.50 KH/s");
+        assert_eq!(format!("{}", HashRate(2_500_000.0)), "2.50 MH/s");
+        assert_eq!(format!("{}", HashRate(3_200_000_000.0)), "3.20 GH/s");
+        assert_eq!(format!("{}", HashRate(1_100_000_000_000.0)), "1.10 TH/s");
     }
 }
