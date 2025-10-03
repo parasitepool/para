@@ -8,10 +8,11 @@ pub(crate) struct Controller {
     share_rx: mpsc::Receiver<(Header, Extranonce, String)>,
     share_tx: mpsc::Sender<(Header, Extranonce, String)>,
     cancel: CancellationToken,
+    once: bool,
 }
 
 impl Controller {
-    pub(crate) async fn new(mut client: Client) -> Result<Self> {
+    pub(crate) async fn new(mut client: Client, once: bool) -> Result<Self> {
         let (subscribe, _, _) = client.subscribe().await?;
         client.authorize().await?;
 
@@ -30,6 +31,7 @@ impl Controller {
             share_rx,
             share_tx,
             cancel: CancellationToken::new(),
+            once,
         })
     }
 
@@ -49,18 +51,25 @@ impl Controller {
                 },
                 Some((header, extranonce2, job_id)) = self.share_rx.recv() => {
                     info!("Valid header found: {:?}", header);
+
                     if let Err(e) = self.client.submit(job_id, extranonce2, header.time.into(), header.nonce.into()).await {
                         warn!("Failed to submit share: {e}");
+                    }
+
+                    if self.once {
+                        info!("Share found, exiting");
+                        break;
                     }
                 }
                 _ = ctrl_c() => {
                     info!("Shutting down client and hasher");
-                    self.client.disconnect().await?;
-                    self.cancel_hasher();
                     break;
                 }
             }
         }
+
+        self.client.disconnect().await?;
+        self.cancel_hasher();
 
         Ok(())
     }

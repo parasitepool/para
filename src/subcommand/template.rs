@@ -5,6 +5,7 @@ use {
 
 #[derive(Debug, Parser)]
 pub struct Template {
+    #[arg(help = "Stratum <HOST:PORT>.")]
     stratum_endpoint: String,
     #[arg(long, help = "Stratum <USERNAME>.")]
     pub username: String,

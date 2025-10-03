@@ -12,7 +12,11 @@ clippy:
 ci: clippy
   cargo fmt -- --check
   cargo test --all
+
+ignored:
   cargo test --all -- --ignored
+
+all: ci ignored
 
 outdated:
   cargo outdated --root-deps-only --workspace
@@ -36,7 +40,8 @@ miner-signet:
   RUST_LOG=info cargo run --release -- miner \
     127.0.0.1:42069 \
     --username tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.tick \
-    --password x
+    --password x \
+    --once 
 
 ping host='parasite.wtf':
   cargo run ping {{host}}:42069
@@ -49,12 +54,16 @@ pool:
     --chain signet \
     --address 0.0.0.0 \
     --bitcoin-rpc-username satoshi \
-    --bitcoin-rpc-password nakamoto
+    --bitcoin-rpc-password nakamoto \
+    --bitcoin-rpc-port 38332
 
 server: 
   RUST_LOG=info cargo run -- server \
     --log-dir copr/logs \
     --port 8080
+
+harness: build-bitcoind
+  cargo run -p harness
 
 install:
   git submodule update --init
