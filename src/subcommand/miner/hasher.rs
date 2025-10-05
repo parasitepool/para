@@ -219,27 +219,6 @@ impl Hasher {
     }
 }
 
-#[derive(Debug)]
-pub struct HashRate(pub f64);
-
-impl std::fmt::Display for HashRate {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let rate = self.0;
-
-        if rate >= 1_000_000_000_000.0 {
-            write!(f, "{:.2} TH/s", rate / 1_000_000_000_000.0)
-        } else if rate >= 1_000_000_000.0 {
-            write!(f, "{:.2} GH/s", rate / 1_000_000_000.0)
-        } else if rate >= 1_000_000.0 {
-            write!(f, "{:.2} MH/s", rate / 1_000_000.0)
-        } else if rate >= 1_000.0 {
-            write!(f, "{:.2} KH/s", rate / 1_000.0)
-        } else {
-            write!(f, "{:.2} H/s", rate)
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use {
@@ -453,9 +432,9 @@ mod tests {
 
     #[test]
     fn test_hashrate_display() {
-        assert_eq!(format!("{}", HashRate(1500.0)), "1.50 KH/s");
-        assert_eq!(format!("{}", HashRate(2_500_000.0)), "2.50 MH/s");
-        assert_eq!(format!("{}", HashRate(3_200_000_000.0)), "3.20 GH/s");
-        assert_eq!(format!("{}", HashRate(1_100_000_000_000.0)), "1.10 TH/s");
+        assert_eq!(format!("{}", HashRate(1500.0)), "1.500K");
+        assert_eq!(format!("{}", HashRate(2_500_000.0)), "2.500M");
+        assert_eq!(format!("{}", HashRate(3_200_000_000.0)), "3.200G");
+        assert_eq!(format!("{}", HashRate(1_100_000_000_000.0)), "1.100T");
     }
 }
