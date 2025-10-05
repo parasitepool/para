@@ -45,7 +45,6 @@ impl Hasher {
         let pool_target = self.pool_target;
         let cancel_clone = cancel.clone();
 
-        // Spawn progress monitor using std::thread instead of tokio
         let progress_state = Arc::clone(&mining_state);
         let progress_cancel = cancel.clone();
         let progress_handle = std::thread::spawn(move || {
@@ -299,8 +298,8 @@ mod tests {
         assert_eq!(bytes_12[2], 0xFF);
     }
 
-    #[tokio::test]
-    async fn hasher_hashes_with_very_low_leading_zeros() {
+    #[test]
+    fn hasher_hashes_with_very_low_leading_zeros() {
         let target = shift(1);
         let mut hasher = Hasher {
             header: header(None, None),
@@ -315,8 +314,8 @@ mod tests {
         assert!(target.is_met_by(header.block_hash()));
     }
 
-    #[tokio::test]
-    async fn hasher_nonce_space_exhausted() {
+    #[test]
+    fn hasher_nonce_space_exhausted() {
         let target = shift(32);
         let mut hasher = Hasher {
             header: header(None, Some(u32::MAX - 1)),
@@ -364,8 +363,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_multiple_leading_zeros_levels() {
+    #[test]
+    fn test_multiple_leading_zeros_levels() {
         let leading_zeros = [1, 2, 3, 4];
 
         for zeros in leading_zeros {
@@ -388,8 +387,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_parallel_mining_easy_target() {
+    #[test]
+    fn test_parallel_mining_easy_target() {
         let target = shift(1);
         let mut hasher = Hasher {
             header: header(None, None),
@@ -412,7 +411,7 @@ mod tests {
     }
 
     #[test]
-    async fn test_parallel_mining_cancellation() {
+    fn test_parallel_mining_cancellation() {
         let target = shift(30);
         let mut hasher = Hasher {
             header: header(None, None),
