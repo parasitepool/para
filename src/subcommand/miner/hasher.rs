@@ -411,7 +411,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[test]
     async fn test_parallel_mining_cancellation() {
         let target = shift(30);
         let mut hasher = Hasher {
