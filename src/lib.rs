@@ -33,6 +33,7 @@ use {
     hex::FromHex,
     lazy_static::lazy_static,
     rand::RngCore,
+    rayon::prelude::{IntoParallelRefIterator, ParallelIterator},
     reqwest::Url,
     rust_embed::RustEmbed,
     rustls_acme::{
@@ -92,9 +93,6 @@ use {
     tracing::{debug, error, info, warn},
     tracing_subscriber::EnvFilter,
 };
-
-#[cfg(feature = "miner")]
-use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 
 pub use subcommand::server::api;
 
