@@ -132,7 +132,7 @@ impl Controller {
             "mining.set_difficulty" => {
                 let difficulty = serde_json::from_value::<SetDifficulty>(params)?.difficulty();
                 *self.pool_difficulty.lock().await = difficulty;
-                // info!("New difficulty: {difficulty}");
+                info!("New difficulty: {difficulty}");
             }
 
             _ => warn!("Unhandled notification: {}", method),

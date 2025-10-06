@@ -58,6 +58,24 @@ impl<'de> Deserialize<'de> for Difficulty {
     }
 }
 
+impl fmt::Display for Difficulty {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let d = self.as_f64();
+
+        if d >= 1.0 {
+            write!(f, "{}", d.floor() as u64)
+        } else {
+            if let Some(p) = f.precision() {
+                write!(f, "{:.*}", p, d)
+            } else {
+                let s = format!("{:.12}", d);
+                let s = s.trim_end_matches('0').trim_end_matches('.');
+                f.write_str(s)
+            }
+        }
+    }
+}
+
 impl From<Nbits> for Difficulty {
     fn from(nbits: Nbits) -> Self {
         Difficulty(nbits.into())
@@ -99,7 +117,7 @@ impl From<f64> for Difficulty {
             "difficulty must be finite and > 0"
         );
 
-        // 2^32 - 1 is safe: DIFF1_TARGET (≈2^224) * scale fits in 256 bits.
+        // 2^32 - 1 is safe: DIFFICULTY_1_TARGET (≈2^224) * scale fits in 256 bits.
         const MAX_SCALE_NUM: u64 = 0xFFFF_FFFF;
 
         let max_by_den = (u64::MAX as f64 / difficulty).floor();
@@ -163,5 +181,18 @@ mod tests {
         let got = Difficulty::from(want).as_f64();
         let rel_err = ((got - want) / want).abs();
         assert!(rel_err < 1e-6, "got {got}, want {want}, rel_err {rel_err}");
+    }
+
+    #[test]
+    fn display_integer_when_greater_than_1() {
+        assert_eq!(format!("{}", Difficulty::from(1)), "1");
+        assert_eq!(format!("{}", Difficulty::from(42)), "42");
+        assert_eq!(format!("{}", Difficulty::from(2.9)), "2");
+    }
+
+    #[test]
+    fn display_respects_precision_flag() {
+        assert_eq!(format!("{:.5}", Difficulty::from(0.5)), "0.50000");
+        assert_eq!(format!("{:.2}", Difficulty::from(0.125)), "0.13"); 
     }
 }
