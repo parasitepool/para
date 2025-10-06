@@ -15,10 +15,6 @@ impl Difficulty {
     pub fn as_f64(self) -> f64 {
         Target::from_compact(self.0).difficulty_float()
     }
-
-    pub fn as_u64(self) -> u64 {
-        Target::from_compact(self.0).difficulty(bitcoin::consensus::Params::BITCOIN) as u64
-    }
 }
 
 impl Serialize for Difficulty {
