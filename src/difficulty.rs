@@ -8,12 +8,16 @@ lazy_static! {
 pub struct Difficulty(CompactTarget);
 
 impl Difficulty {
-    pub fn target(self) -> Target {
+    pub fn to_target(self) -> Target {
         self.0.into()
     }
 
     pub fn as_f64(self) -> f64 {
         Target::from_compact(self.0).difficulty_float()
+    }
+
+    pub fn as_u64(self) -> u64 {
+        Target::from_compact(self.0).difficulty(bitcoin::consensus::Params::BITCOIN) as u64
     }
 }
 
@@ -81,21 +85,28 @@ impl From<Target> for Difficulty {
 impl From<u64> for Difficulty {
     fn from(difficulty: u64) -> Self {
         assert!(difficulty > 0, "difficulty must be > 0");
-        Self::from(difficulty as f64)
+
+        let target = *DIFFICULTY_1_TARGET / U256::from(difficulty);
+
+        Self::from(Target::from_be_bytes(target.to_big_endian()))
     }
 }
 
 impl From<f64> for Difficulty {
-    fn from(diff: f64) -> Self {
+    fn from(difficulty: f64) -> Self {
         assert!(
-            diff.is_finite() && diff > 0.0,
+            difficulty.is_finite() && difficulty > 0.0,
             "difficulty must be finite and > 0"
         );
 
-        const SCALE: u64 = 1_000_000_000;
+        // 2^32 - 1 is safe: DIFF1_TARGET (≈2^224) * scale fits in 256 bits.
+        const MAX_SCALE_NUM: u64 = 0xFFFF_FFFF;
 
-        let numerator = DIFFICULTY_1_TARGET.saturating_mul(U256::from(SCALE));
-        let denominator = (diff * SCALE as f64).round() as u64;
+        let max_by_den = (u64::MAX as f64 / difficulty).floor();
+        let scale = max_by_den.min(MAX_SCALE_NUM as f64).max(1.0) as u64;
+
+        let numerator = (*DIFFICULTY_1_TARGET).saturating_mul(U256::from(scale));
+        let denominator = (difficulty * scale as f64).round() as u64;
 
         let target = if denominator == 0 {
             U256::MAX
@@ -113,19 +124,19 @@ mod tests {
 
     #[test]
     fn max_target_to_difficulty_1() {
-        assert_eq!(Difficulty::from(1.0).target(), Target::MAX);
-        assert_eq!(Difficulty::from(1).target(), Target::MAX);
+        assert_eq!(Difficulty::from(1.0).to_target(), Target::MAX);
+        assert_eq!(Difficulty::from(1).to_target(), Target::MAX);
     }
 
     #[test]
     fn serialize_less_than_1_as_float() {
-        let json = serde_json::to_string(&Difficulty::from(0.5_f64)).unwrap();
+        let json = serde_json::to_string(&Difficulty::from(0.5)).unwrap();
         assert!(json.contains('.'), "should serialize as float: {json}");
     }
 
     #[test]
     fn serialize_greater_than_1_as_int() {
-        let json = serde_json::to_string(&Difficulty::from(42_u64)).unwrap();
+        let json = serde_json::to_string(&Difficulty::from(42)).unwrap();
         assert_eq!(json, "42");
     }
 
@@ -138,5 +149,19 @@ mod tests {
         assert!(a.as_f64() >= 1.0);
         assert!(b.as_f64() >= 1.0);
         assert!(c.as_f64() < 1.0);
+    }
+
+    #[test]
+    fn real_network_diff() {
+        let difficulty = Difficulty::from(150839487445890.5);
+        assert_eq!(difficulty.as_f64(), 150839487445890.5)
+    }
+
+    #[test]
+    fn signet_network_diff() {
+        let want = 0.0012;
+        let got = Difficulty::from(want).as_f64();
+        let rel_err = ((got - want) / want).abs();
+        assert!(rel_err < 1e-6, "got {got}, want {want}, rel_err {rel_err}");
     }
 }
