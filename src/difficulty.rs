@@ -64,14 +64,12 @@ impl fmt::Display for Difficulty {
 
         if d >= 1.0 {
             write!(f, "{}", d.floor() as u64)
+        } else if let Some(p) = f.precision() {
+            write!(f, "{:.*}", p, d)
         } else {
-            if let Some(p) = f.precision() {
-                write!(f, "{:.*}", p, d)
-            } else {
-                let s = format!("{:.12}", d);
-                let s = s.trim_end_matches('0').trim_end_matches('.');
-                f.write_str(s)
-            }
+            let s = format!("{:.12}", d);
+            let s = s.trim_end_matches('0').trim_end_matches('.');
+            f.write_str(s)
         }
     }
 }
@@ -193,6 +191,6 @@ mod tests {
     #[test]
     fn display_respects_precision_flag() {
         assert_eq!(format!("{:.5}", Difficulty::from(0.5)), "0.50000");
-        assert_eq!(format!("{:.2}", Difficulty::from(0.125)), "0.13"); 
+        assert_eq!(format!("{:.2}", Difficulty::from(0.125)), "0.13");
     }
 }
