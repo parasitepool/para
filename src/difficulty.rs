@@ -4,14 +4,10 @@ lazy_static! {
     pub static ref DIFFICULTY_1_TARGET: U256 = U256::from_big_endian(&Target::MAX.to_be_bytes());
 }
 
-// #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize, Display)]
-// #[serde(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Difficulty(CompactTarget);
 
 impl Difficulty {
-    pub const DIFF1_COMPACT: u32 = 0x1d00_ffff; // TODO: is this correct?
-
     pub fn target(self) -> Target {
         self.0.into()
     }
@@ -24,11 +20,9 @@ impl Difficulty {
 impl Serialize for Difficulty {
     fn serialize<S: Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
         let d = self.as_f64();
-        // difficulty is always > 0.0 by construction.
         if d < 1.0 {
             ser.serialize_f64(d)
         } else {
-            // Serialize as an integer u64 for >= 1.0 (explicit floor).
             ser.serialize_u64(d.floor() as u64)
         }
     }
@@ -36,7 +30,6 @@ impl Serialize for Difficulty {
 
 impl<'de> Deserialize<'de> for Difficulty {
     fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
-        // Accept either an integer or a float on the wire.
         #[derive(Deserialize)]
         #[serde(untagged)]
         enum Wire {
@@ -99,18 +92,15 @@ impl From<f64> for Difficulty {
             "difficulty must be finite and > 0"
         );
 
-        let difficulty_1_target = &DIFFICULTY_1_TARGET;
-        // Target::from_compact(CompactTarget::from_consensus(Difficulty::DIFF1_COMPACT));
-
         const SCALE: u64 = 1_000_000_000;
 
-        let num = difficulty_1_target.saturating_mul(U256::from(SCALE));
-        let den = (diff * SCALE as f64).round() as u64;
+        let numerator = DIFFICULTY_1_TARGET.saturating_mul(U256::from(SCALE));
+        let denominator = (diff * SCALE as f64).round() as u64;
 
-        let target = if den == 0 {
+        let target = if denominator == 0 {
             U256::MAX
         } else {
-            num / U256::from(den)
+            numerator / U256::from(denominator)
         };
 
         Difficulty(Target::from_be_bytes(target.to_big_endian()).to_compact_lossy())
@@ -120,7 +110,6 @@ impl From<f64> for Difficulty {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::{from_str, to_string};
 
     #[test]
     fn max_target_to_difficulty_1() {
@@ -129,24 +118,22 @@ mod tests {
     }
 
     #[test]
-    fn ser_lt_one_as_float() {
-        let d = Difficulty::from(0.5_f64);
-        let json = to_string(&d).unwrap();
+    fn serialize_less_than_1_as_float() {
+        let json = serde_json::to_string(&Difficulty::from(0.5_f64)).unwrap();
         assert!(json.contains('.'), "should serialize as float: {json}");
     }
 
     #[test]
-    fn ser_ge_one_as_int() {
-        let d = Difficulty::from(42_u64);
-        let json = to_string(&d).unwrap();
+    fn serialize_greater_than_1_as_int() {
+        let json = serde_json::to_string(&Difficulty::from(42_u64)).unwrap();
         assert_eq!(json, "42");
     }
 
     #[test]
-    fn de_from_int_or_float() {
-        let a: Difficulty = from_str("2").unwrap();
-        let b: Difficulty = from_str("2.0").unwrap();
-        let c: Difficulty = from_str("0.125").unwrap();
+    fn deserialize_from_int_or_float() {
+        let a: Difficulty = serde_json::from_str("2").unwrap();
+        let b: Difficulty = serde_json::from_str("2.0").unwrap();
+        let c: Difficulty = serde_json::from_str("0.125").unwrap();
 
         assert!(a.as_f64() >= 1.0);
         assert!(b.as_f64() >= 1.0);
