@@ -100,7 +100,6 @@ mod chain;
 pub mod ckpool;
 pub mod coinbase_builder;
 pub mod difficulty;
-pub mod difficulty_foo;
 pub mod hash_rate;
 mod job;
 mod stratifier;

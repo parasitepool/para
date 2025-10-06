@@ -25,7 +25,7 @@ impl Controller {
 
         Ok(Self {
             client,
-            pool_difficulty: Arc::new(Mutex::new(Difficulty::default())),
+            pool_difficulty: Arc::new(Mutex::new(Difficulty::from(1))),
             extranonce1: subscribe.extranonce1,
             extranonce2_size: subscribe.extranonce2_size,
             share_rx,
@@ -88,7 +88,7 @@ impl Controller {
 
                 let network_nbits: CompactTarget = notify.nbits.into();
                 let network_target: Target = network_nbits.into();
-                let pool_target = self.pool_difficulty.lock().await.to_target();
+                let pool_target = self.pool_difficulty.lock().await.target();
 
                 info!("{}", serde_json::to_string(&notify.merkle_branches)?);
                 info!("Network target:\t{}", target_as_block_hash(network_target));
@@ -132,7 +132,7 @@ impl Controller {
             "mining.set_difficulty" => {
                 let difficulty = serde_json::from_value::<SetDifficulty>(params)?.difficulty();
                 *self.pool_difficulty.lock().await = difficulty;
-                info!("New difficulty: {difficulty}");
+                // info!("New difficulty: {difficulty}");
             }
 
             _ => warn!("Unhandled notification: {}", method),

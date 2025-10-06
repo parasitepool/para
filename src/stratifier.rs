@@ -220,7 +220,7 @@ where
 
         self.send(Message::Notification {
             method: "mining.set_difficulty".into(),
-            params: json!(SetDifficulty(Difficulty(1))),
+            params: json!(SetDifficulty(Difficulty::from(job.nbits()?))),
         })
         .await?;
 

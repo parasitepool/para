@@ -129,7 +129,7 @@ mod tests {
             r#"[["minimum-difficulty","version-rolling"],{"minimum-difficulty.value":2048,"version-rolling.mask":"00fff000","version-rolling.min-bit-count":2}]"#,
             Configure {
                 extensions: vec!["minimum-difficulty".into(), "version-rolling".into()],
-                minimum_difficulty_value: Some(Difficulty(2048)),
+                minimum_difficulty_value: Some(Difficulty::from(2048)),
                 version_rolling_mask: Some(Version::from_str("00fff000").unwrap()),
                 version_rolling_min_bit_count: Some(2),
             },
@@ -140,7 +140,7 @@ mod tests {
     fn configure_serialize_shape_includes_only_present_fields() {
         let cfg = Configure {
             extensions: vec!["minimum-difficulty".into(), "version-rolling".into()],
-            minimum_difficulty_value: Some(Difficulty(1024)),
+            minimum_difficulty_value: Some(Difficulty::from(1024)),
             version_rolling_mask: None,
             version_rolling_min_bit_count: Some(3),
         };
