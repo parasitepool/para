@@ -4,7 +4,16 @@ lazy_static! {
     pub static ref DIFFICULTY_1_TARGET: U256 = U256::from_big_endian(&Target::MAX.to_be_bytes());
 }
 
-/// Difficulty is a fraught metric.
+/// Difficulty is a fraught metric. It is derived from the network target, where a
+/// difficulty of 1 equals the network target defined in the genesis block divided by the current
+/// network tartget. The target principally represents a 256-bit number but the block header
+/// contains a compact representation called nbits (or CompactTarget). This is inherently lossy.
+/// Furthermore difficulty, which used to be only for human consumption has made itself into the
+/// stratum protocol to define the target (inverse of difficulty) a miner's share has to meet. It
+/// is used to tune the frequency of a miner's share submission and for accounting how much work
+/// has been completed. This struct aims to define it's edges and make it easier to work with but
+/// it is inherently lossy and imprecise. If someone stumbles accross this comment and sees a
+/// better way to reconcile these different types, please open an issue or PR.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Difficulty(CompactTarget);
 
