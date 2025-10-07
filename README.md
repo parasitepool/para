@@ -108,11 +108,27 @@ cargo build --release
 
 Once built, the `para` binary can be found at `./target/release/para`.
 
-`para` requires `rustc` version 1.90.0 or later. Run `rustc --version` to ensure
-you have this version. Run `rustup update` to get the latest stable release.
-
 You can also install `para` directly into your path by doing:
 
 ```
 cargo install --path .
+```
+
+Troubleshooting
+---------------
+
+### Build Issues
+
+#### Verify Minimum Versions
+
+`para` requires
+- `rustc` version 1.90.0 or later
+  - Available from `rustup update`
+- `gcc` version 10.5.0 or later.
+  - Available from your package manager or [gnu.org](https://gcc.gnu.org)
+
+These versions can be verified with:
+```shell
+rustc --version
+gcc --version
 ```
