@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SuggestDifficulty(pub Difficulty);
 
 impl SuggestDifficulty {
@@ -47,7 +47,7 @@ mod tests {
 
     #[test]
     fn suggest_difficulty_roundtrip() {
-        let expected = SuggestDifficulty(Difficulty(1000));
+        let expected = SuggestDifficulty(Difficulty::from(1000));
         let parsed: SuggestDifficulty = serde_json::from_str("[1000]").unwrap();
         assert_eq!(parsed, expected);
 
@@ -63,7 +63,7 @@ mod tests {
 
     #[test]
     fn suggest_difficulty_serialize_shape() {
-        let v = serde_json::to_value(SuggestDifficulty(Difficulty(2))).unwrap();
+        let v = serde_json::to_value(SuggestDifficulty(Difficulty::from(2))).unwrap();
         assert_eq!(v, serde_json::json!([2]));
     }
 

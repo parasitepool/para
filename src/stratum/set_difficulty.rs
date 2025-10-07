@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SetDifficulty(pub Difficulty);
 
 impl SetDifficulty {
@@ -47,7 +47,7 @@ mod tests {
 
     #[test]
     fn set_difficulty_roundtrip() {
-        let expected = SetDifficulty(Difficulty(9999));
+        let expected = SetDifficulty(Difficulty::from(9999));
         let parsed: SetDifficulty = serde_json::from_str("[9999]").unwrap();
         assert_eq!(parsed, expected);
 
@@ -63,7 +63,7 @@ mod tests {
 
     #[test]
     fn set_difficulty_serialize_shape() {
-        let v = serde_json::to_value(SetDifficulty(Difficulty(3))).unwrap();
+        let v = serde_json::to_value(SetDifficulty(Difficulty::from(3))).unwrap();
         assert_eq!(v, serde_json::json!([3]));
     }
 

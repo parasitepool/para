@@ -3,6 +3,12 @@ use super::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, DeserializeFromStr, SerializeDisplay)]
 pub struct Nbits(CompactTarget);
 
+impl Nbits {
+    pub fn to_compact(&self) -> CompactTarget {
+        self.0
+    }
+}
+
 impl FromStr for Nbits {
     type Err = anyhow::Error;
 
