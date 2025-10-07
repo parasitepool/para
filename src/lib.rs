@@ -16,12 +16,13 @@ use {
         Address, Amount, Block, BlockHash, CompactTarget, Network, OutPoint, ScriptBuf, Sequence,
         Target, Transaction, TxIn, TxMerkleNode, TxOut, Txid, VarInt, Witness,
         block::{self, Header},
-        consensus::{self, Decodable, Encodable},
+        consensus::{self, Decodable, Encodable, encode},
         hashes::{Hash, sha256d},
         locktime::absolute::LockTime,
         script::write_scriptint,
     },
-    bitcoincore_rpc::{Auth, RpcApi, json::GetBlockTemplateResult},
+    bitcoincore_rpc::{Auth, RpcApi},
+    block_template::BlockTemplate,
     byteorder::{BigEndian, ByteOrder, LittleEndian},
     chain::Chain,
     clap::Parser,
@@ -95,6 +96,7 @@ use {
 pub use subcommand::server::api;
 
 mod arguments;
+mod block_template;
 mod chain;
 pub mod ckpool;
 pub mod coinbase_builder;

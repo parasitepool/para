@@ -202,7 +202,7 @@ where
             address,
             extranonce1.clone(),
             *version_mask,
-            self.gbt()?,
+            self.get_block_template()?,
             "deadbeef".to_string(),
         )?;
 
@@ -220,7 +220,7 @@ where
 
         self.send(Message::Notification {
             method: "mining.set_difficulty".into(),
-            params: json!(SetDifficulty(Difficulty::from(job.nbits()?))),
+            params: json!(SetDifficulty(Difficulty::from(job.nbits()))),
         })
         .await?;
 
@@ -261,7 +261,7 @@ where
             job.version()
         };
 
-        let nbits = job.nbits()?;
+        let nbits = job.nbits();
 
         let header = Header {
             version: version.into(),
@@ -275,7 +275,7 @@ where
             )?
             .into(),
             time: submit.ntime.into(),
-            bits: nbits.into(),
+            bits: nbits.to_compact(),
             nonce: submit.nonce.into(),
         };
 
@@ -294,13 +294,10 @@ where
         let txdata = vec![coinbase_tx]
             .into_iter()
             .chain(
-                job.gbt
-                    .clone()
+                job.template
                     .transactions
                     .iter()
-                    .map(|result| {
-                        Transaction::consensus_decode(&mut result.raw_tx.as_slice()).unwrap()
-                    })
+                    .map(|tx| tx.transaction.clone())
                     .collect::<Vec<Transaction>>(),
             )
             .collect();
@@ -351,7 +348,7 @@ where
         Ok(())
     }
 
-    fn gbt(&self) -> Result<GetBlockTemplateResult> {
+    fn get_block_template(&self) -> Result<BlockTemplate> {
         let mut rules = vec!["segwit"];
         if self.config.chain().network() == Network::Signet {
             rules.push("signet");
@@ -365,6 +362,6 @@ where
         Ok(self
             .config
             .bitcoin_rpc_client()?
-            .call::<GetBlockTemplateResult>("getblocktemplate", &[params])?)
+            .call::<BlockTemplate>("getblocktemplate", &[params])?)
     }
 }
