@@ -275,7 +275,7 @@ where
             )?
             .into(),
             time: submit.ntime.into(),
-            bits: nbits.into(),
+            bits: nbits.to_compact(),
             nonce: submit.nonce.into(),
         };
 
