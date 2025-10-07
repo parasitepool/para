@@ -4,7 +4,7 @@ use super::*;
 pub struct BlockTemplate {
     pub bits: Nbits,
     #[serde(rename = "previousblockhash")]
-    pub previous_block_hash: bitcoin::BlockHash,
+    pub previous_block_hash: BlockHash,
     #[serde(rename = "curtime")]
     pub current_time: u64,
     pub height: u64,
@@ -12,7 +12,7 @@ pub struct BlockTemplate {
     pub version: Version,
     pub transactions: Vec<TemplateTransaction>,
     #[serde(with = "bitcoin::script::ScriptBuf", default)]
-    pub default_witness_commitment: bitcoin::script::ScriptBuf,
+    pub default_witness_commitment: ScriptBuf,
     pub coinbaseaux: BTreeMap<String, String>,
     #[serde(
         rename = "coinbasevalue",
@@ -24,9 +24,7 @@ pub struct BlockTemplate {
 
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
 pub struct TemplateTransaction {
-    pub txid: bitcoin::Txid,
-    #[serde(rename = "hash")]
-    pub wtxid: bitcoin::Wtxid,
+    pub txid: Txid,
     #[serde(rename = "data", deserialize_with = "tx_from_hex")]
     pub transaction: Transaction,
 }

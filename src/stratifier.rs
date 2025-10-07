@@ -202,7 +202,7 @@ where
             address,
             extranonce1.clone(),
             *version_mask,
-            self.gbt()?,
+            self.get_block_template()?,
             "deadbeef".to_string(),
         )?;
 
@@ -348,7 +348,7 @@ where
         Ok(())
     }
 
-    fn gbt(&self) -> Result<BlockTemplate> {
+    fn get_block_template(&self) -> Result<BlockTemplate> {
         let mut rules = vec!["segwit"];
         if self.config.chain().network() == Network::Signet {
             rules.push("signet");
