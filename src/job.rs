@@ -32,14 +32,8 @@ impl Job {
         .with_pool_sig("|parasite|".into())
         .build()?;
 
-        let merkle_branches = stratum::merkle_branches(
-            template
-                .transactions
-                .clone()
-                .into_iter()
-                .map(|r| r.txid)
-                .collect(),
-        );
+        let merkle_branches =
+            stratum::merkle_branches(template.transactions.iter().map(|tx| tx.txid).collect());
 
         Ok(Self {
             coinb1,
@@ -73,8 +67,7 @@ impl Job {
             merkle_branches: self.merkle_branches.clone(),
             version: self.version(),
             nbits: self.nbits(),
-            ntime: Ntime::try_from(self.template.current_time)
-                .expect("should fit until the year 2106"),
+            ntime: self.template.current_time,
             clean_jobs: true,
         })
     }

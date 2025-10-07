@@ -5,8 +5,8 @@ pub struct BlockTemplate {
     pub bits: Nbits,
     #[serde(rename = "previousblockhash")]
     pub previous_block_hash: BlockHash,
-    #[serde(rename = "curtime")]
-    pub current_time: u64,
+    #[serde(rename = "curtime", deserialize_with = "ntime_from_u64")]
+    pub current_time: Ntime,
     pub height: u64,
     #[serde(deserialize_with = "version_from_i32")]
     pub version: Version,
@@ -43,4 +43,12 @@ where
 {
     let s = <&str>::deserialize(d)?;
     encode::deserialize_hex(s).map_err(serde::de::Error::custom)
+}
+
+fn ntime_from_u64<'de, D>(d: D) -> Result<Ntime, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let v = u64::deserialize(d)?;
+    Ntime::try_from(v).map_err(de::Error::custom)
 }
