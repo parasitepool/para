@@ -8,33 +8,22 @@ pub(crate) struct Controller {
     share_rx: mpsc::Receiver<(Header, Extranonce, String)>,
     share_tx: mpsc::Sender<(Header, Extranonce, String)>,
     cancel: CancellationToken,
-    current_mining_cancel: Option<CancellationToken>,
     cpu_cores: usize,
     extranonce2_counters: Vec<u32>,
     once: bool,
 }
 
 impl Controller {
-    pub(crate) async fn new(
-        mut client: Client,
-        cpu_cores: Option<usize>,
-        once: bool,
-    ) -> Result<Self> {
+    pub(crate) async fn new(mut client: Client, cpu_cores: usize, once: bool) -> Result<Self> {
         let (subscribe, _, _) = client.subscribe().await?;
         client.authorize().await?;
-
-        let num_cores = cpu_cores.unwrap_or_else(|| {
-            let mut system = sysinfo::System::new();
-            system.refresh_cpu_all();
-            system.cpus().len()
-        });
 
         info!(
             "Authorized: extranonce1={}, extranonce2_size={}",
             subscribe.extranonce1, subscribe.extranonce2_size
         );
 
-        info!("Controller initialized with {} CPU cores", num_cores);
+        info!("Controller initialized with {} CPU cores", cpu_cores);
 
         let (share_tx, share_rx) = mpsc::channel(32);
 
@@ -46,9 +35,8 @@ impl Controller {
             share_rx,
             share_tx,
             cancel: CancellationToken::new(),
-            current_mining_cancel: None,
-            cpu_cores: num_cores,
-            extranonce2_counters: vec![0; num_cores],
+            cpu_cores,
+            extranonce2_counters: vec![0; cpu_cores],
             once,
         })
     }
@@ -93,13 +81,12 @@ impl Controller {
                 }
                 _ = ctrl_c() => {
                     info!("Shutting down controller and mining operations");
-                    self.shutdown_mining().await;
-                    self.client.disconnect().await?;
                     break;
                 }
             }
         }
 
+        self.cancel();
         self.client.disconnect().await?;
 
         Ok(())
@@ -110,7 +97,7 @@ impl Controller {
             "mining.notify" => {
                 let notify = serde_json::from_value::<Notify>(params)?;
 
-                self.cancel_current_mining();
+                self.cancel();
 
                 let network_nbits: CompactTarget = notify.nbits.into();
                 let network_target: Target = network_nbits.into();
@@ -120,9 +107,6 @@ impl Controller {
                 info!("{}", serde_json::to_string(&notify.merkle_branches)?);
                 info!("Network target:\t{}", target_as_block_hash(network_target));
                 info!("Pool target:\t{}", target_as_block_hash(pool_target));
-
-                let mining_cancel = CancellationToken::new();
-                self.current_mining_cancel = Some(mining_cancel.clone());
 
                 let share_tx = self.share_tx.clone();
 
@@ -156,7 +140,7 @@ impl Controller {
                     };
 
                     let share_tx_clone = share_tx.clone();
-                    let mining_cancel_clone = mining_cancel.clone();
+                    let cancel_clone = self.cancel.clone();
 
                     info!(
                         "Starting hasher for core {} with extranonce2: {}",
@@ -167,7 +151,7 @@ impl Controller {
                         let (tx, rx) = tokio::sync::oneshot::channel();
 
                         rayon::spawn(move || {
-                            let result = hasher.hash_with_range(mining_cancel_clone, 0, u32::MAX);
+                            let result = hasher.hash_with_range(cancel_clone, 0, u32::MAX);
                             let _ = tx.send(result);
                         });
 
@@ -217,29 +201,14 @@ impl Controller {
         Ok(())
     }
 
+    fn cancel(&mut self) {
+        self.cancel.cancel();
+        self.cancel = CancellationToken::new();
+    }
+
     async fn handle_request(&self, id: Id, method: String, params: Value) -> Result {
         info!("Received request: method={method} id={id} params={params}");
         Ok(())
-    }
-
-    fn cancel_current_mining(&mut self) {
-        if let Some(cancel_token) = &self.current_mining_cancel {
-            cancel_token.cancel();
-            info!("Cancelled current mining operation for new job");
-        }
-        self.current_mining_cancel = None;
-    }
-
-    async fn shutdown_mining(&mut self) {
-        info!("Shutting down all mining operations");
-
-        self.cancel_current_mining();
-
-        self.cancel.cancel();
-
-        tokio::time::sleep(Duration::from_millis(100)).await;
-
-        info!("Mining shutdown complete");
     }
 
     fn generate_extranonce2_for_core(&mut self, core_id: usize) -> Extranonce {

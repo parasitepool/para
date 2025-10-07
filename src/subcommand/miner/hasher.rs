@@ -38,7 +38,7 @@ impl Hasher {
             active_threads: AtomicU32::new(0),
         });
 
-        let chunk_size = crate::subcommand::miner::mining_utils::calculate_optimal_chunk_size();
+        let chunk_size = 10_000;
         const PROGRESS_INTERVAL: u64 = 1_000_000;
 
         let base_header = self.header;
