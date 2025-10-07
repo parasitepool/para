@@ -295,12 +295,9 @@ where
             .into_iter()
             .chain(
                 job.template
-                    .clone()
                     .transactions
                     .iter()
-                    .map(|result| {
-                        Transaction::consensus_decode(&mut result.raw_tx.as_slice()).unwrap()
-                    })
+                    .map(|tx| tx.transaction.clone())
                     .collect::<Vec<Transaction>>(),
             )
             .collect();
