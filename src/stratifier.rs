@@ -220,7 +220,7 @@ where
 
         self.send(Message::Notification {
             method: "mining.set_difficulty".into(),
-            params: json!(SetDifficulty(Difficulty::from(job.nbits()?))),
+            params: json!(SetDifficulty(Difficulty::from(job.nbits()))),
         })
         .await?;
 
@@ -261,7 +261,7 @@ where
             job.version()
         };
 
-        let nbits = job.nbits()?;
+        let nbits = job.nbits();
 
         let header = Header {
             version: version.into(),
@@ -294,7 +294,7 @@ where
         let txdata = vec![coinbase_tx]
             .into_iter()
             .chain(
-                job.gbt
+                job.template
                     .clone()
                     .transactions
                     .iter()
@@ -351,7 +351,7 @@ where
         Ok(())
     }
 
-    fn gbt(&self) -> Result<GetBlockTemplateResult> {
+    fn gbt(&self) -> Result<BlockTemplate> {
         let mut rules = vec!["segwit"];
         if self.config.chain().network() == Network::Signet {
             rules.push("signet");
@@ -365,6 +365,6 @@ where
         Ok(self
             .config
             .bitcoin_rpc_client()?
-            .call::<GetBlockTemplateResult>("getblocktemplate", &[params])?)
+            .call::<BlockTemplate>("getblocktemplate", &[params])?)
     }
 }

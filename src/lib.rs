@@ -21,7 +21,8 @@ use {
         locktime::absolute::LockTime,
         script::write_scriptint,
     },
-    bitcoincore_rpc::{Auth, RpcApi, json::GetBlockTemplateResult},
+    bitcoincore_rpc::{Auth, RpcApi, json::GetBlockTemplateResultTransaction},
+    block_template::BlockTemplate,
     byteorder::{BigEndian, ByteOrder, LittleEndian},
     chain::Chain,
     clap::Parser,
@@ -95,6 +96,7 @@ use {
 pub use subcommand::server::api;
 
 mod arguments;
+mod block_template;
 mod chain;
 pub mod ckpool;
 pub mod coinbase_builder;
