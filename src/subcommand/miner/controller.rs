@@ -25,7 +25,7 @@ impl Controller {
 
         Ok(Self {
             client,
-            pool_difficulty: Arc::new(Mutex::new(Difficulty::from(1))),
+            pool_difficulty: Arc::new(Mutex::new(Difficulty::default())),
             extranonce1: subscribe.extranonce1,
             extranonce2_size: subscribe.extranonce2_size,
             share_rx,

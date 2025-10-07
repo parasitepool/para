@@ -43,6 +43,12 @@ impl PartialOrd for Difficulty {
     }
 }
 
+impl Default for Difficulty {
+    fn default() -> Self {
+        Difficulty::from(1)
+    }
+}
+
 impl From<Nbits> for Difficulty {
     fn from(nbits: Nbits) -> Self {
         Difficulty(nbits.into())
