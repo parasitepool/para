@@ -3,6 +3,7 @@ use super::*;
 mod authorize;
 mod client;
 mod configure;
+mod difficulty;
 mod error;
 mod extranonce;
 mod merkle;
@@ -22,6 +23,7 @@ pub use {
     authorize::Authorize,
     client::Client,
     configure::Configure,
+    difficulty::Difficulty,
     error::JsonRpcError,
     extranonce::Extranonce,
     merkle::{MerkleNode, merkle_branches, merkle_root},

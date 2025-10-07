@@ -16,7 +16,7 @@ impl Pool {
 
         let listener = TcpListener::bind((address.clone(), port)).await?;
 
-        info!("Listening on {address}:{port}");
+        eprintln!("Listening on {address}:{port}");
 
         loop {
             tokio::select! {

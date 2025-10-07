@@ -27,7 +27,6 @@ use {
     clap::Parser,
     coinbase_builder::CoinbaseBuilder,
     derive_more::Display,
-    difficulty::Difficulty,
     futures::{sink::SinkExt, stream::StreamExt},
     hash_rate::HashRate,
     hex::FromHex,
@@ -68,8 +67,8 @@ use {
     },
     stratifier::Connection,
     stratum::{
-        Authorize, Configure, Extranonce, Id, JsonRpcError, MerkleNode, Message, Nbits, Notify,
-        Ntime, PrevHash, SetDifficulty, Submit, Subscribe, SubscribeResult, Version,
+        Authorize, Configure, Difficulty, Extranonce, Id, JsonRpcError, MerkleNode, Message, Nbits,
+        Notify, Ntime, PrevHash, SetDifficulty, Submit, Subscribe, SubscribeResult, Version,
     },
     sysinfo::{Disks, System},
     tokio::{
@@ -99,7 +98,6 @@ mod arguments;
 mod chain;
 pub mod ckpool;
 pub mod coinbase_builder;
-pub mod difficulty;
 pub mod hash_rate;
 mod job;
 mod stratifier;
