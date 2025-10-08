@@ -1,7 +1,5 @@
 use super::*;
 
-// - get's new template every n seconds (configurable)
-// - listens on zmq for new blocks, if so generators new template immediately
 pub(crate) struct Generator {
     bitcoin_rpc_client: Arc<bitcoincore_rpc::Client>,
     cancel: CancellationToken,
