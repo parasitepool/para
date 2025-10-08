@@ -30,6 +30,7 @@ use {
     connection::Connection,
     derive_more::Display,
     futures::{sink::SinkExt, stream::StreamExt},
+    generator::Generator,
     hash_rate::HashRate,
     hex::FromHex,
     lazy_static::lazy_static,
@@ -73,7 +74,6 @@ use {
     },
     subcommand::pool::pool_config::PoolConfig,
     sysinfo::{Disks, System},
-    generator::Generator,
     tokio::{
         io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, BufWriter},
         net::{TcpListener, TcpStream, tcp::OwnedWriteHalf},
@@ -81,7 +81,7 @@ use {
         signal::ctrl_c,
         sync::{Mutex, mpsc, oneshot, watch},
         task::{self, JoinHandle},
-        time::sleep,
+        time::{MissedTickBehavior, interval, sleep},
     },
     tokio_util::{
         codec::{FramedRead, FramedWrite, LinesCodec},

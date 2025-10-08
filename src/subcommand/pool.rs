@@ -90,6 +90,7 @@ mod tests {
             config.version_mask(),
             Version::from_str("1fffe000").unwrap()
         );
+        assert_eq!(config.update_interval(), Duration::from_secs(10))
     }
 
     #[test]

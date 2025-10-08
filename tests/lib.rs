@@ -6,8 +6,9 @@ use {
         api::Status,
         ckpool::{self, HashRateStatus, PoolStatus, ShareStatus, User, Worker},
         hash_rate::HashRate,
-        subcommand::server::notifications::{
-            NotificationHandler, NotificationPriority, NotificationType,
+        subcommand::{
+            server::notifications::{NotificationHandler, NotificationPriority, NotificationType},
+            template::Output as Template,
         },
     },
     pretty_assertions::assert_eq as pretty_assert_eq,

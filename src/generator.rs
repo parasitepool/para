@@ -28,25 +28,38 @@ impl Generator {
 
         let (template_sender, template_receiver) = watch::channel(Arc::new(initial_template));
 
-        self.join = Some(task::spawn_blocking(move || {
-            while !cancel.is_cancelled() {
-                for _ in 0..5 {
-                    if cancel.is_cancelled() {
-                        break;
+        let join = tokio::spawn({
+            info!("Spawning generator");
+
+            let mut ticker = interval(config.update_interval());
+            ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+            async move {
+                loop {
+                    tokio::select! {
+                        _ = cancel.cancelled() => break,
+                        _ = ticker.tick() => {
+                            let bitcoin_rpc_client = bitcoin_rpc_client.clone();
+                            let config = config.clone();
+                            let template_sender = template_sender.clone();
+                            task::spawn_blocking(move ||  {
+                                match get_block_template_blocking(&bitcoin_rpc_client, &config) {
+                                    Ok(template) => {
+                                        template_sender.send_replace(Arc::new(template));
+                                    },
+                                    Err(err) => {
+                                        warn!("Failed to fetch new block template: {err}");
+                                    },
+                                }
+                            });
+                        }
                     }
-                    std::thread::sleep(Duration::from_secs(1));
                 }
-                match get_block_template_blocking(&bitcoin_rpc_client, &config) {
-                    Ok(template) => {
-                        template_sender.send_replace(Arc::new(template));
-                    }
-                    Err(err) => {
-                        warn!("Failed to fetch block template: {err}");
-                    }
-                }
+                info!("Shutting down generator");
             }
-            info!("Shutting down generator")
-        }));
+        });
+
+        self.join = Some(join);
 
         Ok(template_receiver)
     }
