@@ -18,9 +18,12 @@ impl Pool {
 
         eprintln!("Listening on {address}:{port}");
 
+        let mut generator = Generator::new(config.clone())?;
+        let template_receiver = generator.spawn()?;
+
         loop {
             tokio::select! {
-                result = Self::handle_single_worker(config.clone(), &listener) => {
+                result = Self::handle_single_worker(config.clone(), &listener, template_receiver.clone()) => {
                     match result {
                         Ok(_) => continue,
                         Err(err) => error!("Worker connection error: {err}"),
@@ -28,6 +31,7 @@ impl Pool {
                 }
                 _ = ctrl_c() => {
                         info!("Shutting down stratum server");
+                        generator.shutdown().await;
                         break;
                     }
             }
@@ -36,7 +40,11 @@ impl Pool {
         Ok(())
     }
 
-    async fn handle_single_worker(config: Arc<PoolConfig>, listener: &TcpListener) -> Result {
+    async fn handle_single_worker(
+        config: Arc<PoolConfig>,
+        listener: &TcpListener,
+        template_receiver: watch::Receiver<Arc<BlockTemplate>>,
+    ) -> Result {
         let (stream, worker) = listener.accept().await?;
 
         info!("Accepted connection from {worker}");
@@ -46,7 +54,7 @@ impl Pool {
             (BufReader::new(rx), BufWriter::new(tx))
         };
 
-        let mut conn = Connection::new(config.clone(), worker, reader, writer);
+        let mut conn = Connection::new(config.clone(), worker, reader, writer, template_receiver);
 
         conn.serve().await
     }

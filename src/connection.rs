@@ -22,6 +22,7 @@ pub(crate) struct Connection<R, W> {
     worker: SocketAddr,
     reader: FramedRead<R, LinesCodec>,
     writer: FramedWrite<W, LinesCodec>,
+    template_receiver: watch::Receiver<Arc<BlockTemplate>>,
     state: State,
 }
 
@@ -30,12 +31,19 @@ where
     R: AsyncRead + Unpin + AsyncBufReadExt,
     W: AsyncWrite + Unpin,
 {
-    pub(crate) fn new(config: Arc<PoolConfig>, worker: SocketAddr, reader: R, writer: W) -> Self {
+    pub(crate) fn new(
+        config: Arc<PoolConfig>,
+        worker: SocketAddr,
+        reader: R,
+        writer: W,
+        template_receiver: watch::Receiver<Arc<BlockTemplate>>,
+    ) -> Self {
         Self {
             config,
             worker,
             reader: FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_MESSAGE_SIZE)),
             writer: FramedWrite::new(writer, LinesCodec::new()),
+            template_receiver,
             state: State::Init,
         }
     }
@@ -80,8 +88,6 @@ where
                         .context(format!("failed to deserialize {method}"))?;
 
                     self.submit(id, submit).await?;
-
-                    break;
                 }
                 method => {
                     warn!("UNKNOWN method {method} with {params} from {}", self.worker);
@@ -199,7 +205,7 @@ where
             address,
             extranonce1.clone(),
             *version_mask,
-            self.get_block_template()?,
+            self.template_receiver.borrow().clone(),
             "deadbeef".to_string(),
         )?;
 
@@ -343,22 +349,5 @@ where
         let frame = serde_json::to_string(&message)?;
         self.writer.send(frame).await?;
         Ok(())
-    }
-
-    fn get_block_template(&self) -> Result<BlockTemplate> {
-        let mut rules = vec!["segwit"];
-        if self.config.chain().network() == Network::Signet {
-            rules.push("signet");
-        }
-
-        let params = json!({
-            "capabilities": ["coinbasetxn", "workid", "coinbase/append"],
-            "rules": rules,
-        });
-
-        Ok(self
-            .config
-            .bitcoin_rpc_client()?
-            .call::<BlockTemplate>("getblocktemplate", &[params])?)
     }
 }
