@@ -27,6 +27,7 @@ use {
     chain::Chain,
     clap::Parser,
     coinbase_builder::CoinbaseBuilder,
+    connection::Connection,
     derive_more::Display,
     futures::{sink::SinkExt, stream::StreamExt},
     hash_rate::HashRate,
@@ -66,11 +67,11 @@ use {
         thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     },
-    stratifier::Connection,
     stratum::{
         Authorize, Configure, Difficulty, Extranonce, Id, JsonRpcError, MerkleNode, Message, Nbits,
         Notify, Ntime, PrevHash, SetDifficulty, Submit, Subscribe, SubscribeResult, Version,
     },
+    subcommand::pool::pool_config::PoolConfig,
     sysinfo::{Disks, System},
     tokio::{
         io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, BufWriter},
@@ -100,9 +101,10 @@ mod block_template;
 mod chain;
 pub mod ckpool;
 pub mod coinbase_builder;
+mod connection;
+mod generator;
 pub mod hash_rate;
 mod job;
-mod stratifier;
 pub mod stratum;
 pub mod subcommand;
 

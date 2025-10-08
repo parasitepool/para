@@ -1,7 +1,4 @@
-use {
-    super::*,
-    crate::{job::Job, subcommand::pool::pool_config::PoolConfig},
-};
+use {super::*, crate::job::Job};
 
 #[derive(Debug)]
 pub(crate) enum State {
