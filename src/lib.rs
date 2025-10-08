@@ -27,8 +27,10 @@ use {
     chain::Chain,
     clap::Parser,
     coinbase_builder::CoinbaseBuilder,
+    connection::Connection,
     derive_more::Display,
     futures::{sink::SinkExt, stream::StreamExt},
+    generator::Generator,
     hash_rate::HashRate,
     hex::FromHex,
     lazy_static::lazy_static,
@@ -66,20 +68,20 @@ use {
         thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     },
-    stratifier::Connection,
     stratum::{
         Authorize, Configure, Difficulty, Extranonce, Id, JsonRpcError, MerkleNode, Message, Nbits,
         Notify, Ntime, PrevHash, SetDifficulty, Submit, Subscribe, SubscribeResult, Version,
     },
+    subcommand::pool::pool_config::PoolConfig,
     sysinfo::{Disks, System},
     tokio::{
         io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, BufWriter},
         net::{TcpListener, TcpStream, tcp::OwnedWriteHalf},
         runtime::Runtime,
         signal::ctrl_c,
-        sync::{Mutex, mpsc, oneshot},
+        sync::{Mutex, mpsc, oneshot, watch},
         task::{self, JoinHandle},
-        time::sleep,
+        time::{MissedTickBehavior, interval, sleep},
     },
     tokio_util::{
         codec::{FramedRead, FramedWrite, LinesCodec},
@@ -100,9 +102,10 @@ mod block_template;
 mod chain;
 pub mod ckpool;
 pub mod coinbase_builder;
+mod connection;
+mod generator;
 pub mod hash_rate;
 mod job;
-mod stratifier;
 pub mod stratum;
 pub mod subcommand;
 

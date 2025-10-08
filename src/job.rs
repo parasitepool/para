@@ -5,7 +5,7 @@ pub(crate) struct Job {
     pub(crate) coinb1: String,
     pub(crate) coinb2: String,
     pub(crate) extranonce1: Extranonce,
-    pub(crate) template: BlockTemplate,
+    pub(crate) template: Arc<BlockTemplate>,
     pub(crate) job_id: String,
     pub(crate) merkle_branches: Vec<MerkleNode>,
     pub(crate) version_mask: Option<Version>,
@@ -16,7 +16,7 @@ impl Job {
         address: Address,
         extranonce1: Extranonce,
         version_mask: Option<Version>,
-        template: BlockTemplate,
+        template: Arc<BlockTemplate>,
         job_id: String,
     ) -> Result<Self> {
         let (_coinbase_tx, coinb1, coinb2) = CoinbaseBuilder::new(
