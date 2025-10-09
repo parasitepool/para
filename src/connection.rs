@@ -49,51 +49,104 @@ where
     }
 
     pub(crate) async fn serve(&mut self) -> Result {
-        while let Some(message) = self.read_message().await? {
-            let Message::Request { id, method, params } = message else {
-                warn!(?message, "Ignoring any notifications or responses");
-                continue;
-            };
+        let mut template_receiver = self.template_receiver.clone();
 
-            match method.as_str() {
-                "mining.configure" => {
-                    info!("CONFIGURE from {} with {params}", self.worker);
+        loop {
+            tokio::select! {
+                message = self.read_message() => {
+                    let Some(message) = message? else { break; }; // TODO
 
-                    let configure = serde_json::from_value::<Configure>(params)
-                        .context(format!("failed to deserialize {method}"))?;
+                    let Message::Request { id, method, params } = message else {
+                        warn!(?message, "Ignoring any notifications or responses");
+                        continue;
+                    };
 
-                    self.configure(id, configure).await?
+                    match method.as_str() {
+                        "mining.configure" => {
+                            info!("CONFIGURE from {} with {params}", self.worker);
+
+                            let configure = serde_json::from_value::<Configure>(params)
+                                .context(format!("failed to deserialize {method}"))?;
+
+                            self.configure(id, configure).await?
+                        }
+                        "mining.subscribe" => {
+                            info!("SUBSCRIBE from {} with {params}", self.worker);
+
+                            let subscribe = serde_json::from_value::<Subscribe>(params)
+                                .context(format!("failed to deserialize {method}"))?;
+
+                            self.subscribe(id, subscribe).await?
+                        }
+                        "mining.authorize" => {
+                            info!("AUTHORIZE from {} with {params}", self.worker);
+
+                            let authorize = serde_json::from_value::<Authorize>(params)
+                                .context(format!("failed to deserialize {method}"))?;
+
+                            self.authorize(id, authorize).await?
+                        }
+
+                        "mining.submit" => {
+                            info!("SUBMIT from {} with params {params}", self.worker);
+
+                            let submit = serde_json::from_value::<Submit>(params)
+                                .context(format!("failed to deserialize {method}"))?;
+
+                            self.submit(id, submit).await?;
+                        }
+                        method => {
+                            warn!("UNKNOWN method {method} with {params} from {}", self.worker);
+                        }
+                    }
                 }
-                "mining.subscribe" => {
-                    info!("SUBSCRIBE from {} with {params}", self.worker);
 
-                    let subscribe = serde_json::from_value::<Subscribe>(params)
-                        .context(format!("failed to deserialize {method}"))?;
-
-                    self.subscribe(id, subscribe).await?
-                }
-                "mining.authorize" => {
-                    info!("AUTHORIZE from {} with {params}", self.worker);
-
-                    let authorize = serde_json::from_value::<Authorize>(params)
-                        .context(format!("failed to deserialize {method}"))?;
-
-                    self.authorize(id, authorize).await?
-                }
-
-                "mining.submit" => {
-                    info!("SUBMIT from {} with params {params}", self.worker);
-
-                    let submit = serde_json::from_value::<Submit>(params)
-                        .context(format!("failed to deserialize {method}"))?;
-
-                    self.submit(id, submit).await?;
-                }
-                method => {
-                    warn!("UNKNOWN method {method} with {params} from {}", self.worker);
+                changed = template_receiver.changed() => {
+                    assert!(!changed.is_err(), "Template receiver dropped");
+                    self.template_update().await?;
                 }
             }
         }
+
+        Ok(())
+    }
+
+    async fn template_update(&mut self) -> Result {
+        let State::Working { ref job } = self.state else {
+            return Ok(());
+        };
+
+        let new_template = self.template_receiver.borrow().clone();
+
+        let new_job = Job::new(
+            job.address.clone(),
+            job.extranonce1.clone(),
+            job.version_mask,
+            new_template,
+            "deadbeef".to_string(),
+        )?;
+
+        let old_nbits = job.nbits();
+        let new_nbits = new_job.nbits();
+        if new_nbits != old_nbits {
+            info!("Template update changed difficulty; sending SET DIFFICULTY");
+            self.send(Message::Notification {
+                method: "mining.set_difficulty".into(),
+                params: json!(SetDifficulty(Difficulty::from(new_nbits))),
+            })
+            .await?;
+        }
+
+        info!("Template updated; sending NOTIFY");
+        self.send(Message::Notification {
+            method: "mining.notify".into(),
+            params: json!(new_job.notify()?),
+        })
+        .await?;
+
+        self.state = State::Working {
+            job: Box::new(new_job),
+        };
 
         Ok(())
     }
@@ -205,7 +258,7 @@ where
             address,
             extranonce1.clone(),
             *version_mask,
-            self.template_receiver.borrow().clone(),
+            self.template_receiver.borrow_and_update().clone(),
             "deadbeef".to_string(),
         )?;
 
