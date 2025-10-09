@@ -4,7 +4,7 @@ pub(crate) struct Generator {
     bitcoin_rpc_client: Arc<bitcoincore_rpc::Client>,
     cancel: CancellationToken,
     config: Arc<PoolConfig>,
-    join: Option<JoinHandle<()>>,
+    handle: Option<JoinHandle<()>>,
 }
 
 impl Generator {
@@ -13,7 +13,7 @@ impl Generator {
             bitcoin_rpc_client: Arc::new(config.bitcoin_rpc_client()?),
             cancel: CancellationToken::new(),
             config: config.clone(),
-            join: None,
+            handle: None,
         })
     }
 
@@ -67,14 +67,14 @@ impl Generator {
             }
         });
 
-        self.join = Some(handle);
+        self.handle = Some(handle);
         Ok(rx)
     }
 
     pub(crate) async fn shutdown(&mut self) {
         self.cancel.cancel();
-        if let Some(join) = self.join.take() {
-            let _ = join.await;
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.await;
         }
     }
 }
