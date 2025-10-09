@@ -55,7 +55,8 @@ pool:
     --address 0.0.0.0 \
     --bitcoin-rpc-username satoshi \
     --bitcoin-rpc-password nakamoto \
-    --bitcoin-rpc-port 38332
+    --bitcoin-rpc-port 38332 \
+    --zmq-block-notifications tcp://127.0.0.1:28332
 
 server: 
   RUST_LOG=info cargo run -- server \
@@ -88,7 +89,7 @@ install:
 build-bitcoind: install
   #!/usr/bin/env bash
   cd bitcoin
-  cmake -B build
+  cmake -B build -DWITH_ZMQ=ON
   cmake --build build -j 21
 
 build-ckpool: install
