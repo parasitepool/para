@@ -81,7 +81,7 @@ use {
         signal::ctrl_c,
         sync::{Mutex, mpsc, oneshot, watch},
         task::{self, JoinHandle},
-        time::{MissedTickBehavior, interval, sleep},
+        time::{MissedTickBehavior, interval, sleep, timeout},
     },
     tokio_util::{
         codec::{FramedRead, FramedWrite, LinesCodec},
