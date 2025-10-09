@@ -24,6 +24,7 @@ impl Zmq {
 
     pub async fn recv_blockhash(&mut self) -> Result<BlockHash> {
         let message = self.socket.recv().await?;
+
         ensure!(
             message.len() == 3,
             "hashblock: expected 3 frames, got {}",
@@ -31,18 +32,27 @@ impl Zmq {
         );
 
         let topic = message.get(0).context("hashblock: missing topic")?;
+
         ensure!(topic.as_ref() == b"hashblock", "hashblock: wrong topic");
 
         let body = message.get(1).context("hashblock: missing body")?;
+
         ensure!(body.len() == 32, "hashblock: body len {}", body.len());
 
-        let sequence_number = message.get(2).context("hashblock: missing sequence number")?;
-        ensure!(sequence_number.len() == 4, "hashblock: seq len {}", sequence_number.len());
+        let sequence_number = message
+            .get(2)
+            .context("hashblock: missing sequence number")?;
+
+        ensure!(
+            sequence_number.len() == 4,
+            "hashblock: seq len {}",
+            sequence_number.len()
+        );
 
         let mut arr = [0u8; 32];
         arr.copy_from_slice(body);
         arr.reverse();
 
-        Ok(BlockHash::from_slice(&arr).context("blockhash parse")?)
+        BlockHash::from_slice(&arr).context("blockhash parse")
     }
 }

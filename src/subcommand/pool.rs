@@ -16,7 +16,7 @@ impl Pool {
 
         let mut generator = Generator::new(config.clone())?;
         let template_receiver = generator.spawn().await?;
-        
+
         let listener = TcpListener::bind((address.clone(), port)).await?;
 
         eprintln!("Listening on {address}:{port}");
