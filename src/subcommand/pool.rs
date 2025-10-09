@@ -14,12 +14,12 @@ impl Pool {
         let address = config.address();
         let port = config.port();
 
+        let mut generator = Generator::new(config.clone())?;
+        let template_receiver = generator.spawn().await?;
+        
         let listener = TcpListener::bind((address.clone(), port)).await?;
 
         eprintln!("Listening on {address}:{port}");
-
-        let mut generator = Generator::new(config.clone())?;
-        let template_receiver = generator.spawn().await?;
 
         loop {
             tokio::select! {

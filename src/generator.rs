@@ -1,7 +1,7 @@
 use super::*;
 
 pub(crate) struct Generator {
-    bitcoin_rpc: Arc<bitcoincore_rpc::Client>,
+    bitcoin_rpc_client: Arc<bitcoincore_rpc::Client>,
     cancel: CancellationToken,
     config: Arc<PoolConfig>,
     join: Option<JoinHandle<()>>,
@@ -10,7 +10,7 @@ pub(crate) struct Generator {
 impl Generator {
     pub(crate) fn new(config: Arc<PoolConfig>) -> Result<Self> {
         Ok(Self {
-            bitcoin_rpc: Arc::new(config.bitcoin_rpc_client()?),
+            bitcoin_rpc_client: Arc::new(config.bitcoin_rpc_client()?),
             cancel: CancellationToken::new(),
             config: config.clone(),
             join: None,
@@ -18,27 +18,14 @@ impl Generator {
     }
 
     pub(crate) async fn spawn(&mut self) -> Result<watch::Receiver<Arc<BlockTemplate>>> {
-        let rpc = self.bitcoin_rpc.clone();
+        let rpc = self.bitcoin_rpc_client.clone();
         let cancel = self.cancel.clone();
         let config = self.config.clone();
 
         let initial = get_block_template_blocking(&rpc, &config)?;
         let (tx, rx) = watch::channel(Arc::new(initial));
 
-        let zmq_endpoint = config.zmq_block_notifications().to_string();
-        info!("Subscribing to hashblock on ZMQ endpoint {zmq_endpoint}");
-
-        let mut subscription = timeout(Duration::from_secs(1), async {
-            let mut socket = SubSocket::new();
-            socket.connect(&zmq_endpoint).await.context("ZMQ connect")?;
-            socket
-                .subscribe("hashblock")
-                .await
-                .context("ZMQ subscribe to `hashblock`")?;
-            Ok::<_, Error>(socket)
-        })
-        .await
-        .map_err(|err| anyhow!("Failed to connect to ZMQ endpoint {zmq_endpoint}: {err}"))??;
+        let mut subscription = Zmq::connect(config.clone()).await?;
 
         let handle = tokio::spawn({
             info!("Spawning generator task");
@@ -62,15 +49,13 @@ impl Generator {
                 loop {
                     tokio::select! {
                         _ = cancel.cancelled() => break,
-                        result = subscription.recv() => {
+                        result = subscription.recv_blockhash() => {
                             match result {
-                                Ok(message) => {
-                                    let slice = message.get(1).unwrap().iter().rev().copied().collect::<Vec<_>>();
-                                    let blockhash = BlockHash::from_slice(&slice).unwrap();
-                                    info!("ZMQ blockhash: {blockhash}");
+                                Ok(blockhash) => {
+                                    info!("ZMQ blockhash {blockhash}");
                                     fetch_and_push();
                                 }
-                                Err(err) => error!("Failed to get blockhash from ZMQ: {err}")
+                                Err(err) => error!("ZMQ receive error: {err}"),
                             }
                         }
                         _ = ticker.tick() => {

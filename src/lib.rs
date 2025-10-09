@@ -94,6 +94,7 @@ use {
     tracing::{debug, error, info, warn},
     tracing_subscriber::EnvFilter,
     zeromq::{Endpoint, Socket, SocketRecv, SubSocket},
+    zmq::Zmq,
 };
 
 pub use subcommand::server::api;
@@ -109,6 +110,7 @@ pub mod hash_rate;
 mod job;
 pub mod stratum;
 pub mod subcommand;
+mod zmq;
 
 pub const COIN_VALUE: u64 = 100_000_000;
 pub const USER_AGENT: &str = "para/0.5.2";
