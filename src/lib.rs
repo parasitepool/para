@@ -93,6 +93,7 @@ use {
     },
     tracing::{debug, error, info, warn},
     tracing_subscriber::EnvFilter,
+    zeromq::{Endpoint, Socket, SocketRecv, SubSocket},
 };
 
 pub use subcommand::server::api;

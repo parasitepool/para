@@ -19,7 +19,7 @@ impl Pool {
         eprintln!("Listening on {address}:{port}");
 
         let mut generator = Generator::new(config.clone())?;
-        let template_receiver = generator.spawn()?;
+        let template_receiver = generator.spawn().await?;
 
         loop {
             tokio::select! {
@@ -90,7 +90,11 @@ mod tests {
             config.version_mask(),
             Version::from_str("1fffe000").unwrap()
         );
-        assert_eq!(config.update_interval(), Duration::from_secs(10))
+        assert_eq!(config.update_interval(), Duration::from_secs(10));
+        assert_eq!(
+            config.zmq_block_notifications().to_string(),
+            "tcp://127.0.0.1:28332".to_string()
+        );
     }
 
     #[test]
@@ -202,5 +206,14 @@ mod tests {
     fn rpc_url_reflects_port_choice() {
         let config = parse_pool_config("para pool --bitcoin-rpc-port 12345");
         assert_eq!(config.bitcoin_rpc_url(), "127.0.0.1:12345/");
+    }
+
+    #[test]
+    fn zmq_block_notifications() {
+        let config = parse_pool_config("para pool --zmq-block-notifications tcp://127.0.0.1:69");
+        assert_eq!(
+            config.zmq_block_notifications(),
+            "tcp://127.0.0.1:69".parse().unwrap()
+        );
     }
 }

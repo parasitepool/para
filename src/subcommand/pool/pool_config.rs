@@ -38,6 +38,12 @@ pub(crate) struct PoolConfig {
         default_value = "1fffe000"
     )]
     version_mask: Version,
+    #[arg(
+        long,
+        help = "Subscribe to <ZMQ_BLOCK_NOTIFICATION>.",
+        default_value = "tcp://127.0.0.1:28332"
+    )]
+    zmq_block_notifications: Endpoint,
 }
 
 impl PoolConfig {
@@ -160,5 +166,9 @@ impl PoolConfig {
 
     pub fn update_interval(&self) -> Duration {
         Duration::from_secs(self.update_interval)
+    }
+
+    pub fn zmq_block_notifications(&self) -> Endpoint {
+        self.zmq_block_notifications.clone()
     }
 }

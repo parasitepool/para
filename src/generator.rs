@@ -17,7 +17,7 @@ impl Generator {
         })
     }
 
-    pub(crate) fn spawn(&mut self) -> Result<watch::Receiver<Arc<BlockTemplate>>> {
+    pub(crate) async fn spawn(&mut self) -> Result<watch::Receiver<Arc<BlockTemplate>>> {
         let bitcoin_rpc_client = self.bitcoin_rpc_client.clone();
         let cancel = self.cancel.clone();
         let config = self.config.clone();
@@ -25,6 +25,14 @@ impl Generator {
         let initial_template = get_block_template_blocking(&bitcoin_rpc_client, &config)?;
 
         let (template_sender, template_receiver) = watch::channel(Arc::new(initial_template));
+
+        let zmq_endpoint = self.config.zmq_block_notifications().to_string();
+
+        info!("Subscribing to hashblock on ZMQ endpoint {zmq_endpoint}");
+
+        let mut sub = SubSocket::new();
+        sub.connect(&zmq_endpoint).await?;
+        sub.subscribe("hashblock").await?;
 
         let join = tokio::spawn({
             info!("Spawning generator");
@@ -36,6 +44,22 @@ impl Generator {
                 loop {
                     tokio::select! {
                         _ = cancel.cancelled() => break,
+                        _ = sub.recv() => {
+                            info!("New block from ZMQ");
+                            let bitcoin_rpc_client = bitcoin_rpc_client.clone();
+                            let config = config.clone();
+                            let template_sender = template_sender.clone();
+                            task::spawn_blocking(move ||  {
+                                match get_block_template_blocking(&bitcoin_rpc_client, &config) {
+                                    Ok(template) => {
+                                        template_sender.send_replace(Arc::new(template));
+                                    },
+                                    Err(err) => {
+                                        warn!("Failed to fetch new block template: {err}");
+                                    },
+                                }
+                            });
+                        }
                         _ = ticker.tick() => {
                             let bitcoin_rpc_client = bitcoin_rpc_client.clone();
                             let config = config.clone();
