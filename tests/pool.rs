@@ -43,3 +43,8 @@ fn pool_update_interval() {
 
     assert!(t1.ntime < t2.ntime);
 }
+
+#[test]
+fn pool_sends_template_updates_to_miners() {
+    todo!()
+}
