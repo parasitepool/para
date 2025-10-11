@@ -1,6 +1,8 @@
 use super::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, DeserializeFromStr, SerializeDisplay)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, DeserializeFromStr, SerializeDisplay,
+)]
 pub struct Ntime(u32);
 
 impl FromStr for Ntime {

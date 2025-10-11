@@ -20,6 +20,12 @@ pub(crate) struct PoolConfig {
     bitcoin_rpc_username: Option<String>,
     #[arg(long, help = "Load Bitcoin Core RPC cookie file from <COOKIE_FILE>.")]
     bitcoin_rpc_cookie_file: Option<PathBuf>,
+    #[arg(
+        long,
+        help = "Block template <UPDATE_INTERVAL> in seconds.",
+        default_value = "10"
+    )]
+    update_interval: u64,
     #[arg(long = "chain", help = "Run on <CHAIN>.")]
     chain: Option<Chain>,
     #[arg(long, alias = "datadir", help = "Store acme cache in <DATA_DIR>.")]
@@ -32,6 +38,12 @@ pub(crate) struct PoolConfig {
         default_value = "1fffe000"
     )]
     version_mask: Version,
+    #[arg(
+        long,
+        help = "Subscribe to <ZMQ_BLOCK_NOTIFICATION>.",
+        default_value = "tcp://127.0.0.1:28332"
+    )]
+    zmq_block_notifications: Endpoint,
 }
 
 impl PoolConfig {
@@ -150,5 +162,13 @@ impl PoolConfig {
 
     pub fn version_mask(&self) -> Version {
         self.version_mask
+    }
+
+    pub fn update_interval(&self) -> Duration {
+        Duration::from_secs(self.update_interval)
+    }
+
+    pub fn zmq_block_notifications(&self) -> Endpoint {
+        self.zmq_block_notifications.clone()
     }
 }
