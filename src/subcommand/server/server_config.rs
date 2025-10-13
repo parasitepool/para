@@ -28,7 +28,7 @@ pub(crate) struct ServerConfig {
     #[arg(long, help = "Collect statistics from <NODES>.")]
     nodes: Vec<Url>,
     #[arg(long, help = "Send shares to HTTP <SYNC_ENDPOINT>.")]
-    sync_endpoint: Option<String>,
+    sync_endpoint: Option<Url>,
     #[arg(long, help = "Cache <TTL> in seconds.", default_value = "30")]
     ttl: u64,
 }
@@ -106,7 +106,7 @@ impl ServerConfig {
         self.nodes.clone()
     }
 
-    pub(crate) fn sync_endpoint(&self) -> Option<String> {
+    pub(crate) fn sync_endpoint(&self) -> Option<Url> {
         self.sync_endpoint.clone()
     }
 

@@ -38,8 +38,8 @@ impl Subcommand {
                 if let Some(sync_endpoint) = server.config.sync_endpoint() {
                     let hostname = System::host_name().ok_or(anyhow!("no hostname found"))?;
 
-                    if !sync_endpoint.contains(&hostname) {
-                        let mut sync = sync::Sync::default().with_endpoint(sync_endpoint.clone());
+                    if !sync_endpoint.to_string().contains(&hostname) {
+                        let mut sync = sync::Sync::default().with_endpoint(sync_endpoint.to_string());
 
                         if let Some(token) = server.config.admin_token() {
                             sync = sync.with_admin_token(token);
