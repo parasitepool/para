@@ -71,7 +71,10 @@ impl Aggregator {
         Extension(client): Extension<Client>,
         Extension(config): Extension<Arc<ServerConfig>>,
     ) -> ServerResult<Response> {
-        let nodes = config.nodes();
+        let mut nodes = config.nodes();
+        if let Some(sync_endpoint) = config.sync_endpoint() {
+            nodes.push(Url::from_str(&sync_endpoint).map_err(|err| anyhow!(err))?);
+        }
         let admin_token = config.admin_token();
         let fetches = nodes.iter().map(|url| {
             let client = client.clone();

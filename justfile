@@ -66,7 +66,7 @@ harness: build-bitcoind
   cargo run -p harness
 
 install:
-  git submodule update --init
+  git submodule update --init --recursive
   sudo apt-get install --yes \
     autoconf \
     automake \
