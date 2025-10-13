@@ -44,10 +44,8 @@ zmqpubhashblock=tcp://127.0.0.1:{zmq_port}
 
 port={bitcoind_port}
 
-datacarriersize=100000
 maxconnections=256
 maxmempool=2048
-mempoolfullrbf=1
 minrelaytxfee=0.00001
 
 rpcbind=127.0.0.1
