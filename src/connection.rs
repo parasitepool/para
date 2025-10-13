@@ -102,7 +102,7 @@ where
                 }
 
                 changed = template_receiver.changed() => {
-                    assert!(!changed.is_err(), "Template receiver dropped");
+                    assert!(changed.is_ok(), "Template receiver dropped");
                     self.template_update().await?;
                 }
             }
