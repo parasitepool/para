@@ -1,4 +1,4 @@
-use {super::*, para::subcommand::template::Output};
+use super::*;
 
 #[test]
 fn template_with_ckpool() {
@@ -13,7 +13,8 @@ fn template_with_ckpool() {
     .spawn();
 
     let stdout = template.wait_with_output().unwrap();
-    let output = serde_json::from_str::<Output>(&String::from_utf8_lossy(&stdout.stdout)).unwrap();
+    let output =
+        serde_json::from_str::<Template>(&String::from_utf8_lossy(&stdout.stdout)).unwrap();
 
     assert!(output.merkle_branches.is_empty());
     assert_eq!(output.extranonce2_size, 8);

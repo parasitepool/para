@@ -1,7 +1,4 @@
-use {
-    super::*,
-    crate::{job::Job, subcommand::pool::pool_config::PoolConfig},
-};
+use {super::*, crate::job::Job};
 
 #[derive(Debug)]
 pub(crate) enum State {
@@ -25,6 +22,7 @@ pub(crate) struct Connection<R, W> {
     worker: SocketAddr,
     reader: FramedRead<R, LinesCodec>,
     writer: FramedWrite<W, LinesCodec>,
+    template_receiver: watch::Receiver<Arc<BlockTemplate>>,
     state: State,
 }
 
@@ -33,12 +31,19 @@ where
     R: AsyncRead + Unpin + AsyncBufReadExt,
     W: AsyncWrite + Unpin,
 {
-    pub(crate) fn new(config: Arc<PoolConfig>, worker: SocketAddr, reader: R, writer: W) -> Self {
+    pub(crate) fn new(
+        config: Arc<PoolConfig>,
+        worker: SocketAddr,
+        reader: R,
+        writer: W,
+        template_receiver: watch::Receiver<Arc<BlockTemplate>>,
+    ) -> Self {
         Self {
             config,
             worker,
             reader: FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_MESSAGE_SIZE)),
             writer: FramedWrite::new(writer, LinesCodec::new()),
+            template_receiver,
             state: State::Init,
         }
     }
@@ -83,8 +88,6 @@ where
                         .context(format!("failed to deserialize {method}"))?;
 
                     self.submit(id, submit).await?;
-
-                    break;
                 }
                 method => {
                     warn!("UNKNOWN method {method} with {params} from {}", self.worker);
@@ -202,7 +205,7 @@ where
             address,
             extranonce1.clone(),
             *version_mask,
-            self.gbt()?,
+            self.template_receiver.borrow().clone(),
             "deadbeef".to_string(),
         )?;
 
@@ -220,7 +223,7 @@ where
 
         self.send(Message::Notification {
             method: "mining.set_difficulty".into(),
-            params: json!(SetDifficulty(Difficulty(1))),
+            params: json!(SetDifficulty(Difficulty::from(job.nbits()))),
         })
         .await?;
 
@@ -261,7 +264,7 @@ where
             job.version()
         };
 
-        let nbits = job.nbits()?;
+        let nbits = job.nbits();
 
         let header = Header {
             version: version.into(),
@@ -275,7 +278,7 @@ where
             )?
             .into(),
             time: submit.ntime.into(),
-            bits: nbits.into(),
+            bits: nbits.to_compact(),
             nonce: submit.nonce.into(),
         };
 
@@ -294,13 +297,10 @@ where
         let txdata = vec![coinbase_tx]
             .into_iter()
             .chain(
-                job.gbt
-                    .clone()
+                job.template
                     .transactions
                     .iter()
-                    .map(|result| {
-                        Transaction::consensus_decode(&mut result.raw_tx.as_slice()).unwrap()
-                    })
+                    .map(|tx| tx.transaction.clone())
                     .collect::<Vec<Transaction>>(),
             )
             .collect();
@@ -349,22 +349,5 @@ where
         let frame = serde_json::to_string(&message)?;
         self.writer.send(frame).await?;
         Ok(())
-    }
-
-    fn gbt(&self) -> Result<GetBlockTemplateResult> {
-        let mut rules = vec!["segwit"];
-        if self.config.chain().network() == Network::Signet {
-            rules.push("signet");
-        }
-
-        let params = json!({
-            "capabilities": ["coinbasetxn", "workid", "coinbase/append"],
-            "rules": rules,
-        });
-
-        Ok(self
-            .config
-            .bitcoin_rpc_client()?
-            .call::<GetBlockTemplateResult>("getblocktemplate", &[params])?)
     }
 }
