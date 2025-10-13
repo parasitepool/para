@@ -129,15 +129,16 @@ where
         let old_nbits = job.nbits();
         let new_nbits = new_job.nbits();
         if new_nbits != old_nbits {
-            info!("Template update changed difficulty; sending SET DIFFICULTY");
+            let difficulty = Difficulty::from(new_nbits);
+            info!("Sending new difficulty {difficulty}");
             self.send(Message::Notification {
                 method: "mining.set_difficulty".into(),
-                params: json!(SetDifficulty(Difficulty::from(new_nbits))),
+                params: json!(SetDifficulty(difficulty)),
             })
             .await?;
         }
 
-        info!("Template updated; sending NOTIFY");
+        info!("Template updated sending NOTIFY");
         self.send(Message::Notification {
             method: "mining.notify".into(),
             params: json!(new_job.notify()?),
