@@ -28,7 +28,7 @@ pub(crate) struct Connection<R, W> {
 
 impl<R, W> Connection<R, W>
 where
-    R: AsyncRead + Unpin + AsyncBufReadExt,
+    R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
     pub(crate) fn new(
@@ -54,7 +54,10 @@ where
         loop {
             tokio::select! {
                 message = self.read_message() => {
-                    let Some(message) = message? else { break; }; // TODO
+                    let Some(message) = message? else {
+                        error!("Error reading message in connection serve");
+                        break;
+                    };
 
                     let Message::Request { id, method, params } = message else {
                         warn!(?message, "Ignoring any notifications or responses");
@@ -102,8 +105,12 @@ where
                 }
 
                 changed = template_receiver.changed() => {
-                    assert!(changed.is_ok(), "Template receiver dropped");
-                    self.template_update().await?;
+                    if changed.is_err() {
+                        info!("Template receiver dropped, closing connection with {}", self.worker);
+                        break;
+                    }
+                    let template = template_receiver.borrow_and_update().clone();
+                    self.template_update(template).await?;
                 }
             }
         }
@@ -111,18 +118,16 @@ where
         Ok(())
     }
 
-    async fn template_update(&mut self) -> Result {
+    async fn template_update(&mut self, template: Arc<BlockTemplate>) -> Result {
         let State::Working { ref job } = self.state else {
             return Ok(());
         };
-
-        let new_template = self.template_receiver.borrow().clone();
 
         let new_job = Job::new(
             job.address.clone(),
             job.extranonce1.clone(),
             job.version_mask,
-            new_template,
+            template,
             "deadbeef".to_string(),
         )?;
 
@@ -338,7 +343,7 @@ where
 
         let blockhash = header.validate_pow(Target::from_compact(nbits.into()))?;
 
-        info!("Block with hash {blockhash} mets PoW");
+        info!("Block with hash {blockhash} meets PoW");
 
         let coinbase_bin = hex::decode(format!(
             "{}{}{}{}",
@@ -348,8 +353,7 @@ where
         let mut cursor = bitcoin::io::Cursor::new(&coinbase_bin);
         let coinbase_tx = bitcoin::Transaction::consensus_decode_from_finite_reader(&mut cursor)?;
 
-        let txdata = vec![coinbase_tx]
-            .into_iter()
+        let txdata = std::iter::once(coinbase_tx)
             .chain(
                 job.template
                     .transactions
