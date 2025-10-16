@@ -15,6 +15,17 @@ pub(crate) struct Miner {
     once: bool,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Share {
+    pub extranonce1: Extranonce,
+    pub extranonce2: Extranonce,
+    pub job_id: String,
+    pub nonce: Nonce,
+    pub ntime: Ntime,
+    pub username: String,
+    pub version_bits: Option<Version>,
+}
+
 impl Miner {
     pub(crate) fn run(&self) -> Result {
         Runtime::new()?.block_on(async {
@@ -35,7 +46,11 @@ impl Miner {
 
             let controller = Controller::new(client, self.once).await?;
 
-            controller.run().await
+            let shares = controller.run().await?;
+
+            println!("{}", serde_json::to_string_pretty(&shares)?);
+
+            Ok(())
         })
     }
 }

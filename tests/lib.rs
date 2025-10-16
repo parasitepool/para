@@ -38,6 +38,7 @@ use {
     para::subcommand::{
         sync::{ShareBatch, Sync, SyncResponse},
         template::Output as Template,
+        miner::Share,
     },
     reqwest::Response,
     std::{
