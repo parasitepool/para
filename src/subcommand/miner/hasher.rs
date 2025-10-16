@@ -309,7 +309,7 @@ mod tests {
         };
 
         let (header, _extranonce2, _job_id) = hasher
-            .hash_with_range(CancellationToken::new(), 0, 1_000_000)
+            .hashCancellationToken::new())
             .unwrap();
         assert!(target.is_met_by(header.block_hash()));
     }
