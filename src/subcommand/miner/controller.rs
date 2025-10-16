@@ -262,13 +262,9 @@ impl Controller {
 
     async fn log_difficulty_info(&self, difficulty: Difficulty) {
         let target = difficulty.to_target();
-        let difficulty_num = difficulty.0 as f64;
-
-        let estimated_hashes = 2u64.pow(32) as f64 / difficulty_num;
 
         info!("Difficulty metrics:");
-        info!("  - Difficulty: {:.2}", difficulty_num);
+        info!("  - Difficulty: {}", difficulty);
         info!("  - Target: {}", target_as_block_hash(target));
-        info!("  - Est. hashes for share: {:.0}", estimated_hashes);
     }
 }
