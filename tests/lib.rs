@@ -36,9 +36,9 @@ use {
 use {
     harness::bitcoind::Bitcoind,
     para::subcommand::{
+        miner::Share,
         sync::{ShareBatch, Sync, SyncResponse},
         template::Output as Template,
-        miner::Share,
     },
     reqwest::Response,
     std::{

@@ -59,7 +59,7 @@ impl Controller {
                         Ok(submit) => {
                             shares.push(Share {
                                 extranonce1: self.extranonce1.clone(),
-                                extranonce2: extranonce2,
+                                extranonce2,
                                 job_id,
                                 username: submit.username,
                                 nonce: submit.nonce,
