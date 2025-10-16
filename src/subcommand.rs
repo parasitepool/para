@@ -26,7 +26,7 @@ pub(crate) enum Subcommand {
 impl Subcommand {
     pub(crate) fn run(self) -> Result {
         match self {
-            Self::Miner(miner) => Runtime::new()?.block_on(async { miner.run().await }),
+            Self::Miner(miner) => miner.run(),
             Self::Ping(ping) => Runtime::new()?.block_on(async { ping.run().await }),
             Self::Pool(pool) => Runtime::new()?.block_on(async { pool.run().await }),
             Self::Server(server) => {
