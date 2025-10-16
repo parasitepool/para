@@ -3,18 +3,9 @@ use {super::*, crate::job::Job};
 #[derive(Debug)]
 pub(crate) enum State {
     Init,
-    Configured {
-        version_mask: Option<Version>,
-    },
-    Subscribed {
-        extranonce1: Extranonce,
-        _user_agent: String,
-        version_mask: Option<Version>,
-    },
-    Authorized,
-    Working {
-        job: Box<Job>,
-    },
+    Configured,
+    Subscribed,
+    Working { job: Box<Job> },
 }
 
 pub(crate) struct Connection<R, W> {
@@ -23,7 +14,12 @@ pub(crate) struct Connection<R, W> {
     reader: FramedRead<R, LinesCodec>,
     writer: FramedWrite<W, LinesCodec>,
     template_receiver: watch::Receiver<Arc<BlockTemplate>>,
+    // jobs: HashMap<JobId, Arc<Job>>,
     state: State,
+    authorized: Option<SystemTime>,
+    version_mask: Option<Version>,
+    extranonce1: Option<Extranonce>,
+    _user_agent: Option<String>,
 }
 
 impl<R, W> Connection<R, W>
@@ -45,6 +41,10 @@ where
             writer: FramedWrite::new(writer, LinesCodec::new()),
             template_receiver,
             state: State::Init,
+            authorized: None,
+            version_mask: None,
+            extranonce1: None,
+            _user_agent: None,
         }
     }
 
@@ -109,7 +109,7 @@ where
                         info!("Template receiver dropped, closing connection with {}", self.worker);
                         break;
                     }
-                    let template = template_receiver.borrow_and_update().clone();
+                    let template = template_receiver.borrow().clone();
                     self.template_update(template).await?;
                 }
             }
@@ -128,7 +128,7 @@ where
             job.extranonce1.clone(),
             job.version_mask,
             template,
-            "deadbeef".to_string(),
+            JobId::from_str("deadbeef").unwrap(), // TODO
         )?;
 
         let old_nbits = job.nbits();
@@ -175,10 +175,8 @@ where
             };
 
             self.send(message).await?;
-
-            self.state = State::Configured {
-                version_mask: Some(version_mask),
-            };
+            self.version_mask = Some(version_mask);
+            self.state = State::Configured;
         } else {
             warn!("Unsupported extension {:?}", configure);
 
@@ -203,26 +201,33 @@ where
     async fn subscribe(&mut self, id: Id, subscribe: Subscribe) -> Result {
         let version_mask = match &self.state {
             State::Init => None,
-            State::Configured { version_mask } => *version_mask,
+            State::Configured => self.version_mask,
             _ => bail!("SUBSCRIBE not allowed in current state"),
         };
 
         if let Some(extranonce1) = subscribe.extranonce1 {
-            warn!("Ignoring extranonce1 suggestion: {extranonce1}");
+            warn!("Ignoring worker extranonce1 suggestion: {extranonce1}");
         }
 
         let extranonce1 = Extranonce::generate(EXTRANONCE1_SIZE);
 
+        self.extranonce1 = Some(extranonce1.clone());
+        self._user_agent = Some(subscribe.user_agent);
+        self.version_mask = version_mask;
+        self.state = State::Subscribed;
+
+        let subscriptions = vec![
+            (
+                "mining.set_difficulty".to_string(),
+                SUBSCRIPTION_ID.to_string(),
+            ),
+            ("mining.notify".to_string(), SUBSCRIPTION_ID.to_string()),
+        ];
+
         let result = SubscribeResult {
-            subscriptions: vec![("mining.notify".to_string(), "deadbeef".to_string())],
+            subscriptions,
             extranonce1: extranonce1.clone(),
             extranonce2_size: EXTRANONCE2_SIZE.try_into().unwrap(),
-        };
-
-        self.state = State::Subscribed {
-            _user_agent: subscribe.user_agent,
-            extranonce1,
-            version_mask,
         };
 
         self.send(Message::Response {
@@ -237,14 +242,15 @@ where
     }
 
     async fn authorize(&mut self, id: Id, authorize: Authorize) -> Result {
-        let State::Subscribed {
-            extranonce1,
-            version_mask,
-            ..
-        } = &self.state
-        else {
-            bail!("AUTHORIZE not allowed in current state");
-        };
+        ensure!(
+            matches!(self.state, State::Subscribed),
+            "AUTHORIZE before SUBSCRIBE"
+        );
+
+        let extranonce1 = self
+            .extranonce1
+            .clone()
+            .ok_or_else(|| anyhow!("missing extranonce1 do SUBSCRIBE first"))?;
 
         let address = Address::from_str(
             authorize
@@ -263,9 +269,9 @@ where
         let job = Job::new(
             address,
             extranonce1.clone(),
-            *version_mask,
-            self.template_receiver.borrow_and_update().clone(),
-            "deadbeef".to_string(),
+            self.version_mask,
+            self.template_receiver.borrow().clone(),
+            JobId::from_str("deadbeef").unwrap(), // TODO
         )?;
 
         self.send(Message::Response {
@@ -276,7 +282,9 @@ where
         })
         .await?;
 
-        self.state = State::Authorized;
+        if self.authorized.is_none() {
+            self.authorized = Some(SystemTime::now());
+        }
 
         info!("Sending SET DIFFICULTY");
 

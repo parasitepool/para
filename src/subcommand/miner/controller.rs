@@ -5,8 +5,8 @@ pub(crate) struct Controller {
     pool_difficulty: Arc<Mutex<Difficulty>>,
     extranonce1: Extranonce,
     extranonce2_size: u32,
-    share_rx: mpsc::Receiver<(Header, Extranonce, String)>,
-    share_tx: mpsc::Sender<(Header, Extranonce, String)>,
+    share_rx: mpsc::Receiver<(JobId, Header, Extranonce)>,
+    share_tx: mpsc::Sender<(JobId, Header, Extranonce)>,
     cancel: CancellationToken,
     once: bool,
 }
@@ -49,7 +49,7 @@ impl Controller {
                         _ => warn!("Unexpected message on incoming: {:?}", msg)
                     }
                 },
-                Some((header, extranonce2, job_id)) = self.share_rx.recv() => {
+                Some((job_id, header, extranonce2)) = self.share_rx.recv() => {
                     info!("Valid header found: {:?}", header);
 
                     if let Err(e) = self.client.submit(job_id, extranonce2, header.time.into(), header.nonce.into()).await {

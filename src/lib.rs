@@ -69,8 +69,8 @@ use {
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     },
     stratum::{
-        Authorize, Configure, Difficulty, Extranonce, Id, JsonRpcError, MerkleNode, Message, Nbits,
-        Notify, Ntime, PrevHash, SetDifficulty, Submit, Subscribe, SubscribeResult, Version,
+        Authorize, Configure, Difficulty, Extranonce, Id, JobId, JsonRpcError, MerkleNode, Message,
+        Nbits, Notify, Ntime, PrevHash, SetDifficulty, Submit, Subscribe, SubscribeResult, Version,
     },
     subcommand::pool::pool_config::PoolConfig,
     sysinfo::{Disks, System},
@@ -118,6 +118,9 @@ pub const USER_AGENT: &str = "para/0.5.2";
 pub const EXTRANONCE1_SIZE: usize = 4;
 pub const EXTRANONCE2_SIZE: usize = 8;
 pub const MAX_MESSAGE_SIZE: usize = 32 * 1024;
+
+/// Subscription IDs do not seem to have a purpose in Stratum
+pub const SUBSCRIPTION_ID: &str = "deadbeef";
 
 type Result<T = (), E = Error> = std::result::Result<T, E>;
 

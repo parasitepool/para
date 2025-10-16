@@ -218,7 +218,7 @@ mod tests {
     #[test]
     fn notify() {
         let notify = Notify {
-            job_id: "bf".into(),
+            job_id: "bf".parse().unwrap(),
             prevhash: "4d16b6f85af6e2198f44ae2a6de67f78487ae5611b77c6c0440b921e00000000".parse().unwrap(),
             coinb1: "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff20020862062f503253482f04b8864e5008".into(),
             coinb2: "072f736c7573682f000000000100f2052a010000001976a914d23fcdf86f7e756a64a7a9688ef9903327048ed988ac00000000".into(),
@@ -260,7 +260,7 @@ mod tests {
                 method: "mining.submit".into(),
                 params: serde_json::to_value(&Submit {
                     username: "slush.miner1".into(),
-                    job_id: "bf".into(),
+                    job_id: "bf".parse().unwrap(),
                     extranonce2: "00000001".parse().unwrap(),
                     ntime: "504e86ed".parse().unwrap(),
                     nonce: "b2957c02".parse().unwrap(),
@@ -290,7 +290,7 @@ mod tests {
                 method: "mining.submit".into(),
                 params: serde_json::to_value(&Submit {
                     username: "slush.miner1".into(),
-                    job_id: "bf".into(),
+                    job_id: "bf".parse().unwrap(),
                     extranonce2: "00000001".parse().unwrap(),
                     ntime: "504e86ed".parse().unwrap(),
                     nonce: "b2957c02".parse().unwrap(),
