@@ -1,11 +1,11 @@
 use {super::*, crate::job::Job};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) enum State {
     Init,
     Configured,
     Subscribed,
-    Working { job: Box<Job> },
+    Working,
 }
 
 pub(crate) struct Connection<R, W> {
@@ -14,8 +14,10 @@ pub(crate) struct Connection<R, W> {
     reader: FramedRead<R, LinesCodec>,
     writer: FramedWrite<W, LinesCodec>,
     template_receiver: watch::Receiver<Arc<BlockTemplate>>,
-    // jobs: HashMap<JobId, Arc<Job>>,
+    jobs: HashMap<JobId, Arc<Job>>,
     state: State,
+    difficulty: Difficulty,
+    address: Option<Address>,
     authorized: Option<SystemTime>,
     version_mask: Option<Version>,
     extranonce1: Option<Extranonce>,
@@ -40,7 +42,10 @@ where
             reader: FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_MESSAGE_SIZE)),
             writer: FramedWrite::new(writer, LinesCodec::new()),
             template_receiver,
+            jobs: HashMap::new(),
             state: State::Init,
+            difficulty: Difficulty::default(),
+            address: None,
             authorized: None,
             version_mask: None,
             extranonce1: None,
@@ -119,29 +124,29 @@ where
     }
 
     async fn template_update(&mut self, template: Arc<BlockTemplate>) -> Result {
-        let State::Working { ref job } = self.state else {
+        if self.state != State::Working {
             return Ok(());
         };
 
         let new_job = Job::new(
-            job.address.clone(),
-            job.extranonce1.clone(),
-            job.version_mask,
+            self.address.clone().unwrap(),     // TODO
+            self.extranonce1.clone().unwrap(), // TODO
+            self.version_mask,
             template,
             JobId::from_str("deadbeef").unwrap(), // TODO
         )?;
 
-        let old_nbits = job.nbits();
-        let new_nbits = new_job.nbits();
-        if new_nbits != old_nbits {
-            let difficulty = Difficulty::from(new_nbits);
-            info!("Sending new difficulty {difficulty}");
-            self.send(Message::Notification {
-                method: "mining.set_difficulty".into(),
-                params: json!(SetDifficulty(difficulty)),
-            })
-            .await?;
-        }
+//        let old_nbits = Nbits::from(self.difficulty.to_target().to_compact_lossy()); // TODO
+//        let new_nbits = new_job.nbits();
+//        if new_nbits != old_nbits {
+//            let difficulty = Difficulty::from(new_nbits);
+//            info!("Sending new difficulty {difficulty}");
+//            self.send(Message::Notification {
+//                method: "mining.set_difficulty".into(),
+//                params: json!(SetDifficulty(difficulty)),
+//            })
+//            .await?;
+//        }
 
         info!("Template updated sending NOTIFY");
         self.send(Message::Notification {
@@ -150,9 +155,7 @@ where
         })
         .await?;
 
-        self.state = State::Working {
-            job: Box::new(new_job),
-        };
+        self.state = State::Working;
 
         Ok(())
     }
@@ -266,12 +269,14 @@ where
             authorize.username, self.worker
         ))?;
 
+        let job_id = "deadbeef".parse().unwrap(); // TODO
+
         let job = Job::new(
-            address,
+            address.clone(),
             extranonce1.clone(),
             self.version_mask,
             self.template_receiver.borrow().clone(),
-            JobId::from_str("deadbeef").unwrap(), // TODO
+            job_id,
         )?;
 
         self.send(Message::Response {
@@ -281,6 +286,8 @@ where
             reject_reason: None,
         })
         .await?;
+
+        self.address = Some(address);
 
         if self.authorized.is_none() {
             self.authorized = Some(SystemTime::now());
@@ -302,14 +309,20 @@ where
         })
         .await?;
 
-        self.state = State::Working { job: Box::new(job) };
+        self.jobs.insert(job_id, Arc::new(job));
+
+        self.state = State::Working;
 
         Ok(())
     }
 
     async fn submit(&mut self, id: Id, submit: Submit) -> Result {
-        let State::Working { job } = &self.state else {
+        if self.state != State::Working {
             bail!("SUBMIT not allowed in current state");
+        }
+
+        let Some(job) = self.jobs.get(&submit.job_id) else {
+            bail!("Stale job"); // TODO
         };
 
         let version = if let Some(version_bits) = submit.version_bits {

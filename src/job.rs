@@ -2,7 +2,6 @@ use super::*;
 
 #[derive(Debug)]
 pub(crate) struct Job {
-    pub(crate) address: Address,
     pub(crate) coinb1: String,
     pub(crate) coinb2: String,
     pub(crate) extranonce1: Extranonce,
@@ -37,7 +36,6 @@ impl Job {
             stratum::merkle_branches(template.transactions.iter().map(|tx| tx.txid).collect());
 
         Ok(Self {
-            address,
             coinb1,
             coinb2,
             extranonce1,
