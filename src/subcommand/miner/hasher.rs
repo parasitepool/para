@@ -130,9 +130,7 @@ impl Hasher {
         }
 
         Err(anyhow!(
-            "nonce range exhausted: {}-{}",
-            start_nonce,
-            end_nonce
+            "nonce space exhausted",
         ))
     }
 
