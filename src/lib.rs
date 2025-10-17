@@ -70,7 +70,8 @@ use {
     },
     stratum::{
         Authorize, Configure, Difficulty, Extranonce, Id, JobId, JsonRpcError, MerkleNode, Message,
-        Nbits, Notify, Ntime, PrevHash, SetDifficulty, Submit, Subscribe, SubscribeResult, Version,
+        Nbits, Nonce, Notify, Ntime, PrevHash, SetDifficulty, Submit, Subscribe, SubscribeResult,
+        Version,
     },
     subcommand::pool::pool_config::PoolConfig,
     sysinfo::{Disks, System},
