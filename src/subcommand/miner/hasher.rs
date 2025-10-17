@@ -4,7 +4,7 @@ use super::*;
 pub(crate) struct Hasher {
     pub(crate) extranonce2: Extranonce,
     pub(crate) header: Header,
-    pub(crate) job_id: String,
+    pub(crate) job_id: JobId,
     pub(crate) pool_target: Target,
 }
 
@@ -12,7 +12,7 @@ impl Hasher {
     pub(crate) fn hash(
         &mut self,
         cancel: CancellationToken,
-    ) -> Result<(Header, Extranonce, String)> {
+    ) -> Result<(JobId, Header, Extranonce)> {
         let mut hashes = 0;
         let start = Instant::now();
         let mut last_log = start;
@@ -32,7 +32,7 @@ impl Hasher {
 
                 if self.pool_target.is_met_by(hash) {
                     info!("Solved block with hash: {hash}");
-                    return Ok((self.header, self.extranonce2.clone(), self.job_id.clone()));
+                    return Ok((self.job_id, self.header, self.extranonce2.clone()));
                 }
 
                 self.header.nonce = self
@@ -143,10 +143,10 @@ mod tests {
             header: header(None, None),
             pool_target: target,
             extranonce2: "0000000000".parse().unwrap(),
-            job_id: "bf".into(),
+            job_id: "bf".parse().unwrap(),
         };
 
-        let (header, _extranonce2, _job_id) = hasher.hash(CancellationToken::new()).unwrap();
+        let (_job_id, header, _extranonce2) = hasher.hash(CancellationToken::new()).unwrap();
         assert!(target.is_met_by(header.block_hash()));
     }
 
@@ -157,7 +157,7 @@ mod tests {
             header: header(None, Some(u32::MAX - 1)),
             pool_target: target,
             extranonce2: "0000000000".parse().unwrap(),
-            job_id: "bg".into(),
+            job_id: "bb".parse().unwrap(),
         };
 
         assert!(
@@ -210,13 +210,13 @@ mod tests {
                 header: header(None, None),
                 pool_target: target,
                 extranonce2: "0000000000".parse().unwrap(),
-                job_id: format!("test_{zeros}"),
+                job_id: "abc".parse().unwrap(),
             };
 
             let result = hasher.hash(CancellationToken::new());
             assert!(result.is_ok(), "Failed at {zeros} leading zeros");
 
-            let (header, _, _) = result.unwrap();
+            let (_, header, _) = result.unwrap();
             assert!(
                 target.is_met_by(header.block_hash()),
                 "Invalid PoW at {zeros} leading zeros"

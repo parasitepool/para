@@ -3,7 +3,7 @@ use super::*;
 #[derive(Debug, PartialEq, Clone)]
 pub struct Submit {
     pub username: String,
-    pub job_id: String,
+    pub job_id: JobId,
     pub extranonce2: Extranonce,
     pub ntime: Ntime,
     pub nonce: Nonce,
@@ -37,8 +37,8 @@ impl<'de> Deserialize<'de> for Submit {
         #[derive(Deserialize)]
         #[serde(untagged)]
         enum Raw {
-            Five((String, String, Extranonce, Ntime, Nonce)),
-            Six((String, String, Extranonce, Ntime, Nonce, Option<Version>)),
+            Five((String, JobId, Extranonce, Ntime, Nonce)),
+            Six((String, JobId, Extranonce, Ntime, Nonce, Option<Version>)),
         }
 
         match Raw::deserialize(deserializer)? {
@@ -86,7 +86,7 @@ mod tests {
             r#"["slush.miner1","bf","00000001","504e86ed","b2957c02"]"#,
             Submit {
                 username: "slush.miner1".into(),
-                job_id: "bf".into(),
+                job_id: "bf".parse().unwrap(),
                 extranonce2: "00000001".parse().unwrap(),
                 ntime: "504e86ed".parse().unwrap(),
                 nonce: "b2957c02".parse().unwrap(),
@@ -101,7 +101,7 @@ mod tests {
             r#"["slush.miner1","bf","00000001","504e86ed","b2957c02","04d46000"]"#,
             Submit {
                 username: "slush.miner1".into(),
-                job_id: "bf".into(),
+                job_id: "bf".parse().unwrap(),
                 extranonce2: "00000001".parse().unwrap(),
                 ntime: "504e86ed".parse().unwrap(),
                 nonce: "b2957c02".parse().unwrap(),
@@ -114,7 +114,7 @@ mod tests {
     fn submit_serialize_shape() {
         let a = Submit {
             username: "u".into(),
-            job_id: "j".into(),
+            job_id: "deadbeef".parse().unwrap(),
             extranonce2: "01".parse().unwrap(),
             ntime: "00000000".parse().unwrap(),
             nonce: "00000000".parse().unwrap(),
@@ -122,7 +122,7 @@ mod tests {
         };
         assert_eq!(
             serde_json::to_value(&a).unwrap(),
-            serde_json::json!(["u", "j", "01", "00000000", "00000000"])
+            serde_json::json!(["u", "deadbeef", "01", "00000000", "00000000"])
         );
 
         let b = Submit {
@@ -131,7 +131,7 @@ mod tests {
         };
         assert_eq!(
             serde_json::to_value(&b).unwrap(),
-            serde_json::json!(["u", "j", "01", "00000000", "00000000", "ffffffff"])
+            serde_json::json!(["u", "deadbeef", "01", "00000000", "00000000", "ffffffff"])
         );
     }
 

@@ -6,6 +6,7 @@ mod configure;
 mod difficulty;
 mod error;
 mod extranonce;
+mod job_id;
 mod merkle;
 mod message;
 mod nbits;
@@ -26,6 +27,7 @@ pub use {
     difficulty::Difficulty,
     error::JsonRpcError,
     extranonce::Extranonce,
+    job_id::JobId,
     merkle::{MerkleNode, merkle_branches, merkle_root},
     message::{Id, Message},
     nbits::Nbits,

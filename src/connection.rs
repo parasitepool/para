@@ -1,20 +1,14 @@
-use {super::*, crate::job::Job};
+use {
+    super::*,
+    crate::{job::Job, jobs::Jobs},
+};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) enum State {
     Init,
-    Configured {
-        version_mask: Option<Version>,
-    },
-    Subscribed {
-        extranonce1: Extranonce,
-        _user_agent: String,
-        version_mask: Option<Version>,
-    },
-    Authorized,
-    Working {
-        job: Box<Job>,
-    },
+    Configured,
+    Subscribed,
+    Working,
 }
 
 pub(crate) struct Connection<R, W> {
@@ -23,7 +17,13 @@ pub(crate) struct Connection<R, W> {
     reader: FramedRead<R, LinesCodec>,
     writer: FramedWrite<W, LinesCodec>,
     template_receiver: watch::Receiver<Arc<BlockTemplate>>,
+    jobs: Jobs,
     state: State,
+    address: Option<Address>,
+    authorized: Option<SystemTime>,
+    version_mask: Option<Version>,
+    extranonce1: Option<Extranonce>,
+    user_agent: Option<String>,
 }
 
 impl<R, W> Connection<R, W>
@@ -44,7 +44,13 @@ where
             reader: FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_MESSAGE_SIZE)),
             writer: FramedWrite::new(writer, LinesCodec::new()),
             template_receiver,
+            jobs: Jobs::new(),
             state: State::Init,
+            address: None,
+            authorized: None,
+            version_mask: None,
+            extranonce1: None,
+            user_agent: None,
         }
     }
 
@@ -109,7 +115,7 @@ where
                         info!("Template receiver dropped, closing connection with {}", self.worker);
                         break;
                     }
-                    let template = template_receiver.borrow_and_update().clone();
+                    let template = template_receiver.borrow().clone();
                     self.template_update(template).await?;
                 }
             }
@@ -119,40 +125,41 @@ where
     }
 
     async fn template_update(&mut self, template: Arc<BlockTemplate>) -> Result {
-        let State::Working { ref job } = self.state else {
+        if self.state != State::Working {
             return Ok(());
         };
 
-        let new_job = Job::new(
-            job.address.clone(),
-            job.extranonce1.clone(),
-            job.version_mask,
+        let new_job = Arc::new(Job::new(
+            self.address.clone().unwrap(),     // TODO
+            self.extranonce1.clone().unwrap(), // TODO
+            self.version_mask,
             template,
-            "deadbeef".to_string(),
-        )?;
+            self.jobs.next_id(),
+        )?);
 
-        let old_nbits = job.nbits();
-        let new_nbits = new_job.nbits();
-        if new_nbits != old_nbits {
-            let difficulty = Difficulty::from(new_nbits);
-            info!("Sending new difficulty {difficulty}");
-            self.send(Message::Notification {
-                method: "mining.set_difficulty".into(),
-                params: json!(SetDifficulty(difficulty)),
-            })
-            .await?;
-        }
+        // TODO: clean this spaghetti up
+        let clean_jobs = if let Some(previous_job) = self.jobs.latest() {
+            if previous_job.template.height == new_job.template.height {
+                self.jobs.insert(new_job.clone());
+                false
+            } else {
+                self.jobs.insert_and_clean(new_job.clone());
+                true
+            }
+        } else {
+            self.jobs.insert_and_clean(new_job.clone());
+            true
+        };
 
         info!("Template updated sending NOTIFY");
+
         self.send(Message::Notification {
             method: "mining.notify".into(),
-            params: json!(new_job.notify()?),
+            params: json!(new_job.notify(clean_jobs)?),
         })
         .await?;
 
-        self.state = State::Working {
-            job: Box::new(new_job),
-        };
+        self.state = State::Working;
 
         Ok(())
     }
@@ -175,10 +182,8 @@ where
             };
 
             self.send(message).await?;
-
-            self.state = State::Configured {
-                version_mask: Some(version_mask),
-            };
+            self.version_mask = Some(version_mask);
+            self.state = State::Configured;
         } else {
             warn!("Unsupported extension {:?}", configure);
 
@@ -202,27 +207,33 @@ where
 
     async fn subscribe(&mut self, id: Id, subscribe: Subscribe) -> Result {
         let version_mask = match &self.state {
-            State::Init => None,
-            State::Configured { version_mask } => *version_mask,
+            State::Init | State::Configured => self.version_mask,
             _ => bail!("SUBSCRIBE not allowed in current state"),
         };
 
         if let Some(extranonce1) = subscribe.extranonce1 {
-            warn!("Ignoring extranonce1 suggestion: {extranonce1}");
+            warn!("Ignoring worker extranonce1 suggestion: {extranonce1}");
         }
 
         let extranonce1 = Extranonce::generate(EXTRANONCE1_SIZE);
 
+        self.extranonce1 = Some(extranonce1.clone());
+        self.user_agent = Some(subscribe.user_agent);
+        self.version_mask = version_mask;
+        self.state = State::Subscribed;
+
+        let subscriptions = vec![
+            (
+                "mining.set_difficulty".to_string(),
+                SUBSCRIPTION_ID.to_string(),
+            ),
+            ("mining.notify".to_string(), SUBSCRIPTION_ID.to_string()),
+        ];
+
         let result = SubscribeResult {
-            subscriptions: vec![("mining.notify".to_string(), "deadbeef".to_string())],
+            subscriptions,
             extranonce1: extranonce1.clone(),
             extranonce2_size: EXTRANONCE2_SIZE.try_into().unwrap(),
-        };
-
-        self.state = State::Subscribed {
-            _user_agent: subscribe.user_agent,
-            extranonce1,
-            version_mask,
         };
 
         self.send(Message::Response {
@@ -237,14 +248,15 @@ where
     }
 
     async fn authorize(&mut self, id: Id, authorize: Authorize) -> Result {
-        let State::Subscribed {
-            extranonce1,
-            version_mask,
-            ..
-        } = &self.state
-        else {
-            bail!("AUTHORIZE not allowed in current state");
-        };
+        ensure!(
+            matches!(self.state, State::Subscribed),
+            "AUTHORIZE before SUBSCRIBE"
+        );
+
+        let extranonce1 = self
+            .extranonce1
+            .clone()
+            .ok_or_else(|| anyhow!("missing extranonce1 do SUBSCRIBE first"))?;
 
         let address = Address::from_str(
             authorize
@@ -260,13 +272,15 @@ where
             authorize.username, self.worker
         ))?;
 
-        let job = Job::new(
-            address,
+        let job_id = self.jobs.next_id();
+
+        let job = Arc::new(Job::new(
+            address.clone(),
             extranonce1.clone(),
-            *version_mask,
-            self.template_receiver.borrow_and_update().clone(),
-            "deadbeef".to_string(),
-        )?;
+            self.version_mask,
+            self.template_receiver.borrow().clone(), // TODO: borrow and update?
+            job_id,
+        )?);
 
         self.send(Message::Response {
             id,
@@ -276,7 +290,11 @@ where
         })
         .await?;
 
-        self.state = State::Authorized;
+        self.address = Some(address);
+
+        if self.authorized.is_none() {
+            self.authorized = Some(SystemTime::now());
+        }
 
         info!("Sending SET DIFFICULTY");
 
@@ -290,18 +308,25 @@ where
 
         self.send(Message::Notification {
             method: "mining.notify".into(),
-            params: json!(job.notify()?),
+            params: json!(job.notify(true)?),
         })
         .await?;
 
-        self.state = State::Working { job: Box::new(job) };
+        self.jobs.insert_and_clean(job.clone());
+
+        self.state = State::Working;
 
         Ok(())
     }
 
     async fn submit(&mut self, id: Id, submit: Submit) -> Result {
-        let State::Working { job } = &self.state else {
+        if self.state != State::Working {
             bail!("SUBMIT not allowed in current state");
+        }
+
+        let job: Arc<Job> = match self.jobs.get(&submit.job_id).cloned() {
+            Some(job) => job,
+            None => bail!("Stale job"), // TODO
         };
 
         let version = if let Some(version_bits) = submit.version_bits {
@@ -340,6 +365,10 @@ where
             bits: nbits.to_compact(),
             nonce: submit.nonce.into(),
         };
+
+        if self.jobs.is_duplicate(header.block_hash()) {
+            bail!("Duplicate share"); // TODO
+        }
 
         let blockhash = header.validate_pow(Target::from_compact(nbits.into()))?;
 

@@ -22,7 +22,7 @@ pub struct Output {
     pub timestamp: u64,
     pub extranonce1: Extranonce,
     pub extranonce2_size: u32,
-    pub job_id: String,
+    pub job_id: JobId,
     pub prevhash: PrevHash,
     pub coinb1: String,
     pub coinb2: String,
