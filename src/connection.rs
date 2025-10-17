@@ -1,4 +1,7 @@
-use {super::*, crate::job::Job};
+use {
+    super::*,
+    crate::{job::Job, jobs::Jobs},
+};
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum State {
@@ -14,14 +17,13 @@ pub(crate) struct Connection<R, W> {
     reader: FramedRead<R, LinesCodec>,
     writer: FramedWrite<W, LinesCodec>,
     template_receiver: watch::Receiver<Arc<BlockTemplate>>,
-    jobs: HashMap<JobId, Arc<Job>>,
+    jobs: Jobs,
     state: State,
-    difficulty: Difficulty,
     address: Option<Address>,
     authorized: Option<SystemTime>,
     version_mask: Option<Version>,
     extranonce1: Option<Extranonce>,
-    _user_agent: Option<String>,
+    user_agent: Option<String>,
 }
 
 impl<R, W> Connection<R, W>
@@ -42,14 +44,13 @@ where
             reader: FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_MESSAGE_SIZE)),
             writer: FramedWrite::new(writer, LinesCodec::new()),
             template_receiver,
-            jobs: HashMap::new(),
+            jobs: Jobs::new(),
             state: State::Init,
-            difficulty: Difficulty::default(),
             address: None,
             authorized: None,
             version_mask: None,
             extranonce1: None,
-            _user_agent: None,
+            user_agent: None,
         }
     }
 
@@ -128,30 +129,33 @@ where
             return Ok(());
         };
 
-        let new_job = Job::new(
+        let new_job = Arc::new(Job::new(
             self.address.clone().unwrap(),     // TODO
             self.extranonce1.clone().unwrap(), // TODO
             self.version_mask,
             template,
-            JobId::from_str("deadbeef").unwrap(), // TODO
-        )?;
+            self.jobs.next_id(),
+        )?);
 
-//        let old_nbits = Nbits::from(self.difficulty.to_target().to_compact_lossy()); // TODO
-//        let new_nbits = new_job.nbits();
-//        if new_nbits != old_nbits {
-//            let difficulty = Difficulty::from(new_nbits);
-//            info!("Sending new difficulty {difficulty}");
-//            self.send(Message::Notification {
-//                method: "mining.set_difficulty".into(),
-//                params: json!(SetDifficulty(difficulty)),
-//            })
-//            .await?;
-//        }
+        // TODO: clean this spaghetti up
+        let clean_jobs = if let Some(previous_job) = self.jobs.latest() {
+            if previous_job.template.height == new_job.template.height {
+                self.jobs.insert(new_job.clone());
+                false
+            } else {
+                self.jobs.insert_and_clean(new_job.clone());
+                true
+            }
+        } else {
+            self.jobs.insert_and_clean(new_job.clone());
+            true
+        };
 
         info!("Template updated sending NOTIFY");
+
         self.send(Message::Notification {
             method: "mining.notify".into(),
-            params: json!(new_job.notify()?),
+            params: json!(new_job.notify(clean_jobs)?),
         })
         .await?;
 
@@ -203,8 +207,7 @@ where
 
     async fn subscribe(&mut self, id: Id, subscribe: Subscribe) -> Result {
         let version_mask = match &self.state {
-            State::Init => None,
-            State::Configured => self.version_mask,
+            State::Init | State::Configured => self.version_mask,
             _ => bail!("SUBSCRIBE not allowed in current state"),
         };
 
@@ -215,7 +218,7 @@ where
         let extranonce1 = Extranonce::generate(EXTRANONCE1_SIZE);
 
         self.extranonce1 = Some(extranonce1.clone());
-        self._user_agent = Some(subscribe.user_agent);
+        self.user_agent = Some(subscribe.user_agent);
         self.version_mask = version_mask;
         self.state = State::Subscribed;
 
@@ -269,15 +272,15 @@ where
             authorize.username, self.worker
         ))?;
 
-        let job_id = "deadbeef".parse().unwrap(); // TODO
+        let job_id = self.jobs.next_id();
 
-        let job = Job::new(
+        let job = Arc::new(Job::new(
             address.clone(),
             extranonce1.clone(),
             self.version_mask,
-            self.template_receiver.borrow().clone(),
+            self.template_receiver.borrow().clone(), // TODO: borrow and update?
             job_id,
-        )?;
+        )?);
 
         self.send(Message::Response {
             id,
@@ -305,11 +308,11 @@ where
 
         self.send(Message::Notification {
             method: "mining.notify".into(),
-            params: json!(job.notify()?),
+            params: json!(job.notify(true)?),
         })
         .await?;
 
-        self.jobs.insert(job_id, Arc::new(job));
+        self.jobs.insert_and_clean(job.clone());
 
         self.state = State::Working;
 
@@ -321,8 +324,9 @@ where
             bail!("SUBMIT not allowed in current state");
         }
 
-        let Some(job) = self.jobs.get(&submit.job_id) else {
-            bail!("Stale job"); // TODO
+        let job: Arc<Job> = match self.jobs.get(&submit.job_id).cloned() {
+            Some(job) => job,
+            None => bail!("Stale job"), // TODO
         };
 
         let version = if let Some(version_bits) = submit.version_bits {
@@ -361,6 +365,10 @@ where
             bits: nbits.to_compact(),
             nonce: submit.nonce.into(),
         };
+
+        if self.jobs.is_duplicate(header.block_hash()) {
+            bail!("Duplicate share"); // TODO
+        }
 
         let blockhash = header.validate_pow(Target::from_compact(nbits.into()))?;
 

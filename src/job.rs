@@ -58,7 +58,7 @@ impl Job {
         self.template.version
     }
 
-    pub(crate) fn notify(&self) -> Result<Notify> {
+    pub(crate) fn notify(&self, clean_jobs: bool) -> Result<Notify> {
         Ok(Notify {
             job_id: self.job_id,
             prevhash: self.prevhash(),
@@ -68,7 +68,7 @@ impl Job {
             version: self.version(),
             nbits: self.nbits(),
             ntime: self.template.current_time,
-            clean_jobs: true,
+            clean_jobs,
         })
     }
 }
