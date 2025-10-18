@@ -2,10 +2,11 @@ use super::*;
 
 #[derive(Debug)]
 pub(crate) struct Job {
+    pub(crate) address: Address,
     pub(crate) coinb1: String,
     pub(crate) coinb2: String,
     pub(crate) extranonce1: Extranonce,
-    pub(crate) gbt: GetBlockTemplateResult,
+    pub(crate) template: Arc<BlockTemplate>,
     pub(crate) job_id: String,
     pub(crate) merkle_branches: Vec<MerkleNode>,
     pub(crate) version_mask: Option<Version>,
@@ -16,53 +17,47 @@ impl Job {
         address: Address,
         extranonce1: Extranonce,
         version_mask: Option<Version>,
-        gbt: GetBlockTemplateResult,
+        template: Arc<BlockTemplate>,
         job_id: String,
     ) -> Result<Self> {
         let (_coinbase_tx, coinb1, coinb2) = CoinbaseBuilder::new(
-            address,
+            address.clone(),
             extranonce1.clone(),
             EXTRANONCE2_SIZE,
-            gbt.height,
-            gbt.coinbase_value,
-            gbt.default_witness_commitment.clone(),
+            template.height,
+            template.coinbase_value,
+            template.default_witness_commitment.clone(),
         )
-        .with_aux(gbt.coinbaseaux.clone().into_iter().collect())
+        .with_aux(template.coinbaseaux.clone())
         .with_timestamp(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs())
         .with_pool_sig("|parasite|".into())
         .build()?;
 
-        let merkle_branches = stratum::merkle_branches(
-            gbt.transactions
-                .clone()
-                .into_iter()
-                .map(|r| r.txid)
-                .collect(),
-        );
+        let merkle_branches =
+            stratum::merkle_branches(template.transactions.iter().map(|tx| tx.txid).collect());
 
         Ok(Self {
+            address,
             coinb1,
             coinb2,
             extranonce1,
-            gbt,
+            template,
             job_id,
             merkle_branches,
             version_mask,
         })
     }
 
-    pub(crate) fn nbits(&self) -> Result<Nbits> {
-        Nbits::from_str(&hex::encode(&self.gbt.bits))
+    pub(crate) fn nbits(&self) -> Nbits {
+        self.template.bits
     }
 
     pub(crate) fn prevhash(&self) -> PrevHash {
-        PrevHash::from(self.gbt.previous_block_hash)
+        PrevHash::from(self.template.previous_block_hash)
     }
 
     pub(crate) fn version(&self) -> Version {
-        Version(block::Version::from_consensus(
-            self.gbt.version.try_into().unwrap(),
-        ))
+        self.template.version
     }
 
     pub(crate) fn notify(&self) -> Result<Notify> {
@@ -73,8 +68,8 @@ impl Job {
             coinb2: self.coinb2.clone(),
             merkle_branches: self.merkle_branches.clone(),
             version: self.version(),
-            nbits: self.nbits()?,
-            ntime: Ntime::try_from(self.gbt.current_time).expect("should fit until the year 2106"),
+            nbits: self.nbits(),
+            ntime: self.template.current_time,
             clean_jobs: true,
         })
     }

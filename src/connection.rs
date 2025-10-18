@@ -1,7 +1,4 @@
-use {
-    super::*,
-    crate::{job::Job, subcommand::pool::pool_config::PoolConfig},
-};
+use {super::*, crate::job::Job};
 
 #[derive(Debug)]
 pub(crate) enum State {
@@ -25,72 +22,137 @@ pub(crate) struct Connection<R, W> {
     worker: SocketAddr,
     reader: FramedRead<R, LinesCodec>,
     writer: FramedWrite<W, LinesCodec>,
+    template_receiver: watch::Receiver<Arc<BlockTemplate>>,
     state: State,
 }
 
 impl<R, W> Connection<R, W>
 where
-    R: AsyncRead + Unpin + AsyncBufReadExt,
+    R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
-    pub(crate) fn new(config: Arc<PoolConfig>, worker: SocketAddr, reader: R, writer: W) -> Self {
+    pub(crate) fn new(
+        config: Arc<PoolConfig>,
+        worker: SocketAddr,
+        reader: R,
+        writer: W,
+        template_receiver: watch::Receiver<Arc<BlockTemplate>>,
+    ) -> Self {
         Self {
             config,
             worker,
             reader: FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_MESSAGE_SIZE)),
             writer: FramedWrite::new(writer, LinesCodec::new()),
+            template_receiver,
             state: State::Init,
         }
     }
 
     pub(crate) async fn serve(&mut self) -> Result {
-        while let Some(message) = self.read_message().await? {
-            let Message::Request { id, method, params } = message else {
-                warn!(?message, "Ignoring any notifications or responses");
-                continue;
-            };
+        let mut template_receiver = self.template_receiver.clone();
 
-            match method.as_str() {
-                "mining.configure" => {
-                    info!("CONFIGURE from {} with {params}", self.worker);
+        loop {
+            tokio::select! {
+                message = self.read_message() => {
+                    let Some(message) = message? else {
+                        error!("Error reading message in connection serve");
+                        break;
+                    };
 
-                    let configure = serde_json::from_value::<Configure>(params)
-                        .context(format!("failed to deserialize {method}"))?;
+                    let Message::Request { id, method, params } = message else {
+                        warn!(?message, "Ignoring any notifications or responses");
+                        continue;
+                    };
 
-                    self.configure(id, configure).await?
+                    match method.as_str() {
+                        "mining.configure" => {
+                            info!("CONFIGURE from {} with {params}", self.worker);
+
+                            let configure = serde_json::from_value::<Configure>(params)
+                                .context(format!("failed to deserialize {method}"))?;
+
+                            self.configure(id, configure).await?
+                        }
+                        "mining.subscribe" => {
+                            info!("SUBSCRIBE from {} with {params}", self.worker);
+
+                            let subscribe = serde_json::from_value::<Subscribe>(params)
+                                .context(format!("failed to deserialize {method}"))?;
+
+                            self.subscribe(id, subscribe).await?
+                        }
+                        "mining.authorize" => {
+                            info!("AUTHORIZE from {} with {params}", self.worker);
+
+                            let authorize = serde_json::from_value::<Authorize>(params)
+                                .context(format!("failed to deserialize {method}"))?;
+
+                            self.authorize(id, authorize).await?
+                        }
+
+                        "mining.submit" => {
+                            info!("SUBMIT from {} with params {params}", self.worker);
+
+                            let submit = serde_json::from_value::<Submit>(params)
+                                .context(format!("failed to deserialize {method}"))?;
+
+                            self.submit(id, submit).await?;
+                        }
+                        method => {
+                            warn!("UNKNOWN method {method} with {params} from {}", self.worker);
+                        }
+                    }
                 }
-                "mining.subscribe" => {
-                    info!("SUBSCRIBE from {} with {params}", self.worker);
 
-                    let subscribe = serde_json::from_value::<Subscribe>(params)
-                        .context(format!("failed to deserialize {method}"))?;
-
-                    self.subscribe(id, subscribe).await?
-                }
-                "mining.authorize" => {
-                    info!("AUTHORIZE from {} with {params}", self.worker);
-
-                    let authorize = serde_json::from_value::<Authorize>(params)
-                        .context(format!("failed to deserialize {method}"))?;
-
-                    self.authorize(id, authorize).await?
-                }
-
-                "mining.submit" => {
-                    info!("SUBMIT from {} with params {params}", self.worker);
-
-                    let submit = serde_json::from_value::<Submit>(params)
-                        .context(format!("failed to deserialize {method}"))?;
-
-                    self.submit(id, submit).await?;
-
-                    break;
-                }
-                method => {
-                    warn!("UNKNOWN method {method} with {params} from {}", self.worker);
+                changed = template_receiver.changed() => {
+                    if changed.is_err() {
+                        info!("Template receiver dropped, closing connection with {}", self.worker);
+                        break;
+                    }
+                    let template = template_receiver.borrow_and_update().clone();
+                    self.template_update(template).await?;
                 }
             }
         }
+
+        Ok(())
+    }
+
+    async fn template_update(&mut self, template: Arc<BlockTemplate>) -> Result {
+        let State::Working { ref job } = self.state else {
+            return Ok(());
+        };
+
+        let new_job = Job::new(
+            job.address.clone(),
+            job.extranonce1.clone(),
+            job.version_mask,
+            template,
+            "deadbeef".to_string(),
+        )?;
+
+        let old_nbits = job.nbits();
+        let new_nbits = new_job.nbits();
+        if new_nbits != old_nbits {
+            let difficulty = Difficulty::from(new_nbits);
+            info!("Sending new difficulty {difficulty}");
+            self.send(Message::Notification {
+                method: "mining.set_difficulty".into(),
+                params: json!(SetDifficulty(difficulty)),
+            })
+            .await?;
+        }
+
+        info!("Template updated sending NOTIFY");
+        self.send(Message::Notification {
+            method: "mining.notify".into(),
+            params: json!(new_job.notify()?),
+        })
+        .await?;
+
+        self.state = State::Working {
+            job: Box::new(new_job),
+        };
 
         Ok(())
     }
@@ -202,7 +264,7 @@ where
             address,
             extranonce1.clone(),
             *version_mask,
-            self.gbt()?,
+            self.template_receiver.borrow_and_update().clone(),
             "deadbeef".to_string(),
         )?;
 
@@ -220,7 +282,7 @@ where
 
         self.send(Message::Notification {
             method: "mining.set_difficulty".into(),
-            params: json!(SetDifficulty(Difficulty(1))),
+            params: json!(SetDifficulty(Difficulty::from(job.nbits()))),
         })
         .await?;
 
@@ -261,7 +323,7 @@ where
             job.version()
         };
 
-        let nbits = job.nbits()?;
+        let nbits = job.nbits();
 
         let header = Header {
             version: version.into(),
@@ -275,13 +337,13 @@ where
             )?
             .into(),
             time: submit.ntime.into(),
-            bits: nbits.into(),
+            bits: nbits.to_compact(),
             nonce: submit.nonce.into(),
         };
 
         let blockhash = header.validate_pow(Target::from_compact(nbits.into()))?;
 
-        info!("Block with hash {blockhash} mets PoW");
+        info!("Block with hash {blockhash} meets PoW");
 
         let coinbase_bin = hex::decode(format!(
             "{}{}{}{}",
@@ -291,16 +353,12 @@ where
         let mut cursor = bitcoin::io::Cursor::new(&coinbase_bin);
         let coinbase_tx = bitcoin::Transaction::consensus_decode_from_finite_reader(&mut cursor)?;
 
-        let txdata = vec![coinbase_tx]
-            .into_iter()
+        let txdata = std::iter::once(coinbase_tx)
             .chain(
-                job.gbt
-                    .clone()
+                job.template
                     .transactions
                     .iter()
-                    .map(|result| {
-                        Transaction::consensus_decode(&mut result.raw_tx.as_slice()).unwrap()
-                    })
+                    .map(|tx| tx.transaction.clone())
                     .collect::<Vec<Transaction>>(),
             )
             .collect();
@@ -349,22 +407,5 @@ where
         let frame = serde_json::to_string(&message)?;
         self.writer.send(frame).await?;
         Ok(())
-    }
-
-    fn gbt(&self) -> Result<GetBlockTemplateResult> {
-        let mut rules = vec!["segwit"];
-        if self.config.chain().network() == Network::Signet {
-            rules.push("signet");
-        }
-
-        let params = json!({
-            "capabilities": ["coinbasetxn", "workid", "coinbase/append"],
-            "rules": rules,
-        });
-
-        Ok(self
-            .config
-            .bitcoin_rpc_client()?
-            .call::<GetBlockTemplateResult>("getblocktemplate", &[params])?)
     }
 }

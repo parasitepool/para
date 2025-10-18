@@ -14,41 +14,45 @@ impl Pool {
         let address = config.address();
         let port = config.port();
 
+        let mut generator = Generator::new(config.clone())?;
+        let template_receiver = generator.spawn().await?;
+
         let listener = TcpListener::bind((address.clone(), port)).await?;
 
-        info!("Listening on {address}:{port}");
+        eprintln!("Listening on {address}:{port}");
 
         loop {
             tokio::select! {
-                result = Self::handle_single_worker(config.clone(), &listener) => {
-                    match result {
-                        Ok(_) => continue,
-                        Err(err) => error!("Worker connection error: {err}"),
-                    }
+                Ok((stream, worker)) = listener.accept() => {
+                    stream.set_nodelay(true)?;
+
+                    info!("Accepted connection from {worker}");
+
+                    let (reader, writer) = {
+                        let (rx, tx) = stream.into_split();
+                        (BufReader::new(rx), BufWriter::new(tx))
+                    };
+
+                    let template_receiver = template_receiver.clone();
+                    let config = config.clone();
+
+                    tokio::task::spawn(async move {
+                        let mut conn = Connection::new(config, worker, reader, writer, template_receiver);
+
+                        if let Err(err) = conn.serve().await {
+                            error!("Worker connection error: {err}")
+                        }
+                    });
                 }
                 _ = ctrl_c() => {
                         info!("Shutting down stratum server");
+                        generator.shutdown().await;
                         break;
                     }
             }
         }
 
         Ok(())
-    }
-
-    async fn handle_single_worker(config: Arc<PoolConfig>, listener: &TcpListener) -> Result {
-        let (stream, worker) = listener.accept().await?;
-
-        info!("Accepted connection from {worker}");
-
-        let (reader, writer) = {
-            let (rx, tx) = stream.into_split();
-            (BufReader::new(rx), BufWriter::new(tx))
-        };
-
-        let mut conn = Connection::new(config.clone(), worker, reader, writer);
-
-        conn.serve().await
     }
 }
 
@@ -81,6 +85,11 @@ mod tests {
         assert_eq!(
             config.version_mask(),
             Version::from_str("1fffe000").unwrap()
+        );
+        assert_eq!(config.update_interval(), Duration::from_secs(10));
+        assert_eq!(
+            config.zmq_block_notifications().to_string(),
+            "tcp://127.0.0.1:28332".to_string()
         );
     }
 
@@ -193,5 +202,14 @@ mod tests {
     fn rpc_url_reflects_port_choice() {
         let config = parse_pool_config("para pool --bitcoin-rpc-port 12345");
         assert_eq!(config.bitcoin_rpc_url(), "127.0.0.1:12345/");
+    }
+
+    #[test]
+    fn zmq_block_notifications() {
+        let config = parse_pool_config("para pool --zmq-block-notifications tcp://127.0.0.1:69");
+        assert_eq!(
+            config.zmq_block_notifications(),
+            "tcp://127.0.0.1:69".parse().unwrap()
+        );
     }
 }

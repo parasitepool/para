@@ -35,7 +35,11 @@ use {
 #[cfg(target_os = "linux")]
 use {
     harness::bitcoind::Bitcoind,
-    para::subcommand::sync::{ShareBatch, Sync, SyncResponse},
+    para::subcommand::{
+        miner::Share,
+        sync::{ShareBatch, Sync, SyncResponse},
+        template::Output as Template,
+    },
     reqwest::Response,
     std::{
         io::stderr,

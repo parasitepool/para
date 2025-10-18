@@ -319,7 +319,7 @@ mod tests {
             serde_json::from_str::<Message>(set_difficulty_str).unwrap(),
             Message::Notification {
                 method: "mining.set_difficulty".into(),
-                params: serde_json::to_value(SetDifficulty(Difficulty(2))).unwrap(),
+                params: serde_json::to_value(SetDifficulty(Difficulty::from(2))).unwrap(),
             },
         );
     }
@@ -451,7 +451,7 @@ mod tests {
                 method: "mining.configure".into(),
                 params: serde_json::to_value(Configure {
                     extensions: vec!["minimum-difficulty".into(), "version-rolling".into()],
-                    minimum_difficulty_value: Some(Difficulty(2048)),
+                    minimum_difficulty_value: Some(Difficulty::from(2048)),
                     version_rolling_mask: Some("00fff000".parse().unwrap()),
                     version_rolling_min_bit_count: Some(2),
                 })

@@ -63,6 +63,7 @@ tokio-util = "0.7.15"
 tower-http = { version = "0.6.2", features = ["auth", "fs", "set-header"] }
 tracing = "0.1.41"
 tracing-subscriber = { version =  "0.3.19", features = ["env-filter", "fmt"] }
+zeromq = "0.4.1"
 
 [dev-dependencies]
 chrono = "0.4.41"

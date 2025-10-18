@@ -58,6 +58,8 @@ impl Controller {
             "Controller started with {} CPU cores configured",
             self.cpu_cores
         );
+    pub(crate) async fn run(mut self) -> Result<Vec<Share>> {
+        let mut shares = Vec::new();
 
         loop {
             tokio::select! {
@@ -75,15 +77,19 @@ impl Controller {
                 Some((header, extranonce2, job_id)) = self.share_rx.recv() => {
                     info!("Valid share found: nonce={}, hash={:?}", header.nonce, header.block_hash());
 
-                    if let Err(e) = self.client.submit(
-                        job_id,
-                        extranonce2,
-                        header.time.into(),
-                        header.nonce.into()
-                    ).await {
-                        warn!("Failed to submit share: {e}");
-                    } else {
-                        info!("Share submitted successfully!");
+                    match self.client.submit(job_id.clone(), extranonce2.clone(), header.time.into(), header.nonce.into()).await {
+                        Err(err) => warn!("Failed to submit share: {err}"),
+                        Ok(submit) => {
+                            shares.push(Share {
+                                extranonce1: self.extranonce1.clone(),
+                                extranonce2,
+                                job_id,
+                                username: submit.username,
+                                nonce: submit.nonce,
+                                ntime: submit.ntime,
+                                version_bits: submit.version_bits,
+                            })
+                        },
                     }
 
                     if self.once {
@@ -102,7 +108,7 @@ impl Controller {
 
         self.client.disconnect().await?;
 
-        Ok(())
+        Ok(shares)
     }
 
     async fn handle_notification(&mut self, method: String, params: Value) -> Result {

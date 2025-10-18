@@ -49,6 +49,7 @@ impl TestPool {
                 --bitcoin-rpc-username satoshi
                 --bitcoin-rpc-password nakamoto
                 --bitcoin-rpc-port {rpc_port}
+                --zmq-block-notifications tcp://127.0.0.1:{zmq_port}
                 {}",
             args.to_args().join(" ")
         ))
@@ -65,7 +66,7 @@ impl TestPool {
                     thread::sleep(Duration::from_millis(50));
                 }
                 Err(e) => panic!(
-                    "Failed to connect to ckpool after {} attempts: {}",
+                    "Failed to connect to para pool after {} attempts: {}",
                     attempt, e
                 ),
             }

@@ -40,8 +40,7 @@ miner-signet:
   RUST_LOG=info cargo run --release -- miner \
     127.0.0.1:42069 \
     --username tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.tick \
-    --password x \
-    --once 
+    --password x
 
 ping host='parasite.wtf':
   cargo run ping {{host}}:42069
@@ -55,7 +54,8 @@ pool:
     --address 0.0.0.0 \
     --bitcoin-rpc-username satoshi \
     --bitcoin-rpc-password nakamoto \
-    --bitcoin-rpc-port 38332
+    --bitcoin-rpc-port 38332 \
+    --zmq-block-notifications tcp://127.0.0.1:28332
 
 server: 
   RUST_LOG=info cargo run -- server \
@@ -66,7 +66,7 @@ harness: build-bitcoind
   cargo run -p harness
 
 install:
-  git submodule update --init
+  git submodule update --init --recursive
   sudo apt-get install --yes \
     autoconf \
     automake \
@@ -88,7 +88,7 @@ install:
 build-bitcoind: install
   #!/usr/bin/env bash
   cd bitcoin
-  cmake -B build
+  cmake -B build -DWITH_ZMQ=ON
   cmake --build build -j 21
 
 build-ckpool: install

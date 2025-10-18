@@ -1,6 +1,6 @@
 use super::*;
 
-mod miner;
+pub mod miner;
 mod ping;
 pub(crate) mod pool;
 pub mod server;

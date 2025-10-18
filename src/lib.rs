@@ -16,19 +16,21 @@ use {
         Address, Amount, Block, BlockHash, CompactTarget, Network, OutPoint, ScriptBuf, Sequence,
         Target, Transaction, TxIn, TxMerkleNode, TxOut, Txid, VarInt, Witness,
         block::{self, Header},
-        consensus::{self, Decodable, Encodable},
+        consensus::{self, Decodable, Encodable, encode},
         hashes::{Hash, sha256d},
         locktime::absolute::LockTime,
         script::write_scriptint,
     },
-    bitcoincore_rpc::{Auth, RpcApi, json::GetBlockTemplateResult},
+    bitcoincore_rpc::{Auth, RpcApi},
+    block_template::BlockTemplate,
     byteorder::{BigEndian, ByteOrder, LittleEndian},
     chain::Chain,
     clap::Parser,
     coinbase_builder::CoinbaseBuilder,
+    connection::Connection,
     derive_more::Display,
-    difficulty::Difficulty,
     futures::{sink::SinkExt, stream::StreamExt},
+    generator::Generator,
     hash_rate::HashRate,
     hex::FromHex,
     lazy_static::lazy_static,
@@ -66,20 +68,20 @@ use {
         thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     },
-    stratifier::Connection,
     stratum::{
-        Authorize, Configure, Extranonce, Id, JsonRpcError, MerkleNode, Message, Nbits, Notify,
-        Ntime, PrevHash, SetDifficulty, Submit, Subscribe, SubscribeResult, Version,
+        Authorize, Configure, Difficulty, Extranonce, Id, JsonRpcError, MerkleNode, Message, Nbits,
+        Nonce, Notify, Ntime, PrevHash, SetDifficulty, Submit, Subscribe, SubscribeResult, Version,
     },
+    subcommand::pool::pool_config::PoolConfig,
     sysinfo::{Disks, System},
     tokio::{
         io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, BufWriter},
         net::{TcpListener, TcpStream, tcp::OwnedWriteHalf},
         runtime::Runtime,
         signal::ctrl_c,
-        sync::{Mutex, mpsc, oneshot},
+        sync::{Mutex, mpsc, oneshot, watch},
         task::{self, JoinHandle},
-        time::sleep,
+        time::{MissedTickBehavior, interval, sleep, timeout},
     },
     tokio_util::{
         codec::{FramedRead, FramedWrite, LinesCodec},
@@ -91,20 +93,24 @@ use {
     },
     tracing::{debug, error, info, warn},
     tracing_subscriber::EnvFilter,
+    zeromq::{Endpoint, Socket, SocketRecv, SubSocket},
+    zmq::Zmq,
 };
 
 pub use subcommand::server::api;
 
 mod arguments;
+mod block_template;
 mod chain;
 pub mod ckpool;
 pub mod coinbase_builder;
-pub mod difficulty;
+mod connection;
+mod generator;
 pub mod hash_rate;
 mod job;
-mod stratifier;
 pub mod stratum;
 pub mod subcommand;
+mod zmq;
 
 pub const COIN_VALUE: u64 = 100_000_000;
 pub const USER_AGENT: &str = "para/0.5.2";
