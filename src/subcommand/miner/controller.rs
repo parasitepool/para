@@ -53,11 +53,6 @@ impl Controller {
         })
     }
 
-    pub(crate) async fn run(mut self) -> Result {
-        info!(
-            "Controller started with {} CPU cores configured",
-            self.cpu_cores
-        );
     pub(crate) async fn run(mut self) -> Result<Vec<Share>> {
         let mut shares = Vec::new();
 
