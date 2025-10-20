@@ -131,14 +131,15 @@ where
                 }
 
                 changed = template_receiver.changed() => {
-                    if self.state != State::Working {
-                        return Ok(());
-                    };
-
                     if changed.is_err() {
                         info!("Template receiver dropped, closing connection with {}", self.worker);
                         break;
                     }
+
+                    if self.state != State::Working {
+                        let _ = template_receiver.borrow_and_update();
+                        continue;
+                    };
 
                     let template = template_receiver.borrow().clone();
                     self.template_update(template).await?;
