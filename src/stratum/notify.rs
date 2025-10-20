@@ -2,7 +2,7 @@ use super::*;
 
 #[derive(Debug, PartialEq)]
 pub struct Notify {
-    pub job_id: String,
+    pub job_id: JobId,
     pub prevhash: PrevHash,
     pub coinb1: String,
     pub coinb2: String,
@@ -39,7 +39,7 @@ impl<'de> Deserialize<'de> for Notify {
     {
         let (job_id, prevhash, coinb1, coinb2, merkle_branches, version, nbits, ntime, clean_jobs) =
             <(
-                String,
+                JobId,
                 PrevHash,
                 String,
                 String,
@@ -85,7 +85,7 @@ mod tests {
 
     fn sample_notify(clean_jobs: bool) -> Notify {
         Notify {
-            job_id: "bf".into(),
+            job_id: "bf".parse().unwrap(),
             prevhash: "4d16b6f85af6e2198f44ae2a6de67f78487ae5611b77c6c0440b921e00000000"
                 .parse()
                 .unwrap(),

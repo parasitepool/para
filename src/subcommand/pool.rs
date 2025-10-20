@@ -28,10 +28,7 @@ impl Pool {
 
                     info!("Accepted connection from {worker}");
 
-                    let (reader, writer) = {
-                        let (rx, tx) = stream.into_split();
-                        (BufReader::new(rx), BufWriter::new(tx))
-                    };
+                    let (reader, writer) = stream.into_split();
 
                     let template_receiver = template_receiver.clone();
                     let config = config.clone();
