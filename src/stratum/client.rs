@@ -191,23 +191,22 @@ impl Client {
 
     pub async fn submit(
         &mut self,
-        job_id: String,
+        job_id: JobId,
         extranonce2: Extranonce,
         ntime: Ntime,
         nonce: Nonce,
-    ) -> Result {
+    ) -> Result<Submit> {
+        let submit = Submit {
+            username: self.username.clone(),
+            job_id,
+            extranonce2,
+            ntime,
+            nonce,
+            version_bits: None,
+        };
+
         let (rx, _) = self
-            .send_request(
-                "mining.submit",
-                serde_json::to_value(Submit {
-                    username: self.username.clone(),
-                    job_id,
-                    extranonce2,
-                    ntime,
-                    nonce,
-                    version_bits: None,
-                })?,
-            )
+            .send_request("mining.submit", serde_json::to_value(&submit)?)
             .await?;
 
         let (message, _) = rx.await?;
@@ -219,21 +218,21 @@ impl Client {
                 reject_reason: None,
                 ..
             } => {
-                if serde_json::from_value(result)? {
-                    Ok(())
-                } else {
-                    Err(anyhow!("Failed to submit"))
+                if let Err(err) = serde_json::from_value::<Value>(result) {
+                    error!("Failed to submit: {err}")
                 }
             }
             Message::Response {
                 error: Some(err), ..
-            } => Err(anyhow!("mining.submit error: {}", err)),
+            } => error!("mining.submit error: {}", err),
             Message::Response {
                 reject_reason: Some(reason),
                 ..
-            } => Err(anyhow!("share rejected: {}", reason)),
-            _ => Err(anyhow!("Unknown mining.submit error")),
+            } => error!("share rejected: {}", reason),
+            _ => error!("Unknown mining.submit error"),
         }
+
+        Ok(submit)
     }
 
     async fn send_request(

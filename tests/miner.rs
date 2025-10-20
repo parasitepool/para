@@ -11,12 +11,15 @@ fn miner() {
 
     let stratum_endpoint = pool.stratum_endpoint();
 
-    let mut miner = CommandBuilder::new(format!(
+    let miner = CommandBuilder::new(format!(
         "miner --once --username {} {stratum_endpoint}",
         signet_username()
     ))
     .spawn();
 
-    let exit_status = miner.wait().unwrap();
-    assert_eq!(exit_status.code(), Some(0));
+    let stdout = miner.wait_with_output().unwrap();
+    let output =
+        serde_json::from_str::<Vec<Share>>(&String::from_utf8_lossy(&stdout.stdout)).unwrap();
+
+    assert_eq!(output.len(), 1);
 }
