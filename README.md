@@ -147,8 +147,9 @@ To build Rust programs on Windows, you need one of two ABI configurations:
   1. MSVC
      - `rustup` configures Rust to target this ABI by default on Windows
      - [Visual Studio](https://visualstudio.microsoft.com/downloads/) with
-     [Visual Studio Build Tools for C++](https://visualstudio.microsoft.com/visual-cpp-build-tools/) is required for building with MSVC
-       - this can be a very large build (~4GB)
+     [Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
+     is required for building with MSVC
+       - this can be a very large install (~4GB)
   2. GNU (GCC)
      - Available from the `rustup toolchain install stable-gnu` command
      - Requires [MinGW/MSYS2](https://www.msys2.org/)
