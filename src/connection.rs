@@ -100,7 +100,7 @@ where
                         "mining.authorize" => {
                             info!("AUTHORIZE from {} with {params}", self.worker);
 
-                            if !matches!(self.state, State::Subscribed) {
+                            if self.state != State::Subscribed {
                                 self.send_error(id.clone(), -1, "Invalid method", None).await?;
                                 continue;
                             }
@@ -114,7 +114,7 @@ where
                         "mining.submit" => {
                             info!("SUBMIT from {} with params {params}", self.worker);
 
-                            if !matches!(self.state, State::Working) {
+                            if self.state != State::Working {
                                 self.send_error(id.clone(), -1, "Unauthorized", None).await?;
                                 continue;
                             }
@@ -131,10 +131,15 @@ where
                 }
 
                 changed = template_receiver.changed() => {
+                    if self.state != State::Working {
+                        return Ok(());
+                    };
+
                     if changed.is_err() {
                         info!("Template receiver dropped, closing connection with {}", self.worker);
                         break;
                     }
+
                     let template = template_receiver.borrow().clone();
                     self.template_update(template).await?;
                 }
@@ -145,10 +150,6 @@ where
     }
 
     async fn template_update(&mut self, template: Arc<BlockTemplate>) -> Result {
-        if self.state != State::Working {
-            return Ok(());
-        };
-
         let (address, extranonce1) = match (&self.address, &self.extranonce1) {
             (Some(a), Some(e)) => (a.clone(), e.clone()),
             _ => return Ok(()),
