@@ -40,43 +40,54 @@ impl Controller {
 
         loop {
             tokio::select! {
-                Some(msg) = self.client.incoming.recv() => {
-                     match msg {
-                        Message::Notification { method, params } => {
-                            self.handle_notification(method, params).await?;
-                        }
-                        Message::Request { id, method, params } => {
-                            self.handle_request(id, method, params).await?;
-                        }
-                        _ => warn!("Unexpected message on incoming: {:?}", msg)
-                    }
-                },
-                Some((job_id, header, extranonce2)) = self.share_rx.recv() => {
-                    info!("Valid header found: {:?}", header);
-
-                    match self.client.submit(job_id, extranonce2.clone(), header.time.into(), header.nonce.into()).await {
-                        Err(err) => warn!("Failed to submit share: {err}"),
-                        Ok(submit) => {
-                            shares.push(Share {
-                                extranonce1: self.extranonce1.clone(),
-                                extranonce2,
-                                job_id,
-                                username: submit.username,
-                                nonce: submit.nonce,
-                                ntime: submit.ntime,
-                                version_bits: submit.version_bits,
-                            })
-                        },
-                    }
-
-                    if self.once {
-                        info!("Share found, exiting");
-                        break;
-                    }
-                }
                 _ = ctrl_c() => {
                     info!("Shutting down client and hasher");
                     break;
+                },
+                maybe = self.client.incoming.recv() => match maybe {
+                     Some(msg) => {
+                        match msg {
+                            Message::Notification { method, params } => {
+                                self.handle_notification(method, params).await?;
+                            }
+                            Message::Request { id, method, params } => {
+                                self.handle_request(id, method, params).await?;
+                            }
+                            _ => warn!("Unexpected message on incoming: {:?}", msg)
+                        }
+                    }
+                    None => {
+                        info!("Incoming closed, shutting down");
+                        break;
+                    }
+                },
+                maybe = self.share_rx.recv() => match maybe {
+                    Some((job_id, header, extranonce2)) => {
+                        info!("Valid header found: {:?}", header);
+
+                        match self.client.submit(job_id, extranonce2.clone(), header.time.into(), header.nonce.into()).await {
+                            Err(err) => warn!("Failed to submit share: {err}"),
+                            Ok(submit) => {
+                                shares.push(Share {
+                                    extranonce1: self.extranonce1.clone(),
+                                    extranonce2,
+                                    job_id,
+                                    username: submit.username,
+                                    nonce: submit.nonce,
+                                    ntime: submit.ntime,
+                                    version_bits: submit.version_bits,
+                                })
+                            },
+                        }
+
+                        if self.once {
+                            info!("Share found, exiting");
+                            break;
+                        }
+                    }
+                    None => {
+                        info!("Share channel closed");
+                    }
                 }
             }
         }
