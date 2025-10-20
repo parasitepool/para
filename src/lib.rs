@@ -122,6 +122,7 @@ pub const USER_AGENT: &str = "para/0.5.2";
 pub const EXTRANONCE1_SIZE: usize = 4;
 pub const EXTRANONCE2_SIZE: usize = 8;
 pub const MAX_MESSAGE_SIZE: usize = 32 * 1024;
+/// Subscription IDs do not seem to have a purpose in Stratum, hardcoding for now
 pub const SUBSCRIPTION_ID: &str = "deadbeef";
 pub const LRU_CACHE_SIZE: usize = 256;
 
