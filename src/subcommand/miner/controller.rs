@@ -5,8 +5,8 @@ pub(crate) struct Controller {
     pool_difficulty: Arc<Mutex<Difficulty>>,
     extranonce1: Extranonce,
     extranonce2_size: u32,
-    share_rx: mpsc::Receiver<(Header, Extranonce, String)>,
-    share_tx: mpsc::Sender<(Header, Extranonce, String)>,
+    share_rx: mpsc::Receiver<(JobId, Header, Extranonce)>,
+    share_tx: mpsc::Sender<(JobId, Header, Extranonce)>,
     cancel: CancellationToken,
     current_mining_cancel: Option<CancellationToken>,
     cpu_cores: usize,
@@ -58,15 +58,21 @@ impl Controller {
 
         loop {
             tokio::select! {
-                Some(msg) = self.client.incoming.recv() => {
-                     match msg {
-                        Message::Notification { method, params } => {
-                            self.handle_notification(method, params).await?;
+                _ = ctrl_c() => {
+                    info!("Shutting down client and hasher");
+                    break;
+                },
+                maybe = self.client.incoming.recv() => match maybe {
+                     Some(msg) => {
+                        match msg {
+                            Message::Notification { method, params } => {
+                                self.handle_notification(method, params).await?;
+                            }
+                            Message::Request { id, method, params } => {
+                                self.handle_request(id, method, params).await?;
+                            }
+                            _ => warn!("Unexpected message on incoming: {:?}", msg)
                         }
-                        Message::Request { id, method, params } => {
-                            self.handle_request(id, method, params).await?;
-                        }
-                        _ => warn!("Unexpected message on incoming: {:?}", msg)
                     }
                 },
                 Some((header, extranonce2, job_id)) = self.share_rx.recv() => {
@@ -85,11 +91,37 @@ impl Controller {
                                 version_bits: submit.version_bits,
                             })
                         },
-                    }
-
-                    if self.once {
-                        info!("Share found, exiting");
+                    None => {
+                        info!("Incoming closed, shutting down");
                         break;
+                    }
+                },
+                maybe = self.share_rx.recv() => match maybe {
+                    Some((job_id, header, extranonce2)) => {
+                        info!("Valid header found: {:?}", header);
+
+                        match self.client.submit(job_id, extranonce2.clone(), header.time.into(), header.nonce.into()).await {
+                            Err(err) => warn!("Failed to submit share: {err}"),
+                            Ok(submit) => {
+                                shares.push(Share {
+                                    extranonce1: self.extranonce1.clone(),
+                                    extranonce2,
+                                    job_id,
+                                    username: submit.username,
+                                    nonce: submit.nonce,
+                                    ntime: submit.ntime,
+                                    version_bits: submit.version_bits,
+                                })
+                            },
+                        }
+
+                        if self.once {
+                            info!("Share found, exiting");
+                            break;
+                        }
+                    }
+                    None => {
+                        info!("Share channel closed");
                     }
                 }
                 _ = ctrl_c() => {

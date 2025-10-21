@@ -1,20 +1,14 @@
-use {super::*, crate::job::Job};
+use {
+    super::*,
+    crate::{job::Job, jobs::Jobs},
+};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) enum State {
     Init,
-    Configured {
-        version_mask: Option<Version>,
-    },
-    Subscribed {
-        extranonce1: Extranonce,
-        _user_agent: String,
-        version_mask: Option<Version>,
-    },
-    Authorized,
-    Working {
-        job: Box<Job>,
-    },
+    Configured,
+    Subscribed,
+    Working,
 }
 
 pub(crate) struct Connection<R, W> {
@@ -23,7 +17,13 @@ pub(crate) struct Connection<R, W> {
     reader: FramedRead<R, LinesCodec>,
     writer: FramedWrite<W, LinesCodec>,
     template_receiver: watch::Receiver<Arc<BlockTemplate>>,
+    jobs: Jobs,
     state: State,
+    address: Option<Address>,
+    authorized: Option<SystemTime>,
+    version_mask: Option<Version>,
+    extranonce1: Option<Extranonce>,
+    user_agent: Option<String>,
 }
 
 impl<R, W> Connection<R, W>
@@ -44,7 +44,13 @@ where
             reader: FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_MESSAGE_SIZE)),
             writer: FramedWrite::new(writer, LinesCodec::new()),
             template_receiver,
+            jobs: Jobs::new(),
             state: State::Init,
+            address: None,
+            authorized: None,
+            version_mask: None,
+            extranonce1: None,
+            user_agent: None,
         }
     }
 
@@ -60,13 +66,18 @@ where
                     };
 
                     let Message::Request { id, method, params } = message else {
-                        warn!(?message, "Ignoring any notifications or responses");
+                        warn!(?message, "Ignoring any notifications or responses from workers");
                         continue;
                     };
 
                     match method.as_str() {
                         "mining.configure" => {
                             info!("CONFIGURE from {} with {params}", self.worker);
+
+                            if !matches!(self.state,  State::Init | State::Configured) {
+                                self.send_error(id.clone(), -1, "Invalid method", None).await?;
+                                continue;
+                            };
 
                             let configure = serde_json::from_value::<Configure>(params)
                                 .context(format!("failed to deserialize {method}"))?;
@@ -76,6 +87,11 @@ where
                         "mining.subscribe" => {
                             info!("SUBSCRIBE from {} with {params}", self.worker);
 
+                            if !matches!(self.state,  State::Init | State::Configured) {
+                                self.send_error(id.clone(), -1, "Invalid method", None).await?;
+                                continue;
+                            };
+
                             let subscribe = serde_json::from_value::<Subscribe>(params)
                                 .context(format!("failed to deserialize {method}"))?;
 
@@ -83,6 +99,11 @@ where
                         }
                         "mining.authorize" => {
                             info!("AUTHORIZE from {} with {params}", self.worker);
+
+                            if self.state != State::Subscribed {
+                                self.send_error(id.clone(), -1, "Invalid method", None).await?;
+                                continue;
+                            }
 
                             let authorize = serde_json::from_value::<Authorize>(params)
                                 .context(format!("failed to deserialize {method}"))?;
@@ -92,6 +113,11 @@ where
 
                         "mining.submit" => {
                             info!("SUBMIT from {} with params {params}", self.worker);
+
+                            if self.state != State::Working {
+                                self.send_error(id.clone(), -1, "Unauthorized", None).await?;
+                                continue;
+                            }
 
                             let submit = serde_json::from_value::<Submit>(params)
                                 .context(format!("failed to deserialize {method}"))?;
@@ -109,7 +135,13 @@ where
                         info!("Template receiver dropped, closing connection with {}", self.worker);
                         break;
                     }
-                    let template = template_receiver.borrow_and_update().clone();
+
+                    if self.state != State::Working {
+                        let _ = template_receiver.borrow_and_update();
+                        continue;
+                    };
+
+                    let template = template_receiver.borrow().clone();
                     self.template_update(template).await?;
                 }
             }
@@ -119,40 +151,37 @@ where
     }
 
     async fn template_update(&mut self, template: Arc<BlockTemplate>) -> Result {
-        let State::Working { ref job } = self.state else {
-            return Ok(());
+        let (address, extranonce1) = match (&self.address, &self.extranonce1) {
+            (Some(a), Some(e)) => (a.clone(), e.clone()),
+            _ => return Ok(()),
         };
 
-        let new_job = Job::new(
-            job.address.clone(),
-            job.extranonce1.clone(),
-            job.version_mask,
+        let new_job = Arc::new(Job::new(
+            address,
+            extranonce1,
+            self.version_mask,
             template,
-            "deadbeef".to_string(),
-        )?;
+            self.jobs.next_id(),
+        )?);
 
-        let old_nbits = job.nbits();
-        let new_nbits = new_job.nbits();
-        if new_nbits != old_nbits {
-            let difficulty = Difficulty::from(new_nbits);
-            info!("Sending new difficulty {difficulty}");
-            self.send(Message::Notification {
-                method: "mining.set_difficulty".into(),
-                params: json!(SetDifficulty(difficulty)),
-            })
-            .await?;
-        }
+        let clean_jobs = match self.jobs.latest() {
+            Some(prev) if prev.template.height == new_job.template.height => {
+                self.jobs.insert(new_job.clone());
+                false
+            }
+            _ => {
+                self.jobs.insert_and_clean(new_job.clone());
+                true
+            }
+        };
 
         info!("Template updated sending NOTIFY");
+
         self.send(Message::Notification {
             method: "mining.notify".into(),
-            params: json!(new_job.notify()?),
+            params: json!(new_job.notify(clean_jobs)?),
         })
         .await?;
-
-        self.state = State::Working {
-            job: Box::new(new_job),
-        };
 
         Ok(())
     }
@@ -175,10 +204,8 @@ where
             };
 
             self.send(message).await?;
-
-            self.state = State::Configured {
-                version_mask: Some(version_mask),
-            };
+            self.version_mask = Some(version_mask);
+            self.state = State::Configured;
         } else {
             warn!("Unsupported extension {:?}", configure);
 
@@ -201,28 +228,24 @@ where
     }
 
     async fn subscribe(&mut self, id: Id, subscribe: Subscribe) -> Result {
-        let version_mask = match &self.state {
-            State::Init => None,
-            State::Configured { version_mask } => *version_mask,
-            _ => bail!("SUBSCRIBE not allowed in current state"),
-        };
-
         if let Some(extranonce1) = subscribe.extranonce1 {
-            warn!("Ignoring extranonce1 suggestion: {extranonce1}");
+            warn!("Ignoring worker extranonce1 suggestion: {extranonce1}");
         }
 
         let extranonce1 = Extranonce::generate(EXTRANONCE1_SIZE);
 
+        let subscriptions = vec![
+            (
+                "mining.set_difficulty".to_string(),
+                SUBSCRIPTION_ID.to_string(),
+            ),
+            ("mining.notify".to_string(), SUBSCRIPTION_ID.to_string()),
+        ];
+
         let result = SubscribeResult {
-            subscriptions: vec![("mining.notify".to_string(), "deadbeef".to_string())],
+            subscriptions,
             extranonce1: extranonce1.clone(),
             extranonce2_size: EXTRANONCE2_SIZE.try_into().unwrap(),
-        };
-
-        self.state = State::Subscribed {
-            _user_agent: subscribe.user_agent,
-            extranonce1,
-            version_mask,
         };
 
         self.send(Message::Response {
@@ -233,18 +256,18 @@ where
         })
         .await?;
 
+        self.extranonce1 = Some(extranonce1.clone());
+        self.user_agent = Some(subscribe.user_agent);
+        self.state = State::Subscribed;
+
         Ok(())
     }
 
     async fn authorize(&mut self, id: Id, authorize: Authorize) -> Result {
-        let State::Subscribed {
-            extranonce1,
-            version_mask,
-            ..
-        } = &self.state
-        else {
-            bail!("AUTHORIZE not allowed in current state");
-        };
+        let extranonce1 = self
+            .extranonce1
+            .clone()
+            .ok_or_else(|| anyhow!("missing extranonce1 do SUBSCRIBE first"))?;
 
         let address = Address::from_str(
             authorize
@@ -260,13 +283,13 @@ where
             authorize.username, self.worker
         ))?;
 
-        let job = Job::new(
-            address,
+        let job = Arc::new(Job::new(
+            address.clone(),
             extranonce1.clone(),
-            *version_mask,
-            self.template_receiver.borrow_and_update().clone(),
-            "deadbeef".to_string(),
-        )?;
+            self.version_mask,
+            self.template_receiver.borrow().clone(),
+            self.jobs.next_id(),
+        )?);
 
         self.send(Message::Response {
             id,
@@ -276,7 +299,11 @@ where
         })
         .await?;
 
-        self.state = State::Authorized;
+        self.address = Some(address);
+
+        if self.authorized.is_none() {
+            self.authorized = Some(SystemTime::now());
+        }
 
         info!("Sending SET DIFFICULTY");
 
@@ -290,23 +317,29 @@ where
 
         self.send(Message::Notification {
             method: "mining.notify".into(),
-            params: json!(job.notify()?),
+            params: json!(job.notify(true)?),
         })
         .await?;
 
-        self.state = State::Working { job: Box::new(job) };
+        self.jobs.insert_and_clean(job.clone());
+
+        self.state = State::Working;
 
         Ok(())
     }
 
     async fn submit(&mut self, id: Id, submit: Submit) -> Result {
-        let State::Working { job } = &self.state else {
-            bail!("SUBMIT not allowed in current state");
+        let Some(job) = self.jobs.get(&submit.job_id).cloned() else {
+            self.send_error(id, 21, "Stale job", None).await?;
+            return Ok(());
         };
 
         let version = if let Some(version_bits) = submit.version_bits {
             let Some(version_mask) = job.version_mask else {
-                bail!("Version bits found but no version rolling was negotiated");
+                self.send_error(id, 23, "Version rolling not negotiated", None)
+                    .await?;
+
+                return Ok(());
             };
 
             assert!(version_bits != Version::from(0));
@@ -340,6 +373,11 @@ where
             bits: nbits.to_compact(),
             nonce: submit.nonce.into(),
         };
+
+        if self.jobs.is_duplicate(header.block_hash()) {
+            self.send_error(id, 22, "Duplicate share", None).await?;
+            return Ok(());
+        }
 
         let blockhash = header.validate_pow(Target::from_compact(nbits.into()))?;
 
@@ -407,5 +445,25 @@ where
         let frame = serde_json::to_string(&message)?;
         self.writer.send(frame).await?;
         Ok(())
+    }
+
+    async fn send_error(
+        &mut self,
+        id: Id,
+        code: i32,
+        msg: impl Into<String>,
+        traceback: Option<serde_json::Value>,
+    ) -> Result {
+        self.send(Message::Response {
+            id,
+            result: None,
+            error: Some(JsonRpcError {
+                error_code: code,
+                message: msg.into(),
+                traceback,
+            }),
+            reject_reason: None,
+        })
+        .await
     }
 }

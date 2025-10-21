@@ -23,7 +23,7 @@ pub(crate) struct Miner {
 pub struct Share {
     pub extranonce1: Extranonce,
     pub extranonce2: Extranonce,
-    pub job_id: String,
+    pub job_id: JobId,
     pub nonce: Nonce,
     pub ntime: Ntime,
     pub username: String,
