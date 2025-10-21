@@ -12,6 +12,8 @@ pub(crate) struct Controller {
     cpu_cores: usize,
     extranonce2_counters: Vec<u32>,
     once: bool,
+    username: String,
+    shares: Vec<Share>,
 }
 
 impl Controller {
@@ -19,6 +21,7 @@ impl Controller {
         mut client: Client,
         cpu_cores: Option<usize>,
         once: bool,
+        username: String,
     ) -> Result<Self> {
         let (subscribe, _, _) = client.subscribe().await?;
         client.authorize().await?;
@@ -50,10 +53,12 @@ impl Controller {
             cpu_cores: num_cores,
             extranonce2_counters: vec![0; num_cores],
             once,
+            username,
+            shares: Vec::new(),
         })
     }
 
-    pub(crate) async fn run(mut self) -> Result<()> {
+    pub(crate) async fn run(mut self) -> Result<Vec<Share>> {
         loop {
             tokio::select! {
                 _ = ctrl_c() => {
@@ -83,7 +88,22 @@ impl Controller {
                     Some((job_id, header, extranonce2)) => {
                         info!("Valid share found: nonce={}, hash={:?}", header.nonce, header.block_hash());
 
-                        match self.client.submit(job_id, extranonce2, header.time.into(), header.nonce.into()).await {
+                        let job_id_parsed = job_id.parse::<JobId>()
+                            .unwrap_or_else(|_| JobId::from(job_id.parse::<u64>().unwrap_or(0)));
+
+                        let share = Share {
+                            extranonce1: self.extranonce1.clone(),
+                            extranonce2: extranonce2.clone(),
+                            job_id: job_id_parsed,
+                            nonce: header.nonce.into(),
+                            ntime: header.time.into(),
+                            username: self.username.clone(),
+                            version_bits: None,
+                        };
+
+                        self.shares.push(share);
+
+                        match self.client.submit(job_id_parsed, extranonce2, header.time.into(), header.nonce.into()).await {
                             Err(err) => warn!("Failed to submit share: {err}"),
                             Ok(_) => info!("Share submitted successfully"),
                         }
@@ -103,7 +123,7 @@ impl Controller {
 
         self.client.disconnect().await?;
 
-        Ok(())
+        Ok(self.shares)
     }
 
     async fn handle_notification(&mut self, method: String, params: Value) -> Result {
