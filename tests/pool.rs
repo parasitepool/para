@@ -43,3 +43,64 @@ fn pool_update_interval() {
 
     assert!(t1.ntime < t2.ntime);
 }
+
+// TODO:
+// sending multiple configure at beginning is allowed for negotation
+// sending submit before authorize fails
+// sending authorize before subscribe fails
+// unknown method return something?
+//
+
+#[tokio::test]
+async fn stratum_happy_path() {
+    let pool = TestPool::spawn();
+
+    let mut client = pool.stratum_client().await;
+
+    let (subscribe, _, _) = client.subscribe().await.unwrap();
+
+    assert_eq!(subscribe.subscriptions.len(), 2);
+
+    assert!(client.authorize().await.is_ok());
+
+    let set_difficulty = match client.incoming.recv().await.unwrap() {
+        Message::Notification { method: _, params } => {
+            serde_json::from_value::<SetDifficulty>(params).unwrap()
+        }
+        _ => panic!(),
+    };
+
+    assert!(set_difficulty.difficulty() < Difficulty::from(0.01));
+
+    let notify = match client.incoming.recv().await.unwrap() {
+        Message::Notification { method: _, params } => {
+            serde_json::from_value::<Notify>(params).unwrap()
+        }
+        _ => panic!(),
+    };
+
+    assert_eq!(notify.job_id, JobId::from(0));
+    assert!(notify.clean_jobs);
+}
+
+#[tokio::test]
+async fn stratum_some_errors() {
+    let pool = TestPool::spawn();
+
+    let mut client = pool.stratum_client().await;
+
+    assert!(
+        client
+            .authorize()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("Method not allowed in current state")
+    );
+
+    let (subscribe, _, _) = client.subscribe().await.unwrap();
+
+    assert_eq!(subscribe.subscriptions.len(), 2);
+
+    assert!(client.authorize().await.is_ok());
+}

@@ -1,13 +1,13 @@
 use super::*;
 
-type PendingResponses = Arc<Mutex<BTreeMap<Id, oneshot::Sender<(Message, usize)>>>>;
+type Pending = Arc<Mutex<BTreeMap<Id, oneshot::Sender<(Message, usize)>>>>;
 
 pub struct Client {
     pub incoming: mpsc::Receiver<Message>,
     id_counter: AtomicU64,
     listener: JoinHandle<()>,
     password: String,
-    pending: PendingResponses,
+    pending: Pending,
     tcp_writer: BufWriter<OwnedWriteHalf>,
     username: String,
 }
@@ -28,7 +28,7 @@ impl Client {
 
         let (incoming_tx, incoming_rx) = mpsc::channel(32);
 
-        let pending: PendingResponses = Arc::new(Mutex::new(BTreeMap::new()));
+        let pending: Pending = Arc::new(Mutex::new(BTreeMap::new()));
 
         let listener = {
             let incoming_tx = incoming_tx.clone();
@@ -56,7 +56,7 @@ impl Client {
     async fn listener<R>(
         mut tcp_reader: BufReader<R>,
         incoming: mpsc::Sender<Message>,
-        pending: PendingResponses,
+        pending: Pending,
     ) where
         R: AsyncRead + Unpin,
     {

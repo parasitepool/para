@@ -75,7 +75,7 @@ where
                             info!("CONFIGURE from {} with {params}", self.worker);
 
                             if !matches!(self.state,  State::Init | State::Configured) {
-                                self.send_error(id.clone(), -1, "Invalid method", None).await?;
+                                self.send_error(id.clone(), -32001, "Method not allowed in current state", None).await?;
                                 continue;
                             };
 
@@ -88,7 +88,7 @@ where
                             info!("SUBSCRIBE from {} with {params}", self.worker);
 
                             if !matches!(self.state,  State::Init | State::Configured) {
-                                self.send_error(id.clone(), -1, "Invalid method", None).await?;
+                                self.send_error(id.clone(), -32001, "Method not allowed in current state", None).await?;
                                 continue;
                             };
 
@@ -101,7 +101,7 @@ where
                             info!("AUTHORIZE from {} with {params}", self.worker);
 
                             if self.state != State::Subscribed {
-                                self.send_error(id.clone(), -1, "Invalid method", None).await?;
+                                self.send_error(id.clone(), -32001, "Method not allowed in current state", None).await?;
                                 continue;
                             }
 
@@ -110,12 +110,11 @@ where
 
                             self.authorize(id, authorize).await?
                         }
-
                         "mining.submit" => {
                             info!("SUBMIT from {} with params {params}", self.worker);
 
                             if self.state != State::Working {
-                                self.send_error(id.clone(), -1, "Unauthorized", None).await?;
+                                self.send_error(id.clone(), -32002, "Unauthorized", None).await?;
                                 continue;
                             }
 
@@ -141,7 +140,7 @@ where
                         continue;
                     };
 
-                    let template = template_receiver.borrow().clone();
+                    let template = template_receiver.borrow_and_update().clone();
                     self.template_update(template).await?;
                 }
             }
