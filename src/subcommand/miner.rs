@@ -19,6 +19,17 @@ pub(crate) struct Miner {
     monitor_performance: bool,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Share {
+    pub extranonce1: Extranonce,
+    pub extranonce2: Extranonce,
+    pub job_id: JobId,
+    pub nonce: Nonce,
+    pub ntime: Ntime,
+    pub username: String,
+    pub version_bits: Option<Version>,
+}
+
 impl Miner {
     pub(crate) fn run(&self) -> Result {
         let runtime = self.build_runtime()?;
@@ -48,9 +59,16 @@ impl Miner {
                 self.spawn_performance_monitor();
             }
 
-            let controller = Controller::new(client, self.cpu_cores, self.once).await?;
+            let controller =
+                Controller::new(client, self.cpu_cores, self.once, self.username.clone()).await?;
 
-            controller.run().await
+            let shares = controller.run().await?;
+
+            if !shares.is_empty() {
+                println!("{}", serde_json::to_string_pretty(&shares)?);
+            }
+
+            Ok(())
         })
     }
 
