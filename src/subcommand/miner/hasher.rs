@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 pub(crate) struct Hasher {
     pub(crate) extranonce2: Extranonce,
     pub(crate) header: Header,
-    pub(crate) job_id: JobId,
+    pub(crate) job_id: String,
     pub(crate) pool_target: Target,
 }
 
@@ -13,43 +13,47 @@ impl Hasher {
     pub(crate) fn hash(
         &mut self,
         cancel: CancellationToken,
-    ) -> Result<(JobId, Header, Extranonce)> {
-        let mut hashes = 0;
-        let start = Instant::now();
-        let mut last_log = start;
-
-        let span =
-            tracing::info_span!("hasher", job_id = %self.job_id, extranonce2 = %self.extranonce2);
-        let _guard = span.enter();
-
+    ) -> Result<(String, Header, Extranonce)> {
         let start = Instant::now();
         let mut total_hashes = 0u64;
         let mut last_report = start;
         const REPORT_INTERVAL: Duration = Duration::from_secs(5);
 
-        // Iterate through the full nonce range (0 to u32::MAX)
-        for nonce in 0..=u32::MAX {
+        let span =
+            tracing::info_span!("hasher", job_id = %self.job_id, extranonce2 = %self.extranonce2);
+        let _guard = span.enter();
+
+        loop {
             if cancel.is_cancelled() {
                 return Err(anyhow!("hasher cancelled"));
             }
 
-            for _ in 0..10000 {
+            let batch_size = if self.header.nonce > u32::MAX - 10000 {
+                (u32::MAX - self.header.nonce) as usize + 1
+            } else {
+                10000
+            };
+
+            for _ in 0..batch_size {
                 let hash = self.header.block_hash();
-                hashes += 1;
+                total_hashes += 1;
 
                 if self.pool_target.is_met_by(hash) {
                     info!("Solved block with hash: {hash}");
-                    return Ok((self.job_id, self.header, self.extranonce2.clone()));
+                    return Ok((self.job_id.clone(), self.header, self.extranonce2.clone()));
                 }
 
-                self.header.nonce = self
-                    .header
-                    .nonce
-                    .checked_add(1)
-                    .ok_or_else(|| anyhow!("nonce space exhausted"))?;
+                if let Some(next_nonce) = self.header.nonce.checked_add(1) {
+                    self.header.nonce = next_nonce;
+                } else {
+                    return Err(anyhow!("nonce space exhausted"));
+                }
             }
 
-            // Periodic hashrate reporting
+            if batch_size < 10000 {
+                return Err(anyhow!("nonce space exhausted"));
+            }
+
             let now = Instant::now();
             if now.duration_since(last_report) >= REPORT_INTERVAL {
                 let elapsed = now.duration_since(start).as_secs_f64().max(1e-6);
@@ -57,14 +61,7 @@ impl Hasher {
                 info!("Hashrate: {}", HashRate(hashrate));
                 last_report = now;
             }
-
-            if self.pool_target.is_met_by(hash) {
-                info!("Solution found: nonce={}, hash={:?}", nonce, hash);
-                return Ok((self.header, self.extranonce2.clone(), self.job_id.clone()));
-            }
         }
-
-        Err(anyhow!("nonce range exhausted"))
     }
 }
 
@@ -155,7 +152,7 @@ mod tests {
             header: header(None, None),
             pool_target: target,
             extranonce2: "0000000000".parse().unwrap(),
-            job_id: "bf".parse().unwrap(),
+            job_id: "bf".into(),
         };
 
         let (_job_id, header, _extranonce2) = hasher.hash(CancellationToken::new()).unwrap();
@@ -164,20 +161,27 @@ mod tests {
 
     #[test]
     fn hasher_nonce_space_exhausted() {
-        let target = shift(32);
+        let target = Target::from_be_bytes([0u8; 32]);
         let mut hasher = Hasher {
-            header: header(None, Some(u32::MAX - 1)),
+            header: header(None, Some(u32::MAX - 100)),
             pool_target: target,
             extranonce2: "0000000000".parse().unwrap(),
-            job_id: "bb".parse().unwrap(),
+            job_id: "bg".into(),
         };
 
-        // Start from u32::MAX - 1, but the hash() method always iterates 0..=u32::MAX
-        // So we need to set the header nonce to near the end to test exhaustion
-        // Actually, with the new implementation, we can't test partial ranges anymore
-        // This test needs to be reconsidered or removed
         let result = hasher.hash(CancellationToken::new());
-        assert!(result.is_err());
+        assert!(
+            result.is_err(),
+            "Expected nonce space exhausted error, got: {:?}",
+            result
+        );
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("nonce space exhausted"),
+            "Expected 'nonce space exhausted' error"
+        );
     }
 
     #[test]
@@ -223,7 +227,7 @@ mod tests {
                 header: header(None, None),
                 pool_target: target,
                 extranonce2: "0000000000".parse().unwrap(),
-                job_id: "abc".parse().unwrap(),
+                job_id: format!("test_{zeros}"),
             };
 
             let result = hasher.hash(CancellationToken::new());
@@ -253,7 +257,7 @@ mod tests {
             "Mining should find solution for easy target"
         );
 
-        let (header, _, _) = result.unwrap();
+        let (_, header, _) = result.unwrap();
         assert!(
             target.is_met_by(header.block_hash()),
             "Solution should meet target"
