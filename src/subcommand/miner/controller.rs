@@ -5,8 +5,8 @@ pub(crate) struct Controller {
     pool_difficulty: Arc<Mutex<Difficulty>>,
     extranonce1: Extranonce,
     extranonce2_size: u32,
-    share_rx: mpsc::Receiver<(JobId, Header, Extranonce)>,
-    share_tx: mpsc::Sender<(JobId, Header, Extranonce)>,
+    share_rx: mpsc::Receiver<(String, Header, Extranonce)>,
+    share_tx: mpsc::Sender<(String, Header, Extranonce)>,
     cancel: CancellationToken,
     current_mining_cancel: Option<CancellationToken>,
     cpu_cores: usize,
@@ -53,17 +53,17 @@ impl Controller {
         })
     }
 
-    pub(crate) async fn run(mut self) -> Result<Vec<Share>> {
-        let mut shares = Vec::new();
-
+    pub(crate) async fn run(mut self) -> Result<()> {
         loop {
             tokio::select! {
                 _ = ctrl_c() => {
-                    info!("Shutting down client and hasher");
+                    info!("Shutting down controller and mining operations");
+                    self.shutdown_mining().await;
+                    self.client.disconnect().await?;
                     break;
                 },
                 maybe = self.client.incoming.recv() => match maybe {
-                     Some(msg) => {
+                    Some(msg) => {
                         match msg {
                             Message::Notification { method, params } => {
                                 self.handle_notification(method, params).await?;
@@ -74,23 +74,6 @@ impl Controller {
                             _ => warn!("Unexpected message on incoming: {:?}", msg)
                         }
                     }
-                },
-                Some((header, extranonce2, job_id)) = self.share_rx.recv() => {
-                    info!("Valid share found: nonce={}, hash={:?}", header.nonce, header.block_hash());
-
-                    match self.client.submit(job_id.clone(), extranonce2.clone(), header.time.into(), header.nonce.into()).await {
-                        Err(err) => warn!("Failed to submit share: {err}"),
-                        Ok(submit) => {
-                            shares.push(Share {
-                                extranonce1: self.extranonce1.clone(),
-                                extranonce2,
-                                job_id,
-                                username: submit.username,
-                                nonce: submit.nonce,
-                                ntime: submit.ntime,
-                                version_bits: submit.version_bits,
-                            })
-                        },
                     None => {
                         info!("Incoming closed, shutting down");
                         break;
@@ -98,21 +81,11 @@ impl Controller {
                 },
                 maybe = self.share_rx.recv() => match maybe {
                     Some((job_id, header, extranonce2)) => {
-                        info!("Valid header found: {:?}", header);
+                        info!("Valid share found: nonce={}, hash={:?}", header.nonce, header.block_hash());
 
-                        match self.client.submit(job_id, extranonce2.clone(), header.time.into(), header.nonce.into()).await {
+                        match self.client.submit(job_id, extranonce2, header.time.into(), header.nonce.into()).await {
                             Err(err) => warn!("Failed to submit share: {err}"),
-                            Ok(submit) => {
-                                shares.push(Share {
-                                    extranonce1: self.extranonce1.clone(),
-                                    extranonce2,
-                                    job_id,
-                                    username: submit.username,
-                                    nonce: submit.nonce,
-                                    ntime: submit.ntime,
-                                    version_bits: submit.version_bits,
-                                })
-                            },
+                            Ok(_) => info!("Share submitted successfully"),
                         }
 
                         if self.once {
@@ -122,20 +95,15 @@ impl Controller {
                     }
                     None => {
                         info!("Share channel closed");
+                        break;
                     }
-                }
-                _ = ctrl_c() => {
-                    info!("Shutting down controller and mining operations");
-                    self.shutdown_mining().await;
-                    self.client.disconnect().await?;
-                    break;
                 }
             }
         }
 
         self.client.disconnect().await?;
 
-        Ok(shares)
+        Ok(())
     }
 
     async fn handle_notification(&mut self, method: String, params: Value) -> Result {
@@ -185,7 +153,7 @@ impl Controller {
                         },
                         pool_target,
                         extranonce2: extranonce2.clone(),
-                        job_id: notify.job_id.clone(),
+                        job_id: notify.job_id.clone().to_string(),
                     };
 
                     let share_tx_clone = share_tx.clone();
