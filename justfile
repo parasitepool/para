@@ -13,10 +13,6 @@ ci: clippy
   cargo fmt -- --check
   cargo test --all
 
-cii: clippy
-  cargo fmt -- --check
-  cargo test --all -- --skip with_ckpool
-
 ignored:
   cargo test --all -- --ignored
 
