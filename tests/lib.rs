@@ -40,7 +40,10 @@ use {
     },
     harness::bitcoind::Bitcoind,
     para::{
-        stratum::{self, Difficulty, JobId, Message, Notify, SetDifficulty},
+        stratum::{
+            self, Difficulty, Extranonce, JobId, Message, Nonce, Notify, Ntime, SetDifficulty,
+            Version,
+        },
         subcommand::{
             miner::Share,
             sync::{ShareBatch, Sync, SyncResponse},

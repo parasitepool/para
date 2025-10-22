@@ -127,6 +127,40 @@ impl Client {
         }
     }
 
+    pub async fn configure(
+        &mut self,
+        extensions: Vec<String>,
+        version_rolling_mask: Option<Version>,
+    ) -> Result<(Value, Duration, usize)> {
+        let (rx, instant) = self
+            .send_request(
+                "mining.configure",
+                serde_json::to_value(Configure {
+                    extensions,
+                    minimum_difficulty_value: None,
+                    version_rolling_mask,
+                    version_rolling_min_bit_count: None,
+                })?,
+            )
+            .await?;
+
+        let (message, bytes_read) = rx.await?;
+
+        let duration = instant.elapsed();
+
+        match message {
+            Message::Response {
+                result: Some(result),
+                error: None,
+                ..
+            } => Ok((result, duration, bytes_read)),
+            Message::Response {
+                error: Some(err), ..
+            } => Err(anyhow!("mining.configure error: {}", err)),
+            _ => Err(anyhow!("Unknown mining.configure error")),
+        }
+    }
+
     pub async fn subscribe(&mut self) -> Result<(SubscribeResult, Duration, usize)> {
         let (rx, instant) = self
             .send_request(
@@ -219,17 +253,17 @@ impl Client {
                 ..
             } => {
                 if let Err(err) = serde_json::from_value::<Value>(result) {
-                    error!("Failed to submit: {err}")
+                    return Err(anyhow!("Failed to submit: {err}"));
                 }
             }
             Message::Response {
                 error: Some(err), ..
-            } => error!("mining.submit error: {}", err),
+            } => return Err(anyhow!("mining.submit error: {}", err)),
             Message::Response {
                 reject_reason: Some(reason),
                 ..
-            } => error!("share rejected: {}", reason),
-            _ => error!("Unknown mining.submit error"),
+            } => return Err(anyhow!("share rejected: {}", reason)),
+            _ => return Err(anyhow!("Unknown mining.submit error")),
         }
 
         Ok(submit)
