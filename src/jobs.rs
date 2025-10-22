@@ -108,7 +108,7 @@ mod tests {
                 .map(|job| job.template.height)
                 .collect::<HashSet<u64>>();
 
-            assert_eq!(heights.len(), 1, "all jobs should be one same height");
+            assert_eq!(heights.len(), 1, "all jobs should be same height");
             assert!(heights.contains(&current_height));
             assert!(jobs.valid.contains_key(&latest.job_id));
         }
