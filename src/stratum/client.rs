@@ -157,7 +157,7 @@ impl Client {
             Message::Response {
                 error: Some(err), ..
             } => Err(anyhow!("mining.configure error: {}", err)),
-            _ => Err(anyhow!("Unknown mining.configure error")),
+            _ => Err(anyhow!("Unhandled error in mining.configure")),
         }
     }
 
@@ -263,7 +263,7 @@ impl Client {
                 reject_reason: Some(reason),
                 ..
             } => return Err(anyhow!("share rejected: {}", reason)),
-            _ => return Err(anyhow!("Unknown mining.submit error")),
+            _ => return Err(anyhow!("Unhandled error in mining.submit")),
         }
 
         Ok(submit)
