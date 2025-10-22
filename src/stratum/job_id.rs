@@ -4,6 +4,16 @@ use super::*;
 #[repr(transparent)]
 pub struct JobId(u64);
 
+impl JobId {
+    pub fn new(n: u64) -> Self {
+        Self(n)
+    }
+
+    pub fn next(self) -> Self {
+        Self(self.0.wrapping_add(1))
+    }
+}
+
 impl FromStr for JobId {
     type Err = anyhow::Error;
 
@@ -66,5 +76,12 @@ mod tests {
         assert_eq!(s, "\"deadbeef\"");
         let back: JobId = serde_json::from_str(&s).unwrap();
         assert_eq!(back, id);
+    }
+
+    #[test]
+    fn jobid_wraps() {
+        let job_id = JobId::new(u64::MAX - 1);
+        assert_eq!(job_id.next(), JobId::new(u64::MAX));
+        assert_eq!(job_id.next().next(), JobId::new(0));
     }
 }

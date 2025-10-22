@@ -163,16 +163,7 @@ where
             self.jobs.next_id(),
         )?);
 
-        let clean_jobs = match self.jobs.latest() {
-            Some(prev) if prev.template.height == new_job.template.height => {
-                self.jobs.insert(new_job.clone());
-                false
-            }
-            _ => {
-                self.jobs.insert_and_clean(new_job.clone());
-                true
-            }
-        };
+        let clean_jobs = self.jobs.upsert(new_job.clone());
 
         info!("Template updated sending NOTIFY");
 
@@ -314,13 +305,13 @@ where
 
         info!("Sending NOTIFY");
 
+        let clean_jobs = self.jobs.upsert(job.clone());
+
         self.send(Message::Notification {
             method: "mining.notify".into(),
-            params: json!(job.notify(true)?),
+            params: json!(job.notify(clean_jobs)?),
         })
         .await?;
-
-        self.jobs.insert_and_clean(job.clone());
 
         self.state = State::Working;
 
@@ -328,7 +319,7 @@ where
     }
 
     async fn submit(&mut self, id: Id, submit: Submit) -> Result {
-        let Some(job) = self.jobs.get(&submit.job_id).cloned() else {
+        let Some(job) = self.jobs.get(&submit.job_id) else {
             self.send_error(id, 21, "Stale job", None).await?;
             return Ok(());
         };
