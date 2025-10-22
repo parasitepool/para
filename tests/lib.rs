@@ -69,8 +69,6 @@ mod to_args;
 
 mod alerts;
 #[cfg(target_os = "linux")]
-mod miner;
-#[cfg(target_os = "linux")]
 mod ping;
 #[cfg(target_os = "linux")]
 mod pool;
@@ -81,6 +79,9 @@ mod server_with_db;
 mod sync;
 #[cfg(target_os = "linux")]
 mod template;
+
+#[cfg(target_os = "linux")]
+mod ignored;
 
 #[cfg(target_os = "linux")]
 fn next_json<T: DeserializeOwned>(r: &mut BufReader<ChildStdout>) -> T {
