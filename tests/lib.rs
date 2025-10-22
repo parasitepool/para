@@ -45,9 +45,13 @@ use {
     },
     reqwest::Response,
     std::{
-        io::stderr,
+        io::{BufReader, stderr},
         net::TcpStream,
-        sync::atomic::{AtomicUsize, Ordering},
+        process::ChildStdout,
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            mpsc,
+        },
     },
     test_ckpool::TestCkpool,
     test_pool::TestPool,
@@ -77,6 +81,13 @@ mod server_with_db;
 mod sync;
 #[cfg(target_os = "linux")]
 mod template;
+
+#[cfg(target_os = "linux")]
+fn next_json<T: DeserializeOwned>(r: &mut BufReader<ChildStdout>) -> T {
+    let de = serde_json::Deserializer::from_reader(&mut *r);
+    let mut stream = de.into_iter::<T>();
+    stream.next().expect("stream ended").expect("bad json")
+}
 
 #[cfg(target_os = "linux")]
 fn signet_username() -> String {
