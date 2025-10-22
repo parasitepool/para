@@ -22,7 +22,7 @@ use {
         path::PathBuf,
         process::{Child, Command, Stdio},
         str::FromStr,
-        sync::{Arc, Barrier},
+        sync::Arc,
         thread,
         time::Duration,
     },
@@ -53,6 +53,7 @@ use {
         net::TcpStream,
         process::ChildStdout,
         sync::{
+            Barrier,
             atomic::{AtomicUsize, Ordering},
             mpsc,
         },
