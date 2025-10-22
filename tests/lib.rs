@@ -34,6 +34,10 @@ use {
 
 #[cfg(target_os = "linux")]
 use {
+    crate::test_psql::{
+        create_test_block, create_test_shares, insert_test_block, insert_test_shares,
+        setup_test_schema,
+    },
     harness::bitcoind::Bitcoind,
     para::{
         stratum::{self, Difficulty, JobId, Message, Notify, SetDifficulty},
@@ -53,6 +57,7 @@ use {
             mpsc,
         },
     },
+    tempfile::tempdir,
     test_ckpool::TestCkpool,
     test_pool::TestPool,
 };
