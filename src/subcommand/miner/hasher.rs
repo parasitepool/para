@@ -36,7 +36,7 @@ impl Hasher {
 
                 if self.pool_target.is_met_by(hash) {
                     info!("Solved block with hash: {hash}");
-                    return Ok((self.job_id.clone(), self.header, self.extranonce2.clone()));
+                    return Ok((self.job_id, self.header, self.extranonce2.clone()));
                 }
 
                 if let Some(next_nonce) = self.header.nonce.checked_add(1) {
