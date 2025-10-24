@@ -2427,7 +2427,6 @@ dependencies = [
  "lru",
  "mime_guess",
  "once_cell",
- "parking_lot",
  "pgtemp",
  "pretty_assertions",
  "primitive-types",

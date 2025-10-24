@@ -13,7 +13,7 @@ pub(crate) struct Miner {
     password: Option<String>,
     #[arg(long, help = "Exit <ONCE> a share is found.")]
     once: bool,
-    #[arg(long, help = "Number of CPU cores to use.")]
+    #[arg(long, help = "Number of <CPU_CORES> to use.")]
     cpu_cores: Option<usize>,
 }
 

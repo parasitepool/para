@@ -8,7 +8,6 @@ pub(crate) struct Controller {
     share_rx: mpsc::Receiver<(JobId, Header, Extranonce)>,
     share_tx: mpsc::Sender<(JobId, Header, Extranonce)>,
     cancel: CancellationToken,
-    current_mining_cancel: Option<CancellationToken>,
     cpu_cores: usize,
     extranonce2_counters: Vec<u32>,
     once: bool,
@@ -43,7 +42,6 @@ impl Controller {
             share_rx,
             share_tx,
             cancel: CancellationToken::new(),
-            current_mining_cancel: None,
             cpu_cores,
             extranonce2_counters: vec![0; cpu_cores],
             once,
@@ -57,8 +55,6 @@ impl Controller {
             tokio::select! {
                 _ = ctrl_c() => {
                     info!("Shutting down controller and mining operations");
-                    self.shutdown_mining().await;
-                    self.client.disconnect().await?;
                     break;
                 },
                 maybe = self.client.incoming.recv() => match maybe {
@@ -112,7 +108,8 @@ impl Controller {
                 }
             }
         }
-
+        
+        self.cancel();
         self.client.disconnect().await?;
 
         Ok(self.shares)
@@ -123,7 +120,7 @@ impl Controller {
             "mining.notify" => {
                 let notify = serde_json::from_value::<Notify>(params)?;
 
-                self.cancel_current_mining();
+                self.cancel();
 
                 let network_nbits: CompactTarget = notify.nbits.into();
                 let network_target: Target = network_nbits.into();
@@ -134,7 +131,6 @@ impl Controller {
                 info!("Pool target:\t\t{}", target_as_block_hash(pool_target));
 
                 let mining_cancel = CancellationToken::new();
-                self.current_mining_cancel = Some(mining_cancel.clone());
 
                 let share_tx = self.share_tx.clone();
 
@@ -236,24 +232,9 @@ impl Controller {
         Ok(())
     }
 
-    fn cancel_current_mining(&mut self) {
-        if let Some(cancel_token) = &self.current_mining_cancel {
-            cancel_token.cancel();
-            info!("Cancelled current mining operation for new job");
-        }
-        self.current_mining_cancel = None;
-    }
-
-    async fn shutdown_mining(&mut self) {
-        info!("Shutting down all mining operations");
-
-        self.cancel_current_mining();
-
+    fn cancel(&mut self) {
         self.cancel.cancel();
-
-        tokio::time::sleep(Duration::from_millis(100)).await;
-
-        info!("Mining shutdown complete");
+        self.cancel = CancellationToken::new();
     }
 
     fn generate_extranonce2_for_core(&mut self, core_id: usize) -> Extranonce {
