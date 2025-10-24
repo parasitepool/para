@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 pub(crate) struct Hasher {
     pub(crate) extranonce2: Extranonce,
     pub(crate) header: Header,
-    pub(crate) job_id: String,
+    pub(crate) job_id: JobId,
     pub(crate) pool_target: Target,
 }
 
@@ -13,15 +13,11 @@ impl Hasher {
     pub(crate) fn hash(
         &mut self,
         cancel: CancellationToken,
-    ) -> Result<(String, Header, Extranonce)> {
+    ) -> Result<(JobId, Header, Extranonce)> {
         let start = Instant::now();
         let mut total_hashes = 0u64;
         let mut last_report = start;
         const REPORT_INTERVAL: Duration = Duration::from_secs(5);
-
-        let span =
-            tracing::info_span!("hasher", job_id = %self.job_id, extranonce2 = %self.extranonce2);
-        let _guard = span.enter();
 
         loop {
             if cancel.is_cancelled() {
@@ -152,7 +148,7 @@ mod tests {
             header: header(None, None),
             pool_target: target,
             extranonce2: "0000000000".parse().unwrap(),
-            job_id: "bf".into(),
+            job_id: "bf".parse().unwrap(),
         };
 
         let (_job_id, header, _extranonce2) = hasher.hash(CancellationToken::new()).unwrap();
@@ -166,7 +162,7 @@ mod tests {
             header: header(None, Some(u32::MAX - 100)),
             pool_target: target,
             extranonce2: "0000000000".parse().unwrap(),
-            job_id: "bg".into(),
+            job_id: "bg".parse().unwrap(),
         };
 
         let result = hasher.hash(CancellationToken::new());
@@ -227,7 +223,7 @@ mod tests {
                 header: header(None, None),
                 pool_target: target,
                 extranonce2: "0000000000".parse().unwrap(),
-                job_id: format!("test_{zeros}"),
+                job_id: JobId::new(0),
             };
 
             let result = hasher.hash(CancellationToken::new());
@@ -248,7 +244,7 @@ mod tests {
             header: header(None, None),
             pool_target: target,
             extranonce2: "0000000000".parse().unwrap(),
-            job_id: "parallel_test".into(),
+            job_id: JobId::new(0),
         };
 
         let result = hasher.hash(CancellationToken::new());
@@ -271,7 +267,7 @@ mod tests {
             header: header(None, None),
             pool_target: target,
             extranonce2: "0000000000".parse().unwrap(),
-            job_id: "cancel_test".into(),
+            job_id: JobId::new(1),
         };
 
         let cancel_token = CancellationToken::new();

@@ -5,8 +5,8 @@ pub(crate) struct Controller {
     pool_difficulty: Arc<Mutex<Difficulty>>,
     extranonce1: Extranonce,
     extranonce2_size: u32,
-    share_rx: mpsc::Receiver<(String, Header, Extranonce)>,
-    share_tx: mpsc::Sender<(String, Header, Extranonce)>,
+    share_rx: mpsc::Receiver<(JobId, Header, Extranonce)>,
+    share_tx: mpsc::Sender<(JobId, Header, Extranonce)>,
     cancel: CancellationToken,
     current_mining_cancel: Option<CancellationToken>,
     cpu_cores: usize,
@@ -19,25 +19,19 @@ pub(crate) struct Controller {
 impl Controller {
     pub(crate) async fn new(
         mut client: Client,
-        cpu_cores: Option<usize>,
+        cpu_cores: usize,
         once: bool,
         username: String,
     ) -> Result<Self> {
         let (subscribe, _, _) = client.subscribe().await?;
         client.authorize().await?;
 
-        let num_cores = cpu_cores.unwrap_or_else(|| {
-            let mut system = sysinfo::System::new();
-            system.refresh_cpu_all();
-            system.cpus().len()
-        });
-
         info!(
             "Authorized: extranonce1={}, extranonce2_size={}",
             subscribe.extranonce1, subscribe.extranonce2_size
         );
 
-        info!("Controller initialized with {} CPU cores", num_cores);
+        info!("Controller initialized with {} CPU cores", cpu_cores);
 
         let (share_tx, share_rx) = mpsc::channel(32);
 
@@ -50,8 +44,8 @@ impl Controller {
             share_tx,
             cancel: CancellationToken::new(),
             current_mining_cancel: None,
-            cpu_cores: num_cores,
-            extranonce2_counters: vec![0; num_cores],
+            cpu_cores,
+            extranonce2_counters: vec![0; cpu_cores],
             once,
             username,
             shares: Vec::new(),
@@ -88,13 +82,11 @@ impl Controller {
                     Some((job_id, header, extranonce2)) => {
                         info!("Valid share found: nonce={}, hash={:?}", header.nonce, header.block_hash());
 
-                        let job_id_parsed = job_id.parse::<JobId>()
-                            .unwrap_or_else(|_| JobId::from(job_id.parse::<u64>().unwrap_or(0)));
 
                         let share = Share {
                             extranonce1: self.extranonce1.clone(),
                             extranonce2: extranonce2.clone(),
-                            job_id: job_id_parsed,
+                            job_id,
                             nonce: header.nonce.into(),
                             ntime: header.time.into(),
                             username: self.username.clone(),
@@ -103,7 +95,7 @@ impl Controller {
 
                         self.shares.push(share);
 
-                        match self.client.submit(job_id_parsed, extranonce2, header.time.into(), header.nonce.into()).await {
+                        match self.client.submit(job_id, extranonce2, header.time.into(), header.nonce.into()).await {
                             Err(err) => warn!("Failed to submit share: {err}"),
                             Ok(_) => info!("Share submitted successfully"),
                         }
@@ -138,9 +130,8 @@ impl Controller {
                 let pool_target = self.pool_difficulty.lock().await.to_target();
 
                 info!("New job received: {}", notify.job_id);
-                info!("{}", serde_json::to_string(&notify.merkle_branches)?);
                 info!("Network target:\t{}", target_as_block_hash(network_target));
-                info!("Pool target:\t{}", target_as_block_hash(pool_target));
+                info!("Pool target:\t\t{}", target_as_block_hash(pool_target));
 
                 let mining_cancel = CancellationToken::new();
                 self.current_mining_cancel = Some(mining_cancel.clone());
@@ -173,7 +164,7 @@ impl Controller {
                         },
                         pool_target,
                         extranonce2: extranonce2.clone(),
-                        job_id: notify.job_id.clone().to_string(),
+                        job_id: notify.job_id,
                     };
 
                     let share_tx_clone = share_tx.clone();
@@ -229,8 +220,10 @@ impl Controller {
                 let difficulty = serde_json::from_value::<SetDifficulty>(params)?.difficulty();
                 *self.pool_difficulty.lock().await = difficulty;
                 info!("Updated pool difficulty: {difficulty}");
-
-                self.log_difficulty_info(difficulty).await;
+                info!(
+                    "Updated pool target:\t{}",
+                    target_as_block_hash(difficulty.to_target())
+                );
             }
             _ => warn!("Unhandled notification: {}", method),
         }
@@ -279,13 +272,5 @@ impl Controller {
         }
 
         Extranonce::from_hex(&hex::encode(bytes)).expect("Valid extranonce2")
-    }
-
-    async fn log_difficulty_info(&self, difficulty: Difficulty) {
-        let target = difficulty.to_target();
-
-        info!("Difficulty metrics:");
-        info!("  - Difficulty: {}", difficulty);
-        info!("  - Target: {}", target_as_block_hash(target));
     }
 }
