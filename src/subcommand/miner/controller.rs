@@ -54,7 +54,7 @@ impl Controller {
         loop {
             tokio::select! {
                 _ = ctrl_c() => {
-                    info!("Shutting down controller and mining operations");
+                    info!("Shutting down stratum client and hasher");
                     break;
                 },
                 maybe = self.client.incoming.recv() => match maybe {
@@ -108,7 +108,7 @@ impl Controller {
                 }
             }
         }
-        
+
         self.cancel();
         self.client.disconnect().await?;
 
