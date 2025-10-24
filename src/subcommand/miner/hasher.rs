@@ -1,5 +1,4 @@
 use super::*;
-use std::time::{Duration, Instant};
 
 #[derive(Debug)]
 pub(crate) struct Hasher {
@@ -162,7 +161,7 @@ mod tests {
             header: header(None, Some(u32::MAX - 100)),
             pool_target: target,
             extranonce2: "0000000000".parse().unwrap(),
-            job_id: "bg".parse().unwrap(),
+            job_id: "bf".parse().unwrap(),
         };
 
         let result = hasher.hash(CancellationToken::new());
