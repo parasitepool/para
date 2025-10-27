@@ -4,13 +4,17 @@ use {
     dashmap::DashMap,
 };
 
-pub async fn fetch_parse<T: DeserializeOwned>(
+pub async fn fetch_and_parse<T, F>(
     client: &Client,
     url: Url,
     budget: Duration,
     timeout: Duration,
     max_attempts: usize,
-) -> Result<T> {
+    parse: F,
+) -> Result<T>
+where
+    F: FnOnce(&str) -> Result<T>,
+{
     let started = Instant::now();
 
     let backoff = ExponentialBuilder::default()
@@ -44,13 +48,10 @@ pub async fn fetch_parse<T: DeserializeOwned>(
             return Err(anyhow!("{}: {}", status, body));
         }
 
-        let text = response.text().await?;
-        dbg!(&text);
-        let parsed = serde_json::from_str::<T>(&text)?;
-        Ok(parsed)
+        Ok::<String, Error>(response.text().await?)
     };
 
-    let out = op
+    let body = op
         .retry(backoff)
         .sleep(tokio::time::sleep)
         .when(|err: &Error| {
@@ -80,9 +81,9 @@ pub async fn fetch_parse<T: DeserializeOwned>(
         .notify(|err: &Error, duration: Duration| {
             tracing::debug!(?err, ?duration, "retrying after backoff");
         })
-        .await;
+        .await?;
 
-    out
+    parse(&body)
 }
 
 #[derive(Debug)]
@@ -145,12 +146,13 @@ impl Cache {
         let fetches = nodes.iter().map(|url| {
             let client = self.client.clone();
             async move {
-                let result = fetch_parse::<ckpool::Status>(
+                let result = fetch_and_parse(
                     &client,
-                    dbg!(url.join("/pool/pool.status").unwrap()), //TODO
+                    url.join("/pool/pool.status").unwrap(), //TODO
                     Duration::from_secs(5),
                     Duration::from_secs(2),
                     3,
+                    ckpool::Status::from_str,
                 )
                 .await;
                 dbg!(&result);

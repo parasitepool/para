@@ -46,7 +46,7 @@ use {
     },
     serde::{
         Deserialize, Serialize, Serializer,
-        de::{self, DeserializeOwned, Deserializer},
+        de::{self, Deserializer},
         ser::SerializeSeq,
     },
     serde_json::{Value, json},
