@@ -29,6 +29,9 @@ mod server_config;
 mod templates;
 
 const MEBIBYTE: usize = 1 << 20;
+const BUDGET: Duration = Duration::from_secs(5);
+const TIMEOUT: Duration = Duration::from_secs(2);
+const MAX_ATTEMPTS: usize = 3;
 
 #[derive(RustEmbed)]
 #[folder = "static"]

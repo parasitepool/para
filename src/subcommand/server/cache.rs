@@ -4,33 +4,26 @@ use {
     dashmap::DashMap,
 };
 
-pub async fn fetch_and_parse<T, F>(
-    client: &Client,
-    url: Url,
-    budget: Duration,
-    timeout: Duration,
-    max_attempts: usize,
-    parse: F,
-) -> Result<T>
+pub async fn fetch_and_parse<T, F>(client: &Client, url: Url, parse: F) -> Result<T>
 where
     F: FnOnce(&str) -> Result<T>,
 {
     let started = Instant::now();
 
     let backoff = ExponentialBuilder::default()
-        .with_min_delay(Duration::from_millis(111))
+        .with_min_delay(Duration::from_millis(99))
         .with_max_delay(Duration::from_millis(999))
         .with_jitter()
-        .with_max_times(max_attempts);
+        .with_max_times(MAX_ATTEMPTS);
 
-    let op = || async {
+    let fetch = || async {
         let now = Instant::now();
         let elapsed = now.saturating_duration_since(started);
-        if elapsed >= budget {
+        if elapsed >= BUDGET {
             return Err(anyhow!("deadline exceeded"));
         }
-        let remaining = budget - elapsed;
-        let this_try = remaining.min(timeout);
+        let remaining = BUDGET - elapsed;
+        let this_try = remaining.min(TIMEOUT);
 
         let request = client.get(url.clone());
 
@@ -39,8 +32,6 @@ where
             Ok(Err(err)) => return Err(err.into()),
             Ok(Ok(response)) => response,
         };
-
-        dbg!(&response);
 
         let status = response.status();
         if !status.is_success() {
@@ -51,7 +42,7 @@ where
         Ok::<String, Error>(response.text().await?)
     };
 
-    let body = op
+    let body = fetch
         .retry(backoff)
         .sleep(tokio::time::sleep)
         .when(|err: &Error| {
@@ -146,16 +137,16 @@ impl Cache {
         let fetches = nodes.iter().map(|url| {
             let client = self.client.clone();
             async move {
-                let result = fetch_and_parse(
-                    &client,
-                    url.join("/pool/pool.status").unwrap(), //TODO
-                    Duration::from_secs(5),
-                    Duration::from_secs(2),
-                    3,
-                    ckpool::Status::from_str,
-                )
+                let result = async {
+                    fetch_and_parse(
+                        &client,
+                        url.join("/pool/pool.status")?,
+                        ckpool::Status::from_str,
+                    )
+                    .await
+                }
                 .await;
-                dbg!(&result);
+
                 (url, result)
             }
         });
@@ -203,11 +194,10 @@ impl Cache {
             let address = address.clone();
             async move {
                 let result = async {
-                    let resp = client
-                        .get(url.join(&format!("/users/{address}"))?)
-                        .send()
-                        .await?;
-                    serde_json::from_str::<ckpool::User>(&resp.text().await?).map_err(Into::into)
+                    fetch_and_parse(&client, url.join(&format!("/users/{address}"))?, |user| {
+                        serde_json::from_str::<ckpool::User>(user).map_err(Into::into)
+                    })
+                    .await
                 }
                 .await;
                 (url, result)
@@ -247,8 +237,10 @@ impl Cache {
             let client = self.client.clone();
             async move {
                 let result = async {
-                    let resp = client.get(url.join("/users")?).send().await?;
-                    serde_json::from_str::<Vec<String>>(&resp.text().await?).map_err(Into::into)
+                    fetch_and_parse(&client, url.join("/users")?, |users| {
+                        serde_json::from_str::<Vec<String>>(users).map_err(Into::into)
+                    })
+                    .await
                 }
                 .await;
                 (url, result)
