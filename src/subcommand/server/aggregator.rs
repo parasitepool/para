@@ -12,9 +12,16 @@ impl Aggregator {
             );
         }
 
+        headers.insert(
+            header::ACCEPT,
+            header::HeaderValue::from_str("application/json")?,
+        );
+
         let client = ClientBuilder::new()
             .default_headers(headers)
-            .timeout(Duration::from_secs(10))
+            .connect_timeout(CONNECT_TIMEOUT)
+            .pool_idle_timeout(Duration::from_secs(60))
+            .pool_max_idle_per_host(3)
             .use_rustls_tls()
             .build()?;
 
@@ -80,9 +87,7 @@ impl Aggregator {
             let client = client.clone();
             async move {
                 let result = async {
-                    let mut request_builder = client
-                        .get(url.join("/status")?)
-                        .header("accept", "application/json");
+                    let mut request_builder = client.get(url.join("/status")?);
 
                     if let Some(token) = admin_token {
                         request_builder = request_builder.bearer_auth(token);
@@ -101,7 +106,7 @@ impl Aggregator {
             }
         });
 
-        let results: Vec<(&Url, Result<api::Status>)> = join_all(fetches).await;
+        let results: Vec<(&Url, Result<api::Status>)> = futures::future::join_all(fetches).await;
 
         let mut checks = BTreeMap::new();
 

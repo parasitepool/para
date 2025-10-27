@@ -1,4 +1,93 @@
-use {super::*, dashmap::DashMap};
+use {
+    super::*,
+    backon::{ExponentialBuilder, Retryable},
+    dashmap::DashMap,
+};
+
+async fn fetch_for<T, P>(client: Client, base: Url, path: String, parse: P) -> (Url, Result<T>)
+where
+    P: FnOnce(&str) -> Result<T> + Send + 'static,
+{
+    let result = async {
+        let url = base.join(&path)?;
+        let body = fetch(&client, url).await?;
+        parse(&body)
+    }
+    .await;
+
+    (base, result)
+}
+
+async fn fetch(client: &Client, url: Url) -> Result<String> {
+    let started = Instant::now();
+
+    let backoff = ExponentialBuilder::default()
+        .with_min_delay(Duration::from_millis(111))
+        .with_max_delay(Duration::from_millis(999))
+        .with_jitter()
+        .with_max_times(MAX_ATTEMPTS)
+        .with_total_delay(Some(BUDGET));
+
+    let fetch = || async {
+        let now = Instant::now();
+        let elapsed = now.saturating_duration_since(started);
+        if elapsed >= BUDGET {
+            return Err(anyhow!("deadline exceeded"));
+        }
+        let remaining = BUDGET - elapsed;
+        let this_try = remaining.min(TIMEOUT);
+
+        let body = tokio::time::timeout(this_try, async {
+            let response = client.get(url.clone()).send().await?;
+
+            if let Err(status_err) = response.error_for_status_ref() {
+                let text = response.text().await.unwrap_or_default();
+                return Err(anyhow!("{status_err}: {text}").context(status_err));
+            }
+
+            let text = response.text().await?;
+            Ok::<String, Error>(text)
+        })
+        .await
+        .map_err(|_| anyhow::anyhow!("try timeout"))??;
+
+        Ok::<String, Error>(body)
+    };
+
+    let body = fetch
+        .retry(backoff)
+        .sleep(tokio::time::sleep)
+        .when(|err: &Error| {
+            if let Some(err) = err.downcast_ref::<reqwest::Error>() {
+                if err.is_timeout() || err.is_connect() || err.is_request() || err.is_body() {
+                    return true;
+                }
+
+                if let Some(s) = err.status() {
+                    return s == StatusCode::TOO_MANY_REQUESTS || s.is_server_error();
+                }
+
+                return false;
+            }
+
+            let error = err.to_string();
+            if error.contains("try timeout") {
+                return true;
+            }
+
+            if error.contains("deadline exceeded") {
+                return false;
+            }
+
+            false
+        })
+        .notify(|err: &Error, duration: Duration| {
+            tracing::debug!(?err, ?duration, "retrying after backoff");
+        })
+        .await?;
+
+    Ok(body)
+}
 
 #[derive(Debug)]
 struct Cached<T> {
@@ -56,37 +145,38 @@ impl Cache {
             return Ok(cached.value());
         }
 
-        let nodes = self.config.nodes();
-        let fetches = nodes.iter().map(|url| {
-            let client = self.client.clone();
-            async move {
-                let result = async {
-                    let resp = client.get(url.join("/pool/pool.status")?).send().await?;
-                    ckpool::Status::from_str(&resp.text().await?)
-                }
-                .await;
-                (url, result)
-            }
-        });
+        let fetches: FuturesUnordered<_> = self
+            .config
+            .nodes()
+            .into_iter()
+            .map(|base| {
+                fetch_for(
+                    self.client.clone(),
+                    base,
+                    "/pool/pool.status".into(),
+                    ckpool::Status::from_str,
+                )
+            })
+            .collect();
 
-        let results: Vec<(&Url, Result<ckpool::Status>)> = join_all(fetches).await;
-
-        let mut aggregated: Option<ckpool::Status> = None;
-        for (url, result) in results {
-            match result {
-                Ok(status) => {
-                    aggregated = Some(if let Some(agg) = aggregated {
-                        agg + status
-                    } else {
-                        status
-                    });
+        let aggregated = fetches
+            .fold(None, |acc, (base, res)| async move {
+                match res {
+                    Ok(status) => Some(match acc {
+                        Some(a) => a + status,
+                        None => status,
+                    }),
+                    Err(err) => {
+                        let host = base.host_str().unwrap_or("unknown");
+                        warn!("Failed to fetch status from {host} with: {err}");
+                        acc
+                    }
                 }
-                Err(err) => warn!("Failed to fetch status from {url} with: {err}"),
-            }
-        }
+            })
+            .await;
 
         if aggregated.is_none() {
-            error!("Failed aggregate pool statistics");
+            error!("Failed to aggregate pool statistics");
         }
 
         *cached = Cached::new(aggregated);
@@ -106,35 +196,35 @@ impl Cache {
             return Ok(cached.value());
         }
 
-        let nodes = self.config.nodes();
-        let fetches = nodes.iter().map(|url| {
-            let client = self.client.clone();
-            let address = address.clone();
-            async move {
-                let result = async {
-                    let resp = client
-                        .get(url.join(&format!("/users/{address}"))?)
-                        .send()
-                        .await?;
-                    serde_json::from_str::<ckpool::User>(&resp.text().await?).map_err(Into::into)
+        let fetches: FuturesUnordered<_> = self
+            .config
+            .nodes()
+            .into_iter()
+            .map(|base| {
+                fetch_for(
+                    self.client.clone(),
+                    base,
+                    format!("/users/{address}"),
+                    |user| serde_json::from_str::<ckpool::User>(user).map_err(Into::into),
+                )
+            })
+            .collect();
+
+        let aggregated = fetches
+            .fold(None, |acc, (base, res)| async move {
+                match res {
+                    Ok(status) => Some(match acc {
+                        Some(a) => a + status,
+                        None => status,
+                    }),
+                    Err(err) => {
+                        let host = base.host_str().unwrap_or("unknown");
+                        warn!("Failed to fetch status from {host} with: {err}");
+                        acc
+                    }
                 }
-                .await;
-                (url, result)
-            }
-        });
-
-        let results: Vec<(&Url, Result<ckpool::User>)> = join_all(fetches).await;
-
-        let mut aggregated: Option<ckpool::User> = None;
-        for (_, result) in results {
-            if let Ok(user) = result {
-                aggregated = Some(if let Some(agg) = aggregated {
-                    agg + user
-                } else {
-                    user
-                });
-            }
-        }
+            })
+            .await;
 
         if aggregated.is_none() {
             error!("Failed to find user {address} on any node");
@@ -150,29 +240,32 @@ impl Cache {
         if cached.is_fresh(self.config.ttl()) {
             return Ok(cached.value());
         }
+        let fetches: FuturesUnordered<_> = self
+            .config
+            .nodes()
+            .into_iter()
+            .map(|base| {
+                fetch_for(self.client.clone(), base, "/users".to_string(), |s| {
+                    serde_json::from_str::<Vec<String>>(s).map_err(Into::into)
+                })
+            })
+            .collect();
 
-        let nodes = self.config.nodes();
-        let fetches = nodes.iter().map(|url| {
-            let client = self.client.clone();
-            async move {
-                let result = async {
-                    let resp = client.get(url.join("/users")?).send().await?;
-                    serde_json::from_str::<Vec<String>>(&resp.text().await?).map_err(Into::into)
-                }
-                .await;
-                (url, result)
-            }
-        });
-
-        let results: Vec<(&Url, Result<Vec<String>>)> = join_all(fetches).await;
-
-        let mut set = HashSet::new();
-        for (url, result) in results {
-            match result {
-                Ok(users) => set.extend(users),
-                Err(err) => warn!("Failed to fetch status from {url} with: {err}"),
-            }
-        }
+        let set = fetches
+            .fold(
+                HashSet::<String>::new(),
+                |mut acc, (base, res)| async move {
+                    match res {
+                        Ok(list) => acc.extend(list),
+                        Err(err) => {
+                            let host = base.host_str().unwrap_or("unknown");
+                            warn!("Failed to fetch users from {host} with: {err}");
+                        }
+                    }
+                    acc
+                },
+            )
+            .await;
 
         let aggregated = if set.is_empty() {
             error!("Failed aggregate users");
