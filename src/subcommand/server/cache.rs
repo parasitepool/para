@@ -1,4 +1,89 @@
-use {super::*, dashmap::DashMap};
+use {
+    super::*,
+    backon::{ExponentialBuilder, Retryable},
+    dashmap::DashMap,
+};
+
+pub async fn fetch_parse<T: DeserializeOwned>(
+    client: &Client,
+    url: Url,
+    budget: Duration,
+    timeout: Duration,
+    max_attempts: usize,
+) -> Result<T> {
+    let started = Instant::now();
+
+    let backoff = ExponentialBuilder::default()
+        .with_min_delay(Duration::from_millis(111))
+        .with_max_delay(Duration::from_millis(999))
+        .with_jitter()
+        .with_max_times(max_attempts);
+
+    let op = || async {
+        let now = Instant::now();
+        let elapsed = now.saturating_duration_since(started);
+        if elapsed >= budget {
+            return Err(anyhow!("deadline exceeded"));
+        }
+        let remaining = budget - elapsed;
+        let this_try = remaining.min(timeout);
+
+        let request = client.get(url.clone());
+
+        let response = match tokio::time::timeout(this_try, request.send()).await {
+            Err(_) => return Err(anyhow::anyhow!("try timeout")),
+            Ok(Err(err)) => return Err(err.into()),
+            Ok(Ok(response)) => response,
+        };
+
+        dbg!(&response);
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(anyhow!("{}: {}", status, body));
+        }
+
+        let text = response.text().await?;
+        dbg!(&text);
+        let parsed = serde_json::from_str::<T>(&text)?;
+        Ok(parsed)
+    };
+
+    let out = op
+        .retry(backoff)
+        .sleep(tokio::time::sleep)
+        .when(|err: &Error| {
+            if let Some(err) = err.downcast_ref::<reqwest::Error>() {
+                if err.is_timeout() || err.is_connect() || err.is_request() || err.is_body() {
+                    return true;
+                }
+
+                if let Some(s) = err.status() {
+                    return s == StatusCode::TOO_MANY_REQUESTS || s.is_server_error();
+                }
+
+                return false;
+            }
+
+            let error = err.to_string();
+            if error.contains("try timeout") {
+                return true;
+            }
+
+            if error.contains("deadline exceeded") {
+                return false;
+            }
+
+            false
+        })
+        .notify(|err: &Error, duration: Duration| {
+            tracing::debug!(?err, ?duration, "retrying after backoff");
+        })
+        .await;
+
+    out
+}
 
 #[derive(Debug)]
 struct Cached<T> {
@@ -60,11 +145,15 @@ impl Cache {
         let fetches = nodes.iter().map(|url| {
             let client = self.client.clone();
             async move {
-                let result = async {
-                    let resp = client.get(url.join("/pool/pool.status")?).send().await?;
-                    ckpool::Status::from_str(&resp.text().await?)
-                }
+                let result = fetch_parse::<ckpool::Status>(
+                    &client,
+                    dbg!(url.join("/pool/pool.status").unwrap()), //TODO
+                    Duration::from_secs(5),
+                    Duration::from_secs(2),
+                    3,
+                )
                 .await;
+                dbg!(&result);
                 (url, result)
             }
         });

@@ -38,8 +38,8 @@ impl TestServer {
             logdir.display(),
             args.to_args().join(" ")
         ))
-        .capture_stderr(true)
-        .capture_stdout(true)
+        .capture_stderr(false)
+        .capture_stdout(false)
         .env("RUST_LOG", "info")
         .integration_test(true)
         .spawn();
