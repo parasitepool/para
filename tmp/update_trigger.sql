@@ -1,7 +1,7 @@
 CREATE OR REPLACE FUNCTION update_accounts_from_remote_shares()
     RETURNS TRIGGER AS $$
 BEGIN
-    INSERT INTO accounts (username, lnurl, total_diff, created_at, updated_at)
+    INSERT INTO public.accounts (username, lnurl, total_diff, created_at, updated_at)
     VALUES (
         NEW.username,
         CASE
