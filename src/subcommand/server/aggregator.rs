@@ -1,6 +1,5 @@
 use super::*;
 
-
 pub(crate) struct Aggregator;
 
 impl Aggregator {
