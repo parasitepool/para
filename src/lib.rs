@@ -29,7 +29,7 @@ use {
     coinbase_builder::CoinbaseBuilder,
     connection::Connection,
     derive_more::Display,
-    futures::{sink::SinkExt, stream::StreamExt},
+    futures::{sink::SinkExt, stream::FuturesUnordered, stream::StreamExt},
     generator::Generator,
     hash_rate::HashRate,
     hex::FromHex,
