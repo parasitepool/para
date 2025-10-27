@@ -18,7 +18,7 @@ where
     (base, result)
 }
 
-pub async fn fetch(client: &Client, url: Url) -> Result<String> {
+async fn fetch(client: &Client, url: Url) -> Result<String> {
     let started = Instant::now();
 
     let backoff = ExponentialBuilder::default()
