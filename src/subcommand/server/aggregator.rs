@@ -106,7 +106,7 @@ impl Aggregator {
             }
         });
 
-        let results: Vec<(&Url, Result<api::Status>)> = join_all(fetches).await;
+        let results: Vec<(&Url, Result<api::Status>)> = futures::future::join_all(fetches).await;
 
         let mut checks = BTreeMap::new();
 

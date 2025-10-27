@@ -10,7 +10,6 @@ use {
     cache::Cache,
     database::Database,
     error::{OptionExt, ServerError, ServerResult},
-    futures::future::join_all,
     reqwest::{Client, ClientBuilder, header},
     server_config::ServerConfig,
     templates::{
