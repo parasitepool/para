@@ -32,6 +32,7 @@ const MEBIBYTE: usize = 1 << 20;
 const BUDGET: Duration = Duration::from_secs(5);
 const TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_ATTEMPTS: usize = 3;
+const CONNECT_TIMEOUT: Duration = Duration::from_millis(1500);
 
 #[derive(RustEmbed)]
 #[folder = "static"]

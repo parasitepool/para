@@ -11,7 +11,7 @@ where
     let started = Instant::now();
 
     let backoff = ExponentialBuilder::default()
-        .with_min_delay(Duration::from_millis(99))
+        .with_min_delay(Duration::from_millis(111))
         .with_max_delay(Duration::from_millis(999))
         .with_jitter()
         .with_max_times(MAX_ATTEMPTS);
@@ -25,21 +25,19 @@ where
         let remaining = BUDGET - elapsed;
         let this_try = remaining.min(TIMEOUT);
 
-        let request = client.get(url.clone());
+        let body = tokio::time::timeout(this_try, async {
+            let response = client.get(url.clone()).send().await?;
+            let status = response.status();
+            let text = response.text().await?;
+            if !status.is_success() {
+                anyhow::bail!("{status}: {text}");
+            }
+            Ok::<String, Error>(text)
+        })
+        .await
+        .map_err(|_| anyhow!("try timeout"))??;
 
-        let response = match tokio::time::timeout(this_try, request.send()).await {
-            Err(_) => return Err(anyhow::anyhow!("try timeout")),
-            Ok(Err(err)) => return Err(err.into()),
-            Ok(Ok(response)) => response,
-        };
-
-        let status = response.status();
-        if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            return Err(anyhow!("{}: {}", status, body));
-        }
-
-        Ok::<String, Error>(response.text().await?)
+        Ok::<String, Error>(body)
     };
 
     let body = fetch
