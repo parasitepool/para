@@ -7,7 +7,6 @@ use {
 async fn fetch_for<T, P>(client: Client, base: Url, path: String, parse: P) -> (Url, Result<T>)
 where
     P: FnOnce(&str) -> Result<T> + Send + 'static,
-    T: Send,
 {
     let result = async {
         let url = base.join(&path)?;
