@@ -1,3 +1,4 @@
+use crate::subcommand::server::account::account_router;
 use {
     super::*,
     crate::{
@@ -19,6 +20,7 @@ use {
 };
 
 mod accept_json;
+mod account;
 mod aggregator;
 pub mod api;
 mod cache;
@@ -157,7 +159,9 @@ impl Server {
             }
         }
 
-        router = router.layer(Extension(config.clone()));
+        router = router
+            .merge(account_router())
+            .layer(Extension(config.clone()));
 
         if !config.nodes().is_empty() {
             let aggregator = Aggregator::init(config.clone())?;
