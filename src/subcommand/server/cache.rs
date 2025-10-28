@@ -168,7 +168,7 @@ impl Cache {
                     }),
                     Err(err) => {
                         let host = base.host_str().unwrap_or("unknown");
-                        warn!("Failed to fetch status from {host} with: {err}");
+                        warn!("Failed to fetch pool status from {host} with: {err}");
                         acc
                     }
                 }
