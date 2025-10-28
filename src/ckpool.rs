@@ -1,7 +1,11 @@
 use super::*;
 
-pub use user::{User, Worker};
+pub use {
+    hash_rate::HashRate,
+    user::{User, Worker},
+};
 
+mod hash_rate;
 mod user;
 
 #[derive(Debug, DeserializeFromStr, SerializeDisplay, PartialEq, Clone, Copy)]

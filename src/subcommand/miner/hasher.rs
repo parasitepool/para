@@ -53,7 +53,7 @@ impl Hasher {
             if now.duration_since(last_report) >= REPORT_INTERVAL {
                 let elapsed = now.duration_since(start).as_secs_f64().max(1e-6);
                 let hashrate = total_hashes as f64 / elapsed;
-                info!("Hashrate: {}", HashRate(hashrate));
+                info!("Hashrate: {}", ckpool::HashRate(hashrate));
                 last_report = now;
             }
         }
@@ -280,9 +280,12 @@ mod tests {
 
     #[test]
     fn test_hashrate_display() {
-        assert_eq!(format!("{}", HashRate(1500.0)), "1.500K");
-        assert_eq!(format!("{}", HashRate(2_500_000.0)), "2.500M");
-        assert_eq!(format!("{}", HashRate(3_200_000_000.0)), "3.200G");
-        assert_eq!(format!("{}", HashRate(1_100_000_000_000.0)), "1.100T");
+        assert_eq!(format!("{}", ckpool::HashRate(1500.0)), "1.500K");
+        assert_eq!(format!("{}", ckpool::HashRate(2_500_000.0)), "2.500M");
+        assert_eq!(format!("{}", ckpool::HashRate(3_200_000_000.0)), "3.200G");
+        assert_eq!(
+            format!("{}", ckpool::HashRate(1_100_000_000_000.0)),
+            "1.100T"
+        );
     }
 }

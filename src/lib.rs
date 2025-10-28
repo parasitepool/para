@@ -34,7 +34,6 @@ use {
         stream::{FuturesUnordered, StreamExt},
     },
     generator::Generator,
-    hash_rate::HashRate,
     hex::FromHex,
     lazy_static::lazy_static,
     lru::LruCache,
@@ -112,7 +111,6 @@ pub mod ckpool;
 pub mod coinbase_builder;
 mod connection;
 mod generator;
-pub mod hash_rate;
 mod job;
 mod jobs;
 pub mod stratum;
