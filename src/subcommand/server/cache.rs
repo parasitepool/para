@@ -211,17 +211,13 @@ impl Cache {
             .collect();
 
         let aggregated = fetches
-            .fold(None, |acc, (base, res)| async move {
+            .fold(None, |acc, (_, res)| async move {
                 match res {
                     Ok(status) => Some(match acc {
                         Some(a) => a + status,
                         None => status,
                     }),
-                    Err(err) => {
-                        let host = base.host_str().unwrap_or("unknown");
-                        warn!("Failed to fetch status from {host} with: {err}");
-                        acc
-                    }
+                    Err(_) => acc,
                 }
             })
             .await;
