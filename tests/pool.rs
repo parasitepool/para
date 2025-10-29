@@ -146,7 +146,7 @@ async fn submit_before_authorize_fails() {
         client
             .submit(
                 JobId::new(3),
-                Extranonce::generate(8),
+                Extranonce::random(8),
                 Ntime::from(0),
                 Nonce::from(12345),
             )

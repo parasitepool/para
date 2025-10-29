@@ -4,10 +4,14 @@ use super::*;
 pub struct Extranonce(Vec<u8>);
 
 impl Extranonce {
-    pub fn generate(size: usize) -> Self {
+    pub fn random(size: usize) -> Self {
         let mut v = vec![0u8; size];
         rand::rng().fill_bytes(&mut v);
         Self(v)
+    }
+
+    pub fn zeros(size: usize) -> Self {
+        Self(vec![0u8; size])
     }
 
     pub fn increment_wrapping(&mut self) {
@@ -102,7 +106,7 @@ mod tests {
 
     #[test]
     fn generate_has_correct_length() {
-        let extranonce2 = Extranonce::generate(8);
+        let extranonce2 = Extranonce::random(8);
         assert_eq!(extranonce2.len(), 8);
         assert!(!extranonce2.as_bytes().is_empty());
     }

@@ -41,7 +41,7 @@ impl Controller {
             share_tx,
             cancel: CancellationToken::new(),
             cpu_cores,
-            next_extranonce2: Extranonce::generate(subscribe.extranonce2_size),
+            next_extranonce2: Extranonce::zeros(subscribe.extranonce2_size),
             once,
             username,
             shares: Vec::new(),
