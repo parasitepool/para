@@ -120,7 +120,7 @@ mod tests {
 
     #[test]
     fn increment() {
-        let mut extranonce = "00".parse::<Extranonce>().unwrap();
+        let mut extranonce = Extranonce::zeros(1);
         extranonce.increment_wrapping();
         assert_eq!(extranonce.to_hex(), "01");
     }
