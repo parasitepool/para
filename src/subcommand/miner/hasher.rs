@@ -20,11 +20,9 @@ impl Hasher {
     pub(crate) fn hash(
         &mut self,
         cancel: CancellationToken,
-    ) -> Result<(JobId, Header, Extranonce), HasherError> {
+    ) -> Result<(JobId, Header, Extranonce, ckpool::HashRate), HasherError> {
         let start = Instant::now();
-        let mut total_hashes = 0u64;
-        let mut last_report = start;
-        const REPORT_INTERVAL: Duration = Duration::from_secs(5);
+        let mut total_hashes = 0;
 
         loop {
             if cancel.is_cancelled() {
@@ -39,7 +37,15 @@ impl Hasher {
                 total_hashes += 1;
 
                 if self.pool_target.is_met_by(hash) {
-                    return Ok((self.job_id, self.header, self.extranonce2.clone()));
+                    let elapsed = Instant::now().duration_since(start).as_secs_f64().max(1e-6);
+                    let hash_rate = ckpool::HashRate(total_hashes as f64 / elapsed);
+
+                    return Ok((
+                        self.job_id,
+                        self.header,
+                        self.extranonce2.clone(),
+                        hash_rate,
+                    ));
                 }
 
                 if let Some(next_nonce) = self.header.nonce.checked_add(1) {
@@ -51,28 +57,13 @@ impl Hasher {
                     .fail();
                 }
             }
-
-            let now = Instant::now();
-            if now.duration_since(last_report) >= REPORT_INTERVAL {
-                let elapsed = now.duration_since(start).as_secs_f64().max(1e-6);
-                let hashrate = total_hashes as f64 / elapsed;
-                info!("Hashrate: {}", ckpool::HashRate(hashrate));
-                last_report = now;
-            }
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::*,
-        bitcoin::{
-            BlockHash, Target, TxMerkleNode,
-            block::{Header, Version},
-            hashes::Hash,
-        },
-    };
+    use super::*;
 
     fn shift(leading_zeros: u8) -> Target {
         assert!(leading_zeros <= 32, "leading_zeros too high");
@@ -96,7 +87,7 @@ mod tests {
 
     fn header(network_target: Option<Target>, nonce: Option<u32>) -> Header {
         Header {
-            version: Version::TWO,
+            version: bitcoin::block::Version::TWO,
             prev_blockhash: BlockHash::all_zeros(),
             merkle_root: TxMerkleNode::from_raw_hash(BlockHash::all_zeros().to_raw_hash()),
             time: 0,
@@ -153,7 +144,7 @@ mod tests {
             job_id: "bf".parse().unwrap(),
         };
 
-        let (_job_id, header, _extranonce2) = hasher.hash(CancellationToken::new()).unwrap();
+        let (_, header, _, _) = hasher.hash(CancellationToken::new()).unwrap();
         assert!(target.is_met_by(header.block_hash()));
     }
 
@@ -231,7 +222,7 @@ mod tests {
             let result = hasher.hash(CancellationToken::new());
             assert!(result.is_ok(), "Failed at {zeros} leading zeros");
 
-            let (_, header, _) = result.unwrap();
+            let (_, header, _, _) = result.unwrap();
             assert!(
                 target.is_met_by(header.block_hash()),
                 "Invalid PoW at {zeros} leading zeros"
@@ -255,7 +246,7 @@ mod tests {
             "Mining should find solution for easy target"
         );
 
-        let (_, header, _) = result.unwrap();
+        let (_, header, _, _) = result.unwrap();
         assert!(
             target.is_met_by(header.block_hash()),
             "Solution should meet target"

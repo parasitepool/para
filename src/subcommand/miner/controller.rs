@@ -4,8 +4,8 @@ pub(crate) struct Controller {
     client: Client,
     pool_difficulty: Arc<Mutex<Difficulty>>,
     extranonce1: Extranonce,
-    share_rx: mpsc::Receiver<(JobId, Header, Extranonce)>,
-    share_tx: mpsc::Sender<(JobId, Header, Extranonce)>,
+    share_rx: mpsc::Receiver<(JobId, Header, Extranonce, ckpool::HashRate)>,
+    share_tx: mpsc::Sender<(JobId, Header, Extranonce, ckpool::HashRate)>,
     cancel: CancellationToken,
     cpu_cores: usize,
     next_extranonce2: Extranonce,
@@ -70,9 +70,9 @@ impl Controller {
                     }
                 },
                 maybe = self.share_rx.recv() => match maybe {
-                    Some((job_id, header, extranonce2)) => {
-                        info!("Valid share found: nonce={}, hash={:?}", header.nonce, header.block_hash());
-
+                    Some((job_id, header, extranonce2, hash_rate)) => {
+                        info!("Valid share found: blockhash={} nonce={}", header.block_hash(), header.nonce);
+                        info!("Hash rate: {hash_rate}");
 
                         let share = Share {
                             extranonce1: self.extranonce1.clone(),
@@ -162,17 +162,8 @@ impl Controller {
                     );
 
                     tokio::spawn(async move {
-                        let result = hasher.hash(mining_cancel);
-
-                        match result {
+                        match hasher.hash(mining_cancel) {
                             Ok(share) => {
-                                info!(
-                                    "Hasher completed on core {core_id}: blockhash={} nonce={} extranonce2={}",
-                                    share.1.block_hash(),
-                                    share.1.nonce,
-                                    share.2
-                                );
-
                                 let _ = share_tx_clone.send(share).await;
                             }
                             Err(err) => warn!("Hasher failed on core {core_id}: {err}"),
