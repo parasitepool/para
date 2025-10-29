@@ -235,7 +235,7 @@ where
         let result = SubscribeResult {
             subscriptions,
             extranonce1: extranonce1.clone(),
-            extranonce2_size: EXTRANONCE2_SIZE.try_into().unwrap(),
+            extranonce2_size: EXTRANONCE2_SIZE,
         };
 
         self.send(Message::Response {
