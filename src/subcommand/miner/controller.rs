@@ -4,12 +4,11 @@ pub(crate) struct Controller {
     client: Client,
     pool_difficulty: Arc<Mutex<Difficulty>>,
     extranonce1: Extranonce,
-    extranonce2_size: u32,
     share_rx: mpsc::Receiver<(JobId, Header, Extranonce)>,
     share_tx: mpsc::Sender<(JobId, Header, Extranonce)>,
     cancel: CancellationToken,
     cpu_cores: usize,
-    extranonce2_counters: Vec<u32>,
+    next_extranonce2: Extranonce,
     once: bool,
     username: String,
     shares: Vec<Share>,
@@ -32,18 +31,17 @@ impl Controller {
 
         info!("Controller initialized with {} CPU cores", cpu_cores);
 
-        let (share_tx, share_rx) = mpsc::channel(32);
+        let (share_tx, share_rx) = mpsc::channel(256);
 
         Ok(Self {
             client,
             pool_difficulty: Arc::new(Mutex::new(Difficulty::default())),
             extranonce1: subscribe.extranonce1,
-            extranonce2_size: subscribe.extranonce2_size,
             share_rx,
             share_tx,
             cancel: CancellationToken::new(),
             cpu_cores,
-            extranonce2_counters: vec![0; cpu_cores],
+            next_extranonce2: Extranonce::generate(subscribe.extranonce2_size),
             once,
             username,
             shares: Vec::new(),
@@ -62,9 +60,6 @@ impl Controller {
                         match msg {
                             Message::Notification { method, params } => {
                                 self.handle_notification(method, params).await?;
-                            }
-                            Message::Request { id, method, params } => {
-                                self.handle_request(id, method, params).await?;
                             }
                             _ => warn!("Unexpected message on incoming: {:?}", msg)
                         }
@@ -120,7 +115,9 @@ impl Controller {
             "mining.notify" => {
                 let notify = serde_json::from_value::<Notify>(params)?;
 
-                self.cancel();
+                if notify.clean_jobs {
+                    self.cancel();
+                }
 
                 let network_nbits: CompactTarget = notify.nbits.into();
                 let network_target: Target = network_nbits.into();
@@ -130,17 +127,10 @@ impl Controller {
                 info!("Network target:\t{}", target_as_block_hash(network_target));
                 info!("Pool target:\t\t{}", target_as_block_hash(pool_target));
 
-                let mining_cancel = CancellationToken::new();
-
                 let share_tx = self.share_tx.clone();
 
-                info!(
-                    "Starting parallel mining across {} CPU cores",
-                    self.cpu_cores
-                );
-
                 for core_id in 0..self.cpu_cores {
-                    let extranonce2 = self.generate_extranonce2_for_core(core_id);
+                    let extranonce2 = self.next_extranonce2();
 
                     let mut hasher = Hasher {
                         header: Header {
@@ -164,55 +154,34 @@ impl Controller {
                     };
 
                     let share_tx_clone = share_tx.clone();
-                    let mining_cancel_clone = mining_cancel.clone();
+                    let mining_cancel = self.cancel.clone();
 
                     info!(
-                        "Starting hasher for core {} with extranonce2: {}",
+                        "Starting hasher for core {}: extranonce2={}",
                         core_id, extranonce2
                     );
 
                     tokio::spawn(async move {
-                        let (tx, rx) = tokio::sync::oneshot::channel();
+                        let result = hasher.hash(mining_cancel);
 
-                        rayon::spawn(move || {
-                            let result = hasher.hash(mining_cancel_clone);
-                            let _ = tx.send(result);
-                        });
-
-                        match rx.await {
-                            Ok(Ok(share)) => {
+                        match result {
+                            Ok(share) => {
                                 info!(
-                                    "Mining completed successfully on core {}, sending share",
-                                    core_id
+                                    "Hasher completed on core {core_id}: blockhash={} nonce={} extranonce2={}",
+                                    share.1.block_hash(),
+                                    share.1.nonce,
+                                    share.2
                                 );
-                                if let Err(e) = share_tx_clone.send(share).await {
-                                    error!(
-                                        "Failed to send found share from core {}: {e:#}",
-                                        core_id
-                                    );
-                                }
+
+                                let _ = share_tx_clone.send(share).await;
                             }
-                            Ok(Err(e)) => {
-                                if e.to_string().contains("cancelled") {
-                                    info!(
-                                        "Mining operation was cancelled on core {} (new job received)",
-                                        core_id
-                                    );
-                                } else {
-                                    warn!("Mining failed on core {}: {e:#}", core_id);
-                                }
-                            }
-                            Err(e) => {
-                                error!(
-                                    "Failed to receive mining result from core {}: {e:#}",
-                                    core_id
-                                );
-                            }
+                            Err(err) => warn!("Hasher failed on core {core_id}: {err}"),
                         }
                     });
                 }
             }
             "mining.set_difficulty" => {
+                // TODO: if current diff is different from new one then cancel all running hashers
                 let difficulty = serde_json::from_value::<SetDifficulty>(params)?.difficulty();
                 *self.pool_difficulty.lock().await = difficulty;
                 info!("Updated pool difficulty: {difficulty}");
@@ -227,31 +196,15 @@ impl Controller {
         Ok(())
     }
 
-    async fn handle_request(&self, id: Id, method: String, params: Value) -> Result {
-        info!("Received request: method={method} id={id} params={params}");
-        Ok(())
-    }
-
     fn cancel(&mut self) {
         self.cancel.cancel();
         self.cancel = CancellationToken::new();
     }
 
-    fn generate_extranonce2_for_core(&mut self, core_id: usize) -> Extranonce {
-        let counter = self.extranonce2_counters[core_id];
-        self.extranonce2_counters[core_id] = counter.wrapping_add(1);
+    fn next_extranonce2(&mut self) -> Extranonce {
+        let extranonce2 = self.next_extranonce2.clone();
+        self.next_extranonce2.increment_wrapping();
 
-        let extranonce2_bytes = self.extranonce2_size as usize;
-        let mut bytes = vec![0u8; extranonce2_bytes];
-
-        bytes[0] = core_id as u8;
-
-        let counter_bytes = counter.to_le_bytes();
-        let copy_len = std::cmp::min(counter_bytes.len(), extranonce2_bytes.saturating_sub(1));
-        if copy_len > 0 {
-            bytes[1..1 + copy_len].copy_from_slice(&counter_bytes[..copy_len]);
-        }
-
-        Extranonce::from_hex(&hex::encode(bytes)).expect("Valid extranonce2")
+        extranonce2
     }
 }

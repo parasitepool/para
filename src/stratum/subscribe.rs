@@ -50,7 +50,7 @@ impl<'de> Deserialize<'de> for Subscribe {
 pub struct SubscribeResult {
     pub subscriptions: Vec<(String, String)>,
     pub extranonce1: Extranonce,
-    pub extranonce2_size: u32,
+    pub extranonce2_size: usize,
 }
 
 impl Serialize for SubscribeResult {
@@ -72,7 +72,7 @@ impl<'de> Deserialize<'de> for SubscribeResult {
         D: Deserializer<'de>,
     {
         let (subscriptions, extranonce1, extranonce2_size) =
-            <(Vec<(String, String)>, Extranonce, u32)>::deserialize(deserializer)?;
+            <(Vec<(String, String)>, Extranonce, usize)>::deserialize(deserializer)?;
 
         Ok(SubscribeResult {
             subscriptions,

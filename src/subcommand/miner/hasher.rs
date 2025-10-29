@@ -1,4 +1,12 @@
-use super::*;
+use {super::*, snafu::Snafu};
+
+#[derive(Debug, Snafu)]
+pub(crate) enum HasherError {
+    #[snafu(display("hasher cancelled: nonce={nonce}"))]
+    Cancelled { nonce: u32 },
+    #[snafu(display("nonce space exhausted: nonce={nonce}"))]
+    NonceSpaceExhausted { nonce: u32 },
+}
 
 #[derive(Debug)]
 pub(crate) struct Hasher {
@@ -12,7 +20,7 @@ impl Hasher {
     pub(crate) fn hash(
         &mut self,
         cancel: CancellationToken,
-    ) -> Result<(JobId, Header, Extranonce)> {
+    ) -> Result<(JobId, Header, Extranonce), HasherError> {
         let start = Instant::now();
         let mut total_hashes = 0u64;
         let mut last_report = start;
@@ -20,33 +28,28 @@ impl Hasher {
 
         loop {
             if cancel.is_cancelled() {
-                return Err(anyhow!("hasher cancelled"));
+                return CancelledSnafu {
+                    nonce: self.header.nonce,
+                }
+                .fail();
             }
 
-            let batch_size = if self.header.nonce > u32::MAX - 10000 {
-                (u32::MAX - self.header.nonce) as usize + 1
-            } else {
-                10000
-            };
-
-            for _ in 0..batch_size {
+            for _ in 0..10_000 {
                 let hash = self.header.block_hash();
                 total_hashes += 1;
 
                 if self.pool_target.is_met_by(hash) {
-                    info!("Solved block with hash: {hash}");
                     return Ok((self.job_id, self.header, self.extranonce2.clone()));
                 }
 
                 if let Some(next_nonce) = self.header.nonce.checked_add(1) {
                     self.header.nonce = next_nonce;
                 } else {
-                    return Err(anyhow!("nonce space exhausted"));
+                    return NonceSpaceExhaustedSnafu {
+                        nonce: self.header.nonce,
+                    }
+                    .fail();
                 }
-            }
-
-            if batch_size < 10000 {
-                return Err(anyhow!("nonce space exhausted"));
             }
 
             let now = Instant::now();
