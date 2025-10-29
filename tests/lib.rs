@@ -22,7 +22,7 @@ use {
         path::PathBuf,
         process::{Child, Command, Stdio},
         str::FromStr,
-        sync::{Arc, Barrier},
+        sync::Arc,
         thread,
         time::Duration,
     },
@@ -34,18 +34,34 @@ use {
 
 #[cfg(target_os = "linux")]
 use {
+    crate::test_psql::{
+        create_test_block, create_test_shares, insert_test_block, insert_test_shares,
+        setup_test_schema,
+    },
     harness::bitcoind::Bitcoind,
-    para::subcommand::{
-        miner::Share,
-        sync::{ShareBatch, Sync, SyncResponse},
-        template::Output as Template,
+    para::{
+        stratum::{
+            self, Difficulty, Extranonce, JobId, Message, Nonce, Notify, Ntime, SetDifficulty,
+            Version,
+        },
+        subcommand::{
+            miner::Share,
+            sync::{ShareBatch, Sync, SyncResponse},
+            template::Output as Template,
+        },
     },
     reqwest::Response,
     std::{
-        io::stderr,
+        io::{BufReader, stderr},
         net::TcpStream,
-        sync::atomic::{AtomicUsize, Ordering},
+        process::ChildStdout,
+        sync::{
+            Barrier,
+            atomic::{AtomicUsize, Ordering},
+            mpsc,
+        },
     },
+    tempfile::tempdir,
     test_ckpool::TestCkpool,
     test_pool::TestPool,
 };
@@ -62,8 +78,6 @@ mod to_args;
 
 mod alerts;
 #[cfg(target_os = "linux")]
-mod miner;
-#[cfg(target_os = "linux")]
 mod ping;
 #[cfg(target_os = "linux")]
 mod pool;
@@ -74,6 +88,16 @@ mod server_with_db;
 mod sync;
 #[cfg(target_os = "linux")]
 mod template;
+
+#[cfg(target_os = "linux")]
+mod ignored;
+
+#[cfg(target_os = "linux")]
+fn next_json<T: DeserializeOwned>(r: &mut BufReader<ChildStdout>) -> T {
+    let de = serde_json::Deserializer::from_reader(&mut *r);
+    let mut stream = de.into_iter::<T>();
+    stream.next().expect("stream ended").expect("bad json")
+}
 
 #[cfg(target_os = "linux")]
 fn signet_username() -> String {
