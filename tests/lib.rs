@@ -4,8 +4,7 @@ use {
     executable_path::executable_path,
     para::{
         api::Status,
-        ckpool::{self, HashRateStatus, PoolStatus, ShareStatus, User, Worker},
-        hash_rate::HashRate,
+        ckpool::{self, HashRate, HashRateStatus, PoolStatus, ShareStatus, User, Worker},
         subcommand::server::notifications::{
             NotificationHandler, NotificationPriority, NotificationType,
         },
