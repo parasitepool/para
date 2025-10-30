@@ -1,11 +1,5 @@
-use crate::test_psql::setup_test_schema;
-use crate::test_server::TestServer;
-use axum::http::StatusCode;
-use bip322::sign_simple;
-use bitcoin::consensus::Encodable;
-use bitcoin::secp256k1::Secp256k1;
-use bitcoin::{Address, CompressedPublicKey, Network, PrivateKey};
-use std::time::{SystemTime, UNIX_EPOCH};
+use para::subcommand::server::account::Account;
+use super::*;
 
 pub struct TestAccount {
     pub btc_address: String,
@@ -64,7 +58,7 @@ impl TestAccount {
 }
 
 #[tokio::test]
-async fn test_account_lookup_not_found() {
+async fn account_lookup_not_found() {
     let server = TestServer::spawn_with_db().await;
     let db_url = server.database_url().unwrap();
     setup_test_schema(db_url.clone()).await.unwrap();
@@ -76,4 +70,24 @@ async fn test_account_lookup_not_found() {
         .await;
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn account_lookup_found() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    insert_test_remote_shares(db_url.clone(), 1, 800000)
+        .await
+        .expect("Share to be inserted and user record updated");
+
+    let response = server
+        .get_json_async_raw(&format!("/account/{}", "user_0"))
+        .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let account = response.json::<Account>().await.unwrap();
+    assert_eq!(account.btc_address, "user_0");
+    assert_eq!(account.total_diff, 1000);
 }

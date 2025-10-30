@@ -19,7 +19,7 @@ use {
 };
 
 mod accept_json;
-mod account;
+pub mod account;
 mod aggregator;
 pub mod api;
 mod cache;

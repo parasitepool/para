@@ -12,6 +12,7 @@ use {
         routing::{MethodRouter, get, post},
     },
     axum_server::Handle,
+    bip322::verify_simple,
     bitcoin::{
         Address, Amount, Block, BlockHash, CompactTarget, Network, OutPoint, ScriptBuf, Sequence,
         Target, Transaction, TxIn, TxMerkleNode, TxOut, Txid, VarInt, Witness,

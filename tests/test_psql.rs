@@ -226,7 +226,6 @@ $$ LANGUAGE plpgsql;"#,
 
     sqlx::query(
         r#"
-
 CREATE TRIGGER trigger_update_accounts_on_remote_share
     AFTER INSERT ON remote_shares
     FOR EACH ROW
@@ -256,22 +255,63 @@ pub(crate) async fn insert_test_shares(
                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
                     "#,
         )
-            .bind(blockheight)
-            .bind(i as i64 + 1000)
-            .bind(i as i64 + 100)
-            .bind(format!("enonce1_{}", i))
-            .bind(format!("nonce2_{}", i))
-            .bind(format!("nonce_{}", i))
-            .bind("507f1f77")
-            .bind(1000.0 + i as f64)
-            .bind(500.0 + i as f64)
-            .bind(format!("hash_{:064x}", i))
-            .bind(true)
-            .bind(format!("worker_{}", i % 5))
-            .bind(format!("user_{}", i % 10))
-            .bind(address(i % 10).to_string())
-            .execute(&pool)
-            .await?;
+        .bind(blockheight)
+        .bind(i as i64 + 1000)
+        .bind(i as i64 + 100)
+        .bind(format!("enonce1_{}", i))
+        .bind(format!("nonce2_{}", i))
+        .bind(format!("nonce_{}", i))
+        .bind("507f1f77")
+        .bind(1000.0 + i as f64)
+        .bind(500.0 + i as f64)
+        .bind(format!("hash_{:064x}", i))
+        .bind(true)
+        .bind(format!("worker_{}", i % 5))
+        .bind(format!("user_{}", i % 10))
+        .bind(address(i % 10).to_string())
+        .execute(&pool)
+        .await?;
+    }
+
+    pool.close().await;
+    Ok(())
+}
+
+pub(crate) async fn insert_test_remote_shares(
+    db: String,
+    count: u32,
+    blockheight: i64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = sqlx::PgPool::connect(&db).await?;
+
+    for i in 0..count {
+        sqlx::query(
+            r#"
+                    INSERT INTO remote_shares (
+                                               id, origin,
+                        blockheight, workinfoid, clientid, enonce1, nonce2, nonce,
+                        ntime, diff, sdiff, hash, result, workername, username, address
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+                    "#,
+        )
+        .bind(i as i64)
+        .bind("test_origin")
+        .bind(blockheight)
+        .bind(i as i64 + 1000)
+        .bind(i as i64 + 100)
+        .bind(format!("enonce1_{}", i))
+        .bind(format!("nonce2_{}", i))
+        .bind(format!("nonce_{}", i))
+        .bind("507f1f77")
+        .bind(1000.0 + i as f64)
+        .bind(500.0 + i as f64)
+        .bind(format!("hash_{:064x}", i))
+        .bind(true)
+        .bind(format!("worker_{}", i % 5))
+        .bind(format!("user_{}", i % 10))
+        .bind(address(i % 10).to_string())
+        .execute(&pool)
+        .await?;
     }
 
     pool.close().await;

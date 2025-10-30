@@ -1,11 +1,11 @@
 use super::*;
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub(crate) struct Account {
-    pub(crate) btc_address: String,
+pub struct Account {
+    pub btc_address: String,
     pub(crate) ln_address: String,
     pub(crate) past_ln_addresses: Vec<String>,
-    pub(crate) total_diff: i64,
+    pub total_diff: i64,
     pub(crate) payouts: Vec<HistoricalPayout>,
 }
 
