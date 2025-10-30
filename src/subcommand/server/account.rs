@@ -51,11 +51,15 @@ pub(crate) async fn account_lookup(
     Extension(database): Extension<Database>,
     Path(address): Path<String>,
 ) -> ServerResult<Response> {
-    account_detail(Extension(database), Json(AccountLookup {
-        btc_address: address,
-        signature: None,
-        nonce: None,
-    })).await
+    account_detail(
+        Extension(database),
+        Json(AccountLookup {
+            btc_address: address,
+            signature: None,
+            nonce: None,
+        }),
+    )
+    .await
 }
 
 // If accountlookup has an address not in our accounts table:
@@ -86,7 +90,7 @@ pub(crate) async fn account_detail(
 
     let signature_valid =
         if let (Some(signature), Some(nonce)) = (user_lookup.signature, user_lookup.nonce) {
-            verify_account_signature(&user_lookup.btc_address, &nonce, &signature)
+            verify_simple_encoded(&user_lookup.btc_address, &nonce, &signature).is_ok()
         } else {
             false
         };
@@ -125,11 +129,12 @@ pub(crate) async fn account_update(
         account_update.btc_address, account_update.ln_address, account_update.nonce
     );
 
-    let signature_valid = verify_account_signature(
+    let signature_valid = verify_simple_encoded(
         &account_update.btc_address,
         &message,
         &account_update.signature,
-    );
+    )
+    .is_ok();
 
     if !signature_valid {
         return Ok(Json(AccountResponse {
@@ -154,44 +159,4 @@ pub(crate) async fn account_update(
         })
         .into_response()),
     }
-}
-
-fn verify_account_signature(btc_address: &str, nonce: &str, signature_str: &str) -> bool {
-    let message = nonce.to_string();
-    verify_signature_for_message(btc_address, &message, signature_str)
-}
-
-fn verify_signature_for_message(btc_address: &str, message: &str, signature_str: &str) -> bool {
-    let address = match Address::from_str(btc_address) {
-        Ok(addr) => addr,
-        Err(_) => return false,
-    };
-
-    let witness = match parse_witness(signature_str) {
-        Ok(w) => w,
-        Err(_) => return false,
-    };
-
-    verify_simple(address.assume_checked_ref(), message, witness).is_ok()
-}
-
-fn parse_witness(signature_str: &str) -> Result<Witness, String> {
-    if let Ok(bytes) = hex::decode(signature_str)
-        && let Ok(witness) = Witness::consensus_decode(&mut &bytes[..])
-    {
-        return Ok(witness);
-    }
-
-    // Disabled for now, but we could pass as base64
-    /*if let Ok(bytes) = base64::decode(signature_str) {
-        if let Ok(witness) = Witness::consensus_decode(&mut &bytes[..]) {
-            return Ok(witness);
-        }
-    }*/
-
-    if let Ok(witness) = Witness::consensus_decode(&mut signature_str.as_bytes()) {
-        return Ok(witness);
-    }
-
-    Err("Failed to parse witness from signature string".to_string())
 }

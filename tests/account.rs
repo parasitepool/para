@@ -1,5 +1,5 @@
-use para::subcommand::server::account::Account;
 use super::*;
+use para::subcommand::server::account::Account;
 
 pub struct TestAccount {
     pub btc_address: String,
