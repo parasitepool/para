@@ -23,11 +23,23 @@ impl Pool {
 
         loop {
             tokio::select! {
-                result = Self::handle_single_worker(config.clone(), &listener, template_receiver.clone()) => {
-                    match result {
-                        Ok(_) => continue,
-                        Err(err) => error!("Worker connection error: {err}"),
-                    }
+                Ok((stream, worker)) = listener.accept() => {
+                    stream.set_nodelay(true)?;
+
+                    info!("Accepted connection from {worker}");
+
+                    let (reader, writer) = stream.into_split();
+
+                    let template_receiver = template_receiver.clone();
+                    let config = config.clone();
+
+                    tokio::task::spawn(async move {
+                        let mut conn = Connection::new(config, worker, reader, writer, template_receiver);
+
+                        if let Err(err) = conn.serve().await {
+                            error!("Worker connection error: {err}")
+                        }
+                    });
                 }
                 _ = ctrl_c() => {
                         info!("Shutting down stratum server");
@@ -38,25 +50,6 @@ impl Pool {
         }
 
         Ok(())
-    }
-
-    async fn handle_single_worker(
-        config: Arc<PoolConfig>,
-        listener: &TcpListener,
-        template_receiver: watch::Receiver<Arc<BlockTemplate>>,
-    ) -> Result {
-        let (stream, worker) = listener.accept().await?;
-
-        info!("Accepted connection from {worker}");
-
-        let (reader, writer) = {
-            let (rx, tx) = stream.into_split();
-            (BufReader::new(rx), BufWriter::new(tx))
-        };
-
-        let mut conn = Connection::new(config.clone(), worker, reader, writer, template_receiver);
-
-        conn.serve().await
     }
 }
 

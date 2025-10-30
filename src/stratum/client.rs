@@ -1,13 +1,13 @@
 use super::*;
 
-type PendingResponses = Arc<Mutex<BTreeMap<Id, oneshot::Sender<(Message, usize)>>>>;
+type Pending = Arc<Mutex<BTreeMap<Id, oneshot::Sender<(Message, usize)>>>>;
 
 pub struct Client {
     pub incoming: mpsc::Receiver<Message>,
     id_counter: AtomicU64,
     listener: JoinHandle<()>,
     password: String,
-    pending: PendingResponses,
+    pending: Pending,
     tcp_writer: BufWriter<OwnedWriteHalf>,
     username: String,
 }
@@ -28,7 +28,7 @@ impl Client {
 
         let (incoming_tx, incoming_rx) = mpsc::channel(32);
 
-        let pending: PendingResponses = Arc::new(Mutex::new(BTreeMap::new()));
+        let pending: Pending = Arc::new(Mutex::new(BTreeMap::new()));
 
         let listener = {
             let incoming_tx = incoming_tx.clone();
@@ -56,7 +56,7 @@ impl Client {
     async fn listener<R>(
         mut tcp_reader: BufReader<R>,
         incoming: mpsc::Sender<Message>,
-        pending: PendingResponses,
+        pending: Pending,
     ) where
         R: AsyncRead + Unpin,
     {
@@ -127,6 +127,40 @@ impl Client {
         }
     }
 
+    pub async fn configure(
+        &mut self,
+        extensions: Vec<String>,
+        version_rolling_mask: Option<Version>,
+    ) -> Result<(Value, Duration, usize)> {
+        let (rx, instant) = self
+            .send_request(
+                "mining.configure",
+                serde_json::to_value(Configure {
+                    extensions,
+                    minimum_difficulty_value: None,
+                    version_rolling_mask,
+                    version_rolling_min_bit_count: None,
+                })?,
+            )
+            .await?;
+
+        let (message, bytes_read) = rx.await?;
+
+        let duration = instant.elapsed();
+
+        match message {
+            Message::Response {
+                result: Some(result),
+                error: None,
+                ..
+            } => Ok((result, duration, bytes_read)),
+            Message::Response {
+                error: Some(err), ..
+            } => Err(anyhow!("mining.configure error: {}", err)),
+            _ => Err(anyhow!("Unhandled error in mining.configure")),
+        }
+    }
+
     pub async fn subscribe(&mut self) -> Result<(SubscribeResult, Duration, usize)> {
         let (rx, instant) = self
             .send_request(
@@ -191,23 +225,22 @@ impl Client {
 
     pub async fn submit(
         &mut self,
-        job_id: String,
+        job_id: JobId,
         extranonce2: Extranonce,
         ntime: Ntime,
         nonce: Nonce,
-    ) -> Result {
+    ) -> Result<Submit> {
+        let submit = Submit {
+            username: self.username.clone(),
+            job_id,
+            extranonce2,
+            ntime,
+            nonce,
+            version_bits: None,
+        };
+
         let (rx, _) = self
-            .send_request(
-                "mining.submit",
-                serde_json::to_value(Submit {
-                    username: self.username.clone(),
-                    job_id,
-                    extranonce2,
-                    ntime,
-                    nonce,
-                    version_bits: None,
-                })?,
-            )
+            .send_request("mining.submit", serde_json::to_value(&submit)?)
             .await?;
 
         let (message, _) = rx.await?;
@@ -219,21 +252,21 @@ impl Client {
                 reject_reason: None,
                 ..
             } => {
-                if serde_json::from_value(result)? {
-                    Ok(())
-                } else {
-                    Err(anyhow!("Failed to submit"))
+                if let Err(err) = serde_json::from_value::<Value>(result) {
+                    return Err(anyhow!("Failed to submit: {err}"));
                 }
             }
             Message::Response {
                 error: Some(err), ..
-            } => Err(anyhow!("mining.submit error: {}", err)),
+            } => return Err(anyhow!("mining.submit error: {}", err)),
             Message::Response {
                 reject_reason: Some(reason),
                 ..
-            } => Err(anyhow!("share rejected: {}", reason)),
-            _ => Err(anyhow!("Unknown mining.submit error")),
+            } => return Err(anyhow!("share rejected: {}", reason)),
+            _ => return Err(anyhow!("Unhandled error in mining.submit")),
         }
+
+        Ok(submit)
     }
 
     async fn send_request(

@@ -11,7 +11,6 @@ use {
     cache::Cache,
     database::Database,
     error::{OptionExt, ServerError, ServerResult},
-    futures::future::join_all,
     reqwest::{Client, ClientBuilder, header},
     server_config::ServerConfig,
     templates::{
@@ -31,6 +30,10 @@ mod server_config;
 mod templates;
 
 const MEBIBYTE: usize = 1 << 20;
+const BUDGET: Duration = Duration::from_secs(5);
+const TIMEOUT: Duration = Duration::from_secs(2);
+const MAX_ATTEMPTS: usize = 3;
+const CONNECT_TIMEOUT: Duration = Duration::from_millis(1500);
 
 #[derive(RustEmbed)]
 #[folder = "static"]

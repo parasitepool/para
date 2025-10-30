@@ -22,6 +22,22 @@ pub struct BlockTemplate {
     pub coinbase_value: Amount,
 }
 
+impl Default for BlockTemplate {
+    fn default() -> Self {
+        Self {
+            bits: Nbits::from(CompactTarget::from_consensus(0)),
+            previous_block_hash: BlockHash::all_zeros(),
+            current_time: Ntime::from(0),
+            height: 0,
+            version: Version::from(block::Version::TWO),
+            transactions: Vec::new(),
+            default_witness_commitment: ScriptBuf::new(),
+            coinbaseaux: BTreeMap::new(),
+            coinbase_value: Amount::from_sat(COIN_VALUE),
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
 pub struct TemplateTransaction {
     pub txid: Txid,

@@ -6,7 +6,7 @@ pub(crate) struct Job {
     pub(crate) coinb2: String,
     pub(crate) extranonce1: Extranonce,
     pub(crate) template: Arc<BlockTemplate>,
-    pub(crate) job_id: String,
+    pub(crate) job_id: JobId,
     pub(crate) merkle_branches: Vec<MerkleNode>,
     pub(crate) version_mask: Option<Version>,
 }
@@ -17,10 +17,10 @@ impl Job {
         extranonce1: Extranonce,
         version_mask: Option<Version>,
         template: Arc<BlockTemplate>,
-        job_id: String,
+        job_id: JobId,
     ) -> Result<Self> {
         let (_coinbase_tx, coinb1, coinb2) = CoinbaseBuilder::new(
-            address,
+            address.clone(),
             extranonce1.clone(),
             EXTRANONCE2_SIZE,
             template.height,
@@ -58,9 +58,9 @@ impl Job {
         self.template.version
     }
 
-    pub(crate) fn notify(&self) -> Result<Notify> {
+    pub(crate) fn notify(&self, clean_jobs: bool) -> Result<Notify> {
         Ok(Notify {
-            job_id: self.job_id.clone(),
+            job_id: self.job_id,
             prevhash: self.prevhash(),
             coinb1: self.coinb1.clone(),
             coinb2: self.coinb2.clone(),
@@ -68,7 +68,7 @@ impl Job {
             version: self.version(),
             nbits: self.nbits(),
             ntime: self.template.current_time,
-            clean_jobs: true,
+            clean_jobs,
         })
     }
 }

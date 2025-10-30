@@ -84,6 +84,17 @@ impl TestPool {
         format!("127.0.0.1:{}", self.pool_port)
     }
 
+    pub(crate) async fn stratum_client(&self) -> stratum::Client {
+        stratum::Client::connect(
+            self.stratum_endpoint(),
+            signet_username(),
+            None,
+            Duration::from_secs(1),
+        )
+        .await
+        .unwrap()
+    }
+
     pub(crate) fn bitcoind_handle(&self) -> &Bitcoind {
         &self.bitcoind_handle
     }

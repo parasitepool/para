@@ -4,7 +4,7 @@ use super::*;
 pub(crate) struct Hasher {
     pub(crate) extranonce2: Extranonce,
     pub(crate) header: Header,
-    pub(crate) job_id: String,
+    pub(crate) job_id: JobId,
     pub(crate) pool_target: Target,
 }
 
@@ -12,46 +12,49 @@ impl Hasher {
     pub(crate) fn hash(
         &mut self,
         cancel: CancellationToken,
-    ) -> Result<(Header, Extranonce, String)> {
-        let mut hashes = 0;
+    ) -> Result<(JobId, Header, Extranonce)> {
         let start = Instant::now();
-        let mut last_log = start;
-
-        let span =
-            tracing::info_span!("hasher", job_id = %self.job_id, extranonce2 = %self.extranonce2);
-        let _ = span.enter();
+        let mut total_hashes = 0u64;
+        let mut last_report = start;
+        const REPORT_INTERVAL: Duration = Duration::from_secs(5);
 
         loop {
             if cancel.is_cancelled() {
                 return Err(anyhow!("hasher cancelled"));
             }
 
-            for _ in 0..10000 {
+            let batch_size = if self.header.nonce > u32::MAX - 10000 {
+                (u32::MAX - self.header.nonce) as usize + 1
+            } else {
+                10000
+            };
+
+            for _ in 0..batch_size {
                 let hash = self.header.block_hash();
-                hashes += 1;
+                total_hashes += 1;
 
                 if self.pool_target.is_met_by(hash) {
                     info!("Solved block with hash: {hash}");
-                    return Ok((self.header, self.extranonce2.clone(), self.job_id.clone()));
+                    return Ok((self.job_id, self.header, self.extranonce2.clone()));
                 }
 
-                self.header.nonce = self
-                    .header
-                    .nonce
-                    .checked_add(1)
-                    .ok_or_else(|| anyhow!("nonce space exhausted"))?;
+                if let Some(next_nonce) = self.header.nonce.checked_add(1) {
+                    self.header.nonce = next_nonce;
+                } else {
+                    return Err(anyhow!("nonce space exhausted"));
+                }
+            }
+
+            if batch_size < 10000 {
+                return Err(anyhow!("nonce space exhausted"));
             }
 
             let now = Instant::now();
-            let elapsed_since_last = now.duration_since(last_log).as_secs();
-
-            if elapsed_since_last >= 5 {
-                let total_elapsed = now.duration_since(start).as_secs_f64().max(1e-6);
-                let current_hashrate = hashes as f64 / total_elapsed;
-
-                info!("Hashrate: {}", HashRate(current_hashrate));
-
-                last_log = now;
+            if now.duration_since(last_report) >= REPORT_INTERVAL {
+                let elapsed = now.duration_since(start).as_secs_f64().max(1e-6);
+                let hashrate = total_hashes as f64 / elapsed;
+                info!("Hashrate: {}", ckpool::HashRate(hashrate));
+                last_report = now;
             }
         }
     }
@@ -87,6 +90,7 @@ mod tests {
 
         Target::from_be_bytes(bytes)
     }
+
     fn header(network_target: Option<Target>, nonce: Option<u32>) -> Header {
         Header {
             version: Version::TWO,
@@ -143,27 +147,35 @@ mod tests {
             header: header(None, None),
             pool_target: target,
             extranonce2: "0000000000".parse().unwrap(),
-            job_id: "bf".into(),
+            job_id: "bf".parse().unwrap(),
         };
 
-        let (header, _extranonce2, _job_id) = hasher.hash(CancellationToken::new()).unwrap();
+        let (_job_id, header, _extranonce2) = hasher.hash(CancellationToken::new()).unwrap();
         assert!(target.is_met_by(header.block_hash()));
     }
 
     #[test]
     fn hasher_nonce_space_exhausted() {
-        let target = shift(32);
+        let target = Target::from_be_bytes([0u8; 32]);
         let mut hasher = Hasher {
-            header: header(None, Some(u32::MAX - 1)),
+            header: header(None, Some(u32::MAX - 100)),
             pool_target: target,
             extranonce2: "0000000000".parse().unwrap(),
-            job_id: "bg".into(),
+            job_id: "bf".parse().unwrap(),
         };
 
+        let result = hasher.hash(CancellationToken::new());
         assert!(
-            hasher
-                .hash(CancellationToken::new())
-                .is_err_and(|err| err.to_string() == "nonce space exhausted")
+            result.is_err(),
+            "Expected nonce space exhausted error, got: {:?}",
+            result
+        );
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("nonce space exhausted"),
+            "Expected 'nonce space exhausted' error"
         );
     }
 
@@ -210,17 +222,70 @@ mod tests {
                 header: header(None, None),
                 pool_target: target,
                 extranonce2: "0000000000".parse().unwrap(),
-                job_id: format!("test_{zeros}"),
+                job_id: JobId::new(0),
             };
 
             let result = hasher.hash(CancellationToken::new());
             assert!(result.is_ok(), "Failed at {zeros} leading zeros");
 
-            let (header, _, _) = result.unwrap();
+            let (_, header, _) = result.unwrap();
             assert!(
                 target.is_met_by(header.block_hash()),
                 "Invalid PoW at {zeros} leading zeros"
             );
         }
+    }
+
+    #[test]
+    fn test_parallel_mining_easy_target() {
+        let target = shift(1);
+        let mut hasher = Hasher {
+            header: header(None, None),
+            pool_target: target,
+            extranonce2: "0000000000".parse().unwrap(),
+            job_id: JobId::new(0),
+        };
+
+        let result = hasher.hash(CancellationToken::new());
+        assert!(
+            result.is_ok(),
+            "Mining should find solution for easy target"
+        );
+
+        let (_, header, _) = result.unwrap();
+        assert!(
+            target.is_met_by(header.block_hash()),
+            "Solution should meet target"
+        );
+    }
+
+    #[test]
+    fn test_parallel_mining_cancellation() {
+        let target = shift(30);
+        let mut hasher = Hasher {
+            header: header(None, None),
+            pool_target: target,
+            extranonce2: "0000000000".parse().unwrap(),
+            job_id: JobId::new(1),
+        };
+
+        let cancel_token = CancellationToken::new();
+
+        cancel_token.cancel();
+
+        let result = hasher.hash(cancel_token);
+        assert!(result.is_err(), "Should be cancelled");
+        assert!(result.unwrap_err().to_string().contains("cancelled"));
+    }
+
+    #[test]
+    fn test_hashrate_display() {
+        assert_eq!(format!("{}", ckpool::HashRate(1500.0)), "1.500K");
+        assert_eq!(format!("{}", ckpool::HashRate(2_500_000.0)), "2.500M");
+        assert_eq!(format!("{}", ckpool::HashRate(3_200_000_000.0)), "3.200G");
+        assert_eq!(
+            format!("{}", ckpool::HashRate(1_100_000_000_000.0)),
+            "1.100T"
+        );
     }
 }

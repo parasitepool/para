@@ -41,7 +41,7 @@ miner-signet:
     127.0.0.1:42069 \
     --username tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.tick \
     --password x \
-    --once 
+    --cpu-cores 8
 
 ping host='parasite.wtf':
   cargo run ping {{host}}:42069
