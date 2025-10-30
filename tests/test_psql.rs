@@ -162,7 +162,7 @@ pub(crate) async fn setup_test_schema(db_url: String) -> Result<(), Box<dyn std:
                 CREATE TABLE IF NOT EXISTS payouts (
                     id BIGSERIAL PRIMARY KEY,
                     account_id BIGINT NOT NULL REFERENCES accounts(id),
-                    bitcoin_amount BIGINT NOT NULL,
+                    amount BIGINT NOT NULL,
                     diff_paid BIGINT NOT NULL,
                     blockheight_start INTEGER NOT NULL,
                     blockheight_end INTEGER NOT NULL,
@@ -256,22 +256,22 @@ pub(crate) async fn insert_test_shares(
                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
                     "#,
         )
-        .bind(blockheight)
-        .bind(i as i64 + 1000)
-        .bind(i as i64 + 100)
-        .bind(format!("enonce1_{}", i))
-        .bind(format!("nonce2_{}", i))
-        .bind(format!("nonce_{}", i))
-        .bind("507f1f77")
-        .bind(1000.0 + i as f64)
-        .bind(500.0 + i as f64)
-        .bind(format!("hash_{:064x}", i))
-        .bind(true)
-        .bind(format!("worker_{}", i % 5))
-        .bind(format!("user_{}", i % 10))
-        .bind(address(i % 10).to_string())
-        .execute(&pool)
-        .await?;
+            .bind(blockheight)
+            .bind(i as i64 + 1000)
+            .bind(i as i64 + 100)
+            .bind(format!("enonce1_{}", i))
+            .bind(format!("nonce2_{}", i))
+            .bind(format!("nonce_{}", i))
+            .bind("507f1f77")
+            .bind(1000.0 + i as f64)
+            .bind(500.0 + i as f64)
+            .bind(format!("hash_{:064x}", i))
+            .bind(true)
+            .bind(format!("worker_{}", i % 5))
+            .bind(format!("user_{}", i % 10))
+            .bind(address(i % 10).to_string())
+            .execute(&pool)
+            .await?;
     }
 
     pool.close().await;

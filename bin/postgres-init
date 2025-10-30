@@ -283,7 +283,7 @@ PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
   (
       id                BIGSERIAL PRIMARY KEY,
       account_id        BIGINT         NOT NULL REFERENCES accounts (id) ON DELETE RESTRICT,
-      bitcoin_amount    BIGINT         NOT NULL, -- TODO: convert to sats
+      amount            BIGINT         NOT NULL,
       diff_paid         BIGINT         NOT NULL,
       blockheight_start INTEGER        NOT NULL,
       blockheight_end   INTEGER        NOT NULL,

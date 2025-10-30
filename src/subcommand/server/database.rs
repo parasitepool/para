@@ -335,7 +335,7 @@ impl Database {
         let payouts = sqlx::query_as::<_, (i64, i64, i32, i32, String, Option<String>)>(
             "
             SELECT
-                bitcoin_amount,
+                amount,
                 diff_paid,
                 blockheight_start,
                 blockheight_end,
@@ -354,9 +354,9 @@ impl Database {
         Ok(payouts
             .into_iter()
             .map(
-                |(bitcoin_amount, diff_paid, block_start, block_end, status, failure_reason)| {
+                |(amount, diff_paid, block_start, block_end, status, failure_reason)| {
                     account::HistoricalPayout {
-                        amount: (bitcoin_amount as u32), // Convert from BIGINT
+                        amount: (amount as u32),
                         allocated_diff: diff_paid,
                         block_start: block_start as u32,
                         block_end: block_end as u32,
