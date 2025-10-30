@@ -397,7 +397,7 @@ where
 
         info!("Submitting block solve");
 
-        // self.config.bitcoin_rpc_client()?.submit_block(&block)?;
+        self.config.bitcoin_rpc_client()?.submit_block(&block)?;
 
         self.send(Message::Response {
             id,

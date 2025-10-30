@@ -4,11 +4,15 @@ pub(crate) struct Controller {
     client: Client,
     pool_difficulty: Arc<Mutex<Difficulty>>,
     extranonce1: Extranonce,
-    share_rx: mpsc::Receiver<(JobId, Header, Extranonce, ckpool::HashRate)>,
+    extranonce2: Arc<Mutex<Extranonce>>,
     share_tx: mpsc::Sender<(JobId, Header, Extranonce, ckpool::HashRate)>,
-    cancel: CancellationToken,
+    share_rx: mpsc::Receiver<(JobId, Header, Extranonce, ckpool::HashRate)>,
+    notify_tx: watch::Sender<Option<(Notify, CancellationToken)>>,
+    notify_rx: watch::Receiver<Option<(Notify, CancellationToken)>>,
+    root_cancel: CancellationToken,
+    hasher_cancel: Option<CancellationToken>,
+    hashers: JoinSet<()>,
     cpu_cores: usize,
-    next_extranonce2: Extranonce,
     once: bool,
     username: String,
     shares: Vec<Share>,
@@ -32,16 +36,21 @@ impl Controller {
         info!("Controller initialized with {} CPU cores", cpu_cores);
 
         let (share_tx, share_rx) = mpsc::channel(256);
+        let (notify_tx, notify_rx) = watch::channel(None);
 
         Ok(Self {
             client,
             pool_difficulty: Arc::new(Mutex::new(Difficulty::default())),
             extranonce1: subscribe.extranonce1,
-            share_rx,
+            extranonce2: Arc::new(Mutex::new(Extranonce::zeros(subscribe.extranonce2_size))),
             share_tx,
-            cancel: CancellationToken::new(),
+            share_rx,
+            notify_tx,
+            notify_rx,
+            root_cancel: CancellationToken::new(),
+            hasher_cancel: None,
+            hashers: JoinSet::new(),
             cpu_cores,
-            next_extranonce2: Extranonce::zeros(subscribe.extranonce2_size),
             once,
             username,
             shares: Vec::new(),
@@ -49,8 +58,11 @@ impl Controller {
     }
 
     pub(crate) async fn run(mut self) -> Result<Vec<Share>> {
+        self.spawn_hashers();
+
         loop {
             tokio::select! {
+                biased;
                 _ = ctrl_c() => {
                     info!("Shutting down stratum client and hasher");
                     break;
@@ -87,8 +99,8 @@ impl Controller {
                         self.shares.push(share);
 
                         match self.client.submit(job_id, extranonce2, header.time.into(), header.nonce.into()).await {
-                            Err(err) => warn!("Failed to submit share: {err}"),
-                            Ok(_) => info!("Share submitted successfully"),
+                            Err(err) => warn!("Failed to submit share for job {job_id}: {err}"),
+                            Ok(_) => info!("Share for job {job_id} submitted successfully"),
                         }
 
                         if self.once {
@@ -104,10 +116,92 @@ impl Controller {
             }
         }
 
-        self.cancel();
+        self.root_cancel.cancel();
+        drop(self.notify_tx);
+        while self.hashers.join_next().await.is_some() {}
         self.client.disconnect().await?;
 
         Ok(self.shares)
+    }
+
+    fn spawn_hashers(&mut self) {
+        for core_id in 0..self.cpu_cores {
+            let mut notify_rx = self.notify_rx.clone();
+            let share_tx = self.share_tx.clone();
+            let extranonce1 = self.extranonce1.clone();
+            let extranonce2 = self.extranonce2.clone();
+            let pool_difficulty = self.pool_difficulty.clone();
+
+            info!("Starting hasher for core {core_id}",);
+            self.hashers.spawn(async move {
+                loop {
+                    if notify_rx.changed().await.is_err() {
+                        break;
+                    }
+
+                    let Some((notify, cancel)) = notify_rx.borrow().clone() else {
+                        continue;
+                    };
+
+                    loop {
+                        if cancel.is_cancelled() {
+                            break;
+                        }
+
+                        let extranonce2 = {
+                            let mut guard = extranonce2.lock().await;
+                            let extranonce2 = guard.clone();
+                            guard.increment_wrapping();
+                            extranonce2
+                        };
+
+                        let merkle = stratum::merkle_root(
+                            &notify.coinb1,
+                            &notify.coinb2,
+                            &extranonce1,
+                            &extranonce2,
+                            &notify.merkle_branches,
+                        )
+                        .expect("merkle");
+
+                        let header = Header {
+                            version: notify.version.into(),
+                            prev_blockhash: notify.prevhash.clone().into(),
+                            merkle_root: merkle.into(),
+                            time: notify.ntime.into(),
+                            bits: notify.nbits.into(),
+                            nonce: 0,
+                        };
+
+                        let pool_target = { pool_difficulty.lock().await.to_target() };
+
+                        let mut hasher = Hasher {
+                            header,
+                            pool_target,
+                            extranonce2: extranonce2.clone(),
+                            job_id: notify.job_id,
+                        };
+
+                        let cancel_clone = cancel.clone();
+                        let result = task::spawn_blocking(move || hasher.hash(cancel_clone)).await;
+
+                        match result {
+                            Ok(Ok(share)) => {
+                                let _ = share_tx.send(share).await;
+                            }
+                            Ok(Err(err)) => {
+                                warn!("Hasher failed on core {core_id}: {err}");
+                                if cancel.is_cancelled() {
+                                    break;
+                                }
+                                continue;
+                            }
+                            Err(_) => break,
+                        }
+                    }
+                }
+            });
+        }
     }
 
     async fn handle_notification(&mut self, method: String, params: Value) -> Result {
@@ -115,61 +209,17 @@ impl Controller {
             "mining.notify" => {
                 let notify = serde_json::from_value::<Notify>(params)?;
 
-                if notify.clean_jobs {
-                    self.cancel();
-                }
+                info!("New job: job_id={}", notify.job_id,);
 
-                let network_nbits: CompactTarget = notify.nbits.into();
-                let network_target: Target = network_nbits.into();
-                let pool_target = self.pool_difficulty.lock().await.to_target();
+                let cancel = if notify.clean_jobs {
+                    self.cancel_hashers()
+                } else {
+                    self.hasher_cancel
+                        .clone()
+                        .unwrap_or_else(|| self.cancel_hashers())
+                };
 
-                info!("New job received: {}", notify.job_id);
-                info!("Network target:\t{}", target_as_block_hash(network_target));
-                info!("Pool target:\t\t{}", target_as_block_hash(pool_target));
-
-                let share_tx = self.share_tx.clone();
-
-                for core_id in 0..self.cpu_cores {
-                    let extranonce2 = self.next_extranonce2();
-
-                    let mut hasher = Hasher {
-                        header: Header {
-                            version: notify.version.into(),
-                            prev_blockhash: notify.prevhash.clone().into(),
-                            merkle_root: stratum::merkle_root(
-                                &notify.coinb1,
-                                &notify.coinb2,
-                                &self.extranonce1,
-                                &extranonce2,
-                                &notify.merkle_branches,
-                            )?
-                            .into(),
-                            time: notify.ntime.into(),
-                            bits: notify.nbits.into(),
-                            nonce: 0,
-                        },
-                        pool_target,
-                        extranonce2: extranonce2.clone(),
-                        job_id: notify.job_id,
-                    };
-
-                    let share_tx_clone = share_tx.clone();
-                    let mining_cancel = self.cancel.clone();
-
-                    info!(
-                        "Starting hasher for core {}: extranonce2={}",
-                        core_id, extranonce2
-                    );
-
-                    tokio::spawn(async move {
-                        match hasher.hash(mining_cancel) {
-                            Ok(share) => {
-                                let _ = share_tx_clone.send(share).await;
-                            }
-                            Err(err) => warn!("Hasher failed on core {core_id}: {err}"),
-                        }
-                    });
-                }
+                self.notify_tx.send_replace(Some((notify, cancel)));
             }
             "mining.set_difficulty" => {
                 // TODO: if current diff is different from new one then cancel all running hashers
@@ -187,15 +237,12 @@ impl Controller {
         Ok(())
     }
 
-    fn cancel(&mut self) {
-        self.cancel.cancel();
-        self.cancel = CancellationToken::new();
-    }
-
-    fn next_extranonce2(&mut self) -> Extranonce {
-        let extranonce2 = self.next_extranonce2.clone();
-        self.next_extranonce2.increment_wrapping();
-
-        extranonce2
+    fn cancel_hashers(&mut self) -> CancellationToken {
+        if let Some(cancel) = &self.hasher_cancel {
+            cancel.cancel();
+        }
+        let cancel = self.root_cancel.child_token();
+        self.hasher_cancel = Some(cancel.clone());
+        cancel
     }
 }

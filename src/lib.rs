@@ -85,7 +85,7 @@ use {
         runtime::Runtime,
         signal::ctrl_c,
         sync::{Mutex, mpsc, oneshot, watch},
-        task::{self, JoinHandle},
+        task::{self, JoinHandle, JoinSet},
         time::{MissedTickBehavior, interval, sleep, timeout},
     },
     tokio_util::{
