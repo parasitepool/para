@@ -150,6 +150,7 @@ impl Server {
                         "/sync/batch",
                         post(Self::sync_batch).layer(DefaultBodyLimit::max(50 * MEBIBYTE)),
                     )
+                    .merge(account_router())
                     .layer(Extension(database));
 
                 router = router.merge(Self::with_auth_router(config.clone(), db_router));
@@ -160,7 +161,6 @@ impl Server {
         }
 
         router = router
-            .merge(account_router())
             .layer(Extension(config.clone()));
 
         if !config.nodes().is_empty() {
