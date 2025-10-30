@@ -69,11 +69,7 @@ async fn account_lookup_not_found() {
         .get_json_async_raw(&format!("/account/{}", test_account.btc_address))
         .await;
 
-    assert_eq!(response.status(), StatusCode::OK);
-    let account = response.json::<Account>().await.unwrap();
-    // TODO: implement default for Account for easier comparison and better readability
-    assert_eq!(account.btc_address, test_account.btc_address);
-    assert_eq!(account.total_diff, 0);
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

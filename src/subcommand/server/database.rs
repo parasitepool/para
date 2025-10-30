@@ -1,4 +1,5 @@
 use super::*;
+use crate::subcommand::server::account::Account;
 use sqlx::Row;
 
 #[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone, PartialEq)]
@@ -16,15 +17,6 @@ pub struct Payout {
     pub payable_shares: i64,
     pub total_shares: i64,
     pub percentage: f64,
-}
-
-#[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub(crate) struct AccountData {
-    pub(crate) id: i64,
-    pub(crate) username: String,
-    pub(crate) lnurl: Option<String>,
-    pub(crate) past_lnurls: Vec<String>,
-    pub(crate) total_diff: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -278,11 +270,10 @@ impl Database {
         .map_err(|err| anyhow!(err))
     }
 
-    pub(crate) async fn get_account(&self, username: &str) -> Result<AccountData> {
+    pub(crate) async fn get_account(&self, username: &str) -> Result<Account> {
         let account = sqlx::query(
             "
             SELECT
-                id,
                 username,
                 lnurl,
                 past_lnurls,
@@ -303,7 +294,6 @@ impl Database {
             }
         };
 
-        let id: i64 = row.try_get("id").map_err(|err| anyhow!(err))?;
         let username: String = row.try_get("username").map_err(|err| anyhow!(err))?;
         let lnurl: Option<String> = row.try_get("lnurl").ok();
         let total_diff: i64 = row.try_get("total_diff").map_err(|err| anyhow!(err))?;
@@ -319,53 +309,12 @@ impl Database {
             None => vec![],
         };
 
-        Ok(AccountData {
-            id,
-            username,
-            lnurl,
-            past_lnurls,
+        Ok(Account {
+            btc_address: username,
+            ln_address: lnurl,
+            past_ln_addresses: past_lnurls,
             total_diff,
         })
-    }
-
-    pub(crate) async fn get_account_payouts(
-        &self,
-        account_id: i64,
-    ) -> Result<Vec<account::HistoricalPayout>> {
-        let payouts = sqlx::query_as::<_, (i64, i64, i32, i32, String, Option<String>)>(
-            "
-            SELECT
-                amount,
-                diff_paid,
-                blockheight_start,
-                blockheight_end,
-                status,
-                failure_reason
-            FROM payouts
-            WHERE account_id = $1
-            ORDER BY blockheight_end DESC
-            ",
-        )
-        .bind(account_id)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|err| anyhow!(err))?;
-
-        Ok(payouts
-            .into_iter()
-            .map(
-                |(amount, diff_paid, block_start, block_end, status, failure_reason)| {
-                    account::HistoricalPayout {
-                        amount: (amount as u32),
-                        allocated_diff: diff_paid,
-                        block_start: block_start as u32,
-                        block_end: block_end as u32,
-                        status,
-                        failure_reason,
-                    }
-                },
-            )
-            .collect())
     }
 
     pub(crate) async fn update_account_lnurl(&self, username: &str, new_lnurl: &str) -> Result<()> {
