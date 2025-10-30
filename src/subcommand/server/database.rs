@@ -1,4 +1,5 @@
 use super::*;
+use sqlx::Row;
 
 #[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub(crate) struct Split {
@@ -15,6 +16,15 @@ pub struct Payout {
     pub payable_shares: i64,
     pub total_shares: i64,
     pub percentage: f64,
+}
+
+#[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone, PartialEq)]
+pub(crate) struct AccountData {
+    pub(crate) id: i64,
+    pub(crate) username: String,
+    pub(crate) lnurl: Option<String>,
+    pub(crate) past_lnurls: Vec<String>,
+    pub(crate) total_diff: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -266,5 +276,127 @@ impl Database {
         .fetch_all(&self.pool)
         .await
         .map_err(|err| anyhow!(err))
+    }
+
+    pub(crate) async fn get_account(&self, username: &str) -> Result<AccountData> {
+        let account = sqlx::query(
+            "
+            SELECT
+                id,
+                username,
+                lnurl,
+                past_lnurls,
+                total_diff
+            FROM accounts
+            WHERE username = $1
+            ",
+        )
+        .bind(username)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))?;
+
+        let row = match account {
+            Some(r) => r,
+            None => {
+                return Err(anyhow!("Account not found"));
+            }
+        };
+
+        let id: i64 = row.try_get("id").map_err(|err| anyhow!(err))?;
+        let username: String = row.try_get("username").map_err(|err| anyhow!(err))?;
+        let lnurl: Option<String> = row.try_get("lnurl").ok();
+        let total_diff: i64 = row.try_get("total_diff").map_err(|err| anyhow!(err))?;
+
+        let past_lnurls_json: sqlx::types::JsonValue =
+            row.try_get("past_lnurls").map_err(|err| anyhow!(err))?;
+
+        let past_lnurls: Vec<String> = match past_lnurls_json.as_array() {
+            Some(arr) => arr
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect(),
+            None => vec![],
+        };
+
+        Ok(AccountData {
+            id,
+            username,
+            lnurl,
+            past_lnurls,
+            total_diff,
+        })
+    }
+
+    pub(crate) async fn get_account_payouts(
+        &self,
+        account_id: i64,
+    ) -> Result<Vec<account::HistoricalPayout>> {
+        let payouts = sqlx::query_as::<_, (i64, i64, i32, i32, String, Option<String>)>(
+            "
+            SELECT
+                bitcoin_amount,
+                diff_paid,
+                blockheight_start,
+                blockheight_end,
+                status,
+                failure_reason
+            FROM payouts
+            WHERE account_id = $1
+            ORDER BY blockheight_end DESC
+            ",
+        )
+        .bind(account_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))?;
+
+        Ok(payouts
+            .into_iter()
+            .map(
+                |(bitcoin_amount, diff_paid, block_start, block_end, status, failure_reason)| {
+                    account::HistoricalPayout {
+                        amount: (bitcoin_amount as u32), // Convert from BIGINT
+                        allocated_diff: diff_paid,
+                        block_start: block_start as u32,
+                        block_end: block_end as u32,
+                        status,
+                        failure_reason,
+                    }
+                },
+            )
+            .collect())
+    }
+
+    pub(crate) async fn update_account_lnurl(&self, username: &str, new_lnurl: &str) -> Result<()> {
+        let rows_affected = sqlx::query(
+            "
+            UPDATE accounts
+            SET lnurl = $1
+            WHERE username = $2
+            ",
+        )
+        .bind(new_lnurl)
+        .bind(username)
+        .execute(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))?
+        .rows_affected();
+
+        if rows_affected == 0 {
+            sqlx::query(
+                "
+                INSERT INTO accounts (username, lnurl, total_diff, created_at, updated_at)
+                VALUES ($1, $2, 0, NOW(), NOW())
+                ",
+            )
+            .bind(username)
+            .bind(new_lnurl)
+            .execute(&self.pool)
+            .await
+            .map_err(|err| anyhow!(err))?;
+        }
+
+        Ok(())
     }
 }
