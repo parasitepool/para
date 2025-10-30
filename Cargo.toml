@@ -33,6 +33,7 @@ anyhow.workspace = true
 axum = { version = "0.8.3", features = ["http2"] }
 axum-server = "0.7.2"
 backon = "1.6.0"
+bip322 = "0.0.10"
 bitcoin.workspace = true
 bitcoincore-rpc.workspace = true
 boilerplate = { version = "1.0.1", features = ["axum"] }
@@ -65,7 +66,6 @@ tower-http = { version = "0.6.2", features = ["auth", "fs", "set-header"] }
 tracing = "0.1.41"
 tracing-subscriber = { version =  "0.3.19", features = ["env-filter", "fmt"] }
 zeromq = "0.4.1"
-bip322 = "0.0.10"
 
 [dev-dependencies]
 chrono = "0.4.41"
