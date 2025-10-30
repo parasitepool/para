@@ -59,6 +59,7 @@ mod test_psql;
 mod test_server;
 mod to_args;
 
+mod account;
 mod alerts;
 #[cfg(target_os = "linux")]
 mod miner;

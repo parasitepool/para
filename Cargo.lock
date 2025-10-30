@@ -2420,6 +2420,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "urlencoding",
+ "uuid",
  "zeromq",
 ]
 

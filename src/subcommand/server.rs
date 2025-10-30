@@ -160,8 +160,7 @@ impl Server {
             }
         }
 
-        router = router
-            .layer(Extension(config.clone()));
+        router = router.layer(Extension(config.clone()));
 
         if !config.nodes().is_empty() {
             let aggregator = Aggregator::init(config.clone())?;

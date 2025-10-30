@@ -143,6 +143,40 @@ pub(crate) async fn setup_test_schema(db_url: String) -> Result<(), Box<dyn std:
 
     sqlx::query(
         r#"
+                CREATE TABLE IF NOT EXISTS accounts (
+                    id BIGSERIAL PRIMARY KEY,
+                    username TEXT UNIQUE NOT NULL,
+                    lnurl TEXT,
+                    past_lnurls JSONB DEFAULT '[]'::jsonb,
+                    total_diff BIGINT DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW()
+                )
+                "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+                CREATE TABLE IF NOT EXISTS payouts (
+                    id BIGSERIAL PRIMARY KEY,
+                    account_id BIGINT NOT NULL REFERENCES accounts(id),
+                    bitcoin_amount BIGINT NOT NULL,
+                    diff_paid BIGINT NOT NULL,
+                    blockheight_start INTEGER NOT NULL,
+                    blockheight_end INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    failure_reason TEXT,
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+                "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
                 CREATE OR REPLACE FUNCTION compress_shares(start_id BIGINT, end_id BIGINT)
                 RETURNS BIGINT AS $$
                 BEGIN
@@ -152,6 +186,52 @@ pub(crate) async fn setup_test_schema(db_url: String) -> Result<(), Box<dyn std:
                 END;
                 $$ LANGUAGE plpgsql;
                 "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+CREATE OR REPLACE FUNCTION update_accounts_from_remote_shares()
+    RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO public.accounts (username, lnurl, total_diff, created_at, updated_at)
+    VALUES (
+        NEW.username,
+        CASE
+            WHEN NEW.lnurl IS NOT NULL AND TRIM(BOTH ' ' FROM NEW.lnurl) != ''
+            THEN TRIM(BOTH ' ' FROM NEW.lnurl)
+            ELSE NULL
+        END,
+        CASE WHEN NEW.result = true THEN NEW.diff ELSE 0 END,
+        NOW(),
+        NOW()
+    )
+    ON CONFLICT (username) DO UPDATE
+    SET
+        lnurl = CASE
+            WHEN accounts.lnurl IS NULL
+                AND EXCLUDED.lnurl IS NOT NULL
+            THEN EXCLUDED.lnurl
+            ELSE accounts.lnurl
+        END,
+        total_diff = accounts.total_diff + EXCLUDED.total_diff;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;"#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+
+CREATE TRIGGER trigger_update_accounts_on_remote_share
+    AFTER INSERT ON remote_shares
+    FOR EACH ROW
+    WHEN (NEW.username IS NOT NULL AND NEW.username != '')
+    EXECUTE FUNCTION update_accounts_from_remote_shares();"#,
     )
     .execute(&pool)
     .await?;

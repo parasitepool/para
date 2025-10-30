@@ -72,6 +72,7 @@ once_cell = "1.21.3"
 pretty_assertions = "1.4.1"
 tempfile = "3.23.0"
 urlencoding = "2.1.3"
+uuid = "1.18.1"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 pgtemp = "0.6.0"
