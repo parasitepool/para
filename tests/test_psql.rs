@@ -290,8 +290,8 @@ pub(crate) async fn insert_test_remote_shares(
                     INSERT INTO remote_shares (
                                                id, origin,
                         blockheight, workinfoid, clientid, enonce1, nonce2, nonce,
-                        ntime, diff, sdiff, hash, result, workername, username, address
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+                        ntime, diff, sdiff, hash, result, workername, username, lnurl, address
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
                     "#,
         )
         .bind(i as i64)
@@ -309,10 +309,39 @@ pub(crate) async fn insert_test_remote_shares(
         .bind(true)
         .bind(format!("worker_{}", i % 5))
         .bind(format!("user_{}", i % 10))
+        .bind(format!("lnurl{}@test.gov", i % 10))
         .bind(address(i % 10).to_string())
         .execute(&pool)
         .await?;
     }
+
+    pool.close().await;
+    Ok(())
+}
+
+pub(crate) async fn insert_test_account(
+    db_url: String,
+    username: &str,
+    lnurl: Option<&str>,
+    past_lnurls: Vec<String>,
+    total_diff: i64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = sqlx::PgPool::connect(&db_url).await?;
+
+    let past_lnurls_json = serde_json::to_value(past_lnurls)?;
+
+    sqlx::query(
+        "
+        INSERT INTO accounts (username, lnurl, past_lnurls, total_diff, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, NOW(), NOW())
+        ",
+    )
+    .bind(username)
+    .bind(lnurl)
+    .bind(past_lnurls_json)
+    .bind(total_diff)
+    .execute(&pool)
+    .await?;
 
     pool.close().await;
     Ok(())

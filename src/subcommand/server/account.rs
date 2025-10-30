@@ -3,23 +3,22 @@ use super::*;
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct Account {
     pub btc_address: String,
-    pub(crate) ln_address: Option<String>,
-    pub(crate) past_ln_addresses: Vec<String>,
+    pub ln_address: Option<String>,
+    pub past_ln_addresses: Vec<String>,
     pub total_diff: i64,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub(crate) struct AccountUpdate {
-    pub(crate) btc_address: String,
-    pub(crate) ln_address: String,
-    pub(crate) signature: String,
-    pub(crate) nonce: String,
+pub struct AccountUpdate {
+    pub btc_address: String,
+    pub ln_address: String,
+    pub signature: String,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub(crate) struct AccountResponse {
-    pub(crate) success: bool,
-    pub(crate) remark: Option<String>,
+pub struct AccountResponse {
+    pub success: bool,
+    pub remark: Option<String>,
 }
 
 pub fn account_router() -> Router {

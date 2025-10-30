@@ -20,12 +20,12 @@ pub struct Payout {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct Database {
+pub struct Database {
     pub(crate) pool: Pool<Postgres>,
 }
 
 impl Database {
-    pub(crate) async fn new(database_url: String) -> Result<Self> {
+    pub async fn new(database_url: String) -> Result<Self> {
         Ok(Self {
             pool: PgPoolOptions::new()
                 .max_connections(5)
@@ -270,7 +270,7 @@ impl Database {
         .map_err(|err| anyhow!(err))
     }
 
-    pub(crate) async fn get_account(&self, username: &str) -> Result<Account> {
+    pub async fn get_account(&self, username: &str) -> Result<Account> {
         let account = sqlx::query(
             "
             SELECT
@@ -317,33 +317,68 @@ impl Database {
         })
     }
 
-    pub(crate) async fn update_account_lnurl(&self, username: &str, new_lnurl: &str) -> Result<()> {
-        let rows_affected = sqlx::query(
-            "
-            UPDATE accounts
-            SET lnurl = $1
-            WHERE username = $2
-            ",
-        )
-        .bind(new_lnurl)
-        .bind(username)
-        .execute(&self.pool)
-        .await
-        .map_err(|err| anyhow!(err))?
-        .rows_affected();
+    pub async fn update_account_lnurl(&self, username: &str, new_lnurl: &str) -> Result<()> {
+        let current_account = self.get_account(username).await.ok();
 
-        if rows_affected == 0 {
-            sqlx::query(
+        let updated_past_lnurls = if let Some(account) = current_account {
+            if let Some(old_lnurl) = &account.ln_address
+                && old_lnurl == new_lnurl
+            {
+                return Err(anyhow!(
+                    "New lightning address matches existing lightning address"
+                ));
+            }
+            let mut past_lnurls = account.past_ln_addresses.clone();
+
+            if let Some(current_lnurl) = &account.ln_address
+                && !current_lnurl.is_empty()
+                && !past_lnurls.contains(current_lnurl)
+            {
+                past_lnurls.insert(0, current_lnurl.clone());
+            }
+
+            past_lnurls.truncate(10);
+            Some(past_lnurls)
+        } else {
+            None
+        };
+
+        if let Some(past_lnurls) = updated_past_lnurls {
+            let past_lnurls_json = serde_json::to_value(past_lnurls)
+                .map_err(|err| anyhow!("Failed to serialize past_lnurls: {}", err))?;
+
+            let rows_affected = sqlx::query(
                 "
-                INSERT INTO accounts (username, lnurl, total_diff, created_at, updated_at)
-                VALUES ($1, $2, 0, NOW(), NOW())
+                UPDATE accounts
+                SET lnurl = $1, past_lnurls = $2, updated_at = NOW()
+                WHERE username = $3
                 ",
             )
-            .bind(username)
             .bind(new_lnurl)
+            .bind(past_lnurls_json)
+            .bind(username)
             .execute(&self.pool)
             .await
-            .map_err(|err| anyhow!(err))?;
+            .map_err(|err| anyhow!(err))?
+            .rows_affected();
+
+            if rows_affected == 0 {
+                return Err(anyhow!(
+                    "Expected to update existing account but no rows affected"
+                ));
+            }
+        } else {
+            sqlx::query(
+                "
+                INSERT INTO accounts (username, lnurl, past_lnurls, total_diff, created_at, updated_at)
+                VALUES ($1, $2, '[]'::jsonb, 0, NOW(), NOW())
+                ",
+            )
+                .bind(username)
+                .bind(new_lnurl)
+                .execute(&self.pool)
+                .await
+                .map_err(|err| anyhow!(err))?;
         }
 
         Ok(())

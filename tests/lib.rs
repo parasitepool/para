@@ -34,11 +34,11 @@ use {
 #[cfg(target_os = "linux")]
 use {
     crate::test_psql::{
-        create_test_block, create_test_shares, insert_test_block, insert_test_remote_shares,
-        insert_test_shares, setup_test_schema,
+        create_test_block, create_test_shares, insert_test_account, insert_test_block,
+        insert_test_remote_shares, insert_test_shares, setup_test_schema,
     },
-    bip322::sign_simple,
-    bitcoin::{CompressedPublicKey, Network, PrivateKey, consensus::Encodable, key::Secp256k1},
+    bip322::sign_simple_encoded,
+    bitcoin::{CompressedPublicKey, Network, PrivateKey, key::Secp256k1},
     harness::bitcoind::Bitcoind,
     para::{
         stratum::{
@@ -47,6 +47,10 @@ use {
         },
         subcommand::{
             miner::Share,
+            server::{
+                account::{Account, AccountResponse, AccountUpdate},
+                database::Database,
+            },
             sync::{ShareBatch, Sync, SyncResponse},
             template::Output as Template,
         },
@@ -61,7 +65,6 @@ use {
             atomic::{AtomicUsize, Ordering},
             mpsc,
         },
-        time::{SystemTime, UNIX_EPOCH},
     },
     tempfile::tempdir,
     test_ckpool::TestCkpool,
