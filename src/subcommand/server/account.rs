@@ -51,29 +51,11 @@ pub(crate) async fn account_lookup(
     Extension(database): Extension<Database>,
     Path(address): Path<String>,
 ) -> ServerResult<Response> {
-    let account_data = match database.get_account(&address).await {
-        Ok(account) => account,
-        Err(_) => {
-            return Ok((
-                StatusCode::NOT_FOUND,
-                Json(AccountResponse {
-                    success: false,
-                    remark: Some("Account not found".to_string()),
-                }),
-            )
-                .into_response());
-        }
-    };
-
-    let sparse_account = Account {
-        btc_address: account_data.username,
-        ln_address: account_data.lnurl.unwrap_or_default(),
-        past_ln_addresses: vec![],
-        total_diff: account_data.total_diff,
-        payouts: vec![],
-    };
-
-    Ok(Json(sparse_account).into_response())
+    account_detail(Extension(database), Json(AccountLookup {
+        btc_address: address,
+        signature: None,
+        nonce: None,
+    })).await
 }
 
 // If accountlookup has an address not in our accounts table:
