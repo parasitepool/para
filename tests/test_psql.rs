@@ -308,10 +308,9 @@ pub(crate) async fn insert_test_remote_shares(
                                                id, origin,
                         blockheight, workinfoid, clientid, enonce1, nonce2, nonce,
                         ntime, diff, sdiff, hash, result, workername, username, lnurl, address
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+                    ) VALUES (COALESCE((SELECT MAX(id) FROM remote_shares WHERE origin = 'test_origin'), 0) + 1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
                     "#,
         )
-            .bind(i as i64)
             .bind("test_origin")
             .bind(blockheight)
             .bind(i as i64 + 1000)

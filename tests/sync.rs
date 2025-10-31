@@ -392,3 +392,65 @@ async fn test_sync_batch_creates_accounts() {
         );
     }
 }
+
+#[tokio::test]
+async fn test_sync_batch_with_migrate_accounts_flag() {
+    let server = TestServer::spawn_with_db_args("--migrate-accounts").await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    insert_test_remote_shares(db_url.clone(), 5, 800028)
+        .await
+        .unwrap();
+    insert_test_remote_shares(db_url.clone(), 3, 800029)
+        .await
+        .unwrap();
+    insert_test_remote_shares(db_url.clone(), 5, 800030)
+        .await
+        .unwrap();
+
+    let database = Database::new(db_url.clone()).await.unwrap();
+
+    let account_before = database.get_account("user_0").await;
+    assert!(
+        account_before.is_err(),
+        "Verify trigger is not creating account record"
+    );
+
+    let test_shares = create_test_shares(2, 800031);
+    let test_block = create_test_block(800031);
+
+    let batch = ShareBatch {
+        block: Some(test_block.clone()),
+        shares: test_shares,
+        hostname: "test-node-migrate".to_string(),
+        batch_id: BATCH_COUNTER.fetch_add(1, Ordering::SeqCst) as u64,
+        total_shares: 2,
+        start_id: 100,
+        end_id: 101,
+    };
+
+    let response: SyncResponse = server.post_json("/sync/batch", &batch).await;
+
+    assert_eq!(response.status, "OK");
+    assert_eq!(response.received_count, 2);
+
+    let account = database.get_account("user_0").await.unwrap();
+    assert_eq!(account.btc_address, "user_0");
+    assert_eq!(
+        account.ln_address,
+        Some("lnurl0@test.gov".to_string()),
+        "Account should have lnurl from migrated share"
+    );
+    assert_eq!(
+        account.total_diff, 4000,
+        "Account in both sync and migration"
+    );
+
+    let account_new = database.get_account("user_4").await.unwrap();
+    assert_eq!(account_new.btc_address, "user_4");
+    assert_eq!(
+        account_new.total_diff, 2008,
+        "Account not in current sync, handled by migration"
+    );
+}
