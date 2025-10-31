@@ -14,6 +14,25 @@ fn ping_pool() {
 }
 
 #[test]
+fn mine_to_pool() {
+    let pool = TestPool::spawn();
+
+    let stratum_endpoint = pool.stratum_endpoint();
+
+    let miner = CommandBuilder::new(format!(
+        "miner --once --username {} {stratum_endpoint}",
+        signet_username()
+    ))
+    .spawn();
+
+    let stdout = miner.wait_with_output().unwrap();
+    let output =
+        serde_json::from_str::<Vec<Share>>(&String::from_utf8_lossy(&stdout.stdout)).unwrap();
+
+    assert_eq!(output.len(), 1);
+}
+
+#[test]
 fn configure_template_update_interval() {
     let pool = TestPool::spawn_with_args("--update-interval 1");
 
