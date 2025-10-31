@@ -95,6 +95,7 @@ impl TestPool {
         .unwrap()
     }
 
+    #[allow(unused)]
     pub(crate) fn bitcoind_handle(&self) -> &Bitcoind {
         &self.bitcoind_handle
     }
