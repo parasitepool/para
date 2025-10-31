@@ -35,7 +35,7 @@ const BUDGET: Duration = Duration::from_secs(5);
 const TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_ATTEMPTS: usize = 3;
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(1500);
-static MIGRATION_DONE: OnceLock<AtomicBool> = OnceLock::new();
+static MIGRATION_DONE: OnceLock<tokio::sync::Mutex<bool>> = OnceLock::new();
 
 #[derive(RustEmbed)]
 #[folder = "static"]
@@ -511,9 +511,10 @@ impl Server {
         );
 
         if config.migrate_accounts() {
-            let migration_flag = MIGRATION_DONE.get_or_init(|| AtomicBool::new(false));
+            let migration_lock = MIGRATION_DONE.get_or_init(|| Mutex::new(false));
+            let mut done = migration_lock.lock().await;
 
-            if !migration_flag.load(Ordering::SeqCst) {
+            if !*done {
                 info!("Running account migration...");
                 match database.migrate_accounts().await {
                     Ok(rows_affected) => {
@@ -521,7 +522,7 @@ impl Server {
                             "Account migration completed. {} accounts affected.",
                             rows_affected
                         );
-                        migration_flag.store(true, Ordering::SeqCst);
+                        *done = true;
                     }
                     Err(e) => {
                         error!("Account migration failed: {}", e);
