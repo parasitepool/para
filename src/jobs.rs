@@ -82,7 +82,7 @@ mod tests {
         Arc::new(
             Job::new(
                 address,
-                Extranonce::generate(EXTRANONCE1_SIZE),
+                Extranonce::random(EXTRANONCE1_SIZE),
                 None,
                 template,
                 id,
