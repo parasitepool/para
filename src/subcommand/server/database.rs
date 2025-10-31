@@ -1,6 +1,4 @@
-use super::*;
-use crate::subcommand::server::account::Account;
-use sqlx::Row;
+use {super::*, crate::subcommand::server::account::Account, sqlx::Row};
 
 #[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub(crate) struct Split {

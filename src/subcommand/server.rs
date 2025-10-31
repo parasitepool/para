@@ -1,10 +1,11 @@
-use crate::subcommand::server::account::account_router;
-use std::sync::OnceLock;
 use {
     super::*,
     crate::{
         ckpool,
-        subcommand::sync::{ShareBatch, SyncResponse},
+        subcommand::{
+            server::account::account_router,
+            sync::{ShareBatch, SyncResponse},
+        },
     },
     accept_json::AcceptJson,
     aggregator::Aggregator,
@@ -14,6 +15,7 @@ use {
     error::{OptionExt, ServerError, ServerResult},
     reqwest::{Client, ClientBuilder, header},
     server_config::ServerConfig,
+    std::sync::OnceLock,
     templates::{
         PageContent, PageHtml, dashboard::DashboardHtml, home::HomeHtml, status::StatusHtml,
     },
