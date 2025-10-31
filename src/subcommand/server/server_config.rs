@@ -31,6 +31,8 @@ pub(crate) struct ServerConfig {
     sync_endpoint: Option<String>,
     #[arg(long, help = "Cache <TTL> in seconds.", default_value = "30")]
     ttl: u64,
+    #[arg(long, help = "Run account migration before processing sync batches.")]
+    migrate_accounts: bool,
 }
 
 impl ServerConfig {
@@ -112,5 +114,9 @@ impl ServerConfig {
 
     pub(crate) fn ttl(&self) -> Duration {
         Duration::from_secs(self.ttl)
+    }
+
+    pub(crate) fn migrate_accounts(&self) -> bool {
+        self.migrate_accounts
     }
 }

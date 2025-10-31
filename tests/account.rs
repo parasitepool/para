@@ -53,9 +53,12 @@ async fn account_lookup_found() {
     let db_url = server.database_url().unwrap();
     setup_test_schema(db_url.clone()).await.unwrap();
 
-    insert_test_remote_shares(db_url.clone(), 1, 800000)
+    let database = Database::new(db_url.clone()).await.unwrap();
+
+    database
+        .update_account_lnurl("user_0", "lnurl0@test.gov")
         .await
-        .expect("Share to be inserted and user record updated");
+        .expect("Direct account creation to succeed");
 
     let response = server
         .get_json_async_raw(&format!("/account/{}", "user_0"))
@@ -65,7 +68,6 @@ async fn account_lookup_found() {
     let account = response.json::<Account>().await.unwrap();
     assert_eq!(account.btc_address, "user_0");
     assert_eq!(account.ln_address.unwrap_or_default(), "lnurl0@test.gov");
-    assert_eq!(account.total_diff, 1000);
 }
 
 #[tokio::test]
@@ -203,4 +205,42 @@ async fn account_update_endpoint_new_account_with_signature() {
     assert_eq!(account.ln_address, Some(ln_address.to_string()));
     assert_eq!(account.past_ln_addresses.len(), 0);
     assert_eq!(account.total_diff, 0);
+}
+
+#[tokio::test]
+async fn test_migrate_accounts_basic() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    insert_test_remote_shares(db_url.clone(), 10, 800000)
+        .await
+        .unwrap();
+
+    let database = Database::new(db_url.clone()).await.unwrap();
+    let rows_affected = database.migrate_accounts().await.unwrap();
+
+    assert_eq!(rows_affected, 10, "spoofed user count wrong");
+
+    for i in 0..10 {
+        let username = format!("user_{}", i);
+        let account = database.get_account(&username).await.unwrap();
+        assert_eq!(account.btc_address, username);
+        assert_eq!(
+            account.ln_address,
+            Some(format!("lnurl{}@test.gov", i)),
+            "migration failed to build accounts table"
+        );
+        assert_eq!(account.total_diff, 1000 + i);
+    }
+
+    let response = server
+        .get_json_async_raw(&format!("/account/{}", "user_0"))
+        .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let account = response.json::<Account>().await.unwrap();
+    assert_eq!(account.btc_address, "user_0");
+    assert_eq!(account.ln_address.unwrap_or_default(), "lnurl0@test.gov");
+    assert_eq!(account.total_diff, 1000);
 }

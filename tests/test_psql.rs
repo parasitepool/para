@@ -27,7 +27,7 @@ pub(crate) fn create_test_shares(count: u32, blockheight: i64) -> Vec<Share> {
             createinet: Some("127.0.0.1".to_string()),
             workername: Some(format!("worker_{}", i % 5)),
             username: Some(format!("user_{}", i % 10)),
-            lnurl: None,
+            lnurl: Some(format!("lnurl{}@test.gov", i)),
             address: Some(address(i % 10u32).to_string()),
             agent: Some("test-agent".to_string()),
         })
@@ -187,51 +187,6 @@ pub(crate) async fn setup_test_schema(db_url: String) -> Result<(), Box<dyn std:
                 END;
                 $$ LANGUAGE plpgsql;
                 "#,
-    )
-    .execute(&pool)
-    .await?;
-
-    sqlx::query(
-        r#"
-CREATE OR REPLACE FUNCTION update_accounts_from_remote_shares()
-    RETURNS TRIGGER AS $$
-BEGIN
-    INSERT INTO public.accounts (username, lnurl, total_diff, created_at, updated_at)
-    VALUES (
-        NEW.username,
-        CASE
-            WHEN NEW.lnurl IS NOT NULL AND TRIM(BOTH ' ' FROM NEW.lnurl) != ''
-            THEN TRIM(BOTH ' ' FROM NEW.lnurl)
-            ELSE NULL
-        END,
-        CASE WHEN NEW.result = true THEN NEW.diff ELSE 0 END,
-        NOW(),
-        NOW()
-    )
-    ON CONFLICT (username) DO UPDATE
-    SET
-        lnurl = CASE
-            WHEN accounts.lnurl IS NULL
-                AND EXCLUDED.lnurl IS NOT NULL
-            THEN EXCLUDED.lnurl
-            ELSE accounts.lnurl
-        END,
-        total_diff = accounts.total_diff + EXCLUDED.total_diff;
-
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;"#,
-    )
-    .execute(&pool)
-    .await?;
-
-    sqlx::query(
-        r#"
-CREATE TRIGGER trigger_update_accounts_on_remote_share
-    AFTER INSERT ON remote_shares
-    FOR EACH ROW
-    WHEN (NEW.username IS NOT NULL AND NEW.username != '')
-    EXECUTE FUNCTION update_accounts_from_remote_shares();"#,
     )
     .execute(&pool)
     .await?;

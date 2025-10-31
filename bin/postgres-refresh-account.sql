@@ -6,7 +6,7 @@ WITH latest_lnurl AS (SELECT DISTINCT ON (username) username,
                       WHERE username IS NOT NULL
                         AND username != ''
                       ORDER BY username, id DESC),
-     aggregated_data AS (SELECT rs.username,
+     aggregated_data AS (SELECT TRIM(BOTH ' ' FROM rs.username) AS username,
                                 ll.latest_lnurl,
                                 jsonb_agg(DISTINCT TRIM(BOTH ' ' FROM rs.lnurl) ORDER BY TRIM(BOTH ' ' FROM rs.lnurl))
                                 FILTER (WHERE rs.lnurl IS NOT NULL AND TRIM(BOTH ' ' FROM rs.lnurl) != ll.latest_lnurl) AS past_lnurls,

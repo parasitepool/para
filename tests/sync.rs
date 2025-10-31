@@ -349,3 +349,46 @@ async fn test_sync_duplicate_batch_id() {
 
     pool.close().await;
 }
+
+#[tokio::test]
+async fn test_sync_batch_creates_accounts() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    let test_shares = create_test_shares(5, 800000);
+    let test_block = create_test_block(800000);
+
+    let batch = ShareBatch {
+        block: Some(test_block.clone()),
+        shares: test_shares,
+        hostname: "test-node".to_string(),
+        batch_id: BATCH_COUNTER.fetch_add(1, Ordering::SeqCst) as u64,
+        total_shares: 5,
+        start_id: 1,
+        end_id: 5,
+    };
+
+    let response: SyncResponse = server.post_json("/sync/batch", &batch).await;
+
+    assert_eq!(response.status, "OK");
+    assert_eq!(response.received_count, 5);
+
+    let database = Database::new(db_url.clone()).await.unwrap();
+
+    for i in 0..5 {
+        let username = format!("user_{}", i);
+        let account = database.get_account(&username).await.unwrap();
+        assert_eq!(account.btc_address, username);
+        assert_eq!(
+            account.ln_address,
+            Some(format!("lnurl{}@test.gov", i)),
+            "Account should have lnurl from share"
+        );
+        assert_eq!(
+            account.total_diff,
+            1000 + i,
+            "Account should have diff from single share"
+        );
+    }
+}

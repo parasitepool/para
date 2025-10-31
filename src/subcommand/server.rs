@@ -1,4 +1,5 @@
 use crate::subcommand::server::account::account_router;
+use std::sync::OnceLock;
 use {
     super::*,
     crate::{
@@ -34,10 +35,18 @@ const BUDGET: Duration = Duration::from_secs(5);
 const TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_ATTEMPTS: usize = 3;
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(1500);
+static MIGRATION_DONE: OnceLock<AtomicBool> = OnceLock::new();
 
 #[derive(RustEmbed)]
 #[folder = "static"]
 struct StaticAssets;
+
+#[derive(Debug)]
+struct AccountUpdate {
+    username: String,
+    lnurl: Option<String>,
+    total_diff: f64,
+}
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub(crate) struct Payment {
@@ -501,6 +510,33 @@ impl Server {
             batch.hostname
         );
 
+        if config.migrate_accounts() {
+            let migration_flag = MIGRATION_DONE.get_or_init(|| AtomicBool::new(false));
+
+            if !migration_flag.load(Ordering::SeqCst) {
+                info!("Running account migration...");
+                match database.migrate_accounts().await {
+                    Ok(rows_affected) => {
+                        info!(
+                            "Account migration completed. {} accounts affected.",
+                            rows_affected
+                        );
+                        migration_flag.store(true, Ordering::SeqCst);
+                    }
+                    Err(e) => {
+                        error!("Account migration failed: {}", e);
+                        let response = SyncResponse {
+                            batch_id: batch.batch_id,
+                            received_count: 0,
+                            status: "ERROR".to_string(),
+                            error_message: Some(format!("Migration failed: {}", e)),
+                        };
+                        return Ok(Json(response));
+                    }
+                }
+            }
+        }
+
         if let Some(block) = &batch.block {
             match database.upsert_block(block).await {
                 Ok(_) => {
@@ -652,6 +688,73 @@ impl Server {
             })?;
         }
 
+        let mut account_updates: HashMap<String, AccountUpdate> = HashMap::new();
+
+        for share in &batch.shares {
+            if let Some(username) = &share.username {
+                let username = username.trim();
+                if username.is_empty() {
+                    continue;
+                }
+
+                let entry = account_updates
+                    .entry(username.to_string())
+                    .or_insert_with(|| AccountUpdate {
+                        username: username.to_string(),
+                        lnurl: None,
+                        total_diff: 0.0,
+                    });
+
+                if share.result == Some(true)
+                    && let Some(diff) = share.diff
+                {
+                    entry.total_diff += diff;
+                }
+
+                if entry.lnurl.is_none()
+                    && let Some(lnurl) = &share.lnurl
+                {
+                    let trimmed_lnurl = lnurl.trim();
+                    if !trimmed_lnurl.is_empty() {
+                        entry.lnurl = Some(trimmed_lnurl.to_string());
+                    }
+                }
+            }
+        }
+
+        if !account_updates.is_empty() {
+            info!(
+                "Updating {} accounts from batch {}",
+                account_updates.len(),
+                batch.batch_id
+            );
+
+            for update in account_updates.values() {
+                sqlx::query(
+                    "
+                    INSERT INTO accounts (username, lnurl, total_diff, lnurl_updated_at, created_at, updated_at)
+                    VALUES ($1, $2, $3, NOW(), NOW(), NOW())
+                    ON CONFLICT (username) DO UPDATE
+                    SET
+                        lnurl = CASE
+                            WHEN accounts.lnurl IS NULL
+                                AND EXCLUDED.lnurl IS NOT NULL
+                            THEN EXCLUDED.lnurl
+                            ELSE accounts.lnurl
+                        END,
+                        total_diff = accounts.total_diff + EXCLUDED.total_diff,
+                        updated_at = NOW()
+                    ",
+                )
+                    .bind(&update.username)
+                    .bind(&update.lnurl)
+                    .bind(update.total_diff)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| anyhow!("Failed to update account {}: {e}", update.username))?;
+            }
+        }
+
         tx.commit()
             .await
             .map_err(|e| anyhow!("Failed to commit transaction: {e}"))?;
@@ -661,7 +764,7 @@ impl Server {
             .shares
             .iter()
             .filter_map(|s| s.workername.as_ref())
-            .collect::<std::collections::HashSet<_>>()
+            .collect::<HashSet<_>>()
             .len();
 
         let min_blockheight = batch.shares.iter().filter_map(|s| s.blockheight).min();
