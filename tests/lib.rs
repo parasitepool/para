@@ -48,7 +48,7 @@ use {
         subcommand::{
             miner::Share,
             server::{
-                account::{Account, AccountResponse, AccountUpdate},
+                account::{Account, AccountUpdate},
                 database::Database,
             },
             sync::{ShareBatch, Sync, SyncResponse},

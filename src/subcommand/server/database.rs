@@ -1,4 +1,4 @@
-use {super::*, crate::subcommand::server::account::Account, sqlx::Row};
+use super::*;
 
 #[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub(crate) struct Split {
@@ -315,7 +315,7 @@ impl Database {
         })
     }
 
-    pub async fn update_account_lnurl(&self, username: &str, new_lnurl: &str) -> Result<()> {
+    pub async fn update_account_lnurl(&self, username: &str, new_lnurl: &str) -> Result<Account> {
         let current_account = self.get_account(username).await.ok();
 
         let updated_past_lnurls = if let Some(account) = current_account {
@@ -379,7 +379,7 @@ impl Database {
                 .map_err(|err| anyhow!(err))?;
         }
 
-        Ok(())
+        self.get_account(username).await
     }
 
     pub async fn migrate_accounts(&self) -> Result<u64> {

@@ -191,10 +191,8 @@ async fn account_update_endpoint_new_account_with_signature() {
         signature,
     };
 
-    let response: AccountResponse = server.post_json("/account/update", &update_request).await;
-
-    assert!(response.success, "Account update should succeed");
-    assert!(response.remark.is_none());
+    let response: Account = server.post_json("/account/update", &update_request).await;
+    assert_eq!(response.btc_address, test_account.btc_address);
 
     let database = Database::new(db_url.clone()).await.unwrap();
     let account = database

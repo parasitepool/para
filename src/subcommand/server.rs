@@ -27,7 +27,7 @@ mod aggregator;
 pub mod api;
 mod cache;
 pub mod database;
-mod error;
+pub(crate) mod error;
 pub mod notifications;
 mod server_config;
 mod templates;

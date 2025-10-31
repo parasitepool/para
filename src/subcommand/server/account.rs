@@ -31,17 +31,12 @@ pub(crate) async fn account_lookup(
     Extension(database): Extension<Database>,
     Path(address): Path<String>,
 ) -> ServerResult<Response> {
-    match database.get_account(&address).await {
-        Ok(account) => Ok(Json(account).into_response()),
-        Err(_) => Ok((
-            StatusCode::NOT_FOUND,
-            Json(AccountResponse {
-                success: false,
-                remark: Some("Account not found".to_string()),
-            }),
-        )
-            .into_response()),
-    }
+    database
+        .get_account(&address)
+        .await
+        .ok_or_not_found()
+        .map(Json)
+        .map(IntoResponse::into_response)
 }
 
 // Check if the signature provided is valid over "btc_address|ln_address|nonce"
@@ -65,19 +60,10 @@ pub(crate) async fn account_update(
         .into_response());
     }
 
-    match database
+    database
         .update_account_lnurl(&account_update.btc_address, &account_update.ln_address)
         .await
-    {
-        Ok(_) => Ok(Json(AccountResponse {
-            success: true,
-            remark: None,
-        })
-        .into_response()),
-        Err(err) => Ok(Json(AccountResponse {
-            success: false,
-            remark: Some(format!("Failed to update account: {}", err)),
-        })
-        .into_response()),
-    }
+        .ok_or_not_found()
+        .map(Json)
+        .map(IntoResponse::into_response)
 }
