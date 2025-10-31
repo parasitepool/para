@@ -125,6 +125,8 @@ impl Client {
                 }
             }
         }
+
+        drop(incoming);
     }
 
     pub async fn configure(
