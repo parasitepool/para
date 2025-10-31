@@ -3,7 +3,7 @@
 /* Define to 1 if gcc's __atomic builtins are available */
 #undef HAVE_ATOMIC_BUILTINS
 
-/* Define to 1 if you have the 'close' function. */
+/* Define to 1 if you have the `close' function. */
 #undef HAVE_CLOSE
 
 /* Define to 1 if you have the <dlfcn.h> header file. */
@@ -15,34 +15,34 @@
 /* Define to 1 if you have the <fcntl.h> header file. */
 #undef HAVE_FCNTL_H
 
-/* Define to 1 if you have the 'getpid' function. */
+/* Define to 1 if you have the `getpid' function. */
 #undef HAVE_GETPID
 
-/* Define to 1 if you have the 'gettimeofday' function. */
+/* Define to 1 if you have the `gettimeofday' function. */
 #undef HAVE_GETTIMEOFDAY
 
 /* Define to 1 if you have the <inttypes.h> header file. */
 #undef HAVE_INTTYPES_H
 
-/* Define to 1 if you have the 'localeconv' function. */
+/* Define to 1 if you have the `localeconv' function. */
 #undef HAVE_LOCALECONV
 
 /* Define to 1 if you have the <locale.h> header file. */
 #undef HAVE_LOCALE_H
 
-/* Define to 1 if the system has the type 'long long int'. */
+/* Define to 1 if the system has the type `long long int'. */
 #undef HAVE_LONG_LONG_INT
 
-/* Define to 1 if you have the 'open' function. */
+/* Define to 1 if you have the `open' function. */
 #undef HAVE_OPEN
 
-/* Define to 1 if you have the 'read' function. */
+/* Define to 1 if you have the `read' function. */
 #undef HAVE_READ
 
 /* Define to 1 if you have the <sched.h> header file. */
 #undef HAVE_SCHED_H
 
-/* Define to 1 if you have the 'sched_yield' function. */
+/* Define to 1 if you have the `sched_yield' function. */
 #undef HAVE_SCHED_YIELD
 
 /* Define to 1 if you have the <stdint.h> header file. */
@@ -60,7 +60,7 @@
 /* Define to 1 if you have the <string.h> header file. */
 #undef HAVE_STRING_H
 
-/* Define to 1 if you have the 'strtoll' function. */
+/* Define to 1 if you have the `strtoll' function. */
 #undef HAVE_STRTOLL
 
 /* Define to 1 if gcc's __sync builtins are available */
@@ -81,7 +81,7 @@
 /* Define to 1 if you have the <unistd.h> header file. */
 #undef HAVE_UNISTD_H
 
-/* Define to 1 if the system has the type 'unsigned long long int'. */
+/* Define to 1 if the system has the type `unsigned long long int'. */
 #undef HAVE_UNSIGNED_LONG_LONG_INT
 
 /* Number of buckets new object hashtables contain is 2 raised to this power.
@@ -112,7 +112,7 @@
 /* Define to the version of this package. */
 #undef PACKAGE_VERSION
 
-/* Define to 1 if all of the C89 standard headers exist (not just the ones
+/* Define to 1 if all of the C90 standard headers exist (not just the ones
    required in a freestanding environment). This macro is provided for
    backward compatibility; new code need not use it. */
 #undef STDC_HEADERS
@@ -137,7 +137,7 @@
    #define below would cause a syntax error. */
 #undef _UINT8_T
 
-/* Define to '__inline__' or '__inline' if that's what the C compiler
+/* Define to `__inline__' or `__inline' if that's what the C compiler
    calls it, or to nothing if 'inline' is not supported under any name.  */
 #ifndef __cplusplus
 #undef inline
