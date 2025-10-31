@@ -350,7 +350,7 @@ impl Database {
             let rows_affected = sqlx::query(
                 "
                 UPDATE accounts
-                SET lnurl = $1, past_lnurls = $2, updated_at = NOW()
+                SET lnurl = $1, past_lnurls = $2, lnurl_updated_at = NOW(), updated_at = NOW()
                 WHERE username = $3
                 ",
             )
@@ -370,8 +370,8 @@ impl Database {
         } else {
             sqlx::query(
                 "
-                INSERT INTO accounts (username, lnurl, past_lnurls, total_diff, created_at, updated_at)
-                VALUES ($1, $2, '[]'::jsonb, 0, NOW(), NOW())
+                INSERT INTO accounts (username, lnurl, past_lnurls, total_diff, lnurl_updated_at, created_at, updated_at)
+                VALUES ($1, $2, '[]'::jsonb, 0, NOW(), NOW(), NOW())
                 ",
             )
                 .bind(username)

@@ -143,16 +143,17 @@ pub(crate) async fn setup_test_schema(db_url: String) -> Result<(), Box<dyn std:
 
     sqlx::query(
         r#"
-                CREATE TABLE IF NOT EXISTS accounts (
-                    id BIGSERIAL PRIMARY KEY,
-                    username TEXT UNIQUE NOT NULL,
-                    lnurl TEXT,
-                    past_lnurls JSONB DEFAULT '[]'::jsonb,
-                    total_diff BIGINT DEFAULT 0,
-                    created_at TIMESTAMP DEFAULT NOW(),
-                    updated_at TIMESTAMP DEFAULT NOW()
-                )
-                "#,
+                CREATE TABLE IF NOT EXISTS accounts
+                (
+                    id               BIGSERIAL PRIMARY KEY,
+                    username         VARCHAR(128) NOT NULL UNIQUE,
+                    lnurl            VARCHAR(255),
+                    past_lnurls      JSONB                    DEFAULT '[]'::JSONB,
+                    total_diff       BIGINT                   DEFAULT 0,
+                    lnurl_updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    created_at       TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    updated_at       TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                )"#,
     )
     .execute(&pool)
     .await?;
@@ -294,25 +295,25 @@ pub(crate) async fn insert_test_remote_shares(
                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
                     "#,
         )
-        .bind(i as i64)
-        .bind("test_origin")
-        .bind(blockheight)
-        .bind(i as i64 + 1000)
-        .bind(i as i64 + 100)
-        .bind(format!("enonce1_{}", i))
-        .bind(format!("nonce2_{}", i))
-        .bind(format!("nonce_{}", i))
-        .bind("507f1f77")
-        .bind(1000.0 + i as f64)
-        .bind(500.0 + i as f64)
-        .bind(format!("hash_{:064x}", i))
-        .bind(true)
-        .bind(format!("worker_{}", i % 5))
-        .bind(format!("user_{}", i % 10))
-        .bind(format!("lnurl{}@test.gov", i % 10))
-        .bind(address(i % 10).to_string())
-        .execute(&pool)
-        .await?;
+            .bind(i as i64)
+            .bind("test_origin")
+            .bind(blockheight)
+            .bind(i as i64 + 1000)
+            .bind(i as i64 + 100)
+            .bind(format!("enonce1_{}", i))
+            .bind(format!("nonce2_{}", i))
+            .bind(format!("nonce_{}", i))
+            .bind("507f1f77")
+            .bind(1000.0 + i as f64)
+            .bind(500.0 + i as f64)
+            .bind(format!("hash_{:064x}", i))
+            .bind(true)
+            .bind(format!("worker_{}", i % 5))
+            .bind(format!("user_{}", i % 10))
+            .bind(format!("lnurl{}@test.gov", i % 10))
+            .bind(address(i % 10).to_string())
+            .execute(&pool)
+            .await?;
     }
 
     pool.close().await;
