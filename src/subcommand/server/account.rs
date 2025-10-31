@@ -6,6 +6,7 @@ pub struct Account {
     pub ln_address: Option<String>,
     pub past_ln_addresses: Vec<String>,
     pub total_diff: i64,
+    pub last_updated: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]

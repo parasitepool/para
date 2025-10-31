@@ -275,7 +275,8 @@ impl Database {
                 username,
                 lnurl,
                 past_lnurls,
-                total_diff
+                total_diff,
+                lnurl_updated_at::text as last_updated
             FROM accounts
             WHERE username = $1
             ",
@@ -307,11 +308,14 @@ impl Database {
             None => vec![],
         };
 
+        let last_updated: Option<String> = row.try_get("last_updated").ok();
+
         Ok(Account {
             btc_address: username,
             ln_address: lnurl,
             past_ln_addresses: past_lnurls,
             total_diff,
+            last_updated,
         })
     }
 
