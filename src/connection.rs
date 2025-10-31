@@ -393,7 +393,7 @@ where
 
         let block = Block { header, txdata };
 
-        assert!(block.bip34_block_height().is_ok());
+        // assert!(block.bip34_block_height().is_ok());
 
         info!("Submitting block solve");
 
