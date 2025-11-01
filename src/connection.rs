@@ -393,7 +393,9 @@ where
 
         let block = Block { header, txdata };
 
-        assert!(block.bip34_block_height().is_ok());
+        if job.template.height > 16 {
+            assert!(block.bip34_block_height().is_ok());
+        }
 
         info!("Submitting block solve");
 
