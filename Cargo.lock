@@ -2445,6 +2445,7 @@ dependencies = [
  "axum",
  "axum-server",
  "backon",
+ "base64 0.22.1",
  "bip322",
  "bitcoin",
  "bitcoincore-rpc",
@@ -2485,7 +2486,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "urlencoding",
- "uuid",
  "zeromq",
 ]
 

@@ -1,9 +1,11 @@
 use super::*;
 
 pub struct TestAccount {
-    pub btc_address: String,
+    pub legacy_address: String,
+    pub wrapped_segwit_address: String,
+    pub native_segwit_address: String,
+    pub taproot_address: String,
     pub private_key: PrivateKey,
-    pub address: Address,
 }
 
 impl TestAccount {
@@ -12,23 +14,39 @@ impl TestAccount {
         let (secret_key, _) = secp.generate_keypair(&mut bitcoin::secp256k1::rand::thread_rng());
         let private_key = PrivateKey::new(secret_key, Network::Testnet);
 
-        let _public_key = CompressedPublicKey::from_private_key(&secp, &private_key).unwrap();
-        let address = Address::p2wpkh(&_public_key, Network::Testnet);
+        let public_key = CompressedPublicKey::from_private_key(&secp, &private_key).unwrap();
+        let legacy_address = Address::p2pkh(public_key, Network::Testnet).to_string();
+        let wrapped_segwit_address = Address::p2shwpkh(&public_key, Network::Testnet).to_string();
+        let native_segwit_address = Address::p2wpkh(&public_key, Network::Testnet).to_string();
+
+        let untweaked_key = UntweakedPublicKey::from(secret_key.public_key(&secp));
+        let taproot_address =
+            Address::p2tr(&secp, untweaked_key, None, Network::Testnet).to_string();
 
         Self {
-            btc_address: address.to_string(),
+            legacy_address,
+            wrapped_segwit_address,
+            native_segwit_address,
+            taproot_address,
             private_key,
-            address,
         }
     }
 
-    pub fn sign_update(&self, ln_address: &str) -> String {
-        sign_simple_encoded(
-            &self.address.to_string(),
-            ln_address,
-            self.private_key.to_wif().as_str(),
-        )
-        .unwrap()
+    pub fn sign_update(&self, address: String, ln_address: &str) -> String {
+        sign_simple_encoded(&address, ln_address, self.private_key.to_wif().as_str()).unwrap()
+    }
+
+    pub fn sign_update_legacy(&self, ln_address: &str) -> Result<String, Error> {
+        let secp = Secp256k1::new();
+        let message = ln_address;
+
+        let msg_hash = bitcoin::sign_message::signed_msg_hash(message);
+        let secp_message = bitcoin::secp256k1::Message::from_digest(msg_hash.to_byte_array());
+
+        let signature = secp.sign_ecdsa_recoverable(&secp_message, &self.private_key.inner);
+        let msg_signature = MessageSignature::new(signature, false);
+
+        Ok(general_purpose::STANDARD.encode(msg_signature.serialize()))
     }
 }
 
@@ -41,7 +59,7 @@ async fn account_lookup_not_found() {
     let test_account = TestAccount::new();
 
     let response = server
-        .get_json_async_raw(&format!("/account/{}", test_account.btc_address))
+        .get_json_async_raw(&format!("/account/{}", test_account.native_segwit_address))
         .await;
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
@@ -183,23 +201,24 @@ async fn account_update_endpoint_new_account_with_signature() {
 
     let test_account = TestAccount::new();
     let ln_address = "newuser@getalby.com";
-    let signature = test_account.sign_update(ln_address);
+    let signature =
+        test_account.sign_update(test_account.native_segwit_address.clone(), ln_address);
 
     let update_request = AccountUpdate {
-        btc_address: test_account.btc_address.clone(),
+        btc_address: test_account.native_segwit_address.clone(),
         ln_address: ln_address.to_string(),
         signature,
     };
 
     let response: Account = server.post_json("/account/update", &update_request).await;
-    assert_eq!(response.btc_address, test_account.btc_address);
+    assert_eq!(response.btc_address, test_account.native_segwit_address);
 
     let database = Database::new(db_url.clone()).await.unwrap();
     let account = database
-        .get_account(&test_account.btc_address)
+        .get_account(&test_account.native_segwit_address)
         .await
         .unwrap();
-    assert_eq!(account.btc_address, test_account.btc_address);
+    assert_eq!(account.btc_address, test_account.native_segwit_address);
     assert_eq!(account.ln_address, Some(ln_address.to_string()));
     assert_eq!(account.past_ln_addresses.len(), 0);
     assert_eq!(account.total_diff, 0);
@@ -241,4 +260,126 @@ async fn test_migrate_accounts_basic() {
     assert_eq!(account.btc_address, "user_0");
     assert_eq!(account.ln_address.unwrap_or_default(), "lnurl0@test.gov");
     assert_eq!(account.total_diff, 1000);
+}
+
+#[tokio::test]
+async fn account_address_type_taproot() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    let test_account = TestAccount::new();
+    let ln_address = "newuser@getalby.com";
+    let signature = test_account.sign_update(test_account.taproot_address.clone(), ln_address);
+
+    let update_request = AccountUpdate {
+        btc_address: test_account.taproot_address.clone(),
+        ln_address: ln_address.to_string(),
+        signature,
+    };
+
+    let response: Account = server.post_json("/account/update", &update_request).await;
+    assert_eq!(response.btc_address, test_account.taproot_address);
+
+    let database = Database::new(db_url.clone()).await.unwrap();
+    let account = database
+        .get_account(&test_account.taproot_address)
+        .await
+        .unwrap();
+    assert_eq!(account.btc_address, test_account.taproot_address);
+    assert_eq!(account.ln_address, Some(ln_address.to_string()));
+    assert_eq!(account.past_ln_addresses.len(), 0);
+    assert_eq!(account.total_diff, 0);
+}
+
+#[tokio::test]
+async fn account_address_type_legacy() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    let test_account = TestAccount::new();
+    let ln_address = "newuser@getalby.com";
+    let signature = test_account.sign_update_legacy(ln_address).unwrap();
+
+    let update_request = AccountUpdate {
+        btc_address: test_account.legacy_address.clone(),
+        ln_address: ln_address.to_string(),
+        signature,
+    };
+
+    let response: Account = server.post_json("/account/update", &update_request).await;
+    assert_eq!(response.btc_address, test_account.legacy_address);
+
+    let database = Database::new(db_url.clone()).await.unwrap();
+    let account = database
+        .get_account(&test_account.legacy_address)
+        .await
+        .unwrap();
+    assert_eq!(account.btc_address, test_account.legacy_address);
+    assert_eq!(account.ln_address, Some(ln_address.to_string()));
+    assert_eq!(account.past_ln_addresses.len(), 0);
+    assert_eq!(account.total_diff, 0);
+}
+
+#[tokio::test]
+async fn account_address_type_wrapped() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    let test_account = TestAccount::new();
+    let ln_address = "newuser@getalby.com";
+    let signature =
+        test_account.sign_update(test_account.wrapped_segwit_address.clone(), ln_address);
+
+    let update_request = AccountUpdate {
+        btc_address: test_account.wrapped_segwit_address.clone(),
+        ln_address: ln_address.to_string(),
+        signature,
+    };
+
+    let response: Account = server.post_json("/account/update", &update_request).await;
+    assert_eq!(response.btc_address, test_account.wrapped_segwit_address);
+
+    let database = Database::new(db_url.clone()).await.unwrap();
+    let account = database
+        .get_account(&test_account.wrapped_segwit_address)
+        .await
+        .unwrap();
+    assert_eq!(account.btc_address, test_account.wrapped_segwit_address);
+    assert_eq!(account.ln_address, Some(ln_address.to_string()));
+    assert_eq!(account.past_ln_addresses.len(), 0);
+    assert_eq!(account.total_diff, 0);
+}
+
+#[tokio::test]
+async fn account_address_type_native() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    let test_account = TestAccount::new();
+    let ln_address = "newuser@getalby.com";
+    let signature =
+        test_account.sign_update(test_account.native_segwit_address.clone(), ln_address);
+
+    let update_request = AccountUpdate {
+        btc_address: test_account.native_segwit_address.clone(),
+        ln_address: ln_address.to_string(),
+        signature,
+    };
+
+    let response: Account = server.post_json("/account/update", &update_request).await;
+    assert_eq!(response.btc_address, test_account.native_segwit_address);
+
+    let database = Database::new(db_url.clone()).await.unwrap();
+    let account = database
+        .get_account(&test_account.native_segwit_address)
+        .await
+        .unwrap();
+    assert_eq!(account.btc_address, test_account.native_segwit_address);
+    assert_eq!(account.ln_address, Some(ln_address.to_string()));
+    assert_eq!(account.past_ln_addresses.len(), 0);
+    assert_eq!(account.total_diff, 0);
 }

@@ -66,6 +66,7 @@ tower-http = { version = "0.6.2", features = ["auth", "fs", "set-header"] }
 tracing = "0.1.41"
 tracing-subscriber = { version =  "0.3.19", features = ["env-filter", "fmt"] }
 zeromq = "0.4.1"
+base64 = "0.22.1"
 
 [dev-dependencies]
 chrono = "0.4.41"
@@ -75,7 +76,6 @@ once_cell = "1.21.3"
 pretty_assertions = "1.4.1"
 tempfile = "3.23.0"
 urlencoding = "2.1.3"
-uuid = "1.18.1"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 pgtemp = "0.6.0"

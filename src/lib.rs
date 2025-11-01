@@ -12,6 +12,7 @@ use {
         routing::{MethodRouter, get, post},
     },
     axum_server::Handle,
+    base64::{Engine, engine::general_purpose},
     bip322::verify_simple_encoded,
     bitcoin::{
         Address, Amount, Block, BlockHash, CompactTarget, Network, OutPoint, ScriptBuf, Sequence,
@@ -21,6 +22,8 @@ use {
         hashes::{Hash, sha256d},
         locktime::absolute::LockTime,
         script::write_scriptint,
+        secp256k1::Secp256k1,
+        sign_message::MessageSignature,
     },
     bitcoincore_rpc::{Auth, RpcApi},
     block_template::BlockTemplate,

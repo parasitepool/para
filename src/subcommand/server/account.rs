@@ -46,12 +46,11 @@ pub(crate) async fn account_update(
     Extension(database): Extension<Database>,
     Json(account_update): Json<AccountUpdate>,
 ) -> ServerResult<Response> {
-    let signature_valid = verify_simple_encoded(
+    let signature_valid = verify_signature(
         &account_update.btc_address,
         &account_update.ln_address,
         &account_update.signature,
-    )
-    .is_ok();
+    );
 
     if !signature_valid {
         return Ok(Json(AccountResponse {
@@ -67,4 +66,33 @@ pub(crate) async fn account_update(
         .ok_or_not_found()
         .map(Json)
         .map(IntoResponse::into_response)
+}
+
+pub fn verify_signature(address: &String, message: &String, signature: &String) -> bool {
+    match verify_simple_encoded(address, message, signature) {
+        Ok(_) => true,
+        Err(bip322::Error::WitnessMalformed { .. }) => {
+            let secp = Secp256k1::new();
+            let address = Address::from_str(address.as_str())
+                .unwrap()
+                .assume_checked();
+
+            let sig_bytes = match general_purpose::STANDARD.decode(&signature) {
+                Ok(bytes) => bytes,
+                Err(_) => return false
+            };
+
+            let msg_signature = MessageSignature::from_slice(&sig_bytes);
+
+            if let Ok(sig_to_validate) = msg_signature {
+                let msg_hash = bitcoin::sign_message::signed_msg_hash(&message);
+                sig_to_validate
+                    .is_signed_by_address(&secp, &address, msg_hash)
+                    .is_ok()
+            } else {
+                false
+            }
+        },
+        Err(_) => false
+    }
 }

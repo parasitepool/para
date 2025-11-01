@@ -37,8 +37,13 @@ use {
         create_test_block, create_test_shares, insert_test_account, insert_test_block,
         insert_test_remote_shares, insert_test_shares, setup_test_schema,
     },
+    anyhow::Error,
+    base64::{Engine, engine::general_purpose},
     bip322::sign_simple_encoded,
-    bitcoin::{CompressedPublicKey, Network, PrivateKey, key::Secp256k1},
+    bitcoin::{
+        CompressedPublicKey, Network, PrivateKey, hashes::Hash, key::UntweakedPublicKey,
+        secp256k1::Secp256k1, sign_message::MessageSignature,
+    },
     harness::bitcoind::Bitcoind,
     para::{
         stratum::{
