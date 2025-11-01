@@ -18,12 +18,12 @@ pub struct Payout {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct Database {
+pub struct Database {
     pub(crate) pool: Pool<Postgres>,
 }
 
 impl Database {
-    pub(crate) async fn new(database_url: String) -> Result<Self> {
+    pub async fn new(database_url: String) -> Result<Self> {
         Ok(Self {
             pool: PgPoolOptions::new()
                 .max_connections(5)
@@ -266,5 +266,132 @@ impl Database {
         .fetch_all(&self.pool)
         .await
         .map_err(|err| anyhow!(err))
+    }
+
+    pub async fn get_account(&self, username: &str) -> Result<Account> {
+        let account = sqlx::query(
+            "
+            SELECT
+                username,
+                lnurl,
+                past_lnurls,
+                total_diff,
+                lnurl_updated_at::text as last_updated
+            FROM accounts
+            WHERE username = $1
+            ",
+        )
+        .bind(username)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))?;
+
+        let row = match account {
+            Some(r) => r,
+            None => {
+                return Err(anyhow!("Account not found"));
+            }
+        };
+
+        let username: String = row.try_get("username").map_err(|err| anyhow!(err))?;
+        let lnurl: Option<String> = row.try_get("lnurl").ok();
+        let total_diff: i64 = row.try_get("total_diff").map_err(|err| anyhow!(err))?;
+
+        let past_lnurls_json: sqlx::types::JsonValue =
+            row.try_get("past_lnurls").map_err(|err| anyhow!(err))?;
+
+        let past_lnurls: Vec<String> = match past_lnurls_json.as_array() {
+            Some(arr) => arr
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect(),
+            None => vec![],
+        };
+
+        let last_updated: Option<String> = row.try_get("last_updated").ok();
+
+        Ok(Account {
+            btc_address: username,
+            ln_address: lnurl,
+            past_ln_addresses: past_lnurls,
+            total_diff,
+            last_updated,
+        })
+    }
+
+    pub async fn update_account_lnurl(&self, username: &str, new_lnurl: &str) -> Result<Account> {
+        let current_account = self.get_account(username).await.ok();
+
+        let updated_past_lnurls = if let Some(account) = current_account {
+            if let Some(old_lnurl) = &account.ln_address
+                && old_lnurl == new_lnurl
+            {
+                return Err(anyhow!(
+                    "New lightning address matches existing lightning address"
+                ));
+            }
+            let mut past_lnurls = account.past_ln_addresses.clone();
+
+            if let Some(current_lnurl) = &account.ln_address
+                && !current_lnurl.is_empty()
+                && !past_lnurls.contains(current_lnurl)
+            {
+                past_lnurls.insert(0, current_lnurl.clone());
+            }
+
+            past_lnurls.truncate(10);
+            Some(past_lnurls)
+        } else {
+            None
+        };
+
+        if let Some(past_lnurls) = updated_past_lnurls {
+            let past_lnurls_json = serde_json::to_value(past_lnurls)
+                .map_err(|err| anyhow!("Failed to serialize past_lnurls: {}", err))?;
+
+            let rows_affected = sqlx::query(
+                "
+                UPDATE accounts
+                SET lnurl = $1, past_lnurls = $2, lnurl_updated_at = NOW(), updated_at = NOW()
+                WHERE username = $3
+                ",
+            )
+            .bind(new_lnurl)
+            .bind(past_lnurls_json)
+            .bind(username)
+            .execute(&self.pool)
+            .await
+            .map_err(|err| anyhow!(err))?
+            .rows_affected();
+
+            if rows_affected == 0 {
+                return Err(anyhow!(
+                    "Expected to update existing account but no rows affected"
+                ));
+            }
+        } else {
+            sqlx::query(
+                "
+                INSERT INTO accounts (username, lnurl, past_lnurls, total_diff, lnurl_updated_at, created_at, updated_at)
+                VALUES ($1, $2, '[]'::jsonb, 0, NOW(), NOW(), NOW())
+                ",
+            )
+                .bind(username)
+                .bind(new_lnurl)
+                .execute(&self.pool)
+                .await
+                .map_err(|err| anyhow!(err))?;
+        }
+
+        self.get_account(username).await
+    }
+
+    pub async fn migrate_accounts(&self) -> Result<u64> {
+        let result = sqlx::query_scalar::<_, i64>("SELECT refresh_accounts()")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|err| anyhow!(err))?;
+
+        Ok(result as u64)
     }
 }

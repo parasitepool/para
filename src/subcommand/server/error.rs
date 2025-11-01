@@ -43,3 +43,16 @@ impl<T> OptionExt<T> for Option<T> {
         }
     }
 }
+
+pub(crate) trait ResultExt<T> {
+    fn ok_or_not_found(self) -> ServerResult<T>;
+}
+
+impl<T, E> ResultExt<T> for Result<T, E>
+where
+    E: fmt::Display,
+{
+    fn ok_or_not_found(self) -> ServerResult<T> {
+        self.map_err(|e| ServerError::NotFound(e.to_string()))
+    }
+}

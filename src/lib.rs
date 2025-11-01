@@ -12,6 +12,7 @@ use {
         routing::{MethodRouter, get, post},
     },
     axum_server::Handle,
+    bip322::verify_simple_encoded,
     bitcoin::{
         Address, Amount, Block, BlockHash, CompactTarget, Network, OutPoint, ScriptBuf, Sequence,
         Target, Transaction, TxIn, TxMerkleNode, TxOut, Txid, VarInt, Witness,
@@ -53,7 +54,7 @@ use {
     },
     serde_json::{Value, json},
     serde_with::{DeserializeFromStr, SerializeDisplay},
-    sqlx::{Pool, Postgres, postgres::PgPoolOptions},
+    sqlx::{Pool, Postgres, Row, postgres::PgPoolOptions},
     std::{
         collections::{BTreeMap, HashMap, HashSet},
         env,
@@ -77,7 +78,10 @@ use {
         Nbits, Nonce, Notify, Ntime, PrevHash, SetDifficulty, Submit, Subscribe, SubscribeResult,
         Version,
     },
-    subcommand::pool::pool_config::PoolConfig,
+    subcommand::{
+        pool::pool_config::PoolConfig,
+        server::{account::Account, error::ResultExt},
+    },
     sysinfo::{Disks, System},
     tokio::{
         io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, BufWriter},
