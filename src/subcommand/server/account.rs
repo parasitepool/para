@@ -68,31 +68,29 @@ pub(crate) async fn account_update(
         .map(IntoResponse::into_response)
 }
 
-pub fn verify_signature(address: &String, message: &String, signature: &String) -> bool {
+pub fn verify_signature(address: &str, message: &str, signature: &String) -> bool {
     match verify_simple_encoded(address, message, signature) {
         Ok(_) => true,
         Err(bip322::Error::WitnessMalformed { .. }) => {
             let secp = Secp256k1::new();
-            let address = Address::from_str(address.as_str())
-                .unwrap()
-                .assume_checked();
+            let address = Address::from_str(address).unwrap().assume_checked();
 
-            let sig_bytes = match general_purpose::STANDARD.decode(&signature) {
+            let sig_bytes = match general_purpose::STANDARD.decode(signature) {
                 Ok(bytes) => bytes,
-                Err(_) => return false
+                Err(_) => return false,
             };
 
             let msg_signature = MessageSignature::from_slice(&sig_bytes);
 
             if let Ok(sig_to_validate) = msg_signature {
-                let msg_hash = bitcoin::sign_message::signed_msg_hash(&message);
+                let msg_hash = bitcoin::sign_message::signed_msg_hash(message);
                 sig_to_validate
                     .is_signed_by_address(&secp, &address, msg_hash)
                     .is_ok()
             } else {
                 false
             }
-        },
-        Err(_) => false
+        }
+        Err(_) => false,
     }
 }
