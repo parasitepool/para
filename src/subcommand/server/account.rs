@@ -40,8 +40,6 @@ pub(crate) async fn account_lookup(
         .map(IntoResponse::into_response)
 }
 
-// Check if the signature provided is valid over "btc_address|ln_address|nonce"
-// Update record if it is with the new ln_address
 pub(crate) async fn account_update(
     Extension(database): Extension<Database>,
     Json(account_update): Json<AccountUpdate>,
