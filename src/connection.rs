@@ -222,7 +222,7 @@ where
             warn!("Ignoring worker extranonce1 suggestion: {extranonce1}");
         }
 
-        let extranonce1 = Extranonce::generate(EXTRANONCE1_SIZE);
+        let extranonce1 = Extranonce::random(EXTRANONCE1_SIZE);
 
         let subscriptions = vec![
             (
@@ -235,7 +235,7 @@ where
         let result = SubscribeResult {
             subscriptions,
             extranonce1: extranonce1.clone(),
-            extranonce2_size: EXTRANONCE2_SIZE.try_into().unwrap(),
+            extranonce2_size: EXTRANONCE2_SIZE,
         };
 
         self.send(Message::Response {
@@ -393,7 +393,9 @@ where
 
         let block = Block { header, txdata };
 
-        assert!(block.bip34_block_height().is_ok());
+        if job.template.height > 16 {
+            assert!(block.bip34_block_height().is_ok());
+        }
 
         info!("Submitting block solve");
 

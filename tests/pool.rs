@@ -14,6 +14,25 @@ fn ping_pool() {
 }
 
 #[test]
+fn mine_to_pool() {
+    let pool = TestPool::spawn();
+
+    let stratum_endpoint = pool.stratum_endpoint();
+
+    let miner = CommandBuilder::new(format!(
+        "miner --once --username {} {stratum_endpoint}",
+        signet_username()
+    ))
+    .spawn();
+
+    let stdout = miner.wait_with_output().unwrap();
+    let output =
+        serde_json::from_str::<Vec<Share>>(&String::from_utf8_lossy(&stdout.stdout)).unwrap();
+
+    assert_eq!(output.len(), 1);
+}
+
+#[test]
 fn configure_template_update_interval() {
     let pool = TestPool::spawn_with_args("--update-interval 1");
 
@@ -42,6 +61,84 @@ fn configure_template_update_interval() {
     let t2 = serde_json::from_str::<Template>(&String::from_utf8_lossy(&output.stdout)).unwrap();
 
     assert!(t1.ntime < t2.ntime);
+}
+
+#[test]
+fn concurrently_listening_workers_receive_new_templates_on_new_block() {
+    let pool = TestPool::spawn();
+    let endpoint = pool.stratum_endpoint();
+    let user = signet_username();
+
+    let gate = Arc::new(Barrier::new(3));
+    let (out_1, in_1) = mpsc::channel();
+    let (out_2, in_2) = mpsc::channel();
+
+    thread::scope(|thread| {
+        for out in [out_1.clone(), out_2.clone()].into_iter() {
+            let gate = gate.clone();
+            let endpoint = endpoint.clone();
+            let user = user.clone();
+
+            thread.spawn(move || {
+                let mut template_watcher =
+                    CommandBuilder::new(format!("template {endpoint} --username {user} --watch"))
+                        .spawn();
+
+                let mut reader = BufReader::new(template_watcher.stdout.take().unwrap());
+
+                let initial_template = next_json::<Template>(&mut reader);
+
+                gate.wait();
+
+                let new_template = next_json::<Template>(&mut reader);
+
+                out.send((initial_template, new_template)).ok();
+
+                template_watcher.kill().unwrap();
+                template_watcher.wait().unwrap();
+            });
+        }
+
+        gate.wait();
+
+        CommandBuilder::new(format!(
+            "miner --once --username {} {}",
+            signet_username(),
+            pool.stratum_endpoint()
+        ))
+        .spawn()
+        .wait()
+        .unwrap();
+
+        let (initial_template_worker_a, new_template_worker_a) =
+            in_1.recv_timeout(Duration::from_secs(1)).unwrap();
+
+        let (initial_template_worker_b, new_template_worker_b) =
+            in_2.recv_timeout(Duration::from_secs(1)).unwrap();
+
+        assert_eq!(
+            initial_template_worker_a.prevhash,
+            initial_template_worker_b.prevhash
+        );
+
+        assert_ne!(
+            initial_template_worker_a.prevhash,
+            new_template_worker_a.prevhash
+        );
+
+        assert_ne!(
+            initial_template_worker_b.prevhash,
+            new_template_worker_b.prevhash,
+        );
+
+        assert_eq!(
+            new_template_worker_a.prevhash,
+            new_template_worker_b.prevhash
+        );
+
+        assert!(new_template_worker_a.ntime >= initial_template_worker_a.ntime);
+        assert!(new_template_worker_b.ntime >= initial_template_worker_b.ntime);
+    });
 }
 
 #[tokio::test]
@@ -146,7 +243,7 @@ async fn submit_before_authorize_fails() {
         client
             .submit(
                 JobId::new(3),
-                Extranonce::generate(8),
+                Extranonce::random(8),
                 Ntime::from(0),
                 Nonce::from(12345),
             )

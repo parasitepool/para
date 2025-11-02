@@ -58,24 +58,12 @@ impl Miner {
         info!("Available CPU cores: {}", available_cpu_cores);
         info!("CPU cores to use: {}", cpu_cores);
 
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(cpu_cores)
-            .thread_name(|index| format!("rayon-miner-{}", index))
-            .stack_size(1024 * 1024)
-            .panic_handler(|panic_info| {
-                error!("Rayon thread panicked: {:?}", panic_info);
-            })
-            .build_global()
-            .map_err(|e| anyhow!("Failed to configure Rayon: {}", e))?;
-
         let controller =
             Controller::new(client, cpu_cores, self.once, self.username.clone()).await?;
 
         let shares = controller.run().await?;
 
-        if !shares.is_empty() {
-            println!("{}", serde_json::to_string_pretty(&shares)?);
-        }
+        println!("{}", serde_json::to_string_pretty(&shares)?);
 
         Ok(())
     }

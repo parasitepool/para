@@ -4,10 +4,24 @@ use super::*;
 pub struct Extranonce(Vec<u8>);
 
 impl Extranonce {
-    pub fn generate(size: usize) -> Self {
+    pub fn random(size: usize) -> Self {
         let mut v = vec![0u8; size];
         rand::rng().fill_bytes(&mut v);
         Self(v)
+    }
+
+    pub fn zeros(size: usize) -> Self {
+        Self(vec![0u8; size])
+    }
+
+    pub fn increment_wrapping(&mut self) {
+        for b in self.0.iter_mut().rev() {
+            let (next, carry) = b.overflowing_add(1);
+            *b = next;
+            if !carry {
+                return;
+            }
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -92,7 +106,7 @@ mod tests {
 
     #[test]
     fn generate_has_correct_length() {
-        let extranonce2 = Extranonce::generate(8);
+        let extranonce2 = Extranonce::random(8);
         assert_eq!(extranonce2.len(), 8);
         assert!(!extranonce2.as_bytes().is_empty());
     }
@@ -102,5 +116,43 @@ mod tests {
         let extranonce1: Extranonce = serde_json::from_str(r#""abcd""#).unwrap();
         let ser = serde_json::to_string(&extranonce1).unwrap();
         assert_eq!(ser, r#""abcd""#);
+    }
+
+    #[test]
+    fn increment() {
+        let mut extranonce = Extranonce::zeros(1);
+        extranonce.increment_wrapping();
+        assert_eq!(extranonce.to_hex(), "01");
+    }
+
+    #[test]
+    fn increment_with_carry() {
+        let mut extranonce = "00ff".parse::<Extranonce>().unwrap();
+        extranonce.increment_wrapping();
+        assert_eq!(extranonce.to_hex(), "0100");
+    }
+
+    #[test]
+    fn increment_multi_byte_carry() {
+        let mut extranonce = "00ffff".parse::<Extranonce>().unwrap();
+        extranonce.increment_wrapping();
+        assert_eq!(extranonce.to_hex(), "010000");
+    }
+
+    #[test]
+    fn increment_wraps() {
+        let mut extranonce = "ffff".parse::<Extranonce>().unwrap();
+        extranonce.increment_wrapping();
+        assert_eq!(extranonce.to_hex(), "0000");
+        assert_eq!(extranonce.len(), 2);
+    }
+
+    #[test]
+    fn increment_sequence() {
+        let mut extranonce = "00fe".parse::<Extranonce>().unwrap();
+        extranonce.increment_wrapping();
+        assert_eq!(extranonce.to_hex(), "00ff");
+        extranonce.increment_wrapping();
+        assert_eq!(extranonce.to_hex(), "0100");
     }
 }
