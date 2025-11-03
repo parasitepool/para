@@ -442,3 +442,23 @@ async fn account_address_type_native() {
     assert_eq!(account.past_ln_addresses.len(), 0);
     assert_eq!(account.total_diff, 0);
 }
+
+#[tokio::test]
+async fn account_signature_invalid() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    let test_account = TestAccount::new();
+    let ln_address = "newuser@getalby.com";
+    let signature = "invalid signature".to_string();
+
+    let update_request = AccountUpdate {
+        btc_address: test_account.native_segwit_address.clone(),
+        ln_address: ln_address.to_string(),
+        signature,
+    };
+
+    let response: Response = server.post_json_raw("/account/update", &update_request).await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
