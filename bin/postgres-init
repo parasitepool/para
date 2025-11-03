@@ -363,15 +363,8 @@ PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
              NOW()                              AS updated_at
       FROM aggregated_data
       ON CONFLICT (username) DO UPDATE
-          SET lnurl            = EXCLUDED.lnurl,
-              past_lnurls      = CASE
-                                     WHEN accounts.lnurl IS DISTINCT FROM EXCLUDED.lnurl
-                                         AND accounts.lnurl IS NOT NULL
-                                         AND NOT (accounts.past_lnurls @> jsonb_build_array(accounts.lnurl))
-                                         THEN accounts.past_lnurls || jsonb_build_array(accounts.lnurl) ||
-                                              EXCLUDED.past_lnurls
-                                     ELSE accounts.past_lnurls || EXCLUDED.past_lnurls
-                  END,
+          SET lnurl            = COALESCE(accounts.lnurl, EXCLUDED.lnurl),
+              past_lnurls      = COALESCE(accounts.past_lnurls, EXCLUDED.past_lnurls),
               total_diff       = EXCLUDED.total_diff,
               lnurl_updated_at = CASE
                                      WHEN accounts.lnurl IS DISTINCT FROM EXCLUDED.lnurl
