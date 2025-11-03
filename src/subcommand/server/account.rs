@@ -66,8 +66,10 @@ pub fn verify_signature(address: &str, message: &str, signature: &String) -> boo
     match verify_simple_encoded(address, message, signature) {
         Ok(_) => true,
         Err(bip322::Error::WitnessMalformed { .. }) => {
-            let secp = Secp256k1::new();
-            let address = Address::from_str(address).unwrap().assume_checked();
+            let secp = Secp256k1::verification_only();
+            let address = Address::from_str(address)
+                .expect("handled by default error")
+                .assume_checked();
 
             let sig_bytes = match general_purpose::STANDARD.decode(signature) {
                 Ok(bytes) => bytes,
