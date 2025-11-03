@@ -37,7 +37,7 @@ const BUDGET: Duration = Duration::from_secs(5);
 const TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_ATTEMPTS: usize = 3;
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(1500);
-static MIGRATION_LOCK: OnceLock<tokio::sync::RwLock<bool>> = OnceLock::new();
+static MIGRATION_LOCK: OnceLock<Mutex<bool>> = OnceLock::new();
 
 #[derive(RustEmbed)]
 #[folder = "static"]
@@ -512,46 +512,44 @@ impl Server {
             batch.hostname
         );
 
-        let lock = MIGRATION_LOCK.get_or_init(|| tokio::sync::RwLock::new(false));
+        let lock = MIGRATION_LOCK.get_or_init(|| Mutex::new(false));
 
-        let done = match lock.try_read() {
+        let mut done = match lock.try_lock() {
             Ok(guard) => guard,
             Err(_) => {
-                warn!("Rejecting sync {} - migration in progress", batch.batch_id);
+                warn!(
+                    "Rejecting sync batch {} - migration in progress",
+                    batch.batch_id
+                );
                 let response = SyncResponse {
                     batch_id: batch.batch_id,
                     received_count: 0,
                     status: "UNAVAILABLE".to_string(),
-                    error_message: Some("Migration in progress".to_string()),
+                    error_message: Some("Migration in progress, try again later".to_string()),
                 };
                 return Ok(Json(response));
             }
         };
 
         if config.migrate_accounts() && !*done {
-            drop(done);
-            let mut done = lock.write().await;
-
-            if !*done {
-                info!("Running account migration...");
-                match database.migrate_accounts().await {
-                    Ok(rows_affected) => {
-                        info!(
-                            "Account migration completed. {} accounts refreshed/populated.",
-                            rows_affected
-                        );
-                        *done = true;
-                    }
-                    Err(e) => {
-                        error!("Account migration failed: {}", e);
-                        let response = SyncResponse {
-                            batch_id: batch.batch_id,
-                            received_count: 0,
-                            status: "ERROR".to_string(),
-                            error_message: Some(format!("Migration failed: {}", e)),
-                        };
-                        return Ok(Json(response));
-                    }
+            info!("Running account migration...");
+            match database.migrate_accounts().await {
+                Ok(rows_affected) => {
+                    info!(
+                        "Account migration completed. {} accounts affected.",
+                        rows_affected
+                    );
+                    *done = true;
+                }
+                Err(e) => {
+                    error!("Account migration failed: {}", e);
+                    let response = SyncResponse {
+                        batch_id: batch.batch_id,
+                        received_count: 0,
+                        status: "ERROR".to_string(),
+                        error_message: Some(format!("Migration failed: {}", e)),
+                    };
+                    return Ok(Json(response));
                 }
             }
         }
