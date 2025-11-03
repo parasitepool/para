@@ -95,7 +95,12 @@ impl TestServer {
             bin_path: psql_binpath,
         });
 
-        let database_url = pg_db.connection_uri();
+        Self::spawn_with_db_override(args, pg_db).await
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(crate) async fn spawn_with_db_override(args: impl ToArgs, database: PgTempDB) -> Self {
+        let database_url = database.connection_uri();
 
         let port = TcpListener::bind("127.0.0.1:0")
             .unwrap()
@@ -136,7 +141,7 @@ impl TestServer {
             child,
             port,
             tempdir,
-            pg_db: Some(pg_db),
+            pg_db: Some(database),
             admin_token: None,
         }
     }
