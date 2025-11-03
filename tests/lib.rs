@@ -34,8 +34,15 @@ use {
 #[cfg(target_os = "linux")]
 use {
     crate::test_psql::{
-        create_test_block, create_test_shares, insert_test_block, insert_test_shares,
-        setup_test_schema,
+        create_test_block, create_test_shares, insert_test_account, insert_test_block,
+        insert_test_remote_shares, insert_test_shares, setup_test_schema,
+    },
+    anyhow::Error,
+    base64::{Engine, engine::general_purpose},
+    bip322::sign_simple_encoded,
+    bitcoin::{
+        CompressedPublicKey, Network, PrivateKey, hashes::Hash, key::UntweakedPublicKey,
+        secp256k1::Secp256k1, sign_message::MessageSignature,
     },
     harness::bitcoind::Bitcoind,
     para::{
@@ -45,6 +52,10 @@ use {
         },
         subcommand::{
             miner::Share,
+            server::{
+                account::{Account, AccountUpdate},
+                database::Database,
+            },
             sync::{ShareBatch, Sync, SyncResponse},
             template::Output as Template,
         },
@@ -75,6 +86,8 @@ mod test_psql;
 mod test_server;
 mod to_args;
 
+#[cfg(target_os = "linux")]
+mod account;
 mod alerts;
 #[cfg(target_os = "linux")]
 mod ping;

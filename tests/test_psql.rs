@@ -27,7 +27,7 @@ pub(crate) fn create_test_shares(count: u32, blockheight: i64) -> Vec<Share> {
             createinet: Some("127.0.0.1".to_string()),
             workername: Some(format!("worker_{}", i % 5)),
             username: Some(format!("user_{}", i % 10)),
-            lnurl: None,
+            lnurl: Some(format!("lnurl{}@test.gov", i)),
             address: Some(address(i % 10u32).to_string()),
             agent: Some("test-agent".to_string()),
         })
@@ -143,6 +143,41 @@ pub(crate) async fn setup_test_schema(db_url: String) -> Result<(), Box<dyn std:
 
     sqlx::query(
         r#"
+                CREATE TABLE IF NOT EXISTS accounts
+                (
+                    id               BIGSERIAL PRIMARY KEY,
+                    username         VARCHAR(128) NOT NULL UNIQUE,
+                    lnurl            VARCHAR(255),
+                    past_lnurls      JSONB                    DEFAULT '[]'::JSONB,
+                    total_diff       BIGINT                   DEFAULT 0,
+                    lnurl_updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    created_at       TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    updated_at       TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                )"#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+                CREATE TABLE IF NOT EXISTS payouts (
+                    id BIGSERIAL PRIMARY KEY,
+                    account_id BIGINT NOT NULL REFERENCES accounts(id),
+                    amount BIGINT NOT NULL,
+                    diff_paid BIGINT NOT NULL,
+                    blockheight_start INTEGER NOT NULL,
+                    blockheight_end INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    failure_reason TEXT,
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+                "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
                 CREATE OR REPLACE FUNCTION compress_shares(start_id BIGINT, end_id BIGINT)
                 RETURNS BIGINT AS $$
                 BEGIN
@@ -155,6 +190,67 @@ pub(crate) async fn setup_test_schema(db_url: String) -> Result<(), Box<dyn std:
     )
     .execute(&pool)
     .await?;
+
+    sqlx::query(
+        r#"
+                CREATE OR REPLACE FUNCTION refresh_accounts()
+      RETURNS BIGINT AS
+  $$
+  DECLARE
+      rows_affected BIGINT;
+  BEGIN
+      INSERT INTO accounts (username, lnurl, past_lnurls, total_diff, created_at, updated_at)
+      WITH latest_lnurl AS (SELECT DISTINCT ON (username) username,
+                                                          TRIM(BOTH ' ' FROM lnurl) AS latest_lnurl,
+                                                          id
+                            FROM remote_shares
+                            WHERE username IS NOT NULL
+                              AND username != ''
+                            ORDER BY username, id DESC),
+           aggregated_data AS (SELECT TRIM(BOTH ' ' FROM rs.username) AS username,
+                                      ll.latest_lnurl,
+                                      jsonb_agg(DISTINCT TRIM(BOTH ' ' FROM rs.lnurl) ORDER BY TRIM(BOTH ' ' FROM rs.lnurl))
+                                      FILTER (WHERE rs.lnurl IS NOT NULL AND TRIM(BOTH ' ' FROM rs.lnurl) != ll.latest_lnurl) AS past_lnurls,
+                                      COALESCE(SUM(rs.diff), 0)                                                               AS total_diff
+                               FROM remote_shares rs
+                                        INNER JOIN latest_lnurl ll ON rs.username = ll.username
+                               WHERE rs.username IS NOT NULL
+                                 AND rs.username != ''
+                                 AND rs.result = true
+                               GROUP BY rs.username, ll.latest_lnurl)
+      SELECT username,
+             latest_lnurl,
+             COALESCE(past_lnurls, '[]'::jsonb) AS past_lnurls,
+             total_diff,
+             NOW()                              AS created_at,
+             NOW()                              AS updated_at
+      FROM aggregated_data
+      ON CONFLICT (username) DO UPDATE
+          SET lnurl            = EXCLUDED.lnurl,
+              past_lnurls      = CASE
+                                     WHEN accounts.lnurl IS DISTINCT FROM EXCLUDED.lnurl
+                                         AND accounts.lnurl IS NOT NULL
+                                         AND NOT (accounts.past_lnurls @> jsonb_build_array(accounts.lnurl))
+                                         THEN accounts.past_lnurls || jsonb_build_array(accounts.lnurl) ||
+                                              EXCLUDED.past_lnurls
+                                     ELSE accounts.past_lnurls || EXCLUDED.past_lnurls
+                  END,
+              total_diff       = EXCLUDED.total_diff,
+              lnurl_updated_at = CASE
+                                     WHEN accounts.lnurl IS DISTINCT FROM EXCLUDED.lnurl
+                                         THEN NOW()
+                                     ELSE accounts.lnurl_updated_at
+                  END,
+              updated_at       = NOW();
+
+      GET DIAGNOSTICS rows_affected = ROW_COUNT;
+      RETURN rows_affected;
+  END;
+  $$ LANGUAGE plpgsql;
+                "#,
+    )
+        .execute(&pool)
+        .await?;
 
     pool.close().await;
     Ok(())
@@ -193,6 +289,75 @@ pub(crate) async fn insert_test_shares(
         .execute(&pool)
         .await?;
     }
+
+    pool.close().await;
+    Ok(())
+}
+
+pub(crate) async fn insert_test_remote_shares(
+    db: String,
+    count: u32,
+    blockheight: i64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = sqlx::PgPool::connect(&db).await?;
+
+    for i in 0..count {
+        sqlx::query(
+            r#"
+                    INSERT INTO remote_shares (
+                                               id, origin,
+                        blockheight, workinfoid, clientid, enonce1, nonce2, nonce,
+                        ntime, diff, sdiff, hash, result, workername, username, lnurl, address
+                    ) VALUES (COALESCE((SELECT MAX(id) FROM remote_shares WHERE origin = 'test_origin'), 0) + 1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+                    "#,
+        )
+            .bind("test_origin")
+            .bind(blockheight)
+            .bind(i as i64 + 1000)
+            .bind(i as i64 + 100)
+            .bind(format!("enonce1_{}", i))
+            .bind(format!("nonce2_{}", i))
+            .bind(format!("nonce_{}", i))
+            .bind("507f1f77")
+            .bind(1000.0 + i as f64)
+            .bind(500.0 + i as f64)
+            .bind(format!("hash_{:064x}", i))
+            .bind(true)
+            .bind(format!("worker_{}", i % 5))
+            .bind(format!("user_{}", i % 10))
+            .bind(format!("lnurl{}@test.gov", i % 10))
+            .bind(address(i % 10).to_string())
+            .execute(&pool)
+            .await?;
+    }
+
+    pool.close().await;
+    Ok(())
+}
+
+pub(crate) async fn insert_test_account(
+    db_url: String,
+    username: &str,
+    lnurl: Option<&str>,
+    past_lnurls: Vec<String>,
+    total_diff: i64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = sqlx::PgPool::connect(&db_url).await?;
+
+    let past_lnurls_json = serde_json::to_value(past_lnurls)?;
+
+    sqlx::query(
+        "
+        INSERT INTO accounts (username, lnurl, past_lnurls, total_diff, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, NOW(), NOW())
+        ",
+    )
+    .bind(username)
+    .bind(lnurl)
+    .bind(past_lnurls_json)
+    .bind(total_diff)
+    .execute(&pool)
+    .await?;
 
     pool.close().await;
     Ok(())

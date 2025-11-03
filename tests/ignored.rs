@@ -5,6 +5,85 @@ use super::*;
 
 #[test]
 #[ignore]
+fn concurrently_listening_workers_receive_new_templates_on_new_block() {
+    let pool = TestPool::spawn();
+    let endpoint = pool.stratum_endpoint();
+    let user = signet_username();
+
+    let gate = Arc::new(Barrier::new(3));
+    let (out_1, in_1) = mpsc::channel();
+    let (out_2, in_2) = mpsc::channel();
+
+    thread::scope(|thread| {
+        for out in [out_1.clone(), out_2.clone()].into_iter() {
+            let gate = gate.clone();
+            let endpoint = endpoint.clone();
+            let user = user.clone();
+
+            thread.spawn(move || {
+                let mut template_watcher =
+                    CommandBuilder::new(format!("template {endpoint} --username {user} --watch"))
+                        .spawn();
+
+                let mut reader = BufReader::new(template_watcher.stdout.take().unwrap());
+
+                let initial_template = next_json::<Template>(&mut reader);
+
+                gate.wait();
+
+                let new_template = next_json::<Template>(&mut reader);
+
+                out.send((initial_template, new_template)).ok();
+
+                template_watcher.kill().unwrap();
+                template_watcher.wait().unwrap();
+            });
+        }
+
+        gate.wait();
+
+        CommandBuilder::new(format!(
+            "miner --once --username {} {}",
+            signet_username(),
+            pool.stratum_endpoint()
+        ))
+        .spawn()
+        .wait()
+        .unwrap();
+
+        let (initial_template_worker_a, new_template_worker_a) =
+            in_1.recv_timeout(Duration::from_secs(1)).unwrap();
+
+        let (initial_template_worker_b, new_template_worker_b) =
+            in_2.recv_timeout(Duration::from_secs(1)).unwrap();
+
+        assert_eq!(
+            initial_template_worker_a.prevhash,
+            initial_template_worker_b.prevhash
+        );
+
+        assert_ne!(
+            initial_template_worker_a.prevhash,
+            new_template_worker_a.prevhash
+        );
+
+        assert_ne!(
+            initial_template_worker_b.prevhash,
+            new_template_worker_b.prevhash,
+        );
+
+        assert_eq!(
+            new_template_worker_a.prevhash,
+            new_template_worker_b.prevhash
+        );
+
+        assert!(new_template_worker_a.ntime >= initial_template_worker_a.ntime);
+        assert!(new_template_worker_b.ntime >= initial_template_worker_b.ntime);
+    });
+}
+
+#[test]
+#[ignore]
 fn aggregator_cache_concurrent_pool_burst() {
     let mut servers = Vec::new();
     for _ in 0..3 {
@@ -233,6 +312,80 @@ async fn test_sync_endpoint_to_endpoint() {
     assert_eq!(block_count.0, 3);
     assert_eq!(block_count.1, 800030);
     assert_eq!(block_count.2, 800032);
+
+    pool.close().await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_sync_migrate_collision() {
+    let server = TestServer::spawn_with_db_args("--migrate-accounts").await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    let test_shares = create_test_shares(5, 800000);
+    let test_block = create_test_block(800000);
+
+    insert_test_remote_shares(db_url.clone(), 1000, 800000)
+        .await
+        .unwrap();
+
+    let batch = ShareBatch {
+        block: Some(test_block.clone()),
+        shares: test_shares,
+        hostname: "test-node-1".to_string(),
+        batch_id: sync::BATCH_COUNTER.fetch_add(1, Ordering::SeqCst) as u64,
+        total_shares: 5,
+        start_id: 1,
+        end_id: 5,
+    };
+
+    let batch_clone = batch.clone();
+    let url = server.url();
+    let first_request = tokio::spawn(async move {
+        let client = reqwest::Client::new()
+            .post(url.join("/sync/batch").unwrap())
+            .json(&batch_clone);
+
+        let response = client.send().await.unwrap();
+
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "Response: {}",
+            response.text().await.unwrap()
+        );
+
+        response.json().await.unwrap()
+    });
+    let collision_test: SyncResponse = server.post_json("/sync/batch", &batch).await;
+
+    let response: SyncResponse = first_request.await.unwrap();
+
+    assert_eq!(collision_test.status, "UNAVAILABLE");
+    assert_eq!(response.status, "OK");
+    assert_eq!(response.received_count, 5);
+    assert_eq!(response.batch_id, batch.batch_id);
+    assert!(response.error_message.is_none());
+
+    let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
+
+    let stored_shares: Vec<(i64, String)> =
+        sqlx::query_as("SELECT id, origin FROM remote_shares WHERE origin = $1")
+            .bind(&batch.hostname)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(stored_shares.len(), 5);
+
+    let stored_block: Option<(i32, String)> =
+        sqlx::query_as("SELECT blockheight, blockhash FROM blocks WHERE blockheight = $1")
+            .bind(test_block.blockheight)
+            .fetch_optional(&pool)
+            .await
+            .unwrap();
+    assert!(stored_block.is_some());
+    assert_eq!(stored_block.unwrap().1, test_block.blockhash);
 
     pool.close().await;
 }

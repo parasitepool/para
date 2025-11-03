@@ -454,6 +454,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "bip322"
+version = "0.0.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9a160ac75a0c4885f0e69af525351e8d8cab51265fbc28eac15d885a9a0ac99"
+dependencies = [
+ "base64 0.22.1",
+ "bitcoin",
+ "sha2",
+ "snafu",
+]
+
+[[package]]
 name = "bitcoin"
 version = "0.32.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2414,6 +2426,8 @@ dependencies = [
  "axum",
  "axum-server",
  "backon",
+ "base64 0.22.1",
+ "bip322",
  "bitcoin",
  "bitcoincore-rpc",
  "boilerplate",
