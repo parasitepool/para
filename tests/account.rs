@@ -459,6 +459,8 @@ async fn account_signature_invalid() {
         signature,
     };
 
-    let response: Response = server.post_json_raw("/account/update", &update_request).await;
+    let response: Response = server
+        .post_json_raw("/account/update", &update_request)
+        .await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
