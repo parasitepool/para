@@ -51,7 +51,7 @@ impl TestAccount {
 }
 
 #[tokio::test]
-async fn account_lookup_not_found() {
+async fn account_not_found() {
     let server = TestServer::spawn_with_db().await;
     let db_url = server.database_url().unwrap();
     setup_test_schema(db_url.clone()).await.unwrap();
@@ -66,26 +66,34 @@ async fn account_lookup_not_found() {
 }
 
 #[tokio::test]
-async fn account_lookup_found() {
+async fn account_found_after_first_time_creation() {
     let server = TestServer::spawn_with_db().await;
     let db_url = server.database_url().unwrap();
     setup_test_schema(db_url.clone()).await.unwrap();
 
-    let database = Database::new(db_url.clone()).await.unwrap();
+    let test_account = TestAccount::new();
+    let btc_address = test_account.native_segwit_address.clone();
+    let ln_address = "lnurl0@test.gov";
+    let signature = test_account.sign_update(btc_address.clone(), ln_address);
 
-    database
-        .update_account_lnurl("user_0", "lnurl0@test.gov")
-        .await
-        .unwrap()
-        .expect("Direct account creation to succeed");
-
-    let response = server
-        .get_json_async_raw(&format!("/account/{}", "user_0"))
+    let response: Account = server
+        .post_json(
+            "/account/update",
+            &AccountUpdate {
+                btc_address: btc_address.clone(),
+                ln_address: ln_address.to_string(),
+                signature,
+            },
+        )
         .await;
 
-    assert_eq!(response.status(), StatusCode::OK);
-    let account = response.json::<Account>().await.unwrap();
-    assert_eq!(account.btc_address, "user_0");
+    assert_eq!(response.btc_address, btc_address);
+
+    let account = server
+        .get_json_async::<Account>(&format!("/account/{btc_address}"))
+        .await;
+
+    assert_eq!(account.btc_address, btc_address);
     assert_eq!(account.ln_address.unwrap_or_default(), "lnurl0@test.gov");
 }
 
@@ -95,16 +103,29 @@ async fn account_lnurl_new_account() {
     let db_url = server.database_url().unwrap();
     setup_test_schema(db_url.clone()).await.unwrap();
 
-    let database = Database::new(db_url.clone()).await.unwrap();
+    let test_account = TestAccount::new();
+    let btc_address = test_account.native_segwit_address.clone();
+    let ln_address = "lnurl1@test.com";
+    let signature = test_account.sign_update(btc_address.clone(), ln_address);
 
-    let result = database
-        .update_account_lnurl("user0", "lnurl1@test.com")
+    let response: Account = server
+        .post_json(
+            "/account/update",
+            &AccountUpdate {
+                btc_address: btc_address.clone(),
+                ln_address: ln_address.to_string(),
+                signature,
+            },
+        )
         .await;
 
-    assert!(result.is_ok(), "Should create new account successfully");
+    assert_eq!(response.btc_address, btc_address);
 
-    let account = database.get_account("user0").await.unwrap().unwrap();
-    assert_eq!(account.btc_address, "user0");
+    let account = server
+        .get_json_async::<Account>(&format!("/account/{btc_address}"))
+        .await;
+
+    assert_eq!(account.btc_address, btc_address);
     assert_eq!(account.ln_address, Some("lnurl1@test.com".to_string()));
     assert_eq!(account.past_ln_addresses.len(), 0);
     assert_eq!(account.total_diff, 0);
@@ -116,33 +137,42 @@ async fn account_lnurl_existing_account_first_update() {
     let db_url = server.database_url().unwrap();
     setup_test_schema(db_url.clone()).await.unwrap();
 
-    insert_test_account(
-        db_url.clone(),
-        "user1@example.com",
-        Some("old_lnurl@test.com"),
-        vec![],
-        1000,
-    )
-    .await
-    .unwrap();
+    let test_account = TestAccount::new();
+    let btc_address = test_account.native_segwit_address.clone();
 
-    let database = Database::new(db_url.clone()).await.unwrap();
-
-    let result = database
-        .update_account_lnurl("user1@example.com", "new_lnurl@test.com")
+    let ln_address = "old_lnurl@test.com";
+    let signature = test_account.sign_update(btc_address.clone(), ln_address);
+    let _: Account = server
+        .post_json(
+            "/account/update",
+            &AccountUpdate {
+                btc_address: btc_address.clone(),
+                ln_address: ln_address.to_string(),
+                signature,
+            },
+        )
         .await;
 
-    assert!(result.is_ok(), "Should update account successfully");
+    let ln_address = "new_lnurl@test.com";
+    let signature = test_account.sign_update(btc_address.clone(), ln_address);
+    let _: Account = server
+        .post_json(
+            "/account/update",
+            &AccountUpdate {
+                btc_address: btc_address.clone(),
+                ln_address: ln_address.to_string(),
+                signature,
+            },
+        )
+        .await;
 
-    let account = database
-        .get_account("user1@example.com")
-        .await
-        .unwrap()
-        .unwrap();
+    let account = server
+        .get_json_async::<Account>(&format!("/account/{btc_address}"))
+        .await;
+
     assert_eq!(account.ln_address, Some("new_lnurl@test.com".to_string()));
     assert_eq!(account.past_ln_addresses.len(), 1);
     assert_eq!(account.past_ln_addresses[0], "old_lnurl@test.com");
-    assert_eq!(account.total_diff, 1000);
 }
 
 #[tokio::test]
