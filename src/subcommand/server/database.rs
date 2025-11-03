@@ -145,6 +145,7 @@ impl Database {
         .await
         .map_err(|err| anyhow!(err))
     }
+
     pub(crate) async fn get_payouts_range(
         &self,
         start_blockheight: i32,
@@ -268,8 +269,17 @@ impl Database {
         .map_err(|err| anyhow!(err))
     }
 
-    pub async fn get_account(&self, username: &str) -> Result<Account> {
-        let account = sqlx::query(
+    pub async fn get_account(&self, username: &str) -> Result<Option<Account>> {
+        #[derive(sqlx::FromRow)]
+        pub struct AccountRaw {
+            pub username: String,
+            pub lnurl: Option<String>,
+            pub past_lnurls: sqlx::types::Json<Vec<String>>,
+            pub total_diff: i64,
+            pub last_updated: Option<String>,
+        }
+
+        let Some(raw) = sqlx::query_as::<_, AccountRaw>(
             "
             SELECT
                 username,
@@ -283,46 +293,26 @@ impl Database {
         )
         .bind(username)
         .fetch_optional(&self.pool)
-        .await
-        .map_err(|err| anyhow!(err))?;
-
-        let row = match account {
-            Some(r) => r,
-            None => {
-                return Err(anyhow!("Account not found"));
-            }
+        .await?
+        else {
+            return Ok(None);
         };
 
-        let username: String = row.try_get("username").map_err(|err| anyhow!(err))?;
-        let lnurl: Option<String> = row.try_get("lnurl").ok();
-        let total_diff: i64 = row.try_get("total_diff").map_err(|err| anyhow!(err))?;
-
-        let past_lnurls_json: sqlx::types::JsonValue =
-            row.try_get("past_lnurls").map_err(|err| anyhow!(err))?;
-
-        let past_lnurls: Vec<String> = match past_lnurls_json.as_array() {
-            Some(arr) => arr
-                .iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect(),
-            None => vec![],
-        };
-
-        let last_updated: Option<String> = row.try_get("last_updated").ok();
-
-        Ok(Account {
-            btc_address: username,
-            ln_address: lnurl,
-            past_ln_addresses: past_lnurls,
-            total_diff,
-            last_updated,
-        })
+        Ok(Some(Account {
+            btc_address: raw.username,
+            ln_address: raw.lnurl,
+            past_ln_addresses: raw.past_lnurls.0,
+            total_diff: raw.total_diff,
+            last_updated: raw.last_updated,
+        }))
     }
 
-    pub async fn update_account_lnurl(&self, username: &str, new_lnurl: &str) -> Result<Account> {
-        let current_account = self.get_account(username).await.ok();
-
-        let updated_past_lnurls = if let Some(account) = current_account {
+    pub async fn update_account_lnurl(
+        &self,
+        username: &str,
+        new_lnurl: &str,
+    ) -> Result<Option<Account>> {
+        if let Some(account) = self.get_account(username).await? {
             if let Some(old_lnurl) = &account.ln_address
                 && old_lnurl == new_lnurl
             {
@@ -340,12 +330,7 @@ impl Database {
             }
 
             past_lnurls.truncate(10);
-            Some(past_lnurls)
-        } else {
-            None
-        };
 
-        if let Some(past_lnurls) = updated_past_lnurls {
             let past_lnurls_json = serde_json::to_value(past_lnurls)
                 .map_err(|err| anyhow!("Failed to serialize past_lnurls: {}", err))?;
 
@@ -381,7 +366,7 @@ impl Database {
                 .execute(&self.pool)
                 .await
                 .map_err(|err| anyhow!(err))?;
-        }
+        };
 
         self.get_account(username).await
     }

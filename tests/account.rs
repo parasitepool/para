@@ -76,6 +76,7 @@ async fn account_lookup_found() {
     database
         .update_account_lnurl("user_0", "lnurl0@test.gov")
         .await
+        .unwrap()
         .expect("Direct account creation to succeed");
 
     let response = server
@@ -102,7 +103,7 @@ async fn account_lnurl_new_account() {
 
     assert!(result.is_ok(), "Should create new account successfully");
 
-    let account = database.get_account("user0").await.unwrap();
+    let account = database.get_account("user0").await.unwrap().unwrap();
     assert_eq!(account.btc_address, "user0");
     assert_eq!(account.ln_address, Some("lnurl1@test.com".to_string()));
     assert_eq!(account.past_ln_addresses.len(), 0);
@@ -133,7 +134,11 @@ async fn account_lnurl_existing_account_first_update() {
 
     assert!(result.is_ok(), "Should update account successfully");
 
-    let account = database.get_account("user1@example.com").await.unwrap();
+    let account = database
+        .get_account("user1@example.com")
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(account.ln_address, Some("new_lnurl@test.com".to_string()));
     assert_eq!(account.past_ln_addresses.len(), 1);
     assert_eq!(account.past_ln_addresses[0], "old_lnurl@test.com");
@@ -176,7 +181,11 @@ async fn account_lnurl_fifo_limit() {
         .await
         .unwrap();
 
-    let account = database.get_account("user3@example.com").await.unwrap();
+    let account = database
+        .get_account("user3@example.com")
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(account.ln_address, Some("newest@test.com".to_string()));
     assert_eq!(
         account.past_ln_addresses.len(),
@@ -217,6 +226,7 @@ async fn account_update_endpoint_new_account_with_signature() {
     let account = database
         .get_account(&test_account.native_segwit_address)
         .await
+        .unwrap()
         .unwrap();
     assert_eq!(account.btc_address, test_account.native_segwit_address);
     assert_eq!(account.ln_address, Some(ln_address.to_string()));
@@ -241,7 +251,7 @@ async fn test_migrate_accounts_basic() {
 
     for i in 0..10 {
         let username = format!("user_{}", i);
-        let account = database.get_account(&username).await.unwrap();
+        let account = database.get_account(&username).await.unwrap().unwrap();
         assert_eq!(account.btc_address, username);
         assert_eq!(
             account.ln_address,
@@ -285,6 +295,7 @@ async fn account_address_type_taproot() {
     let account = database
         .get_account(&test_account.taproot_address)
         .await
+        .unwrap()
         .unwrap();
     assert_eq!(account.btc_address, test_account.taproot_address);
     assert_eq!(account.ln_address, Some(ln_address.to_string()));
@@ -315,6 +326,7 @@ async fn account_address_type_legacy() {
     let account = database
         .get_account(&test_account.legacy_address)
         .await
+        .unwrap()
         .unwrap();
     assert_eq!(account.btc_address, test_account.legacy_address);
     assert_eq!(account.ln_address, Some(ln_address.to_string()));
@@ -346,6 +358,7 @@ async fn account_address_type_wrapped() {
     let account = database
         .get_account(&test_account.wrapped_segwit_address)
         .await
+        .unwrap()
         .unwrap();
     assert_eq!(account.btc_address, test_account.wrapped_segwit_address);
     assert_eq!(account.ln_address, Some(ln_address.to_string()));
@@ -377,6 +390,7 @@ async fn account_address_type_native() {
     let account = database
         .get_account(&test_account.native_segwit_address)
         .await
+        .unwrap()
         .unwrap();
     assert_eq!(account.btc_address, test_account.native_segwit_address);
     assert_eq!(account.ln_address, Some(ln_address.to_string()));

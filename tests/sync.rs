@@ -378,7 +378,7 @@ async fn test_sync_batch_creates_accounts() {
 
     for i in 0..5 {
         let username = format!("user_{}", i);
-        let account = database.get_account(&username).await.unwrap();
+        let account = database.get_account(&username).await.unwrap().unwrap();
         assert_eq!(account.btc_address, username);
         assert_eq!(
             account.ln_address,
@@ -411,9 +411,9 @@ async fn test_sync_batch_with_migrate_accounts_flag() {
 
     let database = Database::new(db_url.clone()).await.unwrap();
 
-    let account_before = database.get_account("user_0").await;
+    let account_before = database.get_account("user_0").await.unwrap();
     assert!(
-        account_before.is_err(),
+        account_before.is_none(),
         "Verify trigger is not creating account record"
     );
 
@@ -435,7 +435,7 @@ async fn test_sync_batch_with_migrate_accounts_flag() {
     assert_eq!(response.status, "OK");
     assert_eq!(response.received_count, 2);
 
-    let account = database.get_account("user_0").await.unwrap();
+    let account = database.get_account("user_0").await.unwrap().unwrap();
     assert_eq!(account.btc_address, "user_0");
     assert_eq!(
         account.ln_address,
@@ -447,7 +447,7 @@ async fn test_sync_batch_with_migrate_accounts_flag() {
         "Account in both sync and migration"
     );
 
-    let account_new = database.get_account("user_4").await.unwrap();
+    let account_new = database.get_account("user_4").await.unwrap().unwrap();
     assert_eq!(account_new.btc_address, "user_4");
     assert_eq!(
         account_new.total_diff, 2008,

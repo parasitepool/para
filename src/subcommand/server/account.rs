@@ -34,8 +34,8 @@ pub(crate) async fn account_lookup(
 ) -> ServerResult<Response> {
     database
         .get_account(&address)
-        .await
-        .ok_or_not_found()
+        .await?
+        .ok_or_not_found(|| "Account")
         .map(Json)
         .map(IntoResponse::into_response)
 }
@@ -51,17 +51,13 @@ pub(crate) async fn account_update(
     );
 
     if !signature_valid {
-        return Ok(Json(AccountResponse {
-            success: false,
-            remark: Some("Invalid signature".to_string()),
-        })
-        .into_response());
+        return Ok(StatusCode::UNAUTHORIZED.into_response());
     }
 
     database
         .update_account_lnurl(&account_update.btc_address, &account_update.ln_address)
-        .await
-        .ok_or_not_found()
+        .await?
+        .ok_or_not_found(|| "Account")
         .map(Json)
         .map(IntoResponse::into_response)
 }
