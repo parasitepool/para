@@ -51,6 +51,21 @@ impl TestAccount {
 }
 
 #[tokio::test]
+async fn account_endpoints_behind_token() {
+    let mut server = TestServer::spawn_with_db_args("--admin-token verysecrettoken").await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    let test_account = TestAccount::new();
+
+    let response = server
+        .get_json_async_raw(&format!("/account/{}", test_account.native_segwit_address))
+        .await;
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
 async fn account_not_found() {
     let server = TestServer::spawn_with_db().await;
     let db_url = server.database_url().unwrap();
