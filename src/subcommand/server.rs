@@ -37,7 +37,7 @@ const BUDGET: Duration = Duration::from_secs(5);
 const TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_ATTEMPTS: usize = 3;
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(1500);
-static MIGRATION_LOCK: OnceLock<Mutex<bool>> = OnceLock::new();
+static MIGRATION_DONE: OnceLock<bool> = OnceLock::new();
 
 #[derive(RustEmbed)]
 #[folder = "static"]
@@ -148,6 +148,28 @@ impl Server {
 
         match Database::new(config.database_url()).await {
             Ok(database) => {
+                if config.migrate_accounts() {
+                    let pool = database.pool.clone();
+                    tokio::spawn(async move {
+                        info!("Starting account migration worker...");
+                        match sqlx::query_scalar::<_, i64>("SELECT refresh_accounts()")
+                            .fetch_one(&pool)
+                            .await
+                        {
+                            Ok(rows_affected) => {
+                                info!(
+                                    "Account migration completed. {} accounts affected.",
+                                    rows_affected
+                                );
+                            }
+                            Err(e) => {
+                                error!("Account migration failed: {}", e);
+                            }
+                        }
+                        let _ = MIGRATION_DONE.set(true);
+                    });
+                }
+
                 let db_router = Router::new()
                     .route("/payouts/{blockheight}", get(Self::payouts))
                     .route(
@@ -164,10 +186,11 @@ impl Server {
                         "/sync/batch",
                         post(Self::sync_batch).layer(DefaultBodyLimit::max(50 * MEBIBYTE)),
                     )
-                    .merge(account_router())
-                    .layer(Extension(database));
+                    .layer(Extension(database.clone()));
 
-                router = router.merge(Self::with_auth_router(config.clone(), db_router));
+                router = router
+                    .merge(Self::with_auth_router(config.clone(), db_router))
+                    .merge(account_router(config.clone(), database));
             }
             Err(err) => {
                 warn!("Failed to connect to PostgreSQL: {err}",);
@@ -512,46 +535,18 @@ impl Server {
             batch.hostname
         );
 
-        let lock = MIGRATION_LOCK.get_or_init(|| Mutex::new(false));
-
-        let mut done = match lock.try_lock() {
-            Ok(guard) => guard,
-            Err(_) => {
-                warn!(
-                    "Rejecting sync batch {} - migration in progress",
-                    batch.batch_id
-                );
-                let response = SyncResponse {
-                    batch_id: batch.batch_id,
-                    received_count: 0,
-                    status: "UNAVAILABLE".to_string(),
-                    error_message: Some("Migration in progress, try again later".to_string()),
-                };
-                return Ok(Json(response));
-            }
-        };
-
-        if config.migrate_accounts() && !*done {
-            info!("Running account migration...");
-            match database.migrate_accounts().await {
-                Ok(rows_affected) => {
-                    info!(
-                        "Account migration completed. {} accounts affected.",
-                        rows_affected
-                    );
-                    *done = true;
-                }
-                Err(e) => {
-                    error!("Account migration failed: {}", e);
-                    let response = SyncResponse {
-                        batch_id: batch.batch_id,
-                        received_count: 0,
-                        status: "ERROR".to_string(),
-                        error_message: Some(format!("Migration failed: {}", e)),
-                    };
-                    return Ok(Json(response));
-                }
-            }
+        if config.migrate_accounts() && !MIGRATION_DONE.get_or_init(|| false) {
+            warn!(
+                "Rejecting sync batch {} - migration in progress",
+                batch.batch_id
+            );
+            let response = SyncResponse {
+                batch_id: batch.batch_id,
+                received_count: 0,
+                status: "UNAVAILABLE".to_string(),
+                error_message: Some("Migration in progress, try again later".to_string()),
+            };
+            return Ok(Json(response));
         }
 
         if let Some(block) = &batch.block {

@@ -22,10 +22,16 @@ pub struct AccountResponse {
     pub remark: Option<String>,
 }
 
-pub fn account_router() -> Router {
-    Router::new()
+pub(crate) fn account_router(config: Arc<ServerConfig>, database: Database) -> Router {
+    let mut router = Router::new()
         .route("/account/{address}", get(account_lookup))
-        .route("/account/update", post(account_update))
+        .route("/account/update", post(account_update));
+
+    if let Some(token) = config.api_token() {
+        router = router.layer(ValidateRequestHeaderLayer::bearer(token))
+    };
+
+    router.layer(Extension(database))
 }
 
 pub(crate) async fn account_lookup(

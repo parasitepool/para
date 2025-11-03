@@ -60,6 +60,7 @@ use {
             template::Output as Template,
         },
     },
+    pgtemp::{PgTempDB, PgTempDBBuilder},
     reqwest::Response,
     std::{
         io::{BufReader, stderr},

@@ -395,8 +395,26 @@ async fn test_sync_batch_creates_accounts() {
 
 #[tokio::test]
 async fn test_sync_batch_with_migrate_accounts_flag() {
-    let server = TestServer::spawn_with_db_args("--migrate-accounts").await;
-    let db_url = server.database_url().unwrap();
+    let psql_binpath = match Command::new("pg_config").arg("--bindir").output() {
+        Ok(output) if output.status.success() => String::from_utf8(output.stdout)
+            .ok()
+            .map(|s| PathBuf::from(s.trim())),
+        _ => None,
+    };
+    let pg_db = PgTempDB::from_builder(PgTempDBBuilder {
+        temp_dir_prefix: None,
+        db_user: None,
+        password: None,
+        port: None,
+        dbname: None,
+        persist_data_dir: false,
+        dump_path: None,
+        load_path: None,
+        server_configs: Default::default(),
+        bin_path: psql_binpath,
+    });
+
+    let db_url = pg_db.connection_uri();
     setup_test_schema(db_url.clone()).await.unwrap();
 
     insert_test_remote_shares(db_url.clone(), 5, 800028)
@@ -409,14 +427,9 @@ async fn test_sync_batch_with_migrate_accounts_flag() {
         .await
         .unwrap();
 
+    let server = TestServer::spawn_with_db_override(["--migrate-accounts"], pg_db).await;
+
     let database = Database::new(db_url.clone()).await.unwrap();
-
-    let account_before = database.get_account("user_0").await.unwrap();
-    assert!(
-        account_before.is_none(),
-        "Verify trigger is not creating account record"
-    );
-
     let test_shares = create_test_shares(2, 800031);
     let test_block = create_test_block(800031);
 
@@ -430,7 +443,13 @@ async fn test_sync_batch_with_migrate_accounts_flag() {
         end_id: 101,
     };
 
-    let response: SyncResponse = server.post_json("/sync/batch", &batch).await;
+    let mut response: SyncResponse = server.post_json("/sync/batch", &batch).await;
+    let mut attempts = 0;
+    while response.status == "UNAVAILABLE" && attempts < 10 {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        response = server.post_json("/sync/batch", &batch).await;
+        attempts += 1;
+    }
 
     assert_eq!(response.status, "OK");
     assert_eq!(response.received_count, 2);
