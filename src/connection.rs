@@ -299,7 +299,7 @@ where
 
         self.send(Message::Notification {
             method: "mining.set_difficulty".into(),
-            params: json!(SetDifficulty(Difficulty::from(job.nbits()))),
+            params: json!(SetDifficulty(self.config.start_diff())),
         })
         .await?;
 
@@ -368,48 +368,63 @@ where
             self.send_error(id, 22, "Duplicate share", None).await?;
             return Ok(());
         }
-
-        let blockhash = header.validate_pow(Target::from_compact(nbits.into()))?;
-
-        info!("Block with hash {blockhash} meets PoW");
-
-        let coinbase_bin = hex::decode(format!(
-            "{}{}{}{}",
-            job.coinb1, job.extranonce1, submit.extranonce2, job.coinb2,
-        ))?;
-
-        let mut cursor = bitcoin::io::Cursor::new(&coinbase_bin);
-        let coinbase_tx = bitcoin::Transaction::consensus_decode_from_finite_reader(&mut cursor)?;
-
-        let txdata = std::iter::once(coinbase_tx)
-            .chain(
-                job.template
-                    .transactions
-                    .iter()
-                    .map(|tx| tx.transaction.clone())
-                    .collect::<Vec<Transaction>>(),
-            )
-            .collect();
-
-        let block = Block { header, txdata };
-
-        if job.template.height > 16 {
-            assert!(block.bip34_block_height().is_ok());
+        
+        // TODO: do this at the end to make submit block take priority
+        if self
+            .config
+            .start_diff()
+            .to_target()
+            .is_met_by(header.block_hash())
+        {
+            self.send(Message::Response {
+                id,
+                result: Some(json!(true)),
+                error: None,
+                reject_reason: None,
+            })
+            .await?;
+        } else {
+            self.send_error(id, 25, "Above pool target/diff", None)
+                .await?;
         }
 
-        info!("Submitting block solve");
+        match header.validate_pow(Target::from_compact(nbits.into())) {
+            Ok(blockhash) => {
+                info!("Block with hash {blockhash} meets network difficulty");
 
-        self.config.bitcoin_rpc_client()?.submit_block(&block)?;
+                let coinbase_bin = hex::decode(format!(
+                    "{}{}{}{}",
+                    job.coinb1, job.extranonce1, submit.extranonce2, job.coinb2,
+                ))?;
 
-        self.send(Message::Response {
-            id,
-            result: Some(json!(true)),
-            error: None,
-            reject_reason: None,
-        })
-        .await?;
+                let mut cursor = bitcoin::io::Cursor::new(&coinbase_bin);
+                let coinbase_tx =
+                    bitcoin::Transaction::consensus_decode_from_finite_reader(&mut cursor)?;
 
-        info!("SUCCESS: mined block {}", block.block_hash());
+                let txdata = std::iter::once(coinbase_tx)
+                    .chain(
+                        job.template
+                            .transactions
+                            .iter()
+                            .map(|tx| tx.transaction.clone())
+                            .collect::<Vec<Transaction>>(),
+                    )
+                    .collect();
+
+                let block = Block { header, txdata };
+
+                if job.template.height > 16 {
+                    assert!(block.bip34_block_height().is_ok());
+                }
+
+                info!("Submitting block solve");
+
+                self.config.bitcoin_rpc_client()?.submit_block(&block)?;
+
+                info!("SUCCESS: mined block {}", block.block_hash());
+            }
+            Err(_err) => {}
+        }
 
         Ok(())
     }
