@@ -60,7 +60,11 @@ maxtxfee=1000000
             ),
         )?;
 
+        let compiled_bitcoind = format!("{}/bitcoin/build/bin", workspace_root());
+        let expanded_path = format!("{}:{}", std::env::var("PATH")?, compiled_bitcoind);
+
         let handle = Command::new("bitcoind")
+            .env("PATH", &expanded_path)
             .arg(format!("-conf={}", bitcoind_conf.display()))
             .stdout(if with_output {
                 Stdio::inherit()
@@ -75,6 +79,7 @@ maxtxfee=1000000
             .spawn()?;
 
         let status = Command::new("bitcoin-cli")
+            .env("PATH", &expanded_path)
             .args([
                 &format!("-conf={}", bitcoind_conf.display()),
                 "-rpcwait",
