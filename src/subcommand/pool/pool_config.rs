@@ -170,6 +170,10 @@ impl PoolConfig {
         self.version_mask
     }
 
+    pub fn start_diff(&self) -> Difficulty {
+        self.start_diff
+    }
+
     pub fn update_interval(&self) -> Duration {
         Duration::from_secs(self.update_interval)
     }
