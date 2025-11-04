@@ -322,7 +322,7 @@ PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
   END;
   \$\$ LANGUAGE plpgsql;
 
-  CREATE TRIGGER update_payouts_modtime
+  CREATE OR REPLACE TRIGGER update_payouts_modtime
       BEFORE UPDATE
       ON payouts
       FOR EACH ROW
