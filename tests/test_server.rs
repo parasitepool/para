@@ -55,7 +55,7 @@ impl TestServer {
                 panic!("Server did not respond to status check",);
             }
 
-            thread::sleep(Duration::from_millis(50));
+            thread::sleep(Duration::from_millis(100));
         }
 
         Self {
