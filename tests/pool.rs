@@ -15,12 +15,12 @@ fn ping_pool() {
 
 #[test]
 fn mine_to_pool() {
-    let pool = TestPool::spawn();
+    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
 
     let stratum_endpoint = pool.stratum_endpoint();
 
     let miner = CommandBuilder::new(format!(
-        "miner --once --username {} {stratum_endpoint}",
+        "miner --once --username {} {stratum_endpoint} --cpu-cores 1",
         signet_username()
     ))
     .spawn();
@@ -34,7 +34,7 @@ fn mine_to_pool() {
 
 #[test]
 fn configure_template_update_interval() {
-    let pool = TestPool::spawn_with_args("--update-interval 1");
+    let pool = TestPool::spawn_with_args("--update-interval 1 --start-diff 0.00001");
 
     let stratum_endpoint = pool.stratum_endpoint();
 
@@ -97,7 +97,7 @@ async fn basic_initialization_flow() {
 
 #[tokio::test]
 async fn configure_with_multiple_negotiation_steps() {
-    let pool = TestPool::spawn();
+    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
 
     let mut client = pool.stratum_client().await;
 
