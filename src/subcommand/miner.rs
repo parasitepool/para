@@ -1,7 +1,14 @@
-use {super::*, controller::Controller, hasher::Hasher, stratum::Client};
+use {
+    super::*,
+    controller::Controller,
+    hasher::Hasher,
+    metrics::{Metrics, spawn_status_line},
+    stratum::Client,
+};
 
 mod controller;
 mod hasher;
+mod metrics;
 
 #[derive(Debug, Parser)]
 pub(crate) struct Miner {

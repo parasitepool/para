@@ -17,12 +17,18 @@ pub(crate) struct Hasher {
 }
 
 impl Hasher {
-    pub(crate) fn hash(
+    pub(crate) fn hash_with_progress<F>(
         &mut self,
         cancel: CancellationToken,
-    ) -> Result<(JobId, Header, Extranonce, ckpool::HashRate), HasherError> {
+        mut on_batch: F,
+    ) -> Result<(JobId, Header, Extranonce, ckpool::HashRate), HasherError>
+    where
+        F: FnMut(u64),
+    {
         let start = Instant::now();
         let mut total_hashes = 0;
+
+        const BATCH: u64 = 10_000;
 
         loop {
             if cancel.is_cancelled() {
@@ -32,7 +38,7 @@ impl Hasher {
                 .fail();
             }
 
-            for _ in 0..10_000 {
+            for _ in 0..BATCH {
                 let hash = self.header.block_hash();
                 total_hashes += 1;
 
@@ -57,7 +63,17 @@ impl Hasher {
                     .fail();
                 }
             }
+
+            on_batch(BATCH);
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn hash(
+        &mut self,
+        cancel: CancellationToken,
+    ) -> Result<(JobId, Header, Extranonce, ckpool::HashRate), HasherError> {
+        self.hash_with_progress(cancel, |_batch| {})
     }
 }
 

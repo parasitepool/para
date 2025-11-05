@@ -2,20 +2,21 @@ use super::*;
 
 pub(crate) struct Controller {
     client: Client,
-    pool_difficulty: Arc<Mutex<Difficulty>>,
+    cpu_cores: usize,
     extranonce1: Extranonce,
     extranonce2: Arc<Mutex<Extranonce>>,
-    share_tx: mpsc::Sender<(JobId, Header, Extranonce, ckpool::HashRate)>,
-    share_rx: mpsc::Receiver<(JobId, Header, Extranonce, ckpool::HashRate)>,
-    notify_tx: watch::Sender<Option<(Notify, CancellationToken)>>,
-    notify_rx: watch::Receiver<Option<(Notify, CancellationToken)>>,
-    root_cancel: CancellationToken,
     hasher_cancel: Option<CancellationToken>,
     hashers: JoinSet<()>,
-    cpu_cores: usize,
+    metrics: Metrics,
+    notify_tx: watch::Sender<Option<(Notify, CancellationToken)>>,
+    notify_rx: watch::Receiver<Option<(Notify, CancellationToken)>>,
     once: bool,
-    username: String,
+    pool_difficulty: Arc<Mutex<Difficulty>>,
+    root_cancel: CancellationToken,
+    share_tx: mpsc::Sender<(JobId, Header, Extranonce, ckpool::HashRate)>,
+    share_rx: mpsc::Receiver<(JobId, Header, Extranonce, ckpool::HashRate)>,
     shares: Vec<Share>,
+    username: String,
 }
 
 impl Controller {
@@ -38,22 +39,31 @@ impl Controller {
         let (share_tx, share_rx) = mpsc::channel(256);
         let (notify_tx, notify_rx) = watch::channel(None);
 
+        let metrics = Metrics::new();
+        {
+            let metrics_clone = metrics.clone();
+            tokio::spawn(async move {
+                spawn_status_line(metrics_clone, Duration::from_millis(100)).await;
+            });
+        }
+
         Ok(Self {
             client,
-            pool_difficulty: Arc::new(Mutex::new(Difficulty::default())),
+            cpu_cores,
             extranonce1: subscribe.extranonce1,
             extranonce2: Arc::new(Mutex::new(Extranonce::zeros(subscribe.extranonce2_size))),
-            share_tx,
-            share_rx,
-            notify_tx,
-            notify_rx,
-            root_cancel: CancellationToken::new(),
             hasher_cancel: None,
             hashers: JoinSet::new(),
-            cpu_cores,
+            metrics,
+            notify_rx,
+            notify_tx,
             once,
-            username,
+            pool_difficulty: Arc::new(Mutex::new(Difficulty::default())),
+            root_cancel: CancellationToken::new(),
+            share_rx,
+            share_tx,
             shares: Vec::new(),
+            username,
         })
     }
 
@@ -131,6 +141,7 @@ impl Controller {
             let extranonce1 = self.extranonce1.clone();
             let extranonce2 = self.extranonce2.clone();
             let pool_difficulty = self.pool_difficulty.clone();
+            let metrics = self.metrics.clone();
 
             info!("Starting hasher for core {core_id}",);
             self.hashers.spawn(async move {
@@ -183,7 +194,13 @@ impl Controller {
                         };
 
                         let cancel_clone = cancel.clone();
-                        let result = task::spawn_blocking(move || hasher.hash(cancel_clone)).await;
+                        let metrics_clone = metrics.clone();
+
+                        let result = task::spawn_blocking(move || {
+                            hasher
+                                .hash_with_progress(cancel_clone, |batch| metrics_clone.add(batch))
+                        })
+                        .await;
 
                         match result {
                             Ok(Ok(share)) => {
