@@ -216,6 +216,9 @@ mod tests {
         assert_eq!(config.start_diff(), Difficulty::from(0.00001));
 
         let config = parse_pool_config("para pool --start-diff 111");
-        assert_eq!(config.start_diff(), Difficulty::from(111.0));
+        assert_eq!(config.start_diff(), Difficulty::from(111));
+
+        let config = parse_pool_config("para pool");
+        assert_eq!(config.start_diff(), Difficulty::from(1));
     }
 }

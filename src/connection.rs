@@ -369,43 +369,40 @@ where
             return Ok(());
         }
 
-        match header.validate_pow(Target::from_compact(nbits.into())) {
-            Ok(blockhash) => {
-                info!("Block with hash {blockhash} meets network difficulty");
+        if let Ok(blockhash) = header.validate_pow(Target::from_compact(nbits.into())) {
+            info!("Block with hash {blockhash} meets network difficulty");
 
-                let coinbase_bin = hex::decode(format!(
-                    "{}{}{}{}",
-                    job.coinb1, job.extranonce1, submit.extranonce2, job.coinb2,
-                ))?;
+            let coinbase_bin = hex::decode(format!(
+                "{}{}{}{}",
+                job.coinb1, job.extranonce1, submit.extranonce2, job.coinb2,
+            ))?;
 
-                let mut cursor = bitcoin::io::Cursor::new(&coinbase_bin);
-                let coinbase_tx =
-                    bitcoin::Transaction::consensus_decode_from_finite_reader(&mut cursor)?;
+            let mut cursor = bitcoin::io::Cursor::new(&coinbase_bin);
+            let coinbase_tx =
+                bitcoin::Transaction::consensus_decode_from_finite_reader(&mut cursor)?;
 
-                let txdata = std::iter::once(coinbase_tx)
-                    .chain(
-                        job.template
-                            .transactions
-                            .iter()
-                            .map(|tx| tx.transaction.clone())
-                            .collect::<Vec<Transaction>>(),
-                    )
-                    .collect();
+            let txdata = std::iter::once(coinbase_tx)
+                .chain(
+                    job.template
+                        .transactions
+                        .iter()
+                        .map(|tx| tx.transaction.clone())
+                        .collect::<Vec<Transaction>>(),
+                )
+                .collect();
 
-                let block = Block { header, txdata };
+            let block = Block { header, txdata };
 
-                if job.template.height > 16 {
-                    assert!(block.bip34_block_height().is_ok());
-                }
-
-                info!("Submitting potential block solve");
-
-                match self.config.bitcoin_rpc_client()?.submit_block(&block) {
-                    Ok(_) => info!("SUCCESSFULLY mined block {}", block.block_hash()),
-                    Err(err) => error!("Failed to submit block: {err}"),
-                }
+            if job.template.height > 16 {
+                assert!(block.bip34_block_height().is_ok());
             }
-            Err(_) => {}
+
+            info!("Submitting potential block solve");
+
+            match self.config.bitcoin_rpc_client()?.submit_block(&block) {
+                Ok(_) => info!("SUCCESSFULLY mined block {}", block.block_hash()),
+                Err(err) => error!("Failed to submit block: {err}"),
+            }
         }
 
         if self

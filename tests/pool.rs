@@ -65,7 +65,7 @@ fn configure_template_update_interval() {
 
 #[tokio::test]
 async fn basic_initialization_flow() {
-    let pool = TestPool::spawn();
+    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
 
     let mut client = pool.stratum_client().await;
 
@@ -82,7 +82,7 @@ async fn basic_initialization_flow() {
         _ => panic!(),
     };
 
-    assert!(set_difficulty.difficulty() < Difficulty::from(0.01));
+    assert!(set_difficulty.difficulty() == Difficulty::from(0.00001));
 
     let notify = match client.incoming.recv().await.unwrap() {
         Message::Notification { method: _, params } => {
