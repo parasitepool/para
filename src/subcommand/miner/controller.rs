@@ -198,7 +198,7 @@ impl Controller {
 
                         let result = task::spawn_blocking(move || {
                             hasher
-                                .hash_with_progress(cancel_clone, |batch| metrics_clone.add(batch))
+                                .hash_with_metrics(cancel_clone, |batch| metrics_clone.add(batch))
                         })
                         .await;
 

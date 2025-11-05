@@ -17,7 +17,7 @@ pub(crate) struct Hasher {
 }
 
 impl Hasher {
-    pub(crate) fn hash_with_progress<F>(
+    pub(crate) fn hash_with_metrics<F>(
         &mut self,
         cancel: CancellationToken,
         mut on_batch: F,
@@ -73,7 +73,7 @@ impl Hasher {
         &mut self,
         cancel: CancellationToken,
     ) -> Result<(JobId, Header, Extranonce, ckpool::HashRate), HasherError> {
-        self.hash_with_progress(cancel, |_batch| {})
+        self.hash_with_metrics(cancel, |_batch| {})
     }
 }
 
