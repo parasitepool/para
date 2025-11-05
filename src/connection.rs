@@ -111,7 +111,7 @@ where
                             self.authorize(id, authorize).await?
                         }
                         "mining.submit" => {
-                            info!("SUBMIT from {} with params {params}", self.worker);
+                            // info!("SUBMIT from {} with params {params}", self.worker);
 
                             if self.state != State::Working {
                                 self.send_error(id.clone(), -32002, "Unauthorized", None).await?;
@@ -368,7 +368,7 @@ where
             self.send_error(id, 22, "Duplicate share", None).await?;
             return Ok(());
         }
-        
+
         // TODO: do this at the end to make submit block take priority
         if self
             .config
@@ -419,9 +419,10 @@ where
 
                 info!("Submitting block solve");
 
-                self.config.bitcoin_rpc_client()?.submit_block(&block)?;
-
-                info!("SUCCESS: mined block {}", block.block_hash());
+                match self.config.bitcoin_rpc_client()?.submit_block(&block) {
+                    Ok(_) => info!("SUCCESS: mined block {}", block.block_hash()),
+                    Err(err) => error!("Failed to submit block solve: {err}"),
+                }
             }
             Err(_err) => {}
         }

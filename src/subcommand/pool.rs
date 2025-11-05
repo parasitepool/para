@@ -213,9 +213,6 @@ mod tests {
     #[test]
     fn start_diff() {
         let config = parse_pool_config("para pool --start-diff 0.00001");
-        assert_eq!(
-            config.start_diff(),
-            Difficulty::from(0.00001)
-        );
+        assert_eq!(config.start_diff(), Difficulty::from(0.00001));
     }
 }
