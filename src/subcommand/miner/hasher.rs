@@ -17,14 +17,11 @@ pub(crate) struct Hasher {
 }
 
 impl Hasher {
-    pub(crate) fn hash_with_metrics<F>(
+    pub(crate) fn hash_with_metrics(
         &mut self,
         cancel: CancellationToken,
-        mut on_batch: F,
-    ) -> Result<(JobId, Header, Extranonce, ckpool::HashRate), HasherError>
-    where
-        F: FnMut(u64),
-    {
+        metrics: Metrics,
+    ) -> Result<(JobId, Header, Extranonce, ckpool::HashRate), HasherError> {
         let start = Instant::now();
         let mut total_hashes = 0;
 
@@ -64,7 +61,7 @@ impl Hasher {
                 }
             }
 
-            on_batch(BATCH);
+            metrics.add(BATCH);
         }
     }
 
@@ -73,7 +70,7 @@ impl Hasher {
         &mut self,
         cancel: CancellationToken,
     ) -> Result<(JobId, Header, Extranonce, ckpool::HashRate), HasherError> {
-        self.hash_with_metrics(cancel, |_batch| {})
+        self.hash_with_metrics(cancel, Metrics::new())
     }
 }
 
