@@ -38,7 +38,7 @@ miner stratum_endpoint='127.0.0.1:42069':
     --cpu-cores 2
 
 miner-signet: 
-  RUST_LOG=info cargo run --release -- miner \
+  cargo run --release -- miner \
     127.0.0.1:42069 \
     --username tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.tick \
     --password x \

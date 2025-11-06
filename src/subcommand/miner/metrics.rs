@@ -55,7 +55,7 @@ pub async fn spawn_status_line(metrics: Metrics, period: Duration) {
             metrics.uptime().as_secs_f64()
         );
 
-        let mut out = io::stdout();
+        let mut out = io::stderr();
         let _ = write!(out, "\r\x1b[2K{}", line);
         let _ = out.flush();
 
