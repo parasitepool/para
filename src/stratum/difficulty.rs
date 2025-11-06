@@ -162,6 +162,33 @@ impl fmt::Display for Difficulty {
     }
 }
 
+impl FromStr for Difficulty {
+    type Err = Error;
+
+    fn from_str(difficulty: &str) -> Result<Self, Self::Err> {
+        let difficulty = difficulty.trim();
+        if difficulty.is_empty() {
+            return Err(anyhow!("difficulty string is empty"));
+        }
+
+        if let Ok(u) = difficulty.parse::<u64>() {
+            if u == 0 {
+                return Err(anyhow!("difficulty must be > 0"));
+            }
+            return Ok(Difficulty::from(u));
+        }
+
+        if let Ok(x) = difficulty.parse::<f64>() {
+            if !x.is_finite() || x <= 0.0 {
+                return Err(anyhow!("difficulty must be > 0"));
+            }
+            return Ok(Difficulty::from(x));
+        }
+
+        Err(anyhow!("difficulty must be an integer or float"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -306,5 +333,51 @@ mod tests {
     fn display_respects_precision_flag() {
         assert_eq!(format!("{:.5}", Difficulty::from(0.5)), "0.50000");
         assert_eq!(format!("{:.2}", Difficulty::from(0.125)), "0.13");
+    }
+
+    #[track_caller]
+    fn case_from_str(s: &str, want: f64) {
+        let got = Difficulty::from_str(s).unwrap();
+        assert!(
+            relative_error(got.as_f64(), want) < 1e-6,
+            "parse {s}, got {got}, want {want}"
+        );
+    }
+
+    #[test]
+    fn from_str_int_float_scientific() {
+        case_from_str("1", 1.0);
+        case_from_str("0.125", 0.125);
+        case_from_str("1e6", 1_000_000.0);
+        case_from_str("1000", 1000.0);
+    }
+
+    #[test]
+    fn display_pairs_with_parsed() {
+        for s in ["0.5", "1", "42", "0.125"] {
+            let d1 = Difficulty::from_str(s).unwrap();
+            let s2 = d1.to_string();
+            let d2 = Difficulty::from_str(&s2).unwrap();
+            assert!(
+                relative_error(d1.as_f64(), d2.as_f64()) < 1e-6,
+                "roundtrip {s}"
+            );
+        }
+    }
+    #[test]
+    fn from_str_rejects_bad() {
+        for s in [
+            "",
+            "0",
+            "0.0",
+            "-1",
+            "-0.01",
+            "NaN",
+            "Infinity",
+            "-Infinity",
+            "nope",
+        ] {
+            assert!(Difficulty::from_str(s).is_err(), "should reject {s}");
+        }
     }
 }

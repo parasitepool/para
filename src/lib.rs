@@ -101,6 +101,7 @@ use {
         validate_request::ValidateRequestHeaderLayer,
     },
     tracing::{debug, error, info, warn},
+    tracing_appender::non_blocking,
     tracing_subscriber::EnvFilter,
     zeromq::{Endpoint, Socket, SocketRecv, SubSocket},
     zmq::Zmq,
@@ -153,9 +154,11 @@ async fn resolve_stratum_endpoint(stratum_endpoint: &str) -> Result<SocketAddr> 
 }
 
 pub fn main() {
+    let (writer, _guard) = non_blocking(std::io::stdout());
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .with_target(false)
+        .with_writer(writer)
         .init();
 
     let args = Arguments::parse();

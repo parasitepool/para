@@ -40,6 +40,12 @@ pub(crate) struct PoolConfig {
     version_mask: Version,
     #[arg(
         long,
+        help = "Give <STARTING_DIFFICULTY> to new clients.",
+        default_value = "1"
+    )]
+    start_diff: Difficulty,
+    #[arg(
+        long,
         help = "Subscribe to <ZMQ_BLOCK_NOTIFICATION>.",
         default_value = "tcp://127.0.0.1:28332"
     )]
@@ -162,6 +168,10 @@ impl PoolConfig {
 
     pub fn version_mask(&self) -> Version {
         self.version_mask
+    }
+
+    pub fn start_diff(&self) -> Difficulty {
+        self.start_diff
     }
 
     pub fn update_interval(&self) -> Duration {
