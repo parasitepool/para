@@ -27,17 +27,11 @@ impl Database {
         Ok(Self {
             pool: PgPoolOptions::new()
                 .max_connections(5)
-                .acquire_timeout(
-                    if std::env::var("PARA_INTEGRATION_TEST")
-                        .ok()
-                        .filter(|v| v == "1")
-                        .is_some()
-                    {
-                        Duration::from_millis(50)
-                    } else {
-                        Duration::from_secs(5)
-                    },
-                )
+                .acquire_timeout(if integration_test() {
+                    Duration::from_millis(50)
+                } else {
+                    Duration::from_secs(5)
+                })
                 .connect(&database_url)
                 .await?,
         })

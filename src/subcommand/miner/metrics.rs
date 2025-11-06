@@ -1,4 +1,4 @@
-use super::*;
+use {super::*, crossterm::terminal};
 
 #[derive(Clone)]
 pub(crate) struct Metrics {
@@ -35,6 +35,7 @@ pub async fn spawn_status_line(metrics: Metrics, period: Duration) {
 
     let mut prev_time = Instant::now();
     let mut prev_total = metrics.total();
+    let mut sticky = Sticky::new().expect("tty");
 
     loop {
         ticker.tick().await;
@@ -55,11 +56,46 @@ pub async fn spawn_status_line(metrics: Metrics, period: Duration) {
             metrics.uptime().as_secs_f64()
         );
 
-        let mut out = io::stderr();
-        let _ = write!(out, "\r\x1b[2K{}", line);
-        let _ = out.flush();
+        let _ = sticky.redraw(&line);
 
         prev_time = now;
         prev_total = total;
+    }
+}
+
+struct Sticky {
+    rows: u16,
+}
+
+impl Sticky {
+    fn new() -> io::Result<Self> {
+        let (_, rows) = terminal::size()?;
+        let mut out = io::stdout();
+        write!(out, "\x1b[1;{}r\x1b[?25l", rows.saturating_sub(1))?;
+        out.flush()?;
+
+        Ok(Self { rows })
+    }
+
+    fn redraw(&mut self, line: &str) -> io::Result<()> {
+        if let Ok((_, rows)) = terminal::size()
+            && rows != self.rows
+        {
+            self.rows = rows;
+            let mut out = io::stdout();
+            write!(out, "\x1b[r\x1b[1;{}r", rows.saturating_sub(1))?;
+            out.flush()?;
+        }
+
+        let mut out = io::stdout();
+        write!(out, "\x1b7\x1b[{};1H\x1b[2K{}\x1b8", self.rows, line)?;
+        out.flush()
+    }
+}
+
+impl Drop for Sticky {
+    fn drop(&mut self) {
+        let _ = write!(io::stdout(), "\x1b[r\x1b[2K\x1b[?25h");
+        let _ = io::stdout().flush();
     }
 }

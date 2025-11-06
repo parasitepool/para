@@ -154,8 +154,12 @@ async fn resolve_stratum_endpoint(stratum_endpoint: &str) -> Result<SocketAddr> 
     Ok(addr)
 }
 
+fn integration_test() -> bool {
+    std::env::var_os("PARA_INTEGRATION_TEST").is_some()
+}
+
 pub fn main() {
-    let (writer, _guard) = non_blocking(std::io::stdout());
+    let (writer, _guard) = non_blocking(io::stderr());
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .with_target(false)

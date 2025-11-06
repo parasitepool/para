@@ -40,7 +40,8 @@ impl Controller {
         let (notify_tx, notify_rx) = watch::channel(None);
 
         let metrics = Metrics::new();
-        {
+
+        if !integration_test() {
             let metrics_clone = metrics.clone();
             tokio::spawn(async move {
                 spawn_status_line(metrics_clone, Duration::from_millis(100)).await;
