@@ -83,8 +83,6 @@ fn get_block_template_blocking(
     bitcoin_rpc_client: &bitcoincore_rpc::Client,
     config: &PoolConfig,
 ) -> Result<BlockTemplate> {
-    info!("Fetching new block template");
-
     let mut rules = vec!["segwit"];
     if config.chain().network() == Network::Signet {
         rules.push("signet");
@@ -95,5 +93,9 @@ fn get_block_template_blocking(
         "rules": rules,
     });
 
-    Ok(bitcoin_rpc_client.call::<BlockTemplate>("getblocktemplate", &[params])?)
+    let template = bitcoin_rpc_client.call::<BlockTemplate>("getblocktemplate", &[params])?;
+
+    info!("New block template for height {}", template.height);
+
+    Ok(template)
 }

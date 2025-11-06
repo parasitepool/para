@@ -72,7 +72,7 @@ where
 
                     match method.as_str() {
                         "mining.configure" => {
-                            info!("CONFIGURE from {} with {params}", self.worker);
+                            debug!("CONFIGURE from {} with {params}", self.worker);
 
                             if !matches!(self.state,  State::Init | State::Configured) {
                                 self.send_error(id.clone(), -32001, "Method not allowed in current state", None).await?;
@@ -85,7 +85,7 @@ where
                             self.configure(id, configure).await?
                         }
                         "mining.subscribe" => {
-                            info!("SUBSCRIBE from {} with {params}", self.worker);
+                            debug!("SUBSCRIBE from {} with {params}", self.worker);
 
                             if !matches!(self.state,  State::Init | State::Configured) {
                                 self.send_error(id.clone(), -32001, "Method not allowed in current state", None).await?;
@@ -98,7 +98,7 @@ where
                             self.subscribe(id, subscribe).await?
                         }
                         "mining.authorize" => {
-                            info!("AUTHORIZE from {} with {params}", self.worker);
+                            debug!("AUTHORIZE from {} with {params}", self.worker);
 
                             if self.state != State::Subscribed {
                                 self.send_error(id.clone(), -32001, "Method not allowed in current state", None).await?;
@@ -111,7 +111,7 @@ where
                             self.authorize(id, authorize).await?
                         }
                         "mining.submit" => {
-                            info!("SUBMIT from {} with params {params}", self.worker);
+                            debug!("SUBMIT from {} with params {params}", self.worker);
 
                             if self.state != State::Working {
                                 self.send_error(id.clone(), -32002, "Unauthorized", None).await?;
@@ -131,7 +131,7 @@ where
 
                 changed = template_receiver.changed() => {
                     if changed.is_err() {
-                        info!("Template receiver dropped, closing connection with {}", self.worker);
+                        warn!("Template receiver dropped, closing connection with {}", self.worker);
                         break;
                     }
 
@@ -165,7 +165,7 @@ where
 
         let clean_jobs = self.jobs.upsert(new_job.clone());
 
-        info!("Template updated sending NOTIFY");
+        debug!("Template updated sending NOTIFY");
 
         self.send(Message::Notification {
             method: "mining.notify".into(),
@@ -179,7 +179,7 @@ where
     async fn configure(&mut self, id: Id, configure: Configure) -> Result {
         if configure.version_rolling_mask.is_some() {
             let version_mask = self.config.version_mask();
-            info!(
+            debug!(
                 "Configuring version rolling for {} with version mask {version_mask}",
                 self.worker
             );
@@ -295,15 +295,15 @@ where
             self.authorized = Some(SystemTime::now());
         }
 
-        info!("Sending SET DIFFICULTY");
+        debug!("Sending SET DIFFICULTY");
 
         self.send(Message::Notification {
             method: "mining.set_difficulty".into(),
-            params: json!(SetDifficulty(Difficulty::from(job.nbits()))),
+            params: json!(SetDifficulty(self.config.start_diff())),
         })
         .await?;
 
-        info!("Sending NOTIFY");
+        debug!("Sending NOTIFY");
 
         let clean_jobs = self.jobs.upsert(job.clone());
 
@@ -369,47 +369,59 @@ where
             return Ok(());
         }
 
-        let blockhash = header.validate_pow(Target::from_compact(nbits.into()))?;
+        if let Ok(blockhash) = header.validate_pow(Target::from_compact(nbits.into())) {
+            info!("Block with hash {blockhash} meets network difficulty");
 
-        info!("Block with hash {blockhash} meets PoW");
+            let coinbase_bin = hex::decode(format!(
+                "{}{}{}{}",
+                job.coinb1, job.extranonce1, submit.extranonce2, job.coinb2,
+            ))?;
 
-        let coinbase_bin = hex::decode(format!(
-            "{}{}{}{}",
-            job.coinb1, job.extranonce1, submit.extranonce2, job.coinb2,
-        ))?;
+            let mut cursor = bitcoin::io::Cursor::new(&coinbase_bin);
+            let coinbase_tx =
+                bitcoin::Transaction::consensus_decode_from_finite_reader(&mut cursor)?;
 
-        let mut cursor = bitcoin::io::Cursor::new(&coinbase_bin);
-        let coinbase_tx = bitcoin::Transaction::consensus_decode_from_finite_reader(&mut cursor)?;
+            let txdata = std::iter::once(coinbase_tx)
+                .chain(
+                    job.template
+                        .transactions
+                        .iter()
+                        .map(|tx| tx.transaction.clone())
+                        .collect::<Vec<Transaction>>(),
+                )
+                .collect();
 
-        let txdata = std::iter::once(coinbase_tx)
-            .chain(
-                job.template
-                    .transactions
-                    .iter()
-                    .map(|tx| tx.transaction.clone())
-                    .collect::<Vec<Transaction>>(),
-            )
-            .collect();
+            let block = Block { header, txdata };
 
-        let block = Block { header, txdata };
+            if job.template.height > 16 {
+                assert!(block.bip34_block_height().is_ok());
+            }
 
-        if job.template.height > 16 {
-            assert!(block.bip34_block_height().is_ok());
+            info!("Submitting potential block solve");
+
+            match self.config.bitcoin_rpc_client()?.submit_block(&block) {
+                Ok(_) => info!("SUCCESSFULLY mined block {}", block.block_hash()),
+                Err(err) => error!("Failed to submit block: {err}"),
+            }
         }
 
-        info!("Submitting block solve");
-
-        self.config.bitcoin_rpc_client()?.submit_block(&block)?;
-
-        self.send(Message::Response {
-            id,
-            result: Some(json!(true)),
-            error: None,
-            reject_reason: None,
-        })
-        .await?;
-
-        info!("SUCCESS: mined block {}", block.block_hash());
+        if self
+            .config
+            .start_diff()
+            .to_target()
+            .is_met_by(header.block_hash())
+        {
+            self.send(Message::Response {
+                id,
+                result: Some(json!(true)),
+                error: None,
+                reject_reason: None,
+            })
+            .await?;
+        } else {
+            self.send_error(id, 25, "Above pool target/diff", None)
+                .await?;
+        }
 
         Ok(())
     }

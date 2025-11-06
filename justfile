@@ -57,6 +57,7 @@ pool:
     --bitcoin-rpc-username satoshi \
     --bitcoin-rpc-password nakamoto \
     --bitcoin-rpc-port 38332 \
+    --start-diff 0.00001 \
     --zmq-block-notifications tcp://127.0.0.1:28332
 
 server: 
