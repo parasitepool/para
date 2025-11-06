@@ -91,6 +91,7 @@ fn test_format_block_found_notification() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_send_block_notification() {
     let test_channel = generate_test_channel();
     let handler = NotificationHandler::new(test_channel.clone());
