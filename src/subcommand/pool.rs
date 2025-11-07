@@ -209,4 +209,16 @@ mod tests {
             "tcp://127.0.0.1:69".parse().unwrap()
         );
     }
+
+    #[test]
+    fn start_diff() {
+        let config = parse_pool_config("para pool --start-diff 0.00001");
+        assert_eq!(config.start_diff(), Difficulty::from(0.00001));
+
+        let config = parse_pool_config("para pool --start-diff 111");
+        assert_eq!(config.start_diff(), Difficulty::from(111));
+
+        let config = parse_pool_config("para pool");
+        assert_eq!(config.start_diff(), Difficulty::from(1));
+    }
 }
