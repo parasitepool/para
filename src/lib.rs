@@ -62,7 +62,8 @@ use {
         collections::{BTreeMap, HashMap, HashSet},
         env,
         fmt::{self, Display, Formatter},
-        fs, io,
+        fs,
+        io::{self, Write},
         net::{SocketAddr, ToSocketAddrs},
         num::NonZeroUsize,
         ops::{Add, BitAnd, BitOr, BitXor, Not},
@@ -153,8 +154,16 @@ async fn resolve_stratum_endpoint(stratum_endpoint: &str) -> Result<SocketAddr> 
     Ok(addr)
 }
 
+fn integration_test() -> bool {
+    std::env::var_os("PARA_INTEGRATION_TEST").is_some()
+}
+
+fn logs_enabled() -> bool {
+    std::env::var_os("RUST_LOG").is_some()
+}
+
 pub fn main() {
-    let (writer, _guard) = non_blocking(std::io::stdout());
+    let (writer, _guard) = non_blocking(io::stderr());
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .with_target(false)

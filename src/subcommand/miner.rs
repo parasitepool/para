@@ -1,7 +1,14 @@
-use {super::*, controller::Controller, hasher::Hasher, stratum::Client};
+use {
+    super::*,
+    controller::Controller,
+    hasher::Hasher,
+    metrics::{Metrics, spawn_throbber},
+    stratum::Client,
+};
 
 mod controller;
 mod hasher;
+mod metrics;
 
 #[derive(Debug, Parser)]
 pub(crate) struct Miner {
@@ -15,6 +22,8 @@ pub(crate) struct Miner {
     once: bool,
     #[arg(long, help = "Number of <CPU_CORES> to use.")]
     cpu_cores: Option<usize>,
+    #[arg(long, help = "Hash rate to <THROTTLE> to.")]
+    throttle: Option<ckpool::HashRate>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -58,8 +67,14 @@ impl Miner {
         info!("Available CPU cores: {}", available_cpu_cores);
         info!("CPU cores to use: {}", cpu_cores);
 
-        let controller =
-            Controller::new(client, cpu_cores, self.once, self.username.clone()).await?;
+        let controller = Controller::new(
+            client,
+            self.username.clone(),
+            cpu_cores,
+            self.throttle,
+            self.once,
+        )
+        .await?;
 
         let shares = controller.run().await?;
 

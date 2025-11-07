@@ -20,9 +20,10 @@ impl Hasher {
     pub(crate) fn hash(
         &mut self,
         cancel: CancellationToken,
-    ) -> Result<(JobId, Header, Extranonce, ckpool::HashRate), HasherError> {
-        let start = Instant::now();
-        let mut total_hashes = 0;
+        metrics: Arc<Metrics>,
+        throttle: f64,
+    ) -> Result<(JobId, Header, Extranonce), HasherError> {
+        const BATCH: u64 = 10_000;
 
         loop {
             if cancel.is_cancelled() {
@@ -32,20 +33,14 @@ impl Hasher {
                 .fail();
             }
 
-            for _ in 0..10_000 {
+            let t0 = Instant::now();
+
+            for _ in 0..BATCH {
                 let hash = self.header.block_hash();
-                total_hashes += 1;
 
                 if self.pool_target.is_met_by(hash) {
-                    let elapsed = Instant::now().duration_since(start).as_secs_f64().max(1e-6);
-                    let hash_rate = ckpool::HashRate(total_hashes as f64 / elapsed);
-
-                    return Ok((
-                        self.job_id,
-                        self.header,
-                        self.extranonce2.clone(),
-                        hash_rate,
-                    ));
+                    metrics.add_share();
+                    return Ok((self.job_id, self.header, self.extranonce2.clone()));
                 }
 
                 if let Some(next_nonce) = self.header.nonce.checked_add(1) {
@@ -55,6 +50,16 @@ impl Hasher {
                         nonce: self.header.nonce,
                     }
                     .fail();
+                }
+            }
+
+            metrics.add_hashes(BATCH);
+
+            if throttle != f64::MAX {
+                let want = (BATCH as f64) / throttle;
+                let got = t0.elapsed().as_secs_f64();
+                if want > got {
+                    thread::sleep(Duration::from_secs_f64(want - got));
                 }
             }
         }
@@ -144,7 +149,9 @@ mod tests {
             job_id: "bf".parse().unwrap(),
         };
 
-        let (_, header, _, _) = hasher.hash(CancellationToken::new()).unwrap();
+        let (_, header, _) = hasher
+            .hash(CancellationToken::new(), Arc::new(Metrics::new()), f64::MAX)
+            .unwrap();
         assert!(target.is_met_by(header.block_hash()));
     }
 
@@ -158,7 +165,8 @@ mod tests {
             job_id: "bf".parse().unwrap(),
         };
 
-        let result = hasher.hash(CancellationToken::new());
+        let result = hasher.hash(CancellationToken::new(), Arc::new(Metrics::new()), f64::MAX);
+
         assert!(
             result.is_err(),
             "Expected nonce space exhausted error, got: {:?}",
@@ -219,10 +227,10 @@ mod tests {
                 job_id: JobId::new(0),
             };
 
-            let result = hasher.hash(CancellationToken::new());
+            let result = hasher.hash(CancellationToken::new(), Arc::new(Metrics::new()), f64::MAX);
             assert!(result.is_ok(), "Failed at {zeros} leading zeros");
 
-            let (_, header, _, _) = result.unwrap();
+            let (_, header, _) = result.unwrap();
             assert!(
                 target.is_met_by(header.block_hash()),
                 "Invalid PoW at {zeros} leading zeros"
@@ -240,13 +248,14 @@ mod tests {
             job_id: JobId::new(0),
         };
 
-        let result = hasher.hash(CancellationToken::new());
+        let result = hasher.hash(CancellationToken::new(), Arc::new(Metrics::new()), f64::MAX);
+
         assert!(
             result.is_ok(),
             "Mining should find solution for easy target"
         );
 
-        let (_, header, _, _) = result.unwrap();
+        let (_, header, _) = result.unwrap();
         assert!(
             target.is_met_by(header.block_hash()),
             "Solution should meet target"
@@ -267,7 +276,7 @@ mod tests {
 
         cancel_token.cancel();
 
-        let result = hasher.hash(cancel_token);
+        let result = hasher.hash(cancel_token, Arc::new(Metrics::new()), f64::MAX);
         assert!(result.is_err(), "Should be cancelled");
         assert!(result.unwrap_err().to_string().contains("cancelled"));
     }
