@@ -20,12 +20,10 @@ impl Hasher {
     pub(crate) fn hash_with_metrics(
         &mut self,
         cancel: CancellationToken,
-        metrics: Metrics,
-    ) -> Result<(JobId, Header, Extranonce, ckpool::HashRate), HasherError> {
-        let start = Instant::now();
-        let mut total_hashes = 0;
-
-        const BATCH: u64 = 10_000;
+        metrics: Arc<Metrics>,
+        throttle: Arc<AtomicU64>,
+    ) -> Result<(JobId, Header, Extranonce), HasherError> {
+        const BATCH: u64 = 10_000; // TODO: what size?
 
         loop {
             if cancel.is_cancelled() {
@@ -35,20 +33,13 @@ impl Hasher {
                 .fail();
             }
 
+            let t0 = Instant::now();
+
             for _ in 0..BATCH {
                 let hash = self.header.block_hash();
-                total_hashes += 1;
 
                 if self.pool_target.is_met_by(hash) {
-                    let elapsed = Instant::now().duration_since(start).as_secs_f64().max(1e-6);
-                    let hash_rate = ckpool::HashRate(total_hashes as f64 / elapsed);
-
-                    return Ok((
-                        self.job_id,
-                        self.header,
-                        self.extranonce2.clone(),
-                        hash_rate,
-                    ));
+                    return Ok((self.job_id, self.header, self.extranonce2.clone()));
                 }
 
                 if let Some(next_nonce) = self.header.nonce.checked_add(1) {
@@ -61,7 +52,16 @@ impl Hasher {
                 }
             }
 
-            metrics.add(BATCH);
+            metrics.add_hashes(BATCH);
+
+            let cap = throttle.load(Ordering::Relaxed);
+            if cap != u64::MAX {
+                let want = (BATCH as f64) / (cap as f64);
+                let got = t0.elapsed().as_secs_f64();
+                if want > got {
+                    thread::sleep(Duration::from_secs_f64(want - got));
+                }
+            }
         }
     }
 
@@ -69,8 +69,12 @@ impl Hasher {
     pub(crate) fn hash(
         &mut self,
         cancel: CancellationToken,
-    ) -> Result<(JobId, Header, Extranonce, ckpool::HashRate), HasherError> {
-        self.hash_with_metrics(cancel, Metrics::new())
+    ) -> Result<(JobId, Header, Extranonce), HasherError> {
+        self.hash_with_metrics(
+            cancel,
+            Arc::new(Metrics::new()),
+            Arc::new(AtomicU64::new(u64::MAX)),
+        )
     }
 }
 
@@ -157,7 +161,7 @@ mod tests {
             job_id: "bf".parse().unwrap(),
         };
 
-        let (_, header, _, _) = hasher.hash(CancellationToken::new()).unwrap();
+        let (_, header, _) = hasher.hash(CancellationToken::new()).unwrap();
         assert!(target.is_met_by(header.block_hash()));
     }
 
@@ -235,7 +239,7 @@ mod tests {
             let result = hasher.hash(CancellationToken::new());
             assert!(result.is_ok(), "Failed at {zeros} leading zeros");
 
-            let (_, header, _, _) = result.unwrap();
+            let (_, header, _) = result.unwrap();
             assert!(
                 target.is_met_by(header.block_hash()),
                 "Invalid PoW at {zeros} leading zeros"
@@ -259,7 +263,7 @@ mod tests {
             "Mining should find solution for easy target"
         );
 
-        let (_, header, _, _) = result.unwrap();
+        let (_, header, _) = result.unwrap();
         assert!(
             target.is_met_by(header.block_hash()),
             "Solution should meet target"

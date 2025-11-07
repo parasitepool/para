@@ -40,7 +40,6 @@ bitcoincore-rpc.workspace = true
 boilerplate = { version = "1.0.1", features = ["axum"] }
 byteorder = "1.5.0"
 clap = { version = "4.5.36", features = ["derive", "env"] }
-crossterm = "0.29.0"
 dashmap = "6.1.0"
 derive_more = { version = "2.0.1", features = ["display"] }
 dirs = "6.0.0"

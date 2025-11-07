@@ -7,24 +7,26 @@ pub(crate) struct Controller {
     extranonce2: Arc<Mutex<Extranonce>>,
     hasher_cancel: Option<CancellationToken>,
     hashers: JoinSet<()>,
-    metrics: Metrics,
+    metrics: Arc<Metrics>,
     notify_tx: watch::Sender<Option<(Notify, CancellationToken)>>,
     notify_rx: watch::Receiver<Option<(Notify, CancellationToken)>>,
     once: bool,
     pool_difficulty: Arc<Mutex<Difficulty>>,
     root_cancel: CancellationToken,
-    share_tx: mpsc::Sender<(JobId, Header, Extranonce, ckpool::HashRate)>,
-    share_rx: mpsc::Receiver<(JobId, Header, Extranonce, ckpool::HashRate)>,
+    share_tx: mpsc::Sender<(JobId, Header, Extranonce)>,
+    share_rx: mpsc::Receiver<(JobId, Header, Extranonce)>,
     shares: Vec<Share>,
+    throttle: Arc<AtomicU64>,
     username: String,
 }
 
 impl Controller {
     pub(crate) async fn new(
         mut client: Client,
-        cpu_cores: usize,
-        once: bool,
         username: String,
+        cpu_cores: usize,
+        throttle: Option<ckpool::HashRate>,
+        once: bool,
     ) -> Result<Self> {
         let (subscribe, _, _) = client.subscribe().await?;
         client.authorize().await?;
@@ -39,14 +41,17 @@ impl Controller {
         let (share_tx, share_rx) = mpsc::channel(256);
         let (notify_tx, notify_rx) = watch::channel(None);
 
-        let metrics = Metrics::new();
+        let metrics = Arc::new(Metrics::new());
 
-        if !integration_test() {
-            let metrics_clone = metrics.clone();
-            tokio::spawn(async move {
-                spawn_status_line(metrics_clone, Duration::from_millis(100)).await;
-            });
+        if !integration_test() && !logs_enabled() {
+            spawn_throbber(metrics.clone());
         }
+
+        let throttle = Arc::new(AtomicU64::new(
+            throttle
+                .map(|hash_rate| (hash_rate.0 / cpu_cores as f64) as u64)
+                .unwrap_or(u64::MAX),
+        ));
 
         Ok(Self {
             client,
@@ -64,6 +69,7 @@ impl Controller {
             share_rx,
             share_tx,
             shares: Vec::new(),
+            throttle,
             username,
         })
     }
@@ -93,9 +99,8 @@ impl Controller {
                     }
                 },
                 maybe = self.share_rx.recv() => match maybe {
-                    Some((job_id, header, extranonce2, hash_rate)) => {
+                    Some((job_id, header, extranonce2)) => {
                         info!("Valid share found: blockhash={} nonce={}", header.block_hash(), header.nonce);
-                        info!("Hash rate: {hash_rate}");
 
                         let share = Share {
                             extranonce1: self.extranonce1.clone(),
@@ -108,6 +113,7 @@ impl Controller {
                         };
 
                         self.shares.push(share);
+                        self.metrics.add_share();
 
                         match self.client.submit(job_id, extranonce2, header.time.into(), header.nonce.into()).await {
                             Err(err) => warn!("Failed to submit share for job {job_id}: {err}"),
@@ -143,6 +149,7 @@ impl Controller {
             let extranonce2 = self.extranonce2.clone();
             let pool_difficulty = self.pool_difficulty.clone();
             let metrics = self.metrics.clone();
+            let throttle = self.throttle.clone();
 
             info!("Starting hasher for core {core_id}",);
             self.hashers.spawn(async move {
@@ -196,9 +203,10 @@ impl Controller {
 
                         let cancel_clone = cancel.clone();
                         let metrics_clone = metrics.clone();
+                        let throttle_clone = throttle.clone();
 
                         let result = task::spawn_blocking(move || {
-                            hasher.hash_with_metrics(cancel_clone, metrics_clone)
+                            hasher.hash_with_metrics(cancel_clone, metrics_clone, throttle_clone)
                         })
                         .await;
 

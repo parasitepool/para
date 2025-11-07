@@ -158,6 +158,10 @@ fn integration_test() -> bool {
     std::env::var_os("PARA_INTEGRATION_TEST").is_some()
 }
 
+fn logs_enabled() -> bool {
+    std::env::var_os("RUST_LOG").is_some()
+}
+
 pub fn main() {
     let (writer, _guard) = non_blocking(io::stderr());
     tracing_subscriber::fmt()
