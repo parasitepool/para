@@ -144,7 +144,7 @@ impl Controller {
             let extranonce2 = self.extranonce2.clone();
             let pool_difficulty = self.pool_difficulty.clone();
             let metrics = self.metrics.clone();
-            let throttle = self.throttle.clone();
+            let throttle = self.throttle;
 
             info!("Starting hasher for core {core_id}",);
             self.hashers.spawn(async move {
