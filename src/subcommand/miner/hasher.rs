@@ -17,13 +17,13 @@ pub(crate) struct Hasher {
 }
 
 impl Hasher {
-    pub(crate) fn hash_with_metrics(
+    pub(crate) fn hash(
         &mut self,
         cancel: CancellationToken,
         metrics: Arc<Metrics>,
-        throttle: Arc<AtomicU64>,
+        throttle: f64,
     ) -> Result<(JobId, Header, Extranonce), HasherError> {
-        const BATCH: u64 = 10_000; // TODO: what size?
+        const BATCH: u64 = 10_000;
 
         loop {
             if cancel.is_cancelled() {
@@ -55,27 +55,14 @@ impl Hasher {
 
             metrics.add_hashes(BATCH);
 
-            let cap = throttle.load(Ordering::Relaxed);
-            if cap != u64::MAX {
-                let want = (BATCH as f64) / (cap as f64);
+            if throttle != f64::MAX {
+                let want = (BATCH as f64) / throttle;
                 let got = t0.elapsed().as_secs_f64();
                 if want > got {
                     thread::sleep(Duration::from_secs_f64(want - got));
                 }
             }
         }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn hash(
-        &mut self,
-        cancel: CancellationToken,
-    ) -> Result<(JobId, Header, Extranonce), HasherError> {
-        self.hash_with_metrics(
-            cancel,
-            Arc::new(Metrics::new()),
-            Arc::new(AtomicU64::new(u64::MAX)),
-        )
     }
 }
 
@@ -162,7 +149,9 @@ mod tests {
             job_id: "bf".parse().unwrap(),
         };
 
-        let (_, header, _) = hasher.hash(CancellationToken::new()).unwrap();
+        let (_, header, _) = hasher
+            .hash(CancellationToken::new(), Arc::new(Metrics::new()), f64::MAX)
+            .unwrap();
         assert!(target.is_met_by(header.block_hash()));
     }
 
@@ -176,7 +165,8 @@ mod tests {
             job_id: "bf".parse().unwrap(),
         };
 
-        let result = hasher.hash(CancellationToken::new());
+        let result = hasher.hash(CancellationToken::new(), Arc::new(Metrics::new()), f64::MAX);
+
         assert!(
             result.is_err(),
             "Expected nonce space exhausted error, got: {:?}",
@@ -237,7 +227,7 @@ mod tests {
                 job_id: JobId::new(0),
             };
 
-            let result = hasher.hash(CancellationToken::new());
+            let result = hasher.hash(CancellationToken::new(), Arc::new(Metrics::new()), f64::MAX);
             assert!(result.is_ok(), "Failed at {zeros} leading zeros");
 
             let (_, header, _) = result.unwrap();
@@ -258,7 +248,8 @@ mod tests {
             job_id: JobId::new(0),
         };
 
-        let result = hasher.hash(CancellationToken::new());
+        let result = hasher.hash(CancellationToken::new(), Arc::new(Metrics::new()), f64::MAX);
+
         assert!(
             result.is_ok(),
             "Mining should find solution for easy target"
@@ -285,7 +276,7 @@ mod tests {
 
         cancel_token.cancel();
 
-        let result = hasher.hash(cancel_token);
+        let result = hasher.hash(cancel_token, Arc::new(Metrics::new()), f64::MAX);
         assert!(result.is_err(), "Should be cancelled");
         assert!(result.unwrap_err().to_string().contains("cancelled"));
     }

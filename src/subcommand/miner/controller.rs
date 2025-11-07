@@ -16,7 +16,7 @@ pub(crate) struct Controller {
     share_tx: mpsc::Sender<(JobId, Header, Extranonce)>,
     share_rx: mpsc::Receiver<(JobId, Header, Extranonce)>,
     shares: Vec<Share>,
-    throttle: Arc<AtomicU64>,
+    throttle: f64,
     username: String,
 }
 
@@ -41,11 +41,9 @@ impl Controller {
         let (share_tx, share_rx) = mpsc::channel(256);
         let (notify_tx, notify_rx) = watch::channel(None);
 
-        let throttle = Arc::new(AtomicU64::new(
-            throttle
-                .map(|hash_rate| (hash_rate.0 / cpu_cores as f64) as u64)
-                .unwrap_or(u64::MAX),
-        ));
+        let throttle = throttle
+            .map(|hash_rate| hash_rate.0 / cpu_cores as f64)
+            .unwrap_or(f64::MAX);
 
         Ok(Self {
             client,
@@ -200,10 +198,9 @@ impl Controller {
 
                         let cancel_clone = cancel.clone();
                         let metrics_clone = metrics.clone();
-                        let throttle_clone = throttle.clone();
 
                         let result = task::spawn_blocking(move || {
-                            hasher.hash_with_metrics(cancel_clone, metrics_clone, throttle_clone)
+                            hasher.hash(cancel_clone, metrics_clone, throttle)
                         })
                         .await;
 
