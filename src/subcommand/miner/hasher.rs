@@ -39,6 +39,7 @@ impl Hasher {
                 let hash = self.header.block_hash();
 
                 if self.pool_target.is_met_by(hash) {
+                    metrics.add_share();
                     return Ok((self.job_id, self.header, self.extranonce2.clone()));
                 }
 

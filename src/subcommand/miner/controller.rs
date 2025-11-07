@@ -41,12 +41,6 @@ impl Controller {
         let (share_tx, share_rx) = mpsc::channel(256);
         let (notify_tx, notify_rx) = watch::channel(None);
 
-        let metrics = Arc::new(Metrics::new());
-
-        if !integration_test() && !logs_enabled() {
-            spawn_throbber(metrics.clone());
-        }
-
         let throttle = Arc::new(AtomicU64::new(
             throttle
                 .map(|hash_rate| (hash_rate.0 / cpu_cores as f64) as u64)
@@ -60,7 +54,7 @@ impl Controller {
             extranonce2: Arc::new(Mutex::new(Extranonce::zeros(subscribe.extranonce2_size))),
             hasher_cancel: None,
             hashers: JoinSet::new(),
-            metrics,
+            metrics: Arc::new(Metrics::new()),
             notify_rx,
             notify_tx,
             once,
@@ -76,6 +70,10 @@ impl Controller {
 
     pub(crate) async fn run(mut self) -> Result<Vec<Share>> {
         self.spawn_hashers();
+
+        if !integration_test() && !logs_enabled() {
+            spawn_throbber(self.metrics.clone());
+        }
 
         loop {
             tokio::select! {
@@ -113,7 +111,6 @@ impl Controller {
                         };
 
                         self.shares.push(share);
-                        self.metrics.add_share();
 
                         match self.client.submit(job_id, extranonce2, header.time.into(), header.nonce.into()).await {
                             Err(err) => warn!("Failed to submit share for job {job_id}: {err}"),
