@@ -91,6 +91,8 @@ mod to_args;
 mod account;
 mod alerts;
 #[cfg(target_os = "linux")]
+mod payouts;
+#[cfg(target_os = "linux")]
 mod ping;
 #[cfg(target_os = "linux")]
 mod pool;

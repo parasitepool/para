@@ -551,11 +551,18 @@ impl Server {
 
         if let Some(block) = &batch.block {
             match database.upsert_block(block).await {
-                Ok(_) => {
-                    info!(
-                        "Successfully upserted block for height {}",
-                        block.blockheight
-                    );
+                Ok(was_inserted) => {
+                    if was_inserted {
+                        info!(
+                            "Successfully inserted new block at height {}",
+                            block.blockheight
+                        );
+                    } else {
+                        info!(
+                            "Successfully updated existing block at height {}",
+                            block.blockheight
+                        );
+                    }
 
                     let notification_result = notifications::notify_block_found(
                         config.alerts_ntfy_channel(),
