@@ -161,15 +161,19 @@ pub(crate) async fn setup_test_schema(db_url: String) -> Result<(), Box<dyn std:
     sqlx::query(
         r#"
                 CREATE TABLE IF NOT EXISTS payouts (
-                    id BIGSERIAL PRIMARY KEY,
-                    account_id BIGINT NOT NULL REFERENCES accounts(id),
-                    amount BIGINT NOT NULL,
-                    diff_paid BIGINT NOT NULL,
-                    blockheight_start INTEGER NOT NULL,
-                    blockheight_end INTEGER NOT NULL,
-                    status TEXT NOT NULL,
-                    failure_reason TEXT,
-                    created_at TIMESTAMP DEFAULT NOW()
+                    id                BIGSERIAL PRIMARY KEY,
+                    account_id        BIGINT         NOT NULL REFERENCES accounts (id) ON DELETE RESTRICT,
+                    amount            BIGINT         NOT NULL,
+                    diff_paid         BIGINT         NOT NULL,
+                    blockheight_start INTEGER        NOT NULL,
+                    blockheight_end   INTEGER        NOT NULL,
+                    status            VARCHAR(20)    NOT NULL  DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'success', 'failure', 'cancelled')),
+                    attempts          SMALLINT       NOT NULL  DEFAULT 0,
+                    failure_reason    TEXT,
+                    transaction_id    VARCHAR(64),
+                    created_at        TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    updated_at        TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    processed_at      TIMESTAMP WITH TIME ZONE
                 )
                 "#,
     )

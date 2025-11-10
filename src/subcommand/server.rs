@@ -172,6 +172,7 @@ impl Server {
 
                 let db_router = Router::new()
                     .route("/payouts/{blockheight}", get(Self::payouts))
+                    .route("/payouts/update", post(Self::update_payout_status))
                     .route(
                         "/payouts/range/{start_height}/{end_height}",
                         get(Self::payouts_range),
@@ -325,7 +326,7 @@ impl Server {
     ) -> ServerResult<Response> {
         Ok(Json(
             database
-                .get_payouts(blockheight.try_into().unwrap(), "no filter address".into())
+                .get_pending_payouts(blockheight.try_into().unwrap())
                 .await?,
         )
         .into_response())
@@ -411,6 +412,25 @@ impl Server {
                 )
                 .await?,
         )
+        .into_response())
+    }
+
+    pub(crate) async fn update_payout_status(
+        Extension(database): Extension<Database>,
+        Json(request): Json<database::UpdatePayoutStatusRequest>,
+    ) -> ServerResult<Response> {
+        let rows_affected = database
+            .update_payout_status(
+                &request.payout_ids,
+                &request.status,
+                request.failure_reason.as_deref(),
+            )
+            .await?;
+
+        Ok(Json(json!({
+            "status": "OK",
+            "rows_affected": rows_affected,
+        }))
         .into_response())
     }
 
@@ -551,11 +571,18 @@ impl Server {
 
         if let Some(block) = &batch.block {
             match database.upsert_block(block).await {
-                Ok(_) => {
-                    info!(
-                        "Successfully upserted block for height {}",
-                        block.blockheight
-                    );
+                Ok(was_inserted) => {
+                    if was_inserted {
+                        info!(
+                            "Successfully inserted new block at height {}",
+                            block.blockheight
+                        );
+                    } else {
+                        info!(
+                            "Successfully updated existing block at height {}",
+                            block.blockheight
+                        );
+                    }
 
                     let notification_result = notifications::notify_block_found(
                         config.alerts_ntfy_channel(),

@@ -17,6 +17,20 @@ pub struct Payout {
     pub percentage: f64,
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+pub struct PendingPayout {
+    pub ln_address: String,
+    pub amount_sats: i64,
+    pub payout_ids: Vec<i64>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct UpdatePayoutStatusRequest {
+    pub payout_ids: Vec<i64>,
+    pub status: String,
+    pub failure_reason: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Database {
     pub(crate) pool: Pool<Postgres>,
@@ -372,5 +386,92 @@ impl Database {
             .map_err(|err| anyhow!(err))?;
 
         Ok(result as u64)
+    }
+
+    pub async fn get_pending_payouts(&self, blockheight: i32) -> Result<Vec<PendingPayout>> {
+        #[derive(sqlx::FromRow)]
+        struct PayoutRow {
+            payout_id: i64,
+            ln_address: String,
+            amount: i64,
+        }
+
+        let rows = sqlx::query_as::<_, PayoutRow>(
+            "
+            SELECT
+                p.id as payout_id,
+                COALESCE(a.lnurl, '') as ln_address,
+                p.amount
+            FROM payouts p
+            JOIN accounts a ON p.account_id = a.id
+            WHERE p.blockheight_end = $1
+                AND p.status IN ('pending', 'failure')
+                AND a.lnurl IS NOT NULL
+                AND a.lnurl != ''
+            ORDER BY a.lnurl, p.id
+            ",
+        )
+        .bind(blockheight)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))?;
+
+        let mut grouped: HashMap<String, (i64, Vec<i64>)> = HashMap::new();
+
+        for row in rows {
+            let entry = grouped
+                .entry(row.ln_address.clone())
+                .or_insert((0, Vec::new()));
+            entry.0 += row.amount;
+            entry.1.push(row.payout_id);
+        }
+
+        let mut result = Vec::new();
+        for (ln_address, (amount_sats, payout_ids)) in grouped {
+            result.push(PendingPayout {
+                ln_address,
+                amount_sats,
+                payout_ids,
+            });
+        }
+
+        result.sort_by(|a, b| b.amount_sats.cmp(&a.amount_sats));
+
+        Ok(result)
+    }
+
+    pub async fn update_payout_status(
+        &self,
+        payout_ids: &[i64],
+        status: &str,
+        failure_reason: Option<&str>,
+    ) -> Result<u64> {
+        if payout_ids.is_empty() {
+            return Ok(0);
+        }
+
+        let valid_statuses = ["pending", "processing", "success", "failure", "cancelled"];
+        if !valid_statuses.contains(&status) {
+            return Err(anyhow!("Invalid status: {}", status));
+        }
+
+        let rows_affected = sqlx::query(
+            "
+            UPDATE payouts
+            SET status = $1,
+                failure_reason = $2,
+                updated_at = NOW()
+            WHERE id = ANY($3)
+            ",
+        )
+        .bind(status)
+        .bind(failure_reason)
+        .bind(payout_ids)
+        .execute(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))?
+        .rows_affected();
+
+        Ok(rows_affected)
     }
 }

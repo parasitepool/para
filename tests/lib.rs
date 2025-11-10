@@ -33,9 +33,12 @@ use {
 
 #[cfg(target_os = "linux")]
 use {
-    crate::test_psql::{
-        create_test_block, create_test_shares, insert_test_account, insert_test_block,
-        insert_test_remote_shares, insert_test_shares, setup_test_schema,
+    crate::{
+        sync::BATCH_COUNTER,
+        test_psql::{
+            create_test_block, create_test_shares, insert_test_account, insert_test_block,
+            insert_test_remote_shares, insert_test_shares, setup_test_schema,
+        },
     },
     anyhow::Error,
     base64::{Engine, engine::general_purpose},
@@ -90,6 +93,8 @@ mod to_args;
 #[cfg(target_os = "linux")]
 mod account;
 mod alerts;
+#[cfg(target_os = "linux")]
+mod payouts;
 #[cfg(target_os = "linux")]
 mod ping;
 #[cfg(target_os = "linux")]
