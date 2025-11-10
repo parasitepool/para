@@ -1,14 +1,4 @@
-use crate::sync::BATCH_COUNTER;
-use {
-    super::*,
-    crate::test_psql::{
-        create_test_block, insert_test_account, insert_test_remote_shares, setup_test_schema,
-    },
-    para::subcommand::{
-        server::database::Database,
-        sync::{ShareBatch, SyncResponse},
-    },
-};
+use super::*;
 
 #[tokio::test]
 async fn test_block_insertion_creates_payouts() {
