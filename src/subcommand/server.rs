@@ -172,6 +172,7 @@ impl Server {
 
                 let db_router = Router::new()
                     .route("/payouts/{blockheight}", get(Self::payouts))
+                    .route("/payouts/update", post(Self::update_payout_status))
                     .route(
                         "/payouts/range/{start_height}/{end_height}",
                         get(Self::payouts_range),
@@ -325,7 +326,7 @@ impl Server {
     ) -> ServerResult<Response> {
         Ok(Json(
             database
-                .get_payouts(blockheight.try_into().unwrap(), "no filter address".into())
+                .get_pending_payouts(blockheight.try_into().unwrap())
                 .await?,
         )
         .into_response())
@@ -411,6 +412,25 @@ impl Server {
                 )
                 .await?,
         )
+        .into_response())
+    }
+
+    pub(crate) async fn update_payout_status(
+        Extension(database): Extension<Database>,
+        Json(request): Json<database::UpdatePayoutStatusRequest>,
+    ) -> ServerResult<Response> {
+        let rows_affected = database
+            .update_payout_status(
+                &request.payout_ids,
+                &request.status,
+                request.failure_reason.as_deref(),
+            )
+            .await?;
+
+        Ok(Json(json!({
+            "status": "OK",
+            "rows_affected": rows_affected,
+        }))
         .into_response())
     }
 

@@ -236,7 +236,7 @@ async fn test_payout_distribution_proportional_to_diff() {
     let (username_b, amount_b, diff_b) = &payouts[1];
     assert_eq!(username_b, "user_b");
     assert_eq!(*diff_b, 2000);
-    assert_eq!(*amount_b, 199999999); // rounded down as we can't pay partial sats
+    assert_eq!(*amount_b, 199999999, "FLOOR should round down");
 
     let (username_c, amount_c, diff_c) = &payouts[2];
     assert_eq!(username_c, "user_c");
@@ -668,4 +668,502 @@ async fn test_multiple_users_with_finder_exclusion() {
     assert_eq!(other_payouts[2].3, 3000);
 
     pool.close().await;
+}
+
+#[tokio::test]
+async fn test_get_pending_payouts_groups_by_address() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
+
+    insert_test_account(
+        db_url.clone(),
+        "user_a",
+        Some("shared@ln.com"),
+        vec![],
+        5000,
+    )
+    .await
+    .unwrap();
+    insert_test_account(
+        db_url.clone(),
+        "user_b",
+        Some("shared@ln.com"),
+        vec![],
+        3000,
+    )
+    .await
+    .unwrap();
+    insert_test_account(
+        db_url.clone(),
+        "user_c",
+        Some("unique@ln.com"),
+        vec![],
+        2000,
+    )
+    .await
+    .unwrap();
+
+    let mut test_block = create_test_block(800012);
+    test_block.coinbasevalue = Some(1000000000);
+    test_block.username = Some("finder".to_string());
+
+    let batch = ShareBatch {
+        block: Some(test_block.clone()),
+        shares: vec![],
+        hostname: "test-node".to_string(),
+        batch_id: BATCH_COUNTER.fetch_add(1, Ordering::SeqCst) as u64,
+        total_shares: 0,
+        start_id: 1,
+        end_id: 1,
+    };
+
+    let _response: SyncResponse = server.post_json("/sync/batch", &batch).await;
+
+    use para::subcommand::server::database::PendingPayout;
+    let pending: Vec<PendingPayout> = server.get_json_async("/payouts/800012").await;
+
+    assert_eq!(pending.len(), 2, "Should have 2 grouped payouts");
+
+    let shared_payout = pending
+        .iter()
+        .find(|p| p.ln_address == "shared@ln.com")
+        .expect("Should have payout for shared@ln.com");
+
+    assert_eq!(
+        shared_payout.payout_ids.len(),
+        2,
+        "Should combine 2 payouts for shared address"
+    );
+    assert!(shared_payout.amount_sats > 0, "Should have combined amount");
+
+    let unique_payout = pending
+        .iter()
+        .find(|p| p.ln_address == "unique@ln.com")
+        .expect("Should have payout for unique@ln.com");
+
+    assert_eq!(
+        unique_payout.payout_ids.len(),
+        1,
+        "Should have 1 payout for unique address"
+    );
+    assert!(unique_payout.amount_sats > 0, "Should have amount");
+
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn test_get_pending_payouts_excludes_success_status() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
+
+    insert_test_account(db_url.clone(), "user_1", Some("user1@ln.com"), vec![], 3000)
+        .await
+        .unwrap();
+    insert_test_account(db_url.clone(), "user_2", Some("user2@ln.com"), vec![], 2000)
+        .await
+        .unwrap();
+
+    let mut test_block = create_test_block(800013);
+    test_block.coinbasevalue = Some(500000000);
+    test_block.username = Some("finder".to_string());
+
+    let batch = ShareBatch {
+        block: Some(test_block.clone()),
+        shares: vec![],
+        hostname: "test-node".to_string(),
+        batch_id: BATCH_COUNTER.fetch_add(1, Ordering::SeqCst) as u64,
+        total_shares: 0,
+        start_id: 1,
+        end_id: 1,
+    };
+
+    let _response: SyncResponse = server.post_json("/sync/batch", &batch).await;
+
+    let payout_id: i64 = sqlx::query_scalar(
+        "SELECT p.id FROM payouts p
+         JOIN accounts a ON p.account_id = a.id
+         WHERE a.username = 'user_1' LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query("UPDATE payouts SET status = 'success' WHERE id = $1")
+        .bind(payout_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    use para::subcommand::server::database::PendingPayout;
+    let pending: Vec<PendingPayout> = server.get_json_async("/payouts/800013").await;
+
+    assert_eq!(
+        pending.len(),
+        1,
+        "Should only return pending/failure payouts"
+    );
+    assert_eq!(
+        pending[0].ln_address, "user2@ln.com",
+        "Should only have user_2's payout"
+    );
+
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn test_get_pending_payouts_includes_failure_status() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
+
+    insert_test_account(
+        db_url.clone(),
+        "retry_user",
+        Some("retry@ln.com"),
+        vec![],
+        4000,
+    )
+    .await
+    .unwrap();
+
+    let mut test_block = create_test_block(800014);
+    test_block.coinbasevalue = Some(400000000);
+    test_block.username = Some("finder".to_string());
+
+    let batch = ShareBatch {
+        block: Some(test_block.clone()),
+        shares: vec![],
+        hostname: "test-node".to_string(),
+        batch_id: BATCH_COUNTER.fetch_add(1, Ordering::SeqCst) as u64,
+        total_shares: 0,
+        start_id: 1,
+        end_id: 1,
+    };
+
+    let _response: SyncResponse = server.post_json("/sync/batch", &batch).await;
+
+    sqlx::query(
+        "UPDATE payouts SET status = 'failure', failure_reason = 'Network timeout'
+         WHERE blockheight_end = 800014",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    use para::subcommand::server::database::PendingPayout;
+    let pending: Vec<PendingPayout> = server.get_json_async("/payouts/800014").await;
+
+    assert_eq!(pending.len(), 1, "Should include failed payouts for retry");
+    assert_eq!(pending[0].ln_address, "retry@ln.com");
+
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn test_get_pending_payouts_excludes_no_ln_address() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
+
+    insert_test_account(db_url.clone(), "has_ln", Some("hasln@ln.com"), vec![], 3000)
+        .await
+        .unwrap();
+    insert_test_account(db_url.clone(), "no_ln", None, vec![], 2000)
+        .await
+        .unwrap();
+
+    let mut test_block = create_test_block(800015);
+    test_block.coinbasevalue = Some(500000000);
+    test_block.username = Some("finder".to_string());
+
+    let batch = ShareBatch {
+        block: Some(test_block.clone()),
+        shares: vec![],
+        hostname: "test-node".to_string(),
+        batch_id: BATCH_COUNTER.fetch_add(1, Ordering::SeqCst) as u64,
+        total_shares: 0,
+        start_id: 1,
+        end_id: 1,
+    };
+
+    let _response: SyncResponse = server.post_json("/sync/batch", &batch).await;
+
+    use para::subcommand::server::database::PendingPayout;
+    let pending: Vec<PendingPayout> = server.get_json_async("/payouts/800015").await;
+
+    assert_eq!(
+        pending.len(),
+        1,
+        "Should exclude accounts without LN address"
+    );
+    assert_eq!(pending[0].ln_address, "hasln@ln.com");
+
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn test_update_payout_status_to_success() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
+
+    insert_test_account(
+        db_url.clone(),
+        "payout_user",
+        Some("pay@ln.com"),
+        vec![],
+        5000,
+    )
+    .await
+    .unwrap();
+
+    let mut test_block = create_test_block(800016);
+    test_block.coinbasevalue = Some(600000000);
+    test_block.username = Some("finder".to_string());
+
+    let batch = ShareBatch {
+        block: Some(test_block.clone()),
+        shares: vec![],
+        hostname: "test-node".to_string(),
+        batch_id: BATCH_COUNTER.fetch_add(1, Ordering::SeqCst) as u64,
+        total_shares: 0,
+        start_id: 1,
+        end_id: 1,
+    };
+
+    let _response: SyncResponse = server.post_json("/sync/batch", &batch).await;
+
+    let payout_id: i64 = sqlx::query_scalar(
+        "SELECT id FROM payouts WHERE blockheight_end = 800016 AND status = 'pending' LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    use para::subcommand::server::database::UpdatePayoutStatusRequest;
+    let update_request = UpdatePayoutStatusRequest {
+        payout_ids: vec![payout_id],
+        status: "success".to_string(),
+        failure_reason: None,
+    };
+
+    let response: serde_json::Value = server.post_json("/payouts/update", &update_request).await;
+
+    assert_eq!(response["status"], "OK");
+    assert_eq!(response["rows_affected"], 1);
+
+    let status: String = sqlx::query_scalar("SELECT status FROM payouts WHERE id = $1")
+        .bind(payout_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(status, "success");
+
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn test_update_payout_status_to_failure_with_reason() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
+
+    insert_test_account(
+        db_url.clone(),
+        "fail_user",
+        Some("fail@ln.com"),
+        vec![],
+        3000,
+    )
+    .await
+    .unwrap();
+
+    let mut test_block = create_test_block(800017);
+    test_block.coinbasevalue = Some(400000000);
+    test_block.username = Some("finder".to_string());
+
+    let batch = ShareBatch {
+        block: Some(test_block.clone()),
+        shares: vec![],
+        hostname: "test-node".to_string(),
+        batch_id: BATCH_COUNTER.fetch_add(1, Ordering::SeqCst) as u64,
+        total_shares: 0,
+        start_id: 1,
+        end_id: 1,
+    };
+
+    let _response: SyncResponse = server.post_json("/sync/batch", &batch).await;
+
+    let payout_id: i64 = sqlx::query_scalar(
+        "SELECT id FROM payouts WHERE blockheight_end = 800017 AND status = 'pending' LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    use para::subcommand::server::database::UpdatePayoutStatusRequest;
+    let update_request = UpdatePayoutStatusRequest {
+        payout_ids: vec![payout_id],
+        status: "failure".to_string(),
+        failure_reason: Some("Lightning network unreachable".to_string()),
+    };
+
+    let response: serde_json::Value = server.post_json("/payouts/update", &update_request).await;
+
+    assert_eq!(response["status"], "OK");
+    assert_eq!(response["rows_affected"], 1);
+
+    let (status, failure_reason): (String, Option<String>) =
+        sqlx::query_as("SELECT status, failure_reason FROM payouts WHERE id = $1")
+            .bind(payout_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    assert_eq!(status, "failure");
+    assert_eq!(
+        failure_reason,
+        Some("Lightning network unreachable".to_string())
+    );
+
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn test_update_multiple_payout_status() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
+
+    insert_test_account(
+        db_url.clone(),
+        "multi_1",
+        Some("multi1@ln.com"),
+        vec![],
+        2000,
+    )
+    .await
+    .unwrap();
+    insert_test_account(
+        db_url.clone(),
+        "multi_2",
+        Some("multi2@ln.com"),
+        vec![],
+        3000,
+    )
+    .await
+    .unwrap();
+    insert_test_account(
+        db_url.clone(),
+        "multi_3",
+        Some("multi3@ln.com"),
+        vec![],
+        1000,
+    )
+    .await
+    .unwrap();
+
+    let mut test_block = create_test_block(800018);
+    test_block.coinbasevalue = Some(600000000);
+    test_block.username = Some("finder".to_string());
+
+    let batch = ShareBatch {
+        block: Some(test_block.clone()),
+        shares: vec![],
+        hostname: "test-node".to_string(),
+        batch_id: BATCH_COUNTER.fetch_add(1, Ordering::SeqCst) as u64,
+        total_shares: 0,
+        start_id: 1,
+        end_id: 1,
+    };
+
+    let _response: SyncResponse = server.post_json("/sync/batch", &batch).await;
+
+    let payout_ids: Vec<i64> = sqlx::query_scalar(
+        "SELECT id FROM payouts WHERE blockheight_end = 800018 AND status = 'pending'",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+
+    assert!(payout_ids.len() >= 3, "Should have at least 3 payouts");
+
+    use para::subcommand::server::database::UpdatePayoutStatusRequest;
+    let update_request = UpdatePayoutStatusRequest {
+        payout_ids: payout_ids.clone(),
+        status: "processing".to_string(),
+        failure_reason: None,
+    };
+
+    let response: serde_json::Value = server.post_json("/payouts/update", &update_request).await;
+
+    assert_eq!(response["status"], "OK");
+    assert_eq!(
+        response["rows_affected"],
+        payout_ids.len() as u64,
+        "Should update all payouts"
+    );
+
+    let processing_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM payouts WHERE blockheight_end = 800018 AND status = 'processing'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(processing_count, payout_ids.len() as i64);
+
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn test_update_payout_status_empty_list() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    use para::subcommand::server::database::UpdatePayoutStatusRequest;
+    let update_request = UpdatePayoutStatusRequest {
+        payout_ids: vec![],
+        status: "success".to_string(),
+        failure_reason: None,
+    };
+
+    let response: serde_json::Value = server.post_json("/payouts/update", &update_request).await;
+
+    assert_eq!(response["status"], "OK");
+    assert_eq!(response["rows_affected"], 0);
+}
+
+#[tokio::test]
+async fn test_get_pending_payouts_empty_block() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    use para::subcommand::server::database::PendingPayout;
+    let pending: Vec<PendingPayout> = server.get_json_async("/payouts/999999").await;
+
+    assert_eq!(
+        pending.len(),
+        0,
+        "Should return empty list for non-existent block"
+    );
 }
