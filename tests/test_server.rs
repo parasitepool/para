@@ -83,6 +83,7 @@ impl TestServer {
             _ => None,
         };
         let pg_db = PgTempDB::from_builder(PgTempDBBuilder {
+            initdb_args: Default::default(),
             temp_dir_prefix: None,
             db_user: None,
             password: None,
