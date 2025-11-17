@@ -171,6 +171,7 @@ impl Server {
                 }
 
                 let db_router = Router::new()
+                    .route("/payouts", get(Self::payouts_all))
                     .route("/payouts/{blockheight}", get(Self::payouts))
                     .route("/payouts/update", post(Self::update_payout_status))
                     .route(
@@ -320,13 +321,19 @@ impl Server {
         })
     }
 
+    pub(crate) async fn payouts_all(
+        Extension(database): Extension<Database>,
+    ) -> ServerResult<Response> {
+        Ok(Json(database.get_pending_payouts().await?).into_response())
+    }
+
     pub(crate) async fn payouts(
         Path(blockheight): Path<u32>,
         Extension(database): Extension<Database>,
     ) -> ServerResult<Response> {
         Ok(Json(
             database
-                .get_pending_payouts(blockheight.try_into().unwrap())
+                .get_payouts(blockheight.try_into().unwrap(), "no filter address".into())
                 .await?,
         )
         .into_response())

@@ -388,7 +388,7 @@ impl Database {
         Ok(result as u64)
     }
 
-    pub async fn get_pending_payouts(&self, blockheight: i32) -> Result<Vec<PendingPayout>> {
+    pub async fn get_pending_payouts(&self) -> Result<Vec<PendingPayout>> {
         #[derive(sqlx::FromRow)]
         struct PayoutRow {
             payout_id: i64,
@@ -404,14 +404,12 @@ impl Database {
                 p.amount
             FROM payouts p
             JOIN accounts a ON p.account_id = a.id
-            WHERE p.blockheight_end = $1
-                AND p.status IN ('pending', 'failure')
+            WHERE p.status IN ('pending', 'failure')
                 AND a.lnurl IS NOT NULL
                 AND a.lnurl != ''
             ORDER BY a.lnurl, p.id
             ",
         )
-        .bind(blockheight)
         .fetch_all(&self.pool)
         .await
         .map_err(|err| anyhow!(err))?;
