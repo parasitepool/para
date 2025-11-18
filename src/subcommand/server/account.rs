@@ -7,6 +7,12 @@ pub struct Account {
     pub past_ln_addresses: Vec<String>,
     pub total_diff: i64,
     pub last_updated: Option<String>,
+    pub metadata: Option<AccountMetadata>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+pub struct AccountMetadata {
+    ord_address: String,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
@@ -42,7 +48,10 @@ pub(crate) async fn account_lookup(
         .get_account(&address)
         .await?
         .ok_or_not_found(|| "Account")
-        .map(Json)
+        .map(|mut account| {
+            account.past_ln_addresses.sort();
+            Json(account)
+        })
         .map(IntoResponse::into_response)
 }
 

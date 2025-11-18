@@ -480,7 +480,16 @@ impl Database {
         .map_err(|err| anyhow!("Database query failed: {err}"))
     }
 
-    pub(crate) async fn upsert_block(&self, block: &FoundBlockRecord) -> Result<()> {
+    pub(crate) async fn upsert_block(&self, block: &FoundBlockRecord) -> Result<bool> {
+        let existing_block =
+            sqlx::query_scalar::<_, Option<i32>>("SELECT id FROM blocks WHERE blockheight = $1")
+                .bind(block.blockheight)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| anyhow!("Failed to check existing block: {e}"))?;
+
+        let was_inserted = existing_block.is_none();
+
         sqlx::query(
             "INSERT INTO blocks (
             blockheight, blockhash, confirmed, workername, username,
@@ -493,7 +502,11 @@ impl Database {
             username = EXCLUDED.username,
             diff = EXCLUDED.diff,
             coinbasevalue = EXCLUDED.coinbasevalue,
-            rewards_processed = EXCLUDED.rewards_processed",
+            rewards_processed = EXCLUDED.rewards_processed
+        WHERE blocks.blockheight = EXCLUDED.blockheight
+            AND (blocks.blockhash IS DISTINCT FROM EXCLUDED.blockhash
+                OR blocks.confirmed IS DISTINCT FROM EXCLUDED.confirmed
+                OR blocks.coinbasevalue IS DISTINCT FROM EXCLUDED.coinbasevalue)",
         )
         .bind(block.blockheight)
         .bind(&block.blockhash)
@@ -505,7 +518,108 @@ impl Database {
         .bind(block.rewards_processed)
         .execute(&self.pool)
         .await
-        .map_err(|e| anyhow!("Failed to upsert block: {e}"))?;
+        .map_err(|e| anyhow!("Failed to upsert block: {e}"))?
+        .rows_affected();
+
+        if was_inserted && let Some(coinbasevalue) = block.coinbasevalue {
+            self.populate_payouts_for_block(
+                block.blockheight,
+                coinbasevalue,
+                block.username.as_deref(),
+            )
+            .await?;
+        }
+
+        Ok(was_inserted)
+    }
+
+    pub(crate) async fn populate_payouts_for_block(
+        &self,
+        blockheight: i32,
+        total_reward: i64,
+        finder_username: Option<&str>,
+    ) -> Result<()> {
+        let prev_blockheight = sqlx::query_scalar::<_, Option<i32>>(
+            "SELECT MAX(blockheight) FROM blocks WHERE blockheight < $1",
+        )
+        .bind(blockheight)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| anyhow!("Failed to get previous block height: {e}"))?
+        .unwrap_or(0);
+
+        sqlx::query(
+            "
+            WITH eligible_accounts AS (
+                SELECT
+                    a.id as account_id,
+                    a.username,
+                    a.total_diff,
+                    COALESCE(SUM(p.diff_paid), 0) as already_paid_diff
+                FROM accounts a
+                LEFT JOIN payouts p ON p.account_id = a.id
+                    AND p.status != 'cancelled'
+                GROUP BY a.id, a.username, a.total_diff
+            ),
+            payable_accounts AS (
+                SELECT
+                    account_id,
+                    username,
+                    total_diff - already_paid_diff as unpaid_diff
+                FROM eligible_accounts
+                WHERE total_diff - already_paid_diff > 0
+                    AND username != COALESCE($4, '')
+            ),
+            total_unpaid AS (
+                SELECT SUM(unpaid_diff) as total_diff
+                FROM payable_accounts
+            ),
+            finder_account AS (
+                SELECT
+                    a.id as account_id,
+                    a.username,
+                    a.total_diff,
+                    COALESCE(SUM(p.diff_paid), 0) as already_paid_diff
+                FROM accounts a
+                LEFT JOIN payouts p ON p.account_id = a.id
+                    AND p.status != 'cancelled'
+                WHERE a.username = $4
+                GROUP BY a.id, a.username, a.total_diff
+                HAVING a.total_diff - COALESCE(SUM(p.diff_paid), 0) > 0
+            )
+            INSERT INTO payouts (account_id, amount, diff_paid, blockheight_start, blockheight_end, status)
+            SELECT
+                pa.account_id,
+                CASE
+                    WHEN tu.total_diff > 0
+                    THEN FLOOR((pa.unpaid_diff::NUMERIC / tu.total_diff::NUMERIC) * $3)::BIGINT
+                    ELSE 0
+                END as amount,
+                pa.unpaid_diff as diff_paid,
+                $2 as blockheight_start,
+                $1 as blockheight_end,
+                'pending' as status
+            FROM payable_accounts pa
+            CROSS JOIN total_unpaid tu
+            WHERE tu.total_diff > 0
+            UNION ALL
+            SELECT
+                fa.account_id,
+                0 as amount,
+                fa.total_diff - fa.already_paid_diff as diff_paid,
+                $2 as blockheight_start,
+                $1 as blockheight_end,
+                'success' as status
+            FROM finder_account fa
+            ",
+        )
+            .bind(blockheight)
+            .bind(prev_blockheight)
+            .bind(total_reward)
+            .bind(finder_username.unwrap_or(""))
+            .execute(&self.pool)
+            .await
+            .map_err(|e| anyhow!("Failed to populate payouts: {e}"))?;
 
         Ok(())
     }
