@@ -6,3 +6,4 @@ docs/build
 docs/tmp
 logs
 target
+.idea

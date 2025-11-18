@@ -79,7 +79,7 @@ tempfile = "3.23.0"
 urlencoding = "2.1.3"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
-pgtemp = "0.6.0"
+pgtemp = "0.7.1"
 
 [[bin]]
 name = "para"
