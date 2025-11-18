@@ -321,14 +321,6 @@ fn aggregate_users_with_auth_with_api_token() {
         pretty_assert_eq!(response, *user);
     }
 
-    for (address, user) in users.iter() {
-        let response = aggregator.get_json::<User>(
-            format!("/aggregator/users/{address}"),
-            Some("crazysecrettoken"),
-        );
-        pretty_assert_eq!(response, *user);
-    }
-
     let users_response =
         aggregator.get_json::<Vec<String>>("/aggregator/users", Some("crazysecrettoken"));
 
