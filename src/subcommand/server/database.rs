@@ -312,6 +312,7 @@ impl Database {
             past_ln_addresses: raw.past_lnurls.0,
             total_diff: raw.total_diff,
             last_updated: raw.last_updated,
+            metadata: None,
         }))
     }
 
