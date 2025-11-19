@@ -93,9 +93,6 @@ impl Template {
                         }
                     }
                 }
-                _ = sleep(Duration::from_millis(100)) => {
-                    // Continue loop
-                }
             }
         }
 
