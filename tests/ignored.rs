@@ -3,7 +3,7 @@ use {super::*, tokio_util::sync::CancellationToken};
 // These tests either call some scripts that are not available in CI yet or are
 // a bit too expensive so marking them as ignored for now.
 
-// #[test]
+#[test]
 #[ignore]
 fn concurrently_listening_workers_receive_new_templates_on_new_block() {
     let pool = TestPool::spawn();
