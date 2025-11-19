@@ -64,7 +64,7 @@ where
         loop {
             tokio::select! {
                 _ = cancel_token.cancelled() => {
-                    info!("Connection with {} shutting down due to cancellation", self.worker);
+                    info!("Disconnecting from {}", self.worker);
                     break;
                 }
                 message = self.read_message() => {
