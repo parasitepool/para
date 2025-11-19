@@ -58,8 +58,9 @@ impl Subcommand {
                 let server_result = server.run(handle, cancel_token).await;
 
                 if let Some(task) = sync_task {
-                    task.abort();
+                    info!("Waiting for sync task to finish...");
                     let _ = task.await;
+                    info!("Sync task finished");
                 }
 
                 server_result

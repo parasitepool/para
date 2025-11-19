@@ -140,46 +140,62 @@ impl Sync {
 
         info!("Starting sync send from ID: {current_id}");
 
-        while !cancel_token.is_cancelled() {
-            match self.sync_batch(&database, &client, &mut current_id).await {
-                Ok(SyncResult::Complete) => {
-                    if !self.terminate_when_complete {
-                        if !caught_up_logged {
-                            info!("Sync send caught up, waiting for new data...");
-                            caught_up_logged = true;
+        loop {
+            tokio::select! {
+                _ = cancel_token.cancelled() => {
+                    info!("Sync send stopped due to shutdown signal");
+                    break;
+                }
+                result = self.sync_batch(&database, &client, &mut current_id) => {
+                    match result {
+                        Ok(SyncResult::Complete) => {
+                            if !self.terminate_when_complete {
+                                if !caught_up_logged {
+                                    info!("Sync send caught up, waiting for new data...");
+                                    caught_up_logged = true;
+                                }
+                                tokio::select! {
+                                    _ = cancel_token.cancelled() => break,
+                                    _ = sleep(Duration::from_millis(SYNC_DELAY_MS)) => {}
+                                }
+                            } else {
+                                info!("Sync send completed successfully");
+                                break;
+                            }
                         }
-                        sleep(Duration::from_millis(SYNC_DELAY_MS)).await;
-                    } else {
-                        info!("Sync send completed successfully");
-                        break;
+                        Ok(SyncResult::Continue) => {
+                            caught_up_logged = false;
+                            tokio::select! {
+                                _ = cancel_token.cancelled() => break,
+                                _ = sleep(Duration::from_millis(SYNC_DELAY_MS)) => {}
+                            }
+                        }
+                        Ok(SyncResult::WaitForNewBlock) => {
+                            if self.terminate_when_complete {
+                                info!("Sync send completed successfully");
+                                break;
+                            }
+                            if !caught_up_logged {
+                                info!(
+                                    "Current and latest records have same blockheight, waiting for new block..."
+                                );
+                                caught_up_logged = true;
+                            }
+                            tokio::select! {
+                                _ = cancel_token.cancelled() => break,
+                                _ = sleep(Duration::from_millis(BLOCKHEIGHT_CHECK_DELAY_MS)) => {}
+                            }
+                        }
+                        Err(e) => {
+                            error!("Sync send error: {e}");
+                            tokio::select! {
+                                _ = cancel_token.cancelled() => break,
+                                _ = sleep(Duration::from_millis(SYNC_DELAY_MS * 5)) => {}
+                            }
+                        }
                     }
-                }
-                Ok(SyncResult::Continue) => {
-                    caught_up_logged = false;
-                    sleep(Duration::from_millis(SYNC_DELAY_MS)).await;
-                }
-                Ok(SyncResult::WaitForNewBlock) => {
-                    if self.terminate_when_complete {
-                        info!("Sync send completed successfully");
-                        break;
-                    }
-                    if !caught_up_logged {
-                        info!(
-                            "Current and latest records have same blockheight, waiting for new block..."
-                        );
-                        caught_up_logged = true;
-                    }
-                    sleep(Duration::from_millis(BLOCKHEIGHT_CHECK_DELAY_MS)).await;
-                }
-                Err(e) => {
-                    error!("Sync send error: {e}");
-                    sleep(Duration::from_millis(SYNC_DELAY_MS * 5)).await;
                 }
             }
-        }
-
-        if cancel_token.is_cancelled() {
-            info!("Sync send stopped due to shutdown signal");
         }
 
         Ok(())

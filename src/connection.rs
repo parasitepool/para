@@ -17,6 +17,7 @@ pub(crate) struct Connection<R, W> {
     reader: FramedRead<R, LinesCodec>,
     writer: FramedWrite<W, LinesCodec>,
     template_receiver: watch::Receiver<Arc<BlockTemplate>>,
+    cancel_token: CancellationToken,
     jobs: Jobs,
     state: State,
     address: Option<Address>,
@@ -37,6 +38,7 @@ where
         reader: R,
         writer: W,
         template_receiver: watch::Receiver<Arc<BlockTemplate>>,
+        cancel_token: CancellationToken,
     ) -> Self {
         Self {
             config,
@@ -44,6 +46,7 @@ where
             reader: FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_MESSAGE_SIZE)),
             writer: FramedWrite::new(writer, LinesCodec::new()),
             template_receiver,
+            cancel_token,
             jobs: Jobs::new(),
             state: State::Init,
             address: None,
@@ -56,9 +59,14 @@ where
 
     pub(crate) async fn serve(&mut self) -> Result {
         let mut template_receiver = self.template_receiver.clone();
+        let cancel_token = self.cancel_token.clone();
 
         loop {
             tokio::select! {
+                _ = cancel_token.cancelled() => {
+                    info!("Connection with {} shutting down due to cancellation", self.worker);
+                    break;
+                }
                 message = self.read_message() => {
                     let Some(message) = message? else {
                         error!("Error reading message in connection serve");

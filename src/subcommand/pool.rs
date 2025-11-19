@@ -21,6 +21,8 @@ impl Pool {
 
         eprintln!("Listening on {address}:{port}");
 
+        let mut connection_tasks = JoinSet::new();
+
         loop {
             tokio::select! {
                 Ok((stream, worker)) = listener.accept() => {
@@ -32,9 +34,10 @@ impl Pool {
 
                     let template_receiver = template_receiver.clone();
                     let config = config.clone();
+                    let conn_cancel_token = cancel_token.child_token();
 
-                    tokio::task::spawn(async move {
-                        let mut conn = Connection::new(config, worker, reader, writer, template_receiver);
+                    connection_tasks.spawn(async move {
+                        let mut conn = Connection::new(config, worker, reader, writer, template_receiver, conn_cancel_token);
 
                         if let Err(err) = conn.serve().await {
                             error!("Worker connection error: {err}")
@@ -48,6 +51,13 @@ impl Pool {
                     }
             }
         }
+
+        info!(
+            "Waiting for {} active connections to close...",
+            connection_tasks.len()
+        );
+        while connection_tasks.join_next().await.is_some() {}
+        info!("All connections closed");
 
         Ok(())
     }
