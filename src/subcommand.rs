@@ -24,14 +24,13 @@ pub(crate) enum Subcommand {
 }
 
 impl Subcommand {
-    pub(crate) fn run(self, cancel_token: CancellationToken) -> Result {
+    pub(crate) async fn run(self, cancel_token: CancellationToken) -> Result {
         match self {
-            Self::Miner(miner) => Runtime::new()?.block_on(async { miner.run(cancel_token).await }),
-            Self::Ping(ping) => Runtime::new()?.block_on(async { ping.run(cancel_token).await }),
-            Self::Pool(pool) => Runtime::new()?.block_on(async { pool.run(cancel_token).await }),
+            Self::Miner(miner) => miner.run(cancel_token).await,
+            Self::Ping(ping) => ping.run(cancel_token).await,
+            Self::Pool(pool) => pool.run(cancel_token).await,
             Self::Server(server) => {
                 let handle = Handle::new();
-                let rt = Runtime::new()?;
 
                 let mut sync_task = None;
 
@@ -46,33 +45,27 @@ impl Subcommand {
                         }
 
                         let sync_cancel_token = cancel_token.clone();
-                        let send_task = rt.spawn_blocking(move || {
-                            Runtime::new()
-                                .expect("Failed to create sync send runtime")
-                                .block_on(async {
-                                    if let Err(e) = sync.run(sync_cancel_token).await {
-                                        error!("SyncSend failed: {}", e);
-                                    }
-                                });
+                        let send_task = tokio::spawn(async move {
+                            if let Err(e) = sync.run(sync_cancel_token).await {
+                                error!("SyncSend failed: {}", e);
+                            }
                         });
                         sync_task = Some(send_task);
                         info!("Started sync to endpoint: {sync_endpoint}");
                     }
                 }
 
-                let server_result = rt.block_on(async { server.run(handle, cancel_token).await });
+                let server_result = server.run(handle, cancel_token).await;
 
                 if let Some(task) = sync_task {
                     task.abort();
-                    let _ = rt.block_on(task);
+                    let _ = task.await;
                 }
 
                 server_result
             }
-            Self::Sync(sync) => Runtime::new()?.block_on(async { sync.run(cancel_token).await }),
-            Self::Template(template) => {
-                Runtime::new()?.block_on(async { template.run(cancel_token).await })
-            }
+            Self::Sync(sync) => sync.run(cancel_token).await,
+            Self::Template(template) => template.run(cancel_token).await,
         }
     }
 }

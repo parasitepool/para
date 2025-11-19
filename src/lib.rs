@@ -172,23 +172,26 @@ pub fn main() {
 
     let args = Arguments::parse();
 
-    let rt = Runtime::new().expect("Failed to create runtime");
-    let cancel_token = rt.block_on(async { signal::setup_signal_handler() });
+    Runtime::new()
+        .expect("Failed to create runtime")
+        .block_on(async {
+            let cancel_token = signal::setup_signal_handler();
 
-    match args.run(cancel_token) {
-        Err(err) => {
-            error!("error: {err}");
+            match args.run(cancel_token).await {
+                Err(err) => {
+                    error!("error: {err}");
 
-            if env::var_os("RUST_BACKTRACE")
-                .map(|val| val == "1")
-                .unwrap_or_default()
-            {
-                error!("{}", err.backtrace());
+                    if env::var_os("RUST_BACKTRACE")
+                        .map(|val| val == "1")
+                        .unwrap_or_default()
+                    {
+                        error!("{}", err.backtrace());
+                    }
+                    process::exit(1);
+                }
+                Ok(_) => {
+                    process::exit(0);
+                }
             }
-            process::exit(1);
-        }
-        Ok(_) => {
-            process::exit(0);
-        }
-    }
+        });
 }
