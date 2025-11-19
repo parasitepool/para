@@ -120,7 +120,7 @@ enum SyncResult {
 }
 
 impl Sync {
-    pub async fn run(self, cancel_token: CancellationToken) -> Result<()> {
+    pub async fn run(self, cancel_token: CancellationToken) -> Result {
         info!("Starting HTTP share sync send...");
         if !self.terminate_when_complete {
             info!("Keep-alive mode enabled - will continue running even when caught up");
