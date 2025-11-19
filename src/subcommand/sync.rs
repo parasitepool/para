@@ -141,58 +141,67 @@ impl Sync {
         info!("Starting sync send from ID: {current_id}");
 
         loop {
-            tokio::select! {
-                _ = cancel_token.cancelled() => {
-                    info!("Sync send stopped due to shutdown signal");
-                    break;
+            if cancel_token.is_cancelled() {
+                info!("Sync send stopped due to shutdown signal");
+                break;
+            }
+
+            match self.sync_batch(&database, &client, &mut current_id).await {
+                Ok(SyncResult::Complete) => {
+                    if !self.terminate_when_complete {
+                        if !caught_up_logged {
+                            info!("Sync send caught up, waiting for new data...");
+                            caught_up_logged = true;
+                        }
+                        tokio::select! {
+                            _ = cancel_token.cancelled() => {
+                                info!("Sync send stopped due to shutdown signal");
+                                break;
+                            }
+                            _ = sleep(Duration::from_millis(SYNC_DELAY_MS)) => {}
+                        }
+                    } else {
+                        info!("Sync send completed successfully");
+                        break;
+                    }
                 }
-                result = self.sync_batch(&database, &client, &mut current_id) => {
-                    match result {
-                        Ok(SyncResult::Complete) => {
-                            if !self.terminate_when_complete {
-                                if !caught_up_logged {
-                                    info!("Sync send caught up, waiting for new data...");
-                                    caught_up_logged = true;
-                                }
-                                tokio::select! {
-                                    _ = cancel_token.cancelled() => break,
-                                    _ = sleep(Duration::from_millis(SYNC_DELAY_MS)) => {}
-                                }
-                            } else {
-                                info!("Sync send completed successfully");
-                                break;
-                            }
+                Ok(SyncResult::Continue) => {
+                    caught_up_logged = false;
+                    tokio::select! {
+                        _ = cancel_token.cancelled() => {
+                            info!("Sync send stopped due to shutdown signal");
+                            break;
                         }
-                        Ok(SyncResult::Continue) => {
-                            caught_up_logged = false;
-                            tokio::select! {
-                                _ = cancel_token.cancelled() => break,
-                                _ = sleep(Duration::from_millis(SYNC_DELAY_MS)) => {}
-                            }
+                        _ = sleep(Duration::from_millis(SYNC_DELAY_MS)) => {}
+                    }
+                }
+                Ok(SyncResult::WaitForNewBlock) => {
+                    if self.terminate_when_complete {
+                        info!("Sync send completed successfully");
+                        break;
+                    }
+                    if !caught_up_logged {
+                        info!(
+                            "Current and latest records have same blockheight, waiting for new block..."
+                        );
+                        caught_up_logged = true;
+                    }
+                    tokio::select! {
+                        _ = cancel_token.cancelled() => {
+                            info!("Sync send stopped due to shutdown signal");
+                            break;
                         }
-                        Ok(SyncResult::WaitForNewBlock) => {
-                            if self.terminate_when_complete {
-                                info!("Sync send completed successfully");
-                                break;
-                            }
-                            if !caught_up_logged {
-                                info!(
-                                    "Current and latest records have same blockheight, waiting for new block..."
-                                );
-                                caught_up_logged = true;
-                            }
-                            tokio::select! {
-                                _ = cancel_token.cancelled() => break,
-                                _ = sleep(Duration::from_millis(BLOCKHEIGHT_CHECK_DELAY_MS)) => {}
-                            }
+                        _ = sleep(Duration::from_millis(BLOCKHEIGHT_CHECK_DELAY_MS)) => {}
+                    }
+                }
+                Err(e) => {
+                    error!("Sync send error: {e}");
+                    tokio::select! {
+                        _ = cancel_token.cancelled() => {
+                            info!("Sync send stopped due to shutdown signal");
+                            break;
                         }
-                        Err(e) => {
-                            error!("Sync send error: {e}");
-                            tokio::select! {
-                                _ = cancel_token.cancelled() => break,
-                                _ = sleep(Duration::from_millis(SYNC_DELAY_MS * 5)) => {}
-                            }
-                        }
+                        _ = sleep(Duration::from_millis(SYNC_DELAY_MS * 5)) => {}
                     }
                 }
             }
@@ -296,7 +305,7 @@ impl Sync {
         shares: &[Share],
         start_id: i64,
         end_id: i64,
-    ) -> Result<()> {
+    ) -> Result {
         let batch_id = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_secs();
@@ -380,21 +389,22 @@ impl Sync {
     }
 
     async fn load_current_id(&self) -> Result<i64> {
-        if Path::new(&self.id_file).exists() {
-            let content = fs::read_to_string(&self.id_file)
-                .map_err(|e| anyhow!("Failed to read ID file: {}", e))?;
-            let id = content
-                .trim()
-                .parse::<i64>()
-                .map_err(|e| anyhow!("Invalid ID in file: {}", e))?;
-            Ok(id)
-        } else {
-            Ok(0)
+        match tokio::fs::read_to_string(&self.id_file).await {
+            Ok(content) => {
+                let id = content
+                    .trim()
+                    .parse::<i64>()
+                    .map_err(|e| anyhow!("Invalid ID in file: {}", e))?;
+                Ok(id)
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(0),
+            Err(e) => Err(anyhow!("Failed to read ID file: {}", e)),
         }
     }
 
-    async fn save_current_id(&self, id: i64) -> Result<()> {
-        fs::write(&self.id_file, id.to_string())
+    async fn save_current_id(&self, id: i64) -> Result {
+        tokio::fs::write(&self.id_file, id.to_string())
+            .await
             .map_err(|e| anyhow!("Failed to save ID file: {e}"))?;
         Ok(())
     }
@@ -543,7 +553,7 @@ impl Database {
         blockheight: i32,
         total_reward: i64,
         finder_username: Option<&str>,
-    ) -> Result<()> {
+    ) -> Result {
         let prev_blockheight = sqlx::query_scalar::<_, Option<i32>>(
             "SELECT MAX(blockheight) FROM blocks WHERE blockheight < $1",
         )
