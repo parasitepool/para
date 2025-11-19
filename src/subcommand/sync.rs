@@ -120,18 +120,7 @@ enum SyncResult {
 }
 
 impl Sync {
-    pub async fn run(self) -> Result<()> {
-        let shutdown_flag = Arc::new(AtomicBool::new(false));
-        let shutdown_flag_clone = shutdown_flag.clone();
-
-        // shutdown flags
-        tokio::spawn(async move {
-            let _ = ctrl_c().await;
-            info!("Received shutdown signal, stopping sync send...");
-            shutdown_flag_clone.store(true, Ordering::Relaxed);
-            process::exit(0);
-        });
-
+    pub async fn run(self, cancel_token: CancellationToken) -> Result<()> {
         info!("Starting HTTP share sync send...");
         if !self.terminate_when_complete {
             info!("Keep-alive mode enabled - will continue running even when caught up");
@@ -151,7 +140,7 @@ impl Sync {
 
         info!("Starting sync send from ID: {current_id}");
 
-        while !shutdown_flag.load(Ordering::Relaxed) {
+        while !cancel_token.is_cancelled() {
             match self.sync_batch(&database, &client, &mut current_id).await {
                 Ok(SyncResult::Complete) => {
                     if !self.terminate_when_complete {
@@ -189,7 +178,7 @@ impl Sync {
             }
         }
 
-        if shutdown_flag.load(Ordering::Relaxed) {
+        if cancel_token.is_cancelled() {
             info!("Sync send stopped due to shutdown signal");
         }
 

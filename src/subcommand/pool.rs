@@ -9,7 +9,7 @@ pub(crate) struct Pool {
 }
 
 impl Pool {
-    pub(crate) async fn run(&self) -> Result {
+    pub(crate) async fn run(&self, cancel_token: CancellationToken) -> Result {
         let config = Arc::new(self.config.clone());
         let address = config.address();
         let port = config.port();
@@ -41,7 +41,7 @@ impl Pool {
                         }
                     });
                 }
-                _ = ctrl_c() => {
+                _ = cancel_token.cancelled() => {
                         info!("Shutting down stratum server");
                         generator.shutdown().await;
                         break;

@@ -15,7 +15,7 @@ pub(crate) struct Ping {
 }
 
 impl Ping {
-    pub(crate) async fn run(&self) -> Result {
+    pub(crate) async fn run(&self, cancel_token: CancellationToken) -> Result {
         let addr = resolve_stratum_endpoint(&self.stratum_endpoint).await?;
 
         let ping_type = PingType::new(self.username.as_deref(), self.password.as_deref());
@@ -30,7 +30,7 @@ impl Ping {
 
         loop {
             tokio::select! {
-                _ = ctrl_c() => break,
+                _ = cancel_token.cancelled() => break,
                 _ = sleep(Duration::from_secs(1)) => {
                     let seq = sequence.fetch_add(1, Ordering::Relaxed);
 

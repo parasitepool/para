@@ -72,7 +72,7 @@ use {
         str::FromStr,
         sync::{
             Arc, LazyLock,
-            atomic::{AtomicBool, AtomicU64, Ordering},
+            atomic::{AtomicU64, Ordering},
         },
         thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -88,7 +88,6 @@ use {
         io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, BufWriter},
         net::{TcpListener, TcpStream, tcp::OwnedWriteHalf},
         runtime::Runtime,
-        signal::ctrl_c,
         sync::{Mutex, mpsc, oneshot, watch},
         task::{self, JoinHandle, JoinSet},
         time::{MissedTickBehavior, interval, sleep, timeout},
@@ -119,6 +118,7 @@ mod connection;
 mod generator;
 mod job;
 mod jobs;
+mod signal;
 pub mod stratum;
 pub mod subcommand;
 mod zmq;
@@ -172,7 +172,10 @@ pub fn main() {
 
     let args = Arguments::parse();
 
-    match args.run() {
+    let rt = Runtime::new().expect("Failed to create runtime");
+    let cancel_token = rt.block_on(async { signal::setup_signal_handler() });
+
+    match args.run(cancel_token) {
         Err(err) => {
             error!("error: {err}");
 

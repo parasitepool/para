@@ -38,7 +38,7 @@ pub struct Share {
 }
 
 impl Miner {
-    pub(crate) async fn run(&self) -> Result {
+    pub(crate) async fn run(&self, cancel_token: CancellationToken) -> Result {
         info!(
             "Connecting to {} with user {}",
             self.stratum_endpoint, self.username
@@ -76,7 +76,7 @@ impl Miner {
         )
         .await?;
 
-        let shares = controller.run().await?;
+        let shares = controller.run(cancel_token).await?;
 
         println!("{}", serde_json::to_string_pretty(&shares)?);
 
