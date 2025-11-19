@@ -28,22 +28,33 @@ impl Ping {
         let mut reply_count = 0;
         let mut success = false;
 
+        let mut interval = interval(Duration::from_secs(1));
+        interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        interval.tick().await;
+
         loop {
             tokio::select! {
                 _ = cancel_token.cancelled() => break,
-                _ = sleep(Duration::from_secs(1)) => {
+                _ = interval.tick() => {
                     let seq = sequence.fetch_add(1, Ordering::Relaxed);
-
                     stats.record_attempt();
 
-                    match self.ping_once(addr, &ping_type).await {
-                        Ok((duration, size)) => {
-                            success = true;
-                            stats.record_success(duration);
-                            println!("Response from {addr}: seq={seq} size={size} time={:.3}ms", duration.as_secs_f64() * 1000.0);
+                    tokio::select! {
+                        _ = cancel_token.cancelled() => {
+                            println!("Ping cancelled for seq={seq}");
+                            break;
                         }
-                        Err(e) => {
-                            println!("Request timeout for seq={seq} ({e})");
+                        result = self.ping_once(addr, &ping_type) => {
+                            match result {
+                                Ok((duration, size)) => {
+                                    success = true;
+                                    stats.record_success(duration);
+                                    println!("Response from {addr}: seq={seq} size={size} time={:.3}ms", duration.as_secs_f64() * 1000.0);
+                                }
+                                Err(e) => {
+                                    println!("Request timeout for seq={seq} ({e})");
+                                }
+                            }
                         }
                     }
 

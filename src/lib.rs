@@ -173,7 +173,7 @@ pub fn main() {
     let args = Arguments::parse();
 
     Runtime::new()
-        .expect("Failed to create runtime")
+        .expect("Failed to create tokio runtime")
         .block_on(async {
             let cancel_token = signal::setup_signal_handler();
 
