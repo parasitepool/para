@@ -273,13 +273,11 @@ where
             authorize.username, self.worker
         ))?;
 
-        let workbase = self.workbase_receiver.borrow().clone();
-
         let job = Arc::new(Job::new(
             address.clone(),
             extranonce1.clone(),
             self.version_mask,
-            workbase,
+            self.workbase_receiver.borrow().clone(),
             self.jobs.next_id(),
         )?);
 
