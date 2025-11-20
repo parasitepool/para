@@ -3,30 +3,24 @@ use serde_json::json;
 
 pub type Result<T, E = InternalError> = std::result::Result<T, E>;
 
-/// Stratum protocol errors sent to clients (matching ckpool error codes)
-/// Based on ckpool/src/libckpool.h enum share_err
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
 pub enum StratumError {
-    // Protocol violations (negative codes)
-    InvalidNonce2Length = -9, // SE_INVALID_NONCE2
-    WorkerMismatch = -8,      // SE_WORKER_MISMATCH
-    NoNonce = -7,             // SE_NO_NONCE
-    NoNtime = -6,             // SE_NO_NTIME
-    NoNonce2 = -5,            // SE_NO_NONCE2
-    NoJobId = -4,             // SE_NO_JOBID
-    NoUsername = -3,          // SE_NO_USERNAME
-    InvalidArraySize = -2,    // SE_INVALID_SIZE
-    ParamsNotArray = -1,      // SE_NOT_ARRAY
-
-    // Success/Share results (positive codes matching ckpool)
-    Valid = 0,              // SE_NONE
-    InvalidJobId = 1,       // SE_INVALID_JOBID
-    Stale = 2,              // SE_STALE
-    NtimeOutOfRange = 3,    // SE_NTIME_INVALID
-    Duplicate = 4,          // SE_DUPE
-    AboveTarget = 5,        // SE_HIGH_DIFF
-    InvalidVersionMask = 6, // SE_INVALID_VERSION_MASK
+    InvalidNonce2Length = -9,
+    WorkerMismatch = -8,
+    NoNonce = -7,
+    NoNtime = -6,
+    NoNonce2 = -5,
+    NoJobId = -4,
+    NoUsername = -3,
+    InvalidArraySize = -2,
+    ParamsNotArray = -1,
+    InvalidJobId = 1,
+    Stale = 2,
+    NtimeOutOfRange = 3,
+    Duplicate = 4,
+    AboveTarget = 5,
+    InvalidVersionMask = 6,
 }
 
 impl fmt::Display for StratumError {
@@ -41,7 +35,6 @@ impl fmt::Display for StratumError {
             Self::NoUsername => "No username",
             Self::InvalidArraySize => "Invalid array size",
             Self::ParamsNotArray => "Params not array",
-            Self::Valid => "Valid",
             Self::InvalidJobId => "Invalid JobID",
             Self::Stale => "Stale",
             Self::NtimeOutOfRange => "Ntime out of range",
@@ -116,7 +109,6 @@ impl<'de> Deserialize<'de> for StratumErrorResponse {
             -3 => StratumError::NoUsername,
             -2 => StratumError::InvalidArraySize,
             -1 => StratumError::ParamsNotArray,
-            0 => StratumError::Valid,
             1 => StratumError::InvalidJobId,
             2 => StratumError::Stale,
             3 => StratumError::NtimeOutOfRange,
@@ -149,9 +141,9 @@ impl PartialEq for StratumErrorResponse {
 
 impl fmt::Display for StratumErrorResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Stratum error {}: {}", self.error as i32, self.error)?;
+        write!(f, "{}: {}", self.error as i32, self.error)?;
         if let Some(ctx) = &self.context {
-            write!(f, " (context: {})", ctx)?;
+            write!(f, " ({})", ctx)?;
         }
         Ok(())
     }
@@ -216,7 +208,7 @@ pub enum InternalError {
         source: bitcoin::error::UnprefixedHexError,
     },
 
-    #[snafu(display("Protocol error: {message}"))]
+    #[snafu(display("{message}"))]
     Protocol { message: String },
 
     #[snafu(display("Connection timeout: {source}"))]
@@ -273,7 +265,6 @@ mod tests {
             "Invalid array size"
         );
         assert_eq!(StratumError::ParamsNotArray.to_string(), "Params not array");
-        assert_eq!(StratumError::Valid.to_string(), "Valid");
         assert_eq!(StratumError::InvalidJobId.to_string(), "Invalid JobID");
         assert_eq!(StratumError::Stale.to_string(), "Stale");
         assert_eq!(
@@ -290,7 +281,6 @@ mod tests {
 
     #[test]
     fn stratum_error_code_values() {
-        // Verify error codes match ckpool
         assert_eq!(StratumError::InvalidNonce2Length as i32, -9);
         assert_eq!(StratumError::WorkerMismatch as i32, -8);
         assert_eq!(StratumError::NoNonce as i32, -7);
@@ -300,7 +290,6 @@ mod tests {
         assert_eq!(StratumError::NoUsername as i32, -3);
         assert_eq!(StratumError::InvalidArraySize as i32, -2);
         assert_eq!(StratumError::ParamsNotArray as i32, -1);
-        assert_eq!(StratumError::Valid as i32, 0);
         assert_eq!(StratumError::InvalidJobId as i32, 1);
         assert_eq!(StratumError::Stale as i32, 2);
         assert_eq!(StratumError::NtimeOutOfRange as i32, 3);
@@ -367,17 +356,14 @@ mod tests {
             context: None,
         };
 
-        assert_eq!(response.to_string(), "Stratum error 2: Stale");
+        assert_eq!(response.to_string(), "2: Stale");
 
         let with_context = StratumErrorResponse {
             error: StratumError::InvalidJobId,
             context: Some("additional details".to_string()),
         };
 
-        let display = with_context.to_string();
-        assert!(display.contains("Stratum error 1: Invalid JobID"));
-        assert!(display.contains("context"));
-        assert!(display.contains("additional details"));
+        assert_eq!(with_context.to_string(), "1: Invalid JobID (additional details)");
     }
 
     #[test]
