@@ -3,7 +3,6 @@ use {
     command_builder::CommandBuilder,
     executable_path::executable_path,
     para::{
-        USER_AGENT,
         api::Status,
         ckpool::{self, HashRate, HashRateStatus, PoolStatus, ShareStatus, User, Worker},
         subcommand::server::notifications::{
