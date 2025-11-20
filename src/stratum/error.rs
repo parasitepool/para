@@ -63,7 +63,6 @@ impl From<StratumError> for StratumErrorResponse {
     }
 }
 
-/// Serializes as (code, message, traceback) for Stratum V1 compatibility
 #[derive(Debug, Clone, PartialEq)]
 pub struct StratumErrorResponse {
     pub error_code: i32,
