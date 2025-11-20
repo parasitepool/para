@@ -278,7 +278,6 @@ mod tests {
 
     #[test]
     fn stratum_error_response_deserialization_from_array() {
-        // Test basic deserialization
         let json = "[2,\"Stale\",null]";
         let response: StratumErrorResponse = serde_json::from_str(json).unwrap();
 
