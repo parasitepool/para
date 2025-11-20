@@ -8,7 +8,6 @@ use {
     derive_more::Display,
     error::{InternalError, Result},
     hex::FromHex,
-    lazy_static::lazy_static,
     rand::RngCore,
     serde::{
         Deserialize, Serialize, Serializer,
@@ -19,23 +18,11 @@ use {
     serde_with::{DeserializeFromStr, SerializeDisplay},
     snafu::{ResultExt, Snafu},
     std::{
-        collections::BTreeMap,
         fmt,
         ops::{BitAnd, BitOr, BitXor, Not},
         str::FromStr,
-        sync::{
-            Arc,
-            atomic::{AtomicU64, Ordering},
-        },
-        time::{Duration, Instant},
+        sync::LazyLock,
     },
-    tokio::{
-        io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader, BufWriter},
-        net::{TcpStream, tcp::OwnedWriteHalf},
-        sync::{Mutex, mpsc, oneshot},
-        task::JoinHandle,
-    },
-    tracing::{debug, error, warn},
 };
 
 mod authorize;

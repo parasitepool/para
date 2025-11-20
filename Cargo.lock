@@ -2461,7 +2461,6 @@ dependencies = [
  "harness",
  "hex",
  "html-escaper",
- "lazy_static",
  "lru",
  "mime_guess",
  "once_cell",

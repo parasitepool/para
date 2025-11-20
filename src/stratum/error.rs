@@ -46,7 +46,6 @@ impl fmt::Display for StratumError {
 }
 
 impl StratumError {
-    /// Convert to a response with no traceback
     pub fn to_response(self) -> StratumErrorResponse {
         StratumErrorResponse {
             error_code: self as i32,
@@ -55,7 +54,6 @@ impl StratumError {
         }
     }
 
-    /// Convert to a response with traceback
     pub fn to_response_with_traceback(self, traceback: Value) -> StratumErrorResponse {
         StratumErrorResponse {
             error_code: self as i32,
@@ -71,8 +69,7 @@ impl From<StratumError> for StratumErrorResponse {
     }
 }
 
-/// Stratum error response sent to clients (matching ckpool format)
-/// Serializes as [code, message, traceback] for Stratum V1 compatibility
+/// Serializes as (code, message, traceback) for Stratum V1 compatibility
 #[derive(Debug, Clone, PartialEq)]
 pub struct StratumErrorResponse {
     pub error_code: i32,

@@ -1,8 +1,7 @@
 use {super::*, core::cmp::Ordering, primitive_types::U256};
 
-lazy_static! {
-    pub static ref DIFFICULTY_1_TARGET: U256 = U256::from_big_endian(&Target::MAX.to_be_bytes());
-}
+pub static DIFFICULTY_1_TARGET: LazyLock<U256> =
+    LazyLock::new(|| U256::from_big_endian(&Target::MAX.to_be_bytes()));
 
 /// Difficulty is a fraught metric. It is derived from the network target, where the
 /// difficulty equals the current network target divided by the network target defined in the genesis block.
