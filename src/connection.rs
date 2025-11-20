@@ -227,12 +227,12 @@ where
             let message = Message::Response {
                 id,
                 result: None,
-                error: Some(
-                    StratumError::UnsupportedExtension.into_response(Some(serde_json::json!({
+                error: Some(StratumError::UnsupportedExtension.into_response(Some(
+                    serde_json::json!({
                         "extensions": configure.extensions,
                         "supported": ["version-rolling"]
-                    }))),
-                ),
+                    }),
+                ))),
                 reject_reason: None,
             };
 
