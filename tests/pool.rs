@@ -144,11 +144,7 @@ async fn authorize_before_subscribe_fails() {
     let mut client = pool.stratum_client().await;
 
     assert!(
-        client
-            .authorize()
-            .await
-            .unwrap_err()
-            .to_string()
+        dbg!(client.authorize().await.unwrap_err().to_string())
             .contains("Method not allowed in current state")
     );
 }
@@ -162,16 +158,18 @@ async fn submit_before_authorize_fails() {
     client.subscribe(USER_AGENT.into()).await.unwrap();
 
     assert!(
-        client
-            .submit(
-                JobId::new(3),
-                Extranonce::random(8),
-                Ntime::from(0),
-                Nonce::from(12345),
-            )
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("Unauthorized")
+        dbg!(
+            client
+                .submit(
+                    JobId::new(3),
+                    Extranonce::random(8),
+                    Ntime::from(0),
+                    Nonce::from(12345),
+                )
+                .await
+                .unwrap_err()
+                .to_string()
+        )
+        .contains("Unauthorized")
     );
 }

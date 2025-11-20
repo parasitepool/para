@@ -73,9 +73,9 @@ use {
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     },
     stratum::{
-        Authorize, Configure, Difficulty, Extranonce, Id, JobId, JsonRpcError, MerkleNode, Message,
-        Nbits, Nonce, Notify, Ntime, PrevHash, SetDifficulty, Submit, Subscribe, SubscribeResult,
-        Version,
+        Authorize, Configure, Difficulty, Extranonce, Id, JobId, MerkleNode, Message, Nbits, Nonce,
+        Notify, Ntime, PrevHash, SetDifficulty, StratumError, StratumErrorResponse, Submit,
+        Subscribe, SubscribeResult, Version,
     },
     subcommand::{pool::pool_config::PoolConfig, server::account::Account},
     sysinfo::{Disks, System},

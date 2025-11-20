@@ -63,7 +63,7 @@ pub use {
     client::Client,
     configure::Configure,
     difficulty::Difficulty,
-    error::{JsonRpcError, StratumErrorCode},
+    error::{StratumError, StratumErrorResponse},
     extranonce::Extranonce,
     job_id::JobId,
     merkle::{MerkleNode, merkle_branches, merkle_root},

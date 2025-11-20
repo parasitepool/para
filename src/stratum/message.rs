@@ -19,7 +19,7 @@ pub enum Message {
     Response {
         id: Id,
         result: Option<Value>,
-        error: Option<JsonRpcError>,
+        error: Option<StratumErrorResponse>,
         #[serde(skip_serializing_if = "Option::is_none", rename = "reject-reason")]
         reject_reason: Option<String>,
     },
@@ -54,7 +54,7 @@ impl<'de> Deserialize<'de> for Message {
             struct Resp {
                 id: Id,
                 result: Option<Value>,
-                error: Option<JsonRpcError>,
+                error: Option<StratumErrorResponse>,
                 #[serde(rename = "reject-reason")]
                 reject_reason: Option<String>,
             }
@@ -201,15 +201,14 @@ mod tests {
         );
 
         case(
-            r#"{"id":10,"result":null,"error":[21,"Job not found",null]}"#,
+            r#"{"id":10,"result":null,"error":[2,"Stale",null]}"#,
             Message::Response {
                 id: Id::Number(10),
                 result: None,
                 reject_reason: None,
-                error: Some(JsonRpcError {
-                    error_code: 21,
-                    message: "Job not found".into(),
-                    traceback: None,
+                error: Some(StratumErrorResponse {
+                    error: StratumError::Stale,
+                    context: None,
                 }),
             },
         );
