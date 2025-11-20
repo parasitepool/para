@@ -132,6 +132,11 @@ pub enum InternalError {
     #[snafu(display("Invalid value: {reason}"))]
     InvalidValue { reason: String },
 
+    #[snafu(display("Invalid block hash: {source}"))]
+    InvalidBlockHash {
+        source: bitcoin::hashes::FromSliceError,
+    },
+
     #[snafu(display("Invalid merkle tree structure"))]
     InvalidMerkle,
 
@@ -146,6 +151,18 @@ pub enum InternalError {
 
     #[snafu(display("Parse error: {message}"))]
     Parse { message: String },
+
+    #[snafu(display("Invalid hex integer '{input}': {source}"))]
+    ParseHexInt {
+        input: String,
+        source: std::num::ParseIntError,
+    },
+
+    #[snafu(display("Invalid nbits hex '{input}': {source}"))]
+    ParseNbits {
+        input: String,
+        source: bitcoin::error::UnprefixedHexError,
+    },
 
     #[snafu(display("Protocol error: {message}"))]
     Protocol { message: String },

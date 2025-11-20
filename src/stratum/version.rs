@@ -7,8 +7,8 @@ impl FromStr for Version {
     type Err = InternalError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let n = u32::from_str_radix(s, 16).map_err(|e| InternalError::Parse {
-            message: format!("invalid version hex string '{}': {}", s, e),
+        let n = u32::from_str_radix(s, 16).context(error::ParseHexIntSnafu {
+            input: s.to_string(),
         })?;
         // The as conversion matches Bitcoin's behaviour
         Ok(Self(block::Version::from_consensus(n as i32)))

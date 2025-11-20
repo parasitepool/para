@@ -7,8 +7,8 @@ impl FromStr for Nonce {
     type Err = InternalError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let nonce = u32::from_str_radix(s, 16).map_err(|e| InternalError::Parse {
-            message: format!("invalid nonce hex string '{}': {}", s, e),
+        let nonce = u32::from_str_radix(s, 16).context(error::ParseHexIntSnafu {
+            input: s.to_string(),
         })?;
         Ok(Nonce(nonce))
     }

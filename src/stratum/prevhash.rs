@@ -17,9 +17,7 @@ impl FromStr for PrevHash {
             LittleEndian::write_u32(dst, word);
         }
 
-        let inner = BlockHash::from_slice(&reordered).map_err(|e| InternalError::InvalidValue {
-            reason: format!("invalid block hash: {}", e),
-        })?;
+        let inner = BlockHash::from_slice(&reordered).context(error::InvalidBlockHashSnafu)?;
         Ok(PrevHash(inner))
     }
 }

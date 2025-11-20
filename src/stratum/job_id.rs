@@ -18,8 +18,8 @@ impl FromStr for JobId {
     type Err = InternalError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let id = u64::from_str_radix(s, 16).map_err(|e| InternalError::Parse {
-            message: format!("invalid job id hex string '{}': {}", s, e),
+        let id = u64::from_str_radix(s, 16).context(error::ParseHexIntSnafu {
+            input: s.to_string(),
         })?;
         Ok(JobId(id))
     }

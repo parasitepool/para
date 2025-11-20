@@ -13,8 +13,8 @@ impl FromStr for Nbits {
     type Err = InternalError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let compact = CompactTarget::from_unprefixed_hex(s).map_err(|e| InternalError::Parse {
-            message: format!("invalid nbits hex string '{}': {}", s, e),
+        let compact = CompactTarget::from_unprefixed_hex(s).context(error::ParseNbitsSnafu {
+            input: s.to_string(),
         })?;
         Ok(Nbits(compact))
     }

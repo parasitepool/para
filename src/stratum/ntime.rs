@@ -9,8 +9,8 @@ impl FromStr for Ntime {
     type Err = InternalError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let time = u32::from_str_radix(s, 16).map_err(|e| InternalError::Parse {
-            message: format!("invalid ntime hex string '{}': {}", s, e),
+        let time = u32::from_str_radix(s, 16).context(error::ParseHexIntSnafu {
+            input: s.to_string(),
         })?;
         Ok(Ntime(time))
     }
