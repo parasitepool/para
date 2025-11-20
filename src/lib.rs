@@ -28,7 +28,6 @@ use {
     bitcoincore_rpc::{Auth, RpcApi},
     block_template::BlockTemplate,
     byteorder::{BigEndian, ByteOrder, LittleEndian},
-    workbase::Workbase,
     chain::Chain,
     clap::Parser,
     coinbase_builder::CoinbaseBuilder,
@@ -105,6 +104,7 @@ use {
     tracing::{debug, error, info, warn},
     tracing_appender::non_blocking,
     tracing_subscriber::EnvFilter,
+    workbase::Workbase,
     zeromq::{Endpoint, Socket, SocketRecv, SubSocket},
     zmq::Zmq,
 };

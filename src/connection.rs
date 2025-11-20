@@ -385,7 +385,8 @@ where
 
             let txdata = std::iter::once(coinbase_tx)
                 .chain(
-                    job.workbase.template()
+                    job.workbase
+                        .template()
                         .transactions
                         .iter()
                         .map(|tx| tx.transaction.clone())

@@ -13,9 +13,8 @@ impl Workbase {
     /// Creates a new Workbase from a BlockTemplate, automatically computing
     /// the merkle branches from the template's transactions.
     pub fn new(template: BlockTemplate) -> Self {
-        let merkle_branches = stratum::merkle_branches(
-            template.transactions.iter().map(|tx| tx.txid).collect(),
-        );
+        let merkle_branches =
+            stratum::merkle_branches(template.transactions.iter().map(|tx| tx.txid).collect());
 
         Self {
             template,
@@ -33,4 +32,3 @@ impl Workbase {
         &self.merkle_branches
     }
 }
-

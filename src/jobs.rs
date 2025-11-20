@@ -32,7 +32,9 @@ impl Jobs {
         let is_same_height = self
             .latest
             .as_ref()
-            .map(|previous_job| previous_job.workbase.template().height == job.workbase.template().height)
+            .map(|previous_job| {
+                previous_job.workbase.template().height == job.workbase.template().height
+            })
             .unwrap_or(false);
 
         if is_same_height {
@@ -149,7 +151,11 @@ mod tests {
         assert_eq!(jobs.latest.as_ref().unwrap().job_id, id_2);
         assert!(jobs.valid.contains_key(&id_1));
         assert!(jobs.valid.contains_key(&id_2));
-        assert!(jobs.valid.values().all(|job| job.workbase.template().height == 100));
+        assert!(
+            jobs.valid
+                .values()
+                .all(|job| job.workbase.template().height == 100)
+        );
     }
 
     #[test]
@@ -173,7 +179,10 @@ mod tests {
         assert!(!jobs.valid.contains_key(&id_1));
         assert!(jobs.valid.contains_key(&id_2));
         assert_eq!(jobs.latest.as_ref().unwrap().job_id, id_2);
-        assert_eq!(jobs.latest.as_ref().unwrap().workbase.template().height, 101);
+        assert_eq!(
+            jobs.latest.as_ref().unwrap().workbase.template().height,
+            101
+        );
 
         assert!(!jobs.is_duplicate(blockhash));
         assert!(jobs.is_duplicate(blockhash));
