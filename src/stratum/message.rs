@@ -206,10 +206,7 @@ mod tests {
                 id: Id::Number(10),
                 result: None,
                 reject_reason: None,
-                error: Some(StratumErrorResponse {
-                    error: StratumError::Stale,
-                    context: None,
-                }),
+                error: Some(StratumError::Stale.to_response()),
             },
         );
     }

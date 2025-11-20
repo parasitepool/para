@@ -75,7 +75,12 @@ where
                             debug!("CONFIGURE from {} with {params}", self.worker);
 
                             if !matches!(self.state,  State::Init | State::Configured) {
-                                self.send_error(id.clone(), StratumError::ParamsNotArray, Some("Method not allowed in current state".to_string())).await?;
+                                self.send_error(
+                                    id.clone(),
+                                    StratumError::ParamsNotArray,
+                                    Some(serde_json::json!({"reason": "Method not allowed in current state"})),
+                                )
+                                .await?;
                                 continue;
                             };
 
@@ -88,7 +93,12 @@ where
                             debug!("SUBSCRIBE from {} with {params}", self.worker);
 
                             if !matches!(self.state,  State::Init | State::Configured) {
-                                self.send_error(id.clone(), StratumError::ParamsNotArray, Some("Method not allowed in current state".to_string())).await?;
+                                self.send_error(
+                                    id.clone(),
+                                    StratumError::ParamsNotArray,
+                                    Some(serde_json::json!({"reason": "Method not allowed in current state"})),
+                                )
+                                .await?;
                                 continue;
                             };
 
@@ -101,7 +111,12 @@ where
                             debug!("AUTHORIZE from {} with {params}", self.worker);
 
                             if self.state != State::Subscribed {
-                                self.send_error(id.clone(), StratumError::ParamsNotArray, Some("Method not allowed in current state".to_string())).await?;
+                                self.send_error(
+                                    id.clone(),
+                                    StratumError::ParamsNotArray,
+                                    Some(serde_json::json!({"reason": "Method not allowed in current state"})),
+                                )
+                                .await?;
                                 continue;
                             }
 
@@ -114,7 +129,8 @@ where
                             debug!("SUBMIT from {} with params {params}", self.worker);
 
                             if self.state != State::Working {
-                                self.send_error(id.clone(), StratumError::NoUsername, Some("Unauthorized".to_string())).await?;
+                                self.send_error(id.clone(), StratumError::Unauthorized, None)
+                                    .await?;
                                 continue;
                             }
 
@@ -202,10 +218,12 @@ where
             let message = Message::Response {
                 id,
                 result: None,
-                error: Some(StratumErrorResponse {
-                    error: StratumError::ParamsNotArray,
-                    context: Some(format!("Unsupported extension: {:?}", configure)),
-                }),
+                error: Some(StratumError::ParamsNotArray.to_response_with_traceback(
+                    serde_json::json!({
+                        "configure": format!("{:?}", configure),
+                        "reason": "Unsupported extension"
+                    }),
+                )),
                 reject_reason: None,
             };
 
@@ -328,7 +346,7 @@ where
                 self.send_error(
                     id,
                     StratumError::InvalidVersionMask,
-                    Some("Version rolling not negotiated".to_string()),
+                    Some(serde_json::json!({"reason": "Version rolling not negotiated"})),
                 )
                 .await?;
 
@@ -453,11 +471,22 @@ where
         Ok(())
     }
 
-    async fn send_error(&mut self, id: Id, error: StratumError, context: Option<String>) -> Result {
+    async fn send_error(
+        &mut self,
+        id: Id,
+        error: StratumError,
+        traceback: Option<serde_json::Value>,
+    ) -> Result {
+        let response = if let Some(tb) = traceback {
+            error.to_response_with_traceback(tb)
+        } else {
+            error.to_response()
+        };
+
         self.send(Message::Response {
             id,
             result: None,
-            error: Some(StratumErrorResponse { error, context }),
+            error: Some(response),
             reject_reason: None,
         })
         .await
