@@ -28,6 +28,7 @@ use {
     bitcoincore_rpc::{Auth, RpcApi},
     block_template::BlockTemplate,
     byteorder::{BigEndian, ByteOrder, LittleEndian},
+    workbase::Workbase,
     chain::Chain,
     clap::Parser,
     coinbase_builder::CoinbaseBuilder,
@@ -121,6 +122,7 @@ mod job;
 mod jobs;
 pub mod stratum;
 pub mod subcommand;
+mod workbase;
 mod zmq;
 
 pub const COIN_VALUE: u64 = 100_000_000;

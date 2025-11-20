@@ -16,7 +16,7 @@ pub(crate) struct Connection<R, W> {
     worker: SocketAddr,
     reader: FramedRead<R, LinesCodec>,
     writer: FramedWrite<W, LinesCodec>,
-    template_receiver: watch::Receiver<Arc<BlockTemplate>>,
+    template_receiver: watch::Receiver<Arc<Workbase>>,
     jobs: Jobs,
     state: State,
     address: Option<Address>,
@@ -36,7 +36,7 @@ where
         worker: SocketAddr,
         reader: R,
         writer: W,
-        template_receiver: watch::Receiver<Arc<BlockTemplate>>,
+        template_receiver: watch::Receiver<Arc<Workbase>>,
     ) -> Self {
         Self {
             config,
@@ -140,8 +140,8 @@ where
                         continue;
                     };
 
-                    let template = template_receiver.borrow_and_update().clone();
-                    self.template_update(template).await?;
+                    let workbase = template_receiver.borrow_and_update().clone();
+                    self.template_update(workbase).await?;
                 }
             }
         }
@@ -149,22 +149,17 @@ where
         Ok(())
     }
 
-    async fn template_update(&mut self, template: Arc<BlockTemplate>) -> Result {
+    async fn template_update(&mut self, workbase: Arc<Workbase>) -> Result {
         let (address, extranonce1) = match (&self.address, &self.extranonce1) {
             (Some(a), Some(e)) => (a.clone(), e.clone()),
             _ => return Ok(()),
         };
 
-        let merkle_branches = Arc::new(stratum::merkle_branches(
-            template.transactions.iter().map(|tx| tx.txid).collect(),
-        ));
-
         let new_job = Arc::new(Job::new(
             address,
             extranonce1,
             self.version_mask,
-            template,
-            merkle_branches,
+            workbase,
             self.jobs.next_id(),
         )?);
 
@@ -278,18 +273,13 @@ where
             authorize.username, self.worker
         ))?;
 
-        let template = self.template_receiver.borrow().clone();
-
-        let merkle_branches = Arc::new(stratum::merkle_branches(
-            template.transactions.iter().map(|tx| tx.txid).collect(),
-        ));
+        let workbase = self.template_receiver.borrow().clone();
 
         let job = Arc::new(Job::new(
             address.clone(),
             extranonce1.clone(),
             self.version_mask,
-            template,
-            merkle_branches,
+            workbase,
             self.jobs.next_id(),
         )?);
 
@@ -368,7 +358,7 @@ where
                 &job.coinb2,
                 &job.extranonce1,
                 &submit.extranonce2,
-                &job.merkle_branches,
+                job.workbase.merkle_branches(),
             )?
             .into(),
             time: submit.ntime.into(),
@@ -395,7 +385,7 @@ where
 
             let txdata = std::iter::once(coinbase_tx)
                 .chain(
-                    job.template
+                    job.workbase.template()
                         .transactions
                         .iter()
                         .map(|tx| tx.transaction.clone())
@@ -405,7 +395,7 @@ where
 
             let block = Block { header, txdata };
 
-            if job.template.height > 16 {
+            if job.workbase.template().height > 16 {
                 assert!(block.bip34_block_height().is_ok());
             }
 
