@@ -167,33 +167,37 @@ impl FromStr for Difficulty {
 
     fn from_str(difficulty: &str) -> Result<Self, Self::Err> {
         let difficulty = difficulty.trim();
-        if difficulty.is_empty() {
-            return Err(InternalError::InvalidValue {
-                reason: "difficulty string is empty".to_string(),
-            });
-        }
+        snafu::ensure!(
+            !difficulty.is_empty(),
+            InvalidValueSnafu {
+                reason: "difficulty string is empty"
+            }
+        );
 
         if let Ok(u) = difficulty.parse::<u64>() {
-            if u == 0 {
-                return Err(InternalError::InvalidValue {
-                    reason: "difficulty must be > 0".to_string(),
-                });
-            }
+            snafu::ensure!(
+                u > 0,
+                InvalidValueSnafu {
+                    reason: "difficulty must be > 0"
+                }
+            );
             return Ok(Difficulty::from(u));
         }
 
         if let Ok(x) = difficulty.parse::<f64>() {
-            if !x.is_finite() || x <= 0.0 {
-                return Err(InternalError::InvalidValue {
-                    reason: "difficulty must be > 0".to_string(),
-                });
-            }
+            snafu::ensure!(
+                x.is_finite() && x > 0.0,
+                InvalidValueSnafu {
+                    reason: "difficulty must be > 0"
+                }
+            );
             return Ok(Difficulty::from(x));
         }
 
-        Err(InternalError::Parse {
-            message: "difficulty must be an integer or float".to_string(),
-        })
+        ParseSnafu {
+            message: "difficulty must be an integer or float",
+        }
+        .fail()
     }
 }
 

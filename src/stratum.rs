@@ -20,6 +20,9 @@ mod subscribe;
 mod suggest_difficulty;
 mod version;
 
+// Re-export snafu context selectors for internal use
+use error::{InvalidValueSnafu, ParseSnafu};
+
 pub use {
     authorize::Authorize,
     client::Client,

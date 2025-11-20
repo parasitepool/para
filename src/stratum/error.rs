@@ -106,29 +106,30 @@ impl From<StratumErrorCode> for JsonRpcError {
 }
 
 #[derive(Debug, Snafu)]
+#[snafu(visibility(pub))]
 pub enum InternalError {
-    #[snafu(display("Failed to serialize JSON: {}", source))]
+    #[snafu(display("Failed to serialize JSON: {source}"))]
     Serialization { source: serde_json::Error },
 
-    #[snafu(display("Failed to deserialize JSON: {}", source))]
+    #[snafu(display("Failed to deserialize JSON: {source}"))]
     Deserialization { source: serde_json::Error },
 
-    #[snafu(display("Failed to parse hex string: {}", source))]
+    #[snafu(display("Failed to parse hex string: {source}"))]
     HexParse { source: hex::FromHexError },
 
-    #[snafu(display("Invalid hex string: {}", reason))]
+    #[snafu(display("Invalid hex string: {reason}"))]
     InvalidHex { reason: String },
 
-    #[snafu(display("Invalid length: expected {}, got {}", expected, actual))]
+    #[snafu(display("Invalid length: expected {expected}, got {actual}"))]
     InvalidLength { expected: usize, actual: usize },
 
-    #[snafu(display("Invalid value: {}", reason))]
+    #[snafu(display("Invalid value: {reason}"))]
     InvalidValue { reason: String },
 
     #[snafu(display("Invalid merkle tree structure"))]
     InvalidMerkle,
 
-    #[snafu(display("Merkle computation failed: {}", reason))]
+    #[snafu(display("Merkle computation failed: {reason}"))]
     MerkleComputation { reason: String },
 
     #[snafu(display("Invalid version bits"))]
@@ -137,7 +138,7 @@ pub enum InternalError {
     #[snafu(display("Invalid target/difficulty"))]
     InvalidTarget,
 
-    #[snafu(display("Parse error: {}", message))]
+    #[snafu(display("Parse error: {message}"))]
     Parse { message: String },
 }
 
