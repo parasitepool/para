@@ -228,9 +228,9 @@ where
                 id,
                 result: None,
                 error: Some(
-                    StratumError::ParamsNotArray.into_response(Some(serde_json::json!({
-                        "configure": format!("{:?}", configure),
-                        "reason": "Unsupported extension"
+                    StratumError::UnsupportedExtension.into_response(Some(serde_json::json!({
+                        "extensions": configure.extensions,
+                        "supported": ["version-rolling"]
                     }))),
                 ),
                 reject_reason: None,

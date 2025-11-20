@@ -5,6 +5,7 @@ pub type Result<T, E = InternalError> = std::result::Result<T, E>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
 pub enum StratumError {
+    UnsupportedExtension = -11,
     MethodNotAllowed = -10,
     InvalidNonce2Length = -9,
     WorkerMismatch = -8,
@@ -26,6 +27,7 @@ pub enum StratumError {
 impl fmt::Display for StratumError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self {
+            Self::UnsupportedExtension => "Unsupported extension",
             Self::MethodNotAllowed => "Method not allowed",
             Self::InvalidNonce2Length => "Invalid nonce2 length",
             Self::WorkerMismatch => "Worker mismatch",
@@ -181,6 +183,10 @@ mod tests {
     #[test]
     fn stratum_error_code_display() {
         assert_eq!(
+            StratumError::UnsupportedExtension.to_string(),
+            "Unsupported extension"
+        );
+        assert_eq!(
             StratumError::MethodNotAllowed.to_string(),
             "Method not allowed"
         );
@@ -231,7 +237,25 @@ mod tests {
     }
 
     #[test]
+    fn unsupported_extension_error() {
+        let error = StratumError::UnsupportedExtension;
+        let response = error.into_response(Some(serde_json::json!({
+            "extensions": ["minimum-difficulty"],
+            "reason": "Only version-rolling is supported"
+        })));
+
+        assert_eq!(response.error_code, -11);
+        assert_eq!(response.message, "Unsupported extension");
+        assert!(response.traceback.is_some());
+
+        let serialized = serde_json::to_string(&response).unwrap();
+        assert!(serialized.contains("[-11,\"Unsupported extension\","));
+        assert!(serialized.contains("minimum-difficulty"));
+    }
+
+    #[test]
     fn stratum_error_code_values() {
+        assert_eq!(StratumError::UnsupportedExtension as i32, -11);
         assert_eq!(StratumError::MethodNotAllowed as i32, -10);
         assert_eq!(StratumError::InvalidNonce2Length as i32, -9);
         assert_eq!(StratumError::WorkerMismatch as i32, -8);
