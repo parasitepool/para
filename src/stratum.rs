@@ -1,5 +1,10 @@
 use super::*;
 
+// Import snafu for derive macro
+use snafu::Snafu;
+// Import context selectors for use in submodules
+use error::{InvalidValueSnafu, ParseSnafu};
+
 mod authorize;
 mod client;
 mod configure;
@@ -19,9 +24,6 @@ mod submit;
 mod subscribe;
 mod suggest_difficulty;
 mod version;
-
-// Re-export snafu context selectors for internal use
-use error::{InvalidValueSnafu, ParseSnafu};
 
 pub use {
     authorize::Authorize,

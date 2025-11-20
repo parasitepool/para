@@ -142,7 +142,6 @@ pub enum InternalError {
     Parse { message: String },
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
