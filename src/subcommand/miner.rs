@@ -10,6 +10,13 @@ mod controller;
 mod hasher;
 mod metrics;
 
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum Mode {
+    Continuous,
+    ShareFound,
+    BlockFound,
+}
+
 #[derive(Debug, Parser)]
 pub(crate) struct Miner {
     #[arg(help = "Stratum <HOST:PORT>.")]
@@ -18,8 +25,13 @@ pub(crate) struct Miner {
     username: String,
     #[arg(long, help = "Stratum <PASSWORD>.")]
     password: Option<String>,
-    #[arg(long, help = "Exit <ONCE> a share is found.")]
-    once: bool,
+    #[arg(
+        long,
+        value_enum,
+        default_value = "continuous",
+        help = "Mining mode: <continuous|share-found|block-found>."
+    )]
+    mode: Mode,
     #[arg(long, help = "Number of <CPU_CORES> to use.")]
     cpu_cores: Option<usize>,
     #[arg(long, help = "Hash rate to <THROTTLE> to.")]
@@ -72,7 +84,7 @@ impl Miner {
             self.username.clone(),
             cpu_cores,
             self.throttle,
-            self.once,
+            self.mode,
         )
         .await?;
 
@@ -118,5 +130,40 @@ mod tests {
         );
 
         assert_eq!(miner.cpu_cores, Some(8));
+    }
+
+    #[test]
+    fn parse_args_with_default_mode() {
+        let miner = parse_miner_args(
+            "para miner parasite.wtf:42069 \
+            --username test.worker \
+            --password x",
+        );
+
+        assert!(matches!(miner.mode, Mode::Continuous));
+    }
+
+    #[test]
+    fn parse_args_with_mode_share_found() {
+        let miner = parse_miner_args(
+            "para miner parasite.wtf:42069 \
+            --username test.worker \
+            --password x \
+            --mode share-found",
+        );
+
+        assert!(matches!(miner.mode, Mode::ShareFound));
+    }
+
+    #[test]
+    fn parse_args_with_mode_block_found() {
+        let miner = parse_miner_args(
+            "para miner parasite.wtf:42069 \
+            --username test.worker \
+            --password x \
+            --mode block-found",
+        );
+
+        assert!(matches!(miner.mode, Mode::BlockFound));
     }
 }

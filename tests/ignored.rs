@@ -6,7 +6,7 @@ use {super::*, tokio_util::sync::CancellationToken};
 #[test]
 #[ignore]
 fn concurrently_listening_workers_receive_new_templates_on_new_block() {
-    let pool = TestPool::spawn();
+    let pool = TestPool::spawn_with_args("--start-diff 0.0001");
     let endpoint = pool.stratum_endpoint();
     let user = signet_username();
 
@@ -43,7 +43,7 @@ fn concurrently_listening_workers_receive_new_templates_on_new_block() {
         gate.wait();
 
         CommandBuilder::new(format!(
-            "miner --once --username {} {}",
+            "miner --mode block-found --username {} {}",
             signet_username(),
             pool.stratum_endpoint()
         ))
