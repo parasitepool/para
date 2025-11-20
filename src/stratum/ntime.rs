@@ -6,10 +6,12 @@ use super::*;
 pub struct Ntime(u32);
 
 impl FromStr for Ntime {
-    type Err = anyhow::Error;
+    type Err = InternalError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let time = u32::from_str_radix(s, 16)?;
+        let time = u32::from_str_radix(s, 16).map_err(|e| InternalError::Parse {
+            message: format!("invalid ntime hex string '{}': {}", s, e),
+        })?;
         Ok(Ntime(time))
     }
 }

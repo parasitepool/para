@@ -25,7 +25,7 @@ pub use {
     client::Client,
     configure::Configure,
     difficulty::Difficulty,
-    error::JsonRpcError,
+    error::{InternalError, JsonRpcError, StratumErrorCode},
     extranonce::Extranonce,
     job_id::JobId,
     merkle::{MerkleNode, merkle_branches, merkle_root},

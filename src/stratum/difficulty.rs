@@ -163,29 +163,37 @@ impl fmt::Display for Difficulty {
 }
 
 impl FromStr for Difficulty {
-    type Err = Error;
+    type Err = InternalError;
 
     fn from_str(difficulty: &str) -> Result<Self, Self::Err> {
         let difficulty = difficulty.trim();
         if difficulty.is_empty() {
-            return Err(anyhow!("difficulty string is empty"));
+            return Err(InternalError::InvalidValue {
+                reason: "difficulty string is empty".to_string(),
+            });
         }
 
         if let Ok(u) = difficulty.parse::<u64>() {
             if u == 0 {
-                return Err(anyhow!("difficulty must be > 0"));
+                return Err(InternalError::InvalidValue {
+                    reason: "difficulty must be > 0".to_string(),
+                });
             }
             return Ok(Difficulty::from(u));
         }
 
         if let Ok(x) = difficulty.parse::<f64>() {
             if !x.is_finite() || x <= 0.0 {
-                return Err(anyhow!("difficulty must be > 0"));
+                return Err(InternalError::InvalidValue {
+                    reason: "difficulty must be > 0".to_string(),
+                });
             }
             return Ok(Difficulty::from(x));
         }
 
-        Err(anyhow!("difficulty must be an integer or float"))
+        Err(InternalError::Parse {
+            message: "difficulty must be an integer or float".to_string(),
+        })
     }
 }
 
