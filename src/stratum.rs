@@ -1,5 +1,4 @@
 use {
-    super::USER_AGENT,
     bitcoin::{
         BlockHash, CompactTarget, Target, TxMerkleNode, Txid, block,
         consensus::Encodable,

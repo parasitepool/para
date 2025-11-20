@@ -75,7 +75,7 @@ impl Ping {
                 )
                 .await?;
 
-                let (_, duration, size) = client.subscribe().await?;
+                let (_, duration, size) = client.subscribe(USER_AGENT.into()).await?;
 
                 client.disconnect().await?;
 
@@ -90,7 +90,7 @@ impl Ping {
                 )
                 .await?;
 
-                client.subscribe().await?;
+                client.subscribe(USER_AGENT.into()).await?;
                 let (duration, size) = client.authorize().await?;
 
                 let instant = Instant::now();

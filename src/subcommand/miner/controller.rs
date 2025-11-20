@@ -28,7 +28,7 @@ impl Controller {
         throttle: Option<ckpool::HashRate>,
         mode: Mode,
     ) -> Result<Self> {
-        let (subscribe, _, _) = client.subscribe().await?;
+        let (subscribe, _, _) = client.subscribe(USER_AGENT.into()).await?;
         client.authorize().await?;
 
         info!(

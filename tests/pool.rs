@@ -69,7 +69,7 @@ async fn basic_initialization_flow() {
 
     let mut client = pool.stratum_client().await;
 
-    let (subscribe, _, _) = client.subscribe().await.unwrap();
+    let (subscribe, _, _) = client.subscribe(USER_AGENT.into()).await.unwrap();
 
     assert_eq!(subscribe.subscriptions.len(), 2);
 
@@ -130,7 +130,7 @@ async fn configure_with_multiple_negotiation_steps() {
             .is_ok()
     );
 
-    let (subscribe, _, _) = client.subscribe().await.unwrap();
+    let (subscribe, _, _) = client.subscribe(USER_AGENT.into()).await.unwrap();
 
     assert_eq!(subscribe.subscriptions.len(), 2);
 
@@ -159,7 +159,7 @@ async fn submit_before_authorize_fails() {
 
     let mut client = pool.stratum_client().await;
 
-    client.subscribe().await.unwrap();
+    client.subscribe(USER_AGENT.into()).await.unwrap();
 
     assert!(
         client

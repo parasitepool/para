@@ -169,12 +169,15 @@ impl Client {
         }
     }
 
-    pub async fn subscribe(&mut self) -> Result<(SubscribeResult, Duration, usize)> {
+    pub async fn subscribe(
+        &mut self,
+        user_agent: String,
+    ) -> Result<(SubscribeResult, Duration, usize)> {
         let (rx, instant) = self
             .send_request(
                 "mining.subscribe",
                 serde_json::to_value(Subscribe {
-                    user_agent: USER_AGENT.into(),
+                    user_agent,
                     extranonce1: None,
                 })?,
             )
