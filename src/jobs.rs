@@ -79,12 +79,16 @@ mod tests {
             .unwrap()
             .assume_checked();
 
+        let merkle_branches = Arc::new(stratum::merkle_branches(
+            template.transactions.iter().map(|tx| tx.txid).collect(),
+        ));
         Arc::new(
             Job::new(
                 address,
                 Extranonce::random(EXTRANONCE1_SIZE),
                 None,
                 template,
+                merkle_branches,
                 id,
             )
             .unwrap(),

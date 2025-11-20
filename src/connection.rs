@@ -155,11 +155,16 @@ where
             _ => return Ok(()),
         };
 
+        let merkle_branches = Arc::new(stratum::merkle_branches(
+            template.transactions.iter().map(|tx| tx.txid).collect(),
+        ));
+
         let new_job = Arc::new(Job::new(
             address,
             extranonce1,
             self.version_mask,
             template,
+            merkle_branches,
             self.jobs.next_id(),
         )?);
 
@@ -273,11 +278,18 @@ where
             authorize.username, self.worker
         ))?;
 
+        let template = self.template_receiver.borrow().clone();
+
+        let merkle_branches = Arc::new(stratum::merkle_branches(
+            template.transactions.iter().map(|tx| tx.txid).collect(),
+        ));
+
         let job = Arc::new(Job::new(
             address.clone(),
             extranonce1.clone(),
             self.version_mask,
-            self.template_receiver.borrow().clone(),
+            template,
+            merkle_branches,
             self.jobs.next_id(),
         )?);
 

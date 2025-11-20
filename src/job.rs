@@ -7,7 +7,7 @@ pub(crate) struct Job {
     pub(crate) extranonce1: Extranonce,
     pub(crate) template: Arc<BlockTemplate>,
     pub(crate) job_id: JobId,
-    pub(crate) merkle_branches: Vec<MerkleNode>,
+    pub(crate) merkle_branches: Arc<Vec<MerkleNode>>,
     pub(crate) version_mask: Option<Version>,
 }
 
@@ -17,6 +17,7 @@ impl Job {
         extranonce1: Extranonce,
         version_mask: Option<Version>,
         template: Arc<BlockTemplate>,
+        merkle_branches: Arc<Vec<MerkleNode>>,
         job_id: JobId,
     ) -> Result<Self> {
         let (_coinbase_tx, coinb1, coinb2) = CoinbaseBuilder::new(
@@ -31,9 +32,6 @@ impl Job {
         .with_timestamp(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs())
         .with_pool_sig("|parasite|".into())
         .build()?;
-
-        let merkle_branches =
-            stratum::merkle_branches(template.transactions.iter().map(|tx| tx.txid).collect());
 
         Ok(Self {
             coinb1,
@@ -64,7 +62,7 @@ impl Job {
             prevhash: self.prevhash(),
             coinb1: self.coinb1.clone(),
             coinb2: self.coinb2.clone(),
-            merkle_branches: self.merkle_branches.clone(),
+            merkle_branches: (*self.merkle_branches).clone(),
             version: self.version(),
             nbits: self.nbits(),
             ntime: self.template.current_time,
