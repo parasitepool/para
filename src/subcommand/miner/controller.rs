@@ -10,7 +10,7 @@ pub(crate) struct Controller {
     metrics: Arc<Metrics>,
     notify_tx: watch::Sender<Option<(Notify, CancellationToken)>>,
     notify_rx: watch::Receiver<Option<(Notify, CancellationToken)>>,
-    once: bool,
+    mode: Mode,
     pool_difficulty: Arc<Mutex<Difficulty>>,
     root_cancel: CancellationToken,
     share_tx: mpsc::Sender<(JobId, Header, Extranonce)>,
@@ -26,7 +26,7 @@ impl Controller {
         username: String,
         cpu_cores: usize,
         throttle: Option<ckpool::HashRate>,
-        once: bool,
+        mode: Mode,
     ) -> Result<Self> {
         let (subscribe, _, _) = client.subscribe().await?;
         client.authorize().await?;
@@ -55,7 +55,7 @@ impl Controller {
             metrics: Arc::new(Metrics::new()),
             notify_rx,
             notify_tx,
-            once,
+            mode,
             pool_difficulty: Arc::new(Mutex::new(Difficulty::default())),
             root_cancel: CancellationToken::new(),
             share_rx,
@@ -115,9 +115,18 @@ impl Controller {
                             Ok(_) => info!("Share for job {job_id} submitted successfully"),
                         }
 
-                        if self.once {
-                            info!("Share found, exiting");
-                            break;
+                        match self.mode {
+                            Mode::ShareFound => {
+                                info!("Share found, exiting");
+                                break;
+                            },
+                            Mode::BlockFound => {
+                                if header.validate_pow(header.bits.into()).is_ok() {
+                                    info!("Block found, exiting");
+                                    break;
+                                }
+                            }
+                            Mode::Continuous => continue,
                         }
                     }
                     None => {
