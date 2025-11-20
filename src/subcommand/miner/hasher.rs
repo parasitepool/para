@@ -68,7 +68,7 @@ impl Hasher {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use {super::*, bitcoin::TxMerkleNode};
 
     fn shift(leading_zeros: u8) -> Target {
         assert!(leading_zeros <= 32, "leading_zeros too high");

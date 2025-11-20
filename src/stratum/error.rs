@@ -109,10 +109,16 @@ impl From<StratumErrorCode> for JsonRpcError {
 #[snafu(visibility(pub))]
 pub enum InternalError {
     #[snafu(display("Failed to serialize JSON: {source}"))]
-    Serialization { source: serde_json::Error },
+    Serialization {
+        #[snafu(source(from(serde_json::Error, Box::new)))]
+        source: Box<serde_json::Error>,
+    },
 
     #[snafu(display("Failed to deserialize JSON: {source}"))]
-    Deserialization { source: serde_json::Error },
+    Deserialization {
+        #[snafu(source(from(serde_json::Error, Box::new)))]
+        source: Box<serde_json::Error>,
+    },
 
     #[snafu(display("Failed to parse hex string: {source}"))]
     HexParse { source: hex::FromHexError },
@@ -140,6 +146,41 @@ pub enum InternalError {
 
     #[snafu(display("Parse error: {message}"))]
     Parse { message: String },
+
+    #[snafu(display("Protocol error: {message}"))]
+    Protocol { message: String },
+
+    #[snafu(display("Connection timeout: {source}"))]
+    Timeout { source: tokio::time::error::Elapsed },
+
+    #[snafu(display("IO error: {source}"))]
+    Io { source: std::io::Error },
+
+    #[snafu(display("Channel receive error: {source}"))]
+    ChannelRecv {
+        source: tokio::sync::oneshot::error::RecvError,
+    },
+}
+
+// Implement From for common errors to enable ? operator
+impl From<serde_json::Error> for InternalError {
+    fn from(source: serde_json::Error) -> Self {
+        InternalError::Serialization {
+            source: Box::new(source),
+        }
+    }
+}
+
+impl From<std::io::Error> for InternalError {
+    fn from(source: std::io::Error) -> Self {
+        InternalError::Io { source }
+    }
+}
+
+impl From<tokio::sync::oneshot::error::RecvError> for InternalError {
+    fn from(source: tokio::sync::oneshot::error::RecvError) -> Self {
+        InternalError::ChannelRecv { source }
+    }
 }
 
 #[cfg(test)]

@@ -210,7 +210,7 @@ mod tests {
 
     #[test]
     fn subscribe_result_serialize_shape() {
-        let extranonce1 = Extranonce::random(EXTRANONCE1_SIZE);
+        let extranonce1 = Extranonce::random(8);
         let sr = SubscribeResult {
             subscriptions: vec![("mining.notify".into(), "tag".into())],
             extranonce1: extranonce1.clone(),

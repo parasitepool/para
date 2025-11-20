@@ -41,7 +41,7 @@ impl Extranonce {
     }
 
     pub fn from_hex(s: &str) -> Result<Self, InternalError> {
-        let bytes = hex::decode(s).map_err(|source| InternalError::HexParse { source })?;
+        let bytes = hex::decode(s).context(error::HexParseSnafu)?;
         Ok(Self(bytes))
     }
 }

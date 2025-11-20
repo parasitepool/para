@@ -1,9 +1,43 @@
-use super::*;
-
-// Import snafu for derive macro
-use snafu::Snafu;
-// Import context selectors for use in submodules
-use error::{InvalidValueSnafu, ParseSnafu};
+use {
+    super::USER_AGENT,
+    bitcoin::{
+        BlockHash, CompactTarget, Target, TxMerkleNode, Txid, block,
+        consensus::Encodable,
+        hashes::{Hash, sha256d},
+    },
+    byteorder::{BigEndian, ByteOrder, LittleEndian},
+    derive_more::Display,
+    error::{InternalError, Result},
+    hex::FromHex,
+    lazy_static::lazy_static,
+    rand::RngCore,
+    serde::{
+        Deserialize, Serialize, Serializer,
+        de::{self, Deserializer},
+        ser::SerializeSeq,
+    },
+    serde_json::Value,
+    serde_with::{DeserializeFromStr, SerializeDisplay},
+    snafu::{ResultExt, Snafu},
+    std::{
+        collections::BTreeMap,
+        fmt,
+        ops::{BitAnd, BitOr, BitXor, Not},
+        str::FromStr,
+        sync::{
+            Arc,
+            atomic::{AtomicU64, Ordering},
+        },
+        time::{Duration, Instant},
+    },
+    tokio::{
+        io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader, BufWriter},
+        net::{TcpStream, tcp::OwnedWriteHalf},
+        sync::{Mutex, mpsc, oneshot},
+        task::JoinHandle,
+    },
+    tracing::{debug, error, warn},
+};
 
 mod authorize;
 mod client;
@@ -30,7 +64,7 @@ pub use {
     client::Client,
     configure::Configure,
     difficulty::Difficulty,
-    error::{InternalError, JsonRpcError, StratumErrorCode},
+    error::{JsonRpcError, StratumErrorCode},
     extranonce::Extranonce,
     job_id::JobId,
     merkle::{MerkleNode, merkle_branches, merkle_root},

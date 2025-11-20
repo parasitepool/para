@@ -41,7 +41,7 @@ impl FromStr for MerkleNode {
             });
         }
         let mut bytes = [0u8; 32];
-        hex::decode_to_slice(s, &mut bytes).map_err(|source| InternalError::HexParse { source })?;
+        hex::decode_to_slice(s, &mut bytes).context(error::HexParseSnafu)?;
         Ok(MerkleNode(sha256d::Hash::from_byte_array(bytes)))
     }
 }
@@ -89,7 +89,7 @@ pub fn merkle_root(
     merkle_branches: &[MerkleNode],
 ) -> Result<MerkleNode, InternalError> {
     let coinbase_bin = hex::decode(format!("{coinb1}{extranonce1}{extranonce2}{coinb2}"))
-        .map_err(|source| InternalError::HexParse { source })?;
+        .context(error::HexParseSnafu)?;
     let coinbase_hash = sha256d::Hash::hash(&coinbase_bin);
 
     let mut merkle_root = coinbase_hash;

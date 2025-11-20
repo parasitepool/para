@@ -19,7 +19,9 @@ impl Client {
         password: Option<String>,
         timeout: Duration,
     ) -> Result<Self> {
-        let stream = tokio::time::timeout(timeout, TcpStream::connect(address)).await??;
+        let stream = tokio::time::timeout(timeout, TcpStream::connect(address))
+            .await
+            .context(error::TimeoutSnafu)??;
 
         let (tcp_reader, tcp_writer) = {
             let (rx, tx) = stream.into_split();
@@ -47,7 +49,7 @@ impl Client {
         })
     }
 
-    pub async fn disconnect(&mut self) -> Result {
+    pub async fn disconnect(&mut self) -> Result<()> {
         self.tcp_writer.shutdown().await?;
         self.listener.abort();
         Ok(())
@@ -158,8 +160,12 @@ impl Client {
             } => Ok((result, duration, bytes_read)),
             Message::Response {
                 error: Some(err), ..
-            } => Err(anyhow!("mining.configure error: {}", err)),
-            _ => Err(anyhow!("Unhandled error in mining.configure")),
+            } => Err(InternalError::Protocol {
+                message: format!("mining.configure error: {}", err),
+            }),
+            _ => Err(InternalError::Protocol {
+                message: "Unhandled error in mining.configure".to_string(),
+            }),
         }
     }
 
@@ -186,8 +192,12 @@ impl Client {
             } => Ok((serde_json::from_value(result)?, duration, bytes_read)),
             Message::Response {
                 error: Some(err), ..
-            } => Err(anyhow!("mining.subscribe error: {}", err)),
-            _ => Err(anyhow!("Unknown mining.subscribe error")),
+            } => Err(InternalError::Protocol {
+                message: format!("mining.subscribe error: {}", err),
+            }),
+            _ => Err(InternalError::Protocol {
+                message: "Unknown mining.subscribe error".to_string(),
+            }),
         }
     }
 
@@ -215,13 +225,19 @@ impl Client {
                 if serde_json::from_value(result)? {
                     Ok((duration, bytes_read))
                 } else {
-                    Err(anyhow!("Unauthorized"))
+                    Err(InternalError::Protocol {
+                        message: "Unauthorized".to_string(),
+                    })
                 }
             }
             Message::Response {
                 error: Some(err), ..
-            } => Err(anyhow!("mining.authorize error: {}", err)),
-            _ => Err(anyhow!("Unknown mining.authorize error")),
+            } => Err(InternalError::Protocol {
+                message: format!("mining.authorize error: {}", err),
+            }),
+            _ => Err(InternalError::Protocol {
+                message: "Unknown mining.authorize error".to_string(),
+            }),
         }
     }
 
@@ -255,17 +271,31 @@ impl Client {
                 ..
             } => {
                 if let Err(err) = serde_json::from_value::<Value>(result) {
-                    return Err(anyhow!("Failed to submit: {err}"));
+                    return Err(InternalError::Protocol {
+                        message: format!("Failed to submit: {err}"),
+                    });
                 }
             }
             Message::Response {
                 error: Some(err), ..
-            } => return Err(anyhow!("mining.submit error: {}", err)),
+            } => {
+                return Err(InternalError::Protocol {
+                    message: format!("mining.submit error: {}", err),
+                });
+            }
             Message::Response {
                 reject_reason: Some(reason),
                 ..
-            } => return Err(anyhow!("share rejected: {}", reason)),
-            _ => return Err(anyhow!("Unhandled error in mining.submit")),
+            } => {
+                return Err(InternalError::Protocol {
+                    message: format!("share rejected: {}", reason),
+                });
+            }
+            _ => {
+                return Err(InternalError::Protocol {
+                    message: "Unhandled error in mining.submit".to_string(),
+                });
+            }
         }
 
         Ok(submit)

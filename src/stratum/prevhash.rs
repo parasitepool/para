@@ -9,7 +9,7 @@ impl FromStr for PrevHash {
     type Err = InternalError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let bytes = <[u8; 32]>::from_hex(s).map_err(|source| InternalError::HexParse { source })?;
+        let bytes = <[u8; 32]>::from_hex(s).context(error::HexParseSnafu)?;
 
         let mut reordered = [0u8; 32];
         for (src, dst) in bytes.chunks_exact(4).zip(reordered.chunks_mut(4)) {
