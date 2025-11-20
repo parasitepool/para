@@ -77,8 +77,11 @@ where
                             if !matches!(self.state,  State::Init | State::Configured) {
                                 self.send_error(
                                     id.clone(),
-                                    StratumError::ParamsNotArray,
-                                    Some(serde_json::json!({"reason": "Method not allowed in current state"})),
+                                    StratumError::MethodNotAllowed,
+                                    Some(serde_json::json!({
+                                        "method": "mining.configure",
+                                        "current_state": format!("{:?}", self.state)
+                                    })),
                                 )
                                 .await?;
                                 continue;
@@ -95,8 +98,11 @@ where
                             if !matches!(self.state,  State::Init | State::Configured) {
                                 self.send_error(
                                     id.clone(),
-                                    StratumError::ParamsNotArray,
-                                    Some(serde_json::json!({"reason": "Method not allowed in current state"})),
+                                    StratumError::MethodNotAllowed,
+                                    Some(serde_json::json!({
+                                        "method": "mining.subscribe",
+                                        "current_state": format!("{:?}", self.state)
+                                    })),
                                 )
                                 .await?;
                                 continue;
@@ -113,8 +119,11 @@ where
                             if self.state != State::Subscribed {
                                 self.send_error(
                                     id.clone(),
-                                    StratumError::ParamsNotArray,
-                                    Some(serde_json::json!({"reason": "Method not allowed in current state"})),
+                                    StratumError::MethodNotAllowed,
+                                    Some(serde_json::json!({
+                                        "method": "mining.authorize",
+                                        "current_state": format!("{:?}", self.state)
+                                    })),
                                 )
                                 .await?;
                                 continue;

@@ -149,7 +149,7 @@ async fn authorize_before_subscribe_fails() {
             .await
             .unwrap_err()
             .to_string()
-            .contains("Method not allowed in current state")
+            .contains("Method not allowed")
     );
 }
 

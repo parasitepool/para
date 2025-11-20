@@ -5,6 +5,7 @@ pub type Result<T, E = InternalError> = std::result::Result<T, E>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
 pub enum StratumError {
+    MethodNotAllowed = -10,
     InvalidNonce2Length = -9,
     WorkerMismatch = -8,
     NoNonce = -7,
@@ -25,6 +26,7 @@ pub enum StratumError {
 impl fmt::Display for StratumError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self {
+            Self::MethodNotAllowed => "Method not allowed",
             Self::InvalidNonce2Length => "Invalid nonce2 length",
             Self::WorkerMismatch => "Worker mismatch",
             Self::NoNonce => "No nonce",
@@ -180,6 +182,10 @@ mod tests {
     #[test]
     fn stratum_error_code_display() {
         assert_eq!(
+            StratumError::MethodNotAllowed.to_string(),
+            "Method not allowed"
+        );
+        assert_eq!(
             StratumError::InvalidNonce2Length.to_string(),
             "Invalid nonce2 length"
         );
@@ -209,7 +215,25 @@ mod tests {
     }
 
     #[test]
+    fn method_not_allowed_error() {
+        let error = StratumError::MethodNotAllowed;
+        let response = error.into_response(Some(serde_json::json!({
+            "method": "mining.configure",
+            "current_state": "working"
+        })));
+
+        assert_eq!(response.error_code, -10);
+        assert_eq!(response.message, "Method not allowed");
+        assert!(response.traceback.is_some());
+
+        let serialized = serde_json::to_string(&response).unwrap();
+        assert!(serialized.contains("[-10,\"Method not allowed\","));
+        assert!(serialized.contains("mining.configure"));
+    }
+
+    #[test]
     fn stratum_error_code_values() {
+        assert_eq!(StratumError::MethodNotAllowed as i32, -10);
         assert_eq!(StratumError::InvalidNonce2Length as i32, -9);
         assert_eq!(StratumError::WorkerMismatch as i32, -8);
         assert_eq!(StratumError::NoNonce as i32, -7);
