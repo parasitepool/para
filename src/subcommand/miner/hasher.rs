@@ -1,4 +1,4 @@
-use {super::*, snafu::Snafu};
+use super::*;
 
 #[derive(Debug, Snafu)]
 pub(crate) enum HasherError {
