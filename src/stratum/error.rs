@@ -46,26 +46,18 @@ impl fmt::Display for StratumError {
 }
 
 impl StratumError {
-    pub fn to_response(self) -> StratumErrorResponse {
+    pub fn into_response(self, traceback: Option<Value>) -> StratumErrorResponse {
         StratumErrorResponse {
             error_code: self as i32,
             message: self.to_string(),
-            traceback: None,
-        }
-    }
-
-    pub fn to_response_with_traceback(self, traceback: Value) -> StratumErrorResponse {
-        StratumErrorResponse {
-            error_code: self as i32,
-            message: self.to_string(),
-            traceback: Some(traceback),
+            traceback,
         }
     }
 }
 
 impl From<StratumError> for StratumErrorResponse {
     fn from(error: StratumError) -> Self {
-        error.to_response()
+        error.into_response(None)
     }
 }
 
@@ -247,13 +239,13 @@ mod tests {
 
     #[test]
     fn stratum_error_response_serialization_as_array() {
-        let response = StratumError::Stale.to_response();
+        let response = StratumError::Stale.into_response(None);
 
         let serialized = serde_json::to_string(&response).unwrap();
         assert_eq!(serialized, "[2,\"Stale\",null]");
 
         let with_traceback = StratumError::InvalidJobId
-            .to_response_with_traceback(serde_json::json!({"job_id": "deadbeef"}));
+            .into_response(Some(serde_json::json!({"job_id": "deadbeef"})));
 
         let serialized = serde_json::to_string(&with_traceback).unwrap();
         assert!(serialized.contains("[1,\"Invalid JobID\","));
@@ -275,10 +267,10 @@ mod tests {
     #[test]
     fn stratum_error_response_with_traceback() {
         let error = StratumError::InvalidJobId;
-        let response = error.to_response_with_traceback(serde_json::json!({
+        let response = error.into_response(Some(serde_json::json!({
             "received": "abc123",
             "expected": "deadbeef"
-        }));
+        })));
 
         assert_eq!(response.error_code, 1);
         assert_eq!(response.message, "Invalid JobID");
@@ -287,12 +279,12 @@ mod tests {
 
     #[test]
     fn stratum_error_response_display() {
-        let response = StratumError::Stale.to_response();
+        let response = StratumError::Stale.into_response(None);
 
         assert_eq!(response.to_string(), "2: Stale");
 
         let with_traceback = StratumError::InvalidJobId
-            .to_response_with_traceback(serde_json::json!({"detail": "additional details"}));
+            .into_response(Some(serde_json::json!({"detail": "additional details"})));
 
         let display = with_traceback.to_string();
         assert!(display.contains("1: Invalid JobID"));

@@ -218,12 +218,12 @@ where
             let message = Message::Response {
                 id,
                 result: None,
-                error: Some(StratumError::ParamsNotArray.to_response_with_traceback(
-                    serde_json::json!({
+                error: Some(
+                    StratumError::ParamsNotArray.into_response(Some(serde_json::json!({
                         "configure": format!("{:?}", configure),
                         "reason": "Unsupported extension"
-                    }),
-                )),
+                    }))),
+                ),
                 reject_reason: None,
             };
 
@@ -477,16 +477,10 @@ where
         error: StratumError,
         traceback: Option<serde_json::Value>,
     ) -> Result {
-        let response = if let Some(tb) = traceback {
-            error.to_response_with_traceback(tb)
-        } else {
-            error.to_response()
-        };
-
         self.send(Message::Response {
             id,
             result: None,
-            error: Some(response),
+            error: Some(error.into_response(traceback)),
             reject_reason: None,
         })
         .await
