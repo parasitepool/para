@@ -15,7 +15,7 @@ impl Pool {
         let port = config.port();
 
         let mut generator = Generator::new(config.clone())?;
-        let template_receiver = generator.spawn().await?;
+        let workbase_receiver = generator.spawn().await?;
 
         let listener = TcpListener::bind((address.clone(), port)).await?;
 
@@ -30,11 +30,11 @@ impl Pool {
 
                     let (reader, writer) = stream.into_split();
 
-                    let template_receiver = template_receiver.clone();
+                    let workbase_receiver = workbase_receiver.clone();
                     let config = config.clone();
 
                     tokio::task::spawn(async move {
-                        let mut conn = Connection::new(config, worker, reader, writer, template_receiver);
+                        let mut conn = Connection::new(config, worker, reader, writer, workbase_receiver);
 
                         if let Err(err) = conn.serve().await {
                             error!("Worker connection error: {err}")
