@@ -59,12 +59,6 @@ impl StratumError {
     }
 }
 
-impl From<StratumError> for StratumErrorResponse {
-    fn from(error: StratumError) -> Self {
-        error.into_response(None)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct StratumErrorResponse {
     pub error_code: i32,
@@ -277,7 +271,7 @@ mod tests {
     #[test]
     fn stratum_error_response_from_error() {
         let error = StratumError::Stale;
-        let response: StratumErrorResponse = error.into();
+        let response = error.into_response(None);
 
         assert_eq!(response.error_code, 2);
         assert_eq!(response.message, "Stale");
