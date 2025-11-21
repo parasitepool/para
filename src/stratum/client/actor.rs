@@ -70,12 +70,10 @@ impl ClientActor {
                             let _ = respond_to.send(result);
                         }
                         ClientMessage::Request { method, params, respond_to } => {
-                            // Assign actual ID from counter
                             let actual_id = self.next_id();
                             self.pending.insert(actual_id.clone(), respond_to);
 
                             if let Err(e) = self.handle_request(actual_id.clone(), method, params).await {
-                                // If sending fails, notify the pending request
                                 if let Some(tx) = self.pending.remove(&actual_id) {
                                     let _ = tx.send(Err(e));
                                 }
@@ -87,11 +85,9 @@ impl ClientActor {
                         }
                     }
                 }
-                // Messages from the reader task
                 Some(msg) = incoming_rx.recv() => {
                     self.handle_incoming(msg).await;
                 }
-                // All senders dropped - shutdown
                 else => {
                     debug!("Client actor shutting down");
                     self.handle_disconnect().await;
@@ -140,7 +136,6 @@ impl ClientActor {
     async fn handle_request(&mut self, id: Id, method: String, params: Value) -> Result {
         let connection = self.connection.as_mut().ok_or(ClientError::NotConnected)?;
 
-        // Request is already complete - just forward it!
         let msg = Message::Request { id, method, params };
 
         let frame = serde_json::to_string(&msg)

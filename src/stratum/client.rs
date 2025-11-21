@@ -73,6 +73,7 @@ impl Client {
         let _ = self.tx.send(ClientMessage::Disconnect { respond_to }).await;
 
         let _ = rx.await;
+
         Ok(())
     }
 
