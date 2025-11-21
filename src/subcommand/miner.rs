@@ -61,6 +61,7 @@ impl Miner {
         let config = ClientConfig {
             address: address.to_string(),
             username: self.username.clone(),
+            user_agent: USER_AGENT.into(),
             password: self.password.clone(),
             timeout: Duration::from_secs(10),
         };

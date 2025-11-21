@@ -52,7 +52,7 @@ pub use {
     configure::Configure,
     difficulty::Difficulty,
     error::{StratumError, StratumErrorResponse},
-    event::StratumEvent,
+    event::Event,
     extranonce::Extranonce,
     job_id::JobId,
     merkle::{MerkleNode, merkle_branches, merkle_root},

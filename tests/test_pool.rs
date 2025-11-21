@@ -88,6 +88,7 @@ impl TestPool {
         let config = stratum::ClientConfig {
             address: self.stratum_endpoint(),
             username: signet_username(),
+            user_agent: USER_AGENT.into(),
             password: None,
             timeout: Duration::from_secs(1),
         };

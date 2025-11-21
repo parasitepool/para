@@ -1,5 +1,4 @@
 use super::*;
-use crate::stratum::StratumEvent;
 
 pub(crate) struct Controller {
     client: Client,
@@ -29,7 +28,7 @@ impl Controller {
         throttle: Option<ckpool::HashRate>,
         mode: Mode,
     ) -> Result<Self> {
-        let (subscribe, _, _) = client.subscribe(USER_AGENT.into()).await?;
+        let (subscribe, _, _) = client.subscribe().await?;
         client.authorize().await?;
 
         info!(
@@ -70,11 +69,11 @@ impl Controller {
     pub(crate) async fn run(mut self, cancel_token: CancellationToken) -> Result<Vec<Share>> {
         self.spawn_hashers();
 
+        let mut events = self.client.events.subscribe();
+
         if !integration_test() && !logs_enabled() {
             spawn_throbber(self.metrics.clone());
         }
-
-        let mut events = self.client.events.subscribe();
 
         loop {
             tokio::select! {
@@ -85,56 +84,16 @@ impl Controller {
                 },
                 event = events.recv() => {
                     match event {
-                        Ok(StratumEvent::Notify(notify)) => {
+                        Ok(stratum::Event::Notify(notify)) => {
                              self.handle_notify(notify).await?;
                         }
-                        Ok(StratumEvent::SetDifficulty(difficulty)) => {
+                        Ok(stratum::Event::SetDifficulty(difficulty)) => {
                             self.handle_set_difficulty(difficulty).await;
                         }
-                        Ok(StratumEvent::Disconnected) => {
-                            info!("Disconnected from stratum server. Reconnecting...");
-                            // Cancel hashers immediately to stop mining on stale job
+                        Ok(stratum::Event::Disconnected) => {
+                            info!("Disconnected from stratum server. Shutting down...");
                             self.cancel_hashers();
-
-                            // Attempt reconnection with backoff? For now simple loop
-                            let mut retry_delay = Duration::from_secs(1);
-                            loop {
-                                if cancel_token.is_cancelled() { break; }
-
-                                tokio::time::sleep(retry_delay).await;
-
-                                match self.client.reconnect().await {
-                                    Ok(_) => {
-                                        info!("Reconnected successfully");
-                                        // We need to update subscription info if it changed?
-                                        // Actually, Extranonce1 might change.
-                                        // The current Controller structure assumes Extranonce1 is constant from initialization.
-                                        // This is a limitation of the current refactor scope without deeper changes to Controller.
-                                        // Ideally we should update self.extranonce1 here.
-
-                                        // Let's fetch the new subscription details via a new subscribe call which reconnect() does?
-                                        // reconnect() does the handshake. But we don't get the result back out easily unless we change reconnect's signature or store it in Client.
-
-                                        // For now, we assume Extranonce1 might not change or we just keep mining and if we get rejected, so be it.
-                                        // BUT, if Extranonce1 changes, our shares will be invalid.
-
-                                        // Let's do a quick hack: We know reconnect() calls subscribe.
-                                        // But we can't easily access the result.
-                                        // Correct approach: Controller shouldn't cache extranonce1 so rigidly, or we need to update it.
-
-                                        // Since `reconnect` is in `Client`, and returns `Result<()>`, we trust it worked.
-                                        // However, the `Client` doesn't expose the new Extranonce1.
-
-                                        // Let's leave it as is for now, acknowledging the limitation,
-                                        // or we could add a way to get the latest subscription info from Client if we stored it.
-                                        break;
-                                    },
-                                    Err(e) => {
-                                        warn!("Reconnection failed: {}. Retrying in {:?}...", e, retry_delay);
-                                        retry_delay = std::cmp::min(retry_delay * 2, Duration::from_secs(60));
-                                    }
-                                }
-                            }
+                            break;
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
                             warn!("Event loop lagged, missed messages");

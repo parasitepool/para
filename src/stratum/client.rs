@@ -1,4 +1,3 @@
-use crate::USER_AGENT;
 use {
     super::*,
     error::ClientError,
@@ -26,6 +25,7 @@ pub type Result<T = (), E = ClientError> = std::result::Result<T, E>;
 pub struct ClientConfig {
     pub address: String,
     pub username: String,
+    pub user_agent: String,
     pub password: Option<String>,
     pub timeout: Duration,
 }
@@ -35,7 +35,7 @@ pub struct Client {
     config: Arc<ClientConfig>,
     id_counter: Arc<AtomicU64>,
     tx: mpsc::Sender<ActorMessage>,
-    pub events: tokio::sync::broadcast::Sender<StratumEvent>,
+    pub events: tokio::sync::broadcast::Sender<Event>,
 }
 
 enum ActorMessage {
@@ -84,8 +84,7 @@ impl Client {
         self.disconnect().await?;
         self.connect().await?;
 
-        // Perform handshake
-        let (_subscribe, _, _) = self.subscribe(USER_AGENT.into()).await?;
+        let (_subscribe, _, _) = self.subscribe().await?;
         self.authorize().await?;
 
         Ok(())
@@ -166,15 +165,12 @@ impl Client {
         }
     }
 
-    pub async fn subscribe(
-        &self,
-        user_agent: String,
-    ) -> Result<(SubscribeResult, Duration, usize)> {
+    pub async fn subscribe(&self) -> Result<(SubscribeResult, Duration, usize)> {
         let (rx, instant) = self
             .send_request(
                 "mining.subscribe",
                 serde_json::to_value(Subscribe {
-                    user_agent,
+                    user_agent: self.config.user_agent.clone(),
                     extranonce1: None,
                 })
                 .context(error::SerializationSnafu)?,
@@ -325,7 +321,7 @@ impl Client {
 struct Connection {
     config: Arc<ClientConfig>,
     rx: mpsc::Receiver<ActorMessage>,
-    events: tokio::sync::broadcast::Sender<StratumEvent>,
+    events: tokio::sync::broadcast::Sender<Event>,
     pending: BTreeMap<Id, oneshot::Sender<Result<(Message, usize)>>>,
 }
 
@@ -333,7 +329,7 @@ impl Connection {
     fn new(
         config: Arc<ClientConfig>,
         rx: mpsc::Receiver<ActorMessage>,
-        events: tokio::sync::broadcast::Sender<StratumEvent>,
+        events: tokio::sync::broadcast::Sender<Event>,
     ) -> Self {
         Self {
             config,
@@ -450,7 +446,7 @@ impl Connection {
         }
 
         // Notify disconnection
-        let _ = self.events.send(StratumEvent::Disconnected);
+        let _ = self.events.send(Event::Disconnected);
 
         Ok(())
     }
@@ -459,7 +455,7 @@ impl Connection {
         match method.as_str() {
             "mining.notify" => match serde_json::from_value::<Notify>(params) {
                 Ok(notify) => {
-                    let _ = self.events.send(StratumEvent::Notify(notify));
+                    let _ = self.events.send(Event::Notify(notify));
                 }
                 Err(e) => warn!("Failed to parse mining.notify: {}", e),
             },
@@ -467,7 +463,7 @@ impl Connection {
                 Ok(set_diff) => {
                     let _ = self
                         .events
-                        .send(StratumEvent::SetDifficulty(set_diff.difficulty()));
+                        .send(Event::SetDifficulty(set_diff.difficulty()));
                 }
                 Err(e) => warn!("Failed to parse mining.set_difficulty: {}", e),
             },

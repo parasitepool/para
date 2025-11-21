@@ -81,6 +81,7 @@ impl Ping {
                 let config = stratum::ClientConfig {
                     address: addr.to_string(),
                     username: "".into(),
+                    user_agent: USER_AGENT.into(),
                     password: None,
                     timeout: Duration::from_secs(self.timeout),
                 };
@@ -88,7 +89,7 @@ impl Ping {
                 let mut client = stratum::Client::new(config);
                 client.connect().await?;
 
-                let (_, duration, size) = client.subscribe(USER_AGENT.into()).await?;
+                let (_, duration, size) = client.subscribe().await?;
 
                 client.disconnect().await?;
 
@@ -98,6 +99,7 @@ impl Ping {
                 let config = stratum::ClientConfig {
                     address: addr.to_string(),
                     username: username.clone(),
+                    user_agent: USER_AGENT.into(),
                     password: Some(password.clone()),
                     timeout: Duration::from_secs(self.timeout),
                 };
@@ -105,7 +107,7 @@ impl Ping {
                 let mut client = stratum::Client::new(config);
                 client.connect().await?;
 
-                client.subscribe(USER_AGENT.into()).await?;
+                client.subscribe().await?;
                 let (duration, size) = client.authorize().await?;
 
                 let instant = Instant::now();
@@ -114,15 +116,15 @@ impl Ping {
 
                 loop {
                     match events.recv().await {
-                        Ok(stratum::StratumEvent::Notify(_)) => {
+                        Ok(stratum::Event::Notify(_)) => {
                             break;
                         }
-                        Ok(stratum::StratumEvent::Disconnected) => {
-                            // Treat as error or break?
+                        Ok(stratum::Event::Disconnected) => {
+                            // Treat as error or break? TODO
                             return Err(anyhow!("Disconnected before notify"));
                         }
                         Err(e) => {
-                            return Err(anyhow!("Event error: {}", e));
+                            return Err(anyhow!("Stratum event error: {}", e));
                         }
                         _ => continue,
                     }

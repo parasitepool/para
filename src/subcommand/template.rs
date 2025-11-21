@@ -1,6 +1,6 @@
 use {
     super::*,
-    crate::stratum::{Client, ClientConfig, StratumEvent},
+    crate::stratum::{Client, ClientConfig, Event},
 };
 
 #[derive(Debug, Parser)]
@@ -45,6 +45,7 @@ impl Template {
         let config = ClientConfig {
             address: address.to_string(),
             username: self.username.clone(),
+            user_agent: USER_AGENT.into(),
             password: self.password.clone(),
             timeout: Duration::from_secs(5),
         };
@@ -52,7 +53,7 @@ impl Template {
         let mut client = Client::new(config);
         client.connect().await?;
 
-        let (subscription, _, _) = client.subscribe(USER_AGENT.into()).await?;
+        let (subscription, _, _) = client.subscribe().await?;
 
         client.authorize().await?;
 
@@ -66,7 +67,7 @@ impl Template {
                 }
                 event = events.recv() => {
                     match event {
-                        Ok(StratumEvent::Notify(notify)) => {
+                        Ok(Event::Notify(notify)) => {
                             let output = Output {
                                 stratum_endpoint: self.stratum_endpoint.clone(),
                                 ip_address: address.ip().to_string(),
@@ -93,7 +94,7 @@ impl Template {
                                 break;
                             }
                         }
-                         Ok(StratumEvent::Disconnected) => {
+                         Ok(Event::Disconnected) => {
                             error!("Disconnected from stratum server");
                             break;
                         }

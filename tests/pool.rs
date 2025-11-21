@@ -69,7 +69,7 @@ async fn basic_initialization_flow() {
 
     let client = pool.stratum_client().await;
 
-    let (subscribe, _, _) = client.subscribe(USER_AGENT.into()).await.unwrap();
+    let (subscribe, _, _) = client.subscribe().await.unwrap();
 
     assert_eq!(subscribe.subscriptions.len(), 2);
 
@@ -78,14 +78,14 @@ async fn basic_initialization_flow() {
     let mut events = client.events.subscribe();
 
     let set_difficulty = match events.recv().await.unwrap() {
-        stratum::StratumEvent::SetDifficulty(d) => d,
+        stratum::Event::SetDifficulty(d) => d,
         _ => panic!("Expected SetDifficulty"),
     };
 
     assert!(set_difficulty == Difficulty::from(0.00001));
 
     let notify = match events.recv().await.unwrap() {
-        stratum::StratumEvent::Notify(n) => n,
+        stratum::Event::Notify(n) => n,
         _ => panic!("Expected Notify"),
     };
 
@@ -128,7 +128,7 @@ async fn configure_with_multiple_negotiation_steps() {
             .is_ok()
     );
 
-    let (subscribe, _, _) = client.subscribe(USER_AGENT.into()).await.unwrap();
+    let (subscribe, _, _) = client.subscribe().await.unwrap();
 
     assert_eq!(subscribe.subscriptions.len(), 2);
 
@@ -157,7 +157,7 @@ async fn submit_before_authorize_fails() {
 
     let client = pool.stratum_client().await;
 
-    client.subscribe(USER_AGENT.into()).await.unwrap();
+    client.subscribe().await.unwrap();
 
     assert!(
         client
