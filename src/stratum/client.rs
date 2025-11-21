@@ -20,6 +20,8 @@ mod error;
 
 pub type Result<T = (), E = ClientError> = std::result::Result<T, E>;
 
+const CHANNEL_BUFFER_SIZE: usize = 32;
+
 #[derive(Debug, Clone)]
 pub struct ClientConfig {
     pub address: String,
@@ -38,9 +40,10 @@ pub struct Client {
 
 impl Client {
     pub fn new(config: ClientConfig) -> Self {
-        let (tx, rx) = mpsc::channel(32);
-        let (event_tx, _event_rx) = broadcast::channel(32);
+        let (tx, rx) = mpsc::channel(CHANNEL_BUFFER_SIZE);
+        let (event_tx, _event_rx) = broadcast::channel(CHANNEL_BUFFER_SIZE);
 
+        let config = Arc::new(config);
         let actor = ClientActor::new(config.clone(), rx, event_tx.clone());
 
         tokio::spawn(async move {
@@ -48,7 +51,7 @@ impl Client {
         });
 
         Self {
-            config: Arc::new(config),
+            config,
             tx,
             events: event_tx,
         }

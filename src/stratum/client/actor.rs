@@ -34,7 +34,7 @@ pub(super) enum ClientMessage {
 }
 
 pub(super) struct ClientActor {
-    config: ClientConfig,
+    config: Arc<ClientConfig>,
     rx: mpsc::Receiver<ClientMessage>,
     events: broadcast::Sender<Event>,
     id_counter: u64,
@@ -44,7 +44,7 @@ pub(super) struct ClientActor {
 
 impl ClientActor {
     pub(super) fn new(
-        config: ClientConfig,
+        config: Arc<ClientConfig>,
         rx: mpsc::Receiver<ClientMessage>,
         events: broadcast::Sender<Event>,
     ) -> Self {
@@ -59,7 +59,7 @@ impl ClientActor {
     }
 
     pub(super) async fn run(mut self) {
-        let (incoming_tx, mut incoming_rx) = mpsc::channel::<IncomingMessage>(32);
+        let (incoming_tx, mut incoming_rx) = mpsc::channel::<IncomingMessage>(CHANNEL_BUFFER_SIZE);
 
         loop {
             tokio::select! {
@@ -118,9 +118,8 @@ impl ClientActor {
         let (reader, writer) = stream.into_split();
         let writer = BufWriter::new(writer);
 
-        let events = self.events.clone();
         let reader_handle = tokio::spawn(async move {
-            Self::reader_task(BufReader::new(reader), incoming_tx, events).await;
+            Self::reader_task(BufReader::new(reader), incoming_tx).await;
         });
 
         self.connection = Some(ConnectionState {
@@ -213,7 +212,6 @@ impl ClientActor {
     async fn reader_task(
         mut reader: BufReader<tokio::net::tcp::OwnedReadHalf>,
         incoming_tx: mpsc::Sender<IncomingMessage>,
-        events: broadcast::Sender<Event>,
     ) {
         let mut line = String::new();
 
@@ -223,7 +221,6 @@ impl ClientActor {
             let bytes_read = match reader.read_line(&mut line).await {
                 Ok(0) => {
                     let _ = incoming_tx.send(IncomingMessage::Disconnected).await;
-                    let _ = events.send(Event::Disconnected);
                     break;
                 }
                 Ok(n) => n,
