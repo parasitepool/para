@@ -70,12 +70,15 @@ impl ClientActor {
                             let _ = respond_to.send(result);
                         }
                         ClientMessage::Request { method, params, respond_to } => {
-                            let actual_id = self.next_id();
-                            self.pending.insert(actual_id.clone(), respond_to);
+                            let id = self.next_id();
 
-                            if let Err(e) = self.handle_request(actual_id.clone(), method, params).await
-                                && let Some(tx) = self.pending.remove(&actual_id) {
-                                    let _ = tx.send(Err(e));
+                            match self.handle_request(id.clone(), method, params).await {
+                                Ok(_) => {
+                                    self.pending.insert(id, respond_to);
+                                }
+                                Err(err) => {
+                                    let _ = respond_to.send(Err(err));
+                                }
                             }
                         }
                         ClientMessage::Disconnect { respond_to } => {
