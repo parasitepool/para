@@ -78,13 +78,18 @@ impl Ping {
     async fn ping_once(&self, addr: SocketAddr, ping_type: &PingType) -> Result<(Duration, usize)> {
         match ping_type {
             PingType::Subscribe => {
-                let mut client = stratum::Client::connect(
+                let (mut client, connection, _events) = stratum::Client::connect(
                     addr,
                     "".into(),
                     None,
                     Duration::from_secs(self.timeout),
                 )
                 .await?;
+
+                // Spawn connection in background
+                let _connection_handle = tokio::spawn(async move {
+                    let _ = connection.run().await;
+                });
 
                 let (_, duration, size) = client.subscribe(USER_AGENT.into()).await?;
 
@@ -93,7 +98,7 @@ impl Ping {
                 Ok((duration, size))
             }
             PingType::Authorized { username, password } => {
-                let mut client = stratum::Client::connect(
+                let (mut client, connection, mut events) = stratum::Client::connect(
                     addr,
                     username.clone(),
                     Some(password.clone()),
@@ -101,17 +106,22 @@ impl Ping {
                 )
                 .await?;
 
+                // Spawn connection in background
+                let _connection_handle = tokio::spawn(async move {
+                    let _ = connection.run().await;
+                });
+
                 client.subscribe(USER_AGENT.into()).await?;
                 let (duration, size) = client.authorize().await?;
 
                 let instant = Instant::now();
 
                 loop {
-                    let Some(message) = client.incoming.recv().await else {
-                        continue;
+                    let Some(event) = events.recv().await else {
+                        break;
                     };
 
-                    let Message::Notification { method, params: _ } = message else {
+                    let stratum::Event::Notification { method, params: _ } = event else {
                         continue;
                     };
 

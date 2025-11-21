@@ -67,7 +67,12 @@ fn configure_template_update_interval() {
 async fn basic_initialization_flow() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001");
 
-    let mut client = pool.stratum_client().await;
+    let (mut client, connection, mut events) = pool.stratum_client().await;
+
+    // Spawn connection
+    let _connection_handle = tokio::spawn(async move {
+        let _ = connection.run().await;
+    });
 
     let (subscribe, _, _) = client.subscribe(USER_AGENT.into()).await.unwrap();
 
@@ -75,8 +80,8 @@ async fn basic_initialization_flow() {
 
     assert!(client.authorize().await.is_ok());
 
-    let set_difficulty = match client.incoming.recv().await.unwrap() {
-        Message::Notification { method: _, params } => {
+    let set_difficulty = match events.recv().await.unwrap() {
+        stratum::Event::Notification { method: _, params } => {
             serde_json::from_value::<SetDifficulty>(params).unwrap()
         }
         _ => panic!(),
@@ -84,8 +89,8 @@ async fn basic_initialization_flow() {
 
     assert!(set_difficulty.difficulty() == Difficulty::from(0.00001));
 
-    let notify = match client.incoming.recv().await.unwrap() {
-        Message::Notification { method: _, params } => {
+    let notify = match events.recv().await.unwrap() {
+        stratum::Event::Notification { method: _, params } => {
             serde_json::from_value::<Notify>(params).unwrap()
         }
         _ => panic!(),
@@ -99,7 +104,12 @@ async fn basic_initialization_flow() {
 async fn configure_with_multiple_negotiation_steps() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001");
 
-    let mut client = pool.stratum_client().await;
+    let (mut client, connection, _events) = pool.stratum_client().await;
+
+    // Spawn connection
+    let _connection_handle = tokio::spawn(async move {
+        let _ = connection.run().await;
+    });
 
     assert!(
         client
@@ -141,7 +151,12 @@ async fn configure_with_multiple_negotiation_steps() {
 async fn authorize_before_subscribe_fails() {
     let pool = TestPool::spawn();
 
-    let mut client = pool.stratum_client().await;
+    let (mut client, connection, _events) = pool.stratum_client().await;
+
+    // Spawn connection
+    let _connection_handle = tokio::spawn(async move {
+        let _ = connection.run().await;
+    });
 
     assert!(
         client
@@ -157,7 +172,12 @@ async fn authorize_before_subscribe_fails() {
 async fn submit_before_authorize_fails() {
     let pool = TestPool::spawn();
 
-    let mut client = pool.stratum_client().await;
+    let (mut client, connection, _events) = pool.stratum_client().await;
+
+    // Spawn connection
+    let _connection_handle = tokio::spawn(async move {
+        let _ = connection.run().await;
+    });
 
     client.subscribe(USER_AGENT.into()).await.unwrap();
 

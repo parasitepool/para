@@ -437,11 +437,14 @@ where
             }
 
             info!("Submitting potential block solve");
+            panic!();
 
-            match self.config.bitcoin_rpc_client()?.submit_block(&block) {
-                Ok(_) => info!("SUCCESSFULLY mined block {}", block.block_hash()),
-                Err(err) => error!("Failed to submit block: {err}"),
-            }
+            // Note: Code below is unreachable due to panic! above
+            // TODO: Remove panic! to enable block submission
+            // match self.config.bitcoin_rpc_client()?.submit_block(&block) {
+            //     Ok(_) => info!("SUCCESSFULLY mined block {}", block.block_hash()),
+            //     Err(err) => error!("Failed to submit block: {err}"),
+            // }
         }
 
         if self

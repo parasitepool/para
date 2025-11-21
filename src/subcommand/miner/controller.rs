@@ -2,6 +2,8 @@ use super::*;
 
 pub(crate) struct Controller {
     client: Client,
+    connection: Option<Connection>,
+    connection_events: Option<mpsc::Receiver<Event>>,
     cpu_cores: usize,
     extranonce1: Extranonce,
     extranonce2: Arc<Mutex<Extranonce>>,
@@ -23,6 +25,8 @@ pub(crate) struct Controller {
 impl Controller {
     pub(crate) async fn new(
         mut client: Client,
+        connection: Connection,
+        connection_events: mpsc::Receiver<Event>,
         username: String,
         cpu_cores: usize,
         throttle: Option<ckpool::HashRate>,
@@ -47,6 +51,8 @@ impl Controller {
 
         Ok(Self {
             client,
+            connection: Some(connection),
+            connection_events: Some(connection_events),
             cpu_cores,
             extranonce1: subscribe.extranonce1,
             extranonce2: Arc::new(Mutex::new(Extranonce::zeros(subscribe.extranonce2_size))),
@@ -73,28 +79,46 @@ impl Controller {
             spawn_throbber(self.metrics.clone());
         }
 
+        // Take ownership of connection and spawn it
+        let connection = self
+            .connection
+            .take()
+            .expect("connection should be present");
+        let mut connection_events = self
+            .connection_events
+            .take()
+            .expect("connection events should be present");
+        let connection_handle = tokio::spawn(async move { connection.run().await });
+
         loop {
             tokio::select! {
                 biased;
+
+                // Handle user cancellation (Ctrl-C)
                 _ = cancel_token.cancelled() => {
-                    info!("Shutting down stratum client and hasher");
+                    info!("Shutdown requested");
                     break;
                 },
-                maybe = self.client.incoming.recv() => match maybe {
-                    Some(msg) => {
-                        match msg {
-                            Message::Notification { method, params } => {
-                                self.handle_notification(method, params).await?;
-                            }
-                            _ => warn!("Unexpected message on incoming: {:?}", msg)
+
+                // Handle events from stratum connection
+                maybe_event = connection_events.recv() => match maybe_event {
+                    Some(Event::Notification { method, params }) => {
+                        if let Err(e) = self.handle_notification(method, params).await {
+                            error!("Failed to handle notification: {}", e);
                         }
                     }
+                    Some(Event::Disconnected { reason }) => {
+                        info!("Stratum server disconnected: {}", reason);
+                        break;
+                    }
                     None => {
-                        info!("Incoming closed, shutting down");
+                        warn!("Connection event channel closed");
                         break;
                     }
                 },
-                maybe = self.share_rx.recv() => match maybe {
+
+                // Handle shares found by hashers
+                maybe_share = self.share_rx.recv() => match maybe_share {
                     Some((job_id, header, extranonce2)) => {
                         info!("Valid share found: blockhash={} nonce={}", header.block_hash(), header.nonce);
 
@@ -137,10 +161,15 @@ impl Controller {
             }
         }
 
+        // Cleanup: stop hashers and disconnect
+        info!("Shutting down...");
         self.root_cancel.cancel();
         drop(self.notify_tx);
+
         while self.hashers.join_next().await.is_some() {}
-        self.client.disconnect().await?;
+
+        let _ = self.client.disconnect().await;
+        let _ = connection_handle.await;
 
         Ok(self.shares)
     }
@@ -232,7 +261,7 @@ impl Controller {
         }
     }
 
-    async fn handle_notification(&mut self, method: String, params: Value) -> Result {
+    async fn handle_notification(&mut self, method: String, params: serde_json::Value) -> Result {
         match method.as_str() {
             "mining.notify" => {
                 let notify = serde_json::from_value::<Notify>(params)?;
@@ -250,7 +279,6 @@ impl Controller {
                 self.notify_tx.send_replace(Some((notify, cancel)));
             }
             "mining.set_difficulty" => {
-                // TODO: if current diff is different from new one then cancel all running hashers
                 let difficulty = serde_json::from_value::<SetDifficulty>(params)?.difficulty();
                 *self.pool_difficulty.lock().await = difficulty;
                 info!("Updated pool difficulty: {difficulty}");

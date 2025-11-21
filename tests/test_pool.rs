@@ -84,7 +84,13 @@ impl TestPool {
         format!("127.0.0.1:{}", self.pool_port)
     }
 
-    pub(crate) async fn stratum_client(&self) -> stratum::Client {
+    pub(crate) async fn stratum_client(
+        &self,
+    ) -> (
+        stratum::Client,
+        stratum::Connection,
+        tokio::sync::mpsc::Receiver<stratum::Event>,
+    ) {
         stratum::Client::connect(
             self.stratum_endpoint(),
             signet_username(),
