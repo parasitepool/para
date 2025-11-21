@@ -36,7 +36,7 @@ pub(super) enum ClientMessage {
 pub(super) struct ClientActor {
     config: ClientConfig,
     rx: mpsc::Receiver<ClientMessage>,
-    events: tokio::sync::broadcast::Sender<Event>,
+    events: broadcast::Sender<Event>,
     id_counter: u64,
     pending: BTreeMap<Id, oneshot::Sender<Result<(Message, usize)>>>,
     connection: Option<ConnectionState>,
@@ -46,7 +46,7 @@ impl ClientActor {
     pub(super) fn new(
         config: ClientConfig,
         rx: mpsc::Receiver<ClientMessage>,
-        events: tokio::sync::broadcast::Sender<Event>,
+        events: broadcast::Sender<Event>,
     ) -> Self {
         Self {
             config,
@@ -219,7 +219,7 @@ impl ClientActor {
     async fn reader_task(
         mut reader: BufReader<tokio::net::tcp::OwnedReadHalf>,
         incoming_tx: mpsc::Sender<IncomingMessage>,
-        events: tokio::sync::broadcast::Sender<Event>,
+        events: broadcast::Sender<Event>,
     ) {
         let mut line = String::new();
 

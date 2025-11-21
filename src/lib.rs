@@ -83,7 +83,7 @@ use {
         io::{AsyncRead, AsyncWrite},
         net::TcpListener,
         runtime::Runtime,
-        sync::{Mutex, mpsc, watch},
+        sync::{Mutex, broadcast, mpsc, watch},
         task::{self, JoinHandle, JoinSet},
         time::{MissedTickBehavior, interval, sleep, timeout},
     },

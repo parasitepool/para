@@ -85,7 +85,7 @@ impl Controller {
 
     async fn event_loop(
         &mut self,
-        mut events: tokio::sync::broadcast::Receiver<stratum::Event>,
+        mut events: broadcast::Receiver<stratum::Event>,
         cancel_token: CancellationToken,
     ) -> Result {
         loop {
@@ -108,10 +108,10 @@ impl Controller {
                             self.cancel_hashers();
                             break;
                         }
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        Err(broadcast::error::RecvError::Lagged(_)) => {
                             warn!("Event loop lagged, missed messages");
                         }
-                         Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                         Err(broadcast::error::RecvError::Closed) => {
                             info!("Client event channel closed, shutting down");
                             break;
                         }

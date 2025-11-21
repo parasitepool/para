@@ -10,7 +10,7 @@ use {
     tokio::{
         io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter},
         net::TcpStream,
-        sync::{mpsc, oneshot},
+        sync::{broadcast, mpsc, oneshot},
     },
     tracing::{debug, error, warn},
 };
@@ -33,13 +33,13 @@ pub struct ClientConfig {
 pub struct Client {
     config: Arc<ClientConfig>,
     tx: mpsc::Sender<ClientMessage>,
-    events: tokio::sync::broadcast::Sender<Event>,
+    events: broadcast::Sender<Event>,
 }
 
 impl Client {
     pub fn new(config: ClientConfig) -> Self {
         let (tx, rx) = mpsc::channel(32);
-        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(32);
+        let (event_tx, _event_rx) = broadcast::channel(32);
 
         let actor = ClientActor::new(config.clone(), rx, event_tx.clone());
 
@@ -54,7 +54,7 @@ impl Client {
         }
     }
 
-    pub async fn connect(&self) -> Result<tokio::sync::broadcast::Receiver<Event>> {
+    pub async fn connect(&self) -> Result<broadcast::Receiver<Event>> {
         let (respond_to, rx) = oneshot::channel();
 
         self.tx
