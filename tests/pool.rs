@@ -159,7 +159,7 @@ async fn submit_before_authorize_fails() {
     let client = pool.stratum_client().await;
     let _ = client.connect().await.unwrap();
 
-    let _ = tokio::time::sleep(Duration::from_millis(10));
+    tokio::time::sleep(Duration::from_millis(10)).await;
 
     client.subscribe().await.unwrap();
 
