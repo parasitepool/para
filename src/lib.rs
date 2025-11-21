@@ -49,7 +49,7 @@ use {
         Deserialize, Serialize,
         de::{self, Deserializer},
     },
-    serde_json::{Value, json},
+    serde_json::json,
     serde_with::{DeserializeFromStr, SerializeDisplay},
     snafu::Snafu,
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},

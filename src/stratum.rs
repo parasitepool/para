@@ -30,6 +30,7 @@ mod client;
 mod configure;
 mod difficulty;
 mod error;
+mod event;
 mod extranonce;
 mod job_id;
 mod merkle;
@@ -47,10 +48,11 @@ mod version;
 
 pub use {
     authorize::Authorize,
-    client::Client,
+    client::{Client, ClientConfig},
     configure::Configure,
     difficulty::Difficulty,
     error::{StratumError, StratumErrorResponse},
+    event::StratumEvent,
     extranonce::Extranonce,
     job_id::JobId,
     merkle::{MerkleNode, merkle_branches, merkle_root},

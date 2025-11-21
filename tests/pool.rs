@@ -67,7 +67,7 @@ fn configure_template_update_interval() {
 async fn basic_initialization_flow() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001");
 
-    let mut client = pool.stratum_client().await;
+    let client = pool.stratum_client().await;
 
     let (subscribe, _, _) = client.subscribe(USER_AGENT.into()).await.unwrap();
 
@@ -75,20 +75,18 @@ async fn basic_initialization_flow() {
 
     assert!(client.authorize().await.is_ok());
 
-    let set_difficulty = match client.incoming.recv().await.unwrap() {
-        Message::Notification { method: _, params } => {
-            serde_json::from_value::<SetDifficulty>(params).unwrap()
-        }
-        _ => panic!(),
+    let mut events = client.events.subscribe();
+
+    let set_difficulty = match events.recv().await.unwrap() {
+        stratum::StratumEvent::SetDifficulty(d) => d,
+        _ => panic!("Expected SetDifficulty"),
     };
 
-    assert!(set_difficulty.difficulty() == Difficulty::from(0.00001));
+    assert!(set_difficulty == Difficulty::from(0.00001));
 
-    let notify = match client.incoming.recv().await.unwrap() {
-        Message::Notification { method: _, params } => {
-            serde_json::from_value::<Notify>(params).unwrap()
-        }
-        _ => panic!(),
+    let notify = match events.recv().await.unwrap() {
+        stratum::StratumEvent::Notify(n) => n,
+        _ => panic!("Expected Notify"),
     };
 
     assert_eq!(notify.job_id, JobId::from(0));
@@ -99,7 +97,7 @@ async fn basic_initialization_flow() {
 async fn configure_with_multiple_negotiation_steps() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001");
 
-    let mut client = pool.stratum_client().await;
+    let client = pool.stratum_client().await;
 
     assert!(
         client
@@ -141,7 +139,7 @@ async fn configure_with_multiple_negotiation_steps() {
 async fn authorize_before_subscribe_fails() {
     let pool = TestPool::spawn();
 
-    let mut client = pool.stratum_client().await;
+    let client = pool.stratum_client().await;
 
     assert!(
         client
@@ -157,7 +155,7 @@ async fn authorize_before_subscribe_fails() {
 async fn submit_before_authorize_fails() {
     let pool = TestPool::spawn();
 
-    let mut client = pool.stratum_client().await;
+    let client = pool.stratum_client().await;
 
     client.subscribe(USER_AGENT.into()).await.unwrap();
 

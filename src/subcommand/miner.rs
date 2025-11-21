@@ -3,7 +3,7 @@ use {
     controller::Controller,
     hasher::Hasher,
     metrics::{Metrics, spawn_throbber},
-    stratum::Client,
+    stratum::{Client, ClientConfig},
 };
 
 mod controller;
@@ -58,13 +58,15 @@ impl Miner {
 
         let address = resolve_stratum_endpoint(&self.stratum_endpoint).await?;
 
-        let client = Client::connect(
-            address,
-            self.username.clone(),
-            self.password.clone(),
-            Duration::from_secs(10),
-        )
-        .await?;
+        let config = ClientConfig {
+            address: address.to_string(),
+            username: self.username.clone(),
+            password: self.password.clone(),
+            timeout: Duration::from_secs(10),
+        };
+
+        let mut client = Client::new(config);
+        client.connect().await?;
 
         let mut system = System::new();
         system.refresh_cpu_all();

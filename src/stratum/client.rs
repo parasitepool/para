@@ -1,3 +1,4 @@
+use crate::USER_AGENT;
 use {
     super::*,
     error::ClientError,
@@ -10,152 +11,122 @@ use {
         time::{Duration, Instant},
     },
     tokio::{
-        io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader, BufWriter},
-        net::{TcpStream, tcp::OwnedWriteHalf},
-        sync::{Mutex, mpsc, oneshot},
-        task::JoinHandle,
+        io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter},
+        net::TcpStream,
+        sync::{mpsc, oneshot},
     },
-    tracing::{debug, error, warn},
+    tracing::{error, warn},
 };
 
 mod error;
 
 pub type Result<T = (), E = ClientError> = std::result::Result<T, E>;
 
-type Pending = Arc<Mutex<BTreeMap<Id, oneshot::Sender<(Message, usize)>>>>;
+#[derive(Debug, Clone)]
+pub struct ClientConfig {
+    pub address: String,
+    pub username: String,
+    pub password: Option<String>,
+    pub timeout: Duration,
+}
 
+#[derive(Clone)]
 pub struct Client {
-    pub incoming: mpsc::Receiver<Message>,
-    id_counter: AtomicU64,
-    listener: JoinHandle<()>,
-    password: String,
-    pending: Pending,
-    tcp_writer: BufWriter<OwnedWriteHalf>,
-    username: String,
+    config: Arc<ClientConfig>,
+    id_counter: Arc<AtomicU64>,
+    tx: mpsc::Sender<ActorMessage>,
+    pub events: tokio::sync::broadcast::Sender<StratumEvent>,
+}
+
+enum ActorMessage {
+    Request {
+        id: Id,
+        method: String,
+        params: Value,
+        tx: oneshot::Sender<Result<(Message, usize)>>,
+    },
+    Disconnect,
 }
 
 impl Client {
-    pub async fn connect(
-        address: impl tokio::net::ToSocketAddrs,
-        username: String,
-        password: Option<String>,
-        timeout: Duration,
-    ) -> Result<Self> {
-        let stream = tokio::time::timeout(timeout, TcpStream::connect(address))
-            .await
-            .context(error::TimeoutSnafu)?
-            .context(error::IoSnafu)?;
+    pub fn new(config: ClientConfig) -> Self {
+        let (tx, _) = mpsc::channel(32); // Buffer for outgoing requests
+        let (events, _) = tokio::sync::broadcast::channel(32);
 
-        let (tcp_reader, tcp_writer) = {
-            let (rx, tx) = stream.into_split();
-            (BufReader::new(rx), BufWriter::new(tx))
-        };
-
-        let (incoming_tx, incoming_rx) = mpsc::channel(32);
-
-        let pending: Pending = Arc::new(Mutex::new(BTreeMap::new()));
-
-        let listener = {
-            let incoming_tx = incoming_tx.clone();
-            let pending = pending.clone();
-            tokio::spawn(async move { Self::listener(tcp_reader, incoming_tx, pending).await })
-        };
-
-        Ok(Self {
-            tcp_writer,
-            incoming: incoming_rx,
-            listener,
-            pending: pending.clone(),
-            username,
-            password: password.unwrap_or("x".to_string()),
-            id_counter: AtomicU64::new(0),
-        })
+        Self {
+            config: Arc::new(config),
+            id_counter: Arc::new(AtomicU64::new(0)),
+            tx,
+            events,
+        }
     }
 
-    pub async fn disconnect(&mut self) -> Result {
-        self.tcp_writer.shutdown().await.context(error::IoSnafu)?;
-        self.listener.abort();
+    pub async fn connect(&mut self) -> Result<()> {
+        // If there's an existing connection, we might want to ensure it's dead or just spawn a new one.
+        // The `tx` held by `Client` points to the old channel if we don't update it.
+        // So we need to create a new channel and spawn a new actor.
+
+        let (tx, rx) = mpsc::channel(32);
+        self.tx = tx;
+
+        let connection = Connection::new(self.config.clone(), rx, self.events.clone());
+
+        tokio::spawn(async move {
+            if let Err(e) = connection.run().await {
+                error!("Connection actor failed: {}", e);
+            }
+        });
+
         Ok(())
     }
 
-    async fn listener<R>(
-        mut tcp_reader: BufReader<R>,
-        incoming: mpsc::Sender<Message>,
-        pending: Pending,
-    ) where
-        R: AsyncRead + Unpin,
-    {
-        let mut line = String::new();
+    pub async fn reconnect(&mut self) -> Result<()> {
+        self.disconnect().await?;
+        self.connect().await?;
 
-        loop {
-            line.clear();
+        // Perform handshake
+        let (_subscribe, _, _) = self.subscribe(USER_AGENT.into()).await?;
+        self.authorize().await?;
 
-            let bytes_read = match tcp_reader.read_line(&mut line).await {
-                Ok(0) => {
-                    error!("Stratum server disconnected");
-                    break;
-                }
-                Ok(n) => n,
-                Err(e) => {
-                    error!("Read error: {e}");
-                    break;
-                }
-            };
-
-            let msg: Message = match serde_json::from_str(&line) {
-                Ok(msg) => msg,
-                Err(e) => {
-                    warn!("Invalid JSON message: {line:?} - {e}");
-                    continue;
-                }
-            };
-
-            match msg {
-                Message::Response {
-                    id,
-                    result,
-                    error,
-                    reject_reason,
-                } => {
-                    let tx = {
-                        let mut map = pending.lock().await;
-                        map.remove(&id)
-                    };
-
-                    if let Some(tx) = tx {
-                        if tx
-                            .send((
-                                Message::Response {
-                                    id: id.clone(),
-                                    result,
-                                    error,
-                                    reject_reason,
-                                },
-                                bytes_read,
-                            ))
-                            .is_err()
-                        {
-                            debug!("Dropped response for id={id}: receiver went away");
-                        }
-                    } else {
-                        warn!("Unmatched response ID={id}: {line}");
-                    }
-                }
-
-                _ => {
-                    if let Err(e) = incoming.send(msg).await {
-                        error!("Failed to forward incoming notification/request: {e}");
-                        break;
-                    }
-                }
-            }
-        }
-
-        drop(incoming);
+        Ok(())
     }
 
+    pub async fn disconnect(&self) -> Result<()> {
+        let _ = self.tx.send(ActorMessage::Disconnect).await;
+        Ok(())
+    }
+
+    async fn send_request(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<(oneshot::Receiver<Result<(Message, usize)>>, Instant)> {
+        let id = self.next_id();
+        let (tx, rx) = oneshot::channel();
+
+        let instant = Instant::now();
+
+        self.tx
+            .send(ActorMessage::Request {
+                id,
+                method: method.to_string(),
+                params,
+                tx,
+            })
+            .await
+            .map_err(|_| ClientError::NotConnected)?;
+
+        Ok((rx, instant))
+    }
+
+    fn next_id(&self) -> Id {
+        Id::Number(self.id_counter.fetch_add(1, Ordering::Relaxed))
+    }
+
+    // API Methods (delegating to actor)
+
     pub async fn configure(
-        &mut self,
+        &self,
         extensions: Vec<String>,
         version_rolling_mask: Option<Version>,
     ) -> Result<(Value, Duration, usize)> {
@@ -172,7 +143,9 @@ impl Client {
             )
             .await?;
 
-        let (message, bytes_read) = rx.await.context(error::ChannelRecvSnafu)?;
+        let (message, bytes_read) = rx
+            .await
+            .map_err(|e| ClientError::ChannelRecv { source: e })??;
 
         let duration = instant.elapsed();
 
@@ -194,7 +167,7 @@ impl Client {
     }
 
     pub async fn subscribe(
-        &mut self,
+        &self,
         user_agent: String,
     ) -> Result<(SubscribeResult, Duration, usize)> {
         let (rx, instant) = self
@@ -208,7 +181,9 @@ impl Client {
             )
             .await?;
 
-        let (message, bytes_read) = rx.await.context(error::ChannelRecvSnafu)?;
+        let (message, bytes_read) = rx
+            .await
+            .map_err(|e| ClientError::ChannelRecv { source: e })??;
 
         let duration = instant.elapsed();
 
@@ -233,19 +208,26 @@ impl Client {
         }
     }
 
-    pub async fn authorize(&mut self) -> Result<(Duration, usize)> {
+    pub async fn authorize(&self) -> Result<(Duration, usize)> {
         let (rx, instant) = self
             .send_request(
                 "mining.authorize",
                 serde_json::to_value(Authorize {
-                    username: self.username.clone(),
-                    password: Some(self.password.clone()),
+                    username: self.config.username.clone(),
+                    password: Some(
+                        self.config
+                            .password
+                            .clone()
+                            .unwrap_or_else(|| "x".to_string()),
+                    ),
                 })
                 .context(error::SerializationSnafu)?,
             )
             .await?;
 
-        let (message, bytes_read) = rx.await.context(error::ChannelRecvSnafu)?;
+        let (message, bytes_read) = rx
+            .await
+            .map_err(|e| ClientError::ChannelRecv { source: e })??;
 
         let duration = instant.elapsed();
 
@@ -275,14 +257,14 @@ impl Client {
     }
 
     pub async fn submit(
-        &mut self,
+        &self,
         job_id: JobId,
         extranonce2: Extranonce,
         ntime: Ntime,
         nonce: Nonce,
     ) -> Result<Submit> {
         let submit = Submit {
-            username: self.username.clone(),
+            username: self.config.username.clone(),
             job_id,
             extranonce2,
             ntime,
@@ -297,7 +279,9 @@ impl Client {
             )
             .await?;
 
-        let (message, _) = rx.await.context(error::ChannelRecvSnafu)?;
+        let (message, _) = rx
+            .await
+            .map_err(|e| ClientError::ChannelRecv { source: e })??;
 
         match message {
             Message::Response {
@@ -336,41 +320,158 @@ impl Client {
 
         Ok(submit)
     }
+}
 
-    async fn send_request(
-        &mut self,
-        method: &str,
-        params: serde_json::Value,
-    ) -> Result<(oneshot::Receiver<(Message, usize)>, Instant)> {
-        let id = self.next_id();
+struct Connection {
+    config: Arc<ClientConfig>,
+    rx: mpsc::Receiver<ActorMessage>,
+    events: tokio::sync::broadcast::Sender<StratumEvent>,
+    pending: BTreeMap<Id, oneshot::Sender<Result<(Message, usize)>>>,
+}
 
-        let msg = Message::Request {
-            id: id.clone(),
-            method: method.to_string(),
-            params,
-        };
-
-        let (tx, rx) = oneshot::channel();
-
-        self.pending.lock().await.insert(id.clone(), tx);
-
-        let instant = self.send(&msg).await?;
-
-        Ok((rx, instant))
+impl Connection {
+    fn new(
+        config: Arc<ClientConfig>,
+        rx: mpsc::Receiver<ActorMessage>,
+        events: tokio::sync::broadcast::Sender<StratumEvent>,
+    ) -> Self {
+        Self {
+            config,
+            rx,
+            events,
+            pending: BTreeMap::new(),
+        }
     }
 
-    async fn send(&mut self, message: &Message) -> Result<Instant> {
-        let frame = serde_json::to_string(message).context(error::SerializationSnafu)? + "\n";
-        self.tcp_writer
-            .write_all(frame.as_bytes())
-            .await
-            .context(error::IoSnafu)?;
-        let instant = Instant::now();
-        self.tcp_writer.flush().await.context(error::IoSnafu)?;
-        Ok(instant)
+    async fn run(mut self) -> Result<()> {
+        let stream = tokio::time::timeout(
+            self.config.timeout,
+            TcpStream::connect(&self.config.address),
+        )
+        .await
+        .context(error::TimeoutSnafu)?
+        .context(error::IoSnafu)?;
+
+        let (reader, writer) = stream.into_split();
+        let mut reader = BufReader::new(reader);
+        let mut writer = BufWriter::new(writer);
+
+        let mut line = String::new();
+
+        loop {
+            line.clear();
+
+            tokio::select! {
+                // Handle outgoing requests from Client
+                msg = self.rx.recv() => {
+                    match msg {
+                        Some(ActorMessage::Request { id, method, params, tx }) => {
+                            let msg = Message::Request {
+                                id: id.clone(),
+                                method,
+                                params,
+                            };
+                            let frame = match serde_json::to_string(&msg) {
+                                Ok(f) => f + "\n",
+                                Err(e) => {
+                                    let _ = tx.send(Err(ClientError::Serialization { source: e }));
+                                    continue;
+                                }
+                            };
+
+                            if let Err(e) = writer.write_all(frame.as_bytes()).await {
+                                let _ = tx.send(Err(ClientError::Io { source: e }));
+                                // Connection dead
+                                break;
+                            }
+                            if let Err(e) = writer.flush().await {
+                                let _ = tx.send(Err(ClientError::Io { source: e }));
+                                break;
+                            }
+
+                            self.pending.insert(id, tx);
+                        }
+                        Some(ActorMessage::Disconnect) => {
+                            break;
+                        }
+                        None => {
+                            // Client dropped
+                            break;
+                        }
+                    }
+                }
+
+                // Handle incoming messages from TCP
+                read_result = reader.read_line(&mut line) => {
+                    let bytes_read = match read_result {
+                        Ok(0) => break, // EOF
+                        Ok(n) => n,
+                        Err(e) => {
+                            error!("Read error: {e}");
+                            break;
+                        }
+                    };
+
+                    let msg: Message = match serde_json::from_str(&line) {
+                        Ok(msg) => msg,
+                        Err(e) => {
+                            warn!("Invalid JSON message: {line:?} - {e}");
+                            continue;
+                        }
+                    };
+
+                    match msg {
+                        Message::Response { id, result, error, reject_reason } => {
+                            if let Some(tx) = self.pending.remove(&id) {
+                                let _ = tx.send(Ok((
+                                    Message::Response { id, result, error, reject_reason },
+                                    bytes_read
+                                )));
+                            } else {
+                                warn!("Unmatched response ID={id}: {line}");
+                            }
+                        }
+                        Message::Notification { method, params } => {
+                            self.handle_notification(method, params).await;
+                        }
+                        _ => {
+                             warn!("Unexpected message type: {:?}", msg);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Cleanup: notify pending requests
+        // We iterate by removing all items to avoid instability issues with drain
+        let pending = std::mem::take(&mut self.pending);
+        for (_, tx) in pending {
+            let _ = tx.send(Err(ClientError::NotConnected));
+        }
+
+        // Notify disconnection
+        let _ = self.events.send(StratumEvent::Disconnected);
+
+        Ok(())
     }
 
-    fn next_id(&mut self) -> Id {
-        Id::Number(self.id_counter.fetch_add(1, Ordering::Relaxed))
+    async fn handle_notification(&self, method: String, params: Value) {
+        match method.as_str() {
+            "mining.notify" => match serde_json::from_value::<Notify>(params) {
+                Ok(notify) => {
+                    let _ = self.events.send(StratumEvent::Notify(notify));
+                }
+                Err(e) => warn!("Failed to parse mining.notify: {}", e),
+            },
+            "mining.set_difficulty" => match serde_json::from_value::<SetDifficulty>(params) {
+                Ok(set_diff) => {
+                    let _ = self
+                        .events
+                        .send(StratumEvent::SetDifficulty(set_diff.difficulty()));
+                }
+                Err(e) => warn!("Failed to parse mining.set_difficulty: {}", e),
+            },
+            _ => warn!("Unhandled notification: {}", method),
+        }
     }
 }
