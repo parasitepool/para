@@ -23,6 +23,9 @@ fn mine_to_pool() {
         "miner --mode share-found --username {} {stratum_endpoint} --cpu-cores 1",
         signet_username()
     ))
+    .env("RUST_LOG", "debug")
+    .capture_stderr(false)
+    .capture_stdout(false)
     .spawn();
 
     let stdout = miner.wait_with_output().unwrap();

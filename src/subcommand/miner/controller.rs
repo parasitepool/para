@@ -85,14 +85,15 @@ impl Controller {
                 event = events.recv() => {
                     match event {
                         Ok(stratum::Event::Notify(notify)) => {
-                             self.handle_notify(notify).await?;
+                            info!("Received notify");
+                            self.handle_notify(notify).await?;
                         }
                         Ok(stratum::Event::SetDifficulty(difficulty)) => {
+                            info!("Received difficulty");
                             self.handle_set_difficulty(difficulty).await;
                         }
                         Ok(stratum::Event::Disconnected) => {
                             info!("Disconnected from stratum server. Shutting down...");
-                            self.cancel_hashers();
                             break;
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
