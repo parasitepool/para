@@ -77,12 +77,12 @@ async fn basic_initialization_flow() {
 
     let mut events = client.events.subscribe();
 
-    let set_difficulty = match events.recv().await.unwrap() {
-        stratum::Event::SetDifficulty(d) => d,
+    let difficulty = match events.recv().await.unwrap() {
+        stratum::Event::SetDifficulty(difficulty) => difficulty,
         _ => panic!("Expected SetDifficulty"),
     };
 
-    assert!(set_difficulty == Difficulty::from(0.00001));
+    assert!(difficulty == Difficulty::from(0.00001));
 
     let notify = match events.recv().await.unwrap() {
         stratum::Event::Notify(n) => n,
