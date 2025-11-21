@@ -68,8 +68,7 @@ async fn basic_initialization_flow() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001");
 
     let client = pool.stratum_client().await;
-
-    let mut events = client.events.subscribe();
+    let mut events = client.connect().await.unwrap();
 
     let (subscribe, _, _) = client.subscribe().await.unwrap();
 
@@ -98,6 +97,7 @@ async fn configure_with_multiple_negotiation_steps() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001");
 
     let client = pool.stratum_client().await;
+    let _ = client.connect().await.unwrap();
 
     assert!(
         client
@@ -140,6 +140,7 @@ async fn authorize_before_subscribe_fails() {
     let pool = TestPool::spawn();
 
     let client = pool.stratum_client().await;
+    let _ = client.connect().await.unwrap();
 
     assert!(
         client
@@ -156,6 +157,7 @@ async fn submit_before_authorize_fails() {
     let pool = TestPool::spawn();
 
     let client = pool.stratum_client().await;
+    let _ = client.connect().await.unwrap();
 
     client.subscribe().await.unwrap();
 

@@ -92,9 +92,8 @@ impl TestPool {
             password: None,
             timeout: Duration::from_secs(1),
         };
-        let client = stratum::Client::new(config);
-        client.connect().await.unwrap();
-        client
+
+        stratum::Client::new(config)
     }
 
     #[allow(unused)]

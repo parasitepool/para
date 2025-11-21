@@ -67,7 +67,6 @@ impl Miner {
         };
 
         let client = Client::new(config);
-        client.connect().await?;
 
         let mut system = System::new();
         system.refresh_cpu_all();

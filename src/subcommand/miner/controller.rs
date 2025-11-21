@@ -29,7 +29,7 @@ impl Controller {
         mode: Mode,
         cancel_token: CancellationToken,
     ) -> Result<Vec<Share>> {
-        let events = client.events.subscribe();
+        let events = client.connect().await?;
 
         let (subscribe, _, _) = client.subscribe().await?;
 

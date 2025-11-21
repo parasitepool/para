@@ -51,8 +51,7 @@ impl Template {
         };
 
         let client = Client::new(config);
-        client.connect().await?;
-        let mut events = client.events.subscribe();
+        let mut events = client.connect().await?;
 
         let (subscription, _, _) = client.subscribe().await?;
 

@@ -33,7 +33,7 @@ pub struct ClientConfig {
 pub struct Client {
     config: Arc<ClientConfig>,
     tx: mpsc::Sender<ClientMessage>,
-    pub events: tokio::sync::broadcast::Sender<Event>,
+    events: tokio::sync::broadcast::Sender<Event>,
 }
 
 impl Client {
@@ -54,7 +54,7 @@ impl Client {
         }
     }
 
-    pub async fn connect(&self) -> Result {
+    pub async fn connect(&self) -> Result<tokio::sync::broadcast::Receiver<Event>> {
         let (respond_to, rx) = oneshot::channel();
 
         self.tx
@@ -62,7 +62,9 @@ impl Client {
             .await
             .map_err(|_| ClientError::NotConnected)?;
 
-        rx.await.map_err(|_| ClientError::NotConnected)?
+        let _ = rx.await.map_err(|_| ClientError::NotConnected)?;
+
+        Ok(self.events.subscribe())
     }
 
     pub async fn disconnect(&self) -> Result {
