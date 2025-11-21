@@ -73,10 +73,9 @@ impl ClientActor {
                             let actual_id = self.next_id();
                             self.pending.insert(actual_id.clone(), respond_to);
 
-                            if let Err(e) = self.handle_request(actual_id.clone(), method, params).await {
-                                if let Some(tx) = self.pending.remove(&actual_id) {
+                            if let Err(e) = self.handle_request(actual_id.clone(), method, params).await &&
+                                let Some(tx) = self.pending.remove(&actual_id) {
                                     let _ = tx.send(Err(e));
-                                }
                             }
                         }
                         ClientMessage::Disconnect { respond_to } => {
@@ -245,29 +244,22 @@ impl ClientActor {
                 }
             };
 
-            match msg {
-                Message::Response {
-                    id,
-                    result,
-                    error,
-                    reject_reason,
-                } => {
+            match &msg {
+                Message::Response { id, .. } => {
                     let _ = incoming_tx
                         .send(IncomingMessage::Response {
-                            id,
-                            message: Message::Response {
-                                id: Id::Number(0), // Placeholder
-                                result,
-                                error,
-                                reject_reason,
-                            },
+                            id: id.clone(),
+                            message: msg,
                             bytes_read,
                         })
                         .await;
                 }
                 Message::Notification { method, params } => {
                     let _ = incoming_tx
-                        .send(IncomingMessage::Notification { method, params })
+                        .send(IncomingMessage::Notification {
+                            method: method.clone(),
+                            params: params.clone(),
+                        })
                         .await;
                 }
                 _ => {
