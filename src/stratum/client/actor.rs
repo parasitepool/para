@@ -73,8 +73,8 @@ impl ClientActor {
                             let actual_id = self.next_id();
                             self.pending.insert(actual_id.clone(), respond_to);
 
-                            if let Err(e) = self.handle_request(actual_id.clone(), method, params).await &&
-                                let Some(tx) = self.pending.remove(&actual_id) {
+                            if let Err(e) = self.handle_request(actual_id.clone(), method, params).await
+                                && let Some(tx) = self.pending.remove(&actual_id) {
                                     let _ = tx.send(Err(e));
                             }
                         }

@@ -65,7 +65,7 @@ impl Client {
             .await
             .map_err(|_| ClientError::NotConnected)?;
 
-        let _ = rx.await.map_err(|_| ClientError::NotConnected)?;
+        rx.await.map_err(|_| ClientError::NotConnected)??;
 
         Ok(self.events.subscribe())
     }
@@ -112,6 +112,31 @@ impl Client {
         Ok((message, bytes_read, instant.elapsed()))
     }
 
+    fn handle_response(&self, message: Message, method: &str) -> Result<Value> {
+        match message {
+            Message::Response {
+                result: Some(result),
+                error: None,
+                reject_reason: None,
+                ..
+            } => Ok(result),
+            Message::Response {
+                error: Some(err), ..
+            } => Err(ClientError::Protocol {
+                message: format!("{method} error: {err}"),
+            }),
+            Message::Response {
+                reject_reason: Some(reason),
+                ..
+            } => Err(ClientError::Protocol {
+                message: format!("{method} rejected: {reason}"),
+            }),
+            _ => Err(ClientError::Protocol {
+                message: format!("Unhandled {method} response"),
+            }),
+        }
+    }
+
     pub async fn configure(
         &self,
         extensions: Vec<String>,
@@ -131,22 +156,9 @@ impl Client {
             .await?;
 
         let (message, bytes_read, duration) = self.await_response(rx, instant).await?;
+        let result = self.handle_response(message, "mining.configure")?;
 
-        match message {
-            Message::Response {
-                result: Some(result),
-                error: None,
-                ..
-            } => Ok((result, duration, bytes_read)),
-            Message::Response {
-                error: Some(err), ..
-            } => Err(ClientError::Protocol {
-                message: format!("mining.configure error: {}", err),
-            }),
-            _ => Err(ClientError::Protocol {
-                message: "Unhandled error in mining.configure".to_string(),
-            }),
-        }
+        Ok((result, duration, bytes_read))
     }
 
     pub async fn subscribe(&self) -> Result<(SubscribeResult, Duration, usize)> {
@@ -162,26 +174,13 @@ impl Client {
             .await?;
 
         let (message, bytes_read, duration) = self.await_response(rx, instant).await?;
+        let result = self.handle_response(message, "mining.subscribe")?;
 
-        match message {
-            Message::Response {
-                result: Some(result),
-                error: None,
-                ..
-            } => Ok((
-                serde_json::from_value(result).context(error::SerializationSnafu)?,
-                duration,
-                bytes_read,
-            )),
-            Message::Response {
-                error: Some(err), ..
-            } => Err(ClientError::Protocol {
-                message: format!("mining.subscribe error: {}", err),
-            }),
-            _ => Err(ClientError::Protocol {
-                message: "Unknown mining.subscribe error".to_string(),
-            }),
-        }
+        Ok((
+            serde_json::from_value(result).context(error::SerializationSnafu)?,
+            duration,
+            bytes_read,
+        ))
     }
 
     pub async fn authorize(&self) -> Result<(Duration, usize)> {
@@ -197,29 +196,14 @@ impl Client {
             .await?;
 
         let (message, bytes_read, duration) = self.await_response(rx, instant).await?;
+        let result = self.handle_response(message, "mining.authorize")?;
 
-        match message {
-            Message::Response {
-                result: Some(result),
-                error: None,
-                ..
-            } => {
-                if serde_json::from_value(result).context(error::SerializationSnafu)? {
-                    Ok((duration, bytes_read))
-                } else {
-                    Err(ClientError::Protocol {
-                        message: "Unauthorized".to_string(),
-                    })
-                }
-            }
-            Message::Response {
-                error: Some(err), ..
-            } => Err(ClientError::Protocol {
-                message: format!("mining.authorize error: {}", err),
-            }),
-            _ => Err(ClientError::Protocol {
-                message: "Unknown mining.authorize error".to_string(),
-            }),
+        if serde_json::from_value(result).context(error::SerializationSnafu)? {
+            Ok((duration, bytes_read))
+        } else {
+            Err(ClientError::Protocol {
+                message: "Unauthorized".to_string(),
+            })
         }
     }
 
@@ -247,40 +231,12 @@ impl Client {
             .await?;
 
         let (message, _, _) = self.await_response(rx, instant).await?;
+        let result = self.handle_response(message, "mining.submit")?;
 
-        match message {
-            Message::Response {
-                result: Some(result),
-                error: None,
-                reject_reason: None,
-                ..
-            } => {
-                if let Err(err) = serde_json::from_value::<Value>(result) {
-                    return Err(ClientError::Protocol {
-                        message: format!("Failed to submit: {err}"),
-                    });
-                }
-            }
-            Message::Response {
-                error: Some(err), ..
-            } => {
-                return Err(ClientError::Protocol {
-                    message: format!("mining.submit error: {}", err),
-                });
-            }
-            Message::Response {
-                reject_reason: Some(reason),
-                ..
-            } => {
-                return Err(ClientError::Protocol {
-                    message: format!("share rejected: {}", reason),
-                });
-            }
-            _ => {
-                return Err(ClientError::Protocol {
-                    message: "Unhandled error in mining.submit".to_string(),
-                });
-            }
+        if !serde_json::from_value::<bool>(result).context(error::SerializationSnafu)? {
+            return Err(ClientError::Protocol {
+                message: "Server returned false for submit".to_string(),
+            });
         }
 
         Ok(submit)
