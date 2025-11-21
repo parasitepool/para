@@ -243,3 +243,125 @@ impl Client {
         Ok(submit)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use {
+        super::*,
+        std::net::SocketAddr,
+        tokio::{
+            io::{AsyncReadExt, BufReader},
+            net::TcpListener,
+        },
+    };
+
+    async fn mock_server(drop_after_read: bool) -> SocketAddr {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let mut reader = BufReader::new(socket);
+            let mut buf = [0u8; 1024];
+
+            if drop_after_read {
+                let _ = reader.read(&mut buf).await;
+            } else {
+                loop {
+                    match reader.read(&mut buf).await {
+                        Ok(0) => break,
+                        Ok(_) => continue,
+                        Err(_) => break,
+                    }
+                }
+            }
+        });
+
+        addr
+    }
+
+    #[tokio::test]
+    async fn request_timeout() {
+        let addr = mock_server(false).await;
+
+        let config = ClientConfig {
+            address: addr.to_string(),
+            username: "test".into(),
+            user_agent: "test".into(),
+            password: None,
+            timeout: Duration::from_millis(200),
+        };
+
+        let client = Client::new(config);
+        client.connect().await.unwrap();
+
+        let err = client.subscribe().await.unwrap_err();
+        assert!(
+            matches!(err, ClientError::Timeout { .. }),
+            "Expected Timeout error, got: {:?}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn connection_timeout() {
+        let config = ClientConfig {
+            address: "10.255.255.1:9999".into(),
+            username: "test".into(),
+            user_agent: "test".into(),
+            password: None,
+            timeout: Duration::from_millis(200),
+        };
+
+        let client = Client::new(config);
+        let err = client.connect().await.unwrap_err();
+        assert!(
+            matches!(err, ClientError::Timeout { .. }),
+            "Expected Timeout error, got: {:?}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn request_fails_fast() {
+        let config = ClientConfig {
+            address: "127.0.0.1:9999".into(),
+            username: "test".into(),
+            user_agent: "test".into(),
+            password: None,
+            timeout: Duration::from_secs(1),
+        };
+
+        let client = Client::new(config);
+
+        let err = client.subscribe().await.unwrap_err();
+        assert!(
+            matches!(err, ClientError::NotConnected),
+            "Expected NotConnected error, got: {:?}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn detect_connection_drop() {
+        let addr = mock_server(true).await;
+
+        let config = ClientConfig {
+            address: addr.to_string(),
+            username: "test".into(),
+            user_agent: "test".into(),
+            password: None,
+            timeout: Duration::from_secs(5),
+        };
+
+        let client = Client::new(config);
+        client.connect().await.unwrap();
+
+        let err = client.subscribe().await.unwrap_err();
+        assert!(
+            matches!(err, ClientError::NotConnected),
+            "Expected NotConnected, got: {:?}",
+            err
+        );
+    }
+}
