@@ -105,8 +105,9 @@ impl Client {
         rx: oneshot::Receiver<Result<(Message, usize)>>,
         instant: Instant,
     ) -> Result<(Message, usize, Duration)> {
-        let (message, bytes_read) = rx
+        let (message, bytes_read) = tokio::time::timeout(self.config.timeout, rx)
             .await
+            .map_err(|source| ClientError::Timeout { source })?
             .map_err(|e| ClientError::ChannelRecv { source: e })??;
 
         Ok((message, bytes_read, instant.elapsed()))
