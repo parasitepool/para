@@ -118,7 +118,6 @@ impl Ping {
                             break;
                         }
                         Ok(stratum::Event::Disconnected) => {
-                            // Treat as error or break? TODO
                             return Err(anyhow!("Disconnected before notify"));
                         }
                         Err(e) => {
