@@ -1,4 +1,4 @@
-use super::*;
+use {super::*, tokio_util::sync::CancellationToken};
 
 // These tests either call some scripts that are not available in CI yet or are
 // a bit too expensive so marking them as ignored for now.
@@ -280,7 +280,7 @@ async fn test_sync_endpoint_to_endpoint() {
     assert!(health_check.is_ok());
 
     sync_sender
-        .run()
+        .run(CancellationToken::new())
         .await
         .expect("Syncing between servers failed!");
 

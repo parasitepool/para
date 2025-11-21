@@ -67,7 +67,7 @@ use {
         str::FromStr,
         sync::{
             Arc, LazyLock,
-            atomic::{AtomicBool, AtomicU64, Ordering},
+            atomic::{AtomicU64, Ordering},
         },
         thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -83,7 +83,6 @@ use {
         io::{AsyncRead, AsyncWrite},
         net::TcpListener,
         runtime::Runtime,
-        signal::ctrl_c,
         sync::{Mutex, mpsc, watch},
         task::{self, JoinHandle, JoinSet},
         time::{MissedTickBehavior, interval, sleep, timeout},
@@ -114,6 +113,7 @@ mod connection;
 mod generator;
 mod job;
 mod jobs;
+mod signal;
 pub mod stratum;
 pub mod subcommand;
 mod zmq;
@@ -167,20 +167,26 @@ pub fn main() {
 
     let args = Arguments::parse();
 
-    match args.run() {
-        Err(err) => {
-            error!("error: {err}");
+    Runtime::new()
+        .expect("Failed to create tokio runtime")
+        .block_on(async {
+            let cancel_token = signal::setup_signal_handler();
 
-            if env::var_os("RUST_BACKTRACE")
-                .map(|val| val == "1")
-                .unwrap_or_default()
-            {
-                error!("{}", err.backtrace());
+            match args.run(cancel_token).await {
+                Err(err) => {
+                    error!("error: {err}");
+
+                    if env::var_os("RUST_BACKTRACE")
+                        .map(|val| val == "1")
+                        .unwrap_or_default()
+                    {
+                        error!("{}", err.backtrace());
+                    }
+                    process::exit(1);
+                }
+                Ok(_) => {
+                    process::exit(0);
+                }
             }
-            process::exit(1);
-        }
-        Ok(_) => {
-            process::exit(0);
-        }
-    }
+        });
 }

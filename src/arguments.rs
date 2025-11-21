@@ -22,7 +22,7 @@ pub(crate) struct Arguments {
 }
 
 impl Arguments {
-    pub(crate) fn run(self) -> Result {
-        self.subcommand.run()
+    pub(crate) async fn run(self, cancel_token: CancellationToken) -> Result {
+        self.subcommand.run(cancel_token).await
     }
 }

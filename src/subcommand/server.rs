@@ -105,7 +105,7 @@ pub struct Server {
 }
 
 impl Server {
-    pub async fn run(&self, handle: Handle) -> Result {
+    pub async fn run(&self, handle: Handle, cancel_token: CancellationToken) -> Result {
         let config = Arc::new(self.config.clone());
         let log_dir = config.log_dir();
         let pool_dir = log_dir.join("pool");
@@ -118,6 +118,13 @@ impl Server {
         if !user_dir.exists() {
             warn!("User dir {} does not exist", user_dir.display());
         }
+
+        let shutdown_handle = handle.clone();
+        tokio::spawn(async move {
+            cancel_token.cancelled().await;
+            info!("Received shutdown signal, stopping server...");
+            shutdown_handle.shutdown();
+        });
 
         let mut router = Router::new()
             .nest_service("/pool/", ServeDir::new(pool_dir))
