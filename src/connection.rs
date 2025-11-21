@@ -16,7 +16,7 @@ pub(crate) struct Connection<R, W> {
     worker: SocketAddr,
     reader: FramedRead<R, LinesCodec>,
     writer: FramedWrite<W, LinesCodec>,
-    template_receiver: watch::Receiver<Arc<BlockTemplate>>,
+    workbase_receiver: watch::Receiver<Arc<Workbase>>,
     cancel_token: CancellationToken,
     jobs: Jobs,
     state: State,
@@ -37,7 +37,7 @@ where
         worker: SocketAddr,
         reader: R,
         writer: W,
-        template_receiver: watch::Receiver<Arc<BlockTemplate>>,
+        workbase_receiver: watch::Receiver<Arc<Workbase>>,
         cancel_token: CancellationToken,
     ) -> Self {
         Self {
@@ -45,7 +45,7 @@ where
             worker,
             reader: FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_MESSAGE_SIZE)),
             writer: FramedWrite::new(writer, LinesCodec::new()),
-            template_receiver,
+            workbase_receiver,
             cancel_token,
             jobs: Jobs::new(),
             state: State::Init,
@@ -58,7 +58,7 @@ where
     }
 
     pub(crate) async fn serve(&mut self) -> Result {
-        let mut template_receiver = self.template_receiver.clone();
+        let mut workbase_receiver = self.workbase_receiver.clone();
         let cancel_token = self.cancel_token.clone();
 
         loop {
@@ -162,19 +162,19 @@ where
                     }
                 }
 
-                changed = template_receiver.changed() => {
+                changed = workbase_receiver.changed() => {
                     if changed.is_err() {
                         warn!("Template receiver dropped, closing connection with {}", self.worker);
                         break;
                     }
 
                     if self.state != State::Working {
-                        let _ = template_receiver.borrow_and_update();
+                        let _ = workbase_receiver.borrow_and_update();
                         continue;
                     };
 
-                    let template = template_receiver.borrow_and_update().clone();
-                    self.template_update(template).await?;
+                    let workbase = workbase_receiver.borrow_and_update().clone();
+                    self.workbase_update(workbase).await?;
                 }
             }
         }
@@ -182,7 +182,7 @@ where
         Ok(())
     }
 
-    async fn template_update(&mut self, template: Arc<BlockTemplate>) -> Result {
+    async fn workbase_update(&mut self, workbase: Arc<Workbase>) -> Result {
         let (address, extranonce1) = match (&self.address, &self.extranonce1) {
             (Some(a), Some(e)) => (a.clone(), e.clone()),
             _ => return Ok(()),
@@ -192,7 +192,7 @@ where
             address,
             extranonce1,
             self.version_mask,
-            template,
+            workbase,
             self.jobs.next_id(),
         )?);
 
@@ -311,7 +311,7 @@ where
             address.clone(),
             extranonce1.clone(),
             self.version_mask,
-            self.template_receiver.borrow().clone(),
+            self.workbase_receiver.borrow().clone(),
             self.jobs.next_id(),
         )?);
 
@@ -394,7 +394,7 @@ where
                 &job.coinb2,
                 &job.extranonce1,
                 &submit.extranonce2,
-                &job.merkle_branches,
+                job.workbase.merkle_branches(),
             )?
             .into(),
             time: submit.ntime.into(),
@@ -421,7 +421,8 @@ where
 
             let txdata = std::iter::once(coinbase_tx)
                 .chain(
-                    job.template
+                    job.workbase
+                        .template()
                         .transactions
                         .iter()
                         .map(|tx| tx.transaction.clone())
@@ -431,7 +432,7 @@ where
 
             let block = Block { header, txdata };
 
-            if job.template.height > 16 {
+            if job.workbase.template().height > 16 {
                 assert!(block.bip34_block_height().is_ok());
             }
 

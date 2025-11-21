@@ -98,6 +98,7 @@ use {
     tracing::{debug, error, info, warn},
     tracing_appender::non_blocking,
     tracing_subscriber::EnvFilter,
+    workbase::Workbase,
     zeromq::{Endpoint, Socket, SocketRecv, SubSocket},
     zmq::Zmq,
 };
@@ -116,6 +117,7 @@ mod jobs;
 mod signal;
 pub mod stratum;
 pub mod subcommand;
+mod workbase;
 mod zmq;
 
 pub const COIN_VALUE: u64 = 100_000_000;

@@ -32,7 +32,9 @@ impl Jobs {
         let is_same_height = self
             .latest
             .as_ref()
-            .map(|previous_job| previous_job.template.height == job.template.height)
+            .map(|previous_job| {
+                previous_job.workbase.template().height == job.workbase.template().height
+            })
             .unwrap_or(false);
 
         if is_same_height {
@@ -79,12 +81,13 @@ mod tests {
             .unwrap()
             .assume_checked();
 
+        let workbase = Arc::new(Workbase::new((*template).clone()));
         Arc::new(
             Job::new(
                 address,
                 Extranonce::random(EXTRANONCE1_SIZE),
                 None,
-                template,
+                workbase,
                 id,
             )
             .unwrap(),
@@ -100,12 +103,12 @@ mod tests {
         );
 
         if let Some(latest) = &jobs.latest {
-            let current_height = latest.template.height;
+            let current_height = latest.workbase.template().height;
 
             let heights = jobs
                 .valid
                 .values()
-                .map(|job| job.template.height)
+                .map(|job| job.workbase.template().height)
                 .collect::<HashSet<u64>>();
 
             assert_eq!(heights.len(), 1, "all jobs should be same height");
@@ -148,7 +151,11 @@ mod tests {
         assert_eq!(jobs.latest.as_ref().unwrap().job_id, id_2);
         assert!(jobs.valid.contains_key(&id_1));
         assert!(jobs.valid.contains_key(&id_2));
-        assert!(jobs.valid.values().all(|job| job.template.height == 100));
+        assert!(
+            jobs.valid
+                .values()
+                .all(|job| job.workbase.template().height == 100)
+        );
     }
 
     #[test]
@@ -172,7 +179,10 @@ mod tests {
         assert!(!jobs.valid.contains_key(&id_1));
         assert!(jobs.valid.contains_key(&id_2));
         assert_eq!(jobs.latest.as_ref().unwrap().job_id, id_2);
-        assert_eq!(jobs.latest.as_ref().unwrap().template.height, 101);
+        assert_eq!(
+            jobs.latest.as_ref().unwrap().workbase.template().height,
+            101
+        );
 
         assert!(!jobs.is_duplicate(blockhash));
         assert!(jobs.is_duplicate(blockhash));
