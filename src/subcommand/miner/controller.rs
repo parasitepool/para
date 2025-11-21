@@ -30,9 +30,7 @@ impl Controller {
         cancel_token: CancellationToken,
     ) -> Result<Vec<Share>> {
         let events = client.connect().await?;
-
         let (subscribe, _, _) = client.subscribe().await?;
-
         client.authorize().await?;
 
         info!(
@@ -75,10 +73,8 @@ impl Controller {
             spawn_throbber(controller.metrics.clone());
         }
 
-        // Main event loop
         controller.event_loop(events, cancel_token).await?;
 
-        // Cleanup
         controller.root_cancel.cancel();
         drop(controller.notify_tx);
         while controller.hashers.join_next().await.is_some() {}
