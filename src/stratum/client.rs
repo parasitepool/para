@@ -15,7 +15,7 @@ use {
         net::TcpStream,
         sync::{mpsc, oneshot},
     },
-    tracing::{error, info, warn},
+    tracing::{error, warn},
 };
 
 mod connection;
