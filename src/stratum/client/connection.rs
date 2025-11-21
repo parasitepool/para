@@ -40,7 +40,6 @@ impl Connection {
             line.clear();
 
             tokio::select! {
-                // Handle outgoing requests from Client
                 msg = self.rx.recv() => {
                     match msg {
                         Some(ClientMessage::Request { id, method, params, tx }) => {
@@ -73,7 +72,6 @@ impl Connection {
                             break;
                         }
                         None => {
-                            // Client dropped
                             break;
                         }
                     }

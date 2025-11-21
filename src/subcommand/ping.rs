@@ -106,13 +106,12 @@ impl Ping {
 
                 let mut client = stratum::Client::new(config);
                 client.connect().await?;
+                let mut events = client.events.subscribe();
 
                 client.subscribe().await?;
                 let (duration, size) = client.authorize().await?;
 
                 let instant = Instant::now();
-
-                let mut events = client.events.subscribe();
 
                 loop {
                     match events.recv().await {

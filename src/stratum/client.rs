@@ -52,7 +52,7 @@ enum ClientMessage {
 
 impl Client {
     pub fn new(config: ClientConfig) -> Self {
-        let (tx, _) = mpsc::channel(32); // Buffer for outgoing requests
+        let (tx, _) = mpsc::channel(32);
         let (events, _) = tokio::sync::broadcast::channel(32);
 
         Self {
@@ -64,10 +64,6 @@ impl Client {
     }
 
     pub async fn connect(&mut self) -> Result<()> {
-        // If there's an existing connection, we might want to ensure it's dead or just spawn a new one.
-        // The `tx` held by `Client` points to the old channel if we don't update it.
-        // So we need to create a new channel and spawn a new actor.
-
         let (tx, rx) = mpsc::channel(32);
         self.tx = tx;
 
@@ -123,8 +119,6 @@ impl Client {
     fn next_id(&self) -> Id {
         Id::Number(self.id_counter.fetch_add(1, Ordering::Relaxed))
     }
-
-    // API Methods (delegating to actor)
 
     pub async fn configure(
         &self,

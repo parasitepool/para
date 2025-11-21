@@ -52,12 +52,11 @@ impl Template {
 
         let mut client = Client::new(config);
         client.connect().await?;
+        let mut events = client.events.subscribe();
 
         let (subscription, _, _) = client.subscribe().await?;
 
         client.authorize().await?;
-
-        let mut events = client.events.subscribe();
 
         loop {
             tokio::select! {

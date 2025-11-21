@@ -82,7 +82,7 @@ impl Miner {
         info!("Available CPU cores: {}", available_cpu_cores);
         info!("CPU cores to use: {}", cpu_cores);
 
-        let controller = Controller::new(
+        let (controller, events) = Controller::new(
             client,
             self.username.clone(),
             cpu_cores,
@@ -91,7 +91,7 @@ impl Miner {
         )
         .await?;
 
-        let shares = controller.run(cancel_token).await?;
+        let shares = controller.run(events, cancel_token).await?;
 
         println!("{}", serde_json::to_string_pretty(&shares)?);
 

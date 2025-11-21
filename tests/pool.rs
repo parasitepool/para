@@ -23,9 +23,6 @@ fn mine_to_pool() {
         "miner --mode share-found --username {} {stratum_endpoint} --cpu-cores 1",
         signet_username()
     ))
-    .env("RUST_LOG", "debug")
-    .capture_stderr(false)
-    .capture_stdout(false)
     .spawn();
 
     let stdout = miner.wait_with_output().unwrap();
@@ -72,13 +69,13 @@ async fn basic_initialization_flow() {
 
     let client = pool.stratum_client().await;
 
+    let mut events = client.events.subscribe();
+
     let (subscribe, _, _) = client.subscribe().await.unwrap();
 
     assert_eq!(subscribe.subscriptions.len(), 2);
 
     assert!(client.authorize().await.is_ok());
-
-    let mut events = client.events.subscribe();
 
     let difficulty = match events.recv().await.unwrap() {
         stratum::Event::SetDifficulty(difficulty) => difficulty,

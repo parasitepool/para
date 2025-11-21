@@ -27,7 +27,8 @@ impl Controller {
         cpu_cores: usize,
         throttle: Option<ckpool::HashRate>,
         mode: Mode,
-    ) -> Result<Self> {
+    ) -> Result<(Self, tokio::sync::broadcast::Receiver<stratum::Event>)> {
+        let events = client.events.subscribe();
         let (subscribe, _, _) = client.subscribe().await?;
         client.authorize().await?;
 
@@ -45,31 +46,36 @@ impl Controller {
             .map(|hash_rate| hash_rate.0 / cpu_cores as f64)
             .unwrap_or(f64::MAX);
 
-        Ok(Self {
-            client,
-            cpu_cores,
-            extranonce1: subscribe.extranonce1,
-            extranonce2: Arc::new(Mutex::new(Extranonce::zeros(subscribe.extranonce2_size))),
-            hasher_cancel: None,
-            hashers: JoinSet::new(),
-            metrics: Arc::new(Metrics::new()),
-            notify_rx,
-            notify_tx,
-            mode,
-            pool_difficulty: Arc::new(Mutex::new(Difficulty::default())),
-            root_cancel: CancellationToken::new(),
-            share_rx,
-            share_tx,
-            shares: Vec::new(),
-            throttle,
-            username,
-        })
+        Ok((
+            Self {
+                client,
+                cpu_cores,
+                extranonce1: subscribe.extranonce1,
+                extranonce2: Arc::new(Mutex::new(Extranonce::zeros(subscribe.extranonce2_size))),
+                hasher_cancel: None,
+                hashers: JoinSet::new(),
+                metrics: Arc::new(Metrics::new()),
+                notify_rx,
+                notify_tx,
+                mode,
+                pool_difficulty: Arc::new(Mutex::new(Difficulty::default())),
+                root_cancel: CancellationToken::new(),
+                share_rx,
+                share_tx,
+                shares: Vec::new(),
+                throttle,
+                username,
+            },
+            events,
+        ))
     }
 
-    pub(crate) async fn run(mut self, cancel_token: CancellationToken) -> Result<Vec<Share>> {
+    pub(crate) async fn run(
+        mut self,
+        mut events: tokio::sync::broadcast::Receiver<stratum::Event>,
+        cancel_token: CancellationToken,
+    ) -> Result<Vec<Share>> {
         self.spawn_hashers();
-
-        let mut events = self.client.events.subscribe();
 
         if !integration_test() && !logs_enabled() {
             spawn_throbber(self.metrics.clone());
