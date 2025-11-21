@@ -9,7 +9,7 @@ pub(crate) struct Pool {
 }
 
 impl Pool {
-    pub(crate) async fn run(&self) -> Result {
+    pub(crate) async fn run(&self, cancel_token: CancellationToken) -> Result {
         let config = Arc::new(self.config.clone());
         let address = config.address();
         let port = config.port();
@@ -20,6 +20,8 @@ impl Pool {
         let listener = TcpListener::bind((address.clone(), port)).await?;
 
         eprintln!("Listening on {address}:{port}");
+
+        let mut connection_tasks = JoinSet::new();
 
         loop {
             tokio::select! {
@@ -32,22 +34,30 @@ impl Pool {
 
                     let workbase_receiver = workbase_receiver.clone();
                     let config = config.clone();
+                    let conn_cancel_token = cancel_token.child_token();
 
-                    tokio::task::spawn(async move {
-                        let mut conn = Connection::new(config, worker, reader, writer, workbase_receiver);
+                    connection_tasks.spawn(async move {
+                        let mut conn = Connection::new(config, worker, reader, writer, workbase_receiver, conn_cancel_token);
 
                         if let Err(err) = conn.serve().await {
                             error!("Worker connection error: {err}")
                         }
                     });
                 }
-                _ = ctrl_c() => {
+                _ = cancel_token.cancelled() => {
                         info!("Shutting down stratum server");
                         generator.shutdown().await;
                         break;
                     }
             }
         }
+
+        info!(
+            "Waiting for {} active connections to close...",
+            connection_tasks.len()
+        );
+        while connection_tasks.join_next().await.is_some() {}
+        info!("All connections closed");
 
         Ok(())
     }

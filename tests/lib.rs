@@ -49,6 +49,7 @@ use {
     },
     harness::bitcoind::Bitcoind,
     para::{
+        USER_AGENT,
         stratum::{
             self, Difficulty, Extranonce, JobId, Message, Nonce, Notify, Ntime, SetDifficulty,
             Version,

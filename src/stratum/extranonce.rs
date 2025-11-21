@@ -40,8 +40,9 @@ impl Extranonce {
         hex::encode(&self.0)
     }
 
-    pub fn from_hex(s: &str) -> Result<Self> {
-        Ok(Self(hex::decode(s)?))
+    pub fn from_hex(s: &str) -> Result<Self, InternalError> {
+        let bytes = hex::decode(s).context(error::HexParseSnafu)?;
+        Ok(Self(bytes))
     }
 }
 
@@ -63,7 +64,7 @@ impl fmt::Display for Extranonce {
     }
 }
 impl FromStr for Extranonce {
-    type Err = Error;
+    type Err = InternalError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Self::from_hex(s)

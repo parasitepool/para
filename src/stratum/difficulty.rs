@@ -1,8 +1,7 @@
 use {super::*, core::cmp::Ordering, primitive_types::U256};
 
-lazy_static! {
-    pub static ref DIFFICULTY_1_TARGET: U256 = U256::from_big_endian(&Target::MAX.to_be_bytes());
-}
+pub static DIFFICULTY_1_TARGET: LazyLock<U256> =
+    LazyLock::new(|| U256::from_big_endian(&Target::MAX.to_be_bytes()));
 
 /// Difficulty is a fraught metric. It is derived from the network target, where the
 /// difficulty equals the current network target divided by the network target defined in the genesis block.
@@ -163,29 +162,38 @@ impl fmt::Display for Difficulty {
 }
 
 impl FromStr for Difficulty {
-    type Err = Error;
+    type Err = InternalError;
 
     fn from_str(difficulty: &str) -> Result<Self, Self::Err> {
         let difficulty = difficulty.trim();
+
         if difficulty.is_empty() {
-            return Err(anyhow!("difficulty string is empty"));
+            return Err(InternalError::InvalidValue {
+                reason: "difficulty string is empty".to_string(),
+            });
         }
 
         if let Ok(u) = difficulty.parse::<u64>() {
             if u == 0 {
-                return Err(anyhow!("difficulty must be > 0"));
+                return Err(InternalError::InvalidValue {
+                    reason: "difficulty must be > 0".to_string(),
+                });
             }
             return Ok(Difficulty::from(u));
         }
 
         if let Ok(x) = difficulty.parse::<f64>() {
             if !x.is_finite() || x <= 0.0 {
-                return Err(anyhow!("difficulty must be > 0"));
+                return Err(InternalError::InvalidValue {
+                    reason: "difficulty must be > 0".to_string(),
+                });
             }
             return Ok(Difficulty::from(x));
         }
 
-        Err(anyhow!("difficulty must be an integer or float"))
+        Err(InternalError::Parse {
+            message: "difficulty must be an integer or float".to_string(),
+        })
     }
 }
 

@@ -31,12 +31,17 @@ impl MerkleNode {
 }
 
 impl FromStr for MerkleNode {
-    type Err = Error;
+    type Err = InternalError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        ensure!(s.len() == 64, "merkle node hex must be 64 chars");
+        if s.len() != 64 {
+            return Err(InternalError::InvalidLength {
+                expected: 64,
+                actual: s.len(),
+            });
+        }
         let mut bytes = [0u8; 32];
-        hex::decode_to_slice(s, &mut bytes)?;
+        hex::decode_to_slice(s, &mut bytes).context(error::HexParseSnafu)?;
         Ok(MerkleNode(sha256d::Hash::from_byte_array(bytes)))
     }
 }
@@ -82,8 +87,9 @@ pub fn merkle_root(
     extranonce1: &Extranonce,
     extranonce2: &Extranonce,
     merkle_branches: &[MerkleNode],
-) -> Result<MerkleNode> {
-    let coinbase_bin = hex::decode(format!("{coinb1}{extranonce1}{extranonce2}{coinb2}"))?;
+) -> Result<MerkleNode, InternalError> {
+    let coinbase_bin = hex::decode(format!("{coinb1}{extranonce1}{extranonce2}{coinb2}"))
+        .context(error::HexParseSnafu)?;
     let coinbase_hash = sha256d::Hash::hash(&coinbase_bin);
 
     let mut merkle_root = coinbase_hash;

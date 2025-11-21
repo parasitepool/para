@@ -15,7 +15,7 @@ pub(crate) struct Ping {
 }
 
 impl Ping {
-    pub(crate) async fn run(&self) -> Result {
+    pub(crate) async fn run(&self, cancel_token: CancellationToken) -> Result {
         let addr = resolve_stratum_endpoint(&self.stratum_endpoint).await?;
 
         let ping_type = PingType::new(self.username.as_deref(), self.password.as_deref());
@@ -28,22 +28,33 @@ impl Ping {
         let mut reply_count = 0;
         let mut success = false;
 
+        let mut interval = interval(Duration::from_secs(1));
+        interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        interval.tick().await;
+
         loop {
             tokio::select! {
-                _ = ctrl_c() => break,
-                _ = sleep(Duration::from_secs(1)) => {
+                _ = cancel_token.cancelled() => break,
+                _ = interval.tick() => {
                     let seq = sequence.fetch_add(1, Ordering::Relaxed);
-
                     stats.record_attempt();
 
-                    match self.ping_once(addr, &ping_type).await {
-                        Ok((duration, size)) => {
-                            success = true;
-                            stats.record_success(duration);
-                            println!("Response from {addr}: seq={seq} size={size} time={:.3}ms", duration.as_secs_f64() * 1000.0);
+                    tokio::select! {
+                        _ = cancel_token.cancelled() => {
+                            println!("Ping cancelled for seq={seq}");
+                            break;
                         }
-                        Err(e) => {
-                            println!("Request timeout for seq={seq} ({e})");
+                        result = self.ping_once(addr, &ping_type) => {
+                            match result {
+                                Ok((duration, size)) => {
+                                    success = true;
+                                    stats.record_success(duration);
+                                    println!("Response from {addr}: seq={seq} size={size} time={:.3}ms", duration.as_secs_f64() * 1000.0);
+                                }
+                                Err(e) => {
+                                    println!("Request timeout for seq={seq} ({e})");
+                                }
+                            }
                         }
                     }
 
@@ -75,7 +86,7 @@ impl Ping {
                 )
                 .await?;
 
-                let (_, duration, size) = client.subscribe().await?;
+                let (_, duration, size) = client.subscribe(USER_AGENT.into()).await?;
 
                 client.disconnect().await?;
 
@@ -90,7 +101,7 @@ impl Ping {
                 )
                 .await?;
 
-                client.subscribe().await?;
+                client.subscribe(USER_AGENT.into()).await?;
                 let (duration, size) = client.authorize().await?;
 
                 let instant = Instant::now();

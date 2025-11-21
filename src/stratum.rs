@@ -1,4 +1,29 @@
-use super::*;
+use {
+    bitcoin::{
+        BlockHash, CompactTarget, Target, TxMerkleNode, Txid, block,
+        consensus::Encodable,
+        hashes::{Hash, sha256d},
+    },
+    byteorder::{BigEndian, ByteOrder, LittleEndian},
+    derive_more::Display,
+    error::{InternalError, Result},
+    hex::FromHex,
+    rand::RngCore,
+    serde::{
+        Deserialize, Serialize, Serializer,
+        de::{self, Deserializer},
+        ser::SerializeSeq,
+    },
+    serde_json::Value,
+    serde_with::{DeserializeFromStr, SerializeDisplay},
+    snafu::{ResultExt, Snafu},
+    std::{
+        fmt,
+        ops::{BitAnd, BitOr, BitXor, Not},
+        str::FromStr,
+        sync::LazyLock,
+    },
+};
 
 mod authorize;
 mod client;
@@ -25,7 +50,7 @@ pub use {
     client::Client,
     configure::Configure,
     difficulty::Difficulty,
-    error::JsonRpcError,
+    error::{StratumError, StratumErrorResponse},
     extranonce::Extranonce,
     job_id::JobId,
     merkle::{MerkleNode, merkle_branches, merkle_root},

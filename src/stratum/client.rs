@@ -1,4 +1,26 @@
-use super::*;
+use {
+    super::*,
+    error::ClientError,
+    std::{
+        collections::BTreeMap,
+        sync::{
+            Arc,
+            atomic::{AtomicU64, Ordering},
+        },
+        time::{Duration, Instant},
+    },
+    tokio::{
+        io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader, BufWriter},
+        net::{TcpStream, tcp::OwnedWriteHalf},
+        sync::{Mutex, mpsc, oneshot},
+        task::JoinHandle,
+    },
+    tracing::{debug, error, warn},
+};
+
+mod error;
+
+pub type Result<T = (), E = ClientError> = std::result::Result<T, E>;
 
 type Pending = Arc<Mutex<BTreeMap<Id, oneshot::Sender<(Message, usize)>>>>;
 
@@ -19,7 +41,10 @@ impl Client {
         password: Option<String>,
         timeout: Duration,
     ) -> Result<Self> {
-        let stream = tokio::time::timeout(timeout, TcpStream::connect(address)).await??;
+        let stream = tokio::time::timeout(timeout, TcpStream::connect(address))
+            .await
+            .context(error::TimeoutSnafu)?
+            .context(error::IoSnafu)?;
 
         let (tcp_reader, tcp_writer) = {
             let (rx, tx) = stream.into_split();
@@ -48,7 +73,7 @@ impl Client {
     }
 
     pub async fn disconnect(&mut self) -> Result {
-        self.tcp_writer.shutdown().await?;
+        self.tcp_writer.shutdown().await.context(error::IoSnafu)?;
         self.listener.abort();
         Ok(())
     }
@@ -142,11 +167,12 @@ impl Client {
                     minimum_difficulty_value: None,
                     version_rolling_mask,
                     version_rolling_min_bit_count: None,
-                })?,
+                })
+                .context(error::SerializationSnafu)?,
             )
             .await?;
 
-        let (message, bytes_read) = rx.await?;
+        let (message, bytes_read) = rx.await.context(error::ChannelRecvSnafu)?;
 
         let duration = instant.elapsed();
 
@@ -158,23 +184,31 @@ impl Client {
             } => Ok((result, duration, bytes_read)),
             Message::Response {
                 error: Some(err), ..
-            } => Err(anyhow!("mining.configure error: {}", err)),
-            _ => Err(anyhow!("Unhandled error in mining.configure")),
+            } => Err(ClientError::Protocol {
+                message: format!("mining.configure error: {}", err),
+            }),
+            _ => Err(ClientError::Protocol {
+                message: "Unhandled error in mining.configure".to_string(),
+            }),
         }
     }
 
-    pub async fn subscribe(&mut self) -> Result<(SubscribeResult, Duration, usize)> {
+    pub async fn subscribe(
+        &mut self,
+        user_agent: String,
+    ) -> Result<(SubscribeResult, Duration, usize)> {
         let (rx, instant) = self
             .send_request(
                 "mining.subscribe",
                 serde_json::to_value(Subscribe {
-                    user_agent: USER_AGENT.into(),
+                    user_agent,
                     extranonce1: None,
-                })?,
+                })
+                .context(error::SerializationSnafu)?,
             )
             .await?;
 
-        let (message, bytes_read) = rx.await?;
+        let (message, bytes_read) = rx.await.context(error::ChannelRecvSnafu)?;
 
         let duration = instant.elapsed();
 
@@ -183,11 +217,19 @@ impl Client {
                 result: Some(result),
                 error: None,
                 ..
-            } => Ok((serde_json::from_value(result)?, duration, bytes_read)),
+            } => Ok((
+                serde_json::from_value(result).context(error::SerializationSnafu)?,
+                duration,
+                bytes_read,
+            )),
             Message::Response {
                 error: Some(err), ..
-            } => Err(anyhow!("mining.subscribe error: {}", err)),
-            _ => Err(anyhow!("Unknown mining.subscribe error")),
+            } => Err(ClientError::Protocol {
+                message: format!("mining.subscribe error: {}", err),
+            }),
+            _ => Err(ClientError::Protocol {
+                message: "Unknown mining.subscribe error".to_string(),
+            }),
         }
     }
 
@@ -198,11 +240,12 @@ impl Client {
                 serde_json::to_value(Authorize {
                     username: self.username.clone(),
                     password: Some(self.password.clone()),
-                })?,
+                })
+                .context(error::SerializationSnafu)?,
             )
             .await?;
 
-        let (message, bytes_read) = rx.await?;
+        let (message, bytes_read) = rx.await.context(error::ChannelRecvSnafu)?;
 
         let duration = instant.elapsed();
 
@@ -212,16 +255,22 @@ impl Client {
                 error: None,
                 ..
             } => {
-                if serde_json::from_value(result)? {
+                if serde_json::from_value(result).context(error::SerializationSnafu)? {
                     Ok((duration, bytes_read))
                 } else {
-                    Err(anyhow!("Unauthorized"))
+                    Err(ClientError::Protocol {
+                        message: "Unauthorized".to_string(),
+                    })
                 }
             }
             Message::Response {
                 error: Some(err), ..
-            } => Err(anyhow!("mining.authorize error: {}", err)),
-            _ => Err(anyhow!("Unknown mining.authorize error")),
+            } => Err(ClientError::Protocol {
+                message: format!("mining.authorize error: {}", err),
+            }),
+            _ => Err(ClientError::Protocol {
+                message: "Unknown mining.authorize error".to_string(),
+            }),
         }
     }
 
@@ -242,10 +291,13 @@ impl Client {
         };
 
         let (rx, _) = self
-            .send_request("mining.submit", serde_json::to_value(&submit)?)
+            .send_request(
+                "mining.submit",
+                serde_json::to_value(&submit).context(error::SerializationSnafu)?,
+            )
             .await?;
 
-        let (message, _) = rx.await?;
+        let (message, _) = rx.await.context(error::ChannelRecvSnafu)?;
 
         match message {
             Message::Response {
@@ -255,17 +307,31 @@ impl Client {
                 ..
             } => {
                 if let Err(err) = serde_json::from_value::<Value>(result) {
-                    return Err(anyhow!("Failed to submit: {err}"));
+                    return Err(ClientError::Protocol {
+                        message: format!("Failed to submit: {err}"),
+                    });
                 }
             }
             Message::Response {
                 error: Some(err), ..
-            } => return Err(anyhow!("mining.submit error: {}", err)),
+            } => {
+                return Err(ClientError::Protocol {
+                    message: format!("mining.submit error: {}", err),
+                });
+            }
             Message::Response {
                 reject_reason: Some(reason),
                 ..
-            } => return Err(anyhow!("share rejected: {}", reason)),
-            _ => return Err(anyhow!("Unhandled error in mining.submit")),
+            } => {
+                return Err(ClientError::Protocol {
+                    message: format!("share rejected: {}", reason),
+                });
+            }
+            _ => {
+                return Err(ClientError::Protocol {
+                    message: "Unhandled error in mining.submit".to_string(),
+                });
+            }
         }
 
         Ok(submit)
@@ -294,10 +360,13 @@ impl Client {
     }
 
     async fn send(&mut self, message: &Message) -> Result<Instant> {
-        let frame = serde_json::to_string(message)? + "\n";
-        self.tcp_writer.write_all(frame.as_bytes()).await?;
+        let frame = serde_json::to_string(message).context(error::SerializationSnafu)? + "\n";
+        self.tcp_writer
+            .write_all(frame.as_bytes())
+            .await
+            .context(error::IoSnafu)?;
         let instant = Instant::now();
-        self.tcp_writer.flush().await?;
+        self.tcp_writer.flush().await.context(error::IoSnafu)?;
         Ok(instant)
     }
 

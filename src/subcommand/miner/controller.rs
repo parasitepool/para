@@ -28,7 +28,7 @@ impl Controller {
         throttle: Option<ckpool::HashRate>,
         mode: Mode,
     ) -> Result<Self> {
-        let (subscribe, _, _) = client.subscribe().await?;
+        let (subscribe, _, _) = client.subscribe(USER_AGENT.into()).await?;
         client.authorize().await?;
 
         info!(
@@ -66,7 +66,7 @@ impl Controller {
         })
     }
 
-    pub(crate) async fn run(mut self) -> Result<Vec<Share>> {
+    pub(crate) async fn run(mut self, cancel_token: CancellationToken) -> Result<Vec<Share>> {
         self.spawn_hashers();
 
         if !integration_test() && !logs_enabled() {
@@ -76,7 +76,7 @@ impl Controller {
         loop {
             tokio::select! {
                 biased;
-                _ = ctrl_c() => {
+                _ = cancel_token.cancelled() => {
                     info!("Shutting down stratum client and hasher");
                     break;
                 },
