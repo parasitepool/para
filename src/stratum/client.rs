@@ -100,6 +100,18 @@ impl Client {
         Ok((rx, instant))
     }
 
+    async fn await_response(
+        &self,
+        rx: oneshot::Receiver<Result<(Message, usize)>>,
+        instant: Instant,
+    ) -> Result<(Message, usize, Duration)> {
+        let (message, bytes_read) = rx
+            .await
+            .map_err(|e| ClientError::ChannelRecv { source: e })??;
+
+        Ok((message, bytes_read, instant.elapsed()))
+    }
+
     pub async fn configure(
         &self,
         extensions: Vec<String>,
@@ -118,11 +130,7 @@ impl Client {
             )
             .await?;
 
-        let (message, bytes_read) = rx
-            .await
-            .map_err(|e| ClientError::ChannelRecv { source: e })??;
-
-        let duration = instant.elapsed();
+        let (message, bytes_read, duration) = self.await_response(rx, instant).await?;
 
         match message {
             Message::Response {
@@ -153,11 +161,7 @@ impl Client {
             )
             .await?;
 
-        let (message, bytes_read) = rx
-            .await
-            .map_err(|e| ClientError::ChannelRecv { source: e })??;
-
-        let duration = instant.elapsed();
+        let (message, bytes_read, duration) = self.await_response(rx, instant).await?;
 
         match message {
             Message::Response {
@@ -192,11 +196,7 @@ impl Client {
             )
             .await?;
 
-        let (message, bytes_read) = rx
-            .await
-            .map_err(|e| ClientError::ChannelRecv { source: e })??;
-
-        let duration = instant.elapsed();
+        let (message, bytes_read, duration) = self.await_response(rx, instant).await?;
 
         match message {
             Message::Response {
@@ -239,16 +239,14 @@ impl Client {
             version_bits: None,
         };
 
-        let (rx, _) = self
+        let (rx, instant) = self
             .send_request(
                 "mining.submit".to_string(),
                 serde_json::to_value(&submit).context(error::SerializationSnafu)?,
             )
             .await?;
 
-        let (message, _) = rx
-            .await
-            .map_err(|e| ClientError::ChannelRecv { source: e })??;
+        let (message, _, _) = self.await_response(rx, instant).await?;
 
         match message {
             Message::Response {
