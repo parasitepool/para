@@ -50,7 +50,7 @@ impl Template {
         )
         .await?;
 
-        let (subscription, _, _) = client.subscribe().await?;
+        let (subscription, _, _) = client.subscribe(USER_AGENT.into()).await?;
 
         client.authorize().await?;
 

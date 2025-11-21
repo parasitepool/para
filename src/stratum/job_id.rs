@@ -15,10 +15,12 @@ impl JobId {
 }
 
 impl FromStr for JobId {
-    type Err = anyhow::Error;
+    type Err = InternalError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let id = u64::from_str_radix(s, 16)?;
+        let id = u64::from_str_radix(s, 16).context(error::ParseHexIntSnafu {
+            input: s.to_string(),
+        })?;
         Ok(JobId(id))
     }
 }

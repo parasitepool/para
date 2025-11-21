@@ -83,7 +83,15 @@ where
                             debug!("CONFIGURE from {} with {params}", self.worker);
 
                             if !matches!(self.state,  State::Init | State::Configured) {
-                                self.send_error(id.clone(), -32001, "Method not allowed in current state", None).await?;
+                                self.send_error(
+                                    id.clone(),
+                                    StratumError::MethodNotAllowed,
+                                    Some(serde_json::json!({
+                                        "method": "mining.configure",
+                                        "current_state": format!("{:?}", self.state)
+                                    })),
+                                )
+                                .await?;
                                 continue;
                             };
 
@@ -96,7 +104,15 @@ where
                             debug!("SUBSCRIBE from {} with {params}", self.worker);
 
                             if !matches!(self.state,  State::Init | State::Configured) {
-                                self.send_error(id.clone(), -32001, "Method not allowed in current state", None).await?;
+                                self.send_error(
+                                    id.clone(),
+                                    StratumError::MethodNotAllowed,
+                                    Some(serde_json::json!({
+                                        "method": "mining.subscribe",
+                                        "current_state": format!("{:?}", self.state)
+                                    })),
+                                )
+                                .await?;
                                 continue;
                             };
 
@@ -109,7 +125,15 @@ where
                             debug!("AUTHORIZE from {} with {params}", self.worker);
 
                             if self.state != State::Subscribed {
-                                self.send_error(id.clone(), -32001, "Method not allowed in current state", None).await?;
+                                self.send_error(
+                                    id.clone(),
+                                    StratumError::MethodNotAllowed,
+                                    Some(serde_json::json!({
+                                        "method": "mining.authorize",
+                                        "current_state": format!("{:?}", self.state)
+                                    })),
+                                )
+                                .await?;
                                 continue;
                             }
 
@@ -122,7 +146,8 @@ where
                             debug!("SUBMIT from {} with params {params}", self.worker);
 
                             if self.state != State::Working {
-                                self.send_error(id.clone(), -32002, "Unauthorized", None).await?;
+                                self.send_error(id.clone(), StratumError::Unauthorized, None)
+                                    .await?;
                                 continue;
                             }
 
@@ -210,11 +235,12 @@ where
             let message = Message::Response {
                 id,
                 result: None,
-                error: Some(JsonRpcError {
-                    error_code: -1,
-                    message: "Unsupported extension".into(),
-                    traceback: Some(serde_json::to_value(configure)?),
-                }),
+                error: Some(StratumError::UnsupportedExtension.into_response(Some(
+                    serde_json::json!({
+                        "extensions": configure.extensions,
+                        "supported": ["version-rolling"]
+                    }),
+                ))),
                 reject_reason: None,
             };
 
@@ -328,14 +354,18 @@ where
 
     async fn submit(&mut self, id: Id, submit: Submit) -> Result {
         let Some(job) = self.jobs.get(&submit.job_id) else {
-            self.send_error(id, 21, "Stale job", None).await?;
+            self.send_error(id, StratumError::Stale, None).await?;
             return Ok(());
         };
 
         let version = if let Some(version_bits) = submit.version_bits {
             let Some(version_mask) = job.version_mask else {
-                self.send_error(id, 23, "Version rolling not negotiated", None)
-                    .await?;
+                self.send_error(
+                    id,
+                    StratumError::InvalidVersionMask,
+                    Some(serde_json::json!({"reason": "Version rolling not negotiated"})),
+                )
+                .await?;
 
                 return Ok(());
             };
@@ -373,7 +403,7 @@ where
         };
 
         if self.jobs.is_duplicate(header.block_hash()) {
-            self.send_error(id, 22, "Duplicate share", None).await?;
+            self.send_error(id, StratumError::Duplicate, None).await?;
             return Ok(());
         }
 
@@ -427,8 +457,7 @@ where
             })
             .await?;
         } else {
-            self.send_error(id, 25, "Above pool target/diff", None)
-                .await?;
+            self.send_error(id, StratumError::AboveTarget, None).await?;
         }
 
         Ok(())
@@ -462,18 +491,13 @@ where
     async fn send_error(
         &mut self,
         id: Id,
-        code: i32,
-        msg: impl Into<String>,
+        error: StratumError,
         traceback: Option<serde_json::Value>,
     ) -> Result {
         self.send(Message::Response {
             id,
             result: None,
-            error: Some(JsonRpcError {
-                error_code: code,
-                message: msg.into(),
-                traceback,
-            }),
+            error: Some(error.into_response(traceback)),
             reject_reason: None,
         })
         .await
