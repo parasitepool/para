@@ -437,6 +437,7 @@ where
             }
 
             info!("Submitting potential block solve");
+            // panic!();
 
             match self.config.bitcoin_rpc_client()?.submit_block(&block) {
                 Ok(_) => info!("SUCCESSFULLY mined block {}", block.block_hash()),

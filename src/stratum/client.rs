@@ -1,13 +1,8 @@
 use {
     super::*,
-    connection::Connection,
     error::ClientError,
     std::{
         collections::BTreeMap,
-        sync::{
-            Arc,
-            atomic::{AtomicU64, Ordering},
-        },
         time::{Duration, Instant},
     },
     tokio::{
@@ -15,10 +10,9 @@ use {
         net::TcpStream,
         sync::{mpsc, oneshot},
     },
-    tracing::{error, warn},
+    tracing::{debug, error, warn},
 };
 
-mod connection;
 mod error;
 
 pub type Result<T = (), E = ClientError> = std::result::Result<T, E>;
@@ -32,92 +26,124 @@ pub struct ClientConfig {
     pub timeout: Duration,
 }
 
+// ============================================================================
+// Handle - what the user holds and uses to talk to the actor
+// ============================================================================
+
 #[derive(Clone)]
 pub struct Client {
-    config: Arc<ClientConfig>,
-    id_counter: Arc<AtomicU64>,
     tx: mpsc::Sender<ClientMessage>,
     pub events: tokio::sync::broadcast::Sender<Event>,
 }
 
+// Messages sent from the handle to the actor
 enum ClientMessage {
+    Connect {
+        respond_to: oneshot::Sender<Result<()>>,
+    },
     Request {
-        id: Id,
         method: String,
         params: Value,
-        tx: oneshot::Sender<Result<(Message, usize)>>,
+        respond_to: oneshot::Sender<Result<(Message, usize)>>,
     },
-    Disconnect,
+    Disconnect {
+        respond_to: oneshot::Sender<()>,
+    },
 }
+
+// ============================================================================
+// Actor - the independently running task that owns all state
+// ============================================================================
+
+struct ClientActor {
+    config: ClientConfig,
+    rx: mpsc::Receiver<ClientMessage>,
+    events: tokio::sync::broadcast::Sender<Event>,
+    id_counter: u64,
+    pending: BTreeMap<Id, oneshot::Sender<Result<(Message, usize)>>>,
+    connection: Option<ConnectionState>,
+}
+
+struct ConnectionState {
+    writer: BufWriter<tokio::net::tcp::OwnedWriteHalf>,
+    reader_handle: tokio::task::JoinHandle<()>,
+}
+
+// Messages sent from the reader task to the actor
+enum IncomingMessage {
+    Response {
+        id: Id,
+        message: Message,
+        bytes_read: usize,
+    },
+    Notification {
+        method: String,
+        params: Value,
+    },
+    Disconnected,
+    Error(ClientError),
+}
+
+// ============================================================================
+// Client Handle Implementation
+// ============================================================================
 
 impl Client {
     pub fn new(config: ClientConfig) -> Self {
-        let (tx, _) = mpsc::channel(32);
-        let (events, _) = tokio::sync::broadcast::channel(32);
+        let (tx, rx) = mpsc::channel(32);
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(32);
+
+        let actor = ClientActor::new(config, rx, event_tx.clone());
+
+        // Spawn the actor immediately - it starts in disconnected state
+        tokio::spawn(async move {
+            actor.run().await;
+        });
 
         Self {
-            config: Arc::new(config),
-            id_counter: Arc::new(AtomicU64::new(0)),
             tx,
-            events,
+            events: event_tx,
         }
     }
 
-    pub async fn connect(&mut self) -> Result<()> {
-        let (tx, rx) = mpsc::channel(32);
-        self.tx = tx;
+    pub async fn connect(&self) -> Result<()> {
+        let (respond_to, rx) = oneshot::channel();
 
-        let connection = Connection::new(self.config.clone(), rx, self.events.clone());
+        self.tx
+            .send(ClientMessage::Connect { respond_to })
+            .await
+            .map_err(|_| ClientError::NotConnected)?;
 
-        tokio::spawn(async move {
-            if let Err(e) = connection.run().await {
-                error!("Connection actor failed: {}", e);
-            }
-        });
-
-        Ok(())
-    }
-
-    pub async fn reconnect(&mut self) -> Result<()> {
-        self.disconnect().await?;
-        self.connect().await?;
-
-        let (_subscribe, _, _) = self.subscribe().await?;
-        self.authorize().await?;
-
-        Ok(())
+        rx.await.map_err(|_| ClientError::NotConnected)?
     }
 
     pub async fn disconnect(&self) -> Result<()> {
-        let _ = self.tx.send(ClientMessage::Disconnect).await;
+        let (respond_to, rx) = oneshot::channel();
+
+        let _ = self.tx.send(ClientMessage::Disconnect { respond_to }).await;
+
+        let _ = rx.await;
         Ok(())
     }
 
     async fn send_request(
         &self,
-        method: &str,
-        params: serde_json::Value,
+        method: String,
+        params: Value,
     ) -> Result<(oneshot::Receiver<Result<(Message, usize)>>, Instant)> {
-        let id = self.next_id();
-        let (tx, rx) = oneshot::channel();
-
+        let (respond_to, rx) = oneshot::channel();
         let instant = Instant::now();
 
         self.tx
             .send(ClientMessage::Request {
-                id,
-                method: method.to_string(),
+                method,
                 params,
-                tx,
+                respond_to,
             })
             .await
             .map_err(|_| ClientError::NotConnected)?;
 
         Ok((rx, instant))
-    }
-
-    fn next_id(&self) -> Id {
-        Id::Number(self.id_counter.fetch_add(1, Ordering::Relaxed))
     }
 
     pub async fn configure(
@@ -127,7 +153,7 @@ impl Client {
     ) -> Result<(Value, Duration, usize)> {
         let (rx, instant) = self
             .send_request(
-                "mining.configure",
+                "mining.configure".to_string(),
                 serde_json::to_value(Configure {
                     extensions,
                     minimum_difficulty_value: None,
@@ -164,12 +190,8 @@ impl Client {
     pub async fn subscribe(&self) -> Result<(SubscribeResult, Duration, usize)> {
         let (rx, instant) = self
             .send_request(
-                "mining.subscribe",
-                serde_json::to_value(Subscribe {
-                    user_agent: self.config.user_agent.clone(),
-                    extranonce1: None,
-                })
-                .context(error::SerializationSnafu)?,
+                "mining.subscribe".to_string(),
+                serde_json::json!(null), // Will be populated by actor from config
             )
             .await?;
 
@@ -203,17 +225,8 @@ impl Client {
     pub async fn authorize(&self) -> Result<(Duration, usize)> {
         let (rx, instant) = self
             .send_request(
-                "mining.authorize",
-                serde_json::to_value(Authorize {
-                    username: self.config.username.clone(),
-                    password: Some(
-                        self.config
-                            .password
-                            .clone()
-                            .unwrap_or_else(|| "x".to_string()),
-                    ),
-                })
-                .context(error::SerializationSnafu)?,
+                "mining.authorize".to_string(),
+                serde_json::json!(null), // Will be populated by actor from config
             )
             .await?;
 
@@ -256,7 +269,7 @@ impl Client {
         nonce: Nonce,
     ) -> Result<Submit> {
         let submit = Submit {
-            username: self.config.username.clone(),
+            username: String::new(), // Will be populated by actor from config
             job_id,
             extranonce2,
             ntime,
@@ -266,7 +279,7 @@ impl Client {
 
         let (rx, _) = self
             .send_request(
-                "mining.submit",
+                "mining.submit".to_string(),
                 serde_json::to_value(&submit).context(error::SerializationSnafu)?,
             )
             .await?;
@@ -311,5 +324,282 @@ impl Client {
         }
 
         Ok(submit)
+    }
+}
+
+// ============================================================================
+// ClientActor Implementation
+// ============================================================================
+
+impl ClientActor {
+    fn new(
+        config: ClientConfig,
+        rx: mpsc::Receiver<ClientMessage>,
+        events: tokio::sync::broadcast::Sender<Event>,
+    ) -> Self {
+        Self {
+            config,
+            rx,
+            events,
+            id_counter: 0,
+            pending: BTreeMap::new(),
+            connection: None,
+        }
+    }
+
+    async fn run(mut self) {
+        // Main actor loop - processes messages from client handle and reader task
+        let (incoming_tx, mut incoming_rx) = mpsc::channel::<IncomingMessage>(32);
+
+        loop {
+            tokio::select! {
+                // Messages from the client handle
+                Some(msg) = self.rx.recv() => {
+                    match msg {
+                        ClientMessage::Connect { respond_to } => {
+                            let result = self.handle_connect(incoming_tx.clone()).await;
+                            let _ = respond_to.send(result);
+                        }
+                        ClientMessage::Request { method, params, respond_to } => {
+                            // Assign actual ID from counter
+                            let actual_id = self.next_id();
+                            self.pending.insert(actual_id.clone(), respond_to);
+
+                            if let Err(e) = self.handle_request(actual_id.clone(), method, params).await {
+                                // If sending fails, notify the pending request
+                                if let Some(tx) = self.pending.remove(&actual_id) {
+                                    let _ = tx.send(Err(e));
+                                }
+                            }
+                        }
+                        ClientMessage::Disconnect { respond_to } => {
+                            self.handle_disconnect().await;
+                            let _ = respond_to.send(());
+                        }
+                    }
+                }
+                // Messages from the reader task
+                Some(msg) = incoming_rx.recv() => {
+                    self.handle_incoming(msg).await;
+                }
+                // All senders dropped - shutdown
+                else => {
+                    debug!("Client actor shutting down");
+                    self.handle_disconnect().await;
+                    break;
+                }
+            }
+        }
+    }
+
+    fn next_id(&mut self) -> Id {
+        let id = self.id_counter;
+        self.id_counter += 1;
+        Id::Number(id)
+    }
+
+    async fn handle_connect(&mut self, incoming_tx: mpsc::Sender<IncomingMessage>) -> Result<()> {
+        // Disconnect if already connected
+        if self.connection.is_some() {
+            self.handle_disconnect().await;
+        }
+
+        // Establish TCP connection
+        let stream = tokio::time::timeout(
+            self.config.timeout,
+            TcpStream::connect(&self.config.address),
+        )
+        .await
+        .map_err(|source| ClientError::Timeout { source })?
+        .map_err(|source| ClientError::Io { source })?;
+
+        let (reader, writer) = stream.into_split();
+        let writer = BufWriter::new(writer);
+
+        // Spawn reader task
+        let events = self.events.clone();
+        let reader_handle = tokio::spawn(async move {
+            Self::reader_task(BufReader::new(reader), incoming_tx, events).await;
+        });
+
+        self.connection = Some(ConnectionState {
+            writer,
+            reader_handle,
+        });
+
+        debug!("Connected to {}", self.config.address);
+        Ok(())
+    }
+
+    async fn handle_request(&mut self, id: Id, method: String, mut params: Value) -> Result<()> {
+        let connection = self.connection.as_mut().ok_or(ClientError::NotConnected)?;
+
+        // Inject config values for specific methods
+        match method.as_str() {
+            "mining.subscribe" => {
+                params = serde_json::to_value(Subscribe {
+                    user_agent: self.config.user_agent.clone(),
+                    extranonce1: None,
+                })
+                .map_err(|e| ClientError::Serialization { source: e })?;
+            }
+            "mining.authorize" => {
+                params = serde_json::to_value(Authorize {
+                    username: self.config.username.clone(),
+                    password: self.config.password.clone().or(Some("x".to_string())),
+                })
+                .map_err(|e| ClientError::Serialization { source: e })?;
+            }
+            "mining.submit" => {
+                // Inject username into submit
+                if let Ok(mut submit) = serde_json::from_value::<Submit>(params.clone()) {
+                    submit.username = self.config.username.clone();
+                    params = serde_json::to_value(&submit)
+                        .map_err(|e| ClientError::Serialization { source: e })?;
+                }
+            }
+            _ => {}
+        }
+
+        let msg = Message::Request { id, method, params };
+
+        let frame = serde_json::to_string(&msg)
+            .map_err(|e| ClientError::Serialization { source: e })?
+            + "\n";
+
+        connection
+            .writer
+            .write_all(frame.as_bytes())
+            .await
+            .map_err(|e| ClientError::Io { source: e })?;
+
+        connection
+            .writer
+            .flush()
+            .await
+            .map_err(|e| ClientError::Io { source: e })?;
+
+        Ok(())
+    }
+
+    async fn handle_disconnect(&mut self) {
+        if let Some(connection) = self.connection.take() {
+            connection.reader_handle.abort();
+            debug!("Disconnected");
+        }
+
+        // Cleanup pending requests
+        let pending = std::mem::take(&mut self.pending);
+        for (_, tx) in pending {
+            let _ = tx.send(Err(ClientError::NotConnected));
+        }
+
+        let _ = self.events.send(Event::Disconnected);
+    }
+
+    async fn handle_incoming(&mut self, msg: IncomingMessage) {
+        match msg {
+            IncomingMessage::Response {
+                id,
+                message,
+                bytes_read,
+            } => {
+                if let Some(tx) = self.pending.remove(&id) {
+                    let _ = tx.send(Ok((message, bytes_read)));
+                } else {
+                    warn!("Unmatched response ID={:?}", id);
+                }
+            }
+            IncomingMessage::Notification { method, params } => match method.as_str() {
+                "mining.notify" => match serde_json::from_value::<Notify>(params) {
+                    Ok(notify) => {
+                        let _ = self.events.send(Event::Notify(notify));
+                    }
+                    Err(e) => warn!("Failed to parse mining.notify: {}", e),
+                },
+                "mining.set_difficulty" => match serde_json::from_value::<SetDifficulty>(params) {
+                    Ok(set_diff) => {
+                        let _ = self
+                            .events
+                            .send(Event::SetDifficulty(set_diff.difficulty()));
+                    }
+                    Err(e) => warn!("Failed to parse mining.set_difficulty: {}", e),
+                },
+                _ => warn!("Unhandled notification: {}", method),
+            },
+            IncomingMessage::Disconnected => {
+                self.handle_disconnect().await;
+            }
+            IncomingMessage::Error(err) => {
+                error!("Reader error: {}", err);
+                self.handle_disconnect().await;
+            }
+        }
+    }
+
+    async fn reader_task(
+        mut reader: BufReader<tokio::net::tcp::OwnedReadHalf>,
+        incoming_tx: mpsc::Sender<IncomingMessage>,
+        events: tokio::sync::broadcast::Sender<Event>,
+    ) {
+        let mut line = String::new();
+
+        loop {
+            line.clear();
+
+            let bytes_read = match reader.read_line(&mut line).await {
+                Ok(0) => {
+                    let _ = incoming_tx.send(IncomingMessage::Disconnected).await;
+                    let _ = events.send(Event::Disconnected);
+                    break;
+                }
+                Ok(n) => n,
+                Err(e) => {
+                    error!("Read error: {e}");
+                    let _ = incoming_tx
+                        .send(IncomingMessage::Error(ClientError::Io { source: e }))
+                        .await;
+                    break;
+                }
+            };
+
+            let msg: Message = match serde_json::from_str(&line) {
+                Ok(msg) => msg,
+                Err(e) => {
+                    warn!("Invalid JSON message: {line:?} - {e}");
+                    continue;
+                }
+            };
+
+            match msg {
+                Message::Response {
+                    id,
+                    result,
+                    error,
+                    reject_reason,
+                } => {
+                    let _ = incoming_tx
+                        .send(IncomingMessage::Response {
+                            id,
+                            message: Message::Response {
+                                id: Id::Number(0), // Placeholder
+                                result,
+                                error,
+                                reject_reason,
+                            },
+                            bytes_read,
+                        })
+                        .await;
+                }
+                Message::Notification { method, params } => {
+                    let _ = incoming_tx
+                        .send(IncomingMessage::Notification { method, params })
+                        .await;
+                }
+                _ => {
+                    warn!("Unexpected message type: {:?}", msg);
+                }
+            }
+        }
     }
 }

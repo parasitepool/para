@@ -86,7 +86,7 @@ impl Ping {
                     timeout: Duration::from_secs(self.timeout),
                 };
 
-                let mut client = stratum::Client::new(config);
+                let client = stratum::Client::new(config);
                 client.connect().await?;
 
                 let (_, duration, size) = client.subscribe().await?;
@@ -104,7 +104,7 @@ impl Ping {
                     timeout: Duration::from_secs(self.timeout),
                 };
 
-                let mut client = stratum::Client::new(config);
+                let client = stratum::Client::new(config);
                 client.connect().await?;
                 let mut events = client.events.subscribe();
 

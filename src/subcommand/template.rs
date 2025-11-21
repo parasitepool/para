@@ -50,7 +50,7 @@ impl Template {
             timeout: Duration::from_secs(5),
         };
 
-        let mut client = Client::new(config);
+        let client = Client::new(config);
         client.connect().await?;
         let mut events = client.events.subscribe();
 

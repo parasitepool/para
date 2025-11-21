@@ -66,7 +66,7 @@ impl Miner {
             timeout: Duration::from_secs(10),
         };
 
-        let mut client = Client::new(config);
+        let client = Client::new(config);
         client.connect().await?;
 
         let mut system = System::new();
