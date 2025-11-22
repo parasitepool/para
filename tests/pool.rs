@@ -67,28 +67,25 @@ fn configure_template_update_interval() {
 async fn basic_initialization_flow() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001");
 
-    let mut client = pool.stratum_client().await;
+    let client = pool.stratum_client().await;
+    let mut events = client.connect().await.unwrap();
 
-    let (subscribe, _, _) = client.subscribe(USER_AGENT.into()).await.unwrap();
+    let (subscribe, _, _) = client.subscribe().await.unwrap();
 
     assert_eq!(subscribe.subscriptions.len(), 2);
 
     assert!(client.authorize().await.is_ok());
 
-    let set_difficulty = match client.incoming.recv().await.unwrap() {
-        Message::Notification { method: _, params } => {
-            serde_json::from_value::<SetDifficulty>(params).unwrap()
-        }
-        _ => panic!(),
+    let difficulty = match events.recv().await.unwrap() {
+        stratum::Event::SetDifficulty(difficulty) => difficulty,
+        _ => panic!("Expected SetDifficulty"),
     };
 
-    assert!(set_difficulty.difficulty() == Difficulty::from(0.00001));
+    assert_eq!(difficulty, Difficulty::from(0.00001));
 
-    let notify = match client.incoming.recv().await.unwrap() {
-        Message::Notification { method: _, params } => {
-            serde_json::from_value::<Notify>(params).unwrap()
-        }
-        _ => panic!(),
+    let notify = match events.recv().await.unwrap() {
+        stratum::Event::Notify(n) => n,
+        _ => panic!("Expected Notify"),
     };
 
     assert_eq!(notify.job_id, JobId::from(0));
@@ -99,7 +96,8 @@ async fn basic_initialization_flow() {
 async fn configure_with_multiple_negotiation_steps() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001");
 
-    let mut client = pool.stratum_client().await;
+    let client = pool.stratum_client().await;
+    let _ = client.connect().await.unwrap();
 
     assert!(
         client
@@ -130,7 +128,7 @@ async fn configure_with_multiple_negotiation_steps() {
             .is_ok()
     );
 
-    let (subscribe, _, _) = client.subscribe(USER_AGENT.into()).await.unwrap();
+    let (subscribe, _, _) = client.subscribe().await.unwrap();
 
     assert_eq!(subscribe.subscriptions.len(), 2);
 
@@ -141,7 +139,8 @@ async fn configure_with_multiple_negotiation_steps() {
 async fn authorize_before_subscribe_fails() {
     let pool = TestPool::spawn();
 
-    let mut client = pool.stratum_client().await;
+    let client = pool.stratum_client().await;
+    let _ = client.connect().await.unwrap();
 
     assert!(
         client
@@ -157,9 +156,10 @@ async fn authorize_before_subscribe_fails() {
 async fn submit_before_authorize_fails() {
     let pool = TestPool::spawn();
 
-    let mut client = pool.stratum_client().await;
+    let client = pool.stratum_client().await;
+    let _ = client.connect().await.unwrap();
 
-    client.subscribe(USER_AGENT.into()).await.unwrap();
+    client.subscribe().await.unwrap();
 
     assert!(
         client

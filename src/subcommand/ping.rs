@@ -78,45 +78,52 @@ impl Ping {
     async fn ping_once(&self, addr: SocketAddr, ping_type: &PingType) -> Result<(Duration, usize)> {
         match ping_type {
             PingType::Subscribe => {
-                let mut client = stratum::Client::connect(
-                    addr,
-                    "".into(),
-                    None,
-                    Duration::from_secs(self.timeout),
-                )
-                .await?;
+                let config = stratum::ClientConfig {
+                    address: addr.to_string(),
+                    username: "".into(),
+                    user_agent: USER_AGENT.into(),
+                    password: None,
+                    timeout: Duration::from_secs(self.timeout),
+                };
 
-                let (_, duration, size) = client.subscribe(USER_AGENT.into()).await?;
+                let client = stratum::Client::new(config);
+                client.connect().await?;
+
+                let (_, duration, size) = client.subscribe().await?;
 
                 client.disconnect().await?;
 
                 Ok((duration, size))
             }
             PingType::Authorized { username, password } => {
-                let mut client = stratum::Client::connect(
-                    addr,
-                    username.clone(),
-                    Some(password.clone()),
-                    Duration::from_secs(self.timeout),
-                )
-                .await?;
+                let config = stratum::ClientConfig {
+                    address: addr.to_string(),
+                    username: username.clone(),
+                    user_agent: USER_AGENT.into(),
+                    password: Some(password.clone()),
+                    timeout: Duration::from_secs(self.timeout),
+                };
 
-                client.subscribe(USER_AGENT.into()).await?;
+                let client = stratum::Client::new(config);
+                let mut events = client.connect().await?;
+
+                client.subscribe().await?;
                 let (duration, size) = client.authorize().await?;
 
                 let instant = Instant::now();
 
                 loop {
-                    let Some(message) = client.incoming.recv().await else {
-                        continue;
-                    };
-
-                    let Message::Notification { method, params: _ } = message else {
-                        continue;
-                    };
-
-                    if method == "mining.notify" {
-                        break;
+                    match events.recv().await {
+                        Ok(stratum::Event::Notify(_)) => {
+                            break;
+                        }
+                        Ok(stratum::Event::Disconnected) => {
+                            return Err(anyhow!("Disconnected before notify"));
+                        }
+                        Err(e) => {
+                            return Err(anyhow!("Stratum event error: {}", e));
+                        }
+                        _ => continue,
                     }
                 }
 

@@ -19,4 +19,7 @@ pub enum ClientError {
 
     #[snafu(display("{message}"))]
     Protocol { message: String },
+
+    #[snafu(display("Client not connected"))]
+    NotConnected,
 }

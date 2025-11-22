@@ -85,14 +85,15 @@ impl TestPool {
     }
 
     pub(crate) async fn stratum_client(&self) -> stratum::Client {
-        stratum::Client::connect(
-            self.stratum_endpoint(),
-            signet_username(),
-            None,
-            Duration::from_secs(1),
-        )
-        .await
-        .unwrap()
+        let config = stratum::ClientConfig {
+            address: self.stratum_endpoint(),
+            username: signet_username(),
+            user_agent: USER_AGENT.into(),
+            password: None,
+            timeout: Duration::from_secs(1),
+        };
+
+        stratum::Client::new(config)
     }
 
     #[allow(unused)]

@@ -3,7 +3,7 @@ use {
     controller::Controller,
     hasher::Hasher,
     metrics::{Metrics, spawn_throbber},
-    stratum::Client,
+    stratum::{Client, ClientConfig},
 };
 
 mod controller;
@@ -58,13 +58,15 @@ impl Miner {
 
         let address = resolve_stratum_endpoint(&self.stratum_endpoint).await?;
 
-        let client = Client::connect(
-            address,
-            self.username.clone(),
-            self.password.clone(),
-            Duration::from_secs(10),
-        )
-        .await?;
+        let config = ClientConfig {
+            address: address.to_string(),
+            username: self.username.clone(),
+            user_agent: USER_AGENT.into(),
+            password: self.password.clone(),
+            timeout: Duration::from_secs(10),
+        };
+
+        let client = Client::new(config);
 
         let mut system = System::new();
         system.refresh_cpu_all();
@@ -79,16 +81,15 @@ impl Miner {
         info!("Available CPU cores: {}", available_cpu_cores);
         info!("CPU cores to use: {}", cpu_cores);
 
-        let controller = Controller::new(
+        let shares = Controller::run(
             client,
             self.username.clone(),
             cpu_cores,
             self.throttle,
             self.mode,
+            cancel_token,
         )
         .await?;
-
-        let shares = controller.run(cancel_token).await?;
 
         println!("{}", serde_json::to_string_pretty(&shares)?);
 

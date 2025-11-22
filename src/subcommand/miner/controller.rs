@@ -21,14 +21,16 @@ pub(crate) struct Controller {
 }
 
 impl Controller {
-    pub(crate) async fn new(
-        mut client: Client,
+    pub(crate) async fn run(
+        client: Client,
         username: String,
         cpu_cores: usize,
         throttle: Option<ckpool::HashRate>,
         mode: Mode,
-    ) -> Result<Self> {
-        let (subscribe, _, _) = client.subscribe(USER_AGENT.into()).await?;
+        cancel_token: CancellationToken,
+    ) -> Result<Vec<Share>> {
+        let events = client.connect().await?;
+        let (subscribe, _, _) = client.subscribe().await?;
         client.authorize().await?;
 
         info!(
@@ -45,7 +47,7 @@ impl Controller {
             .map(|hash_rate| hash_rate.0 / cpu_cores as f64)
             .unwrap_or(f64::MAX);
 
-        Ok(Self {
+        let mut controller = Self {
             client,
             cpu_cores,
             extranonce1: subscribe.extranonce1,
@@ -63,16 +65,29 @@ impl Controller {
             shares: Vec::new(),
             throttle,
             username,
-        })
-    }
+        };
 
-    pub(crate) async fn run(mut self, cancel_token: CancellationToken) -> Result<Vec<Share>> {
-        self.spawn_hashers();
+        controller.spawn_hashers();
 
         if !integration_test() && !logs_enabled() {
-            spawn_throbber(self.metrics.clone());
+            spawn_throbber(controller.metrics.clone());
         }
 
+        controller.event_loop(events, cancel_token).await?;
+
+        controller.root_cancel.cancel();
+        drop(controller.notify_tx);
+        while controller.hashers.join_next().await.is_some() {}
+        controller.client.disconnect().await?;
+
+        Ok(controller.shares)
+    }
+
+    async fn event_loop(
+        &mut self,
+        mut events: broadcast::Receiver<stratum::Event>,
+        cancel_token: CancellationToken,
+    ) -> Result {
         loop {
             tokio::select! {
                 biased;
@@ -80,18 +95,26 @@ impl Controller {
                     info!("Shutting down stratum client and hasher");
                     break;
                 },
-                maybe = self.client.incoming.recv() => match maybe {
-                    Some(msg) => {
-                        match msg {
-                            Message::Notification { method, params } => {
-                                self.handle_notification(method, params).await?;
-                            }
-                            _ => warn!("Unexpected message on incoming: {:?}", msg)
+                event = events.recv() => {
+                    match event {
+                        Ok(stratum::Event::Notify(notify)) => {
+                            self.handle_notify(notify).await?;
                         }
-                    }
-                    None => {
-                        info!("Incoming closed, shutting down");
-                        break;
+                        Ok(stratum::Event::SetDifficulty(difficulty)) => {
+                            self.handle_set_difficulty(difficulty).await;
+                        }
+                        Ok(stratum::Event::Disconnected) => {
+                            info!("Disconnected from stratum server. Shutting down...");
+                            self.cancel_hashers();
+                            break;
+                        }
+                        Err(broadcast::error::RecvError::Lagged(_)) => {
+                            warn!("Event loop lagged, missed messages");
+                        }
+                         Err(broadcast::error::RecvError::Closed) => {
+                            info!("Client event channel closed, shutting down");
+                            break;
+                        }
                     }
                 },
                 maybe = self.share_rx.recv() => match maybe {
@@ -137,12 +160,7 @@ impl Controller {
             }
         }
 
-        self.root_cancel.cancel();
-        drop(self.notify_tx);
-        while self.hashers.join_next().await.is_some() {}
-        self.client.disconnect().await?;
-
-        Ok(self.shares)
+        Ok(())
     }
 
     fn spawn_hashers(&mut self) {
@@ -232,37 +250,28 @@ impl Controller {
         }
     }
 
-    async fn handle_notification(&mut self, method: String, params: Value) -> Result {
-        match method.as_str() {
-            "mining.notify" => {
-                let notify = serde_json::from_value::<Notify>(params)?;
+    async fn handle_notify(&mut self, notify: Notify) -> Result {
+        info!("New job: job_id={}", notify.job_id,);
 
-                info!("New job: job_id={}", notify.job_id,);
+        let cancel = if notify.clean_jobs {
+            self.cancel_hashers()
+        } else {
+            self.hasher_cancel
+                .clone()
+                .unwrap_or_else(|| self.cancel_hashers())
+        };
 
-                let cancel = if notify.clean_jobs {
-                    self.cancel_hashers()
-                } else {
-                    self.hasher_cancel
-                        .clone()
-                        .unwrap_or_else(|| self.cancel_hashers())
-                };
-
-                self.notify_tx.send_replace(Some((notify, cancel)));
-            }
-            "mining.set_difficulty" => {
-                // TODO: if current diff is different from new one then cancel all running hashers
-                let difficulty = serde_json::from_value::<SetDifficulty>(params)?.difficulty();
-                *self.pool_difficulty.lock().await = difficulty;
-                info!("Updated pool difficulty: {difficulty}");
-                info!(
-                    "Updated pool target:\t{}",
-                    target_as_block_hash(difficulty.to_target())
-                );
-            }
-            _ => warn!("Unhandled notification: {}", method),
-        }
-
+        self.notify_tx.send_replace(Some((notify, cancel)));
         Ok(())
+    }
+
+    async fn handle_set_difficulty(&mut self, difficulty: Difficulty) {
+        *self.pool_difficulty.lock().await = difficulty;
+        info!("Updated pool difficulty: {difficulty}");
+        info!(
+            "Updated pool target:\t{}",
+            target_as_block_hash(difficulty.to_target())
+        );
     }
 
     fn cancel_hashers(&mut self) -> CancellationToken {

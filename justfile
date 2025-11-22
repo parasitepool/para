@@ -43,7 +43,7 @@ miner-signet:
     --username tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.tick \
     --password x \
     --cpu-cores 2 \
-    --throttle 200K
+    --throttle 500K
 
 ping host='parasite.wtf':
   cargo run ping {{host}}:42069
