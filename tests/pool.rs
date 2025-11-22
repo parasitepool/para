@@ -81,7 +81,7 @@ async fn basic_initialization_flow() {
         _ => panic!("Expected SetDifficulty"),
     };
 
-    assert!(difficulty == Difficulty::from(0.00001));
+    assert_eq!(difficulty, Difficulty::from(0.00001));
 
     let notify = match events.recv().await.unwrap() {
         stratum::Event::Notify(n) => n,
