@@ -1,4 +1,4 @@
-use super::*;
+use super::{super::StratumErrorResponse, *};
 
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub))]
@@ -19,6 +19,9 @@ pub enum ClientError {
 
     #[snafu(display("{message}"))]
     Protocol { message: String },
+
+    #[snafu(display("{response}"))]
+    Stratum { response: StratumErrorResponse },
 
     #[snafu(display("Client not connected"))]
     NotConnected,

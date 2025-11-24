@@ -27,6 +27,13 @@ unused:
 doc:
   cargo doc --workspace --open
 
+audit:
+  cargo audit
+
+coverage:
+  # cargo tarpaulin
+  cargo llvm-cov
+
 test-without-ckpool:
   cargo test --all -- --skip with_ckpool
 

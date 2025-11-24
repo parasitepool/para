@@ -16,9 +16,9 @@ use {
 };
 
 mod actor;
-mod error;
+pub mod error;
 
-pub type Result<T = (), E = ClientError> = std::result::Result<T, E>;
+pub type Result<T = (), E = error::ClientError> = std::result::Result<T, E>;
 
 const CHANNEL_BUFFER_SIZE: usize = 32;
 
@@ -123,9 +123,7 @@ impl Client {
             } => Ok(result),
             Message::Response {
                 error: Some(err), ..
-            } => Err(ClientError::Protocol {
-                message: format!("{method} error: {err}"),
-            }),
+            } => Err(ClientError::Stratum { response: err }),
             Message::Response {
                 reject_reason: Some(reason),
                 ..

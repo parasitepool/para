@@ -48,7 +48,7 @@ mod version;
 
 pub use {
     authorize::Authorize,
-    client::{Client, ClientConfig},
+    client::{Client, ClientConfig, error::ClientError},
     configure::Configure,
     difficulty::Difficulty,
     error::{StratumError, StratumErrorResponse},
