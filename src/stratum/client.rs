@@ -128,11 +128,19 @@ impl Client {
             Message::Response {
                 reject_reason: Some(reason),
                 ..
-            } => Err(ClientError::Protocol {
-                message: format!("{method} rejected: {reason}"),
+            } => Err(ClientError::Stratum {
+                response: StratumErrorResponse {
+                    error_code: -100,
+                    message: format!("{method} rejected: {reason}"),
+                    traceback: None,
+                },
             }),
-            _ => Err(ClientError::Protocol {
-                message: format!("Unhandled {method} response"),
+            _ => Err(ClientError::Stratum {
+                response: StratumErrorResponse {
+                    error_code: -101,
+                    message: format!("Unhandled {method} response"),
+                    traceback: None,
+                },
             }),
         }
     }
@@ -201,8 +209,8 @@ impl Client {
         if serde_json::from_value(result).context(error::SerializationSnafu)? {
             Ok((duration, bytes_read))
         } else {
-            Err(ClientError::Protocol {
-                message: "Unauthorized".to_string(),
+            Err(ClientError::Stratum {
+                response: StratumError::Unauthorized.into_response(None),
             })
         }
     }
@@ -234,8 +242,12 @@ impl Client {
         let result = self.handle_response(message, "mining.submit")?;
 
         if !serde_json::from_value::<bool>(result).context(error::SerializationSnafu)? {
-            return Err(ClientError::Protocol {
-                message: "Server returned false for submit".to_string(),
+            return Err(ClientError::Stratum {
+                response: StratumErrorResponse {
+                    error_code: -102,
+                    message: "Server returned false for submit".to_string(),
+                    traceback: None,
+                },
             });
         }
 
