@@ -139,8 +139,8 @@ fn solve_share(
         version: notify.version.into(),
         prev_blockhash: notify.prevhash.clone().into(),
         merkle_root: merkle_root.into(),
-        time: u32::from(notify.ntime),
-        bits: bitcoin::CompactTarget::from(notify.nbits),
+        time: notify.ntime.into(),
+        bits: notify.nbits.into(),
         nonce: 0,
     };
 

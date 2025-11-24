@@ -433,6 +433,7 @@ fn aggregator_dashboard_with_auth_with_api_token() {
 }
 
 #[test]
+#[serial(heavy)]
 fn aggregator_cache_ttl() {
     let mut users = Vec::new();
     for i in 0..9 {

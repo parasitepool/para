@@ -260,7 +260,7 @@ async fn clean_jobs_true_on_init_and_new_block() {
 }
 
 #[tokio::test]
-async fn shares_must_meet_difficulty() {
+async fn shares_must_meet_pool_difficulty() {
     let pool = TestPool::spawn_with_args("--start-diff 0.0001");
     let client = pool.stratum_client().await;
     let mut events = client.connect().await.unwrap();
