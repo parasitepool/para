@@ -175,3 +175,232 @@ async fn submit_before_authorize_fails() {
             .contains("Unauthorized")
     );
 }
+
+#[tokio::test]
+async fn duplicate_share_rejected() {
+    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
+    let client = pool.stratum_client().await;
+    let mut events = client.connect().await.unwrap();
+
+    let (subscribe, _, _) = client.subscribe().await.unwrap();
+    let extranonce1 = subscribe.extranonce1;
+    let extranonce2 = Extranonce::random(subscribe.extranonce2_size);
+
+    client.authorize().await.unwrap();
+
+    let mut difficulty = stratum::Difficulty::from(1);
+
+    let notify = loop {
+        match events.recv().await.unwrap() {
+            stratum::Event::SetDifficulty(diff) => difficulty = diff,
+            stratum::Event::Notify(notify) => break notify,
+            _ => {}
+        }
+    };
+
+    let (ntime, nonce) = solve_share(&notify, &extranonce1, &extranonce2, difficulty);
+
+    let submit = client
+        .submit(notify.job_id, extranonce2.clone(), ntime, nonce)
+        .await;
+
+    assert!(submit.is_ok());
+
+    let submit_duplicate = client
+        .submit(notify.job_id, extranonce2, ntime, nonce)
+        .await;
+
+    assert!(submit_duplicate.is_err());
+    assert!(matches!(
+        submit_duplicate,
+        Err(ClientError::Stratum { response }) if response.error_code == StratumError::Duplicate as i32
+    ));
+}
+
+#[tokio::test]
+async fn clean_jobs_true_on_init_and_new_block() {
+    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
+    let client = pool.stratum_client().await;
+    let mut events = client.connect().await.unwrap();
+
+    client.subscribe().await.unwrap();
+    client.authorize().await.unwrap();
+
+    let mut notify = match events.recv().await.unwrap() {
+        stratum::Event::Notify(n) => n,
+        stratum::Event::SetDifficulty(_) => match events.recv().await.unwrap() {
+            stratum::Event::Notify(n) => n,
+            _ => panic!("expected notify"),
+        },
+        _ => panic!("expected notify"),
+    };
+
+    assert!(notify.clean_jobs);
+
+    CommandBuilder::new(format!(
+        "miner --mode block-found --username {} {}",
+        signet_username(),
+        pool.stratum_endpoint()
+    ))
+    .spawn()
+    .wait()
+    .unwrap();
+
+    loop {
+        match events.recv().await.unwrap() {
+            stratum::Event::Notify(notif) if notif.job_id != notify.job_id => {
+                notify = notif;
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    assert!(notify.clean_jobs);
+}
+
+#[tokio::test]
+async fn shares_must_meet_difficulty() {
+    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
+    let client = pool.stratum_client().await;
+    let mut events = client.connect().await.unwrap();
+
+    let (subscribe, _, _) = client.subscribe().await.unwrap();
+    let extranonce1 = subscribe.extranonce1;
+    let extranonce2 = Extranonce::random(subscribe.extranonce2_size);
+
+    client.authorize().await.unwrap();
+
+    let mut difficulty = stratum::Difficulty::from(1.0);
+
+    let notify = loop {
+        match events.recv().await.unwrap() {
+            stratum::Event::SetDifficulty(diff) => difficulty = diff,
+            stratum::Event::Notify(notify) => break notify,
+            _ => {}
+        }
+    };
+
+    let easy_diff = stratum::Difficulty::from(0.0000001);
+    let (ntime, nonce) = solve_share(&notify, &extranonce1, &extranonce2, easy_diff);
+
+    let merkle_root = stratum::merkle_root(
+        &notify.coinb1,
+        &notify.coinb2,
+        &extranonce1,
+        &extranonce2,
+        &notify.merkle_branches,
+    )
+    .unwrap();
+
+    let header = Header {
+        version: notify.version.into(),
+        prev_blockhash: notify.prevhash.clone().into(),
+        merkle_root: merkle_root.into(),
+        time: ntime.into(),
+        bits: notify.nbits.into(),
+        nonce: nonce.into(),
+    };
+
+    let hash = header.block_hash();
+    let pool_target = difficulty.to_target();
+
+    if pool_target.is_met_by(hash) {
+        println!("Accidentally found valid share, skipping negative test");
+        return;
+    }
+
+    let submit = client
+        .submit(notify.job_id, extranonce2, ntime, nonce)
+        .await;
+
+    assert!(submit.is_err());
+    assert!(matches!(
+        submit,
+        Err(ClientError::Stratum { response }) if response.error_code == StratumError::AboveTarget as i32
+    ));
+}
+
+#[tokio::test]
+async fn stale_share_rejected() {
+    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
+    let client = pool.stratum_client().await;
+    let mut events = client.connect().await.unwrap();
+
+    let (subscribe, _, _) = client.subscribe().await.unwrap();
+    let extranonce1 = subscribe.extranonce1;
+    let extranonce2 = Extranonce::random(subscribe.extranonce2_size);
+
+    client.authorize().await.unwrap();
+
+    let mut difficulty = stratum::Difficulty::from(1.0);
+
+    let notify_a = loop {
+        match events.recv().await.unwrap() {
+            stratum::Event::SetDifficulty(diff) => difficulty = diff,
+            stratum::Event::Notify(notify) => break notify,
+            _ => {}
+        }
+    };
+
+    let (ntime, nonce) = solve_share(&notify_a, &extranonce1, &extranonce2, difficulty);
+
+    CommandBuilder::new(format!(
+        "miner --mode block-found --username {} {}",
+        signet_username(),
+        pool.stratum_endpoint()
+    ))
+    .spawn()
+    .wait()
+    .unwrap();
+
+    loop {
+        match events.recv().await.unwrap() {
+            stratum::Event::Notify(n) if n.job_id != notify_a.job_id && n.clean_jobs => {
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    let submit = client
+        .submit(notify_a.job_id, extranonce2, ntime, nonce)
+        .await;
+
+    assert!(submit.is_err());
+    assert!(matches!(
+        submit,
+        Err(ClientError::Stratum { response })
+        if response.error_code == StratumError::Stale as i32
+        || response.error_code == StratumError::InvalidJobId as i32
+    ));
+}
+
+#[tokio::test]
+async fn invalid_job_id_rejected_as_stale() {
+    let pool = TestPool::spawn();
+    let client = pool.stratum_client().await;
+    let mut events = client.connect().await.unwrap();
+
+    let (subscribe, _, _) = client.subscribe().await.unwrap();
+    let _extranonce1 = subscribe.extranonce1;
+    let extranonce2 = Extranonce::random(subscribe.extranonce2_size);
+
+    client.authorize().await.unwrap();
+
+    let _ = events.recv().await.unwrap();
+    let _ = events.recv().await.unwrap();
+
+    let ntime = Ntime::from(0);
+    let nonce = Nonce::from(0);
+
+    let bad_job_id = stratum::JobId::from(0xdeadbeef);
+
+    let submit = client.submit(bad_job_id, extranonce2, ntime, nonce).await;
+
+    assert!(submit.is_err());
+    assert!(matches!(
+        submit,
+        Err(ClientError::Stratum { response }) if response.error_code == StratumError::Stale as i32
+    ));
+}
