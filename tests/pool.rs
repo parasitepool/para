@@ -372,7 +372,6 @@ async fn stale_share_rejected() {
         submit,
         Err(ClientError::Stratum { response })
         if response.error_code == StratumError::Stale as i32
-        || response.error_code == StratumError::InvalidJobId as i32
     ));
 }
 
