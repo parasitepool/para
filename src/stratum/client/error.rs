@@ -1,4 +1,4 @@
-use super::{super::StratumErrorResponse, *};
+use super::*;
 
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub))]

@@ -1,7 +1,6 @@
 use {
     super::*,
     actor::{ClientActor, ClientMessage},
-    error::ClientError,
     std::{
         collections::BTreeMap,
         sync::Arc,
@@ -15,10 +14,12 @@ use {
     tracing::{debug, error, warn},
 };
 
-mod actor;
-pub mod error;
+pub use error::ClientError;
 
-pub type Result<T = (), E = error::ClientError> = std::result::Result<T, E>;
+mod actor;
+mod error;
+
+pub type Result<T = (), E = ClientError> = std::result::Result<T, E>;
 
 const CHANNEL_BUFFER_SIZE: usize = 32;
 
