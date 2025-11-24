@@ -12,6 +12,7 @@ use {
     pretty_assertions::assert_eq as pretty_assert_eq,
     reqwest::{StatusCode, Url},
     serde::{Deserialize, Serialize, de::DeserializeOwned},
+    serial_test::serial,
     std::{
         collections::{BTreeMap, HashSet},
         ffi::{OsStr, OsString},
@@ -21,7 +22,7 @@ use {
         path::PathBuf,
         process::{Child, Command, Stdio},
         str::FromStr,
-        sync::Arc,
+        sync::{Arc, Barrier},
         thread,
         time::Duration,
     },
@@ -65,13 +66,11 @@ use {
     },
     pgtemp::{PgTempDB, PgTempDBBuilder},
     reqwest::Response,
-    serial_test::serial,
     std::{
         io::{BufReader, stderr},
         net::TcpStream,
         process::ChildStdout,
         sync::{
-            Barrier,
             atomic::{AtomicUsize, Ordering},
             mpsc,
         },

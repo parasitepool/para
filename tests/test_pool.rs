@@ -116,17 +116,15 @@ impl Drop for TestPool {
 
             let _ = kill(pid, Signal::SIGTERM);
 
-            for _ in 0..50 {
+            for _ in 0..100 {
                 match self.pool_handle.try_wait() {
                     Ok(Some(_status)) => {
                         return;
                     }
                     Ok(None) => {
-                        thread::sleep(Duration::from_millis(100));
+                        thread::sleep(Duration::from_millis(50));
                     }
-                    Err(_e) => {
-                        break;
-                    }
+                    _ => break,
                 }
             }
 
