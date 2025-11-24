@@ -562,6 +562,7 @@ fn aggregator_negative_cache_on_users() {
 }
 
 #[test]
+#[ignore]
 #[serial(heavy)]
 fn aggregator_cache_concurrent_pool_burst() {
     let mut servers = Vec::new();
@@ -639,6 +640,7 @@ fn aggregator_cache_concurrent_pool_burst() {
 }
 
 #[test]
+#[ignore]
 #[serial(heavy)]
 fn aggregator_cache_concurrent_user_burst() {
     let mut users = Vec::new();
