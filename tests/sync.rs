@@ -3,7 +3,6 @@ use {super::*, tokio_util::sync::CancellationToken};
 pub(crate) static BATCH_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 #[tokio::test]
-#[serial(postgres)]
 async fn test_sync_batch_endpoint() {
     let server = TestServer::spawn_with_db().await;
     let db_url = server.database_url().unwrap();
@@ -52,7 +51,6 @@ async fn test_sync_batch_endpoint() {
 }
 
 #[tokio::test]
-#[serial(postgres)]
 async fn test_sync_with_auth() {
     let mut server = TestServer::spawn_with_db_args("--admin-token verysecrettoken").await;
 
@@ -110,7 +108,6 @@ async fn test_sync_with_auth() {
 }
 
 #[tokio::test]
-#[serial(postgres)]
 async fn test_sync_empty_batch() {
     let server = TestServer::spawn_with_db().await;
     let db_url = server.database_url().unwrap();
@@ -152,7 +149,6 @@ async fn test_sync_empty_batch() {
 }
 
 #[tokio::test]
-#[serial(postgres)]
 async fn test_sync_batch_with_block_only() {
     let server = TestServer::spawn_with_db().await;
     let db_url = server.database_url().unwrap();
@@ -199,7 +195,6 @@ async fn test_sync_batch_with_block_only() {
 
 #[tokio::test]
 #[ignore]
-#[serial(postgres)]
 async fn test_sync_large_batch() {
     let record_count_in_large_batch = 40000;
     let server = TestServer::spawn_with_db().await;
@@ -249,7 +244,6 @@ async fn test_sync_large_batch() {
 }
 
 #[tokio::test]
-#[serial(postgres)]
 async fn test_sync_multiple_batches_different_blocks() {
     let server = TestServer::spawn_with_db().await;
     let db_url = server.database_url().unwrap();
@@ -300,7 +294,6 @@ async fn test_sync_multiple_batches_different_blocks() {
 }
 
 #[tokio::test]
-#[serial(postgres)]
 async fn test_sync_duplicate_batch_id() {
     // batch_id serves only as validation that the synced batch matches
     // test acts as a canary against changing this behavior without consideration
@@ -359,7 +352,6 @@ async fn test_sync_duplicate_batch_id() {
 }
 
 #[tokio::test]
-#[serial(postgres)]
 async fn test_sync_batch_creates_accounts() {
     let server = TestServer::spawn_with_db().await;
     let db_url = server.database_url().unwrap();
@@ -403,7 +395,6 @@ async fn test_sync_batch_creates_accounts() {
 }
 
 #[tokio::test]
-#[serial(postgres)]
 async fn test_sync_batch_with_migrate_accounts_flag() {
     let psql_binpath = match Command::new("pg_config").arg("--bindir").output() {
         Ok(output) if output.status.success() => String::from_utf8(output.stdout)
@@ -486,7 +477,6 @@ async fn test_sync_batch_with_migrate_accounts_flag() {
 }
 
 #[tokio::test]
-#[serial(postgres)]
 async fn test_sync_endpoint_to_endpoint() {
     let source_server = TestServer::spawn_with_db().await;
     let target_server = TestServer::spawn_with_db().await;
