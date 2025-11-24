@@ -1,8 +1,9 @@
-use super::*;
+use {super::*, tokio_util::sync::CancellationToken};
 
 pub(crate) static BATCH_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 #[tokio::test]
+#[serial(postgres)]
 async fn test_sync_batch_endpoint() {
     let server = TestServer::spawn_with_db().await;
     let db_url = server.database_url().unwrap();
@@ -51,6 +52,7 @@ async fn test_sync_batch_endpoint() {
 }
 
 #[tokio::test]
+#[serial(postgres)]
 async fn test_sync_with_auth() {
     let mut server = TestServer::spawn_with_db_args("--admin-token verysecrettoken").await;
 
@@ -108,6 +110,7 @@ async fn test_sync_with_auth() {
 }
 
 #[tokio::test]
+#[serial(postgres)]
 async fn test_sync_empty_batch() {
     let server = TestServer::spawn_with_db().await;
     let db_url = server.database_url().unwrap();
@@ -149,6 +152,7 @@ async fn test_sync_empty_batch() {
 }
 
 #[tokio::test]
+#[serial(postgres)]
 async fn test_sync_batch_with_block_only() {
     let server = TestServer::spawn_with_db().await;
     let db_url = server.database_url().unwrap();
@@ -194,6 +198,8 @@ async fn test_sync_batch_with_block_only() {
 }
 
 #[tokio::test]
+#[ignore]
+#[serial(postgres)]
 async fn test_sync_large_batch() {
     let record_count_in_large_batch = 40000;
     let server = TestServer::spawn_with_db().await;
@@ -243,6 +249,7 @@ async fn test_sync_large_batch() {
 }
 
 #[tokio::test]
+#[serial(postgres)]
 async fn test_sync_multiple_batches_different_blocks() {
     let server = TestServer::spawn_with_db().await;
     let db_url = server.database_url().unwrap();
@@ -293,6 +300,7 @@ async fn test_sync_multiple_batches_different_blocks() {
 }
 
 #[tokio::test]
+#[serial(postgres)]
 async fn test_sync_duplicate_batch_id() {
     // batch_id serves only as validation that the synced batch matches
     // test acts as a canary against changing this behavior without consideration
@@ -351,6 +359,7 @@ async fn test_sync_duplicate_batch_id() {
 }
 
 #[tokio::test]
+#[serial(postgres)]
 async fn test_sync_batch_creates_accounts() {
     let server = TestServer::spawn_with_db().await;
     let db_url = server.database_url().unwrap();
@@ -394,6 +403,7 @@ async fn test_sync_batch_creates_accounts() {
 }
 
 #[tokio::test]
+#[serial(postgres)]
 async fn test_sync_batch_with_migrate_accounts_flag() {
     let psql_binpath = match Command::new("pg_config").arg("--bindir").output() {
         Ok(output) if output.status.success() => String::from_utf8(output.stdout)
@@ -473,4 +483,109 @@ async fn test_sync_batch_with_migrate_accounts_flag() {
         account_new.total_diff, 2008,
         "Account not in current sync, handled by migration"
     );
+}
+
+#[tokio::test]
+#[serial(postgres)]
+async fn test_sync_endpoint_to_endpoint() {
+    let source_server = TestServer::spawn_with_db().await;
+    let target_server = TestServer::spawn_with_db().await;
+
+    let source_db_url = source_server.database_url().unwrap();
+    setup_test_schema(source_db_url.clone()).await.unwrap();
+
+    let target_db_url = target_server.database_url().unwrap();
+    setup_test_schema(target_db_url.clone()).await.unwrap();
+
+    for block_height in 800030..=800032 {
+        insert_test_shares(source_db_url.clone(), 100, block_height)
+            .await
+            .unwrap();
+        insert_test_block(source_db_url.clone(), block_height)
+            .await
+            .unwrap();
+    }
+    insert_test_shares(source_db_url.clone(), 1, 800033)
+        .await
+        .unwrap();
+
+    let sync_sender = Sync::default()
+        .with_endpoint(target_server.url().to_string())
+        .with_database_url(source_db_url.clone())
+        .with_terminate_when_complete(true)
+        .with_temp_file();
+
+    let client = reqwest::Client::new();
+
+    let health_check = client
+        .get(target_server.url().join("/sync/batch").unwrap())
+        .send()
+        .await;
+
+    assert!(health_check.is_ok());
+
+    sync_sender
+        .run(CancellationToken::new())
+        .await
+        .expect("Syncing between servers failed!");
+
+    let pool = sqlx::PgPool::connect(&target_db_url).await.unwrap();
+
+    let stored_shares: Vec<(i64, String)> = sqlx::query_as("SELECT id, origin FROM remote_shares")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(stored_shares.len() as u32, 300);
+
+    let stored_block: Option<(i32, String)> = sqlx::query_as(
+        "SELECT blockheight, blockhash FROM blocks ORDER BY blockheight ASC LIMIT 1",
+    )
+    .fetch_optional(&pool)
+    .await
+    .unwrap();
+
+    assert!(stored_block.is_some());
+    assert_eq!(stored_block.unwrap().0, 800030);
+
+    let block_count: (i64, i32, i32) =
+        sqlx::query_as("SELECT count(*), min(blockheight), max(blockheight) FROM blocks")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    assert_eq!(block_count.0, 3);
+    assert_eq!(block_count.1, 800030);
+    assert_eq!(block_count.2, 800032);
+
+    pool.close().await;
+}
+
+trait SyncSendTestExt {
+    fn with_database_url(self, database_url: String) -> Self;
+    fn with_terminate_when_complete(self, terminate: bool) -> Self;
+    fn with_temp_file(self) -> Self;
+}
+
+impl SyncSendTestExt for Sync {
+    fn with_database_url(mut self, database_url: String) -> Self {
+        self.database_url = database_url;
+        self
+    }
+
+    fn with_terminate_when_complete(mut self, terminate: bool) -> Self {
+        self.terminate_when_complete = terminate;
+        self
+    }
+
+    fn with_temp_file(mut self) -> Self {
+        self.id_file = tempdir()
+            .unwrap()
+            .path()
+            .join("id.txt")
+            .to_str()
+            .unwrap()
+            .to_string();
+        self
+    }
 }

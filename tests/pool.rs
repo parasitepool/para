@@ -1,6 +1,7 @@
 use super::*;
 
 #[test]
+#[serial(pool)]
 fn ping_pool() {
     let pool = TestPool::spawn();
 
@@ -14,6 +15,7 @@ fn ping_pool() {
 }
 
 #[test]
+#[serial(pool)]
 fn mine_to_pool() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001");
 
@@ -33,6 +35,7 @@ fn mine_to_pool() {
 }
 
 #[test]
+#[serial(pool)]
 fn configure_template_update_interval() {
     let pool = TestPool::spawn_with_args("--update-interval 1 --start-diff 0.00001");
 
@@ -64,6 +67,7 @@ fn configure_template_update_interval() {
 }
 
 #[tokio::test]
+#[serial(pool)]
 async fn basic_initialization_flow() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001");
 
@@ -93,6 +97,7 @@ async fn basic_initialization_flow() {
 }
 
 #[tokio::test]
+#[serial(pool)]
 async fn configure_with_multiple_negotiation_steps() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001");
 
@@ -136,6 +141,7 @@ async fn configure_with_multiple_negotiation_steps() {
 }
 
 #[tokio::test]
+#[serial(pool)]
 async fn authorize_before_subscribe_fails() {
     let pool = TestPool::spawn();
 
@@ -153,6 +159,7 @@ async fn authorize_before_subscribe_fails() {
 }
 
 #[tokio::test]
+#[serial(pool)]
 async fn submit_before_authorize_fails() {
     let pool = TestPool::spawn();
 
@@ -177,6 +184,7 @@ async fn submit_before_authorize_fails() {
 }
 
 #[tokio::test]
+#[serial(pool)]
 async fn duplicate_share_rejected() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001");
     let client = pool.stratum_client().await;
@@ -218,6 +226,7 @@ async fn duplicate_share_rejected() {
 }
 
 #[tokio::test]
+#[serial(pool)]
 async fn clean_jobs_true_on_init_and_new_block() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001");
     let client = pool.stratum_client().await;
@@ -260,8 +269,9 @@ async fn clean_jobs_true_on_init_and_new_block() {
 }
 
 #[tokio::test]
+#[serial(pool)]
 async fn shares_must_meet_difficulty() {
-    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
+    let pool = TestPool::spawn_with_args("--start-diff 0.0001");
     let client = pool.stratum_client().await;
     let mut events = client.connect().await.unwrap();
 
@@ -322,8 +332,9 @@ async fn shares_must_meet_difficulty() {
 }
 
 #[tokio::test]
+#[serial(pool)]
 async fn stale_share_rejected() {
-    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
+    let pool = TestPool::spawn_with_args("--start-diff 0.0001");
     let client = pool.stratum_client().await;
     let mut events = client.connect().await.unwrap();
 
@@ -377,6 +388,7 @@ async fn stale_share_rejected() {
 }
 
 #[tokio::test]
+#[serial(pool)]
 async fn invalid_job_id_rejected_as_stale() {
     let pool = TestPool::spawn();
     let client = pool.stratum_client().await;
@@ -403,4 +415,83 @@ async fn invalid_job_id_rejected_as_stale() {
         submit,
         Err(ClientError::Stratum { response }) if response.error_code == StratumError::Stale as i32
     ));
+}
+
+#[test]
+#[serial(pool)]
+fn concurrently_listening_workers_receive_new_templates_on_new_block() {
+    let pool = TestPool::spawn_with_args("--start-diff 0.0001");
+    let endpoint = pool.stratum_endpoint();
+    let user = signet_username();
+
+    let gate = Arc::new(Barrier::new(3));
+    let (out_1, in_1) = mpsc::channel();
+    let (out_2, in_2) = mpsc::channel();
+
+    thread::scope(|thread| {
+        for out in [out_1.clone(), out_2.clone()].into_iter() {
+            let gate = gate.clone();
+            let endpoint = endpoint.clone();
+            let user = user.clone();
+
+            thread.spawn(move || {
+                let mut template_watcher =
+                    CommandBuilder::new(format!("template {endpoint} --username {user} --watch"))
+                        .spawn();
+
+                let mut reader = BufReader::new(template_watcher.stdout.take().unwrap());
+
+                let initial_template = next_json::<Template>(&mut reader);
+
+                gate.wait();
+
+                let new_template = next_json::<Template>(&mut reader);
+
+                out.send((initial_template, new_template)).ok();
+
+                template_watcher.kill().unwrap();
+                template_watcher.wait().unwrap();
+            });
+        }
+
+        gate.wait();
+
+        CommandBuilder::new(format!(
+            "miner --mode block-found --username {} {}",
+            signet_username(),
+            pool.stratum_endpoint()
+        ))
+        .spawn()
+        .wait()
+        .unwrap();
+
+        let (initial_template_worker_a, new_template_worker_a) =
+            in_1.recv_timeout(Duration::from_secs(1)).unwrap();
+
+        let (initial_template_worker_b, new_template_worker_b) =
+            in_2.recv_timeout(Duration::from_secs(1)).unwrap();
+
+        assert_eq!(
+            initial_template_worker_a.prevhash,
+            initial_template_worker_b.prevhash
+        );
+
+        assert_ne!(
+            initial_template_worker_a.prevhash,
+            new_template_worker_a.prevhash
+        );
+
+        assert_ne!(
+            initial_template_worker_b.prevhash,
+            new_template_worker_b.prevhash,
+        );
+
+        assert_eq!(
+            new_template_worker_a.prevhash,
+            new_template_worker_b.prevhash
+        );
+
+        assert!(new_template_worker_a.ntime >= initial_template_worker_a.ntime);
+        assert!(new_template_worker_b.ntime >= initial_template_worker_b.ntime);
+    });
 }

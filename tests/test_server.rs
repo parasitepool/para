@@ -299,35 +299,39 @@ impl TestServer {
 
 impl Drop for TestServer {
     fn drop(&mut self) {
-        let pid = self.child.id();
-        // Use system kill command to send SIGINT
-        let _ = Command::new("kill")
-            .arg("-2") // SIGINT
-            .arg(pid.to_string())
-            .output();
+        #[cfg(unix)]
+        {
+            use nix::{
+                sys::signal::{Signal, kill},
+                unistd::Pid,
+            };
 
-        // Give it a moment to shut down gracefully
-        let mut attempts = 0;
-        loop {
-            match self.child.try_wait() {
-                Ok(Some(_)) => break,
-                Ok(None) => {
-                    if attempts > 50 {
-                        // Wait up to ~5 seconds
-                        // Force kill if it doesn't exit
-                        let _ = self.child.kill();
-                        let _ = self.child.wait();
+            let pid = Pid::from_raw(self.child.id() as i32);
+
+            let _ = kill(pid, Signal::SIGTERM);
+
+            for _ in 0..50 {
+                match self.child.try_wait() {
+                    Ok(Some(_status)) => {
+                        return;
+                    }
+                    Ok(None) => {
+                        thread::sleep(Duration::from_millis(100));
+                    }
+                    Err(_e) => {
                         break;
                     }
-                    thread::sleep(Duration::from_millis(100));
-                    attempts += 1;
-                }
-                Err(_) => {
-                    let _ = self.child.kill();
-                    let _ = self.child.wait();
-                    break;
                 }
             }
+
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+
+        #[cfg(not(unix))]
+        {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
         }
     }
 }

@@ -65,6 +65,7 @@ use {
     },
     pgtemp::{PgTempDB, PgTempDBBuilder},
     reqwest::Response,
+    serial_test::serial,
     std::{
         io::{BufReader, stderr},
         net::TcpStream,
@@ -106,9 +107,6 @@ mod server_with_db;
 mod sync;
 #[cfg(target_os = "linux")]
 mod template;
-
-#[cfg(target_os = "linux")]
-mod ignored;
 
 #[cfg(target_os = "linux")]
 fn next_json<T: DeserializeOwned>(r: &mut BufReader<ChildStdout>) -> T {
