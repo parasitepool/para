@@ -165,9 +165,6 @@ pub enum InternalError {
         input: String,
         source: bitcoin::error::UnprefixedHexError,
     },
-
-    #[snafu(display("{message}"))]
-    Protocol { message: String },
 }
 
 #[cfg(test)]
