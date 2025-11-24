@@ -2,7 +2,6 @@ use crate::test_pool::TestPool;
 use bitcoin::block::Header;
 use para::stratum::{self, ClientError, Extranonce, Nonce, Ntime, StratumError};
 
-// Helper to solve a block for a specific difficulty
 fn solve_share(
     notify: &stratum::Notify,
     extranonce1: &Extranonce,
@@ -29,7 +28,6 @@ fn solve_share(
 
     let target = difficulty.to_target();
 
-    // Brute force
     loop {
         let hash = header.block_hash();
         if target.is_met_by(hash) {

@@ -61,7 +61,7 @@ impl TestCkpool {
         let bitcoind_handle =
             Bitcoind::spawn(tempdir.clone(), bitcoind_port, rpc_port, zmq_port, false).unwrap();
 
-        Lazy::force(&COMPILE_CKPOOL);
+        // Lazy::force(&COMPILE_CKPOOL);
 
         let ckpool_conf = tempdir.path().join("ckpool.conf");
 

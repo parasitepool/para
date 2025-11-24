@@ -105,7 +105,37 @@ impl TestPool {
 impl Drop for TestPool {
     fn drop(&mut self) {
         self.bitcoind_handle.shutdown();
-        self.pool_handle.kill().unwrap();
-        self.pool_handle.wait().unwrap();
+
+        // Try to send SIGINT to allow graceful shutdown and coverage dump
+        let pid = self.pool_handle.id();
+        // Use system kill command to send SIGINT
+        let _ = Command::new("kill")
+            .arg("-2") // SIGINT
+            .arg(pid.to_string())
+            .output();
+
+        // Give it a moment to shut down gracefully
+        let mut attempts = 0;
+        loop {
+            match self.pool_handle.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) => {
+                    if attempts > 50 {
+                        // Wait up to ~5 seconds
+                        // Force kill if it doesn't exit
+                        let _ = self.pool_handle.kill();
+                        let _ = self.pool_handle.wait();
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(100));
+                    attempts += 1;
+                }
+                Err(_) => {
+                    let _ = self.pool_handle.kill();
+                    let _ = self.pool_handle.wait();
+                    break;
+                }
+            }
+        }
     }
 }
