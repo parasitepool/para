@@ -246,7 +246,7 @@ async fn clean_jobs_true_on_init_and_new_block() {
 
     assert!(notify.clean_jobs);
 
-    pool.mine_block_and_wait(&signet_username()).await;
+    pool.mine_block();
 
     loop {
         match events.recv().await.unwrap() {
@@ -349,7 +349,7 @@ async fn stale_share_rejected() {
 
     let (ntime, nonce) = solve_share(&notify_a, &extranonce1, &extranonce2, difficulty);
 
-    pool.mine_block_and_wait(&signet_username()).await;
+    pool.mine_block();
 
     loop {
         match events.recv().await.unwrap() {
@@ -441,7 +441,7 @@ fn concurrently_listening_workers_receive_new_templates_on_new_block() {
 
         gate.wait();
 
-        pool.mine_block_and_wait_blocking(&signet_username());
+        pool.mine_block();
 
         let (initial_template_worker_a, new_template_worker_a) =
             in_1.recv_timeout(Duration::from_secs(1)).unwrap();

@@ -101,7 +101,6 @@ impl TestPool {
         &self.bitcoind_handle
     }
 
-    /// Get the current block height from bitcoind
     pub(crate) fn get_block_height(&self) -> u64 {
         self.bitcoind_handle
             .client()
@@ -110,67 +109,23 @@ impl TestPool {
             .unwrap()
     }
 
-    /// Mine a block and wait for bitcoind to process it (async version)
-    pub(crate) async fn mine_block_and_wait(&self, username: &str) {
+    pub(crate) fn mine_block(&self) {
         let current_height = self.get_block_height();
 
         CommandBuilder::new(format!(
             "miner --mode block-found --username {} {}",
-            username,
+            signet_username(),
             self.stratum_endpoint()
         ))
         .spawn()
         .wait()
         .unwrap();
 
-        // Poll until block height increases (timeout after 10 seconds)
-        for attempt in 0..200 {
+        for _ in 0..100 {
             if self.get_block_height() > current_height {
-                // Block confirmed! Wait a bit more for ZMQ notification to propagate
-                tokio::time::sleep(Duration::from_millis(100)).await;
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-
-            if attempt == 199 {
-                panic!(
-                    "Block not confirmed by bitcoind after 10 seconds. Current height: {}, expected: {}",
-                    self.get_block_height(),
-                    current_height + 1
-                );
-            }
-        }
-    }
-
-    /// Mine a block and wait for bitcoind to process it (blocking version)
-    pub(crate) fn mine_block_and_wait_blocking(&self, username: &str) {
-        let current_height = self.get_block_height();
-
-        CommandBuilder::new(format!(
-            "miner --mode block-found --username {} {}",
-            username,
-            self.stratum_endpoint()
-        ))
-        .spawn()
-        .wait()
-        .unwrap();
-
-        // Poll until block height increases (timeout after 10 seconds)
-        for attempt in 0..200 {
-            if self.get_block_height() > current_height {
-                // Block confirmed! Wait a bit more for ZMQ notification to propagate
-                thread::sleep(Duration::from_millis(100));
                 return;
             }
             thread::sleep(Duration::from_millis(50));
-
-            if attempt == 199 {
-                panic!(
-                    "Block not confirmed by bitcoind after 10 seconds. Current height: {}, expected: {}",
-                    self.get_block_height(),
-                    current_height + 1
-                );
-            }
         }
     }
 }
