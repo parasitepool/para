@@ -138,6 +138,9 @@ impl TestServer {
             thread::sleep(Duration::from_millis(50));
         }
 
+        // Give the database connection pool time to fully initialize
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
         Self {
             child,
             port,

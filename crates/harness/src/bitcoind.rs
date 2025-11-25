@@ -83,7 +83,7 @@ maxtxfee=1000000
             .args([
                 &format!("-conf={}", bitcoind_conf.display()),
                 "-rpcwait",
-                "-rpcwaittimeout=5",
+                "-rpcwaittimeout=15",
                 "getblockchaininfo",
             ])
             .stderr(Stdio::null())
@@ -92,7 +92,7 @@ maxtxfee=1000000
 
         assert!(
             status.success(),
-            "Failed to connect bitcoind after 5 seconds"
+            "Failed to connect bitcoind after 15 seconds"
         );
 
         Ok(Self {
