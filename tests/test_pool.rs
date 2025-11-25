@@ -123,9 +123,10 @@ impl TestPool {
 
         for _ in 0..100 {
             if self.get_block_height() > current_height {
+                thread::sleep(Duration::from_millis(100));
                 return;
             }
-            thread::sleep(Duration::from_millis(50));
+            thread::sleep(Duration::from_millis(100));
         }
     }
 }
