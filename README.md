@@ -64,8 +64,7 @@ Setup
 ### Requirements:
 
 * [Rust](https://rust-lang.org/tools/install/)
-* [Just](https://github.com/casey/just?tab=readme-ov-file#installation)
-(optional)
+* [Just](https://github.com/casey/just?tab=readme-ov-file#installation) (optional)
 
 #### Manual Install
 
