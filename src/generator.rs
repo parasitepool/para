@@ -17,13 +17,13 @@ impl Generator {
         })
     }
 
-    pub(crate) async fn spawn(&mut self) -> Result<watch::Receiver<Arc<BlockTemplate>>> {
+    pub(crate) async fn spawn(&mut self) -> Result<watch::Receiver<Arc<Workbase>>> {
         let rpc = self.bitcoin_rpc_client.clone();
         let cancel = self.cancel.clone();
         let config = self.config.clone();
 
         let initial = get_block_template_blocking(&rpc, &config)?;
-        let (tx, rx) = watch::channel(Arc::new(initial));
+        let (tx, rx) = watch::channel(Arc::new(Workbase::new(initial)));
 
         let mut subscription = Zmq::connect(config.clone()).await?;
 
@@ -39,7 +39,7 @@ impl Generator {
                 let tx = tx.clone();
                 task::spawn_blocking(move || match get_block_template_blocking(&rpc, &config) {
                     Ok(template) => {
-                        tx.send_replace(Arc::new(template));
+                        tx.send_replace(Arc::new(Workbase::new(template)));
                     }
                     Err(err) => warn!("Failed to fetch new block template: {err}"),
                 });
@@ -83,8 +83,6 @@ fn get_block_template_blocking(
     bitcoin_rpc_client: &bitcoincore_rpc::Client,
     config: &PoolConfig,
 ) -> Result<BlockTemplate> {
-    info!("Fetching new block template");
-
     let mut rules = vec!["segwit"];
     if config.chain().network() == Network::Signet {
         rules.push("signet");
@@ -95,5 +93,9 @@ fn get_block_template_blocking(
         "rules": rules,
     });
 
-    Ok(bitcoin_rpc_client.call::<BlockTemplate>("getblocktemplate", &[params])?)
+    let template = bitcoin_rpc_client.call::<BlockTemplate>("getblocktemplate", &[params])?;
+
+    info!("New block template for height {}", template.height);
+
+    Ok(template)
 }

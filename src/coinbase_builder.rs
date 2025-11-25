@@ -56,14 +56,20 @@ impl CoinbaseBuilder {
         let mut buf: Vec<u8> = Vec::with_capacity(Self::MAX_COINBASE_SCRIPT_SIG_SIZE);
 
         // BIP34 encode block height
-        let mut minimally_encoded_serialized_cscript = [0u8; 8];
-        let len = write_scriptint(
-            &mut minimally_encoded_serialized_cscript,
-            self.height.try_into().expect("height should always fit"),
-        );
-        // byte length should be fine for the next 150 years
-        buf.push(len as u8);
-        buf.extend_from_slice(&minimally_encoded_serialized_cscript[..len]);
+        if self.height > 0 && self.height <= 16 {
+            // Append dummy to increase scriptSig size to 2 (see bad-cb-length consensus rule)
+            buf.push(0x50 + (self.height as u8));
+            buf.push(0x00);
+        } else {
+            let mut minimally_encoded_serialized_cscript = [0u8; 8];
+            let len = write_scriptint(
+                &mut minimally_encoded_serialized_cscript,
+                self.height.try_into().expect("height should always fit"),
+            );
+            // byte length should be fine for the next 150 years
+            buf.push(len as u8);
+            buf.extend_from_slice(&minimally_encoded_serialized_cscript[..len]);
+        }
 
         for (_, value) in self.aux.into_iter() {
             buf.extend_from_slice(hex::decode(value)?.as_slice());
@@ -212,7 +218,7 @@ mod tests {
         .unwrap();
 
         let extranonce1 = hex::decode("abcd1234").unwrap();
-        let extranonce2_custom = [0x11u8; 8];
+        let extranonce2_custom = [0x11; 8];
 
         let joined = {
             let mut v = hex::decode(&coinb1).unwrap();
@@ -366,7 +372,7 @@ mod tests {
 
         let mut tmp = [0u8; 8];
         let hlen = write_scriptint(&mut tmp, 0);
-        let aux_len = 0usize;
+        let aux_len = 0;
         let script_prefix_len = 1 + hlen + aux_len;
 
         let b_a = hex::decode(&c1_a).unwrap();
@@ -407,7 +413,7 @@ mod tests {
 
     #[test]
     fn join_roundtrip_various_extranonce2_sizes() {
-        for x2 in [0usize, 1, 8, 16, 32] {
+        for x2 in [0, 1, 8, 16, 32] {
             let (tx, c1, c2) = CoinbaseBuilder::new(
                 address(),
                 "abcd1234".parse().unwrap(),
@@ -453,7 +459,7 @@ mod tests {
 
     #[test]
     fn offset_matches_varint_formula() {
-        let height = 600_000u64;
+        let height = 600_000;
 
         let mut aux = BTreeMap::new();
         aux.insert("k".into(), "cafebabe".into());
@@ -550,5 +556,35 @@ mod tests {
         .to_string();
 
         assert!(err.contains("Script sig too large"));
+    }
+
+    #[test]
+    fn bip34_height() {
+        for h in [1, 16, 17, 500_000] {
+            let (tx, _, _) = CoinbaseBuilder::new(
+                address(),
+                "abcd1234".parse().unwrap(),
+                8,
+                h,
+                Amount::from_sat(50 * COIN_VALUE),
+                ScriptBuf::new(),
+            )
+            .build()
+            .unwrap();
+
+            let script_sig = tx.input[0].script_sig.as_bytes();
+
+            if h <= 16 {
+                assert!(matches!(script_sig[0], 0x51..=0x60));
+                assert_eq!(script_sig[1], 0x00);
+            } else {
+                let len = script_sig[0] as usize;
+                assert!(
+                    (1..=75).contains(&len),
+                    "expect small push for realistic heights"
+                );
+                assert!(script_sig.len() > len, "enough bytes for height");
+            }
+        }
     }
 }

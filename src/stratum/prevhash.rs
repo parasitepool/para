@@ -6,10 +6,10 @@ use super::*;
 pub struct PrevHash(BlockHash);
 
 impl FromStr for PrevHash {
-    type Err = anyhow::Error;
+    type Err = InternalError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let bytes = <[u8; 32]>::from_hex(s)?;
+        let bytes = <[u8; 32]>::from_hex(s).context(error::HexParseSnafu)?;
 
         let mut reordered = [0u8; 32];
         for (src, dst) in bytes.chunks_exact(4).zip(reordered.chunks_mut(4)) {
@@ -17,7 +17,7 @@ impl FromStr for PrevHash {
             LittleEndian::write_u32(dst, word);
         }
 
-        let inner = BlockHash::from_slice(&reordered)?;
+        let inner = BlockHash::from_slice(&reordered).context(error::InvalidBlockHashSnafu)?;
         Ok(PrevHash(inner))
     }
 }

@@ -1,6 +1,9 @@
+ckpool/src/jansson-2.14/jansson_private_config.h.in
+ckpool/src/jansson-2.14/test-driver
 copr/signet*
 copr/tmp
 docs/build
 docs/tmp
 logs
 target
+.idea

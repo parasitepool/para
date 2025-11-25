@@ -120,18 +120,7 @@ enum SyncResult {
 }
 
 impl Sync {
-    pub async fn run(self) -> Result<()> {
-        let shutdown_flag = Arc::new(AtomicBool::new(false));
-        let shutdown_flag_clone = shutdown_flag.clone();
-
-        // shutdown flags
-        tokio::spawn(async move {
-            let _ = ctrl_c().await;
-            info!("Received shutdown signal, stopping sync send...");
-            shutdown_flag_clone.store(true, Ordering::Relaxed);
-            process::exit(0);
-        });
-
+    pub async fn run(self, cancel_token: CancellationToken) -> Result {
         info!("Starting HTTP share sync send...");
         if !self.terminate_when_complete {
             info!("Keep-alive mode enabled - will continue running even when caught up");
@@ -151,7 +140,12 @@ impl Sync {
 
         info!("Starting sync send from ID: {current_id}");
 
-        while !shutdown_flag.load(Ordering::Relaxed) {
+        loop {
+            if cancel_token.is_cancelled() {
+                info!("Sync send stopped due to shutdown signal");
+                break;
+            }
+
             match self.sync_batch(&database, &client, &mut current_id).await {
                 Ok(SyncResult::Complete) => {
                     if !self.terminate_when_complete {
@@ -159,7 +153,13 @@ impl Sync {
                             info!("Sync send caught up, waiting for new data...");
                             caught_up_logged = true;
                         }
-                        sleep(Duration::from_millis(SYNC_DELAY_MS)).await;
+                        tokio::select! {
+                            _ = cancel_token.cancelled() => {
+                                info!("Sync send stopped due to shutdown signal");
+                                break;
+                            }
+                            _ = sleep(Duration::from_millis(SYNC_DELAY_MS)) => {}
+                        }
                     } else {
                         info!("Sync send completed successfully");
                         break;
@@ -167,7 +167,13 @@ impl Sync {
                 }
                 Ok(SyncResult::Continue) => {
                     caught_up_logged = false;
-                    sleep(Duration::from_millis(SYNC_DELAY_MS)).await;
+                    tokio::select! {
+                        _ = cancel_token.cancelled() => {
+                            info!("Sync send stopped due to shutdown signal");
+                            break;
+                        }
+                        _ = sleep(Duration::from_millis(SYNC_DELAY_MS)) => {}
+                    }
                 }
                 Ok(SyncResult::WaitForNewBlock) => {
                     if self.terminate_when_complete {
@@ -180,17 +186,25 @@ impl Sync {
                         );
                         caught_up_logged = true;
                     }
-                    sleep(Duration::from_millis(BLOCKHEIGHT_CHECK_DELAY_MS)).await;
+                    tokio::select! {
+                        _ = cancel_token.cancelled() => {
+                            info!("Sync send stopped due to shutdown signal");
+                            break;
+                        }
+                        _ = sleep(Duration::from_millis(BLOCKHEIGHT_CHECK_DELAY_MS)) => {}
+                    }
                 }
                 Err(e) => {
                     error!("Sync send error: {e}");
-                    sleep(Duration::from_millis(SYNC_DELAY_MS * 5)).await;
+                    tokio::select! {
+                        _ = cancel_token.cancelled() => {
+                            info!("Sync send stopped due to shutdown signal");
+                            break;
+                        }
+                        _ = sleep(Duration::from_millis(SYNC_DELAY_MS * 5)) => {}
+                    }
                 }
             }
-        }
-
-        if shutdown_flag.load(Ordering::Relaxed) {
-            info!("Sync send stopped due to shutdown signal");
         }
 
         Ok(())
@@ -291,7 +305,7 @@ impl Sync {
         shares: &[Share],
         start_id: i64,
         end_id: i64,
-    ) -> Result<()> {
+    ) -> Result {
         let batch_id = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_secs();
@@ -375,21 +389,22 @@ impl Sync {
     }
 
     async fn load_current_id(&self) -> Result<i64> {
-        if Path::new(&self.id_file).exists() {
-            let content = fs::read_to_string(&self.id_file)
-                .map_err(|e| anyhow!("Failed to read ID file: {}", e))?;
-            let id = content
-                .trim()
-                .parse::<i64>()
-                .map_err(|e| anyhow!("Invalid ID in file: {}", e))?;
-            Ok(id)
-        } else {
-            Ok(0)
+        match tokio::fs::read_to_string(&self.id_file).await {
+            Ok(content) => {
+                let id = content
+                    .trim()
+                    .parse::<i64>()
+                    .map_err(|e| anyhow!("Invalid ID in file: {}", e))?;
+                Ok(id)
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(0),
+            Err(e) => Err(anyhow!("Failed to read ID file: {}", e)),
         }
     }
 
-    async fn save_current_id(&self, id: i64) -> Result<()> {
-        fs::write(&self.id_file, id.to_string())
+    async fn save_current_id(&self, id: i64) -> Result {
+        tokio::fs::write(&self.id_file, id.to_string())
+            .await
             .map_err(|e| anyhow!("Failed to save ID file: {e}"))?;
         Ok(())
     }
@@ -480,7 +495,16 @@ impl Database {
         .map_err(|err| anyhow!("Database query failed: {err}"))
     }
 
-    pub(crate) async fn upsert_block(&self, block: &FoundBlockRecord) -> Result<()> {
+    pub(crate) async fn upsert_block(&self, block: &FoundBlockRecord) -> Result<bool> {
+        let existing_block =
+            sqlx::query_scalar::<_, Option<i32>>("SELECT id FROM blocks WHERE blockheight = $1")
+                .bind(block.blockheight)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| anyhow!("Failed to check existing block: {e}"))?;
+
+        let was_inserted = existing_block.is_none();
+
         sqlx::query(
             "INSERT INTO blocks (
             blockheight, blockhash, confirmed, workername, username,
@@ -493,7 +517,11 @@ impl Database {
             username = EXCLUDED.username,
             diff = EXCLUDED.diff,
             coinbasevalue = EXCLUDED.coinbasevalue,
-            rewards_processed = EXCLUDED.rewards_processed",
+            rewards_processed = EXCLUDED.rewards_processed
+        WHERE blocks.blockheight = EXCLUDED.blockheight
+            AND (blocks.blockhash IS DISTINCT FROM EXCLUDED.blockhash
+                OR blocks.confirmed IS DISTINCT FROM EXCLUDED.confirmed
+                OR blocks.coinbasevalue IS DISTINCT FROM EXCLUDED.coinbasevalue)",
         )
         .bind(block.blockheight)
         .bind(&block.blockhash)
@@ -505,7 +533,108 @@ impl Database {
         .bind(block.rewards_processed)
         .execute(&self.pool)
         .await
-        .map_err(|e| anyhow!("Failed to upsert block: {e}"))?;
+        .map_err(|e| anyhow!("Failed to upsert block: {e}"))?
+        .rows_affected();
+
+        if was_inserted && let Some(coinbasevalue) = block.coinbasevalue {
+            self.populate_payouts_for_block(
+                block.blockheight,
+                coinbasevalue,
+                block.username.as_deref(),
+            )
+            .await?;
+        }
+
+        Ok(was_inserted)
+    }
+
+    pub(crate) async fn populate_payouts_for_block(
+        &self,
+        blockheight: i32,
+        total_reward: i64,
+        finder_username: Option<&str>,
+    ) -> Result {
+        let prev_blockheight = sqlx::query_scalar::<_, Option<i32>>(
+            "SELECT MAX(blockheight) FROM blocks WHERE blockheight < $1",
+        )
+        .bind(blockheight)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| anyhow!("Failed to get previous block height: {e}"))?
+        .unwrap_or(0);
+
+        sqlx::query(
+            "
+            WITH eligible_accounts AS (
+                SELECT
+                    a.id as account_id,
+                    a.username,
+                    a.total_diff,
+                    COALESCE(SUM(p.diff_paid), 0) as already_paid_diff
+                FROM accounts a
+                LEFT JOIN payouts p ON p.account_id = a.id
+                    AND p.status != 'cancelled'
+                GROUP BY a.id, a.username, a.total_diff
+            ),
+            payable_accounts AS (
+                SELECT
+                    account_id,
+                    username,
+                    total_diff - already_paid_diff as unpaid_diff
+                FROM eligible_accounts
+                WHERE total_diff - already_paid_diff > 0
+                    AND username != COALESCE($4, '')
+            ),
+            total_unpaid AS (
+                SELECT SUM(unpaid_diff) as total_diff
+                FROM payable_accounts
+            ),
+            finder_account AS (
+                SELECT
+                    a.id as account_id,
+                    a.username,
+                    a.total_diff,
+                    COALESCE(SUM(p.diff_paid), 0) as already_paid_diff
+                FROM accounts a
+                LEFT JOIN payouts p ON p.account_id = a.id
+                    AND p.status != 'cancelled'
+                WHERE a.username = $4
+                GROUP BY a.id, a.username, a.total_diff
+                HAVING a.total_diff - COALESCE(SUM(p.diff_paid), 0) > 0
+            )
+            INSERT INTO payouts (account_id, amount, diff_paid, blockheight_start, blockheight_end, status)
+            SELECT
+                pa.account_id,
+                CASE
+                    WHEN tu.total_diff > 0
+                    THEN FLOOR((pa.unpaid_diff::NUMERIC / tu.total_diff::NUMERIC) * $3)::BIGINT
+                    ELSE 0
+                END as amount,
+                pa.unpaid_diff as diff_paid,
+                $2 as blockheight_start,
+                $1 as blockheight_end,
+                'pending' as status
+            FROM payable_accounts pa
+            CROSS JOIN total_unpaid tu
+            WHERE tu.total_diff > 0
+            UNION ALL
+            SELECT
+                fa.account_id,
+                0 as amount,
+                fa.total_diff - fa.already_paid_diff as diff_paid,
+                $2 as blockheight_start,
+                $1 as blockheight_end,
+                'success' as status
+            FROM finder_account fa
+            ",
+        )
+            .bind(blockheight)
+            .bind(prev_blockheight)
+            .bind(total_reward)
+            .bind(finder_username.unwrap_or(""))
+            .execute(&self.pool)
+            .await
+            .map_err(|e| anyhow!("Failed to populate payouts: {e}"))?;
 
         Ok(())
     }

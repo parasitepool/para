@@ -14,8 +14,27 @@ fn ping_pool() {
 }
 
 #[test]
+fn mine_to_pool() {
+    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
+
+    let stratum_endpoint = pool.stratum_endpoint();
+
+    let miner = CommandBuilder::new(format!(
+        "miner --mode share-found --username {} {stratum_endpoint} --cpu-cores 1",
+        signet_username()
+    ))
+    .spawn();
+
+    let stdout = miner.wait_with_output().unwrap();
+    let output =
+        serde_json::from_str::<Vec<Share>>(&String::from_utf8_lossy(&stdout.stdout)).unwrap();
+
+    assert_eq!(output.len(), 1);
+}
+
+#[test]
 fn configure_template_update_interval() {
-    let pool = TestPool::spawn_with_args("--update-interval 1");
+    let pool = TestPool::spawn_with_args("--update-interval 1 --start-diff 0.00001");
 
     let stratum_endpoint = pool.stratum_endpoint();
 
@@ -46,9 +65,10 @@ fn configure_template_update_interval() {
 
 #[tokio::test]
 async fn basic_initialization_flow() {
-    let pool = TestPool::spawn();
+    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
 
-    let mut client = pool.stratum_client().await;
+    let client = pool.stratum_client().await;
+    let mut events = client.connect().await.unwrap();
 
     let (subscribe, _, _) = client.subscribe().await.unwrap();
 
@@ -56,20 +76,16 @@ async fn basic_initialization_flow() {
 
     assert!(client.authorize().await.is_ok());
 
-    let set_difficulty = match client.incoming.recv().await.unwrap() {
-        Message::Notification { method: _, params } => {
-            serde_json::from_value::<SetDifficulty>(params).unwrap()
-        }
-        _ => panic!(),
+    let difficulty = match events.recv().await.unwrap() {
+        stratum::Event::SetDifficulty(difficulty) => difficulty,
+        _ => panic!("Expected SetDifficulty"),
     };
 
-    assert!(set_difficulty.difficulty() < Difficulty::from(0.01));
+    assert_eq!(difficulty, Difficulty::from(0.00001));
 
-    let notify = match client.incoming.recv().await.unwrap() {
-        Message::Notification { method: _, params } => {
-            serde_json::from_value::<Notify>(params).unwrap()
-        }
-        _ => panic!(),
+    let notify = match events.recv().await.unwrap() {
+        stratum::Event::Notify(n) => n,
+        _ => panic!("Expected Notify"),
     };
 
     assert_eq!(notify.job_id, JobId::from(0));
@@ -78,9 +94,10 @@ async fn basic_initialization_flow() {
 
 #[tokio::test]
 async fn configure_with_multiple_negotiation_steps() {
-    let pool = TestPool::spawn();
+    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
 
-    let mut client = pool.stratum_client().await;
+    let client = pool.stratum_client().await;
+    let _ = client.connect().await.unwrap();
 
     assert!(
         client
@@ -122,7 +139,8 @@ async fn configure_with_multiple_negotiation_steps() {
 async fn authorize_before_subscribe_fails() {
     let pool = TestPool::spawn();
 
-    let mut client = pool.stratum_client().await;
+    let client = pool.stratum_client().await;
+    let _ = client.connect().await.unwrap();
 
     assert!(
         client
@@ -130,7 +148,7 @@ async fn authorize_before_subscribe_fails() {
             .await
             .unwrap_err()
             .to_string()
-            .contains("Method not allowed in current state")
+            .contains("Method not allowed")
     );
 }
 
@@ -138,7 +156,8 @@ async fn authorize_before_subscribe_fails() {
 async fn submit_before_authorize_fails() {
     let pool = TestPool::spawn();
 
-    let mut client = pool.stratum_client().await;
+    let client = pool.stratum_client().await;
+    let _ = client.connect().await.unwrap();
 
     client.subscribe().await.unwrap();
 
@@ -146,7 +165,7 @@ async fn submit_before_authorize_fails() {
         client
             .submit(
                 JobId::new(3),
-                Extranonce::generate(8),
+                Extranonce::random(8),
                 Ntime::from(0),
                 Nonce::from(12345),
             )

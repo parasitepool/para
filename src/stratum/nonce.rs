@@ -4,10 +4,12 @@ use super::*;
 pub struct Nonce(u32);
 
 impl FromStr for Nonce {
-    type Err = anyhow::Error;
+    type Err = InternalError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let nonce = u32::from_str_radix(s, 16)?;
+        let nonce = u32::from_str_radix(s, 16).context(error::ParseHexIntSnafu {
+            input: s.to_string(),
+        })?;
         Ok(Nonce(nonce))
     }
 }

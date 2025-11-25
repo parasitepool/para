@@ -2,7 +2,10 @@ use {
     super::*,
     crate::{
         ckpool,
-        subcommand::sync::{ShareBatch, SyncResponse},
+        subcommand::{
+            server::account::account_router,
+            sync::{ShareBatch, SyncResponse},
+        },
     },
     accept_json::AcceptJson,
     aggregator::Aggregator,
@@ -12,17 +15,19 @@ use {
     error::{OptionExt, ServerError, ServerResult},
     reqwest::{Client, ClientBuilder, header},
     server_config::ServerConfig,
+    std::sync::OnceLock,
     templates::{
         PageContent, PageHtml, dashboard::DashboardHtml, home::HomeHtml, status::StatusHtml,
     },
 };
 
 mod accept_json;
+pub mod account;
 mod aggregator;
 pub mod api;
 mod cache;
 pub mod database;
-mod error;
+pub(crate) mod error;
 pub mod notifications;
 mod server_config;
 mod templates;
@@ -32,10 +37,18 @@ const BUDGET: Duration = Duration::from_secs(5);
 const TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_ATTEMPTS: usize = 3;
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(1500);
+static MIGRATION_DONE: OnceLock<bool> = OnceLock::new();
 
 #[derive(RustEmbed)]
 #[folder = "static"]
 struct StaticAssets;
+
+#[derive(Debug)]
+struct AccountUpdate {
+    username: String,
+    lnurl: Option<String>,
+    total_diff: f64,
+}
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub(crate) struct Payment {
@@ -92,7 +105,7 @@ pub struct Server {
 }
 
 impl Server {
-    pub async fn run(&self, handle: Handle) -> Result {
+    pub async fn run(&self, handle: Handle, cancel_token: CancellationToken) -> Result {
         let config = Arc::new(self.config.clone());
         let log_dir = config.log_dir();
         let pool_dir = log_dir.join("pool");
@@ -105,6 +118,13 @@ impl Server {
         if !user_dir.exists() {
             warn!("User dir {} does not exist", user_dir.display());
         }
+
+        let shutdown_handle = handle.clone();
+        tokio::spawn(async move {
+            cancel_token.cancelled().await;
+            info!("Received shutdown signal, stopping server...");
+            shutdown_handle.shutdown();
+        });
 
         let mut router = Router::new()
             .nest_service("/pool/", ServeDir::new(pool_dir))
@@ -135,8 +155,32 @@ impl Server {
 
         match Database::new(config.database_url()).await {
             Ok(database) => {
+                if config.migrate_accounts() {
+                    let pool = database.pool.clone();
+                    tokio::spawn(async move {
+                        info!("Starting account migration worker...");
+                        match sqlx::query_scalar::<_, i64>("SELECT refresh_accounts()")
+                            .fetch_one(&pool)
+                            .await
+                        {
+                            Ok(rows_affected) => {
+                                info!(
+                                    "Account migration completed. {} accounts affected.",
+                                    rows_affected
+                                );
+                            }
+                            Err(e) => {
+                                error!("Account migration failed: {}", e);
+                            }
+                        }
+                        let _ = MIGRATION_DONE.set(true);
+                    });
+                }
+
                 let db_router = Router::new()
+                    .route("/payouts", get(Self::payouts_all))
                     .route("/payouts/{blockheight}", get(Self::payouts))
+                    .route("/payouts/update", post(Self::update_payout_status))
                     .route(
                         "/payouts/range/{start_height}/{end_height}",
                         get(Self::payouts_range),
@@ -151,9 +195,11 @@ impl Server {
                         "/sync/batch",
                         post(Self::sync_batch).layer(DefaultBodyLimit::max(50 * MEBIBYTE)),
                     )
-                    .layer(Extension(database));
+                    .layer(Extension(database.clone()));
 
-                router = router.merge(Self::with_auth_router(config.clone(), db_router));
+                router = router
+                    .merge(Self::with_auth_router(config.clone(), db_router))
+                    .merge(account_router(config.clone(), database));
             }
             Err(err) => {
                 warn!("Failed to connect to PostgreSQL: {err}",);
@@ -282,6 +328,12 @@ impl Server {
         })
     }
 
+    pub(crate) async fn payouts_all(
+        Extension(database): Extension<Database>,
+    ) -> ServerResult<Response> {
+        Ok(Json(database.get_pending_payouts().await?).into_response())
+    }
+
     pub(crate) async fn payouts(
         Path(blockheight): Path<u32>,
         Extension(database): Extension<Database>,
@@ -374,6 +426,25 @@ impl Server {
                 )
                 .await?,
         )
+        .into_response())
+    }
+
+    pub(crate) async fn update_payout_status(
+        Extension(database): Extension<Database>,
+        Json(request): Json<database::UpdatePayoutStatusRequest>,
+    ) -> ServerResult<Response> {
+        let rows_affected = database
+            .update_payout_status(
+                &request.payout_ids,
+                &request.status,
+                request.failure_reason.as_deref(),
+            )
+            .await?;
+
+        Ok(Json(json!({
+            "status": "OK",
+            "rows_affected": rows_affected,
+        }))
         .into_response())
     }
 
@@ -498,13 +569,34 @@ impl Server {
             batch.hostname
         );
 
+        if config.migrate_accounts() && !MIGRATION_DONE.get_or_init(|| false) {
+            warn!(
+                "Rejecting sync batch {} - migration in progress",
+                batch.batch_id
+            );
+            let response = SyncResponse {
+                batch_id: batch.batch_id,
+                received_count: 0,
+                status: "UNAVAILABLE".to_string(),
+                error_message: Some("Migration in progress, try again later".to_string()),
+            };
+            return Ok(Json(response));
+        }
+
         if let Some(block) = &batch.block {
             match database.upsert_block(block).await {
-                Ok(_) => {
-                    info!(
-                        "Successfully upserted block for height {}",
-                        block.blockheight
-                    );
+                Ok(was_inserted) => {
+                    if was_inserted {
+                        info!(
+                            "Successfully inserted new block at height {}",
+                            block.blockheight
+                        );
+                    } else {
+                        info!(
+                            "Successfully updated existing block at height {}",
+                            block.blockheight
+                        );
+                    }
 
                     let notification_result = notifications::notify_block_found(
                         config.alerts_ntfy_channel(),
@@ -649,6 +741,73 @@ impl Server {
             })?;
         }
 
+        let mut account_updates: HashMap<String, AccountUpdate> = HashMap::new();
+
+        for share in &batch.shares {
+            if let Some(username) = &share.username {
+                let username = username.trim();
+                if username.is_empty() {
+                    continue;
+                }
+
+                let entry = account_updates
+                    .entry(username.to_string())
+                    .or_insert_with(|| AccountUpdate {
+                        username: username.to_string(),
+                        lnurl: None,
+                        total_diff: 0.0,
+                    });
+
+                if share.result == Some(true)
+                    && let Some(diff) = share.diff
+                {
+                    entry.total_diff += diff;
+                }
+
+                if entry.lnurl.is_none()
+                    && let Some(lnurl) = &share.lnurl
+                {
+                    let trimmed_lnurl = lnurl.trim();
+                    if !trimmed_lnurl.is_empty() {
+                        entry.lnurl = Some(trimmed_lnurl.to_string());
+                    }
+                }
+            }
+        }
+
+        if !account_updates.is_empty() {
+            info!(
+                "Updating {} accounts from batch {}",
+                account_updates.len(),
+                batch.batch_id
+            );
+
+            for update in account_updates.values() {
+                sqlx::query(
+                    "
+                    INSERT INTO accounts (username, lnurl, total_diff, lnurl_updated_at, created_at, updated_at)
+                    VALUES ($1, $2, $3, NOW(), NOW(), NOW())
+                    ON CONFLICT (username) DO UPDATE
+                    SET
+                        lnurl = CASE
+                            WHEN accounts.lnurl IS NULL
+                                AND EXCLUDED.lnurl IS NOT NULL
+                            THEN EXCLUDED.lnurl
+                            ELSE accounts.lnurl
+                        END,
+                        total_diff = accounts.total_diff + EXCLUDED.total_diff,
+                        updated_at = NOW()
+                    ",
+                )
+                    .bind(&update.username)
+                    .bind(&update.lnurl)
+                    .bind(update.total_diff)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| anyhow!("Failed to update account {}: {e}", update.username))?;
+            }
+        }
+
         tx.commit()
             .await
             .map_err(|e| anyhow!("Failed to commit transaction: {e}"))?;
@@ -658,7 +817,7 @@ impl Server {
             .shares
             .iter()
             .filter_map(|s| s.workername.as_ref())
-            .collect::<std::collections::HashSet<_>>()
+            .collect::<HashSet<_>>()
             .len();
 
         let min_blockheight = batch.shares.iter().filter_map(|s| s.blockheight).min();

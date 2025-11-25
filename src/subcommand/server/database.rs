@@ -17,27 +17,35 @@ pub struct Payout {
     pub percentage: f64,
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+pub struct PendingPayout {
+    pub ln_address: String,
+    pub amount_sats: i64,
+    pub payout_ids: Vec<i64>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct UpdatePayoutStatusRequest {
+    pub payout_ids: Vec<i64>,
+    pub status: String,
+    pub failure_reason: Option<String>,
+}
+
 #[derive(Debug, Clone)]
-pub(crate) struct Database {
+pub struct Database {
     pub(crate) pool: Pool<Postgres>,
 }
 
 impl Database {
-    pub(crate) async fn new(database_url: String) -> Result<Self> {
+    pub async fn new(database_url: String) -> Result<Self> {
         Ok(Self {
             pool: PgPoolOptions::new()
                 .max_connections(5)
-                .acquire_timeout(
-                    if std::env::var("PARA_INTEGRATION_TEST")
-                        .ok()
-                        .filter(|v| v == "1")
-                        .is_some()
-                    {
-                        Duration::from_millis(50)
-                    } else {
-                        Duration::from_secs(5)
-                    },
-                )
+                .acquire_timeout(if integration_test() {
+                    Duration::from_millis(50)
+                } else {
+                    Duration::from_secs(5)
+                })
                 .connect(&database_url)
                 .await?,
         })
@@ -145,6 +153,7 @@ impl Database {
         .await
         .map_err(|err| anyhow!(err))
     }
+
     pub(crate) async fn get_payouts_range(
         &self,
         start_blockheight: i32,
@@ -266,5 +275,202 @@ impl Database {
         .fetch_all(&self.pool)
         .await
         .map_err(|err| anyhow!(err))
+    }
+
+    pub async fn get_account(&self, username: &str) -> Result<Option<Account>> {
+        #[derive(sqlx::FromRow)]
+        pub struct AccountRaw {
+            pub username: String,
+            pub lnurl: Option<String>,
+            pub past_lnurls: sqlx::types::Json<Vec<String>>,
+            pub total_diff: i64,
+            pub last_updated: Option<String>,
+        }
+
+        let Some(raw) = sqlx::query_as::<_, AccountRaw>(
+            "
+            SELECT
+                username,
+                lnurl,
+                past_lnurls,
+                total_diff,
+                lnurl_updated_at::text as last_updated
+            FROM accounts
+            WHERE username = $1
+            ",
+        )
+        .bind(username)
+        .fetch_optional(&self.pool)
+        .await?
+        else {
+            return Ok(None);
+        };
+
+        Ok(Some(Account {
+            btc_address: raw.username,
+            ln_address: raw.lnurl,
+            past_ln_addresses: raw.past_lnurls.0,
+            total_diff: raw.total_diff,
+            last_updated: raw.last_updated,
+            metadata: None,
+        }))
+    }
+
+    pub async fn update_account_lnurl(
+        &self,
+        username: &str,
+        new_lnurl: &str,
+    ) -> Result<Option<Account>> {
+        if let Some(account) = self.get_account(username).await? {
+            if let Some(old_lnurl) = &account.ln_address
+                && old_lnurl == new_lnurl
+            {
+                return Err(anyhow!(
+                    "New lightning address matches existing lightning address"
+                ));
+            }
+            let mut past_lnurls = account.past_ln_addresses.clone();
+
+            if let Some(current_lnurl) = &account.ln_address
+                && !current_lnurl.is_empty()
+                && !past_lnurls.contains(current_lnurl)
+            {
+                past_lnurls.insert(0, current_lnurl.clone());
+            }
+
+            past_lnurls.truncate(10);
+
+            let past_lnurls_json = serde_json::to_value(past_lnurls)
+                .map_err(|err| anyhow!("Failed to serialize past_lnurls: {}", err))?;
+
+            let rows_affected = sqlx::query(
+                "
+                UPDATE accounts
+                SET lnurl = $1, past_lnurls = $2, lnurl_updated_at = NOW(), updated_at = NOW()
+                WHERE username = $3
+                ",
+            )
+            .bind(new_lnurl)
+            .bind(past_lnurls_json)
+            .bind(username)
+            .execute(&self.pool)
+            .await
+            .map_err(|err| anyhow!(err))?
+            .rows_affected();
+
+            if rows_affected == 0 {
+                return Err(anyhow!(
+                    "Expected to update existing account but no rows affected"
+                ));
+            }
+        } else {
+            sqlx::query(
+                "
+                INSERT INTO accounts (username, lnurl, past_lnurls, total_diff, lnurl_updated_at, created_at, updated_at)
+                VALUES ($1, $2, '[]'::jsonb, 0, NOW(), NOW(), NOW())
+                ",
+            )
+                .bind(username)
+                .bind(new_lnurl)
+                .execute(&self.pool)
+                .await
+                .map_err(|err| anyhow!(err))?;
+        };
+
+        self.get_account(username).await
+    }
+
+    pub async fn migrate_accounts(&self) -> Result<u64> {
+        let result = sqlx::query_scalar::<_, i64>("SELECT refresh_accounts()")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|err| anyhow!(err))?;
+
+        Ok(result as u64)
+    }
+
+    pub async fn get_pending_payouts(&self) -> Result<Vec<PendingPayout>> {
+        #[derive(sqlx::FromRow)]
+        struct PayoutRow {
+            payout_id: i64,
+            ln_address: String,
+            amount: i64,
+        }
+
+        let rows = sqlx::query_as::<_, PayoutRow>(
+            "
+            SELECT
+                p.id as payout_id,
+                COALESCE(a.lnurl, '') as ln_address,
+                p.amount
+            FROM payouts p
+            JOIN accounts a ON p.account_id = a.id
+            WHERE p.status IN ('pending', 'failure')
+                AND a.lnurl IS NOT NULL
+                AND a.lnurl != ''
+            ORDER BY a.lnurl, p.id
+            ",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))?;
+
+        let mut grouped: HashMap<String, (i64, Vec<i64>)> = HashMap::new();
+
+        for row in rows {
+            let entry = grouped
+                .entry(row.ln_address.clone())
+                .or_insert((0, Vec::new()));
+            entry.0 += row.amount;
+            entry.1.push(row.payout_id);
+        }
+
+        let mut result = Vec::new();
+        for (ln_address, (amount_sats, payout_ids)) in grouped {
+            result.push(PendingPayout {
+                ln_address,
+                amount_sats,
+                payout_ids,
+            });
+        }
+
+        result.sort_by(|a, b| b.amount_sats.cmp(&a.amount_sats));
+
+        Ok(result)
+    }
+
+    pub async fn update_payout_status(
+        &self,
+        payout_ids: &[i64],
+        status: &str,
+        failure_reason: Option<&str>,
+    ) -> Result<u64> {
+        if payout_ids.is_empty() {
+            return Ok(0);
+        }
+
+        let valid_statuses = ["pending", "processing", "success", "failure", "cancelled"];
+        if !valid_statuses.contains(&status) {
+            return Err(anyhow!("Invalid status: {}", status));
+        }
+
+        let rows_affected = sqlx::query(
+            "
+            UPDATE payouts
+            SET status = $1,
+                failure_reason = $2,
+                updated_at = NOW()
+            WHERE id = ANY($3)
+            ",
+        )
+        .bind(status)
+        .bind(failure_reason)
+        .bind(payout_ids)
+        .execute(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))?
+        .rows_affected();
+
+        Ok(rows_affected)
     }
 }

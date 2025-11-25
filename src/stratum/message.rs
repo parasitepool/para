@@ -19,7 +19,7 @@ pub enum Message {
     Response {
         id: Id,
         result: Option<Value>,
-        error: Option<JsonRpcError>,
+        error: Option<StratumErrorResponse>,
         #[serde(skip_serializing_if = "Option::is_none", rename = "reject-reason")]
         reject_reason: Option<String>,
     },
@@ -54,7 +54,7 @@ impl<'de> Deserialize<'de> for Message {
             struct Resp {
                 id: Id,
                 result: Option<Value>,
-                error: Option<JsonRpcError>,
+                error: Option<StratumErrorResponse>,
                 #[serde(rename = "reject-reason")]
                 reject_reason: Option<String>,
             }
@@ -126,7 +126,7 @@ mod tests {
             Message::Request {
                 id: Id::Number(1),
                 method: "mining.subscribe".into(),
-                params: json!([]),
+                params: serde_json::json!([]),
             },
         );
     }
@@ -137,7 +137,7 @@ mod tests {
             r#"{"method":"mining.notify","params":[]}"#,
             Message::Notification {
                 method: "mining.notify".into(),
-                params: json!([]),
+                params: serde_json::json!([]),
             },
         );
 
@@ -147,7 +147,7 @@ mod tests {
             serde_json::from_str::<Message>(with_id_null).unwrap(),
             Message::Notification {
                 method: "mining.notify".into(),
-                params: json!([]),
+                params: serde_json::json!([]),
             }
         );
     }
@@ -158,7 +158,7 @@ mod tests {
             r#"{"id":8,"result":[[["mining.set_difficulty","b4b6693b72a50c7116db18d6497cac52"],["mining.notify","ae6812eb4cd7735a302a8a9dd95cf71f"]],"08000002",4],"error":null}"#,
             Message::Response {
                 id: Id::Number(8),
-                result: Some(json!([
+                result: Some(serde_json::json!([
                     [
                         ["mining.set_difficulty", "b4b6693b72a50c7116db18d6497cac52"],
                         ["mining.notify", "ae6812eb4cd7735a302a8a9dd95cf71f"]
@@ -181,7 +181,7 @@ mod tests {
             .unwrap(),
             Message::Response {
                 id: Id::Number(5),
-                result: Some(json!(false)),
+                result: Some(serde_json::json!(false)),
                 error: None,
                 reject_reason: Some("Above target".into()),
             },
@@ -201,16 +201,12 @@ mod tests {
         );
 
         case(
-            r#"{"id":10,"result":null,"error":[21,"Job not found",null]}"#,
+            r#"{"id":10,"result":null,"error":[2,"Stale",null]}"#,
             Message::Response {
                 id: Id::Number(10),
                 result: None,
                 reject_reason: None,
-                error: Some(JsonRpcError {
-                    error_code: 21,
-                    message: "Job not found".into(),
-                    traceback: None,
-                }),
+                error: Some(StratumError::Stale.into_response(None)),
             },
         );
     }
@@ -275,7 +271,7 @@ mod tests {
             Message::Response {
                 reject_reason: None,
                 id: Id::Number(4),
-                result: Some(json!(true)),
+                result: Some(serde_json::json!(true)),
                 error: None,
             },
         );
@@ -305,7 +301,7 @@ mod tests {
             Message::Response {
                 reject_reason: None,
                 id: Id::Number(4),
-                result: Some(json!(true)),
+                result: Some(serde_json::json!(true)),
                 error: None,
             },
         );
@@ -343,7 +339,7 @@ mod tests {
             r#"{"id":2,"result":true,"error":null}"#,
             Message::Response {
                 id: Id::Number(2),
-                result: Some(json!(true)),
+                result: Some(serde_json::json!(true)),
                 error: None,
                 reject_reason: None,
             },

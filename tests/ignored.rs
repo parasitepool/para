@@ -1,36 +1,12 @@
-use super::*;
+use {super::*, tokio_util::sync::CancellationToken};
 
 // These tests either call some scripts that are not available in CI yet or are
 // a bit too expensive so marking them as ignored for now.
 
 #[test]
 #[ignore]
-fn miner() {
-    let pool = TestPool::spawn();
-
-    let bitcoind = pool.bitcoind_handle();
-
-    bitcoind.mine_blocks(16).unwrap();
-
-    let stratum_endpoint = pool.stratum_endpoint();
-
-    let miner = CommandBuilder::new(format!(
-        "miner --once --username {} {stratum_endpoint}",
-        signet_username()
-    ))
-    .spawn();
-
-    let stdout = miner.wait_with_output().unwrap();
-    let output =
-        serde_json::from_str::<Vec<Share>>(&String::from_utf8_lossy(&stdout.stdout)).unwrap();
-
-    assert_eq!(output.len(), 1);
-}
-
-#[test]
-#[ignore]
 fn concurrently_listening_workers_receive_new_templates_on_new_block() {
-    let pool = TestPool::spawn();
+    let pool = TestPool::spawn_with_args("--start-diff 0.0001");
     let endpoint = pool.stratum_endpoint();
     let user = signet_username();
 
@@ -66,7 +42,14 @@ fn concurrently_listening_workers_receive_new_templates_on_new_block() {
 
         gate.wait();
 
-        pool.bitcoind_handle().mine_blocks(1).unwrap();
+        CommandBuilder::new(format!(
+            "miner --mode block-found --username {} {}",
+            signet_username(),
+            pool.stratum_endpoint()
+        ))
+        .spawn()
+        .wait()
+        .unwrap();
 
         let (initial_template_worker_a, new_template_worker_a) =
             in_1.recv_timeout(Duration::from_secs(1)).unwrap();
@@ -297,7 +280,7 @@ async fn test_sync_endpoint_to_endpoint() {
     assert!(health_check.is_ok());
 
     sync_sender
-        .run()
+        .run(CancellationToken::new())
         .await
         .expect("Syncing between servers failed!");
 

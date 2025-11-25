@@ -12,33 +12,31 @@ use {
         routing::{MethodRouter, get, post},
     },
     axum_server::Handle,
+    base64::{Engine, engine::general_purpose},
+    bip322::verify_simple_encoded,
     bitcoin::{
         Address, Amount, Block, BlockHash, CompactTarget, Network, OutPoint, ScriptBuf, Sequence,
-        Target, Transaction, TxIn, TxMerkleNode, TxOut, Txid, VarInt, Witness,
+        Target, Transaction, TxIn, TxOut, Txid, VarInt, Witness,
         block::{self, Header},
-        consensus::{self, Decodable, Encodable, encode},
-        hashes::{Hash, sha256d},
+        consensus::{self, Decodable, encode},
+        hashes::Hash,
         locktime::absolute::LockTime,
         script::write_scriptint,
+        secp256k1::Secp256k1,
+        sign_message::MessageSignature,
     },
     bitcoincore_rpc::{Auth, RpcApi},
     block_template::BlockTemplate,
-    byteorder::{BigEndian, ByteOrder, LittleEndian},
     chain::Chain,
     clap::Parser,
     coinbase_builder::CoinbaseBuilder,
     connection::Connection,
-    derive_more::Display,
     futures::{
         sink::SinkExt,
         stream::{FuturesUnordered, StreamExt},
     },
     generator::Generator,
-    hash_rate::HashRate,
-    hex::FromHex,
-    lazy_static::lazy_static,
     lru::LruCache,
-    rand::RngCore,
     reqwest::Url,
     rust_embed::RustEmbed,
     rustls_acme::{
@@ -48,45 +46,45 @@ use {
         caches::DirCache,
     },
     serde::{
-        Deserialize, Serialize, Serializer,
+        Deserialize, Serialize,
         de::{self, Deserializer},
-        ser::SerializeSeq,
     },
-    serde_json::{Value, json},
+    serde_json::json,
     serde_with::{DeserializeFromStr, SerializeDisplay},
+    snafu::Snafu,
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
     std::{
         collections::{BTreeMap, HashMap, HashSet},
         env,
         fmt::{self, Display, Formatter},
-        fs, io,
+        fs,
+        io::{self, Write},
         net::{SocketAddr, ToSocketAddrs},
         num::NonZeroUsize,
-        ops::{Add, BitAnd, BitOr, BitXor, Not},
+        ops::Add,
         path::{Path, PathBuf},
         process,
         str::FromStr,
         sync::{
             Arc, LazyLock,
-            atomic::{AtomicBool, AtomicU64, Ordering},
+            atomic::{AtomicU64, Ordering},
         },
         thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     },
     stratum::{
-        Authorize, Configure, Difficulty, Extranonce, Id, JobId, JsonRpcError, MerkleNode, Message,
-        Nbits, Nonce, Notify, Ntime, PrevHash, SetDifficulty, Submit, Subscribe, SubscribeResult,
+        Authorize, Configure, Difficulty, Extranonce, Id, JobId, MerkleNode, Message, Nbits, Nonce,
+        Notify, Ntime, PrevHash, SetDifficulty, StratumError, Submit, Subscribe, SubscribeResult,
         Version,
     },
-    subcommand::pool::pool_config::PoolConfig,
+    subcommand::{pool::pool_config::PoolConfig, server::account::Account},
     sysinfo::{Disks, System},
     tokio::{
-        io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, BufWriter},
-        net::{TcpListener, TcpStream, tcp::OwnedWriteHalf},
+        io::{AsyncRead, AsyncWrite},
+        net::TcpListener,
         runtime::Runtime,
-        signal::ctrl_c,
-        sync::{Mutex, mpsc, oneshot, watch},
-        task::{self, JoinHandle},
+        sync::{Mutex, broadcast, mpsc, watch},
+        task::{self, JoinHandle, JoinSet},
         time::{MissedTickBehavior, interval, sleep, timeout},
     },
     tokio_util::{
@@ -98,7 +96,9 @@ use {
         validate_request::ValidateRequestHeaderLayer,
     },
     tracing::{debug, error, info, warn},
+    tracing_appender::non_blocking,
     tracing_subscriber::EnvFilter,
+    workbase::Workbase,
     zeromq::{Endpoint, Socket, SocketRecv, SubSocket},
     zmq::Zmq,
 };
@@ -112,11 +112,12 @@ pub mod ckpool;
 pub mod coinbase_builder;
 mod connection;
 mod generator;
-pub mod hash_rate;
 mod job;
 mod jobs;
+mod signal;
 pub mod stratum;
 pub mod subcommand;
+mod workbase;
 mod zmq;
 
 pub const COIN_VALUE: u64 = 100_000_000;
@@ -150,28 +151,44 @@ async fn resolve_stratum_endpoint(stratum_endpoint: &str) -> Result<SocketAddr> 
     Ok(addr)
 }
 
+fn integration_test() -> bool {
+    std::env::var_os("PARA_INTEGRATION_TEST").is_some()
+}
+
+fn logs_enabled() -> bool {
+    std::env::var_os("RUST_LOG").is_some()
+}
+
 pub fn main() {
+    let (writer, _guard) = non_blocking(io::stderr());
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .with_target(false)
+        .with_writer(writer)
         .init();
 
     let args = Arguments::parse();
 
-    match args.run() {
-        Err(err) => {
-            error!("error: {err}");
+    Runtime::new()
+        .expect("Failed to create tokio runtime")
+        .block_on(async {
+            let cancel_token = signal::setup_signal_handler();
 
-            if env::var_os("RUST_BACKTRACE")
-                .map(|val| val == "1")
-                .unwrap_or_default()
-            {
-                error!("{}", err.backtrace());
+            match args.run(cancel_token).await {
+                Err(err) => {
+                    error!("error: {err}");
+
+                    if env::var_os("RUST_BACKTRACE")
+                        .map(|val| val == "1")
+                        .unwrap_or_default()
+                    {
+                        error!("{}", err.backtrace());
+                    }
+                    process::exit(1);
+                }
+                Ok(_) => {
+                    process::exit(0);
+                }
             }
-            process::exit(1);
-        }
-        Ok(_) => {
-            process::exit(0);
-        }
-    }
+        });
 }

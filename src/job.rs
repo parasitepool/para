@@ -5,9 +5,8 @@ pub(crate) struct Job {
     pub(crate) coinb1: String,
     pub(crate) coinb2: String,
     pub(crate) extranonce1: Extranonce,
-    pub(crate) template: Arc<BlockTemplate>,
+    pub(crate) workbase: Arc<Workbase>,
     pub(crate) job_id: JobId,
-    pub(crate) merkle_branches: Vec<MerkleNode>,
     pub(crate) version_mask: Option<Version>,
 }
 
@@ -16,9 +15,10 @@ impl Job {
         address: Address,
         extranonce1: Extranonce,
         version_mask: Option<Version>,
-        template: Arc<BlockTemplate>,
+        workbase: Arc<Workbase>,
         job_id: JobId,
     ) -> Result<Self> {
+        let template = workbase.template();
         let (_coinbase_tx, coinb1, coinb2) = CoinbaseBuilder::new(
             address.clone(),
             extranonce1.clone(),
@@ -32,30 +32,26 @@ impl Job {
         .with_pool_sig("|parasite|".into())
         .build()?;
 
-        let merkle_branches =
-            stratum::merkle_branches(template.transactions.iter().map(|tx| tx.txid).collect());
-
         Ok(Self {
             coinb1,
             coinb2,
             extranonce1,
-            template,
+            workbase,
             job_id,
-            merkle_branches,
             version_mask,
         })
     }
 
     pub(crate) fn nbits(&self) -> Nbits {
-        self.template.bits
+        self.workbase.template().bits
     }
 
     pub(crate) fn prevhash(&self) -> PrevHash {
-        PrevHash::from(self.template.previous_block_hash)
+        PrevHash::from(self.workbase.template().previous_block_hash)
     }
 
     pub(crate) fn version(&self) -> Version {
-        self.template.version
+        self.workbase.template().version
     }
 
     pub(crate) fn notify(&self, clean_jobs: bool) -> Result<Notify> {
@@ -64,10 +60,10 @@ impl Job {
             prevhash: self.prevhash(),
             coinb1: self.coinb1.clone(),
             coinb2: self.coinb2.clone(),
-            merkle_branches: self.merkle_branches.clone(),
+            merkle_branches: self.workbase.merkle_branches().to_vec(),
             version: self.version(),
             nbits: self.nbits(),
-            ntime: self.template.current_time,
+            ntime: self.workbase.template().current_time,
             clean_jobs,
         })
     }

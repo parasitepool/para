@@ -10,10 +10,12 @@ impl Nbits {
 }
 
 impl FromStr for Nbits {
-    type Err = anyhow::Error;
+    type Err = InternalError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let compact = CompactTarget::from_unprefixed_hex(s)?;
+        let compact = CompactTarget::from_unprefixed_hex(s).context(error::ParseNbitsSnafu {
+            input: s.to_string(),
+        })?;
         Ok(Nbits(compact))
     }
 }

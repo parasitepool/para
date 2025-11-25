@@ -16,7 +16,8 @@ pub(crate) struct Connection<R, W> {
     worker: SocketAddr,
     reader: FramedRead<R, LinesCodec>,
     writer: FramedWrite<W, LinesCodec>,
-    template_receiver: watch::Receiver<Arc<BlockTemplate>>,
+    workbase_receiver: watch::Receiver<Arc<Workbase>>,
+    cancel_token: CancellationToken,
     jobs: Jobs,
     state: State,
     address: Option<Address>,
@@ -36,14 +37,16 @@ where
         worker: SocketAddr,
         reader: R,
         writer: W,
-        template_receiver: watch::Receiver<Arc<BlockTemplate>>,
+        workbase_receiver: watch::Receiver<Arc<Workbase>>,
+        cancel_token: CancellationToken,
     ) -> Self {
         Self {
             config,
             worker,
             reader: FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_MESSAGE_SIZE)),
             writer: FramedWrite::new(writer, LinesCodec::new()),
-            template_receiver,
+            workbase_receiver,
+            cancel_token,
             jobs: Jobs::new(),
             state: State::Init,
             address: None,
@@ -55,10 +58,15 @@ where
     }
 
     pub(crate) async fn serve(&mut self) -> Result {
-        let mut template_receiver = self.template_receiver.clone();
+        let mut workbase_receiver = self.workbase_receiver.clone();
+        let cancel_token = self.cancel_token.clone();
 
         loop {
             tokio::select! {
+                _ = cancel_token.cancelled() => {
+                    info!("Disconnecting from {}", self.worker);
+                    break;
+                }
                 message = self.read_message() => {
                     let Some(message) = message? else {
                         error!("Error reading message in connection serve");
@@ -72,10 +80,18 @@ where
 
                     match method.as_str() {
                         "mining.configure" => {
-                            info!("CONFIGURE from {} with {params}", self.worker);
+                            debug!("CONFIGURE from {} with {params}", self.worker);
 
                             if !matches!(self.state,  State::Init | State::Configured) {
-                                self.send_error(id.clone(), -32001, "Method not allowed in current state", None).await?;
+                                self.send_error(
+                                    id.clone(),
+                                    StratumError::MethodNotAllowed,
+                                    Some(serde_json::json!({
+                                        "method": "mining.configure",
+                                        "current_state": format!("{:?}", self.state)
+                                    })),
+                                )
+                                .await?;
                                 continue;
                             };
 
@@ -85,10 +101,18 @@ where
                             self.configure(id, configure).await?
                         }
                         "mining.subscribe" => {
-                            info!("SUBSCRIBE from {} with {params}", self.worker);
+                            debug!("SUBSCRIBE from {} with {params}", self.worker);
 
                             if !matches!(self.state,  State::Init | State::Configured) {
-                                self.send_error(id.clone(), -32001, "Method not allowed in current state", None).await?;
+                                self.send_error(
+                                    id.clone(),
+                                    StratumError::MethodNotAllowed,
+                                    Some(serde_json::json!({
+                                        "method": "mining.subscribe",
+                                        "current_state": format!("{:?}", self.state)
+                                    })),
+                                )
+                                .await?;
                                 continue;
                             };
 
@@ -98,10 +122,18 @@ where
                             self.subscribe(id, subscribe).await?
                         }
                         "mining.authorize" => {
-                            info!("AUTHORIZE from {} with {params}", self.worker);
+                            debug!("AUTHORIZE from {} with {params}", self.worker);
 
                             if self.state != State::Subscribed {
-                                self.send_error(id.clone(), -32001, "Method not allowed in current state", None).await?;
+                                self.send_error(
+                                    id.clone(),
+                                    StratumError::MethodNotAllowed,
+                                    Some(serde_json::json!({
+                                        "method": "mining.authorize",
+                                        "current_state": format!("{:?}", self.state)
+                                    })),
+                                )
+                                .await?;
                                 continue;
                             }
 
@@ -111,10 +143,11 @@ where
                             self.authorize(id, authorize).await?
                         }
                         "mining.submit" => {
-                            info!("SUBMIT from {} with params {params}", self.worker);
+                            debug!("SUBMIT from {} with params {params}", self.worker);
 
                             if self.state != State::Working {
-                                self.send_error(id.clone(), -32002, "Unauthorized", None).await?;
+                                self.send_error(id.clone(), StratumError::Unauthorized, None)
+                                    .await?;
                                 continue;
                             }
 
@@ -129,19 +162,19 @@ where
                     }
                 }
 
-                changed = template_receiver.changed() => {
+                changed = workbase_receiver.changed() => {
                     if changed.is_err() {
-                        info!("Template receiver dropped, closing connection with {}", self.worker);
+                        warn!("Template receiver dropped, closing connection with {}", self.worker);
                         break;
                     }
 
                     if self.state != State::Working {
-                        let _ = template_receiver.borrow_and_update();
+                        let _ = workbase_receiver.borrow_and_update();
                         continue;
                     };
 
-                    let template = template_receiver.borrow_and_update().clone();
-                    self.template_update(template).await?;
+                    let workbase = workbase_receiver.borrow_and_update().clone();
+                    self.workbase_update(workbase).await?;
                 }
             }
         }
@@ -149,7 +182,7 @@ where
         Ok(())
     }
 
-    async fn template_update(&mut self, template: Arc<BlockTemplate>) -> Result {
+    async fn workbase_update(&mut self, workbase: Arc<Workbase>) -> Result {
         let (address, extranonce1) = match (&self.address, &self.extranonce1) {
             (Some(a), Some(e)) => (a.clone(), e.clone()),
             _ => return Ok(()),
@@ -159,13 +192,13 @@ where
             address,
             extranonce1,
             self.version_mask,
-            template,
+            workbase,
             self.jobs.next_id(),
         )?);
 
         let clean_jobs = self.jobs.upsert(new_job.clone());
 
-        info!("Template updated sending NOTIFY");
+        debug!("Template updated sending NOTIFY");
 
         self.send(Message::Notification {
             method: "mining.notify".into(),
@@ -179,7 +212,7 @@ where
     async fn configure(&mut self, id: Id, configure: Configure) -> Result {
         if configure.version_rolling_mask.is_some() {
             let version_mask = self.config.version_mask();
-            info!(
+            debug!(
                 "Configuring version rolling for {} with version mask {version_mask}",
                 self.worker
             );
@@ -202,11 +235,12 @@ where
             let message = Message::Response {
                 id,
                 result: None,
-                error: Some(JsonRpcError {
-                    error_code: -1,
-                    message: "Unsupported extension".into(),
-                    traceback: Some(serde_json::to_value(configure)?),
-                }),
+                error: Some(StratumError::UnsupportedExtension.into_response(Some(
+                    serde_json::json!({
+                        "extensions": configure.extensions,
+                        "supported": ["version-rolling"]
+                    }),
+                ))),
                 reject_reason: None,
             };
 
@@ -222,7 +256,7 @@ where
             warn!("Ignoring worker extranonce1 suggestion: {extranonce1}");
         }
 
-        let extranonce1 = Extranonce::generate(EXTRANONCE1_SIZE);
+        let extranonce1 = Extranonce::random(EXTRANONCE1_SIZE);
 
         let subscriptions = vec![
             (
@@ -235,7 +269,7 @@ where
         let result = SubscribeResult {
             subscriptions,
             extranonce1: extranonce1.clone(),
-            extranonce2_size: EXTRANONCE2_SIZE.try_into().unwrap(),
+            extranonce2_size: EXTRANONCE2_SIZE,
         };
 
         self.send(Message::Response {
@@ -277,7 +311,7 @@ where
             address.clone(),
             extranonce1.clone(),
             self.version_mask,
-            self.template_receiver.borrow().clone(),
+            self.workbase_receiver.borrow().clone(),
             self.jobs.next_id(),
         )?);
 
@@ -295,15 +329,15 @@ where
             self.authorized = Some(SystemTime::now());
         }
 
-        info!("Sending SET DIFFICULTY");
+        debug!("Sending SET DIFFICULTY");
 
         self.send(Message::Notification {
             method: "mining.set_difficulty".into(),
-            params: json!(SetDifficulty(Difficulty::from(job.nbits()))),
+            params: json!(SetDifficulty(self.config.start_diff())),
         })
         .await?;
 
-        info!("Sending NOTIFY");
+        debug!("Sending NOTIFY");
 
         let clean_jobs = self.jobs.upsert(job.clone());
 
@@ -320,14 +354,18 @@ where
 
     async fn submit(&mut self, id: Id, submit: Submit) -> Result {
         let Some(job) = self.jobs.get(&submit.job_id) else {
-            self.send_error(id, 21, "Stale job", None).await?;
+            self.send_error(id, StratumError::Stale, None).await?;
             return Ok(());
         };
 
         let version = if let Some(version_bits) = submit.version_bits {
             let Some(version_mask) = job.version_mask else {
-                self.send_error(id, 23, "Version rolling not negotiated", None)
-                    .await?;
+                self.send_error(
+                    id,
+                    StratumError::InvalidVersionMask,
+                    Some(serde_json::json!({"reason": "Version rolling not negotiated"})),
+                )
+                .await?;
 
                 return Ok(());
             };
@@ -356,7 +394,7 @@ where
                 &job.coinb2,
                 &job.extranonce1,
                 &submit.extranonce2,
-                &job.merkle_branches,
+                job.workbase.merkle_branches(),
             )?
             .into(),
             time: submit.ntime.into(),
@@ -365,49 +403,63 @@ where
         };
 
         if self.jobs.is_duplicate(header.block_hash()) {
-            self.send_error(id, 22, "Duplicate share", None).await?;
+            self.send_error(id, StratumError::Duplicate, None).await?;
             return Ok(());
         }
 
-        let blockhash = header.validate_pow(Target::from_compact(nbits.into()))?;
+        if let Ok(blockhash) = header.validate_pow(Target::from_compact(nbits.into())) {
+            info!("Block with hash {blockhash} meets network difficulty");
 
-        info!("Block with hash {blockhash} meets PoW");
+            let coinbase_bin = hex::decode(format!(
+                "{}{}{}{}",
+                job.coinb1, job.extranonce1, submit.extranonce2, job.coinb2,
+            ))?;
 
-        let coinbase_bin = hex::decode(format!(
-            "{}{}{}{}",
-            job.coinb1, job.extranonce1, submit.extranonce2, job.coinb2,
-        ))?;
+            let mut cursor = bitcoin::io::Cursor::new(&coinbase_bin);
+            let coinbase_tx =
+                bitcoin::Transaction::consensus_decode_from_finite_reader(&mut cursor)?;
 
-        let mut cursor = bitcoin::io::Cursor::new(&coinbase_bin);
-        let coinbase_tx = bitcoin::Transaction::consensus_decode_from_finite_reader(&mut cursor)?;
+            let txdata = std::iter::once(coinbase_tx)
+                .chain(
+                    job.workbase
+                        .template()
+                        .transactions
+                        .iter()
+                        .map(|tx| tx.transaction.clone())
+                        .collect::<Vec<Transaction>>(),
+                )
+                .collect();
 
-        let txdata = std::iter::once(coinbase_tx)
-            .chain(
-                job.template
-                    .transactions
-                    .iter()
-                    .map(|tx| tx.transaction.clone())
-                    .collect::<Vec<Transaction>>(),
-            )
-            .collect();
+            let block = Block { header, txdata };
 
-        let block = Block { header, txdata };
+            if job.workbase.template().height > 16 {
+                assert!(block.bip34_block_height().is_ok());
+            }
 
-        assert!(block.bip34_block_height().is_ok());
+            info!("Submitting potential block solve");
 
-        info!("Submitting block solve");
+            match self.config.bitcoin_rpc_client()?.submit_block(&block) {
+                Ok(_) => info!("SUCCESSFULLY mined block {}", block.block_hash()),
+                Err(err) => error!("Failed to submit block: {err}"),
+            }
+        }
 
-        self.config.bitcoin_rpc_client()?.submit_block(&block)?;
-
-        self.send(Message::Response {
-            id,
-            result: Some(json!(true)),
-            error: None,
-            reject_reason: None,
-        })
-        .await?;
-
-        info!("SUCCESS: mined block {}", block.block_hash());
+        if self
+            .config
+            .start_diff()
+            .to_target()
+            .is_met_by(header.block_hash())
+        {
+            self.send(Message::Response {
+                id,
+                result: Some(json!(true)),
+                error: None,
+                reject_reason: None,
+            })
+            .await?;
+        } else {
+            self.send_error(id, StratumError::AboveTarget, None).await?;
+        }
 
         Ok(())
     }
@@ -440,18 +492,13 @@ where
     async fn send_error(
         &mut self,
         id: Id,
-        code: i32,
-        msg: impl Into<String>,
+        error: StratumError,
         traceback: Option<serde_json::Value>,
     ) -> Result {
         self.send(Message::Response {
             id,
             result: None,
-            error: Some(JsonRpcError {
-                error_code: code,
-                message: msg.into(),
-                traceback,
-            }),
+            error: Some(error.into_response(traceback)),
             reject_reason: None,
         })
         .await

@@ -1,5 +1,13 @@
 use super::*;
 
+#[derive(Debug, Snafu)]
+pub(crate) enum HasherError {
+    #[snafu(display("hasher cancelled: nonce={nonce}"))]
+    Cancelled { nonce: u32 },
+    #[snafu(display("nonce space exhausted: nonce={nonce}"))]
+    NonceSpaceExhausted { nonce: u32 },
+}
+
 #[derive(Debug)]
 pub(crate) struct Hasher {
     pub(crate) extranonce2: Extranonce,
@@ -12,49 +20,47 @@ impl Hasher {
     pub(crate) fn hash(
         &mut self,
         cancel: CancellationToken,
-    ) -> Result<(JobId, Header, Extranonce)> {
-        let start = Instant::now();
-        let mut total_hashes = 0u64;
-        let mut last_report = start;
-        const REPORT_INTERVAL: Duration = Duration::from_secs(5);
+        metrics: Arc<Metrics>,
+        throttle: f64,
+    ) -> Result<(JobId, Header, Extranonce), HasherError> {
+        const BATCH: u64 = 10_000;
 
         loop {
             if cancel.is_cancelled() {
-                return Err(anyhow!("hasher cancelled"));
+                return CancelledSnafu {
+                    nonce: self.header.nonce,
+                }
+                .fail();
             }
 
-            let batch_size = if self.header.nonce > u32::MAX - 10000 {
-                (u32::MAX - self.header.nonce) as usize + 1
-            } else {
-                10000
-            };
+            let t0 = Instant::now();
 
-            for _ in 0..batch_size {
+            for _ in 0..BATCH {
                 let hash = self.header.block_hash();
-                total_hashes += 1;
 
                 if self.pool_target.is_met_by(hash) {
-                    info!("Solved block with hash: {hash}");
+                    metrics.add_share();
                     return Ok((self.job_id, self.header, self.extranonce2.clone()));
                 }
 
                 if let Some(next_nonce) = self.header.nonce.checked_add(1) {
                     self.header.nonce = next_nonce;
                 } else {
-                    return Err(anyhow!("nonce space exhausted"));
+                    return NonceSpaceExhaustedSnafu {
+                        nonce: self.header.nonce,
+                    }
+                    .fail();
                 }
             }
 
-            if batch_size < 10000 {
-                return Err(anyhow!("nonce space exhausted"));
-            }
+            metrics.add_hashes(BATCH);
 
-            let now = Instant::now();
-            if now.duration_since(last_report) >= REPORT_INTERVAL {
-                let elapsed = now.duration_since(start).as_secs_f64().max(1e-6);
-                let hashrate = total_hashes as f64 / elapsed;
-                info!("Hashrate: {}", HashRate(hashrate));
-                last_report = now;
+            if throttle != f64::MAX {
+                let want = (BATCH as f64) / throttle;
+                let got = t0.elapsed().as_secs_f64();
+                if want > got {
+                    thread::sleep(Duration::from_secs_f64(want - got));
+                }
             }
         }
     }
@@ -62,14 +68,7 @@ impl Hasher {
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::*,
-        bitcoin::{
-            BlockHash, Target, TxMerkleNode,
-            block::{Header, Version},
-            hashes::Hash,
-        },
-    };
+    use {super::*, bitcoin::TxMerkleNode};
 
     fn shift(leading_zeros: u8) -> Target {
         assert!(leading_zeros <= 32, "leading_zeros too high");
@@ -93,7 +92,7 @@ mod tests {
 
     fn header(network_target: Option<Target>, nonce: Option<u32>) -> Header {
         Header {
-            version: Version::TWO,
+            version: bitcoin::block::Version::TWO,
             prev_blockhash: BlockHash::all_zeros(),
             merkle_root: TxMerkleNode::from_raw_hash(BlockHash::all_zeros().to_raw_hash()),
             time: 0,
@@ -150,7 +149,9 @@ mod tests {
             job_id: "bf".parse().unwrap(),
         };
 
-        let (_job_id, header, _extranonce2) = hasher.hash(CancellationToken::new()).unwrap();
+        let (_, header, _) = hasher
+            .hash(CancellationToken::new(), Arc::new(Metrics::new()), f64::MAX)
+            .unwrap();
         assert!(target.is_met_by(header.block_hash()));
     }
 
@@ -164,7 +165,8 @@ mod tests {
             job_id: "bf".parse().unwrap(),
         };
 
-        let result = hasher.hash(CancellationToken::new());
+        let result = hasher.hash(CancellationToken::new(), Arc::new(Metrics::new()), f64::MAX);
+
         assert!(
             result.is_err(),
             "Expected nonce space exhausted error, got: {:?}",
@@ -225,7 +227,7 @@ mod tests {
                 job_id: JobId::new(0),
             };
 
-            let result = hasher.hash(CancellationToken::new());
+            let result = hasher.hash(CancellationToken::new(), Arc::new(Metrics::new()), f64::MAX);
             assert!(result.is_ok(), "Failed at {zeros} leading zeros");
 
             let (_, header, _) = result.unwrap();
@@ -246,7 +248,8 @@ mod tests {
             job_id: JobId::new(0),
         };
 
-        let result = hasher.hash(CancellationToken::new());
+        let result = hasher.hash(CancellationToken::new(), Arc::new(Metrics::new()), f64::MAX);
+
         assert!(
             result.is_ok(),
             "Mining should find solution for easy target"
@@ -273,16 +276,19 @@ mod tests {
 
         cancel_token.cancel();
 
-        let result = hasher.hash(cancel_token);
+        let result = hasher.hash(cancel_token, Arc::new(Metrics::new()), f64::MAX);
         assert!(result.is_err(), "Should be cancelled");
         assert!(result.unwrap_err().to_string().contains("cancelled"));
     }
 
     #[test]
     fn test_hashrate_display() {
-        assert_eq!(format!("{}", HashRate(1500.0)), "1.500K");
-        assert_eq!(format!("{}", HashRate(2_500_000.0)), "2.500M");
-        assert_eq!(format!("{}", HashRate(3_200_000_000.0)), "3.200G");
-        assert_eq!(format!("{}", HashRate(1_100_000_000_000.0)), "1.100T");
+        assert_eq!(format!("{}", ckpool::HashRate(1500.0)), "1.500K");
+        assert_eq!(format!("{}", ckpool::HashRate(2_500_000.0)), "2.500M");
+        assert_eq!(format!("{}", ckpool::HashRate(3_200_000_000.0)), "3.200G");
+        assert_eq!(
+            format!("{}", ckpool::HashRate(1_100_000_000_000.0)),
+            "1.100T"
+        );
     }
 }
