@@ -144,7 +144,7 @@ sudo apt install build-essential pkg-config libssl-dev
 #### Windows Builds
 To build Rust programs on Windows, you need one of two ABI configurations:
   1. MSVC
-     - `rustup` configures Rust to target this ABI by default on Windows
+     - On Windows, `rustup` will configure Rust to target this ABI by default
      - [Visual Studio](https://visualstudio.microsoft.com/downloads/) with
      [Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
      is required for building with MSVC
