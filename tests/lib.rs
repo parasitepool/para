@@ -48,6 +48,7 @@ use {
         CompressedPublicKey, Network, PrivateKey, block::Header, hashes::Hash,
         key::UntweakedPublicKey, secp256k1::Secp256k1, sign_message::MessageSignature,
     },
+    bitcoincore_rpc::RpcApi,
     harness::bitcoind::Bitcoind,
     para::{
         USER_AGENT,

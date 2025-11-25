@@ -246,14 +246,7 @@ async fn clean_jobs_true_on_init_and_new_block() {
 
     assert!(notify.clean_jobs);
 
-    CommandBuilder::new(format!(
-        "miner --mode block-found --username {} {}",
-        signet_username(),
-        pool.stratum_endpoint()
-    ))
-    .spawn()
-    .wait()
-    .unwrap();
+    pool.mine_block_and_wait(&signet_username()).await;
 
     loop {
         match events.recv().await.unwrap() {
@@ -356,14 +349,7 @@ async fn stale_share_rejected() {
 
     let (ntime, nonce) = solve_share(&notify_a, &extranonce1, &extranonce2, difficulty);
 
-    CommandBuilder::new(format!(
-        "miner --mode block-found --username {} {}",
-        signet_username(),
-        pool.stratum_endpoint()
-    ))
-    .spawn()
-    .wait()
-    .unwrap();
+    pool.mine_block_and_wait(&signet_username()).await;
 
     loop {
         match events.recv().await.unwrap() {
@@ -455,14 +441,7 @@ fn concurrently_listening_workers_receive_new_templates_on_new_block() {
 
         gate.wait();
 
-        CommandBuilder::new(format!(
-            "miner --mode block-found --username {} {}",
-            signet_username(),
-            pool.stratum_endpoint()
-        ))
-        .spawn()
-        .wait()
-        .unwrap();
+        pool.mine_block_and_wait_blocking(&signet_username());
 
         let (initial_template_worker_a, new_template_worker_a) =
             in_1.recv_timeout(Duration::from_secs(1)).unwrap();
