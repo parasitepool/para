@@ -33,7 +33,7 @@ audit:
 coverage:
   # cargo tarpaulin --engine llvm
   # cargo llvm-cov -- --include-ignored
-  cargo llvm-cov
+  cargo llvm-cov --html --open
 
 test-without-ckpool:
   cargo test --all -- --skip with_ckpool

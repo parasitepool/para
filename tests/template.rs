@@ -2,6 +2,7 @@ use super::*;
 
 #[test]
 #[serial(bitcoind)]
+#[timeout(90000)]
 fn template_with_ckpool() {
     let ckpool = TestCkpool::spawn();
 
