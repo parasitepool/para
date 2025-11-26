@@ -1,6 +1,7 @@
 use super::*;
 
 #[test]
+#[serial(bitcoind)]
 fn template_with_ckpool() {
     let ckpool = TestCkpool::spawn();
 

@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-#[serial(pool)]
+#[serial(bitcoind)]
 fn ping_pool() {
     let pool = TestPool::spawn();
 
@@ -15,7 +15,7 @@ fn ping_pool() {
 }
 
 #[test]
-#[serial(pool)]
+#[serial(bitcoind)]
 fn mine_to_pool() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001");
 
@@ -35,7 +35,7 @@ fn mine_to_pool() {
 }
 
 #[test]
-#[serial(pool)]
+#[serial(bitcoind)]
 fn configure_template_update_interval() {
     let pool = TestPool::spawn_with_args("--update-interval 1 --start-diff 0.00001");
 
@@ -67,7 +67,7 @@ fn configure_template_update_interval() {
 }
 
 #[tokio::test]
-#[serial(pool)]
+#[serial(bitcoind)]
 async fn basic_initialization_flow() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001");
 
@@ -97,7 +97,7 @@ async fn basic_initialization_flow() {
 }
 
 #[tokio::test]
-#[serial(pool)]
+#[serial(bitcoind)]
 async fn configure_with_multiple_negotiation_steps() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001");
 
@@ -141,7 +141,7 @@ async fn configure_with_multiple_negotiation_steps() {
 }
 
 #[tokio::test]
-#[serial(pool)]
+#[serial(bitcoind)]
 async fn authorize_before_subscribe_fails() {
     let pool = TestPool::spawn();
 
@@ -159,7 +159,7 @@ async fn authorize_before_subscribe_fails() {
 }
 
 #[tokio::test]
-#[serial(pool)]
+#[serial(bitcoind)]
 async fn submit_before_authorize_fails() {
     let pool = TestPool::spawn();
 
@@ -184,7 +184,7 @@ async fn submit_before_authorize_fails() {
 }
 
 #[tokio::test]
-#[serial(pool)]
+#[serial(bitcoind)]
 async fn duplicate_share_rejected() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001");
     let client = pool.stratum_client().await;
@@ -226,7 +226,7 @@ async fn duplicate_share_rejected() {
 }
 
 #[tokio::test]
-#[serial(pool)]
+#[serial(bitcoind)]
 async fn clean_jobs_true_on_init_and_new_block() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001");
     let client = pool.stratum_client().await;
@@ -262,7 +262,7 @@ async fn clean_jobs_true_on_init_and_new_block() {
 }
 
 #[tokio::test]
-#[serial(pool)]
+#[serial(bitcoind)]
 async fn shares_must_meet_pool_difficulty() {
     let pool = TestPool::spawn_with_args("--start-diff 0.0001");
     let client = pool.stratum_client().await;
@@ -325,7 +325,7 @@ async fn shares_must_meet_pool_difficulty() {
 }
 
 #[tokio::test]
-#[serial(pool)]
+#[serial(bitcoind)]
 async fn stale_share_rejected() {
     let pool = TestPool::spawn_with_args("--start-diff 0.0001");
     let client = pool.stratum_client().await;
@@ -373,7 +373,7 @@ async fn stale_share_rejected() {
 }
 
 #[tokio::test]
-#[serial(pool)]
+#[serial(bitcoind)]
 async fn invalid_job_id_rejected_as_stale() {
     let pool = TestPool::spawn();
     let client = pool.stratum_client().await;
@@ -403,7 +403,7 @@ async fn invalid_job_id_rejected_as_stale() {
 }
 
 #[test]
-#[serial(pool)]
+#[serial(bitcoind)]
 fn concurrently_listening_workers_receive_new_templates_on_new_block() {
     let pool = TestPool::spawn_with_args("--start-diff 0.0001");
     let endpoint = pool.stratum_endpoint();
