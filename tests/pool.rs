@@ -204,15 +204,18 @@ async fn duplicate_share_rejected() {
 
     client.authorize().await.unwrap();
 
-    let mut difficulty = stratum::Difficulty::from(1);
-
-    let notify = loop {
-        match events.recv().await.unwrap() {
-            stratum::Event::SetDifficulty(diff) => difficulty = diff,
-            stratum::Event::Notify(notify) => break notify,
-            _ => {}
+    let (notify, difficulty) = timeout(Duration::from_secs(10), async {
+        let mut difficulty = stratum::Difficulty::from(1);
+        loop {
+            match events.recv().await.unwrap() {
+                stratum::Event::SetDifficulty(diff) => difficulty = diff,
+                stratum::Event::Notify(notify) => return (notify, difficulty),
+                _ => {}
+            }
         }
-    };
+    })
+    .await
+    .expect("Timeout waiting for initial notification");
 
     let (ntime, nonce) = solve_share(&notify, &extranonce1, &extranonce2, difficulty);
 
@@ -257,15 +260,19 @@ async fn clean_jobs_true_on_init_and_new_block() {
 
     pool.mine_block();
 
-    loop {
-        match events.recv().await.unwrap() {
-            stratum::Event::Notify(notif) if notif.job_id != notify.job_id => {
-                notify = notif;
-                break;
+    let timeout_result = timeout(Duration::from_secs(10), async {
+        loop {
+            match events.recv().await.unwrap() {
+                stratum::Event::Notify(notif) if notif.job_id != notify.job_id => {
+                    return notif;
+                }
+                _ => {}
             }
-            _ => {}
         }
-    }
+    })
+    .await;
+
+    notify = timeout_result.expect("Timeout waiting for new block notification");
 
     assert!(notify.clean_jobs);
 }
@@ -284,15 +291,18 @@ async fn shares_must_meet_pool_difficulty() {
 
     client.authorize().await.unwrap();
 
-    let mut difficulty = stratum::Difficulty::from(1.0);
-
-    let notify = loop {
-        match events.recv().await.unwrap() {
-            stratum::Event::SetDifficulty(diff) => difficulty = diff,
-            stratum::Event::Notify(notify) => break notify,
-            _ => {}
+    let (notify, difficulty) = timeout(Duration::from_secs(10), async {
+        let mut difficulty = stratum::Difficulty::from(1.0);
+        loop {
+            match events.recv().await.unwrap() {
+                stratum::Event::SetDifficulty(diff) => difficulty = diff,
+                stratum::Event::Notify(notify) => return (notify, difficulty),
+                _ => {}
+            }
         }
-    };
+    })
+    .await
+    .expect("Timeout waiting for initial notification");
 
     let easy_diff = stratum::Difficulty::from(0.0000001);
     let (ntime, nonce) = solve_share(&notify, &extranonce1, &extranonce2, easy_diff);
@@ -348,28 +358,35 @@ async fn stale_share_rejected() {
 
     client.authorize().await.unwrap();
 
-    let mut difficulty = stratum::Difficulty::from(1.0);
-
-    let notify_a = loop {
-        match events.recv().await.unwrap() {
-            stratum::Event::SetDifficulty(diff) => difficulty = diff,
-            stratum::Event::Notify(notify) => break notify,
-            _ => {}
+    let (notify_a, difficulty) = timeout(Duration::from_secs(10), async {
+        let mut difficulty = stratum::Difficulty::from(1.0);
+        loop {
+            match events.recv().await.unwrap() {
+                stratum::Event::SetDifficulty(diff) => difficulty = diff,
+                stratum::Event::Notify(notify) => return (notify, difficulty),
+                _ => {}
+            }
         }
-    };
+    })
+    .await
+    .expect("Timeout waiting for initial notification");
 
     let (ntime, nonce) = solve_share(&notify_a, &extranonce1, &extranonce2, difficulty);
 
     pool.mine_block();
 
-    loop {
-        match events.recv().await.unwrap() {
-            stratum::Event::Notify(n) if n.job_id != notify_a.job_id && n.clean_jobs => {
-                break;
+    timeout(Duration::from_secs(10), async {
+        loop {
+            match events.recv().await.unwrap() {
+                stratum::Event::Notify(n) if n.job_id != notify_a.job_id && n.clean_jobs => {
+                    break;
+                }
+                _ => {}
             }
-            _ => {}
         }
-    }
+    })
+    .await
+    .expect("Timeout waiting for new block notification");
 
     let submit = client
         .submit(notify_a.job_id, extranonce2, ntime, nonce)
@@ -457,10 +474,10 @@ fn concurrently_listening_workers_receive_new_templates_on_new_block() {
         pool.mine_block();
 
         let (initial_template_worker_a, new_template_worker_a) =
-            in_1.recv_timeout(Duration::from_secs(1)).unwrap();
+            in_1.recv_timeout(Duration::from_secs(10)).unwrap();
 
         let (initial_template_worker_b, new_template_worker_b) =
-            in_2.recv_timeout(Duration::from_secs(1)).unwrap();
+            in_2.recv_timeout(Duration::from_secs(10)).unwrap();
 
         assert_eq!(
             initial_template_worker_a.prevhash,

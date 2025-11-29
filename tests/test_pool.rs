@@ -123,7 +123,8 @@ impl TestPool {
 
         for _ in 0..100 {
             if self.get_block_height() > current_height {
-                thread::sleep(Duration::from_millis(100));
+                // Wait longer for ZMQ notification to propagate and pool to process
+                thread::sleep(Duration::from_millis(500));
                 return;
             }
             thread::sleep(Duration::from_millis(100));
