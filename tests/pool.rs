@@ -240,7 +240,7 @@ async fn duplicate_share_rejected() {
 #[serial(bitcoind)]
 #[timeout(90000)]
 async fn clean_jobs_true_on_init_and_new_block() {
-    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
+    let pool = TestPool::spawn_with_args("--start-diff 0.0001");
     let client = pool.stratum_client().await;
     let mut events = client.connect().await.unwrap();
 
