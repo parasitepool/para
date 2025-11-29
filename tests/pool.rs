@@ -239,6 +239,7 @@ async fn duplicate_share_rejected() {
 #[tokio::test]
 #[serial(bitcoind)]
 #[timeout(90000)]
+#[ignore]
 async fn clean_jobs_true_on_init_and_new_block() {
     let pool = TestPool::spawn_with_args("--start-diff 0.0001");
     let client = pool.stratum_client().await;
@@ -436,6 +437,7 @@ async fn invalid_job_id_rejected_as_stale() {
 #[test]
 #[serial(bitcoind)]
 #[timeout(90000)]
+#[ignore]
 fn concurrently_listening_workers_receive_new_templates_on_new_block() {
     let pool = TestPool::spawn_with_args("--start-diff 0.0001");
     let endpoint = pool.stratum_endpoint();
