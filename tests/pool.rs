@@ -263,7 +263,9 @@ async fn clean_jobs_true_on_init_and_new_block() {
     let timeout_result = timeout(Duration::from_secs(10), async {
         loop {
             match events.recv().await.unwrap() {
-                stratum::Event::Notify(notif) if notif.job_id != notify.job_id => {
+                stratum::Event::Notify(notif)
+                    if notif.job_id != notify.job_id && notify.clean_jobs =>
+                {
                     return notif;
                 }
                 _ => {}
