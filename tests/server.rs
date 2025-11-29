@@ -433,6 +433,7 @@ fn aggregator_dashboard_with_auth_with_api_token() {
 }
 
 #[test]
+#[serial(heavy)]
 fn aggregator_cache_ttl() {
     let mut users = Vec::new();
     for i in 0..9 {
@@ -558,4 +559,164 @@ fn aggregator_negative_cache_on_users() {
     let response =
         aggregator.get_json::<User>(format!("/aggregator/users/{non_existent_user}"), None);
     pretty_assert_eq!(response, typical_user());
+}
+
+#[test]
+#[ignore]
+#[serial(heavy)]
+fn aggregator_cache_concurrent_pool_burst() {
+    let mut servers = Vec::new();
+    for _ in 0..3 {
+        let server = TestServer::spawn();
+        fs::write(
+            server.log_dir().join("pool/pool.status"),
+            typical_status().to_string(),
+        )
+        .unwrap();
+
+        servers.push(server);
+    }
+
+    let aggregator = Arc::new(TestServer::spawn_with_args(format!(
+        "--nodes {} --nodes {} --nodes {} --ttl 1",
+        servers[0].url(),
+        servers[1].url(),
+        servers[2].url(),
+    )));
+
+    aggregator.assert_response(
+        "/aggregator/pool/pool.status",
+        &(typical_status() + typical_status() + typical_status()).to_string(),
+        None,
+    );
+
+    fs::write(
+        servers[1].log_dir().join("pool/pool.status"),
+        zero_status().to_string(),
+    )
+    .unwrap();
+
+    const N: usize = 100;
+    let start = Arc::new(Barrier::new(N + 1));
+    let expected_old = (typical_status() + typical_status() + typical_status()).to_string();
+
+    let mut handles = Vec::with_capacity(N);
+    for _ in 0..N {
+        let agg = aggregator.clone();
+        let go = start.clone();
+        let exp = expected_old.clone();
+        handles.push(thread::spawn(move || {
+            go.wait();
+            agg.assert_response("/aggregator/pool/pool.status", &exp, None);
+        }));
+    }
+
+    start.wait();
+
+    for handle in handles {
+        handle.join().unwrap();
+    }
+
+    thread::sleep(Duration::from_secs(1));
+
+    let expected_new = (zero_status() + typical_status() + typical_status()).to_string();
+    let start = Arc::new(Barrier::new(N + 1));
+    let mut handles = Vec::with_capacity(N);
+    for _ in 0..N {
+        let agg = aggregator.clone();
+        let go = start.clone();
+        let exp = expected_new.clone();
+        handles.push(thread::spawn(move || {
+            go.wait();
+            agg.assert_response("/aggregator/pool/pool.status", &exp, None);
+        }));
+    }
+
+    start.wait();
+
+    for handles in handles {
+        handles.join().unwrap();
+    }
+}
+
+#[test]
+#[ignore]
+#[serial(heavy)]
+fn aggregator_cache_concurrent_user_burst() {
+    let mut users = Vec::new();
+    for i in 0..9 {
+        let user = typical_user();
+        let user_address = address(i);
+
+        users.push((user_address.to_string(), user));
+    }
+
+    let mut servers = Vec::new();
+    for (address, user) in users.iter().take(3) {
+        let server = TestServer::spawn();
+        fs::create_dir_all(server.log_dir().join("users")).unwrap();
+        fs::write(
+            server.log_dir().join(format!("users/{address}")),
+            serde_json::to_string(&user).unwrap(),
+        )
+        .unwrap();
+        servers.push(server);
+    }
+
+    let aggregator = Arc::new(TestServer::spawn_with_args(format!(
+        "--nodes {} --nodes {} --nodes {} --ttl 1",
+        servers[0].url(),
+        servers[1].url(),
+        servers[2].url(),
+    )));
+
+    let u0 = aggregator.get_json::<User>(format!("/aggregator/users/{}", users[0].0), None);
+    pretty_assert_eq!(u0, typical_user());
+
+    fs::write(
+        servers[0].log_dir().join(format!("users/{}", users[0].0)),
+        serde_json::to_string(&zero_user()).unwrap(),
+    )
+    .unwrap();
+
+    const N: usize = 100;
+    let start = Arc::new(Barrier::new(N + 1));
+    let mut handles = Vec::with_capacity(N);
+    for _ in 0..N {
+        let agg = aggregator.clone();
+        let go = start.clone();
+        let addr = users[0].0.clone();
+        handles.push(thread::spawn(move || {
+            go.wait();
+            let got = agg.get_json::<User>(format!("/aggregator/users/{addr}"), None);
+            pretty_assert_eq!(got, typical_user());
+        }));
+    }
+
+    start.wait();
+
+    for handle in handles {
+        handle.join().unwrap();
+    }
+
+    thread::sleep(Duration::from_secs(1));
+
+    let start = Arc::new(Barrier::new(N + 1));
+    let mut handles = Vec::with_capacity(N);
+    for _ in 0..N {
+        let agg = aggregator.clone();
+        let go = start.clone();
+        let addr = users[0].0.clone();
+        handles.push(thread::spawn(move || {
+            go.wait();
+            let got = agg.get_json::<User>(format!("/aggregator/users/{addr}"), None);
+            pretty_assert_eq!(got, zero_user());
+        }));
+    }
+
+    start.wait();
+
+    for handle in handles {
+        handle.join().unwrap();
+    }
 }

@@ -100,12 +100,71 @@ impl TestPool {
     pub(crate) fn bitcoind_handle(&self) -> &Bitcoind {
         &self.bitcoind_handle
     }
+
+    pub(crate) fn get_block_height(&self) -> u64 {
+        self.bitcoind_handle
+            .client()
+            .unwrap()
+            .get_block_count()
+            .unwrap()
+    }
+
+    pub(crate) fn mine_block(&self) {
+        let current_height = self.get_block_height();
+
+        CommandBuilder::new(format!(
+            "miner --mode block-found --username {} {}",
+            signet_username(),
+            self.stratum_endpoint()
+        ))
+        .spawn()
+        .wait()
+        .unwrap();
+
+        for _ in 0..100 {
+            if self.get_block_height() > current_height {
+                thread::sleep(Duration::from_millis(500));
+                return;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+    }
 }
 
 impl Drop for TestPool {
     fn drop(&mut self) {
         self.bitcoind_handle.shutdown();
-        self.pool_handle.kill().unwrap();
-        self.pool_handle.wait().unwrap();
+        #[cfg(unix)]
+        {
+            use nix::{
+                sys::signal::{Signal, kill},
+                unistd::Pid,
+            };
+
+            let pid = Pid::from_raw(self.pool_handle.id() as i32);
+
+            let _ = kill(pid, Signal::SIGTERM);
+
+            for _ in 0..100 {
+                match self.pool_handle.try_wait() {
+                    Ok(Some(_status)) => {
+                        return;
+                    }
+                    Ok(None) => {
+                        thread::sleep(Duration::from_millis(50));
+                    }
+                    _ => break,
+                }
+            }
+
+            let _ = self.pool_handle.kill();
+            let _ = self.pool_handle.wait();
+        }
+
+        #[cfg(not(unix))]
+        {
+            let _ = self.pool_handle.kill();
+            let _ = self.pool_handle.wait();
+        }
     }
 }

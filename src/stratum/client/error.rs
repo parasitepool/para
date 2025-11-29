@@ -17,8 +17,8 @@ pub enum ClientError {
     #[snafu(display("Serialization error: {source}"))]
     Serialization { source: serde_json::Error },
 
-    #[snafu(display("{message}"))]
-    Protocol { message: String },
+    #[snafu(display("{response}"))]
+    Stratum { response: StratumErrorResponse },
 
     #[snafu(display("Client not connected"))]
     NotConnected,
