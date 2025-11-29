@@ -2,7 +2,6 @@ use {
     bitcoin::{Address, address::NetworkUnchecked},
     command_builder::CommandBuilder,
     executable_path::executable_path,
-    ntest::timeout,
     para::{
         api::Status,
         ckpool::{self, HashRate, HashRateStatus, PoolStatus, ShareStatus, User, Worker},
@@ -51,6 +50,7 @@ use {
     },
     bitcoincore_rpc::RpcApi,
     harness::bitcoind::Bitcoind,
+    ntest::timeout,
     para::{
         USER_AGENT,
         stratum::{
