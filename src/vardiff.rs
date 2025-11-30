@@ -78,13 +78,6 @@ impl DecayingAverage {
     }
 }
 
-/// Tracks timing for vardiff decisions.
-#[derive(Debug, Clone)]
-struct Timing {
-    first_share: Instant,
-    last_diff_change: Instant,
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct Vardiff {
     target_interval: Duration,
@@ -94,7 +87,8 @@ pub(crate) struct Vardiff {
     dsps: DecayingAverage,
     current_diff: Difficulty,
     old_diff: Difficulty,
-    timing: Option<Timing>,
+    first_share: Option<Instant>,
+    last_diff_change: Instant,
     shares_since_change: u32,
 }
 
@@ -113,7 +107,8 @@ impl Vardiff {
             dsps: DecayingAverage::new(window),
             current_diff: start_diff,
             old_diff: start_diff,
-            timing: None,
+            first_share: None,
+            last_diff_change: Instant::now(),
             shares_since_change: 0,
         }
     }
@@ -146,12 +141,9 @@ impl Vardiff {
     ) -> Option<Difficulty> {
         let now = Instant::now();
 
-        // Initialize timing on first share
-        if self.timing.is_none() {
-            self.timing = Some(Timing {
-                first_share: now,
-                last_diff_change: now,
-            });
+        if self.first_share.is_none() {
+            self.first_share = Some(now);
+            self.last_diff_change = now;
         }
 
         self.dsps.record(share_diff.as_f64(), now);
@@ -160,137 +152,79 @@ impl Vardiff {
         self.evaluate_adjustment(network_diff, now)
     }
 
-    /// Evaluates whether difficulty should be adjusted.
     fn evaluate_adjustment(
         &mut self,
         network_diff: Difficulty,
         now: Instant,
     ) -> Option<Difficulty> {
-        let timing = self.timing.as_ref()?;
+        let first_share = self.first_share?;
+        let time_since_first = now.duration_since(first_share);
+        let time_since_change = now.duration_since(self.last_diff_change);
 
-        let time_since_first = now.duration_since(timing.first_share);
-        let time_since_change = now.duration_since(timing.last_diff_change);
-
-        // Check if we have enough data to make a decision
-        if !self.ready_for_evaluation(time_since_change) {
-            return None;
-        }
-
-        let metrics = self.calculate_metrics(time_since_first);
-
-        debug!(
-            "Vardiff: evaluating | dsps={:.6} bias={:.4} drr={:.4} target={:.4} range=[{:.4}, {:.4}]",
-            metrics.dsps,
-            metrics.bias,
-            metrics.diff_rate_ratio,
-            self.target_rate(),
-            metrics.low_threshold,
-            metrics.high_threshold
-        );
-
-        if metrics.is_within_hysteresis() {
-            debug!("Vardiff within hysteresis band, no adjustment needed");
-            return None;
-        }
-
-        self.calculate_new_difficulty(metrics, network_diff, now)
-    }
-
-    fn ready_for_evaluation(&self, time_since_change: Duration) -> bool {
         let enough_shares = self.shares_since_change >= self.min_shares_for_adjustment;
         let enough_time = time_since_change >= self.min_time_for_adjustment;
 
         if !enough_shares && !enough_time {
             debug!(
-                "Skipping vardiff adjustment (shares={}/{} time={:.1}s/{:.1}s)",
+                "Skipping vardiff (shares={}/{} time={:.1}s/{:.1}s)",
                 self.shares_since_change,
                 self.min_shares_for_adjustment,
                 time_since_change.as_secs_f64(),
                 self.min_time_for_adjustment.as_secs_f64()
             );
-
-            return false;
+            return None;
         }
-        true
-    }
 
-    fn calculate_metrics(&self, time_since_first: Duration) -> Metrics {
         let bias = calculate_time_bias(time_since_first, self.window);
         let dsps = self.dsps.value() / bias;
-        let current_diff = self.current_diff.as_f64();
-        let diff_rate_ratio = dsps / current_diff;
+        let diff_rate_ratio = dsps / self.current_diff.as_f64();
         let target_rate = self.target_rate();
-
-        Metrics {
-            dsps,
-            bias,
-            diff_rate_ratio,
-            low_threshold: target_rate * HYSTERESIS_LOW,
-            high_threshold: target_rate * HYSTERESIS_HIGH,
-        }
-    }
-
-    /// Calculates and applies new difficulty if appropriate.
-    fn calculate_new_difficulty(
-        &mut self,
-        metrics: Metrics,
-        network_diff: Difficulty,
-        now: Instant,
-    ) -> Option<Difficulty> {
-        // Calculate optimal difficulty: dsps * target_interval
-        let optimal = metrics.dsps * self.target_interval.as_secs_f64();
-
-        let min_diff = 0.0;
-        let max_diff = network_diff.as_f64();
-        let clamped = optimal.clamp(min_diff, max_diff);
+        let low_threshold = target_rate * HYSTERESIS_LOW;
+        let high_threshold = target_rate * HYSTERESIS_HIGH;
 
         debug!(
-            "Vardiff: optimal={:.6} clamped={:.6} (min={:.6}, max={:.6})",
-            optimal, clamped, min_diff, max_diff
+            "Vardiff: dsps={:.6} bias={:.4} drr={:.4} target={:.4} range=[{:.4}, {:.4}]",
+            dsps, bias, diff_rate_ratio, target_rate, low_threshold, high_threshold
         );
 
+        // Within hysteresis band - no adjustment needed
+        if diff_rate_ratio > low_threshold && diff_rate_ratio < high_threshold {
+            debug!("Vardiff within hysteresis band");
+            return None;
+        }
+
+        // Calculate optimal difficulty
+        let optimal = dsps * self.target_interval.as_secs_f64();
+        let clamped = optimal.clamp(0.0, network_diff.as_f64());
+
         if clamped <= 0.0 {
-            debug!("Skipping vardiff: invalid clamped value");
             return None;
         }
 
         let new_diff = Difficulty::from(clamped);
 
         if self.current_diff == new_diff {
-            debug!("Vardiff already at optimal difficulty {}", new_diff);
             return None;
         }
 
         // Guard against oscillation on difficulty decrease
         if new_diff < self.current_diff && self.shares_since_change == 1 {
-            debug!("Vardiff: first share after potential decrease, deferring");
-            if let Some(ref mut timing) = self.timing {
-                timing.last_diff_change = now;
-            }
+            debug!("Vardiff: deferring decrease after single share");
+            self.last_diff_change = now;
             return None;
         }
 
         debug!(
-            "Vardiff: adjusting {} -> {} (drr={:.4} outside [{:.4}, {:.4}])",
-            self.current_diff,
-            new_diff,
-            metrics.diff_rate_ratio,
-            metrics.low_threshold,
-            metrics.high_threshold
+            "Vardiff: {} -> {} (drr={:.4} outside [{:.4}, {:.4}])",
+            self.current_diff, new_diff, diff_rate_ratio, low_threshold, high_threshold
         );
 
-        self.apply_difficulty_change(new_diff, now);
-        Some(new_diff)
-    }
-
-    /// Applies a difficulty change and resets tracking state.
-    fn apply_difficulty_change(&mut self, new_diff: Difficulty, now: Instant) {
         self.old_diff = self.current_diff;
         self.current_diff = new_diff;
         self.shares_since_change = 0;
-        if let Some(ref mut timing) = self.timing {
-            timing.last_diff_change = now;
-        }
+        self.last_diff_change = now;
+
+        Some(new_diff)
     }
 }
 
@@ -301,21 +235,6 @@ impl Default for Vardiff {
             Duration::from_secs(300),
             Difficulty::from(1),
         )
-    }
-}
-
-/// Metrics used for difficulty evaluation.
-struct Metrics {
-    dsps: f64,
-    bias: f64,
-    diff_rate_ratio: f64,
-    low_threshold: f64,
-    high_threshold: f64,
-}
-
-impl Metrics {
-    fn is_within_hysteresis(&self) -> bool {
-        self.diff_rate_ratio > self.low_threshold && self.diff_rate_ratio < self.high_threshold
     }
 }
 
@@ -447,10 +366,8 @@ mod tests {
 
         // Simulate fast share submission
         let past = Instant::now() - secs(300);
-        vardiff.timing = Some(Timing {
-            first_share: past,
-            last_diff_change: past,
-        });
+        vardiff.first_share = Some(past);
+        vardiff.last_diff_change = past;
         vardiff.dsps = DecayingAverage::with_start_time(secs(10), past);
 
         let mut t = past;
@@ -470,10 +387,8 @@ mod tests {
         let mut vardiff = Vardiff::new(secs(5), secs(10), Difficulty::from(10));
 
         let past = Instant::now() - secs(300);
-        vardiff.timing = Some(Timing {
-            first_share: past,
-            last_diff_change: past,
-        });
+        vardiff.first_share = Some(past);
+        vardiff.last_diff_change = past;
         vardiff.dsps = DecayingAverage::with_start_time(secs(10), past);
 
         let mut t = past;
