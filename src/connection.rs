@@ -43,8 +43,8 @@ where
     ) -> Self {
         let vardiff = Vardiff::new(
             config.start_diff(),
-            Duration::from_secs_f64(config.vardiff_period()),
-            Duration::from_secs_f64(config.vardiff_window()),
+            config.vardiff_period(),
+            config.vardiff_window(),
         );
 
         Self {
@@ -480,7 +480,7 @@ where
                     new_diff,
                     self.worker,
                     self.vardiff.dsps(),
-                    self.config.vardiff_period()
+                    self.config.vardiff_period().as_secs_f64()
                 );
 
                 self.send(Message::Notification {

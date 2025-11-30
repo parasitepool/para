@@ -194,11 +194,11 @@ impl PoolConfig {
         self.zmq_block_notifications.clone()
     }
 
-    pub fn vardiff_period(&self) -> f64 {
-        self.vardiff_period
+    pub fn vardiff_period(&self) -> Duration {
+        Duration::from_secs_f64(self.vardiff_period)
     }
 
-    pub fn vardiff_window(&self) -> f64 {
-        self.vardiff_window
+    pub fn vardiff_window(&self) -> Duration {
+        Duration::from_secs_f64(self.vardiff_window)
     }
 }
