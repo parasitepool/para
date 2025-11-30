@@ -508,16 +508,12 @@ fn concurrently_listening_workers_receive_new_templates_on_new_block() {
     });
 }
 
-// ============================================================================
-// Vardiff Integration Tests
-// ============================================================================
-
 #[tokio::test]
 #[serial(bitcoind)]
 #[timeout(90000)]
 async fn vardiff_uses_start_diff_initially() {
     // Test that the pool sends the configured start_diff on initial connection
-    let pool = TestPool::spawn_with_args("--start-diff 42 --min-diff 1");
+    let pool = TestPool::spawn_with_args("--start-diff 42");
 
     let client = pool.stratum_client().await;
     let mut events = client.connect().await.unwrap();
@@ -531,30 +527,6 @@ async fn vardiff_uses_start_diff_initially() {
     };
 
     assert_eq!(difficulty, Difficulty::from(42));
-}
-
-#[tokio::test]
-#[serial(bitcoind)]
-#[timeout(90000)]
-async fn vardiff_respects_min_diff_configuration() {
-    // Test that min_diff configuration is passed through
-    // We can't easily test that it's enforced without submitting many shares,
-    // but we can at least verify the pool starts with a valid configuration
-    let pool = TestPool::spawn_with_args("--start-diff 10 --min-diff 5");
-
-    let client = pool.stratum_client().await;
-    let mut events = client.connect().await.unwrap();
-
-    client.subscribe().await.unwrap();
-    client.authorize().await.unwrap();
-
-    let difficulty = match events.recv().await.unwrap() {
-        stratum::Event::SetDifficulty(difficulty) => difficulty,
-        _ => panic!("Expected SetDifficulty"),
-    };
-
-    // Start diff should be used initially
-    assert_eq!(difficulty, Difficulty::from(10));
 }
 
 #[tokio::test]
@@ -588,7 +560,7 @@ async fn vardiff_maintains_difficulty_through_share_submission() {
     // Test that vardiff tracks share submissions without error
     // Configure with very low difficulty so we can easily find shares
     let pool = TestPool::spawn_with_args(
-        "--start-diff 0.00001 --min-diff 0.000001 --vardiff-target-interval 5 --vardiff-window 60",
+        "--start-diff 0.00001 --vardiff-target-interval 5 --vardiff-window 60",
     );
 
     let client = pool.stratum_client().await;
@@ -635,7 +607,7 @@ async fn vardiff_can_receive_difficulty_adjustment() {
     // This tests the infrastructure for vardiff, though actually triggering
     // a difficulty change would require many shares over time
     let pool = TestPool::spawn_with_args(
-        "--start-diff 0.00001 --min-diff 0.000001 --vardiff-target-interval 1 --vardiff-window 10",
+        "--start-diff 0.00001 --vardiff-target-interval 1 --vardiff-window 10",
     );
 
     let client = pool.stratum_client().await;

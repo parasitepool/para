@@ -46,11 +46,6 @@ pub(crate) struct PoolConfig {
     start_diff: Difficulty,
     #[arg(
         long,
-        help = "Set <MINIMUM_DIFFICULTY> allowed by pool."
-    )]
-    min_diff: Option<Difficulty>,
-    #[arg(
-        long,
         help = "Target seconds between share submissions for vardiff.",
         default_value = "5.0"
     )]
@@ -197,10 +192,6 @@ impl PoolConfig {
 
     pub fn zmq_block_notifications(&self) -> Endpoint {
         self.zmq_block_notifications.clone()
-    }
-
-    pub fn min_diff(&self) -> Difficulty {
-        self.min_diff.unwrap_or(self.start_diff)
     }
 
     pub fn vardiff_target_interval(&self) -> f64 {

@@ -48,8 +48,6 @@ impl DecayingAverage {
 /// Configuration for the vardiff algorithm.
 #[derive(Debug, Clone)]
 pub struct VardiffConfig {
-    /// Minimum allowed difficulty (floor)
-    pub min_diff: Difficulty,
     /// Target time between share submissions
     pub target_interval: Duration,
     /// Time window for the rolling average
@@ -65,10 +63,9 @@ pub struct VardiffConfig {
 }
 
 impl VardiffConfig {
-    pub fn new(min_diff: Difficulty, target_interval: Duration, window: Duration) -> Self {
+    pub fn new(target_interval: Duration, window: Duration) -> Self {
         let target_secs = target_interval.as_secs_f64();
         Self {
-            min_diff,
             target_interval,
             window,
             // Default thresholds based on ckpool: ~72 shares or ~240 seconds for 5s target
@@ -89,7 +86,6 @@ impl VardiffConfig {
 impl Default for VardiffConfig {
     fn default() -> Self {
         Self::new(
-            Difficulty::from(1),
             Duration::from_secs(5),
             Duration::from_secs(300),
         )
@@ -236,8 +232,7 @@ impl Vardiff {
         // Calculate optimal difficulty: dsps * target_interval
         let optimal = metrics.dsps * self.config.target_interval.as_secs_f64();
 
-        // Clamp to valid range
-        let min_diff = self.config.min_diff.as_f64();
+        let min_diff = 0.0;
         let max_diff = network_diff.as_f64();
         let clamped = optimal.clamp(min_diff, max_diff);
 
@@ -419,7 +414,7 @@ mod tests {
     }
 
     fn test_config() -> VardiffConfig {
-        VardiffConfig::new(Difficulty::from(1), secs(5), secs(300))
+        VardiffConfig::new(secs(5), secs(300))
     }
 
     #[test]
@@ -458,7 +453,7 @@ mod tests {
 
     #[test]
     fn increases_difficulty_for_fast_shares() {
-        let config = VardiffConfig::new(Difficulty::from(1), secs(5), secs(10));
+        let config = VardiffConfig::new(secs(5), secs(10));
         let start_diff = Difficulty::from(10);
         let mut vardiff = Vardiff::new(config, start_diff);
 
@@ -483,16 +478,8 @@ mod tests {
     }
 
     #[test]
-    fn respects_min_diff_floor() {
-        let config = VardiffConfig::new(Difficulty::from(50), secs(5), secs(10));
-        let vardiff = Vardiff::new(config, Difficulty::from(100));
-
-        assert!(vardiff.current_diff() >= Difficulty::from(50));
-    }
-
-    #[test]
     fn respects_network_diff_ceiling() {
-        let config = VardiffConfig::new(Difficulty::from(1), secs(5), secs(10));
+        let config = VardiffConfig::new( secs(5), secs(10));
         let mut vardiff = Vardiff::new(config, Difficulty::from(10));
 
         let past = Instant::now() - secs(300);
