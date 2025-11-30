@@ -46,13 +46,7 @@ pub(crate) struct PoolConfig {
     start_diff: Difficulty,
     #[arg(
         long,
-        help = "Subscribe to <ZMQ_BLOCK_NOTIFICATION>.",
-        default_value = "tcp://127.0.0.1:28332"
-    )]
-    zmq_block_notifications: Endpoint,
-    #[arg(
-        long,
-        help = "Minimum difficulty floor for vardiff. Defaults to start-diff if not set."
+        help = "Set <MINIMUM_DIFFICULTY> allowed by pool."
     )]
     min_diff: Option<Difficulty>,
     #[arg(
@@ -67,6 +61,12 @@ pub(crate) struct PoolConfig {
         default_value = "300"
     )]
     vardiff_window: f64,
+    #[arg(
+        long,
+        help = "Subscribe to <ZMQ_BLOCK_NOTIFICATION>.",
+        default_value = "tcp://127.0.0.1:28332"
+    )]
+    zmq_block_notifications: Endpoint,
 }
 
 impl PoolConfig {
