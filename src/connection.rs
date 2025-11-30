@@ -1,6 +1,10 @@
 use {
     super::*,
-    crate::{job::Job, jobs::Jobs},
+    crate::{
+        job::Job,
+        jobs::Jobs,
+        vardiff::{Vardiff, VardiffConfig},
+    },
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -25,6 +29,7 @@ pub(crate) struct Connection<R, W> {
     version_mask: Option<Version>,
     extranonce1: Option<Extranonce>,
     user_agent: Option<String>,
+    vardiff: Vardiff,
 }
 
 impl<R, W> Connection<R, W>
@@ -40,6 +45,13 @@ where
         workbase_receiver: watch::Receiver<Arc<Workbase>>,
         cancel_token: CancellationToken,
     ) -> Self {
+        let vardiff_config = VardiffConfig::new(
+            config.min_diff(),
+            Duration::from_secs_f64(config.vardiff_target_interval()),
+            Duration::from_secs_f64(config.vardiff_window()),
+        );
+        let vardiff = Vardiff::new(vardiff_config, config.start_diff());
+
         Self {
             config,
             worker,
@@ -54,6 +66,7 @@ where
             version_mask: None,
             extranonce1: None,
             user_agent: None,
+            vardiff,
         }
     }
 
@@ -333,7 +346,7 @@ where
 
         self.send(Message::Notification {
             method: "mining.set_difficulty".into(),
-            params: json!(SetDifficulty(self.config.start_diff())),
+            params: json!(SetDifficulty(self.vardiff.current_diff())),
         })
         .await?;
 
@@ -444,12 +457,9 @@ where
             }
         }
 
-        if self
-            .config
-            .start_diff()
-            .to_target()
-            .is_met_by(header.block_hash())
-        {
+        let current_diff = self.vardiff.current_diff();
+
+        if current_diff.to_target().is_met_by(header.block_hash()) {
             self.send(Message::Response {
                 id,
                 result: Some(json!(true)),
@@ -457,6 +467,30 @@ where
                 reject_reason: None,
             })
             .await?;
+
+            // Record the share and check if difficulty should be adjusted
+            let network_diff = Difficulty::from(job.nbits());
+            let stats = self.vardiff.stats();
+            info!(
+                "Share accepted from {} | diff={} dsps={:.4} shares_since_change={}",
+                self.worker, current_diff, stats.dsps, stats.shares_since_change
+            );
+
+            if let Some(new_diff) = self.vardiff.record_share(current_diff, network_diff) {
+                info!(
+                    "Vardiff: adjusting difficulty {} -> {} for {} | dsps={:.4} target_interval={}s",
+                    current_diff,
+                    new_diff,
+                    self.worker,
+                    stats.dsps,
+                    self.config.vardiff_target_interval()
+                );
+                self.send(Message::Notification {
+                    method: "mining.set_difficulty".into(),
+                    params: json!(SetDifficulty(new_diff)),
+                })
+                .await?;
+            }
         } else {
             self.send_error(id, StratumError::AboveTarget, None).await?;
         }

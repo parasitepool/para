@@ -25,7 +25,7 @@ unused:
   cargo +nightly udeps --workspace
 
 doc:
-  cargo doc --workspace --open
+  cargo doc --package para --open
 
 audit:
   cargo audit
@@ -67,6 +67,8 @@ pool:
     --bitcoin-rpc-password nakamoto \
     --bitcoin-rpc-port 38332 \
     --start-diff 0.00001 \
+    --vardiff-window 30 \
+    --vardiff-target-interval 1 \
     --zmq-block-notifications tcp://127.0.0.1:28332
 
 server: 

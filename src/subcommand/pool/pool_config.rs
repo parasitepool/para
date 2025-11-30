@@ -50,6 +50,23 @@ pub(crate) struct PoolConfig {
         default_value = "tcp://127.0.0.1:28332"
     )]
     zmq_block_notifications: Endpoint,
+    #[arg(
+        long,
+        help = "Minimum difficulty floor for vardiff. Defaults to start-diff if not set."
+    )]
+    min_diff: Option<Difficulty>,
+    #[arg(
+        long,
+        help = "Target seconds between share submissions for vardiff.",
+        default_value = "5.0"
+    )]
+    vardiff_target_interval: f64,
+    #[arg(
+        long,
+        help = "Rolling average window in seconds for measuring share rate.",
+        default_value = "300"
+    )]
+    vardiff_window: f64,
 }
 
 impl PoolConfig {
@@ -180,5 +197,17 @@ impl PoolConfig {
 
     pub fn zmq_block_notifications(&self) -> Endpoint {
         self.zmq_block_notifications.clone()
+    }
+
+    pub fn min_diff(&self) -> Difficulty {
+        self.min_diff.unwrap_or(self.start_diff)
+    }
+
+    pub fn vardiff_target_interval(&self) -> f64 {
+        self.vardiff_target_interval
+    }
+
+    pub fn vardiff_window(&self) -> f64 {
+        self.vardiff_window
     }
 }
