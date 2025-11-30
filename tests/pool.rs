@@ -510,102 +510,15 @@ fn concurrently_listening_workers_receive_new_templates_on_new_block() {
 
 #[tokio::test]
 #[serial(bitcoind)]
-#[timeout(90000)]
-async fn vardiff_uses_start_diff_initially() {
-    // Test that the pool sends the configured start_diff on initial connection
-    let pool = TestPool::spawn_with_args("--start-diff 42");
-
-    let client = pool.stratum_client().await;
-    let mut events = client.connect().await.unwrap();
-
-    client.subscribe().await.unwrap();
-    client.authorize().await.unwrap();
-
-    let difficulty = match events.recv().await.unwrap() {
-        stratum::Event::SetDifficulty(difficulty) => difficulty,
-        _ => panic!("Expected SetDifficulty as first event after authorize"),
-    };
-
-    assert_eq!(difficulty, Difficulty::from(42));
-}
-
-#[tokio::test]
-#[serial(bitcoind)]
-#[timeout(90000)]
-async fn vardiff_configuration_accepts_target_interval() {
-    // Test that vardiff-target-interval is accepted as a CLI argument
-    let pool = TestPool::spawn_with_args(
-        "--start-diff 0.00001 --vardiff-target-interval 10.0 --vardiff-window 60",
-    );
-
-    let client = pool.stratum_client().await;
-    let mut events = client.connect().await.unwrap();
-
-    client.subscribe().await.unwrap();
-    client.authorize().await.unwrap();
-
-    // Just verify the pool starts up correctly with these parameters
-    let difficulty = match events.recv().await.unwrap() {
-        stratum::Event::SetDifficulty(difficulty) => difficulty,
-        _ => panic!("Expected SetDifficulty"),
-    };
-
-    assert_eq!(difficulty, Difficulty::from(0.00001));
-}
-
-#[tokio::test]
-#[serial(bitcoind)]
 #[timeout(120000)]
-async fn vardiff_maintains_difficulty_through_share_submission() {
-    // Test that vardiff tracks share submissions without error
-    // Configure with very low difficulty so we can easily find shares
-    let pool = TestPool::spawn_with_args(
-        "--start-diff 0.00001 --vardiff-target-interval 5 --vardiff-window 60",
-    );
+async fn vardiff_initialization_and_share_submission() {
+    // Comprehensive vardiff test that validates:
+    // 1. Pool accepts all vardiff CLI configuration options
+    // 2. Start difficulty is correctly applied to new connections
+    // 3. Share submission works with vardiff tracking enabled
+    // 4. Multiple shares can be submitted without errors
+    // 5. Event channel remains functional throughout
 
-    let client = pool.stratum_client().await;
-    let mut events = client.connect().await.unwrap();
-
-    let (subscribe, _, _) = client.subscribe().await.unwrap();
-    let extranonce1 = subscribe.extranonce1;
-    let extranonce2 = Extranonce::random(subscribe.extranonce2_size);
-
-    client.authorize().await.unwrap();
-
-    let (notify, initial_difficulty) = timeout(Duration::from_secs(10), async {
-        let mut difficulty = stratum::Difficulty::from(1);
-        loop {
-            match events.recv().await.unwrap() {
-                stratum::Event::SetDifficulty(diff) => difficulty = diff,
-                stratum::Event::Notify(notify) => return (notify, difficulty),
-                _ => {}
-            }
-        }
-    })
-    .await
-    .expect("Timeout waiting for initial notification");
-
-    // Submit a valid share
-    let (ntime, nonce) = solve_share(&notify, &extranonce1, &extranonce2, initial_difficulty);
-
-    let submit_result = client
-        .submit(notify.job_id, extranonce2.clone(), ntime, nonce)
-        .await;
-
-    // Share should be accepted
-    assert!(submit_result.is_ok(), "First share should be accepted");
-
-    // The connection should still be functional
-    // (vardiff tracking shouldn't cause any errors)
-}
-
-#[tokio::test]
-#[serial(bitcoind)]
-#[timeout(120000)]
-async fn vardiff_can_receive_difficulty_adjustment() {
-    // Test that the client can receive a set_difficulty notification
-    // This tests the infrastructure for vardiff, though actually triggering
-    // a difficulty change would require many shares over time
     let pool = TestPool::spawn_with_args(
         "--start-diff 0.00001 --vardiff-target-interval 1 --vardiff-window 10",
     );
@@ -618,6 +531,7 @@ async fn vardiff_can_receive_difficulty_adjustment() {
 
     client.authorize().await.unwrap();
 
+    // Verify start_diff is applied correctly
     let (notify, difficulty) = timeout(Duration::from_secs(10), async {
         let mut difficulty = stratum::Difficulty::from(1);
         loop {
@@ -631,9 +545,13 @@ async fn vardiff_can_receive_difficulty_adjustment() {
     .await
     .expect("Timeout waiting for initial notification");
 
-    // Submit multiple shares rapidly to potentially trigger vardiff
-    // Note: Actually triggering vardiff requires many shares over time,
-    // so this test primarily validates the infrastructure works
+    assert_eq!(
+        difficulty,
+        Difficulty::from(0.00001),
+        "Start difficulty should match configured value"
+    );
+
+    // Submit multiple shares to validate vardiff tracking infrastructure
     for i in 0..5 {
         let extranonce2 = Extranonce::random(subscribe.extranonce2_size);
         let (ntime, nonce) = solve_share(&notify, &extranonce1, &extranonce2, difficulty);
@@ -653,13 +571,11 @@ async fn vardiff_can_receive_difficulty_adjustment() {
         }
     }
 
-    // Verify we can still receive events (including potential set_difficulty)
-    // This validates the channel remains functional after share submission
+    // Verify event channel remains functional after share submissions
     let _ = timeout(Duration::from_millis(500), async {
         loop {
             match events.recv().await {
                 Ok(stratum::Event::SetDifficulty(new_diff)) => {
-                    // If we get a difficulty change, that's great!
                     println!("Received difficulty adjustment to {}", new_diff);
                     return Some(new_diff);
                 }
@@ -669,6 +585,4 @@ async fn vardiff_can_receive_difficulty_adjustment() {
         }
     })
     .await;
-
-    // Test passes if we get here without errors - the infrastructure works
 }

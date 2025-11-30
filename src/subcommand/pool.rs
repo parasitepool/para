@@ -231,4 +231,28 @@ mod tests {
         let config = parse_pool_config("para pool");
         assert_eq!(config.start_diff(), Difficulty::from(1));
     }
+
+    #[test]
+    fn vardiff_target_interval() {
+        let config = parse_pool_config("para pool --vardiff-target-interval 10.0");
+        assert_eq!(config.vardiff_target_interval(), 10.0);
+
+        let config = parse_pool_config("para pool --vardiff-target-interval 0.5");
+        assert_eq!(config.vardiff_target_interval(), 0.5);
+
+        let config = parse_pool_config("para pool");
+        assert_eq!(config.vardiff_target_interval(), 5.0);
+    }
+
+    #[test]
+    fn vardiff_window() {
+        let config = parse_pool_config("para pool --vardiff-window 60");
+        assert_eq!(config.vardiff_window(), 60.0);
+
+        let config = parse_pool_config("para pool --vardiff-window 600.5");
+        assert_eq!(config.vardiff_window(), 600.5);
+
+        let config = parse_pool_config("para pool");
+        assert_eq!(config.vardiff_window(), 300.0);
+    }
 }
