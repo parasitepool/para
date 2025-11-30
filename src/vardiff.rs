@@ -359,12 +359,12 @@ mod tests {
         let start_diff = Difficulty::from(10);
         let mut vardiff = Vardiff::new(secs(5), secs(10), start_diff);
 
-        let past = Instant::now() - secs(300);
-        vardiff.first_share = Some(past);
-        vardiff.last_diff_change = past;
-        vardiff.dsps = DecayingAverage::with_start_time(secs(10), past);
+        let base = Instant::now();
+        vardiff.first_share = Some(base);
+        vardiff.last_diff_change = base;
+        vardiff.dsps = DecayingAverage::with_start_time(secs(10), base);
 
-        let mut t = past;
+        let mut t = base;
         for _ in 0..100 {
             t += millis(100);
             vardiff.dsps.record(10.0, t);
@@ -380,12 +380,12 @@ mod tests {
     fn respects_network_diff_ceiling() {
         let mut vardiff = Vardiff::new(secs(5), secs(10), Difficulty::from(10));
 
-        let past = Instant::now() - secs(300);
-        vardiff.first_share = Some(past);
-        vardiff.last_diff_change = past;
-        vardiff.dsps = DecayingAverage::with_start_time(secs(10), past);
+        let base = Instant::now();
+        vardiff.first_share = Some(base);
+        vardiff.last_diff_change = base;
+        vardiff.dsps = DecayingAverage::with_start_time(secs(10), base);
 
-        let mut t = past;
+        let mut t = base;
         for _ in 0..100 {
             t += millis(10);
             vardiff.dsps.record(10.0, t);
