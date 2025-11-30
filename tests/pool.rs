@@ -519,9 +519,8 @@ async fn vardiff_initialization_and_share_submission() {
     // 4. Multiple shares can be submitted without errors
     // 5. Event channel remains functional throughout
 
-    let pool = TestPool::spawn_with_args(
-        "--start-diff 0.00001 --vardiff-target-interval 1 --vardiff-window 10",
-    );
+    let pool =
+        TestPool::spawn_with_args("--start-diff 0.00001 --vardiff-period 1 --vardiff-window 10");
 
     let client = pool.stratum_client().await;
     let mut events = client.connect().await.unwrap();

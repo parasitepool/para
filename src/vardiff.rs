@@ -85,10 +85,7 @@ impl VardiffConfig {
 
 impl Default for VardiffConfig {
     fn default() -> Self {
-        Self::new(
-            Duration::from_secs(5),
-            Duration::from_secs(300),
-        )
+        Self::new(Duration::from_secs(5), Duration::from_secs(300))
     }
 }
 
@@ -479,7 +476,7 @@ mod tests {
 
     #[test]
     fn respects_network_diff_ceiling() {
-        let config = VardiffConfig::new( secs(5), secs(10));
+        let config = VardiffConfig::new(secs(5), secs(10));
         let mut vardiff = Vardiff::new(config, Difficulty::from(10));
 
         let past = Instant::now() - secs(300);

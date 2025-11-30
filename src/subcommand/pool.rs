@@ -233,15 +233,15 @@ mod tests {
     }
 
     #[test]
-    fn vardiff_target_interval() {
-        let config = parse_pool_config("para pool --vardiff-target-interval 10.0");
-        assert_eq!(config.vardiff_target_interval(), 10.0);
+    fn vardiff_period() {
+        let config = parse_pool_config("para pool --vardiff-period 10.0");
+        assert_eq!(config.vardiff_period(), 10.0);
 
-        let config = parse_pool_config("para pool --vardiff-target-interval 0.5");
-        assert_eq!(config.vardiff_target_interval(), 0.5);
+        let config = parse_pool_config("para pool --vardiff-period 0.5");
+        assert_eq!(config.vardiff_period(), 0.5);
 
         let config = parse_pool_config("para pool");
-        assert_eq!(config.vardiff_target_interval(), 5.0);
+        assert_eq!(config.vardiff_period(), 5.0);
     }
 
     #[test]

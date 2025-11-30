@@ -46,13 +46,13 @@ pub(crate) struct PoolConfig {
     start_diff: Difficulty,
     #[arg(
         long,
-        help = "Target seconds between share submissions for vardiff.",
+        help = "Target <VARDIFF_PERIOD> seconds between share submissions.",
         default_value = "5.0"
     )]
-    vardiff_target_interval: f64,
+    vardiff_period: f64,
     #[arg(
         long,
-        help = "Rolling average window in seconds for measuring share rate.",
+        help = "Average share rate over <VARDIFF_WINDOW> seconds.",
         default_value = "300"
     )]
     vardiff_window: f64,
@@ -194,8 +194,8 @@ impl PoolConfig {
         self.zmq_block_notifications.clone()
     }
 
-    pub fn vardiff_target_interval(&self) -> f64 {
-        self.vardiff_target_interval
+    pub fn vardiff_period(&self) -> f64 {
+        self.vardiff_period
     }
 
     pub fn vardiff_window(&self) -> f64 {

@@ -46,7 +46,7 @@ where
         cancel_token: CancellationToken,
     ) -> Self {
         let vardiff_config = VardiffConfig::new(
-            Duration::from_secs_f64(config.vardiff_target_interval()),
+            Duration::from_secs_f64(config.vardiff_period()),
             Duration::from_secs_f64(config.vardiff_window()),
         );
         let vardiff = Vardiff::new(vardiff_config, config.start_diff());
@@ -477,12 +477,12 @@ where
 
             if let Some(new_diff) = self.vardiff.record_share(current_diff, network_diff) {
                 info!(
-                    "Vardiff: adjusting difficulty {} -> {} for {} | dsps={:.4} target_interval={}s",
+                    "Vardiff: adjusting difficulty {} -> {} for {} | dsps={:.4} period={}s",
                     current_diff,
                     new_diff,
                     self.worker,
                     stats.dsps,
-                    self.config.vardiff_target_interval()
+                    self.config.vardiff_period()
                 );
                 self.send(Message::Notification {
                     method: "mining.set_difficulty".into(),
