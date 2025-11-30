@@ -22,16 +22,16 @@ const HYSTERESIS_LOW: f64 = 0.5;
 const HYSTERESIS_HIGH: f64 = 1.33;
 
 /// Computes `1 - e^(-x)` with numerical stability.
-/// Returns 0.0 at x=0, approaches 1.0 as x approaches infinity.
-/// Uses `exp_m1` for accuracy with small x, caps input at [`EXP_SATURATION_LIMIT`].
-fn exponential_fill_fraction(x: f64) -> f64 {
+/// Returns 0.0 at x=0, saturates to 1.0 as x increases.
+/// Used for EMA warmup bias correction.
+fn exponential_saturation(x: f64) -> f64 {
     -(-x.min(EXP_SATURATION_LIMIT)).exp_m1()
 }
 
 /// Calculates time bias based on how much history we have.
 /// Returns a value approaching 1.0 as elapsed time exceeds the window.
 fn calculate_time_bias(elapsed: Duration, window: Duration) -> f64 {
-    exponential_fill_fraction(elapsed.as_secs_f64() / window.as_secs_f64())
+    exponential_saturation(elapsed.as_secs_f64() / window.as_secs_f64())
 }
 
 #[derive(Debug, Clone)]
@@ -66,7 +66,7 @@ impl DecayingAverage {
         }
 
         let window_secs = self.window.as_secs_f64();
-        let decay_factor = exponential_fill_fraction(elapsed / window_secs);
+        let decay_factor = exponential_saturation(elapsed / window_secs);
         let normalizer = 1.0 + decay_factor;
 
         self.value = (self.value + (sample / elapsed) * decay_factor) / normalizer;
@@ -113,27 +113,22 @@ impl Vardiff {
         }
     }
 
-    /// Target share rate (shares per second at difficulty 1).
     fn target_rate(&self) -> f64 {
         1.0 / self.target_interval.as_secs_f64()
     }
 
-    /// Returns the current difficulty.
     pub(crate) fn current_diff(&self) -> Difficulty {
         self.current_diff
     }
 
-    /// Returns the current difficulty-weighted shares per second.
     pub(crate) fn dsps(&self) -> f64 {
         self.dsps.value()
     }
 
-    /// Returns the number of shares since the last difficulty change.
     pub(crate) fn shares_since_change(&self) -> u32 {
         self.shares_since_change
     }
 
-    /// Records a share and returns a new difficulty if adjustment is needed.
     pub(crate) fn record_share(
         &mut self,
         share_diff: Difficulty,
