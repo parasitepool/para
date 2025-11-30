@@ -187,29 +187,25 @@ impl Vardiff {
             dsps, bias, diff_rate_ratio, target_rate, low_threshold, high_threshold
         );
 
-        // Within hysteresis band - no adjustment needed
         if diff_rate_ratio > low_threshold && diff_rate_ratio < high_threshold {
             debug!("Vardiff within hysteresis band");
             return None;
         }
 
-        // Calculate optimal difficulty
         let optimal = dsps * self.target_interval.as_secs_f64();
-        let clamped = optimal.clamp(0.0, network_diff.as_f64());
+        assert!(optimal > 0.0, "optimal difficulty must be positive");
 
-        if clamped <= 0.0 {
-            return None;
-        }
-
-        let new_diff = Difficulty::from(clamped);
+        let new_diff = Difficulty::from(optimal.min(network_diff.as_f64()));
 
         if self.current_diff == new_diff {
             return None;
         }
 
-        // Guard against oscillation on difficulty decrease
         if new_diff < self.current_diff && self.shares_since_change == 1 {
-            debug!("Vardiff: deferring decrease after single share");
+            debug!(
+                "Guarding against oscillation on difficulty decrease after first share since adjustment"
+            );
+
             self.last_diff_change = now;
             return None;
         }
@@ -275,7 +271,6 @@ mod tests {
         avg.record(100.0, start + secs(1));
         let initial = avg.value();
 
-        // Decay by recording zero
         avg.record(0.0, start + secs(31));
         assert!(avg.value() < initial);
     }
@@ -364,7 +359,6 @@ mod tests {
         let start_diff = Difficulty::from(10);
         let mut vardiff = Vardiff::new(secs(5), secs(10), start_diff);
 
-        // Simulate fast share submission
         let past = Instant::now() - secs(300);
         vardiff.first_share = Some(past);
         vardiff.last_diff_change = past;
@@ -409,34 +403,24 @@ mod tests {
 
     #[test]
     fn min_shares_derived_from_window_ratio() {
-        // min_shares = (window / period) * 1.2
-
-        // 60s window, 1s period → 60 expected shares → 72 min
         let vardiff = Vardiff::new(secs(1), secs(60), Difficulty::from(1));
         assert_eq!(vardiff.min_shares_for_adjustment, 72);
 
-        // 300s window, 5s period → 60 expected shares → 72 min (ckpool default)
         let vardiff = Vardiff::new(secs(5), secs(300), Difficulty::from(1));
         assert_eq!(vardiff.min_shares_for_adjustment, 72);
 
-        // 2s window, 1s period → 2 expected shares → 2.4 → 2
         let vardiff = Vardiff::new(secs(1), secs(2), Difficulty::from(1));
         assert_eq!(vardiff.min_shares_for_adjustment, 2);
     }
 
     #[test]
     fn min_time_derived_from_window_ratio() {
-        // min_time = window * 0.8
-
-        // 300s window → 240s min_time (ckpool default)
         let vardiff = Vardiff::new(secs(5), secs(300), Difficulty::from(1));
         assert_eq!(vardiff.min_time_for_adjustment, secs(240));
 
-        // 60s window → 48s min_time
         let vardiff = Vardiff::new(secs(1), secs(60), Difficulty::from(1));
         assert_eq!(vardiff.min_time_for_adjustment, secs(48));
 
-        // 10s window → 8s min_time
         let vardiff = Vardiff::new(secs(1), secs(10), Difficulty::from(1));
         assert_eq!(vardiff.min_time_for_adjustment, secs(8));
     }
