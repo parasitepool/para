@@ -1,10 +1,6 @@
 use {
     super::*,
-    crate::{
-        job::Job,
-        jobs::Jobs,
-        vardiff::{Vardiff, VardiffConfig},
-    },
+    crate::{job::Job, jobs::Jobs, vardiff::Vardiff},
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -45,11 +41,11 @@ where
         workbase_receiver: watch::Receiver<Arc<Workbase>>,
         cancel_token: CancellationToken,
     ) -> Self {
-        let vardiff_config = VardiffConfig::new(
+        let vardiff = Vardiff::new(
             Duration::from_secs_f64(config.vardiff_period()),
             Duration::from_secs_f64(config.vardiff_window()),
+            config.start_diff(),
         );
-        let vardiff = Vardiff::new(vardiff_config, config.start_diff());
 
         Self {
             config,
@@ -467,23 +463,26 @@ where
             })
             .await?;
 
-            // Record the share and check if difficulty should be adjusted
             let network_diff = Difficulty::from(job.nbits());
-            let stats = self.vardiff.stats();
-            info!(
+
+            debug!(
                 "Share accepted from {} | diff={} dsps={:.4} shares_since_change={}",
-                self.worker, current_diff, stats.dsps, stats.shares_since_change
+                self.worker,
+                current_diff,
+                self.vardiff.dsps(),
+                self.vardiff.shares_since_change()
             );
 
             if let Some(new_diff) = self.vardiff.record_share(current_diff, network_diff) {
-                info!(
-                    "Vardiff: adjusting difficulty {} -> {} for {} | dsps={:.4} period={}s",
+                debug!(
+                    "Adjusting difficulty {} -> {} for {} | dsps={:.4} period={}s",
                     current_diff,
                     new_diff,
                     self.worker,
-                    stats.dsps,
+                    self.vardiff.dsps(),
                     self.config.vardiff_period()
                 );
+
                 self.send(Message::Notification {
                     method: "mining.set_difficulty".into(),
                     params: json!(SetDifficulty(new_diff)),

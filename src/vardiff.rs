@@ -1,5 +1,39 @@
 use super::*;
 
+/// Maximum ratio where `1 - e^(-x)` is distinguishable from 1.0.
+/// Beyond this, `e^(-x) < f64::EPSILON` and the subtraction rounds to exactly 1.0.
+/// Derived from: `-ln(f64::EPSILON) ≈ 36.04`
+const EXP_SATURATION_LIMIT: f64 = 36.0;
+
+/// Minimum time before considering difficulty adjustment, as a fraction of the window.
+/// Derived from ckpool: 240s min_time / 300s window = 0.8
+const MIN_TIME_WINDOW_RATIO: f64 = 0.8;
+
+/// Minimum shares before considering adjustment, as a multiple of expected shares per window.
+/// Derived from ckpool: 72 shares / (300s window / 5s period) = 72 / 60 = 1.2
+const MIN_SHARES_WINDOW_RATIO: f64 = 1.2;
+
+/// Lower hysteresis bound: don't decrease difficulty unless rate drops below this fraction of target.
+/// From ckpool.
+const HYSTERESIS_LOW: f64 = 0.5;
+
+/// Upper hysteresis bound: don't increase difficulty unless rate exceeds this fraction of target.
+/// From ckpool.
+const HYSTERESIS_HIGH: f64 = 1.33;
+
+/// Computes `1 - e^(-x)` with numerical stability.
+/// Returns 0.0 at x=0, approaches 1.0 as x approaches infinity.
+/// Uses `exp_m1` for accuracy with small x, caps input at [`EXP_SATURATION_LIMIT`].
+fn exponential_fill_fraction(x: f64) -> f64 {
+    -(-x.min(EXP_SATURATION_LIMIT)).exp_m1()
+}
+
+/// Calculates time bias based on how much history we have.
+/// Returns a value approaching 1.0 as elapsed time exceeds the window.
+fn calculate_time_bias(elapsed: Duration, window: Duration) -> f64 {
+    exponential_fill_fraction(elapsed.as_secs_f64() / window.as_secs_f64())
+}
+
 #[derive(Debug, Clone)]
 pub struct DecayingAverage {
     value: f64,
@@ -32,8 +66,7 @@ impl DecayingAverage {
         }
 
         let window_secs = self.window.as_secs_f64();
-        let decay_exp = (elapsed / window_secs).min(36.0);
-        let decay_factor = 1.0 - (-decay_exp).exp();
+        let decay_factor = exponential_fill_fraction(elapsed / window_secs);
         let normalizer = 1.0 + decay_factor;
 
         self.value = (self.value + (sample / elapsed) * decay_factor) / normalizer;
@@ -42,51 +75,6 @@ impl DecayingAverage {
 
     pub fn value(&self) -> f64 {
         self.value
-    }
-}
-
-/// Configuration for the vardiff algorithm.
-#[derive(Debug, Clone)]
-pub struct VardiffConfig {
-    /// Target time between share submissions
-    pub target_interval: Duration,
-    /// Time window for the rolling average
-    pub window: Duration,
-    /// Minimum shares before considering adjustment
-    pub min_shares_for_adjustment: u32,
-    /// Minimum time before considering adjustment
-    pub min_time_for_adjustment: Duration,
-    /// Lower bound of hysteresis band (as fraction of target rate)
-    pub hysteresis_low: f64,
-    /// Upper bound of hysteresis band (as fraction of target rate)
-    pub hysteresis_high: f64,
-}
-
-impl VardiffConfig {
-    pub fn new(target_interval: Duration, window: Duration) -> Self {
-        let target_secs = target_interval.as_secs_f64();
-        Self {
-            target_interval,
-            window,
-            // Default thresholds based on ckpool: ~72 shares or ~240 seconds for 5s target
-            // Floor of 3 shares prevents instability with subsecond periods
-            min_shares_for_adjustment: (target_secs * 14.4).max(3.0) as u32,
-            min_time_for_adjustment: Duration::from_secs_f64(target_secs * 48.0),
-            // Hysteresis band: [0.5x, 1.33x] of target rate
-            hysteresis_low: 0.5,
-            hysteresis_high: 1.33,
-        }
-    }
-
-    /// Target share rate (shares per second at difficulty 1).
-    fn target_rate(&self) -> f64 {
-        1.0 / self.target_interval.as_secs_f64()
-    }
-}
-
-impl Default for VardiffConfig {
-    fn default() -> Self {
-        Self::new(Duration::from_secs(5), Duration::from_secs(300))
     }
 }
 
@@ -100,7 +88,10 @@ struct Timing {
 /// Variable difficulty state for a miner connection.
 #[derive(Debug, Clone)]
 pub struct Vardiff {
-    config: VardiffConfig,
+    target_interval: Duration,
+    window: Duration,
+    min_shares_for_adjustment: u32,
+    min_time_for_adjustment: Duration,
     dsps: DecayingAverage,
     current_diff: Difficulty,
     old_diff: Difficulty,
@@ -110,10 +101,18 @@ pub struct Vardiff {
 
 impl Vardiff {
     /// Creates a new vardiff tracker.
-    pub fn new(config: VardiffConfig, start_diff: Difficulty) -> Self {
+    pub fn new(target_interval: Duration, window: Duration, start_diff: Difficulty) -> Self {
+        let target_secs = target_interval.as_secs_f64();
+        let window_secs = window.as_secs_f64();
+        let expected_shares_per_window = window_secs / target_secs;
+
         Self {
-            dsps: DecayingAverage::new(config.window),
-            config,
+            target_interval,
+            window,
+            min_shares_for_adjustment: (expected_shares_per_window * MIN_SHARES_WINDOW_RATIO)
+                as u32,
+            min_time_for_adjustment: Duration::from_secs_f64(window_secs * MIN_TIME_WINDOW_RATIO),
+            dsps: DecayingAverage::new(window),
             current_diff: start_diff,
             old_diff: start_diff,
             timing: None,
@@ -121,9 +120,24 @@ impl Vardiff {
         }
     }
 
+    /// Target share rate (shares per second at difficulty 1).
+    fn target_rate(&self) -> f64 {
+        1.0 / self.target_interval.as_secs_f64()
+    }
+
     /// Returns the current difficulty.
     pub fn current_diff(&self) -> Difficulty {
         self.current_diff
+    }
+
+    /// Returns the current difficulty-weighted shares per second.
+    pub fn dsps(&self) -> f64 {
+        self.dsps.value()
+    }
+
+    /// Returns the number of shares since the last difficulty change.
+    pub fn shares_since_change(&self) -> u32 {
+        self.shares_since_change
     }
 
     /// Records a share and returns a new difficulty if adjustment is needed.
@@ -171,52 +185,50 @@ impl Vardiff {
             metrics.dsps,
             metrics.bias,
             metrics.diff_rate_ratio,
-            self.config.target_rate(),
+            self.target_rate(),
             metrics.low_threshold,
             metrics.high_threshold
         );
 
-        // Check hysteresis - don't adjust if within acceptable range
         if metrics.is_within_hysteresis() {
-            debug!("Vardiff: within hysteresis band, no adjustment needed");
+            debug!("Vardiff within hysteresis band, no adjustment needed");
             return None;
         }
 
         self.calculate_new_difficulty(metrics, network_diff, now)
     }
 
-    /// Checks if enough shares/time have passed for evaluation.
     fn ready_for_evaluation(&self, time_since_change: Duration) -> bool {
-        let enough_shares = self.shares_since_change >= self.config.min_shares_for_adjustment;
-        let enough_time = time_since_change >= self.config.min_time_for_adjustment;
+        let enough_shares = self.shares_since_change >= self.min_shares_for_adjustment;
+        let enough_time = time_since_change >= self.min_time_for_adjustment;
 
         if !enough_shares && !enough_time {
             debug!(
-                "Vardiff: skipping (shares={}/{} time={:.1}s/{:.1}s)",
+                "Skipping vardiff adjustment (shares={}/{} time={:.1}s/{:.1}s)",
                 self.shares_since_change,
-                self.config.min_shares_for_adjustment,
+                self.min_shares_for_adjustment,
                 time_since_change.as_secs_f64(),
-                self.config.min_time_for_adjustment.as_secs_f64()
+                self.min_time_for_adjustment.as_secs_f64()
             );
+
             return false;
         }
         true
     }
 
-    /// Calculates current metrics for difficulty evaluation.
     fn calculate_metrics(&self, time_since_first: Duration) -> Metrics {
-        let bias = calculate_time_bias(time_since_first, self.config.window);
+        let bias = calculate_time_bias(time_since_first, self.window);
         let dsps = self.dsps.value() / bias;
         let current_diff = self.current_diff.as_f64();
         let diff_rate_ratio = dsps / current_diff;
-        let target_rate = self.config.target_rate();
+        let target_rate = self.target_rate();
 
         Metrics {
             dsps,
             bias,
             diff_rate_ratio,
-            low_threshold: target_rate * self.config.hysteresis_low,
-            high_threshold: target_rate * self.config.hysteresis_high,
+            low_threshold: target_rate * HYSTERESIS_LOW,
+            high_threshold: target_rate * HYSTERESIS_HIGH,
         }
     }
 
@@ -228,7 +240,7 @@ impl Vardiff {
         now: Instant,
     ) -> Option<Difficulty> {
         // Calculate optimal difficulty: dsps * target_interval
-        let optimal = metrics.dsps * self.config.target_interval.as_secs_f64();
+        let optimal = metrics.dsps * self.target_interval.as_secs_f64();
 
         let min_diff = 0.0;
         let max_diff = network_diff.as_f64();
@@ -240,15 +252,14 @@ impl Vardiff {
         );
 
         if clamped <= 0.0 {
-            debug!("Vardiff: invalid clamped value, skipping");
+            debug!("Skipping vardiff: invalid clamped value");
             return None;
         }
 
         let new_diff = Difficulty::from(clamped);
 
-        // No change if already at optimal
         if self.current_diff == new_diff {
-            debug!("Vardiff: already at optimal difficulty {}", new_diff);
+            debug!("Vardiff already at optimal difficulty {}", new_diff);
             return None;
         }
 
@@ -283,13 +294,15 @@ impl Vardiff {
             timing.last_diff_change = now;
         }
     }
+}
 
-    /// Returns current statistics.
-    pub fn stats(&self) -> VardiffStats {
-        VardiffStats {
-            dsps: self.dsps.value(),
-            shares_since_change: self.shares_since_change,
-        }
+impl Default for Vardiff {
+    fn default() -> Self {
+        Self::new(
+            Duration::from_secs(5),
+            Duration::from_secs(300),
+            Difficulty::from(1),
+        )
     }
 }
 
@@ -306,21 +319,6 @@ impl Metrics {
     fn is_within_hysteresis(&self) -> bool {
         self.diff_rate_ratio > self.low_threshold && self.diff_rate_ratio < self.high_threshold
     }
-}
-
-/// Statistics about vardiff state.
-#[derive(Debug, Clone)]
-pub struct VardiffStats {
-    pub dsps: f64,
-    pub shares_since_change: u32,
-}
-
-/// Calculates time bias based on how much history we have.
-///
-/// Returns a value approaching 1.0 as elapsed time exceeds the window.
-fn calculate_time_bias(elapsed: Duration, window: Duration) -> f64 {
-    let ratio = (elapsed.as_secs_f64() / window.as_secs_f64()).min(36.0);
-    1.0 - (-ratio).exp()
 }
 
 #[cfg(test)]
@@ -390,19 +388,19 @@ mod tests {
     }
 
     #[test]
-    fn starts_low() {
+    fn time_bias_starts_low() {
         let bias = calculate_time_bias(secs(1), secs(300));
         assert!(bias < 0.01, "Expected low bias, got {}", bias);
     }
 
     #[test]
-    fn approaches_one() {
+    fn time_bias_approaches_one() {
         let bias = calculate_time_bias(secs(3000), secs(300));
         assert!(bias > 0.99, "Expected high bias, got {}", bias);
     }
 
     #[test]
-    fn moderate_at_half_window() {
+    fn time_bias_moderate_at_half_window() {
         let bias = calculate_time_bias(secs(150), secs(300));
         assert!(
             (0.3..0.5).contains(&bias),
@@ -411,26 +409,22 @@ mod tests {
         );
     }
 
-    fn test_config() -> VardiffConfig {
-        VardiffConfig::new(secs(5), secs(300))
-    }
-
     #[test]
     fn tracks_initial_difficulty() {
-        let vardiff = Vardiff::new(test_config(), Difficulty::from(10));
+        let vardiff = Vardiff::new(secs(5), secs(300), Difficulty::from(10));
         assert_eq!(vardiff.current_diff(), Difficulty::from(10));
     }
 
     #[test]
     fn no_change_on_first_share() {
-        let mut vardiff = Vardiff::new(test_config(), Difficulty::from(10));
+        let mut vardiff = Vardiff::new(secs(5), secs(300), Difficulty::from(10));
         let result = vardiff.record_share(Difficulty::from(10), Difficulty::from(1_000_000));
         assert!(result.is_none());
     }
 
     #[test]
     fn respects_min_shares_threshold() {
-        let mut vardiff = Vardiff::new(test_config(), Difficulty::from(10));
+        let mut vardiff = Vardiff::new(secs(5), secs(300), Difficulty::from(10));
 
         for _ in 0..10 {
             let result = vardiff.record_share(Difficulty::from(10), Difficulty::from(1_000_000));
@@ -440,20 +434,18 @@ mod tests {
 
     #[test]
     fn stats_reflect_current_state() {
-        let mut vardiff = Vardiff::new(VardiffConfig::default(), Difficulty::from(42));
+        let mut vardiff = Vardiff::default();
 
-        let stats = vardiff.stats();
-        assert_eq!(stats.shares_since_change, 0);
+        assert_eq!(vardiff.shares_since_change, 0);
 
         vardiff.record_share(Difficulty::from(42), Difficulty::from(1_000_000));
-        assert_eq!(vardiff.stats().shares_since_change, 1);
+        assert_eq!(vardiff.shares_since_change, 1);
     }
 
     #[test]
     fn increases_difficulty_for_fast_shares() {
-        let config = VardiffConfig::new(secs(5), secs(10));
         let start_diff = Difficulty::from(10);
-        let mut vardiff = Vardiff::new(config, start_diff);
+        let mut vardiff = Vardiff::new(secs(5), secs(10), start_diff);
 
         // Simulate fast share submission
         let past = Instant::now() - secs(300);
@@ -477,8 +469,7 @@ mod tests {
 
     #[test]
     fn respects_network_diff_ceiling() {
-        let config = VardiffConfig::new(secs(5), secs(10));
-        let mut vardiff = Vardiff::new(config, Difficulty::from(10));
+        let mut vardiff = Vardiff::new(secs(5), secs(10), Difficulty::from(10));
 
         let past = Instant::now() - secs(300);
         vardiff.timing = Some(Timing {
@@ -504,29 +495,36 @@ mod tests {
     }
 
     #[test]
-    fn subsecond_period_has_min_shares_floor() {
-        // With very short periods, min_shares should be floored at 3
-        // to prevent unstable adjustments on every share
+    fn min_shares_derived_from_window_ratio() {
+        // min_shares = (window / period) * 1.2
 
-        // 0.1s period would give 1.44 shares without floor
-        let config = VardiffConfig::new(millis(100), secs(2));
-        assert_eq!(
-            config.min_shares_for_adjustment, 3,
-            "Subsecond period should floor min_shares at 3"
-        );
+        // 60s window, 1s period → 60 expected shares → 72 min
+        let vardiff = Vardiff::new(secs(1), secs(60), Difficulty::from(1));
+        assert_eq!(vardiff.min_shares_for_adjustment, 72);
 
-        // 0.01s period would give 0.144 shares without floor
-        let config = VardiffConfig::new(millis(10), secs(1));
-        assert_eq!(
-            config.min_shares_for_adjustment, 3,
-            "Very short period should floor min_shares at 3"
-        );
+        // 300s window, 5s period → 60 expected shares → 72 min (ckpool default)
+        let vardiff = Vardiff::new(secs(5), secs(300), Difficulty::from(1));
+        assert_eq!(vardiff.min_shares_for_adjustment, 72);
 
-        // 1s period gives 14.4, which is above the floor
-        let config = VardiffConfig::new(secs(1), secs(60));
-        assert_eq!(
-            config.min_shares_for_adjustment, 14,
-            "Normal period should use calculated value"
-        );
+        // 2s window, 1s period → 2 expected shares → 2.4 → 2
+        let vardiff = Vardiff::new(secs(1), secs(2), Difficulty::from(1));
+        assert_eq!(vardiff.min_shares_for_adjustment, 2);
+    }
+
+    #[test]
+    fn min_time_derived_from_window_ratio() {
+        // min_time = window * 0.8
+
+        // 300s window → 240s min_time (ckpool default)
+        let vardiff = Vardiff::new(secs(5), secs(300), Difficulty::from(1));
+        assert_eq!(vardiff.min_time_for_adjustment, secs(240));
+
+        // 60s window → 48s min_time
+        let vardiff = Vardiff::new(secs(1), secs(60), Difficulty::from(1));
+        assert_eq!(vardiff.min_time_for_adjustment, secs(48));
+
+        // 10s window → 8s min_time
+        let vardiff = Vardiff::new(secs(1), secs(10), Difficulty::from(1));
+        assert_eq!(vardiff.min_time_for_adjustment, secs(8));
     }
 }
