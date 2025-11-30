@@ -69,7 +69,8 @@ impl VardiffConfig {
             target_interval,
             window,
             // Default thresholds based on ckpool: ~72 shares or ~240 seconds for 5s target
-            min_shares_for_adjustment: (target_secs * 14.4) as u32,
+            // Floor of 3 shares prevents instability with subsecond periods
+            min_shares_for_adjustment: (target_secs * 14.4).max(3.0) as u32,
             min_time_for_adjustment: Duration::from_secs_f64(target_secs * 48.0),
             // Hysteresis band: [0.5x, 1.33x] of target rate
             hysteresis_low: 0.5,
@@ -500,5 +501,32 @@ mod tests {
                 "Difficulty exceeded network_diff"
             );
         }
+    }
+
+    #[test]
+    fn subsecond_period_has_min_shares_floor() {
+        // With very short periods, min_shares should be floored at 3
+        // to prevent unstable adjustments on every share
+
+        // 0.1s period would give 1.44 shares without floor
+        let config = VardiffConfig::new(millis(100), secs(2));
+        assert_eq!(
+            config.min_shares_for_adjustment, 3,
+            "Subsecond period should floor min_shares at 3"
+        );
+
+        // 0.01s period would give 0.144 shares without floor
+        let config = VardiffConfig::new(millis(10), secs(1));
+        assert_eq!(
+            config.min_shares_for_adjustment, 3,
+            "Very short period should floor min_shares at 3"
+        );
+
+        // 1s period gives 14.4, which is above the floor
+        let config = VardiffConfig::new(secs(1), secs(60));
+        assert_eq!(
+            config.min_shares_for_adjustment, 14,
+            "Normal period should use calculated value"
+        );
     }
 }

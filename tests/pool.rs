@@ -511,16 +511,9 @@ fn concurrently_listening_workers_receive_new_templates_on_new_block() {
 #[tokio::test]
 #[serial(bitcoind)]
 #[timeout(120000)]
-async fn vardiff_initialization_and_share_submission() {
-    // Comprehensive vardiff test that validates:
-    // 1. Pool accepts all vardiff CLI configuration options
-    // 2. Start difficulty is correctly applied to new connections
-    // 3. Share submission works with vardiff tracking enabled
-    // 4. Multiple shares can be submitted without errors
-    // 5. Event channel remains functional throughout
-
+async fn vardiff_adjusts_difficulty() {
     let pool =
-        TestPool::spawn_with_args("--start-diff 0.00001 --vardiff-period 1 --vardiff-window 10");
+        TestPool::spawn_with_args("--start-diff 0.00001 --vardiff-period 1 --vardiff-window 5");
 
     let client = pool.stratum_client().await;
     let mut events = client.connect().await.unwrap();
@@ -530,8 +523,7 @@ async fn vardiff_initialization_and_share_submission() {
 
     client.authorize().await.unwrap();
 
-    // Verify start_diff is applied correctly
-    let (notify, difficulty) = timeout(Duration::from_secs(10), async {
+    let (notify, initial_difficulty) = timeout(Duration::from_secs(10), async {
         let mut difficulty = stratum::Difficulty::from(1);
         loop {
             match events.recv().await.unwrap() {
@@ -545,43 +537,64 @@ async fn vardiff_initialization_and_share_submission() {
     .expect("Timeout waiting for initial notification");
 
     assert_eq!(
-        difficulty,
+        initial_difficulty,
         Difficulty::from(0.00001),
         "Start difficulty should match configured value"
     );
 
-    // Submit multiple shares to validate vardiff tracking infrastructure
-    for i in 0..5 {
+    let mut accepted_shares = 0;
+    for _ in 0..30 {
         let extranonce2 = Extranonce::random(subscribe.extranonce2_size);
-        let (ntime, nonce) = solve_share(&notify, &extranonce1, &extranonce2, difficulty);
+        let (ntime, nonce) = solve_share(&notify, &extranonce1, &extranonce2, initial_difficulty);
 
         match client
             .submit(notify.job_id, extranonce2, ntime, nonce)
             .await
         {
-            Ok(_) => {}
+            Ok(_) => accepted_shares += 1,
             Err(ClientError::Stratum { response })
                 if response.error_code == StratumError::Duplicate as i32 =>
             {
-                // Duplicate shares are expected if we solve same nonce
                 continue;
             }
-            Err(e) => panic!("Unexpected error on share {}: {:?}", i, e),
+            Err(ClientError::Stratum { response })
+                if response.error_code == StratumError::AboveTarget as i32 =>
+            {
+                continue;
+            }
+            Err(ClientError::Stratum { response })
+                if response.error_code == StratumError::Stale as i32 =>
+            {
+                continue;
+            }
+            Err(e) => panic!("Unexpected error: {:?}", e),
         }
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
     }
 
-    // Verify event channel remains functional after share submissions
-    let _ = timeout(Duration::from_millis(500), async {
+    assert!(
+        accepted_shares >= 3,
+        "Need at least 3 accepted shares, got {}",
+        accepted_shares
+    );
+
+    let new_difficulty = timeout(Duration::from_secs(10), async {
         loop {
             match events.recv().await {
-                Ok(stratum::Event::SetDifficulty(new_diff)) => {
-                    println!("Received difficulty adjustment to {}", new_diff);
-                    return Some(new_diff);
-                }
+                Ok(stratum::Event::SetDifficulty(diff)) => return diff,
                 Ok(_) => continue,
-                Err(_) => return None,
+                Err(e) => panic!("Event channel closed unexpectedly: {:?}", e),
             }
         }
     })
-    .await;
+    .await
+    .expect("Timeout waiting for difficulty adjustment");
+
+    assert!(
+        new_difficulty > initial_difficulty,
+        "Difficulty should increase when shares come faster than target: {} -> {}",
+        initial_difficulty,
+        new_difficulty
+    );
 }
