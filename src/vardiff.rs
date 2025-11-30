@@ -35,14 +35,14 @@ fn calculate_time_bias(elapsed: Duration, window: Duration) -> f64 {
 }
 
 #[derive(Debug, Clone)]
-pub struct DecayingAverage {
+pub(crate) struct DecayingAverage {
     value: f64,
     window: Duration,
     last_update: Instant,
 }
 
 impl DecayingAverage {
-    pub fn new(window: Duration) -> Self {
+    pub(crate) fn new(window: Duration) -> Self {
         Self {
             value: 0.0,
             window,
@@ -59,7 +59,7 @@ impl DecayingAverage {
         }
     }
 
-    pub fn record(&mut self, sample: f64, now: Instant) {
+    pub(crate) fn record(&mut self, sample: f64, now: Instant) {
         let elapsed = now.duration_since(self.last_update).as_secs_f64();
         if elapsed <= 0.0 {
             return;
@@ -73,7 +73,7 @@ impl DecayingAverage {
         self.last_update = now;
     }
 
-    pub fn value(&self) -> f64 {
+    pub(crate) fn value(&self) -> f64 {
         self.value
     }
 }
@@ -85,9 +85,8 @@ struct Timing {
     last_diff_change: Instant,
 }
 
-/// Variable difficulty state for a miner connection.
 #[derive(Debug, Clone)]
-pub struct Vardiff {
+pub(crate) struct Vardiff {
     target_interval: Duration,
     window: Duration,
     min_shares_for_adjustment: u32,
@@ -100,8 +99,7 @@ pub struct Vardiff {
 }
 
 impl Vardiff {
-    /// Creates a new vardiff tracker.
-    pub fn new(target_interval: Duration, window: Duration, start_diff: Difficulty) -> Self {
+    pub(crate) fn new(target_interval: Duration, window: Duration, start_diff: Difficulty) -> Self {
         let target_secs = target_interval.as_secs_f64();
         let window_secs = window.as_secs_f64();
         let expected_shares_per_window = window_secs / target_secs;
@@ -126,22 +124,22 @@ impl Vardiff {
     }
 
     /// Returns the current difficulty.
-    pub fn current_diff(&self) -> Difficulty {
+    pub(crate) fn current_diff(&self) -> Difficulty {
         self.current_diff
     }
 
     /// Returns the current difficulty-weighted shares per second.
-    pub fn dsps(&self) -> f64 {
+    pub(crate) fn dsps(&self) -> f64 {
         self.dsps.value()
     }
 
     /// Returns the number of shares since the last difficulty change.
-    pub fn shares_since_change(&self) -> u32 {
+    pub(crate) fn shares_since_change(&self) -> u32 {
         self.shares_since_change
     }
 
     /// Records a share and returns a new difficulty if adjustment is needed.
-    pub fn record_share(
+    pub(crate) fn record_share(
         &mut self,
         share_diff: Difficulty,
         network_diff: Difficulty,
