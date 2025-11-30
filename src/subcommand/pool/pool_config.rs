@@ -52,7 +52,7 @@ pub(crate) struct PoolConfig {
     vardiff_period: f64,
     #[arg(
         long,
-        help = "Average share rate over <VARDIFF_WINDOW> seconds.",
+        help = "Average the share submission rate over <VARDIFF_WINDOW> seconds.",
         default_value = "300"
     )]
     vardiff_window: f64,

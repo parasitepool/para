@@ -42,9 +42,9 @@ where
         cancel_token: CancellationToken,
     ) -> Self {
         let vardiff = Vardiff::new(
+            config.start_diff(),
             Duration::from_secs_f64(config.vardiff_period()),
             Duration::from_secs_f64(config.vardiff_window()),
-            config.start_diff(),
         );
 
         Self {

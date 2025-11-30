@@ -80,7 +80,7 @@ impl DecayingAverage {
 
 #[derive(Debug, Clone)]
 pub(crate) struct Vardiff {
-    target_interval: Duration,
+    period: Duration,
     window: Duration,
     min_shares_for_adjustment: u32,
     min_time_for_adjustment: Duration,
@@ -93,13 +93,12 @@ pub(crate) struct Vardiff {
 }
 
 impl Vardiff {
-    pub(crate) fn new(target_interval: Duration, window: Duration, start_diff: Difficulty) -> Self {
-        let target_secs = target_interval.as_secs_f64();
+    pub(crate) fn new(start_diff: Difficulty, period: Duration, window: Duration) -> Self {
         let window_secs = window.as_secs_f64();
-        let expected_shares_per_window = window_secs / target_secs;
+        let expected_shares_per_window = window_secs / period.as_secs_f64();
 
         Self {
-            target_interval,
+            period,
             window,
             min_shares_for_adjustment: (expected_shares_per_window * MIN_SHARES_WINDOW_RATIO)
                 as u32,
@@ -114,7 +113,7 @@ impl Vardiff {
     }
 
     fn target_rate(&self) -> f64 {
-        1.0 / self.target_interval.as_secs_f64()
+        1.0 / self.period.as_secs_f64()
     }
 
     pub(crate) fn current_diff(&self) -> Difficulty {
@@ -187,7 +186,7 @@ impl Vardiff {
             return None;
         }
 
-        let optimal = dsps * self.target_interval.as_secs_f64();
+        let optimal = dsps * self.period.as_secs_f64();
         assert!(optimal > 0.0, "optimal difficulty must be positive");
 
         let new_diff = Difficulty::from(optimal.min(network_diff.as_f64()));
@@ -222,9 +221,9 @@ impl Vardiff {
 impl Default for Vardiff {
     fn default() -> Self {
         Self::new(
+            Difficulty::from(1),
             Duration::from_secs(5),
             Duration::from_secs(300),
-            Difficulty::from(1),
         )
     }
 }
@@ -318,20 +317,20 @@ mod tests {
 
     #[test]
     fn tracks_initial_difficulty() {
-        let vardiff = Vardiff::new(secs(5), secs(300), Difficulty::from(10));
+        let vardiff = Vardiff::new(Difficulty::from(10), secs(5), secs(300));
         assert_eq!(vardiff.current_diff(), Difficulty::from(10));
     }
 
     #[test]
     fn no_change_on_first_share() {
-        let mut vardiff = Vardiff::new(secs(5), secs(300), Difficulty::from(10));
+        let mut vardiff = Vardiff::new(Difficulty::from(10), secs(5), secs(300));
         let result = vardiff.record_share(Difficulty::from(10), Difficulty::from(1_000_000));
         assert!(result.is_none());
     }
 
     #[test]
     fn respects_min_shares_threshold() {
-        let mut vardiff = Vardiff::new(secs(5), secs(300), Difficulty::from(10));
+        let mut vardiff = Vardiff::new(Difficulty::from(10), secs(5), secs(300));
 
         for _ in 0..10 {
             let result = vardiff.record_share(Difficulty::from(10), Difficulty::from(1_000_000));
@@ -352,7 +351,7 @@ mod tests {
     #[test]
     fn increases_difficulty_for_fast_shares() {
         let start_diff = Difficulty::from(10);
-        let mut vardiff = Vardiff::new(secs(5), secs(10), start_diff);
+        let mut vardiff = Vardiff::new(start_diff, secs(5), secs(10));
 
         let base = Instant::now();
         vardiff.first_share = Some(base);
@@ -373,7 +372,7 @@ mod tests {
 
     #[test]
     fn respects_network_diff_ceiling() {
-        let mut vardiff = Vardiff::new(secs(5), secs(10), Difficulty::from(10));
+        let mut vardiff = Vardiff::new(Difficulty::from(10), secs(5), secs(10));
 
         let base = Instant::now();
         vardiff.first_share = Some(base);
@@ -398,25 +397,25 @@ mod tests {
 
     #[test]
     fn min_shares_derived_from_window_ratio() {
-        let vardiff = Vardiff::new(secs(1), secs(60), Difficulty::from(1));
+        let vardiff = Vardiff::new(Difficulty::from(1), secs(1), secs(60));
         assert_eq!(vardiff.min_shares_for_adjustment, 72);
 
-        let vardiff = Vardiff::new(secs(5), secs(300), Difficulty::from(1));
+        let vardiff = Vardiff::new(Difficulty::from(1), secs(5), secs(300));
         assert_eq!(vardiff.min_shares_for_adjustment, 72);
 
-        let vardiff = Vardiff::new(secs(1), secs(2), Difficulty::from(1));
+        let vardiff = Vardiff::new(Difficulty::from(1), secs(1), secs(2));
         assert_eq!(vardiff.min_shares_for_adjustment, 2);
     }
 
     #[test]
     fn min_time_derived_from_window_ratio() {
-        let vardiff = Vardiff::new(secs(5), secs(300), Difficulty::from(1));
+        let vardiff = Vardiff::new(Difficulty::from(1), secs(5), secs(300));
         assert_eq!(vardiff.min_time_for_adjustment, secs(240));
 
-        let vardiff = Vardiff::new(secs(1), secs(60), Difficulty::from(1));
+        let vardiff = Vardiff::new(Difficulty::from(1), secs(1), secs(60));
         assert_eq!(vardiff.min_time_for_adjustment, secs(48));
 
-        let vardiff = Vardiff::new(secs(1), secs(10), Difficulty::from(1));
+        let vardiff = Vardiff::new(Difficulty::from(1), secs(1), secs(10));
         assert_eq!(vardiff.min_time_for_adjustment, secs(8));
     }
 }
