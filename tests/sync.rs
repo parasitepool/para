@@ -194,6 +194,7 @@ async fn test_sync_batch_with_block_only() {
 }
 
 #[tokio::test]
+#[timeout(90000)]
 #[ignore]
 async fn test_sync_large_batch() {
     let record_count_in_large_batch = 40000;
