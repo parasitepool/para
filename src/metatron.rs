@@ -61,3 +61,75 @@ impl StatusLine for Metatron {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_metatron_starts_at_zero() {
+        let metatron = Metatron::new();
+        assert_eq!(metatron.total_workers(), 0);
+        assert_eq!(metatron.total_shares(), 0);
+        assert_eq!(metatron.total_blocks(), 0);
+    }
+
+    #[test]
+    fn worker_count_increments_and_decrements() {
+        let metatron = Metatron::new();
+        assert_eq!(metatron.total_workers(), 0);
+
+        metatron.add_worker();
+        metatron.add_worker();
+        assert_eq!(metatron.total_workers(), 2);
+
+        metatron.sub_worker();
+        assert_eq!(metatron.total_workers(), 1);
+
+        metatron.sub_worker();
+        assert_eq!(metatron.total_workers(), 0);
+    }
+
+    #[test]
+    fn share_count_increments() {
+        let metatron = Metatron::new();
+        metatron.add_share();
+        metatron.add_share();
+        metatron.add_share();
+        assert_eq!(metatron.total_shares(), 3);
+    }
+
+    #[test]
+    fn block_count_increments() {
+        let metatron = Metatron::new();
+        metatron.add_block();
+        assert_eq!(metatron.total_blocks(), 1);
+    }
+
+    #[test]
+    fn status_line_contains_all_fields() {
+        let metatron = Metatron::new();
+        metatron.add_worker();
+        metatron.add_worker();
+        metatron.add_share();
+        metatron.add_share();
+        metatron.add_share();
+        metatron.add_block();
+
+        let line = metatron.status_line();
+        assert!(line.contains("workers=2"), "missing workers: {line}");
+        assert!(line.contains("shares=3"), "missing shares: {line}");
+        assert!(line.contains("blocks=1"), "missing blocks: {line}");
+        assert!(line.contains("uptime="), "missing uptime: {line}");
+    }
+
+    #[test]
+    fn status_line_format_is_stable() {
+        let metatron = Metatron::new();
+        let line = metatron.status_line();
+        assert!(
+            line.starts_with("workers=0  shares=0  blocks=0  uptime="),
+            "unexpected format: {line}"
+        );
+    }
+}
