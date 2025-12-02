@@ -59,11 +59,10 @@ async fn fetch(client: &Client, url: Url) -> Result<String> {
         .sleep(tokio::time::sleep)
         .when(|err: &Error| {
             if let Some(err) = err.downcast_ref::<reqwest::Error>() {
-                // If we got an HTTP status, only retry on 429 or 5xx
                 if let Some(status) = err.status() {
                     return status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error();
                 }
-                // No status = network-level failure (timeout, DNS, connection, etc.) → retry
+
                 return true;
             }
 
