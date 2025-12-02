@@ -1,10 +1,5 @@
 use super::*;
 
-/// Maximum ratio where `1 - e^(-x)` is distinguishable from 1.0.
-/// Beyond this, `e^(-x) < f64::EPSILON` and the subtraction rounds to exactly 1.0.
-/// Derived from: `-ln(f64::EPSILON) ≈ 36.04`
-const EXP_SATURATION_LIMIT: f64 = 36.0;
-
 /// Minimum time before considering difficulty adjustment, as a fraction of the window.
 /// Derived from ckpool: 240s min_time / 300s window = 0.8
 const MIN_TIME_WINDOW_RATIO: f64 = 0.8;
@@ -13,19 +8,20 @@ const MIN_TIME_WINDOW_RATIO: f64 = 0.8;
 /// Derived from ckpool: 72 shares / (300s window / 5s period) = 72 / 60 = 1.2
 const MIN_SHARES_WINDOW_RATIO: f64 = 1.2;
 
-/// Lower hysteresis bound: don't decrease difficulty unless rate drops below this fraction of target.
-/// From ckpool.
+/// Don't decrease difficulty unless rate drops below this fraction of target; derived from ckpool
 const HYSTERESIS_LOW: f64 = 0.5;
 
-/// Upper hysteresis bound: don't increase difficulty unless rate exceeds this fraction of target.
-/// From ckpool.
+/// Don't increase difficulty unless rate exceeds this fraction of target; derived from ckpool.
 const HYSTERESIS_HIGH: f64 = 1.33;
 
 /// Computes `1 - e^(-x)` with numerical stability.
 /// Returns 0.0 at x=0, saturates to 1.0 as x increases.
 /// Used for EMA warmup bias correction.
 fn exponential_saturation(x: f64) -> f64 {
-    -(-x.min(EXP_SATURATION_LIMIT)).exp_m1()
+    // Maximum ratio where `1 - e^(-x)` is distinguishable from 1.0.
+    // Beyond this, `e^(-x) < f64::EPSILON` and the subtraction rounds to exactly 1.0.
+    // Derived from: `-ln(f64::EPSILON) = 36.04`
+    -(-x.min(36.0)).exp_m1()
 }
 
 /// Calculates time bias based on how much history we have.
