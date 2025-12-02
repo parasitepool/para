@@ -20,6 +20,7 @@ impl Aggregator {
         let client = ClientBuilder::new()
             .default_headers(headers)
             .connect_timeout(CONNECT_TIMEOUT)
+            .timeout(TIMEOUT)
             .pool_idle_timeout(Duration::from_secs(60))
             .pool_max_idle_per_host(3)
             .use_rustls_tls()

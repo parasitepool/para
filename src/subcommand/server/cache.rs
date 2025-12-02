@@ -22,8 +22,8 @@ async fn fetch(client: &Client, url: Url) -> Result<String> {
     let started = Instant::now();
 
     let backoff = ExponentialBuilder::default()
-        .with_min_delay(Duration::from_millis(111))
-        .with_max_delay(Duration::from_millis(999))
+        .with_min_delay(Duration::from_millis(300))
+        .with_max_delay(Duration::from_secs(3))
         .with_jitter()
         .with_max_times(MAX_ATTEMPTS)
         .with_total_delay(Some(BUDGET));
@@ -59,27 +59,14 @@ async fn fetch(client: &Client, url: Url) -> Result<String> {
         .sleep(tokio::time::sleep)
         .when(|err: &Error| {
             if let Some(err) = err.downcast_ref::<reqwest::Error>() {
-                if err.is_timeout() || err.is_connect() || err.is_request() || err.is_body() {
-                    return true;
+                if let Some(status) = err.status() {
+                    return status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error();
                 }
 
-                if let Some(s) = err.status() {
-                    return s == StatusCode::TOO_MANY_REQUESTS || s.is_server_error();
-                }
-
-                return false;
-            }
-
-            let error = err.to_string();
-            if error.contains("try timeout") {
                 return true;
             }
 
-            if error.contains("deadline exceeded") {
-                return false;
-            }
-
-            false
+            !err.to_string().contains("deadline exceeded")
         })
         .notify(|err: &Error, duration: Duration| {
             tracing::debug!(?err, ?duration, "retrying after backoff");
