@@ -46,6 +46,18 @@ pub(crate) struct PoolConfig {
     start_diff: Difficulty,
     #[arg(
         long,
+        help = "Target <VARDIFF_PERIOD> seconds between share submissions.",
+        default_value = "5.0"
+    )]
+    vardiff_period: f64,
+    #[arg(
+        long,
+        help = "Average the share submission rate over <VARDIFF_WINDOW> seconds.",
+        default_value = "300"
+    )]
+    vardiff_window: f64,
+    #[arg(
+        long,
         help = "Subscribe to <ZMQ_BLOCK_NOTIFICATION>.",
         default_value = "tcp://127.0.0.1:28332"
     )]
@@ -180,5 +192,13 @@ impl PoolConfig {
 
     pub fn zmq_block_notifications(&self) -> Endpoint {
         self.zmq_block_notifications.clone()
+    }
+
+    pub fn vardiff_period(&self) -> Duration {
+        Duration::from_secs_f64(self.vardiff_period)
+    }
+
+    pub fn vardiff_window(&self) -> Duration {
+        Duration::from_secs_f64(self.vardiff_window)
     }
 }

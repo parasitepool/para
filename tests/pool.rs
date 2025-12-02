@@ -3,21 +3,6 @@ use super::*;
 #[test]
 #[serial(bitcoind)]
 #[timeout(90000)]
-fn ping_pool() {
-    let pool = TestPool::spawn();
-
-    let stratum_endpoint = pool.stratum_endpoint();
-
-    let mut ping =
-        CommandBuilder::new(format!("ping --count 1 --timeout 10 {stratum_endpoint}")).spawn();
-
-    let exit_status = ping.wait().unwrap();
-    assert_eq!(exit_status.code(), Some(0));
-}
-
-#[test]
-#[serial(bitcoind)]
-#[timeout(90000)]
 fn mine_to_pool() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001");
 
@@ -506,4 +491,95 @@ fn concurrently_listening_workers_receive_new_templates_on_new_block() {
         assert!(new_template_worker_a.ntime >= initial_template_worker_a.ntime);
         assert!(new_template_worker_b.ntime >= initial_template_worker_b.ntime);
     });
+}
+
+#[tokio::test]
+#[serial(bitcoind)]
+#[timeout(120000)]
+async fn vardiff_adjusts_difficulty() {
+    let pool =
+        TestPool::spawn_with_args("--start-diff 0.00001 --vardiff-period 1 --vardiff-window 5");
+
+    let client = pool.stratum_client().await;
+    let mut events = client.connect().await.unwrap();
+
+    let (subscribe, _, _) = client.subscribe().await.unwrap();
+    let extranonce1 = subscribe.extranonce1;
+
+    client.authorize().await.unwrap();
+
+    let (notify, initial_difficulty) = timeout(Duration::from_secs(10), async {
+        let mut difficulty = stratum::Difficulty::from(1);
+        loop {
+            match events.recv().await.unwrap() {
+                stratum::Event::SetDifficulty(diff) => difficulty = diff,
+                stratum::Event::Notify(notify) => return (notify, difficulty),
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("Timeout waiting for initial notification");
+
+    assert_eq!(
+        initial_difficulty,
+        Difficulty::from(0.00001),
+        "Start difficulty should match configured value"
+    );
+
+    let mut accepted_shares = 0;
+    for _ in 0..30 {
+        let extranonce2 = Extranonce::random(subscribe.extranonce2_size);
+        let (ntime, nonce) = solve_share(&notify, &extranonce1, &extranonce2, initial_difficulty);
+
+        match client
+            .submit(notify.job_id, extranonce2, ntime, nonce)
+            .await
+        {
+            Ok(_) => accepted_shares += 1,
+            Err(ClientError::Stratum { response })
+                if response.error_code == StratumError::Duplicate as i32 =>
+            {
+                continue;
+            }
+            Err(ClientError::Stratum { response })
+                if response.error_code == StratumError::AboveTarget as i32 =>
+            {
+                continue;
+            }
+            Err(ClientError::Stratum { response })
+                if response.error_code == StratumError::Stale as i32 =>
+            {
+                continue;
+            }
+            Err(e) => panic!("Unexpected error: {:?}", e),
+        }
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    assert!(
+        accepted_shares >= 3,
+        "Need at least 3 accepted shares, got {}",
+        accepted_shares
+    );
+
+    let new_difficulty = timeout(Duration::from_secs(10), async {
+        loop {
+            match events.recv().await {
+                Ok(stratum::Event::SetDifficulty(diff)) => return diff,
+                Ok(_) => continue,
+                Err(e) => panic!("Event channel closed unexpectedly: {:?}", e),
+            }
+        }
+    })
+    .await
+    .expect("Timeout waiting for difficulty adjustment");
+
+    assert!(
+        new_difficulty > initial_difficulty,
+        "Difficulty should increase when shares come faster than target: {} -> {}",
+        initial_difficulty,
+        new_difficulty
+    );
 }

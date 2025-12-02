@@ -1,13 +1,13 @@
 use super::*;
 
 #[derive(Clone, Debug)]
-pub struct Workbase {
+pub(crate) struct Workbase {
     template: BlockTemplate,
     merkle_branches: Vec<MerkleNode>,
 }
 
 impl Workbase {
-    pub fn new(template: BlockTemplate) -> Self {
+    pub(crate) fn new(template: BlockTemplate) -> Self {
         let merkle_branches =
             stratum::merkle_branches(template.transactions.iter().map(|tx| tx.txid).collect());
 
@@ -17,11 +17,11 @@ impl Workbase {
         }
     }
 
-    pub fn template(&self) -> &BlockTemplate {
+    pub(crate) fn template(&self) -> &BlockTemplate {
         &self.template
     }
 
-    pub fn merkle_branches(&self) -> &[MerkleNode] {
+    pub(crate) fn merkle_branches(&self) -> &[MerkleNode] {
         &self.merkle_branches
     }
 }

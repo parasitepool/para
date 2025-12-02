@@ -231,4 +231,28 @@ mod tests {
         let config = parse_pool_config("para pool");
         assert_eq!(config.start_diff(), Difficulty::from(1));
     }
+
+    #[test]
+    fn vardiff_period() {
+        let config = parse_pool_config("para pool --vardiff-period 10.0");
+        assert_eq!(config.vardiff_period(), Duration::from_secs(10));
+
+        let config = parse_pool_config("para pool --vardiff-period 0.5");
+        assert_eq!(config.vardiff_period(), Duration::from_millis(500));
+
+        let config = parse_pool_config("para pool");
+        assert_eq!(config.vardiff_period(), Duration::from_secs(5));
+    }
+
+    #[test]
+    fn vardiff_window() {
+        let config = parse_pool_config("para pool --vardiff-window 60");
+        assert_eq!(config.vardiff_window(), Duration::from_secs(60));
+
+        let config = parse_pool_config("para pool --vardiff-window 600.5");
+        assert_eq!(config.vardiff_window(), Duration::from_secs_f64(600.5));
+
+        let config = parse_pool_config("para pool");
+        assert_eq!(config.vardiff_window(), Duration::from_secs(300));
+    }
 }

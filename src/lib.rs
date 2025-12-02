@@ -117,6 +117,7 @@ mod jobs;
 mod signal;
 pub mod stratum;
 pub mod subcommand;
+mod vardiff;
 mod workbase;
 mod zmq;
 
