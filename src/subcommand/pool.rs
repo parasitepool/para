@@ -1,6 +1,6 @@
 use {
     super::*,
-    crate::metatron::{Metatron, spawn_throbber},
+    crate::{metatron::Metatron, throbber::spawn_throbber},
     pool_config::PoolConfig,
 };
 

@@ -1,4 +1,4 @@
-use super::*;
+use {super::*, crate::throbber::StatusLine};
 
 pub(crate) struct Metrics {
     hashes: AtomicU64,
@@ -34,87 +34,21 @@ impl Metrics {
     pub(crate) fn uptime(&self) -> Duration {
         self.started.elapsed()
     }
-}
 
-struct Anchored;
-
-impl Anchored {
-    fn new() -> io::Result<Self> {
-        let mut out = io::stdout();
-        writeln!(out)?;
-        write!(out, "\x1b[s")?;
-        out.flush()?;
-        Ok(Self)
-    }
-    fn redraw(&self, line: &str) -> io::Result<()> {
-        let mut out = io::stdout();
-        write!(out, "\x1b[u\x1b[2K\r{}", line)?;
-        out.flush()
+    pub(crate) fn avg_hashrate(&self) -> f64 {
+        let hashes = self.total_hashes() as f64;
+        let secs = self.uptime().as_secs_f64();
+        if secs > 0.0 { hashes / secs } else { 0.0 }
     }
 }
 
-impl Drop for Anchored {
-    fn drop(&mut self) {
-        let _ = write!(io::stdout(), "\x1b[u\x1b[2K\r\n");
-        let _ = io::stdout().flush();
+impl StatusLine for Metrics {
+    fn status_line(&self) -> String {
+        format!(
+            "hashrate={}H/s  shares={}  uptime={}s",
+            ckpool::HashRate(self.avg_hashrate()),
+            self.total_shares(),
+            self.uptime().as_secs()
+        )
     }
-}
-
-pub(crate) fn spawn_throbber(metrics: Arc<Metrics>) {
-    tokio::spawn(async move {
-        let frames = ["⣷", "⣯", "⣟", "⡿", "⢿", "⣻", "⣽", "⣾"];
-        let mut frame = 0;
-        let mut ticker = tokio::time::interval(Duration::from_millis(200));
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-
-        let mut prev_time = Instant::now();
-        let mut prev_total = metrics.total_hashes();
-        let mut smooth: Option<f64> = None;
-        let anchor = Anchored::new().expect("tty");
-
-        loop {
-            ticker.tick().await;
-
-            let now = Instant::now();
-            let total = metrics.total_hashes();
-
-            let dt = now.duration_since(prev_time).as_secs_f64().max(1e-6);
-            let delta = total.saturating_sub(prev_total) as f64;
-            let inst = delta / dt;
-
-            // alpha = 1 - e^(-dt/tau) gives time-based smoothing (EMA)
-            let tau = 3.0;
-            let alpha = 1.0 - (-dt / tau).exp();
-            let rate = match smooth {
-                None => {
-                    smooth = Some(inst);
-                    inst
-                }
-                Some(s) => {
-                    let v = s + alpha * (inst - s);
-                    smooth = Some(v);
-                    v
-                }
-            };
-
-            let throbber = frames[frame % frames.len()];
-            frame = frame.wrapping_add(1);
-
-            let line = format!(
-                " {throbber}  hashrate={}H/s  shares={}  uptime={}s",
-                ckpool::HashRate(rate),
-                metrics.total_shares(),
-                metrics.uptime().as_secs()
-            );
-
-            let mut out = io::stdout();
-            let _ = write!(out, "\x1b[2K\r{line}");
-            let _ = out.flush();
-
-            let _ = anchor.redraw(&line);
-
-            prev_time = now;
-            prev_total = total;
-        }
-    });
 }

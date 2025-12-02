@@ -1,4 +1,4 @@
-use super::*;
+use {super::*, crate::throbber::StatusLine};
 
 pub(crate) struct Metatron {
     blocks: AtomicU64,
@@ -50,55 +50,14 @@ impl Metatron {
     }
 }
 
-struct Throbber;
-
-impl Throbber {
-    fn new() -> io::Result<Self> {
-        let mut out = io::stdout();
-        writeln!(out)?;
-        write!(out, "\x1b[s")?;
-        out.flush()?;
-        Ok(Self)
+impl StatusLine for Metatron {
+    fn status_line(&self) -> String {
+        format!(
+            "workers={}  shares={}  blocks={}  uptime={}s",
+            self.total_workers(),
+            self.total_shares(),
+            self.total_blocks(),
+            self.uptime().as_secs()
+        )
     }
-
-    fn redraw(&self, line: &str) -> io::Result<()> {
-        let mut out = io::stdout();
-        write!(out, "\x1b[u\x1b[2K\r{}", line)?;
-        out.flush()
-    }
-}
-
-impl Drop for Throbber {
-    fn drop(&mut self) {
-        let _ = write!(io::stdout(), "\x1b[u\x1b[2K\r\n");
-        let _ = io::stdout().flush();
-    }
-}
-
-pub(crate) fn spawn_throbber(metatron: Arc<Metatron>) {
-    tokio::spawn(async move {
-        let frames = ["⣷", "⣯", "⣟", "⡿", "⢿", "⣻", "⣽", "⣾"];
-        let mut frame = 0;
-        let mut ticker = interval(Duration::from_millis(200));
-        ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
-        let anchor = Throbber::new().expect("tty");
-
-        loop {
-            ticker.tick().await;
-
-            let throbber = frames[frame % frames.len()];
-            frame = frame.wrapping_add(1);
-
-            let line = format!(
-                " {throbber}  workers={}  shares={}  blocks={}  uptime={}s",
-                metatron.total_workers(),
-                metatron.total_shares(),
-                metatron.total_blocks(),
-                metatron.uptime().as_secs()
-            );
-
-            let _ = anchor.redraw(&line);
-        }
-    });
 }

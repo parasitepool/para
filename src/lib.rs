@@ -120,6 +120,7 @@ mod metatron;
 mod signal;
 pub mod stratum;
 pub mod subcommand;
+mod throbber;
 mod vardiff;
 mod workbase;
 mod zmq;
