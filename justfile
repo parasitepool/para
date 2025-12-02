@@ -36,7 +36,7 @@ coverage:
   cargo llvm-cov --html --open
 
 test-without-ckpool:
-  cargo test --all -- --skip with_ckpool
+  cargo test --all -- --skip ckpool
 
 miner stratum_endpoint='127.0.0.1:42069': 
   cargo run --release -- miner \
