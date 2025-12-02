@@ -59,42 +59,15 @@ async fn fetch(client: &Client, url: Url) -> Result<String> {
         .sleep(tokio::time::sleep)
         .when(|err: &Error| {
             if let Some(err) = err.downcast_ref::<reqwest::Error>() {
-                // Retry on network-level failures
-                if err.is_timeout()
-                    || err.is_connect()
-                    || err.is_request()
-                    || err.is_body()
-                    || err.is_decode()
-                {
-                    return true;
+                // If we got an HTTP status, only retry on 429 or 5xx
+                if let Some(status) = err.status() {
+                    return status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error();
                 }
-
-                // Retry on DNS resolution failures (shown as connection errors without status)
-                if err.source().is_some_and(|e| {
-                    e.to_string().contains("dns")
-                        || e.to_string().contains("resolve")
-                        || e.to_string().contains("getaddrinfo")
-                }) {
-                    return true;
-                }
-
-                if let Some(s) = err.status() {
-                    return s == StatusCode::TOO_MANY_REQUESTS || s.is_server_error();
-                }
-
-                return false;
-            }
-
-            let error = err.to_string();
-            if error.contains("try timeout") {
+                // No status = network-level failure (timeout, DNS, connection, etc.) → retry
                 return true;
             }
 
-            if error.contains("deadline exceeded") {
-                return false;
-            }
-
-            false
+            !err.to_string().contains("deadline exceeded")
         })
         .notify(|err: &Error, duration: Duration| {
             tracing::debug!(?err, ?duration, "retrying after backoff");
