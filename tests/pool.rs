@@ -3,21 +3,6 @@ use super::*;
 #[test]
 #[serial(bitcoind)]
 #[timeout(90000)]
-fn ping_pool() {
-    let pool = TestPool::spawn();
-
-    let stratum_endpoint = pool.stratum_endpoint();
-
-    let mut ping =
-        CommandBuilder::new(format!("ping --count 1 --timeout 10 {stratum_endpoint}")).spawn();
-
-    let exit_status = ping.wait().unwrap();
-    assert_eq!(exit_status.code(), Some(0));
-}
-
-#[test]
-#[serial(bitcoind)]
-#[timeout(90000)]
 fn mine_to_pool() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001");
 

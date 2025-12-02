@@ -3,7 +3,7 @@ use super::*;
 #[test]
 #[serial(bitcoind)]
 #[timeout(90000)]
-fn template_with_ckpool() {
+fn template_ckpool() {
     let ckpool = TestCkpool::spawn();
 
     let stratum_endpoint = ckpool.stratum_endpoint();
