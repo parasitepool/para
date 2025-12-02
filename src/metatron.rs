@@ -1,4 +1,4 @@
-use {super::*, crate::throbber::StatusLine};
+use super::*;
 
 pub(crate) struct Metatron {
     blocks: AtomicU64,
