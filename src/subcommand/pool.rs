@@ -1,8 +1,4 @@
-use {
-    super::*,
-    crate::{metatron::Metatron, throbber::spawn_throbber},
-    pool_config::PoolConfig,
-};
+use {super::*, pool_config::PoolConfig};
 
 pub(crate) mod pool_config;
 

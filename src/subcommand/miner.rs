@@ -4,7 +4,6 @@ use {
     hasher::Hasher,
     metrics::Metrics,
     stratum::{Client, ClientConfig},
-    throbber::spawn_throbber,
 };
 
 mod controller;

@@ -83,7 +83,7 @@ use {
     },
     subcommand::{pool::pool_config::PoolConfig, server::account::Account},
     sysinfo::{Disks, System},
-    throbber::StatusLine,
+    throbber::{StatusLine, spawn_throbber},
     tokio::{
         io::{AsyncRead, AsyncWrite},
         net::TcpListener,
