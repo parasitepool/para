@@ -35,6 +35,8 @@ impl TestCkpool {
         let sockdir = tempdir.path().join("tmp");
         fs::create_dir(&sockdir).unwrap();
 
+        Lazy::force(&COMPILE_CKPOOL);
+
         let (bitcoind_port, rpc_port, zmq_port, ckpool_port) = (
             TcpListener::bind("127.0.0.1:0")
                 .unwrap()
@@ -60,8 +62,6 @@ impl TestCkpool {
 
         let bitcoind_handle =
             Bitcoind::spawn(tempdir.clone(), bitcoind_port, rpc_port, zmq_port, false).unwrap();
-
-        Lazy::force(&COMPILE_CKPOOL);
 
         let ckpool_conf = tempdir.path().join("ckpool.conf");
 

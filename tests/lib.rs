@@ -12,6 +12,7 @@ use {
     pretty_assertions::assert_eq as pretty_assert_eq,
     reqwest::{StatusCode, Url},
     serde::{Deserialize, Serialize, de::DeserializeOwned},
+    serial_test::serial,
     std::{
         collections::{BTreeMap, HashSet},
         ffi::{OsStr, OsString},
@@ -21,7 +22,7 @@ use {
         path::PathBuf,
         process::{Child, Command, Stdio},
         str::FromStr,
-        sync::Arc,
+        sync::{Arc, Barrier},
         thread,
         time::Duration,
     },
@@ -44,13 +45,17 @@ use {
     base64::{Engine, engine::general_purpose},
     bip322::sign_simple_encoded,
     bitcoin::{
-        CompressedPublicKey, Network, PrivateKey, hashes::Hash, key::UntweakedPublicKey,
-        secp256k1::Secp256k1, sign_message::MessageSignature,
+        CompressedPublicKey, Network, PrivateKey, block::Header, hashes::Hash,
+        key::UntweakedPublicKey, secp256k1::Secp256k1, sign_message::MessageSignature,
     },
+    bitcoincore_rpc::RpcApi,
     harness::bitcoind::Bitcoind,
+    ntest::timeout,
     para::{
         USER_AGENT,
-        stratum::{self, Difficulty, Extranonce, JobId, Nonce, Ntime, Version},
+        stratum::{
+            self, ClientError, Difficulty, Extranonce, JobId, Nonce, Ntime, StratumError, Version,
+        },
         subcommand::{
             miner::Share,
             server::{
@@ -68,7 +73,6 @@ use {
         net::TcpStream,
         process::ChildStdout,
         sync::{
-            Barrier,
             atomic::{AtomicUsize, Ordering},
             mpsc,
         },
@@ -106,9 +110,6 @@ mod sync;
 mod template;
 
 #[cfg(target_os = "linux")]
-mod ignored;
-
-#[cfg(target_os = "linux")]
 fn next_json<T: DeserializeOwned>(r: &mut BufReader<ChildStdout>) -> T {
     let de = serde_json::Deserializer::from_reader(&mut *r);
     let mut stream = de.into_iter::<T>();
@@ -118,6 +119,49 @@ fn next_json<T: DeserializeOwned>(r: &mut BufReader<ChildStdout>) -> T {
 #[cfg(target_os = "linux")]
 fn signet_username() -> String {
     "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.tick.abcdef@lnurl.com".to_string()
+}
+
+#[cfg(target_os = "linux")]
+fn solve_share(
+    notify: &stratum::Notify,
+    extranonce1: &Extranonce,
+    extranonce2: &Extranonce,
+    difficulty: stratum::Difficulty,
+) -> (Ntime, Nonce) {
+    let merkle_root = stratum::merkle_root(
+        &notify.coinb1,
+        &notify.coinb2,
+        extranonce1,
+        extranonce2,
+        &notify.merkle_branches,
+    )
+    .unwrap();
+
+    let mut header = Header {
+        version: notify.version.into(),
+        prev_blockhash: notify.prevhash.clone().into(),
+        merkle_root: merkle_root.into(),
+        time: notify.ntime.into(),
+        bits: notify.nbits.into(),
+        nonce: 0,
+    };
+
+    let target = difficulty.to_target();
+
+    loop {
+        let hash = header.block_hash();
+        if target.is_met_by(hash) {
+            return (Ntime::from(header.time), Nonce::from(header.nonce));
+        }
+
+        header.nonce += 1;
+        if header.nonce == 0 {
+            panic!(
+                "Nonce wrapped around without finding share at diff {}",
+                difficulty
+            );
+        }
+    }
 }
 
 pub(crate) fn address(n: u32) -> Address {

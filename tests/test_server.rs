@@ -138,6 +138,8 @@ impl TestServer {
             thread::sleep(Duration::from_millis(50));
         }
 
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
         Self {
             child,
             port,
@@ -299,7 +301,37 @@ impl TestServer {
 
 impl Drop for TestServer {
     fn drop(&mut self) {
-        self.child.kill().unwrap();
-        self.child.wait().unwrap();
+        #[cfg(unix)]
+        {
+            use nix::{
+                sys::signal::{Signal, kill},
+                unistd::Pid,
+            };
+
+            let pid = Pid::from_raw(self.child.id() as i32);
+
+            let _ = kill(pid, Signal::SIGTERM);
+
+            for _ in 0..100 {
+                match self.child.try_wait() {
+                    Ok(Some(_status)) => {
+                        return;
+                    }
+                    Ok(None) => {
+                        thread::sleep(Duration::from_millis(50));
+                    }
+                    _ => break,
+                }
+            }
+
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+
+        #[cfg(not(unix))]
+        {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
     }
 }

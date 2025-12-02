@@ -86,6 +86,7 @@ maxtxfee=1000000
                 "-rpcwaittimeout=5",
                 "getblockchaininfo",
             ])
+            .stderr(Stdio::null())
             .stdout(Stdio::null())
             .status()?;
 
