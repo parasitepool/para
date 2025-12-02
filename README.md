@@ -64,11 +64,11 @@ Setup
 ### Requirements:
 
 * [Rust](https://rust-lang.org/tools/install/)
-* [Just](https://github.com/casey/just?tab=readme-ov-file#installation)
+* [Just](https://github.com/casey/just?tab=readme-ov-file#installation) (optional)
 
 #### Manual Install
 
-Rust is required to build, test, and develop. To install: 
+Rust is required to build, test, and develop. To install with `curl`:
 
 ``` 
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh 
@@ -121,7 +121,7 @@ Troubleshooting
 
 #### Verify Minimum Versions
 
-`para` requires
+`para` requires:
 - `rustc` version 1.90.0 or later
   - Available from `rustup update`
 - `gcc` version 10.5.0 or later.
@@ -132,3 +132,31 @@ These versions can be verified with:
 rustc --version
 gcc --version
 ```
+
+#### Linux Builds
+To compile software on Linux systems, you may need additional packages which
+are not always installed by default. For Debian based systems (Ubuntu, Kali,
+etc), you can install these dependencies with `apt`:
+```
+sudo apt install build-essential pkg-config libssl-dev
+```
+
+#### Windows Builds
+To build Rust programs on Windows, you need one of two ABI configurations:
+  1. MSVC
+     - On Windows, `rustup` will configure Rust to target this ABI by default
+     - [Visual Studio](https://visualstudio.microsoft.com/downloads/) with
+     [Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
+     is required for building with MSVC
+       - this can be a very large install (~4GB)
+  2. GNU (GCC)
+     - Available from the `rustup toolchain install stable-gnu` command
+     - Requires [MinGW/MSYS2](https://www.msys2.org/)
+       ```
+       # Run from within the MSYS terminal
+       pacman -S --needed base-devel mingw-w64-ucrt-x86_64-toolchain \
+       mingw-w64-ucrt-x86_64-nasm
+       ```
+
+[The Rustup Book](https://rust-lang.github.io/rustup/installation/windows.html)
+provides more details on Windows builds.
