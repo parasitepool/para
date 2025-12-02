@@ -22,8 +22,8 @@ async fn fetch(client: &Client, url: Url) -> Result<String> {
     let started = Instant::now();
 
     let backoff = ExponentialBuilder::default()
-        .with_min_delay(Duration::from_millis(111))
-        .with_max_delay(Duration::from_millis(999))
+        .with_min_delay(Duration::from_millis(300))
+        .with_max_delay(Duration::from_secs(3))
         .with_jitter()
         .with_max_times(MAX_ATTEMPTS)
         .with_total_delay(Some(BUDGET));
@@ -59,7 +59,22 @@ async fn fetch(client: &Client, url: Url) -> Result<String> {
         .sleep(tokio::time::sleep)
         .when(|err: &Error| {
             if let Some(err) = err.downcast_ref::<reqwest::Error>() {
-                if err.is_timeout() || err.is_connect() || err.is_request() || err.is_body() {
+                // Retry on network-level failures
+                if err.is_timeout()
+                    || err.is_connect()
+                    || err.is_request()
+                    || err.is_body()
+                    || err.is_decode()
+                {
+                    return true;
+                }
+
+                // Retry on DNS resolution failures (shown as connection errors without status)
+                if err.source().is_some_and(|e| {
+                    e.to_string().contains("dns")
+                        || e.to_string().contains("resolve")
+                        || e.to_string().contains("getaddrinfo")
+                }) {
                     return true;
                 }
 
