@@ -1,6 +1,7 @@
 use super::*;
 
 pub(crate) struct Metatron {
+    blocks: AtomicU64,
     shares: AtomicU64,
     started: Instant,
     workers: AtomicU64,
@@ -9,10 +10,15 @@ pub(crate) struct Metatron {
 impl Metatron {
     pub(crate) fn new() -> Self {
         Self {
+            blocks: AtomicU64::new(0),
             shares: AtomicU64::new(0),
             started: Instant::now(),
             workers: AtomicU64::new(0),
         }
+    }
+
+    pub(crate) fn add_block(&self) {
+        self.blocks.fetch_add(1, Ordering::Relaxed);
     }
 
     pub(crate) fn add_share(&self) {
@@ -25,6 +31,10 @@ impl Metatron {
 
     pub(crate) fn sub_worker(&self) {
         self.workers.fetch_sub(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn total_blocks(&self) -> u64 {
+        self.blocks.load(Ordering::Relaxed)
     }
 
     pub(crate) fn total_shares(&self) -> u64 {
@@ -77,15 +87,14 @@ pub(crate) fn spawn_throbber(metatron: Arc<Metatron>) {
         loop {
             ticker.tick().await;
 
-            let total_shares = metatron.total_shares();
-
             let throbber = frames[frame % frames.len()];
             frame = frame.wrapping_add(1);
 
             let line = format!(
-                " {throbber}  workers={}  shares={}  uptime={}s",
+                " {throbber}  workers={}  shares={}  blocks={}  uptime={}s",
                 metatron.total_workers(),
-                total_shares,
+                metatron.total_shares(),
+                metatron.total_blocks(),
                 metatron.uptime().as_secs()
             );
 

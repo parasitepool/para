@@ -365,6 +365,8 @@ where
     }
 
     async fn submit(&mut self, id: Id, submit: Submit) -> Result {
+        self.metatron.add_share();
+
         let Some(job) = self.jobs.get(&submit.job_id) else {
             self.send_error(id, StratumError::Stale, None).await?;
             return Ok(());
@@ -451,7 +453,10 @@ where
             info!("Submitting potential block solve");
 
             match self.config.bitcoin_rpc_client()?.submit_block(&block) {
-                Ok(_) => info!("SUCCESSFULLY mined block {}", block.block_hash()),
+                Ok(_) => {
+                    info!("SUCCESSFULLY mined block {}", block.block_hash());
+                    self.metatron.add_block();
+                }
                 Err(err) => error!("Failed to submit block: {err}"),
             }
         }
@@ -466,8 +471,6 @@ where
                 reject_reason: None,
             })
             .await?;
-
-            self.metatron.add_share();
 
             let network_diff = Difficulty::from(job.nbits());
 
