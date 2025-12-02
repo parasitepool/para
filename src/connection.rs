@@ -1,6 +1,6 @@
 use {
     super::*,
-    crate::{job::Job, jobs::Jobs, vardiff::Vardiff},
+    crate::{job::Job, jobs::Jobs, metatron::Metatron, vardiff::Vardiff},
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -13,6 +13,7 @@ pub(crate) enum State {
 
 pub(crate) struct Connection<R, W> {
     config: Arc<PoolConfig>,
+    metatron: Arc<Metatron>,
     worker: SocketAddr,
     reader: FramedRead<R, LinesCodec>,
     writer: FramedWrite<W, LinesCodec>,
@@ -35,6 +36,7 @@ where
 {
     pub(crate) fn new(
         config: Arc<PoolConfig>,
+        metatron: Arc<Metatron>,
         worker: SocketAddr,
         reader: R,
         writer: W,
@@ -47,8 +49,11 @@ where
             config.vardiff_window(),
         );
 
+        metatron.add_worker();
+
         Self {
             config,
+            metatron,
             worker,
             reader: FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_MESSAGE_SIZE)),
             writer: FramedWrite::new(writer, LinesCodec::new()),
@@ -77,7 +82,6 @@ where
                 }
                 message = self.read_message() => {
                     let Some(message) = message? else {
-                        error!("Error reading message in connection serve");
                         break;
                     };
 
@@ -463,6 +467,8 @@ where
             })
             .await?;
 
+            self.metatron.add_share();
+
             let network_diff = Difficulty::from(job.nbits());
 
             debug!(
@@ -534,5 +540,16 @@ where
             reject_reason: None,
         })
         .await
+    }
+}
+
+impl<R, W> Drop for Connection<R, W> {
+    fn drop(&mut self) {
+        self.metatron.sub_worker();
+        info!(
+            "Worker {} disconnected (remaining: {})",
+            self.worker,
+            self.metatron.total_workers()
+        );
     }
 }

@@ -7,7 +7,7 @@ pub(crate) struct Metrics {
 }
 
 impl Metrics {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             hashes: AtomicU64::new(0),
             shares: AtomicU64::new(0),
@@ -15,23 +15,23 @@ impl Metrics {
         }
     }
 
-    pub fn add_hashes(&self, hashes: u64) {
+    pub(crate) fn add_hashes(&self, hashes: u64) {
         self.hashes.fetch_add(hashes, Ordering::Relaxed);
     }
 
-    pub fn add_share(&self) {
+    pub(crate) fn add_share(&self) {
         self.shares.fetch_add(1, Ordering::Relaxed);
     }
 
-    pub fn total_hashes(&self) -> u64 {
+    pub(crate) fn total_hashes(&self) -> u64 {
         self.hashes.load(Ordering::Relaxed)
     }
 
-    pub fn total_shares(&self) -> u64 {
+    pub(crate) fn total_shares(&self) -> u64 {
         self.shares.load(Ordering::Relaxed)
     }
 
-    pub fn uptime(&self) -> Duration {
+    pub(crate) fn uptime(&self) -> Duration {
         self.started.elapsed()
     }
 }
@@ -101,10 +101,10 @@ pub(crate) fn spawn_throbber(metrics: Arc<Metrics>) {
             frame = frame.wrapping_add(1);
 
             let line = format!(
-                " {throbber}  hashrate={}H/s  shares={}  uptime={:.0}s",
+                " {throbber}  hashrate={}H/s  shares={}  uptime={}s",
                 ckpool::HashRate(rate),
                 metrics.total_shares(),
-                metrics.uptime().as_secs_f64()
+                metrics.uptime().as_secs()
             );
 
             let mut out = io::stdout();

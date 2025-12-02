@@ -31,6 +31,7 @@ use {
     clap::Parser,
     coinbase_builder::CoinbaseBuilder,
     connection::Connection,
+    decay::{DecayingAverage, calculate_time_bias},
     futures::{
         sink::SinkExt,
         stream::{FuturesUnordered, StreamExt},
@@ -111,9 +112,11 @@ mod chain;
 pub mod ckpool;
 pub mod coinbase_builder;
 mod connection;
+mod decay;
 mod generator;
 mod job;
 mod jobs;
+mod metatron;
 mod signal;
 pub mod stratum;
 pub mod subcommand;
