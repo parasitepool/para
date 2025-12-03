@@ -45,7 +45,7 @@ impl Metrics {
         self.started.elapsed()
     }
 
-    pub(crate) fn avg_hashrate(&self) -> f64 {
+    pub(crate) fn hash_rate(&self) -> f64 {
         let mut state = self.hash_rate.lock();
         let total = self.total_hashes();
         let delta = total.saturating_sub(state.last_total);
@@ -59,7 +59,7 @@ impl StatusLine for Metrics {
     fn status_line(&self) -> String {
         format!(
             "hashrate={}H/s  shares={}  uptime={}s",
-            ckpool::HashRate(self.avg_hashrate()),
+            ckpool::HashRate(self.hash_rate()),
             self.total_shares(),
             self.uptime().as_secs()
         )
@@ -97,14 +97,14 @@ mod tests {
     fn avg_hashrate_zero_hashes_returns_zero() {
         let metrics = Metrics::new();
         thread::sleep(Duration::from_millis(10));
-        let rate = metrics.avg_hashrate();
+        let rate = metrics.hash_rate();
         assert_eq!(rate, 0.0);
     }
 
     #[test]
     fn avg_hashrate_is_finite() {
         let metrics = Metrics::new();
-        let rate = metrics.avg_hashrate();
+        let rate = metrics.hash_rate();
         assert!(rate.is_finite(), "hashrate should be finite: {rate}");
     }
 
@@ -115,7 +115,7 @@ mod tests {
         metrics.add_hashes(100_000);
 
         // First call samples the delta
-        let rate = metrics.avg_hashrate();
+        let rate = metrics.hash_rate();
         assert!(rate > 0.0, "hashrate should be positive: {rate}");
         assert!(rate.is_finite(), "hashrate should be finite: {rate}");
     }
@@ -128,10 +128,10 @@ mod tests {
         for _ in 0..5 {
             thread::sleep(Duration::from_millis(50));
             metrics.add_hashes(10_000);
-            let _ = metrics.avg_hashrate(); // Sample
+            let _ = metrics.hash_rate(); // Sample
         }
 
-        let rate = metrics.avg_hashrate();
+        let rate = metrics.hash_rate();
         assert!(rate > 0.0, "smoothed rate should be positive: {rate}");
         assert!(rate.is_finite(), "smoothed rate should be finite: {rate}");
     }
