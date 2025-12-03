@@ -459,7 +459,7 @@ where
         let current_diff = self.vardiff.current_diff();
 
         if current_diff.to_target().is_met_by(header.block_hash()) {
-            self.metatron.add_share(current_diff.as_f64());
+            self.metatron.add_accepted(current_diff.as_f64());
 
             self.send(Message::Response {
                 id,
@@ -496,6 +496,7 @@ where
                 .await?;
             }
         } else {
+            self.metatron.add_rejected();
             self.send_error(id, StratumError::AboveTarget, None).await?;
         }
 

@@ -1,7 +1,7 @@
 use super::*;
 
-/// Expected hashes per difficulty-1 share: 2^32 = 4.29 billion.
-/// The precise value is 2^256/target_1 ≈ 4,295,032,833 (~0.0015% higher),
+/// Expected hashes per difficulty-1 share: 2^32 =~ 4.29 billion.
+/// The precise value is 2^256/target_1 =~ 4,295,032,833 (~0.0015% higher),
 /// but 2^32 is the standard approximation used across the mining ecosystem.
 const HASHES_PER_DIFF_1: u64 = 1 << 32;
 
@@ -23,15 +23,15 @@ pub struct HashRate(pub f64);
 impl HashRate {
     pub const ZERO: Self = Self(0.0);
 
-    pub fn from_difficulty_rate(difficulty: f64, shares_per_sec: f64) -> Self {
-        Self(difficulty * shares_per_sec * HASHES_PER_DIFF_1 as f64)
+    pub fn from_dsps(dsps: f64) -> Self {
+        Self(dsps * HASHES_PER_DIFF_1 as f64)
     }
 
+    #[cfg(test)]
     pub fn estimate(total_difficulty: f64, window: Duration) -> Self {
         if window.is_zero() {
             return Self::ZERO;
         }
-
         Self(total_difficulty * HASHES_PER_DIFF_1 as f64 / window.as_secs_f64())
     }
 }
@@ -43,7 +43,7 @@ impl Display for HashRate {
 }
 
 impl FromStr for HashRate {
-    type Err = ParseError;
+    type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(Self(parse_with_si_prefix(
@@ -110,19 +110,6 @@ impl Div<f64> for HashRate {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct ParseError {
-    pub message: String,
-}
-
-impl Display for ParseError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.message)
-    }
-}
-
-impl std::error::Error for ParseError {}
-
 fn format_with_si_suffix(value: f64, unit: &str, f: &mut Formatter<'_>) -> fmt::Result {
     if value == 0.0 {
         return write!(f, "0 {unit}");
@@ -146,13 +133,9 @@ fn format_with_si_suffix(value: f64, unit: &str, f: &mut Formatter<'_>) -> fmt::
     }
 }
 
-fn parse_with_si_prefix(s: &str, valid_suffixes: &[&str]) -> Result<f64, ParseError> {
+fn parse_with_si_prefix(s: &str, valid_suffixes: &[&str]) -> Result<f64> {
     let s = s.trim();
-    if s.is_empty() {
-        return Err(ParseError {
-            message: "empty string".to_string(),
-        });
-    }
+    ensure!(!s.is_empty(), "empty string");
 
     // Find and strip any valid suffix
     let mut num_part = s;
@@ -174,24 +157,19 @@ fn parse_with_si_prefix(s: &str, valid_suffixes: &[&str]) -> Result<f64, ParseEr
         } else if last_char.is_ascii_digit() || last_char == '.' {
             (num_part, 1.0)
         } else {
-            return Err(ParseError {
-                message: format!("invalid suffix: {last_char}"),
-            });
+            bail!("invalid suffix: {last_char}");
         }
     } else {
         (num_part, 1.0)
     };
 
     let num_str = num_str.trim();
-    let num: f64 = num_str.parse().map_err(|e| ParseError {
-        message: format!("invalid number: {e}"),
-    })?;
+    let num: f64 = num_str.parse().context("invalid number")?;
 
-    if !num.is_finite() || num < 0.0 {
-        return Err(ParseError {
-            message: "value must be finite and non-negative".to_string(),
-        });
-    }
+    ensure!(
+        num.is_finite() && num >= 0.0,
+        "value must be finite and non-negative"
+    );
 
     Ok(num * multiplier)
 }
@@ -201,11 +179,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn hashrate_from_difficulty_rate() {
-        let rate = HashRate::from_difficulty_rate(1.0, 1.0);
+    fn hashrate_from_dsps() {
+        let rate = HashRate::from_dsps(1.0);
         assert_eq!(rate.0, HASHES_PER_DIFF_1 as f64);
 
-        let rate = HashRate::from_difficulty_rate(100.0, 0.2);
+        let rate = HashRate::from_dsps(20.0);
         assert_eq!(rate.0, 20.0 * HASHES_PER_DIFF_1 as f64);
     }
 
@@ -213,6 +191,9 @@ mod tests {
     fn hashrate_estimate() {
         let rate = HashRate::estimate(60.0, Duration::from_secs(60));
         assert_eq!(rate.0, HASHES_PER_DIFF_1 as f64);
+
+        let rate = HashRate::estimate(100.0, Duration::ZERO);
+        assert_eq!(rate, HashRate::ZERO);
     }
 
     #[test]

@@ -126,7 +126,7 @@ mod tests {
         for _ in 0..5 {
             thread::sleep(Duration::from_millis(50));
             metrics.add_hashes(10_000);
-            metrics.hash_rate(); 
+            metrics.hash_rate();
         }
 
         let rate = metrics.hash_rate();
