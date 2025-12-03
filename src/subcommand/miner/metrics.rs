@@ -1,9 +1,15 @@
-use super::*;
+use {super::*, parking_lot::Mutex};
+
+struct HashRate {
+    last_total: u64,
+    smoothed: DecayingAverage,
+}
 
 pub(crate) struct Metrics {
     hashes: AtomicU64,
     shares: AtomicU64,
     started: Instant,
+    hash_rate: Mutex<HashRate>,
 }
 
 impl Metrics {
@@ -12,6 +18,10 @@ impl Metrics {
             hashes: AtomicU64::new(0),
             shares: AtomicU64::new(0),
             started: Instant::now(),
+            hash_rate: Mutex::new(HashRate {
+                last_total: 0,
+                smoothed: DecayingAverage::new(Duration::from_secs(5)),
+            }),
         }
     }
 
@@ -36,9 +46,12 @@ impl Metrics {
     }
 
     pub(crate) fn avg_hashrate(&self) -> f64 {
-        let hashes = self.total_hashes() as f64;
-        let secs = self.uptime().as_secs_f64();
-        if secs > 0.0 { hashes / secs } else { 0.0 }
+        let mut state = self.hash_rate.lock();
+        let total = self.total_hashes();
+        let delta = total.saturating_sub(state.last_total);
+        state.smoothed.record(delta as f64, Instant::now());
+        state.last_total = total;
+        state.smoothed.value()
     }
 }
 
@@ -83,7 +96,7 @@ mod tests {
     #[test]
     fn avg_hashrate_zero_hashes_returns_zero() {
         let metrics = Metrics::new();
-        thread::sleep(std::time::Duration::from_millis(10));
+        thread::sleep(Duration::from_millis(10));
         let rate = metrics.avg_hashrate();
         assert_eq!(rate, 0.0);
     }
@@ -98,12 +111,29 @@ mod tests {
     #[test]
     fn avg_hashrate_increases_with_hashes() {
         let metrics = Metrics::new();
-        thread::sleep(std::time::Duration::from_millis(10));
-        metrics.add_hashes(10_000);
+        thread::sleep(Duration::from_millis(50));
+        metrics.add_hashes(100_000);
 
+        // First call samples the delta
         let rate = metrics.avg_hashrate();
         assert!(rate > 0.0, "hashrate should be positive: {rate}");
         assert!(rate.is_finite(), "hashrate should be finite: {rate}");
+    }
+
+    #[test]
+    fn avg_hashrate_smooths_over_samples() {
+        let metrics = Metrics::new();
+
+        // Simulate periodic sampling like the throbber does
+        for _ in 0..5 {
+            thread::sleep(Duration::from_millis(50));
+            metrics.add_hashes(10_000);
+            let _ = metrics.avg_hashrate(); // Sample
+        }
+
+        let rate = metrics.avg_hashrate();
+        assert!(rate > 0.0, "smoothed rate should be positive: {rate}");
+        assert!(rate.is_finite(), "smoothed rate should be finite: {rate}");
     }
 
     #[test]
