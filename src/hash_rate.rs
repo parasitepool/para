@@ -123,21 +123,16 @@ fn format_with_si_suffix(value: f64, unit: &str, f: &mut Formatter<'_>) -> fmt::
 
     let scaled = value / divisor;
 
-    // Use 3 significant figures
-    if scaled >= 100.0 {
-        write!(f, "{:.0} {prefix}{unit}", scaled)
-    } else if scaled >= 10.0 {
-        write!(f, "{:.1} {prefix}{unit}", scaled)
-    } else {
-        write!(f, "{:.2} {prefix}{unit}", scaled)
-    }
+    let formatted = format!("{scaled:.3}");
+    let trimmed = formatted.trim_end_matches('0').trim_end_matches('.');
+
+    write!(f, "{trimmed} {prefix}{unit}")
 }
 
 fn parse_with_si_prefix(s: &str, valid_suffixes: &[&str]) -> Result<f64> {
     let s = s.trim();
     ensure!(!s.is_empty(), "empty string");
 
-    // Find and strip any valid suffix
     let mut num_part = s;
     for suffix in valid_suffixes {
         if let Some(stripped) = s.strip_suffix(suffix) {
@@ -146,7 +141,6 @@ fn parse_with_si_prefix(s: &str, valid_suffixes: &[&str]) -> Result<f64> {
         }
     }
 
-    // Check for SI prefix at the end
     let (num_str, multiplier) = if let Some(last_char) = num_part.chars().last() {
         let upper = last_char.to_ascii_uppercase();
         if let Some((_, mult)) = SI_PREFIXES
@@ -200,16 +194,18 @@ mod tests {
     fn hashrate_display_formatting() {
         let cases = [
             (0.0, "0 H/s"),
-            (1e3, "1.00 KH/s"),
-            (1e6, "1.00 MH/s"),
-            (1e9, "1.00 GH/s"),
-            (1e12, "1.00 TH/s"),
-            (1e15, "1.00 PH/s"),
-            (1e18, "1.00 EH/s"),
+            (1e3, "1 KH/s"),
+            (1e6, "1 MH/s"),
+            (1e9, "1 GH/s"),
+            (1e12, "1 TH/s"),
+            (1e15, "1 PH/s"),
+            (1e18, "1 EH/s"),
             (314e15, "314 PH/s"),
-            (1.5e12, "1.50 TH/s"),
+            (1.5e12, "1.5 TH/s"),
+            (1.567e12, "1.567 TH/s"),
             (45.6e12, "45.6 TH/s"),
             (456e12, "456 TH/s"),
+            (123.456e12, "123.456 TH/s"),
         ];
 
         for (value, expected) in cases {

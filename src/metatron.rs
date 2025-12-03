@@ -1,4 +1,4 @@
-use {super::*, hash_rate::HashRate, parking_lot::Mutex};
+use {super::*, parking_lot::Mutex};
 
 pub(crate) struct Metatron {
     blocks: AtomicU64,
