@@ -48,6 +48,7 @@ hex = "0.4.3"
 html-escaper = "0.2.0"
 lru = "0.16.2"
 mime_guess = "2.0.5"
+parking_lot = "0.12.5"
 primitive-types = "0.14.0"
 rand = "0.9.1"
 reqwest = { version = "0.12.22", features = ["rustls-tls", "blocking", "json"] }

@@ -31,12 +31,16 @@ use {
     clap::Parser,
     coinbase_builder::CoinbaseBuilder,
     connection::Connection,
+    decay::{DecayingAverage, calculate_time_bias},
     futures::{
         sink::SinkExt,
         stream::{FuturesUnordered, StreamExt},
     },
     generator::Generator,
+    job::Job,
+    jobs::Jobs,
     lru::LruCache,
+    metatron::Metatron,
     reqwest::Url,
     rust_embed::RustEmbed,
     rustls_acme::{
@@ -79,6 +83,7 @@ use {
     },
     subcommand::{pool::pool_config::PoolConfig, server::account::Account},
     sysinfo::{Disks, System},
+    throbber::{StatusLine, spawn_throbber},
     tokio::{
         io::{AsyncRead, AsyncWrite},
         net::TcpListener,
@@ -98,6 +103,7 @@ use {
     tracing::{debug, error, info, warn},
     tracing_appender::non_blocking,
     tracing_subscriber::EnvFilter,
+    vardiff::Vardiff,
     workbase::Workbase,
     zeromq::{Endpoint, Socket, SocketRecv, SubSocket},
     zmq::Zmq,
@@ -111,12 +117,15 @@ mod chain;
 pub mod ckpool;
 pub mod coinbase_builder;
 mod connection;
+mod decay;
 mod generator;
 mod job;
 mod jobs;
+mod metatron;
 mod signal;
 pub mod stratum;
 pub mod subcommand;
+mod throbber;
 mod vardiff;
 mod workbase;
 mod zmq;

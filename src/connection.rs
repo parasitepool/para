@@ -1,7 +1,4 @@
-use {
-    super::*,
-    crate::{job::Job, jobs::Jobs, vardiff::Vardiff},
-};
+use super::*;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum State {
@@ -13,6 +10,7 @@ pub(crate) enum State {
 
 pub(crate) struct Connection<R, W> {
     config: Arc<PoolConfig>,
+    metatron: Arc<Metatron>,
     worker: SocketAddr,
     reader: FramedRead<R, LinesCodec>,
     writer: FramedWrite<W, LinesCodec>,
@@ -35,6 +33,7 @@ where
 {
     pub(crate) fn new(
         config: Arc<PoolConfig>,
+        metatron: Arc<Metatron>,
         worker: SocketAddr,
         reader: R,
         writer: W,
@@ -47,8 +46,11 @@ where
             config.vardiff_window(),
         );
 
+        metatron.add_worker();
+
         Self {
             config,
+            metatron,
             worker,
             reader: FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_MESSAGE_SIZE)),
             writer: FramedWrite::new(writer, LinesCodec::new()),
@@ -77,7 +79,6 @@ where
                 }
                 message = self.read_message() => {
                     let Some(message) = message? else {
-                        error!("Error reading message in connection serve");
                         break;
                     };
 
@@ -361,6 +362,8 @@ where
     }
 
     async fn submit(&mut self, id: Id, submit: Submit) -> Result {
+        self.metatron.add_share();
+
         let Some(job) = self.jobs.get(&submit.job_id) else {
             self.send_error(id, StratumError::Stale, None).await?;
             return Ok(());
@@ -447,7 +450,10 @@ where
             info!("Submitting potential block solve");
 
             match self.config.bitcoin_rpc_client()?.submit_block(&block) {
-                Ok(_) => info!("SUCCESSFULLY mined block {}", block.block_hash()),
+                Ok(_) => {
+                    info!("SUCCESSFULLY mined block {}", block.block_hash());
+                    self.metatron.add_block();
+                }
                 Err(err) => error!("Failed to submit block: {err}"),
             }
         }
@@ -534,5 +540,16 @@ where
             reject_reason: None,
         })
         .await
+    }
+}
+
+impl<R, W> Drop for Connection<R, W> {
+    fn drop(&mut self) {
+        self.metatron.sub_worker();
+        info!(
+            "Worker {} disconnected (remaining: {})",
+            self.worker,
+            self.metatron.total_workers()
+        );
     }
 }

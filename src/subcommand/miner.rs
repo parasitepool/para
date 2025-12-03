@@ -2,7 +2,7 @@ use {
     super::*,
     controller::Controller,
     hasher::Hasher,
-    metrics::{Metrics, spawn_throbber},
+    metrics::Metrics,
     stratum::{Client, ClientConfig},
 };
 
