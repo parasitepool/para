@@ -64,10 +64,6 @@ impl DecayingAverage {
     pub(crate) fn value(&self) -> f64 {
         self.value
     }
-
-    pub(crate) fn window(&self) -> Duration {
-        self.window
-    }
 }
 
 #[cfg(test)]
