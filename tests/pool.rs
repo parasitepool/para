@@ -30,7 +30,7 @@ fn configure_template_update_interval() {
     let stratum_endpoint = pool.stratum_endpoint();
 
     let output = CommandBuilder::new(format!(
-        "template {stratum_endpoint} --username {}",
+        "template {stratum_endpoint} --username {} --raw",
         signet_username()
     ))
     .spawn()
@@ -42,7 +42,7 @@ fn configure_template_update_interval() {
     std::thread::sleep(Duration::from_secs(1));
 
     let output = CommandBuilder::new(format!(
-        "template {stratum_endpoint} --username {}",
+        "template {stratum_endpoint} --username {} --raw",
         signet_username()
     ))
     .spawn()
@@ -439,9 +439,10 @@ fn concurrently_listening_workers_receive_new_templates_on_new_block() {
             let user = user.clone();
 
             thread.spawn(move || {
-                let mut template_watcher =
-                    CommandBuilder::new(format!("template {endpoint} --username {user} --watch"))
-                        .spawn();
+                let mut template_watcher = CommandBuilder::new(format!(
+                    "template {endpoint} --username {user} --watch --raw"
+                ))
+                .spawn();
 
                 let mut reader = BufReader::new(template_watcher.stdout.take().unwrap());
 
