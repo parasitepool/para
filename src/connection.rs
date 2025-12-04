@@ -365,7 +365,7 @@ where
         let Some(job) = self.jobs.get(&submit.job_id) else {
             self.send_error(id, StratumError::Stale, None).await?;
             self.metatron.add_rejected();
-            
+
             return Ok(());
         };
 
@@ -379,7 +379,7 @@ where
                 .await?;
 
                 self.metatron.add_rejected();
-                
+
                 return Ok(());
             };
 
@@ -418,7 +418,7 @@ where
         if self.jobs.is_duplicate(header.block_hash()) {
             self.send_error(id, StratumError::Duplicate, None).await?;
             self.metatron.add_rejected();
-            
+
             return Ok(());
         }
 
