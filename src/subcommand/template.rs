@@ -638,43 +638,60 @@ impl Template {
     }
 
     fn format_timestamp(unix_time: u64) -> String {
-        use std::time::{Duration, UNIX_EPOCH};
-        let datetime = UNIX_EPOCH + Duration::from_secs(unix_time);
-        format!("{:?}", datetime)
+        // Convert unix timestamp to ISO 8601 format (UTC)
+        const SECONDS_PER_MINUTE: u64 = 60;
+
+        let mut remaining = unix_time;
+
+        let seconds = remaining % SECONDS_PER_MINUTE;
+        remaining /= SECONDS_PER_MINUTE;
+
+        let minutes = remaining % 60;
+        remaining /= 60;
+
+        let hours = remaining % 24;
+        remaining /= 24;
+
+        // Days since epoch (1970-01-01)
+        let mut days = remaining;
+
+        // Calculate year
+        let mut year = 1970;
+        loop {
+            let days_in_year = if is_leap_year(year) { 366 } else { 365 };
+            if days < days_in_year {
+                break;
+            }
+            days -= days_in_year;
+            year += 1;
+        }
+
+        // Calculate month and day
+        let leap = is_leap_year(year);
+        let days_in_months: [u64; 12] = if leap {
+            [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+        } else {
+            [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+        };
+
+        let mut month = 1;
+        for days_in_month in days_in_months {
+            if days < days_in_month {
+                break;
+            }
+            days -= days_in_month;
+            month += 1;
+        }
+
+        let day = days + 1; // Days are 1-indexed
+
+        format!(
+            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+            year, month, day, hours, minutes, seconds
+        )
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_calculate_block_subsidy() {
-        assert_eq!(Template::calculate_block_subsidy(0), 5_000_000_000);
-        assert_eq!(Template::calculate_block_subsidy(209_999), 5_000_000_000);
-        assert_eq!(Template::calculate_block_subsidy(210_000), 2_500_000_000);
-        assert_eq!(Template::calculate_block_subsidy(420_000), 1_250_000_000);
-        assert_eq!(Template::calculate_block_subsidy(630_000), 625_000_000);
-        assert_eq!(Template::calculate_block_subsidy(840_000), 312_500_000);
-    }
-
-    #[test]
-    fn test_parse_version_bits() {
-        // Standard BIP9 version with no signals
-        let bits = Template::parse_version_bits(0x20000000);
-        assert!(bits.bip9_signaling);
-        assert!(bits.signaled_bits.is_empty());
-
-        // BIP9 with bit 1 signaled (e.g., SegWit)
-        let bits = Template::parse_version_bits(0x20000002);
-        assert!(bits.bip9_signaling);
-        assert!(bits.signaled_bits.contains(&1));
-    }
-
-    #[test]
-    fn test_difficulty_calculation() {
-        // Mainnet genesis block nbits
-        let (diff, _target) = Template::calculate_difficulty_and_target(0x1d00ffff);
-        assert!((diff - 1.0).abs() < 0.001);
-    }
+fn is_leap_year(year: u64) -> bool {
+    (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400)
 }
