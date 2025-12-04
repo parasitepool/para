@@ -30,7 +30,7 @@ fn configure_template_update_interval() {
     let stratum_endpoint = pool.stratum_endpoint();
 
     let output = CommandBuilder::new(format!(
-        "template {stratum_endpoint} --username {}",
+        "template {stratum_endpoint} --username {} --raw",
         signet_username()
     ))
     .spawn()
@@ -42,7 +42,7 @@ fn configure_template_update_interval() {
     std::thread::sleep(Duration::from_secs(1));
 
     let output = CommandBuilder::new(format!(
-        "template {stratum_endpoint} --username {}",
+        "template {stratum_endpoint} --username {} --raw",
         signet_username()
     ))
     .spawn()
