@@ -50,9 +50,10 @@ fn template_interpreted() {
     assert_eq!(output.ip_address, "127.0.0.1".to_string());
     assert!(output.coinbase.block_height.is_some());
     assert!(output.block_header.difficulty > 0.0);
-    // Verify timestamp is ISO 8601 format (contains T and Z)
-    assert!(output.block_header.timestamp_human.contains('T'));
-    assert!(output.block_header.timestamp_human.ends_with('Z'));
+    // Verify timestamp is ISO 8601 format (contains T and ends with Z)
+    let ts = &output.block_header.timestamp_human;
+    assert!(ts.contains('T'), "timestamp missing T: {}", ts);
+    assert!(ts.trim().ends_with('Z'), "timestamp missing Z: {}", ts);
 
     assert_eq!(stdout.status.code(), Some(0));
 }
