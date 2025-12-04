@@ -61,7 +61,6 @@ impl DecayingAverage {
         self.last_update = now;
     }
 
-    #[must_use]
     pub(crate) fn value(&self) -> f64 {
         self.value
     }

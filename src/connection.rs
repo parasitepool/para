@@ -362,10 +362,10 @@ where
     }
 
     async fn submit(&mut self, id: Id, submit: Submit) -> Result {
-        self.metatron.add_share();
-
         let Some(job) = self.jobs.get(&submit.job_id) else {
             self.send_error(id, StratumError::Stale, None).await?;
+            self.metatron.add_rejected();
+
             return Ok(());
         };
 
@@ -377,6 +377,8 @@ where
                     Some(serde_json::json!({"reason": "Version rolling not negotiated"})),
                 )
                 .await?;
+
+                self.metatron.add_rejected();
 
                 return Ok(());
             };
@@ -415,6 +417,8 @@ where
 
         if self.jobs.is_duplicate(header.block_hash()) {
             self.send_error(id, StratumError::Duplicate, None).await?;
+            self.metatron.add_rejected();
+
             return Ok(());
         }
 
@@ -461,6 +465,8 @@ where
         let current_diff = self.vardiff.current_diff();
 
         if current_diff.to_target().is_met_by(header.block_hash()) {
+            self.metatron.add_accepted(current_diff.as_f64());
+
             self.send(Message::Response {
                 id,
                 result: Some(json!(true)),
@@ -496,6 +502,7 @@ where
                 .await?;
             }
         } else {
+            self.metatron.add_rejected();
             self.send_error(id, StratumError::AboveTarget, None).await?;
         }
 
