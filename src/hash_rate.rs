@@ -38,7 +38,7 @@ impl HashRate {
 
 impl Display for HashRate {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        format_with_si_suffix(self.0, "H/s", f)
+        format_si(self.0, "H/s", f)
     }
 }
 
@@ -46,10 +46,7 @@ impl FromStr for HashRate {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self(parse_with_si_prefix(
-            s,
-            &["H/s", "h/s", "H", "h", ""],
-        )?))
+        Ok(Self(parse_si(s, &["H/s", "H"])?))
     }
 }
 
@@ -110,7 +107,7 @@ impl Div<f64> for HashRate {
     }
 }
 
-fn format_with_si_suffix(value: f64, unit: &str, f: &mut Formatter<'_>) -> fmt::Result {
+fn format_si(value: f64, unit: &str, f: &mut Formatter<'_>) -> fmt::Result {
     if value == 0.0 {
         return write!(f, "0 {unit}");
     }
@@ -118,54 +115,43 @@ fn format_with_si_suffix(value: f64, unit: &str, f: &mut Formatter<'_>) -> fmt::
     let (prefix, divisor) = SI_PREFIXES
         .iter()
         .rev()
-        .find(|(_, div)| value.abs() >= *div * 0.9999)
+        .find(|(_, div)| value.abs() >= *div)
         .unwrap_or(&SI_PREFIXES[0]);
 
     let scaled = value / divisor;
-
-    let formatted = format!("{scaled:.3}");
-    let trimmed = formatted.trim_end_matches('0').trim_end_matches('.');
+    let s = format!("{scaled:.3}");
+    let trimmed = s.trim_end_matches('0').trim_end_matches('.');
 
     write!(f, "{trimmed} {prefix}{unit}")
 }
 
-fn parse_with_si_prefix(s: &str, valid_suffixes: &[&str]) -> Result<f64> {
+fn parse_si(s: &str, units: &[&str]) -> Result<f64> {
     let s = s.trim();
     ensure!(!s.is_empty(), "empty string");
 
-    let mut num_part = s;
-    for suffix in valid_suffixes {
-        if let Some(stripped) = s.strip_suffix(suffix) {
-            num_part = stripped.trim();
-            break;
-        }
-    }
+    let s = units
+        .iter()
+        .find_map(|unit| s.strip_suffix(unit))
+        .unwrap_or(s)
+        .trim();
 
-    let (num_str, multiplier) = if let Some(last_char) = num_part.chars().last() {
-        let upper = last_char.to_ascii_uppercase();
-        if let Some((_, mult)) = SI_PREFIXES
-            .iter()
-            .find(|(p, _)| !p.is_empty() && p.chars().next().unwrap().to_ascii_uppercase() == upper)
-        {
-            (&num_part[..num_part.len() - last_char.len_utf8()], *mult)
-        } else if last_char.is_ascii_digit() || last_char == '.' {
-            (num_part, 1.0)
-        } else {
-            bail!("invalid suffix: {last_char}");
-        }
-    } else {
-        (num_part, 1.0)
-    };
+    let (num_str, mult) = SI_PREFIXES
+        .iter()
+        .rev()
+        .find_map(|(prefix, mult)| {
+            if prefix.is_empty() {
+                return None;
+            }
+            s.strip_suffix(prefix)
+                .or_else(|| s.strip_suffix(&prefix.to_lowercase()))
+                .map(|n| (n.trim(), *mult))
+        })
+        .unwrap_or((s, 1.0));
 
-    let num_str = num_str.trim();
     let num: f64 = num_str.parse().context("invalid number")?;
+    ensure!(num.is_finite() && num >= 0.0, "invalid value");
 
-    ensure!(
-        num.is_finite() && num >= 0.0,
-        "value must be finite and non-negative"
-    );
-
-    Ok(num * multiplier)
+    Ok(num * mult)
 }
 
 #[cfg(test)]
