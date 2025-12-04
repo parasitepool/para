@@ -29,6 +29,8 @@ fn template_raw() {
 #[serial(bitcoind)]
 #[timeout(90000)]
 fn template_interpreted() {
+    use para::subcommand::template::InterpretedOutput;
+
     let ckpool = TestCkpool::spawn();
 
     let stratum_endpoint = ckpool.stratum_endpoint();
@@ -41,13 +43,16 @@ fn template_interpreted() {
 
     let stdout = template.wait_with_output().unwrap();
     let output =
-        serde_json::from_str::<InterpretedTemplate>(&String::from_utf8_lossy(&stdout.stdout))
+        serde_json::from_str::<InterpretedOutput>(&String::from_utf8_lossy(&stdout.stdout))
             .unwrap();
 
     assert_eq!(output.mining_params.extranonce2_size, 8);
     assert_eq!(output.ip_address, "127.0.0.1".to_string());
     assert!(output.coinbase.block_height.is_some());
     assert!(output.block_header.difficulty > 0.0);
+    // Verify timestamp is ISO 8601 format (contains T and Z)
+    assert!(output.block_header.timestamp_human.contains('T'));
+    assert!(output.block_header.timestamp_human.ends_with('Z'));
 
     assert_eq!(stdout.status.code(), Some(0));
 }
