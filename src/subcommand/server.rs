@@ -16,6 +16,7 @@ use {
     reqwest::{Client, ClientBuilder, header},
     server_config::ServerConfig,
     std::sync::OnceLock,
+    sysinfo::DiskRefreshKind,
     templates::{
         PageContent, PageHtml, dashboard::DashboardHtml, home::HomeHtml, status::StatusHtml,
     },
@@ -306,19 +307,22 @@ impl Server {
 
             let status_file = config.log_dir().join("pool/pool.status");
 
-            let (hashrate, workers) = std::fs::read_to_string(&status_file)
+            let parsed_status = fs::read_to_string(&status_file)
                 .ok()
-                .and_then(|s| ckpool::Status::from_str(&s).ok())
-                .map(|st| (Some(st.hash_rates.hashrate1m), Some(st.pool.workers)))
-                .unwrap_or((None, None));
+                .and_then(|s| ckpool::Status::from_str(&s).ok());
 
             let status = StatusHtml {
                 disk_usage_percent,
                 memory_usage_percent,
                 cpu_usage_percent,
                 uptime: System::uptime(),
-                hashrate,
-                workers,
+                hashrate: parsed_status.map(|st| st.hash_rates.hashrate1m),
+                users: parsed_status.map(|st| st.pool.users),
+                workers: parsed_status.map(|st| st.pool.workers),
+                accepted: parsed_status.map(|st| st.shares.accepted),
+                rejected: parsed_status.map(|st| st.shares.rejected),
+                best_share: parsed_status.map(|st| st.shares.bestshare),
+                sps: parsed_status.map(|st| st.shares.sps1m),
             };
 
             Ok(if accept_json {

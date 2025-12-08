@@ -7,7 +7,12 @@ pub struct StatusHtml {
     pub memory_usage_percent: f64,
     pub uptime: u64,
     pub hashrate: Option<ckpool::HashRate>,
+    pub users: Option<u64>,
     pub workers: Option<u64>,
+    pub accepted: Option<u64>,
+    pub rejected: Option<u64>,
+    pub best_share: Option<u64>,
+    pub sps: Option<f64>,
 }
 
 impl PageContent for StatusHtml {
