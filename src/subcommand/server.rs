@@ -324,6 +324,7 @@ impl Server {
                 rejected: parsed_status.map(|st| st.shares.rejected),
                 best_share: parsed_status.map(|st| st.shares.bestshare),
                 sps: parsed_status.map(|st| st.shares.sps1m),
+                total_work: parsed_status.map(|st| st.shares.diff),
             };
 
             Ok(if accept_json {
