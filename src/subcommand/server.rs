@@ -281,7 +281,8 @@ impl Server {
             let path = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
 
             let mut disk_usage_percent = 0.0;
-            let disks = Disks::new_with_refreshed_list();
+            let disks =
+                Disks::new_with_refreshed_list_specifics(DiskRefreshKind::nothing().with_storage());
             for disk in &disks {
                 if path.starts_with(disk.mount_point()) {
                     let total = disk.total_space();
