@@ -180,6 +180,7 @@ impl Server {
 
                 let db_router = Router::new()
                     .route("/payouts", get(Self::payouts_all))
+                    .route("/payouts/failed", get(Self::payouts_failed))
                     .route("/payouts/{blockheight}", get(Self::payouts))
                     .route("/payouts/update", post(Self::update_payout_status))
                     .route(
@@ -337,6 +338,12 @@ impl Server {
         Extension(database): Extension<Database>,
     ) -> ServerResult<Response> {
         Ok(Json(database.get_pending_payouts().await?).into_response())
+    }
+
+    pub(crate) async fn payouts_failed(
+        Extension(database): Extension<Database>,
+    ) -> ServerResult<Response> {
+        Ok(Json(database.get_failed_payouts().await?).into_response())
     }
 
     pub(crate) async fn payouts(

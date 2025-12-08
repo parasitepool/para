@@ -24,6 +24,13 @@ pub struct PendingPayout {
     pub payout_ids: Vec<i64>,
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+pub struct FailedPayout {
+    pub btc_address: String,
+    pub amount_sats: i64,
+    pub payout_ids: Vec<i64>,
+}
+
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct UpdatePayoutStatusRequest {
     pub payout_ids: Vec<i64>,
@@ -429,6 +436,54 @@ impl Database {
         for (ln_address, (amount_sats, payout_ids)) in grouped {
             result.push(PendingPayout {
                 ln_address,
+                amount_sats,
+                payout_ids,
+            });
+        }
+
+        result.sort_by(|a, b| b.amount_sats.cmp(&a.amount_sats));
+
+        Ok(result)
+    }
+
+    pub async fn get_failed_payouts(&self) -> Result<Vec<FailedPayout>> {
+        #[derive(sqlx::FromRow)]
+        struct FailedPayoutRow {
+            payout_id: i64,
+            btc_address: String,
+            amount: i64,
+        }
+
+        let rows = sqlx::query_as::<_, FailedPayoutRow>(
+            "
+            SELECT
+                p.id as payout_id,
+                a.username as btc_address,
+                p.amount
+            FROM payouts p
+            JOIN accounts a ON p.account_id = a.id
+            WHERE p.status IN ('failure')
+            ORDER BY a.lnurl, p.id
+            ",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))?;
+
+        let mut grouped: HashMap<String, (i64, Vec<i64>)> = HashMap::new();
+
+        for row in rows {
+            let entry = grouped
+                .entry(row.btc_address.clone())
+                .or_insert((0, Vec::new()));
+            entry.0 += row.amount;
+            entry.1.push(row.payout_id);
+        }
+
+        let mut result = Vec::new();
+        for (btc_address, (amount_sats, payout_ids)) in grouped {
+            result.push(FailedPayout {
+                btc_address,
                 amount_sats,
                 payout_ids,
             });
