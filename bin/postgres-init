@@ -279,6 +279,20 @@ PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
 "
 
 PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
+  CREATE TABLE IF NOT EXISTS account_metadata
+  (
+      id          BIGSERIAL PRIMARY KEY,
+      account_id  BIGINT       NOT NULL REFERENCES accounts (id) ON DELETE CASCADE UNIQUE,
+      data        JSONB        NOT NULL DEFAULT '{}'::JSONB,
+      created_at  TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+      updated_at  TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  )
+  "
+PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
+  CREATE INDEX IF NOT EXISTS idx_account_metadata_account_id ON account_metadata (account_id);
+"
+
+PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
   CREATE TABLE IF NOT EXISTS payouts
   (
       id                BIGSERIAL PRIMARY KEY,

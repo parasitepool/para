@@ -292,18 +292,21 @@ impl Database {
             pub past_lnurls: sqlx::types::Json<Vec<String>>,
             pub total_diff: i64,
             pub last_updated: Option<String>,
+            pub metadata: Option<serde_json::Value>,
         }
 
         let Some(raw) = sqlx::query_as::<_, AccountRaw>(
             "
             SELECT
-                username,
-                lnurl,
-                past_lnurls,
-                total_diff,
-                lnurl_updated_at::text as last_updated
-            FROM accounts
-            WHERE username = $1
+                a.username,
+                a.lnurl,
+                a.past_lnurls,
+                a.total_diff,
+                a.lnurl_updated_at::text as last_updated,
+                m.data as metadata
+            FROM accounts a
+            LEFT JOIN account_metadata m ON a.id = m.account_id
+            WHERE a.username = $1
             ",
         )
         .bind(username)
@@ -319,7 +322,7 @@ impl Database {
             past_ln_addresses: raw.past_lnurls.0,
             total_diff: raw.total_diff,
             last_updated: raw.last_updated,
-            metadata: None,
+            metadata: raw.metadata,
         }))
     }
 
@@ -383,6 +386,38 @@ impl Database {
                 .await
                 .map_err(|err| anyhow!(err))?;
         };
+
+        self.get_account(username).await
+    }
+
+    pub async fn update_account_metadata(
+        &self,
+        username: &str,
+        metadata: &serde_json::Value,
+    ) -> Result<Option<Account>> {
+        let account_id: Option<i64> =
+            sqlx::query_scalar("SELECT id FROM accounts WHERE username = $1")
+                .bind(username)
+                .fetch_optional(&self.pool)
+                .await?;
+
+        let Some(account_id) = account_id else {
+            return Ok(None);
+        };
+
+        sqlx::query(
+            "
+            INSERT INTO account_metadata (account_id, data, created_at, updated_at)
+            VALUES ($1, $2, NOW(), NOW())
+            ON CONFLICT (account_id) DO UPDATE
+            SET data = account_metadata.data || $2, updated_at = NOW()
+            ",
+        )
+        .bind(account_id)
+        .bind(metadata)
+        .execute(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))?;
 
         self.get_account(username).await
     }
