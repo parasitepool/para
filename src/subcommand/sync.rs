@@ -119,6 +119,20 @@ enum SyncResult {
     WaitForNewBlock,
 }
 
+pub(crate) async fn load_current_id_from_file(id_file: &str) -> Result<i64> {
+    match tokio::fs::read_to_string(id_file).await {
+        Ok(content) => {
+            let id = content
+                .trim()
+                .parse::<i64>()
+                .map_err(|e| anyhow!("Invalid ID in file: {}", e))?;
+            Ok(id)
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(0),
+        Err(e) => Err(anyhow!("Failed to read ID file: {}", e)),
+    }
+}
+
 impl Sync {
     pub async fn run(self, cancel_token: CancellationToken) -> Result {
         info!("Starting HTTP share sync send...");
@@ -389,17 +403,7 @@ impl Sync {
     }
 
     async fn load_current_id(&self) -> Result<i64> {
-        match tokio::fs::read_to_string(&self.id_file).await {
-            Ok(content) => {
-                let id = content
-                    .trim()
-                    .parse::<i64>()
-                    .map_err(|e| anyhow!("Invalid ID in file: {}", e))?;
-                Ok(id)
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(0),
-            Err(e) => Err(anyhow!("Failed to read ID file: {}", e)),
-        }
+        load_current_id_from_file(&self.id_file).await
     }
 
     async fn save_current_id(&self, id: i64) -> Result {

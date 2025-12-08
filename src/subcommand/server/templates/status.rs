@@ -6,6 +6,7 @@ pub struct StatusHtml {
     pub disk_usage_percent: f64,
     pub memory_usage_percent: f64,
     pub uptime: u64,
+    pub blockheight: Option<i32>,
 
     pub users: Option<u64>,
     pub workers: Option<u64>,

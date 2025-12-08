@@ -276,6 +276,8 @@ impl Server {
         Extension(config): Extension<Arc<ServerConfig>>,
         AcceptJson(accept_json): AcceptJson,
     ) -> ServerResult<Response> {
+        let blockheight = Self::get_synced_blockheight(&config).await;
+
         task::block_in_place(|| {
             let mut system = System::new_all();
             system.refresh_all();
@@ -325,6 +327,7 @@ impl Server {
                 best_share: parsed_status.map(|st| st.shares.bestshare),
                 sps: parsed_status.map(|st| st.shares.sps1m),
                 total_work: parsed_status.map(|st| st.shares.diff),
+                blockheight,
             };
 
             Ok(if accept_json {
@@ -848,6 +851,42 @@ impl Server {
         );
 
         Ok(())
+    }
+
+    async fn get_synced_blockheight(config: &ServerConfig) -> Option<i32> {
+        let id_file = config.data_dir().join("current_id.txt");
+        let id_file_str = id_file.to_string_lossy();
+
+        let current_id = match sync::load_current_id_from_file(&id_file_str).await {
+            Ok(id) => id,
+            Err(e) => {
+                warn!("Failed to load current sync id: {}", e);
+                return None;
+            }
+        };
+
+        if current_id == 0 {
+            return None;
+        }
+
+        let database = match Database::new(config.database_url()).await {
+            Ok(db) => db,
+            Err(e) => {
+                warn!(
+                    "Failed to connect to database for blockheight lookup: {}",
+                    e
+                );
+                return None;
+            }
+        };
+
+        match database.get_blockheight_for_id(current_id).await {
+            Ok(blockheight) => blockheight,
+            Err(e) => {
+                warn!("Failed to get blockheight for id {}: {}", current_id, e);
+                None
+            }
+        }
     }
 }
 

@@ -19,6 +19,9 @@
 %% if let Some(sps) = status.sps {
       <li>Workers: {{ sps }}</li>
 %% }
+%% if let Some(blockheight) = status.blockheight {
+      <li>Last Synced Blockheight: {{ blockheight }}</li>
+%% }
     </ul>
   </article>
   <br>
