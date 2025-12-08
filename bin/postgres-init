@@ -162,13 +162,14 @@ PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
 
       -- update share values by setting all except the first to 0 and the first to the sum of the others
       UPDATE shares
-      SET diff = subq.total_diff
+      SET diff = subq.total_diff, sdiff = subq.highest_diff
       FROM (
                SELECT
                    s.workername,
                    s.blockheight,
                    MIN(s.id) as keep_id,
-                   SUM(s.diff) as total_diff
+                   SUM(s.diff) as total_diff,
+                   MAX(s.sdiff) as highest_diff
                FROM shares s
                WHERE s.id > window_start_val AND s.id <= window_end_val AND s.blockheight > 0 AND s.result = true
                GROUP BY s.workername, s.blockheight
