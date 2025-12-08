@@ -13,6 +13,12 @@
 %% if let Some(workers) = status.workers {
       <li>Workers: {{ workers }}</li>
 %% }
+%% if let Some(best_share) = status.best_share {
+      <li>Workers: {{ best_share }}</li>
+%% }
+%% if let Some(sps) = status.sps {
+      <li>Workers: {{ sps }}</li>
+%% }
     </ul>
   </article>
   <br>
