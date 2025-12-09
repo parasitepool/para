@@ -13,6 +13,15 @@
 %% if let Some(workers) = status.workers {
       <li>Workers: {{ workers }}</li>
 %% }
+%% if let Some(best_share) = status.best_share {
+      <li>Best Share: {{ best_share }}</li>
+%% }
+%% if let Some(sps) = status.sps {
+      <li>SPS: {{ sps }}</li>
+%% }
+%% if let Some(blockheight) = status.blockheight {
+      <li>Last Synced Blockheight: {{ blockheight }}</li>
+%% }
     </ul>
   </article>
   <br>

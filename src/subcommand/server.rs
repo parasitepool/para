@@ -16,6 +16,7 @@ use {
     reqwest::{Client, ClientBuilder, header},
     server_config::ServerConfig,
     std::sync::OnceLock,
+    sysinfo::DiskRefreshKind,
     templates::{
         PageContent, PageHtml, dashboard::DashboardHtml, home::HomeHtml, status::StatusHtml,
     },
@@ -179,6 +180,7 @@ impl Server {
 
                 let db_router = Router::new()
                     .route("/payouts", get(Self::payouts_all))
+                    .route("/payouts/failed", get(Self::payouts_failed))
                     .route("/payouts/{blockheight}", get(Self::payouts))
                     .route("/payouts/update", post(Self::update_payout_status))
                     .route(
@@ -274,6 +276,8 @@ impl Server {
         Extension(config): Extension<Arc<ServerConfig>>,
         AcceptJson(accept_json): AcceptJson,
     ) -> ServerResult<Response> {
+        let blockheight = Self::get_synced_blockheight(&config).await;
+
         task::block_in_place(|| {
             let mut system = System::new_all();
             system.refresh_all();
@@ -281,7 +285,8 @@ impl Server {
             let path = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
 
             let mut disk_usage_percent = 0.0;
-            let disks = Disks::new_with_refreshed_list();
+            let disks =
+                Disks::new_with_refreshed_list_specifics(DiskRefreshKind::nothing().with_storage());
             for disk in &disks {
                 if path.starts_with(disk.mount_point()) {
                     let total = disk.total_space();
@@ -305,19 +310,24 @@ impl Server {
 
             let status_file = config.log_dir().join("pool/pool.status");
 
-            let (hashrate, workers) = std::fs::read_to_string(&status_file)
+            let parsed_status = fs::read_to_string(&status_file)
                 .ok()
-                .and_then(|s| ckpool::Status::from_str(&s).ok())
-                .map(|st| (Some(st.hash_rates.hashrate1m), Some(st.pool.workers)))
-                .unwrap_or((None, None));
+                .and_then(|s| ckpool::Status::from_str(&s).ok());
 
             let status = StatusHtml {
                 disk_usage_percent,
                 memory_usage_percent,
                 cpu_usage_percent,
                 uptime: System::uptime(),
-                hashrate,
-                workers,
+                hashrate: parsed_status.map(|st| st.hash_rates.hashrate1m),
+                users: parsed_status.map(|st| st.pool.users),
+                workers: parsed_status.map(|st| st.pool.workers),
+                accepted: parsed_status.map(|st| st.shares.accepted),
+                rejected: parsed_status.map(|st| st.shares.rejected),
+                best_share: parsed_status.map(|st| st.shares.bestshare),
+                sps: parsed_status.map(|st| st.shares.sps1m),
+                total_work: parsed_status.map(|st| st.shares.diff),
+                blockheight,
             };
 
             Ok(if accept_json {
@@ -332,6 +342,12 @@ impl Server {
         Extension(database): Extension<Database>,
     ) -> ServerResult<Response> {
         Ok(Json(database.get_pending_payouts().await?).into_response())
+    }
+
+    pub(crate) async fn payouts_failed(
+        Extension(database): Extension<Database>,
+    ) -> ServerResult<Response> {
+        Ok(Json(database.get_failed_payouts().await?).into_response())
     }
 
     pub(crate) async fn payouts(
@@ -835,6 +851,42 @@ impl Server {
         );
 
         Ok(())
+    }
+
+    async fn get_synced_blockheight(config: &ServerConfig) -> Option<i32> {
+        let id_file = config.data_dir().join("current_id.txt");
+        let id_file_str = id_file.to_string_lossy();
+
+        let current_id = match sync::load_current_id_from_file(&id_file_str).await {
+            Ok(id) => id,
+            Err(e) => {
+                warn!("Failed to load current sync id: {}", e);
+                return None;
+            }
+        };
+
+        if current_id == 0 {
+            return None;
+        }
+
+        let database = match Database::new(config.database_url()).await {
+            Ok(db) => db,
+            Err(e) => {
+                warn!(
+                    "Failed to connect to database for blockheight lookup: {}",
+                    e
+                );
+                return None;
+            }
+        };
+
+        match database.get_blockheight_for_id(current_id).await {
+            Ok(blockheight) => blockheight,
+            Err(e) => {
+                warn!("Failed to get blockheight for id {}: {}", current_id, e);
+                None
+            }
+        }
     }
 }
 

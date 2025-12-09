@@ -10,3 +10,9 @@ Hashrate: {{ hashrate }}<br>
 %% if let Some(workers) = self.workers {
 Workers: {{ workers }}<br>
 %% }
+%% if let Some(best_share) = self.best_share {
+Best Share: {{ best_share }}<br>
+%% }
+%% if let Some(sps) = self.sps {
+SPS: {{ sps }}<br>
+%% }
