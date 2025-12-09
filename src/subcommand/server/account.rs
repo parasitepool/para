@@ -7,6 +7,8 @@ pub struct Account {
     pub past_ln_addresses: Vec<String>,
     pub total_diff: i64,
     pub last_updated: Option<String>,
+    /// Used as a general purpose sparse data storage for aspects of an account that are
+    /// not critical to primary operations (mining pool).
     pub metadata: Option<serde_json::Value>,
 }
 
