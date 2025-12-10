@@ -31,13 +31,13 @@ serde_json = "1.0.140"
 [dependencies]
 anyhow.workspace = true
 axum = { version = "0.8.3", features = ["http2"] }
-axum-server = "0.7.2"
+axum-server = "0.7.3"
 backon = "1.6.0"
 base64 = "0.22.1"
 bip322 = "0.0.10"
 bitcoin.workspace = true
 bitcoincore-rpc.workspace = true
-boilerplate = { version = "1.0.1", features = ["axum"] }
+boilerplate = { version = "1.1.1", features = ["axum"] }
 byteorder = "1.5.0"
 clap = { version = "4.5.36", features = ["derive", "env"] }
 dashmap = "6.1.0"
@@ -45,7 +45,6 @@ derive_more = { version = "2.0.1", features = ["display"] }
 dirs = "6.0.0"
 futures = "0.3.31"
 hex = "0.4.3"
-html-escaper = "0.2.0"
 lru = "0.16.2"
 mime_guess = "2.0.5"
 parking_lot = "0.12.5"

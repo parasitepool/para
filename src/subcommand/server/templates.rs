@@ -1,7 +1,6 @@
 use {
     super::*,
-    boilerplate::Boilerplate,
-    html_escaper::{Escape, Trusted},
+    boilerplate::{Boilerplate, Trusted},
 };
 
 pub(crate) mod dashboard;

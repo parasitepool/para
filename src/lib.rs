@@ -98,10 +98,6 @@ use {
         codec::{FramedRead, FramedWrite, LinesCodec},
         sync::CancellationToken,
     },
-    tower_http::{
-        services::ServeDir, set_header::SetResponseHeaderLayer,
-        validate_request::ValidateRequestHeaderLayer,
-    },
     tracing::{debug, error, info, warn},
     tracing_appender::non_blocking,
     tracing_subscriber::EnvFilter,
