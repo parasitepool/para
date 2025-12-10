@@ -182,6 +182,21 @@ pub(crate) async fn setup_test_schema(db_url: String) -> Result<(), Box<dyn std:
 
     sqlx::query(
         r#"
+                CREATE TABLE IF NOT EXISTS account_metadata
+                (
+                    id          BIGSERIAL PRIMARY KEY,
+                    account_id  BIGINT       NOT NULL REFERENCES accounts (id) ON DELETE CASCADE UNIQUE,
+                    data        JSONB        NOT NULL DEFAULT '{}'::JSONB,
+                    created_at  TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    updated_at  TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                )
+                "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
                 CREATE OR REPLACE FUNCTION compress_shares(start_id BIGINT, end_id BIGINT)
                 RETURNS BIGINT AS $$
                 BEGIN
