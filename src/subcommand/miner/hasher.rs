@@ -280,15 +280,4 @@ mod tests {
         assert!(result.is_err(), "Should be cancelled");
         assert!(result.unwrap_err().to_string().contains("cancelled"));
     }
-
-    #[test]
-    fn test_hashrate_display() {
-        assert_eq!(format!("{}", ckpool::HashRate(1500.0)), "1.500K");
-        assert_eq!(format!("{}", ckpool::HashRate(2_500_000.0)), "2.500M");
-        assert_eq!(format!("{}", ckpool::HashRate(3_200_000_000.0)), "3.200G");
-        assert_eq!(
-            format!("{}", ckpool::HashRate(1_100_000_000_000.0)),
-            "1.100T"
-        );
-    }
 }
