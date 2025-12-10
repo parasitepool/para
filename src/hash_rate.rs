@@ -151,7 +151,10 @@ fn parse_si(s: &str, units: &[&str]) -> Result<f64> {
     let num: f64 = num_str.parse().context("invalid number")?;
     ensure!(num.is_finite() && num >= 0.0, "invalid value");
 
-    Ok(num * mult)
+    let result = num * mult;
+    ensure!(result.is_finite(), "value overflow after SI prefix scaling");
+
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -236,7 +239,7 @@ mod tests {
 
     #[test]
     fn hashrate_parse_errors() {
-        let invalid = ["", "abc", "-1", "NaN", "Infinity"];
+        let invalid = ["", "abc", "-1", "NaN", "Infinity", "1.8e308 EH/s"];
         for input in invalid {
             assert!(input.parse::<HashRate>().is_err(), "should reject: {input}");
         }
