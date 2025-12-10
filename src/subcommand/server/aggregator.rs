@@ -34,7 +34,7 @@ impl Aggregator {
             .route("/aggregator/users", get(Self::users));
 
         router = if let Some(token) = config.api_token() {
-            router.layer(super::bearer_auth(token))
+            router.layer(bearer_auth(token))
         } else {
             router
         }
