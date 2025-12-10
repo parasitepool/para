@@ -3,6 +3,7 @@ use super::*;
 pub(crate) struct Aggregator;
 
 impl Aggregator {
+    #[allow(deprecated)]
     pub(crate) fn init(config: Arc<ServerConfig>) -> Result<Router> {
         let mut headers = header::HeaderMap::new();
         if let Some(token) = config.api_token() {

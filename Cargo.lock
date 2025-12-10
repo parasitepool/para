@@ -371,23 +371,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "axum-server"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1df331683d982a0b9492b38127151e6453639cd34926eb9c07d4cd8c6d22bfc"
-dependencies = [
- "bytes",
- "either",
- "fs-err",
- "http",
- "http-body",
- "hyper",
- "hyper-util",
- "tokio",
- "tower-service",
-]
-
-[[package]]
 name = "backon"
 version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1630,12 +1613,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "html-escaper"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "459a0ca33ee92551e0a3bb1774f2d3bdd1c09fb6341845736662dd25e1fcb52a"
-
-[[package]]
 name = "http"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2452,7 +2429,7 @@ version = "0.5.2"
 dependencies = [
  "anyhow",
  "axum",
- "axum-server 0.8.0",
+ "axum-server",
  "backon",
  "base64 0.22.1",
  "bip322",
@@ -2469,7 +2446,6 @@ dependencies = [
  "futures",
  "harness",
  "hex",
- "html-escaper",
  "lru",
  "mime_guess",
  "nix",
@@ -3129,7 +3105,7 @@ dependencies = [
  "async-trait",
  "async-web-client",
  "aws-lc-rs",
- "axum-server 0.7.3",
+ "axum-server",
  "base64 0.22.1",
  "blocking",
  "chrono",

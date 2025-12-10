@@ -140,11 +140,14 @@ impl Server {
                 HeaderValue::from_static("inline"),
             ));
 
-        router = if let Some(token) = config.api_token() {
-            router.layer(ValidateRequestHeaderLayer::bearer(token))
-        } else {
-            router
-        };
+        #[allow(deprecated)]
+        {
+            router = if let Some(token) = config.api_token() {
+                router.layer(ValidateRequestHeaderLayer::bearer(token))
+            } else {
+                router
+            };
+        }
 
         router = router
             .route("/", get(Self::home))
@@ -224,6 +227,7 @@ impl Server {
         Ok(())
     }
 
+    #[allow(deprecated)]
     fn with_auth<S>(config: Arc<ServerConfig>, method_router: MethodRouter<S>) -> MethodRouter<S>
     where
         S: Clone + Send + Sync + 'static,
@@ -235,6 +239,7 @@ impl Server {
         }
     }
 
+    #[allow(deprecated)]
     fn with_auth_router<S>(config: Arc<ServerConfig>, router: Router<S>) -> Router<S>
     where
         S: Clone + Send + Sync + 'static,
