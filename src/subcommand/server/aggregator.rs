@@ -3,7 +3,6 @@ use super::*;
 pub(crate) struct Aggregator;
 
 impl Aggregator {
-    #[allow(deprecated)]
     pub(crate) fn init(config: Arc<ServerConfig>) -> Result<Router> {
         let mut headers = header::HeaderMap::new();
         if let Some(token) = config.api_token() {
@@ -35,7 +34,7 @@ impl Aggregator {
             .route("/aggregator/users", get(Self::users));
 
         router = if let Some(token) = config.api_token() {
-            router.layer(ValidateRequestHeaderLayer::bearer(token))
+            router.layer(super::bearer_auth(token))
         } else {
             router
         }

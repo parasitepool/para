@@ -20,6 +20,10 @@ use {
     templates::{
         PageContent, PageHtml, dashboard::DashboardHtml, home::HomeHtml, status::StatusHtml,
     },
+    tower_http::{
+        services::ServeDir, set_header::SetResponseHeaderLayer,
+        validate_request::ValidateRequestHeaderLayer,
+    },
 };
 
 mod accept_json;
@@ -39,6 +43,13 @@ const TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_ATTEMPTS: usize = 3;
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(1500);
 static MIGRATION_DONE: OnceLock<bool> = OnceLock::new();
+
+#[allow(deprecated)]
+pub(crate) fn bearer_auth<T: Default>(
+    token: &str,
+) -> ValidateRequestHeaderLayer<tower_http::auth::require_authorization::Bearer<T>> {
+    ValidateRequestHeaderLayer::bearer(token)
+}
 
 #[derive(RustEmbed)]
 #[folder = "static"]
@@ -140,14 +151,11 @@ impl Server {
                 HeaderValue::from_static("inline"),
             ));
 
-        #[allow(deprecated)]
-        {
-            router = if let Some(token) = config.api_token() {
-                router.layer(ValidateRequestHeaderLayer::bearer(token))
-            } else {
-                router
-            };
-        }
+        router = if let Some(token) = config.api_token() {
+            router.layer(bearer_auth(token))
+        } else {
+            router
+        };
 
         router = router
             .route("/", get(Self::home))
@@ -227,27 +235,23 @@ impl Server {
         Ok(())
     }
 
-    #[allow(deprecated)]
     fn with_auth<S>(config: Arc<ServerConfig>, method_router: MethodRouter<S>) -> MethodRouter<S>
     where
         S: Clone + Send + Sync + 'static,
     {
         if let Some(token) = config.admin_token() {
-            method_router.layer(ValidateRequestHeaderLayer::bearer(token))
+            method_router.layer(bearer_auth(token))
         } else {
             method_router
         }
     }
 
-    #[allow(deprecated)]
     fn with_auth_router<S>(config: Arc<ServerConfig>, router: Router<S>) -> Router<S>
     where
         S: Clone + Send + Sync + 'static,
     {
         if let Some(token) = config.admin_token() {
-            Router::new()
-                .merge(router)
-                .layer(ValidateRequestHeaderLayer::bearer(token))
+            Router::new().merge(router).layer(bearer_auth(token))
         } else {
             router
         }

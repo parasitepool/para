@@ -32,7 +32,6 @@ pub struct AccountResponse {
     pub remark: Option<String>,
 }
 
-#[allow(deprecated)]
 pub(crate) fn account_router(config: Arc<ServerConfig>, database: Database) -> Router {
     let mut router = Router::new()
         .route("/account/{address}", get(account_lookup))
@@ -40,7 +39,7 @@ pub(crate) fn account_router(config: Arc<ServerConfig>, database: Database) -> R
         .route("/account/metadata", post(account_metadata_update));
 
     if let Some(token) = config.api_token() {
-        router = router.layer(ValidateRequestHeaderLayer::bearer(token))
+        router = router.layer(super::bearer_auth(token))
     };
 
     router.layer(Extension(database))
