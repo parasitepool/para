@@ -61,8 +61,17 @@ impl DecayingAverage {
         self.last_update = now;
     }
 
-    pub(crate) fn value(&self) -> f64 {
-        self.value
+    pub(crate) fn value_at(&self, now: Instant) -> f64 {
+        let elapsed = now
+            .saturating_duration_since(self.last_update)
+            .as_secs_f64();
+
+        if elapsed <= 0.0 {
+            return self.value;
+        }
+
+        let ratio = elapsed / self.window.as_secs_f64();
+        self.value * (1.0 - exponential_saturation(ratio))
     }
 }
 
@@ -117,8 +126,9 @@ mod tests {
 
     #[test]
     fn starts_at_zero() {
-        let avg = DecayingAverage::new(secs(300));
-        assert_eq!(avg.value(), 0.0);
+        let start = Instant::now();
+        let avg = DecayingAverage::with_start_time(secs(300), start);
+        assert_eq!(avg.value_at(start), 0.0);
     }
 
     #[test]
@@ -128,20 +138,45 @@ mod tests {
 
         avg.record(60.0, start + secs(1));
 
-        assert!(avg.value() > 0.0);
-        assert!(avg.value() < 60.0);
+        let value = avg.value_at(start + secs(1));
+        assert!(value > 0.0);
+        assert!(value < 60.0);
     }
 
     #[test]
-    fn decays_over_time() {
+    fn decays_over_time_without_samples() {
         let start = Instant::now();
         let mut avg = DecayingAverage::with_start_time(secs(60), start);
 
         avg.record(100.0, start + secs(1));
-        let initial = avg.value();
+        let initial = avg.value_at(start + secs(1));
 
-        avg.record(0.0, start + secs(31));
-        assert!(avg.value() < initial);
+        let later = avg.value_at(start + secs(31));
+        assert!(later < initial, "should decay: {} < {}", later, initial);
+    }
+
+    #[test]
+    fn value_at_is_tick_frequency_independent() {
+        let start = Instant::now();
+        let mut avg = DecayingAverage::with_start_time(secs(60), start);
+
+        avg.record(100.0, start + secs(1));
+
+        let t = start + secs(31);
+        let first_read = avg.value_at(t);
+        let second_read = avg.value_at(t);
+        let third_read = avg.value_at(t);
+
+        assert_eq!(first_read, second_read);
+        assert_eq!(second_read, third_read);
+
+        let even_later = avg.value_at(start + secs(61));
+        assert!(
+            even_later < first_read,
+            "should continue decaying: {} < {}",
+            even_later,
+            first_read
+        );
     }
 
     #[test]
@@ -155,7 +190,7 @@ mod tests {
             avg.record(10.0, t);
         }
 
-        let value = avg.value();
+        let value = avg.value_at(t);
         assert!((8.0..12.0).contains(&value), "Expected ~10, got {}", value);
     }
 
@@ -165,7 +200,7 @@ mod tests {
         let mut avg = DecayingAverage::with_start_time(secs(60), start);
 
         avg.record(100.0, start);
-        assert_eq!(avg.value(), 0.0);
+        assert_eq!(avg.value_at(start), 0.0);
     }
 
     #[test]
@@ -175,9 +210,9 @@ mod tests {
 
         avg.record(-50.0, start + secs(1));
         assert!(
-            avg.value() < 0.0,
+            avg.value_at(start + secs(1)) < 0.0,
             "expected negative value, got {}",
-            avg.value()
+            avg.value_at(start + secs(1))
         );
     }
 
@@ -187,9 +222,37 @@ mod tests {
         let mut avg = DecayingAverage::with_start_time(secs(1), start);
 
         avg.record(100.0, start + secs(1));
-        avg.record(100.0, start + secs(1000));
 
-        assert!(avg.value().is_finite(), "value should be finite");
+        let value = avg.value_at(start + secs(1000));
+        assert!(value.is_finite(), "value should be finite");
+        assert!(value < 1e-10, "value should be effectively zero: {}", value);
+    }
+
+    #[test]
+    fn decay_follows_exponential_curve() {
+        let start = Instant::now();
+        let mut avg = DecayingAverage::with_start_time(secs(60), start);
+
+        avg.record(60.0, start + secs(1)); // Record to set a value
+        let initial = avg.value_at(start + secs(1));
+
+        let after_one_tc = avg.value_at(start + secs(61));
+        let expected = initial * (-1.0_f64).exp();
+        assert!(
+            (after_one_tc - expected).abs() < 0.01,
+            "after one time constant: {} ≈ {}",
+            after_one_tc,
+            expected
+        );
+
+        let after_two_tc = avg.value_at(start + secs(121));
+        let expected = initial * (-2.0_f64).exp();
+        assert!(
+            (after_two_tc - expected).abs() < 0.01,
+            "after two time constants: {} ≈ {}",
+            after_two_tc,
+            expected
+        );
     }
 
     #[test]

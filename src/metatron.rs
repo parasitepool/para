@@ -35,7 +35,7 @@ impl Metatron {
     }
 
     pub(crate) fn hash_rate(&self) -> HashRate {
-        HashRate::from_dsps(self.dsps.lock().value())
+        HashRate::from_dsps(self.dsps.lock().value_at(Instant::now()))
     }
 
     pub(crate) fn add_worker(&self) {

@@ -49,9 +49,10 @@ impl Metrics {
         let mut state = self.hash_rate.lock();
         let total = self.total_hashes();
         let delta = total.saturating_sub(state.last_total);
-        state.smoothed.record(delta as f64, Instant::now());
+        let now = Instant::now();
+        state.smoothed.record(delta as f64, now);
         state.last_total = total;
-        HashRate(state.smoothed.value())
+        HashRate(state.smoothed.value_at(now))
     }
 }
 
