@@ -1,7 +1,7 @@
 [package]
 name = "para"
 description = "Parasite toolkit"
-version = "0.5.2"
+version = "0.5.3"
 homepage = "https://github.com/parasitepool/para"
 autotests = false
 
