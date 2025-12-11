@@ -713,7 +713,7 @@ async fn test_get_pending_payouts_groups_by_address() {
     let _response: SyncResponse = server.post_json("/sync/batch", &batch).await;
 
     use para::subcommand::server::database::PendingPayout;
-    let pending: Vec<PendingPayout> = server.get_json_async("/payouts").await;
+    let pending: Vec<PendingPayout> = server.get_json_async("/payouts?format=json").await;
 
     assert_eq!(pending.len(), 2, "Should have 2 grouped payouts");
 
@@ -791,7 +791,7 @@ async fn test_get_pending_payouts_excludes_success_status() {
         .unwrap();
 
     use para::subcommand::server::database::PendingPayout;
-    let pending: Vec<PendingPayout> = server.get_json_async("/payouts").await;
+    let pending: Vec<PendingPayout> = server.get_json_async("/payouts?format=json").await;
 
     assert_eq!(
         pending.len(),
@@ -849,7 +849,7 @@ async fn test_get_pending_payouts_includes_failure_status() {
     .unwrap();
 
     use para::subcommand::server::database::PendingPayout;
-    let pending: Vec<PendingPayout> = server.get_json_async("/payouts").await;
+    let pending: Vec<PendingPayout> = server.get_json_async("/payouts?format=json").await;
 
     assert_eq!(pending.len(), 1, "Should include failed payouts for retry");
     assert_eq!(pending[0].ln_address, "retry@ln.com");
@@ -889,7 +889,7 @@ async fn test_get_pending_payouts_excludes_no_ln_address() {
     let _response: SyncResponse = server.post_json("/sync/batch", &batch).await;
 
     use para::subcommand::server::database::PendingPayout;
-    let pending: Vec<PendingPayout> = server.get_json_async("/payouts").await;
+    let pending: Vec<PendingPayout> = server.get_json_async("/payouts?format=json").await;
 
     assert_eq!(
         pending.len(),
