@@ -1,5 +1,4 @@
-use crate::test_psql::create_shares_for_user;
-use {super::*, tokio_util::sync::CancellationToken};
+use {super::*, crate::test_psql::create_shares_for_user, tokio_util::sync::CancellationToken};
 
 pub(crate) static BATCH_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
