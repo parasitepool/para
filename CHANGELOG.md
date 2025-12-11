@@ -1,6 +1,61 @@
 Changelog
 =========
 
+[0.5.3](https://github.com/parasitepool/para/releases/tag/0.5.3) - 2025-12-10
+-----------------------------------------------------------------------------
+
+### Added
+- Build binaries for releases (#299)
+- Add HashRate to pool metrics (#293)
+- Metatron: The Celestial Scribe (#291)
+- Add Troubleshooting for Linux and Windows to README (#250)
+- Add vardiff algorithm (#283)
+- Add more stratum protocol tests and helpers (#280)
+- Add proper stratum errors (#276)
+- Add mining modes (#275)
+- Add miner metrics, status throbber and hash rate throttle (#268)
+- Add pool difficulty (#266)
+- Add Accounts System (#254)
+- Handle `bad-cb-length` consensus rule in CoinbaseBuilder (#261)
+- Add exponential backoff with jitter to aggregator (#255)
+- Add JobId, share validation and dup detection (#244)
+- Miner: Emit list of found shares on exit (#245)
+- Upgrade to Bitcoin v30 (#239)
+- Add ZMQ block notifications (#232)
+- Add template generator (#230)
+- Add custom getblocktemplate (#228)
+- Add link to official rust docs (#226)
+- Add Installation Troubleshooting Notes (#222)
+- Add flag to exit miner on share found (#223)
+
+### Changed
+- Tweak aggregator retry logic (#290)
+- Combine block template and merkle branches into workbase (#277)
+- Refactor stratum client for robustness (#279)
+- Unify signal handling and cancellation (#274)
+- limit lnaddress to 255 characters (#264)
+- move migration out of sync_batch (#263)
+- Refactor miner (#258)
+- Don't log user status errors (#256)
+- Leaner multicore miner (#224)
+- Refine `Difficulty` (#227)
+
+### Misc
+- Update dependencies (#300)
+- Cleanup Issue Backlog (#296)
+- Consolidate ping tests (#286)
+- Update dependencies (#271)
+- Account-Based Payment Automation (#270)
+- Tweak bitcoind test harness (#267)
+- Create or replace update trigger (#265)
+- Move hash_rate.rs in ckpool module (#257)
+- Add some tests for various things (#252)
+- Small miner fix (#251)
+- Refactor connection.rs for template updates (#236)
+- Show sync endpoint in dashboard (#241)
+- Bitcoind harness (#188)
+- Fix release action (#221)
+
 [0.5.2](https://github.com/parasitepool/para/releases/tag/0.5.2) - 2025-10-01
 -----------------------------------------------------------------------------
 

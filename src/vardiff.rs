@@ -57,7 +57,7 @@ impl Vardiff {
     }
 
     pub(crate) fn dsps(&self) -> f64 {
-        self.dsps.value()
+        self.dsps.value_at(Instant::now())
     }
 
     pub(crate) fn shares_since_change(&self) -> u32 {
@@ -106,7 +106,7 @@ impl Vardiff {
         }
 
         let bias = calculate_time_bias(time_since_first, self.window);
-        let dsps = self.dsps.value() / bias;
+        let dsps = self.dsps.value_at(now) / bias;
         let diff_rate_ratio = dsps / self.current_diff.as_f64();
         let target_rate = self.target_rate();
         let low_threshold = target_rate * HYSTERESIS_LOW;

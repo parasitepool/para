@@ -37,6 +37,7 @@ use {
         stream::{FuturesUnordered, StreamExt},
     },
     generator::Generator,
+    hash_rate::HashRate,
     job::Job,
     jobs::Jobs,
     lru::LruCache,
@@ -52,6 +53,7 @@ use {
     serde::{
         Deserialize, Serialize,
         de::{self, Deserializer},
+        ser::Serializer,
     },
     serde_json::json,
     serde_with::{DeserializeFromStr, SerializeDisplay},
@@ -65,7 +67,7 @@ use {
         io::{self, Write},
         net::{SocketAddr, ToSocketAddrs},
         num::NonZeroUsize,
-        ops::Add,
+        ops::{Add, AddAssign, Div, Mul, Sub, SubAssign},
         path::{Path, PathBuf},
         process,
         str::FromStr,
@@ -96,10 +98,6 @@ use {
         codec::{FramedRead, FramedWrite, LinesCodec},
         sync::CancellationToken,
     },
-    tower_http::{
-        services::ServeDir, set_header::SetResponseHeaderLayer,
-        validate_request::ValidateRequestHeaderLayer,
-    },
     tracing::{debug, error, info, warn},
     tracing_appender::non_blocking,
     tracing_subscriber::EnvFilter,
@@ -119,6 +117,7 @@ pub mod coinbase_builder;
 mod connection;
 mod decay;
 mod generator;
+mod hash_rate;
 mod job;
 mod jobs;
 mod metatron;

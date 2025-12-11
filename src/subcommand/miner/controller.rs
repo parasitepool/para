@@ -25,7 +25,7 @@ impl Controller {
         client: Client,
         username: String,
         cpu_cores: usize,
-        throttle: Option<ckpool::HashRate>,
+        throttle: Option<HashRate>,
         mode: Mode,
         cancel_token: CancellationToken,
     ) -> Result<Vec<Share>> {

@@ -20,6 +20,10 @@ use {
     templates::{
         PageContent, PageHtml, dashboard::DashboardHtml, home::HomeHtml, status::StatusHtml,
     },
+    tower_http::{
+        services::ServeDir, set_header::SetResponseHeaderLayer,
+        validate_request::ValidateRequestHeaderLayer,
+    },
 };
 
 mod accept_json;
@@ -39,6 +43,13 @@ const TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_ATTEMPTS: usize = 3;
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(1500);
 static MIGRATION_DONE: OnceLock<bool> = OnceLock::new();
+
+#[allow(deprecated)]
+pub(crate) fn bearer_auth<T: Default>(
+    token: &str,
+) -> ValidateRequestHeaderLayer<tower_http::auth::require_authorization::Bearer<T>> {
+    ValidateRequestHeaderLayer::bearer(token)
+}
 
 #[derive(RustEmbed)]
 #[folder = "static"]
@@ -141,7 +152,7 @@ impl Server {
             ));
 
         router = if let Some(token) = config.api_token() {
-            router.layer(ValidateRequestHeaderLayer::bearer(token))
+            router.layer(bearer_auth(token))
         } else {
             router
         };
@@ -229,7 +240,7 @@ impl Server {
         S: Clone + Send + Sync + 'static,
     {
         if let Some(token) = config.admin_token() {
-            method_router.layer(ValidateRequestHeaderLayer::bearer(token))
+            method_router.layer(bearer_auth(token))
         } else {
             method_router
         }
@@ -240,9 +251,7 @@ impl Server {
         S: Clone + Send + Sync + 'static,
     {
         if let Some(token) = config.admin_token() {
-            Router::new()
-                .merge(router)
-                .layer(ValidateRequestHeaderLayer::bearer(token))
+            Router::new().merge(router).layer(bearer_auth(token))
         } else {
             router
         }
@@ -784,7 +793,7 @@ impl Server {
                     && let Some(lnurl) = &share.lnurl
                 {
                     let trimmed_lnurl = lnurl.trim();
-                    if !trimmed_lnurl.is_empty() {
+                    if !trimmed_lnurl.is_empty() && trimmed_lnurl.len() < 255 {
                         entry.lnurl = Some(trimmed_lnurl.to_string());
                     }
                 }

@@ -39,7 +39,7 @@ pub(crate) fn account_router(config: Arc<ServerConfig>, database: Database) -> R
         .route("/account/metadata", post(account_metadata_update));
 
     if let Some(token) = config.api_token() {
-        router = router.layer(ValidateRequestHeaderLayer::bearer(token))
+        router = router.layer(bearer_auth(token))
     };
 
     router.layer(Extension(database))

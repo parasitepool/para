@@ -35,7 +35,7 @@ pub(crate) struct Miner {
     #[arg(long, help = "Number of <CPU_CORES> to use.")]
     cpu_cores: Option<usize>,
     #[arg(long, help = "Hash rate to <THROTTLE> to.")]
-    throttle: Option<ckpool::HashRate>,
+    throttle: Option<HashRate>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
