@@ -60,6 +60,7 @@ struct AccountUpdate {
     username: String,
     lnurl: Option<String>,
     total_diff: f64,
+    blockheights: HashSet<i32>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
@@ -781,12 +782,16 @@ impl Server {
                         username: username.to_string(),
                         lnurl: None,
                         total_diff: 0.0,
+                        blockheights: HashSet::new(),
                     });
 
-                if share.result == Some(true)
-                    && let Some(diff) = share.diff
-                {
-                    entry.total_diff += diff;
+                if share.result == Some(true) {
+                    if let Some(diff) = share.diff {
+                        entry.total_diff += diff;
+                    }
+                    if let Some(blockheight) = share.blockheight {
+                        entry.blockheights.insert(blockheight);
+                    }
                 }
 
                 if entry.lnurl.is_none()
@@ -830,6 +835,31 @@ impl Server {
                     .execute(&mut *tx)
                     .await
                     .map_err(|e| anyhow!("Failed to update account {}: {e}", update.username))?;
+
+                if !update.blockheights.is_empty() {
+                    let block_count_increment = update.blockheights.len() as i64;
+                    sqlx::query(
+                        "
+                        INSERT INTO account_metadata (account_id, data, created_at, updated_at)
+                        SELECT id, jsonb_build_object('block_count', $2), NOW(), NOW()
+                        FROM accounts WHERE username = $1
+                        ON CONFLICT (account_id) DO UPDATE
+                        SET data = account_metadata.data || jsonb_build_object('block_count',
+                            COALESCE((account_metadata.data->>'block_count')::bigint, 0) + $2),
+                            updated_at = NOW()
+                        ",
+                    )
+                    .bind(&update.username)
+                    .bind(block_count_increment)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| {
+                        anyhow!(
+                            "Failed to update account_metadata for {}: {e}",
+                            update.username
+                        )
+                    })?;
+                }
             }
         }
 
