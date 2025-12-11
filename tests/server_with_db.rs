@@ -383,7 +383,7 @@ async fn insert_test_shares_with_users(
 }
 
 #[tokio::test]
-async fn test_invalid_auth() {
+async fn test_invalid() {
     let server = TestServer::spawn_with_db_args("--admin-token verysecrettoken").await;
 
     setup_test_schema(server.database_url().unwrap())
@@ -392,6 +392,37 @@ async fn test_invalid_auth() {
 
     let res: Response = server.get_json_async_raw("/split").await;
     assert!(!res.status().is_success());
+}
+
+#[tokio::test]
+async fn test_payouts_content_negotiation() {
+    let mut server = TestServer::spawn_with_db_args("--admin-token verysecrettoken").await;
+
+    setup_test_schema(server.database_url().unwrap())
+        .await
+        .unwrap();
+
+    // fail requests without auth
+    let res: Response = server.get_json_async_raw("/payouts").await;
+    assert!(!res.status().is_success());
+    let res: Response = server.get_json_async_raw("/payouts?format=json").await;
+    assert!(!res.status().is_success());
+
+    server.admin_token = Some("verysecrettoken".into());
+    let res: Response = server.get_json_async_raw("/payouts").await;
+    assert!(res.status().is_success());
+    let content_type = res.headers().get("content-type").unwrap().to_str().unwrap();
+    assert!(content_type.contains("application/json"));
+
+    let res: Response = server.get_json_async_raw("/payouts?format=json").await;
+    assert!(res.status().is_success());
+    let content_type = res.headers().get("content-type").unwrap().to_str().unwrap();
+    assert!(content_type.contains("application/json"));
+
+    let res: Response = server.get_json_async_raw("/payouts?format=json").await;
+    assert!(res.status().is_success());
+    let content_type = res.headers().get("content-type").unwrap().to_str().unwrap();
+    assert!(content_type.contains("application/json"));
 }
 
 #[tokio::test]
