@@ -793,7 +793,7 @@ impl Server {
                     && let Some(lnurl) = &share.lnurl
                 {
                     let trimmed_lnurl = lnurl.trim();
-                    if !trimmed_lnurl.is_empty() {
+                    if !trimmed_lnurl.is_empty() && trimmed_lnurl.len() < 255 {
                         entry.lnurl = Some(trimmed_lnurl.to_string());
                     }
                 }
