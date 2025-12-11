@@ -837,28 +837,36 @@ impl Server {
                     .map_err(|e| anyhow!("Failed to update account {}: {e}", update.username))?;
 
                 if !update.blockheights.is_empty() {
-                    let block_count_increment = update.blockheights.len() as i64;
+                    let blockheights: Vec<i32> = update.blockheights.iter().copied().collect();
+                    let max_blockheight = *update.blockheights.iter().max().unwrap();
                     sqlx::query(
                         "
                         INSERT INTO account_metadata (account_id, data, created_at, updated_at)
-                        SELECT id, jsonb_build_object('block_count', $2), NOW(), NOW()
+                        SELECT id,
+                               jsonb_build_object(
+                                   'block_count', cardinality($2::int[]),
+                                   'highest_blockheight', $3
+                               ),
+                               NOW(), NOW()
                         FROM accounts WHERE username = $1
                         ON CONFLICT (account_id) DO UPDATE
-                        SET data = account_metadata.data || jsonb_build_object('block_count',
-                            COALESCE((account_metadata.data->>'block_count')::bigint, 0) + $2),
+                        SET data = account_metadata.data || jsonb_build_object(
+                                'block_count',
+                                COALESCE((account_metadata.data->>'block_count')::bigint, 0) +
+                                    (SELECT COUNT(*) FROM unnest($2::int[]) AS bh
+                                     WHERE bh > COALESCE((account_metadata.data->>'highest_blockheight')::int, 0)),
+                                'highest_blockheight',
+                                GREATEST(COALESCE((account_metadata.data->>'highest_blockheight')::int, 0), $3)
+                            ),
                             updated_at = NOW()
                         ",
                     )
-                    .bind(&update.username)
-                    .bind(block_count_increment)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(|e| {
-                        anyhow!(
-                            "Failed to update account_metadata for {}: {e}",
-                            update.username
-                        )
-                    })?;
+                        .bind(&update.username)
+                        .bind(&blockheights)
+                        .bind(max_blockheight)
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(|e| anyhow!("Failed to update account_metadata for {}: {e}", update.username))?;
                 }
             }
         }

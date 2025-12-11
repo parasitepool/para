@@ -531,7 +531,7 @@ async fn test_sync_endpoint_to_endpoint() {
     assert_eq!(stored_shares.len() as u32, 300);
 
     let stored_block: Option<(i32, String)> = sqlx::query_as(
-        "SELECT blockheight, blockhash FROM blocks ORDER BY blockheight ASC LIMIT 1",
+        "SELECT blockheight, blockhash FROM blocks ORDER BY blockheight LIMIT 1",
     )
     .fetch_optional(&pool)
     .await
@@ -876,6 +876,68 @@ async fn test_sync_batch_block_count_ignores_failed_shares() {
     assert_eq!(
         block_count.0, 1,
         "Should only count block from successful share"
+    );
+
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn test_sync_batch_block_count_ignores_lower_blocks() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    let shares1 =
+        create_shares_for_user("3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy", &[800005, 800006], 1);
+    let batch1 = ShareBatch {
+        block: None,
+        shares: shares1,
+        hostname: "test-node".to_string(),
+        batch_id: BATCH_COUNTER.fetch_add(1, Ordering::SeqCst) as u64,
+        total_shares: 2,
+        start_id: 1,
+        end_id: 2,
+    };
+
+    let _: SyncResponse = server.post_json("/sync/batch", &batch1).await;
+
+    let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
+
+    let shares2 = create_shares_for_user(
+        "3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy",
+        &[800001, 800002, 800003],
+        10,
+    );
+    let batch2 = ShareBatch {
+        block: None,
+        shares: shares2,
+        hostname: "test-node".to_string(),
+        batch_id: BATCH_COUNTER.fetch_add(1, Ordering::SeqCst) as u64,
+        total_shares: 3,
+        start_id: 10,
+        end_id: 12,
+    };
+
+    let _: SyncResponse = server.post_json("/sync/batch", &batch2).await;
+
+    let metadata: (i64, i32) = sqlx::query_as(
+        "SELECT (data->>'block_count')::bigint, (data->>'highest_blockheight')::int
+         FROM account_metadata am
+         JOIN accounts a ON a.id = am.account_id
+         WHERE a.username = $1",
+    )
+    .bind("3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy")
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(
+        metadata.0, 2,
+        "Should still have 2 blocks - lower blocks not counted"
+    );
+    assert_eq!(
+        metadata.1, 800006,
+        "highest_blockheight unchanged at 800006"
     );
 
     pool.close().await;
