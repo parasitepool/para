@@ -18,7 +18,8 @@ use {
     std::sync::OnceLock,
     sysinfo::DiskRefreshKind,
     templates::{
-        PageContent, PageHtml, dashboard::DashboardHtml, home::HomeHtml, status::StatusHtml,
+        PageContent, PageHtml, dashboard::DashboardHtml, home::HomeHtml, payouts::PayoutsHtml,
+        status::StatusHtml,
     },
     tower_http::{
         services::ServeDir, set_header::SetResponseHeaderLayer,
@@ -349,9 +350,22 @@ impl Server {
     }
 
     pub(crate) async fn payouts_all(
+        Extension(config): Extension<Arc<ServerConfig>>,
         Extension(database): Extension<Database>,
+        Query(params): Query<HashMap<String, String>>,
     ) -> ServerResult<Response> {
-        Ok(Json(database.get_pending_payouts().await?).into_response())
+        let pending = database.get_pending_payouts().await?;
+
+        let format_json = params.get("format").map(|f| f == "json").unwrap_or(false);
+        if format_json {
+            Ok(Json(&pending).into_response())
+        } else {
+            let failed = database.get_failed_payouts().await?;
+
+            Ok(PayoutsHtml { pending, failed }
+                .page(config.domain())
+                .into_response())
+        }
     }
 
     pub(crate) async fn payouts_failed(

@@ -1,0 +1,48 @@
+<div style="display: block;">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
+        <div style="margin: 2px 10px 5px;">
+            Payouts<br>
+            <br>
+            Pending Payouts: {{ self.display_pending_count() }}<br>
+            Pending Total: {{ self.display_pending_total() }}<br>
+            Failed Payouts: {{ self.display_failed_count() }}<br>
+            Failed Total: {{ self.display_failed_total() }}<br>
+            Total Payouts {{ self.display_combined_total() }}
+        </div>
+        <div>
+            <a href="/payouts?format=json" download="payouts.json">Download Sat Sheet (JSON)</a>
+        </div>
+    </div>
+    <div>
+        %% if !self.pending.is_empty() {
+        <h3>Pending Payments</h3>
+        <table border="1" cellpadding="5" cellspacing="0" style="width: 100%;">
+            <tr>
+                <th>Lightning Address</th>
+                <th>Amount</th>
+            </tr>
+            %% for payout in &self.pending {
+            <tr>
+                <td>{{ payout.ln_address }}</td>
+                <td>{{ crate::subcommand::server::templates::payouts::format_sats(payout.amount_sats) }}</td>
+            </tr>
+            %% }
+        </table>
+        %% }
+        %% if !self.failed.is_empty() {
+        <h3>Failed Payments</h3>
+        <table border="1" cellpadding="5" cellspacing="0" style="width: 100%;">
+            <tr>
+                <th>Bitcoin Address</th>
+                <th>Amount</th>
+            </tr>
+            %% for payout in &self.failed {
+            <tr>
+                <td>{{ payout.btc_address }}</td>
+                <td>{{ crate::subcommand::server::templates::payouts::format_sats(payout.amount_sats) }}</td>
+            </tr>
+            %% }
+        </table>
+        %% }
+    </div>
+</div>

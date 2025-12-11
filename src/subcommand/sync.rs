@@ -573,6 +573,7 @@ impl Database {
                 SELECT
                     a.id as account_id,
                     a.username,
+                    a.lnurl,
                     a.total_diff,
                     COALESCE(SUM(p.diff_paid), 0) as already_paid_diff
                 FROM accounts a
@@ -584,6 +585,7 @@ impl Database {
                 SELECT
                     account_id,
                     username,
+                    lnurl,
                     total_diff - already_paid_diff as unpaid_diff
                 FROM eligible_accounts
                 WHERE total_diff - already_paid_diff > 0
@@ -617,7 +619,11 @@ impl Database {
                 pa.unpaid_diff as diff_paid,
                 $2 as blockheight_start,
                 $1 as blockheight_end,
-                'pending' as status
+                CASE
+                    WHEN pa.lnurl IS NOT NULL
+                    THEN 'pending'
+                    ELSE 'failure'
+                END as status
             FROM payable_accounts pa
             CROSS JOIN total_unpaid tu
             WHERE tu.total_diff > 0
