@@ -34,6 +34,39 @@ pub(crate) fn create_test_shares(count: u32, blockheight: i64) -> Vec<Share> {
         .collect()
 }
 
+pub fn create_shares_for_user(username: &str, blockheights: &[i32], base_id: i64) -> Vec<Share> {
+    blockheights
+        .iter()
+        .enumerate()
+        .map(|(i, &blockheight)| Share {
+            id: base_id + i as i64,
+            blockheight: Some(blockheight),
+            workinfoid: Some(1000),
+            clientid: Some(100),
+            enonce1: Some(format!("enonce1_{}", i)),
+            nonce2: Some(format!("nonce2_{}", i)),
+            nonce: Some(format!("nonce_{}", i)),
+            ntime: Some("507f1f77".to_string()),
+            diff: Some(1000.0),
+            sdiff: Some(500.0),
+            hash: Some(format!("hash_{:064x}", i)),
+            result: Some(true),
+            reject_reason: None,
+            error: None,
+            errn: None,
+            createdate: Some("2024-01-01 12:00:00".to_string()),
+            createby: Some("ckpool".to_string()),
+            createcode: Some("".to_string()),
+            createinet: Some("127.0.0.1".to_string()),
+            workername: Some(format!("{}_worker", username)),
+            username: Some(username.to_string()),
+            lnurl: Some(format!("{}@test.com", username)),
+            address: Some("tb1qtest".to_string()),
+            agent: Some("test-agent".to_string()),
+        })
+        .collect()
+}
+
 pub(crate) fn create_test_block(blockheight: i64) -> FoundBlockRecord {
     FoundBlockRecord {
         id: blockheight as i32,

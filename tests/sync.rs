@@ -1,3 +1,4 @@
+use crate::test_psql::create_shares_for_user;
 use {super::*, tokio_util::sync::CancellationToken};
 
 pub(crate) static BATCH_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -548,6 +549,334 @@ async fn test_sync_endpoint_to_endpoint() {
     assert_eq!(block_count.0, 3);
     assert_eq!(block_count.1, 800030);
     assert_eq!(block_count.2, 800032);
+
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn test_sync_batch_creates_block_count() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    let shares = create_shares_for_user(
+        "bc1p5d7rjq7g6rdk2yhzks9smlaqtedr4dekq08ge8ztwac72sfr9rusxg3297",
+        &[100000, 100001, 100002],
+        1,
+    );
+
+    let batch = ShareBatch {
+        block: None,
+        shares,
+        hostname: "test-node".to_string(),
+        batch_id: BATCH_COUNTER.fetch_add(1, Ordering::SeqCst) as u64,
+        total_shares: 3,
+        start_id: 1,
+        end_id: 3,
+    };
+
+    let response: SyncResponse = server.post_json("/sync/batch", &batch).await;
+    assert_eq!(response.status, "OK");
+
+    let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
+
+    let block_count: Option<(i64,)> = sqlx::query_as(
+        "SELECT (data->>'block_count')::bigint FROM account_metadata am
+         JOIN accounts a ON a.id = am.account_id
+         WHERE a.username = $1",
+    )
+    .bind("bc1p5d7rjq7g6rdk2yhzks9smlaqtedr4dekq08ge8ztwac72sfr9rusxg3297")
+    .fetch_optional(&pool)
+    .await
+    .unwrap();
+
+    assert!(block_count.is_some(), "account_metadata should exist");
+    assert_eq!(block_count.unwrap().0, 3, "Should count 3 distinct blocks");
+
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn test_sync_batch_block_count_deduplicates_within_batch() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    let shares = create_shares_for_user(
+        "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+        &[200000, 200000, 200000, 200001],
+        1,
+    );
+
+    let batch = ShareBatch {
+        block: None,
+        shares,
+        hostname: "test-node".to_string(),
+        batch_id: BATCH_COUNTER.fetch_add(1, Ordering::SeqCst) as u64,
+        total_shares: 4,
+        start_id: 1,
+        end_id: 4,
+    };
+
+    let response: SyncResponse = server.post_json("/sync/batch", &batch).await;
+    assert_eq!(response.status, "OK");
+
+    let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
+
+    let block_count: Option<(i64,)> = sqlx::query_as(
+        "SELECT (data->>'block_count')::bigint FROM account_metadata am
+         JOIN accounts a ON a.id = am.account_id
+         WHERE a.username = $1",
+    )
+    .bind("bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq")
+    .fetch_optional(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(
+        block_count.unwrap().0,
+        2,
+        "Should count only 2 distinct blocks"
+    );
+
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn test_sync_batch_block_count_increments_across_batches() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    let shares1 =
+        create_shares_for_user("3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy", &[300000, 300001], 1);
+    let batch1 = ShareBatch {
+        block: None,
+        shares: shares1,
+        hostname: "test-node".to_string(),
+        batch_id: BATCH_COUNTER.fetch_add(1, Ordering::SeqCst) as u64,
+        total_shares: 2,
+        start_id: 1,
+        end_id: 2,
+    };
+
+    let response1: SyncResponse = server.post_json("/sync/batch", &batch1).await;
+    assert_eq!(response1.status, "OK");
+
+    let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
+
+    let block_count1: (i64,) = sqlx::query_as(
+        "SELECT (data->>'block_count')::bigint FROM account_metadata am
+         JOIN accounts a ON a.id = am.account_id
+         WHERE a.username = $1",
+    )
+    .bind("3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy")
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(block_count1.0, 2, "Should have 2 blocks after first batch");
+
+    let shares2 = create_shares_for_user(
+        "3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy",
+        &[300002, 300003, 300004],
+        10,
+    );
+    let batch2 = ShareBatch {
+        block: None,
+        shares: shares2,
+        hostname: "test-node".to_string(),
+        batch_id: BATCH_COUNTER.fetch_add(1, Ordering::SeqCst) as u64,
+        total_shares: 3,
+        start_id: 10,
+        end_id: 12,
+    };
+
+    let response2: SyncResponse = server.post_json("/sync/batch", &batch2).await;
+    assert_eq!(response2.status, "OK");
+
+    let block_count2: (i64,) = sqlx::query_as(
+        "SELECT (data->>'block_count')::bigint FROM account_metadata am
+         JOIN accounts a ON a.id = am.account_id
+         WHERE a.username = $1",
+    )
+    .bind("3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy")
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(
+        block_count2.0, 5,
+        "Should have 5 blocks total after second batch"
+    );
+
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn test_sync_batch_block_count_preserves_other_metadata() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    let shares1 = create_shares_for_user("1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2", &[400000], 1);
+    let batch1 = ShareBatch {
+        block: None,
+        shares: shares1,
+        hostname: "test-node".to_string(),
+        batch_id: BATCH_COUNTER.fetch_add(1, Ordering::SeqCst) as u64,
+        total_shares: 1,
+        start_id: 1,
+        end_id: 1,
+    };
+
+    let _: SyncResponse = server.post_json("/sync/batch", &batch1).await;
+
+    let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
+
+    sqlx::query(
+        "UPDATE account_metadata SET data = data || '{\"custom_field\": \"test_value\"}'::jsonb
+         WHERE account_id = (SELECT id FROM accounts WHERE username = $1)",
+    )
+    .bind("1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2")
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let shares2 = create_shares_for_user("1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2", &[400001], 10);
+    let batch2 = ShareBatch {
+        block: None,
+        shares: shares2,
+        hostname: "test-node".to_string(),
+        batch_id: BATCH_COUNTER.fetch_add(1, Ordering::SeqCst) as u64,
+        total_shares: 1,
+        start_id: 10,
+        end_id: 10,
+    };
+
+    let _: SyncResponse = server.post_json("/sync/batch", &batch2).await;
+
+    let metadata: (i64, String) = sqlx::query_as(
+        "SELECT (data->>'block_count')::bigint, data->>'custom_field'
+         FROM account_metadata am
+         JOIN accounts a ON a.id = am.account_id
+         WHERE a.username = $1",
+    )
+    .bind("1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2")
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(metadata.0, 2, "block_count should be 2");
+    assert_eq!(metadata.1, "test_value", "custom_field should be preserved");
+
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn test_sync_batch_block_count_multiple_users() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    let mut shares = create_shares_for_user(
+        "bc1p5d7rjq7g6rdk2yhzks9smlaqtedr4dekq08ge8ztwac72sfr9rusxg3297",
+        &[500000, 500001],
+        1,
+    );
+    shares.extend(create_shares_for_user(
+        "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+        &[500000, 500001, 500002],
+        10,
+    ));
+
+    let batch = ShareBatch {
+        block: None,
+        shares,
+        hostname: "test-node".to_string(),
+        batch_id: BATCH_COUNTER.fetch_add(1, Ordering::SeqCst) as u64,
+        total_shares: 5,
+        start_id: 1,
+        end_id: 12,
+    };
+
+    let response: SyncResponse = server.post_json("/sync/batch", &batch).await;
+    assert_eq!(response.status, "OK");
+
+    let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
+
+    let first_count: (i64,) = sqlx::query_as(
+        "SELECT (data->>'block_count')::bigint FROM account_metadata am
+         JOIN accounts a ON a.id = am.account_id
+         WHERE a.username = $1",
+    )
+    .bind("bc1p5d7rjq7g6rdk2yhzks9smlaqtedr4dekq08ge8ztwac72sfr9rusxg3297")
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let second_count: (i64,) = sqlx::query_as(
+        "SELECT (data->>'block_count')::bigint FROM account_metadata am
+         JOIN accounts a ON a.id = am.account_id
+         WHERE a.username = $1",
+    )
+    .bind("bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq")
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(
+        first_count.0, 2,
+        "bc1p5d7rjq7g6rdk2yhzks9smlaqtedr4dekq08ge8ztwac72sfr9rusxg3297 should have 2 blocks"
+    );
+    assert_eq!(
+        second_count.0, 3,
+        "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq should have 3 blocks"
+    );
+
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn test_sync_batch_block_count_ignores_failed_shares() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    let mut shares =
+        create_shares_for_user("3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy", &[600000, 600001], 1);
+
+    shares[1].result = Some(false);
+
+    let batch = ShareBatch {
+        block: None,
+        shares,
+        hostname: "test-node".to_string(),
+        batch_id: BATCH_COUNTER.fetch_add(1, Ordering::SeqCst) as u64,
+        total_shares: 2,
+        start_id: 1,
+        end_id: 2,
+    };
+
+    let response: SyncResponse = server.post_json("/sync/batch", &batch).await;
+    assert_eq!(response.status, "OK");
+
+    let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
+
+    let block_count: (i64,) = sqlx::query_as(
+        "SELECT (data->>'block_count')::bigint FROM account_metadata am
+         JOIN accounts a ON a.id = am.account_id
+         WHERE a.username = $1",
+    )
+    .bind("3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy")
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(
+        block_count.0, 1,
+        "Should only count block from successful share"
+    );
 
     pool.close().await;
 }
