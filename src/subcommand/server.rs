@@ -852,7 +852,7 @@ impl Server {
 
                 if !update.blockheights.is_empty() {
                     let blockheights: Vec<i32> = update.blockheights.iter().copied().collect();
-                    let max_blockheight = *update.blockheights.iter().max().unwrap();
+                    let max_blockheight = *blockheights.iter().max().unwrap();
                     sqlx::query(
                         "
                         INSERT INTO account_metadata (account_id, data, created_at, updated_at)
