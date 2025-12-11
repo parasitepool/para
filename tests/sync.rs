@@ -530,12 +530,11 @@ async fn test_sync_endpoint_to_endpoint() {
 
     assert_eq!(stored_shares.len() as u32, 300);
 
-    let stored_block: Option<(i32, String)> = sqlx::query_as(
-        "SELECT blockheight, blockhash FROM blocks ORDER BY blockheight LIMIT 1",
-    )
-    .fetch_optional(&pool)
-    .await
-    .unwrap();
+    let stored_block: Option<(i32, String)> =
+        sqlx::query_as("SELECT blockheight, blockhash FROM blocks ORDER BY blockheight LIMIT 1")
+            .fetch_optional(&pool)
+            .await
+            .unwrap();
 
     assert!(stored_block.is_some());
     assert_eq!(stored_block.unwrap().0, 800030);
