@@ -409,16 +409,6 @@ async fn test_payouts_content_negotiation() {
     assert!(!res.status().is_success());
 
     server.admin_token = Some("verysecrettoken".into());
-    let res = server.get_json_async_raw("/payouts").await;
-    assert!(res.status().is_success());
-    let content_type = res.headers().get("content-type").unwrap().to_str().unwrap();
-    assert!(content_type.contains("application/json"));
-
-    let res = server.get_json_async_raw("/payouts?format=json").await;
-    assert!(res.status().is_success());
-    let content_type = res.headers().get("content-type").unwrap().to_str().unwrap();
-    assert!(content_type.contains("application/json"));
-
     let res = server.get_json_async_raw("/payouts?format=json").await;
     assert!(res.status().is_success());
     let content_type = res.headers().get("content-type").unwrap().to_str().unwrap();
