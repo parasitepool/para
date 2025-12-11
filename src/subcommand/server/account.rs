@@ -7,18 +7,22 @@ pub struct Account {
     pub past_ln_addresses: Vec<String>,
     pub total_diff: i64,
     pub last_updated: Option<String>,
-    pub metadata: Option<AccountMetadata>,
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub struct AccountMetadata {
-    ord_address: String,
+    /// Used as a general purpose sparse data storage for aspects of an account that are
+    /// not critical to primary operations (mining pool).
+    pub metadata: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct AccountUpdate {
     pub btc_address: String,
     pub ln_address: String,
+    pub signature: String,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+pub struct AccountMetadataUpdate {
+    pub btc_address: String,
+    pub metadata: serde_json::Value,
     pub signature: String,
 }
 
@@ -31,10 +35,11 @@ pub struct AccountResponse {
 pub(crate) fn account_router(config: Arc<ServerConfig>, database: Database) -> Router {
     let mut router = Router::new()
         .route("/account/{address}", get(account_lookup))
-        .route("/account/update", post(account_update));
+        .route("/account/update", post(account_update))
+        .route("/account/metadata", post(account_metadata_update));
 
     if let Some(token) = config.api_token() {
-        router = router.layer(ValidateRequestHeaderLayer::bearer(token))
+        router = router.layer(bearer_auth(token))
     };
 
     router.layer(Extension(database))
@@ -71,6 +76,31 @@ pub(crate) async fn account_update(
 
     database
         .update_account_lnurl(&account_update.btc_address, &account_update.ln_address)
+        .await?
+        .ok_or_not_found(|| "Account")
+        .map(Json)
+        .map(IntoResponse::into_response)
+}
+
+pub(crate) async fn account_metadata_update(
+    Extension(database): Extension<Database>,
+    Json(metadata_update): Json<AccountMetadataUpdate>,
+) -> ServerResult<Response> {
+    let message = serde_json::to_string(&metadata_update.metadata)
+        .map_err(|e| anyhow!("Failed to serialize metadata: {}", e))?;
+
+    let signature_valid = verify_signature(
+        &metadata_update.btc_address,
+        &message,
+        &metadata_update.signature,
+    );
+
+    if !signature_valid {
+        return Ok(StatusCode::UNAUTHORIZED.into_response());
+    }
+
+    database
+        .update_account_metadata(&metadata_update.btc_address, &metadata_update.metadata)
         .await?
         .ok_or_not_found(|| "Account")
         .map(Json)

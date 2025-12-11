@@ -24,6 +24,13 @@ pub struct PendingPayout {
     pub payout_ids: Vec<i64>,
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+pub struct FailedPayout {
+    pub btc_address: String,
+    pub amount_sats: i64,
+    pub payout_ids: Vec<i64>,
+}
+
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct UpdatePayoutStatusRequest {
     pub payout_ids: Vec<i64>,
@@ -285,18 +292,21 @@ impl Database {
             pub past_lnurls: sqlx::types::Json<Vec<String>>,
             pub total_diff: i64,
             pub last_updated: Option<String>,
+            pub metadata: Option<serde_json::Value>,
         }
 
         let Some(raw) = sqlx::query_as::<_, AccountRaw>(
             "
             SELECT
-                username,
-                lnurl,
-                past_lnurls,
-                total_diff,
-                lnurl_updated_at::text as last_updated
-            FROM accounts
-            WHERE username = $1
+                a.username,
+                a.lnurl,
+                a.past_lnurls,
+                a.total_diff,
+                a.lnurl_updated_at::text as last_updated,
+                m.data as metadata
+            FROM accounts a
+            LEFT JOIN account_metadata m ON a.id = m.account_id
+            WHERE a.username = $1
             ",
         )
         .bind(username)
@@ -312,7 +322,7 @@ impl Database {
             past_ln_addresses: raw.past_lnurls.0,
             total_diff: raw.total_diff,
             last_updated: raw.last_updated,
-            metadata: None,
+            metadata: raw.metadata,
         }))
     }
 
@@ -380,6 +390,38 @@ impl Database {
         self.get_account(username).await
     }
 
+    pub async fn update_account_metadata(
+        &self,
+        username: &str,
+        metadata: &serde_json::Value,
+    ) -> Result<Option<Account>> {
+        let account_id: Option<i64> =
+            sqlx::query_scalar("SELECT id FROM accounts WHERE username = $1")
+                .bind(username)
+                .fetch_optional(&self.pool)
+                .await?;
+
+        let Some(account_id) = account_id else {
+            return Ok(None);
+        };
+
+        sqlx::query(
+            "
+            INSERT INTO account_metadata (account_id, data, created_at, updated_at)
+            VALUES ($1, $2, NOW(), NOW())
+            ON CONFLICT (account_id) DO UPDATE
+            SET data = account_metadata.data || $2, updated_at = NOW()
+            ",
+        )
+        .bind(account_id)
+        .bind(metadata)
+        .execute(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))?;
+
+        self.get_account(username).await
+    }
+
     pub async fn migrate_accounts(&self) -> Result<u64> {
         let result = sqlx::query_scalar::<_, i64>("SELECT refresh_accounts()")
             .fetch_one(&self.pool)
@@ -429,6 +471,54 @@ impl Database {
         for (ln_address, (amount_sats, payout_ids)) in grouped {
             result.push(PendingPayout {
                 ln_address,
+                amount_sats,
+                payout_ids,
+            });
+        }
+
+        result.sort_by(|a, b| b.amount_sats.cmp(&a.amount_sats));
+
+        Ok(result)
+    }
+
+    pub async fn get_failed_payouts(&self) -> Result<Vec<FailedPayout>> {
+        #[derive(sqlx::FromRow)]
+        struct FailedPayoutRow {
+            payout_id: i64,
+            btc_address: String,
+            amount: i64,
+        }
+
+        let rows = sqlx::query_as::<_, FailedPayoutRow>(
+            "
+            SELECT
+                p.id as payout_id,
+                a.username as btc_address,
+                p.amount
+            FROM payouts p
+            JOIN accounts a ON p.account_id = a.id
+            WHERE p.status IN ('failure')
+            ORDER BY a.lnurl, p.id
+            ",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))?;
+
+        let mut grouped: HashMap<String, (i64, Vec<i64>)> = HashMap::new();
+
+        for row in rows {
+            let entry = grouped
+                .entry(row.btc_address.clone())
+                .or_insert((0, Vec::new()));
+            entry.0 += row.amount;
+            entry.1.push(row.payout_id);
+        }
+
+        let mut result = Vec::new();
+        for (btc_address, (amount_sats, payout_ids)) in grouped {
+            result.push(FailedPayout {
+                btc_address,
                 amount_sats,
                 payout_ids,
             });

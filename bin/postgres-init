@@ -162,13 +162,14 @@ PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
 
       -- update share values by setting all except the first to 0 and the first to the sum of the others
       UPDATE shares
-      SET diff = subq.total_diff
+      SET diff = subq.total_diff, sdiff = subq.highest_diff
       FROM (
                SELECT
                    s.workername,
                    s.blockheight,
                    MIN(s.id) as keep_id,
-                   SUM(s.diff) as total_diff
+                   SUM(s.diff) as total_diff,
+                   MAX(s.sdiff) as highest_diff
                FROM shares s
                WHERE s.id > window_start_val AND s.id <= window_end_val AND s.blockheight > 0 AND s.result = true
                GROUP BY s.workername, s.blockheight
@@ -276,6 +277,20 @@ PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
   CREATE INDEX IF NOT EXISTS idx_accounts_username ON accounts (username);
   CREATE INDEX IF NOT EXISTS idx_accounts_lnurl ON accounts (lnurl);
   CREATE INDEX IF NOT EXISTS idx_accounts_past_lnurls ON accounts USING GIN (past_lnurls);
+"
+
+PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
+  CREATE TABLE IF NOT EXISTS account_metadata
+  (
+      id          BIGSERIAL PRIMARY KEY,
+      account_id  BIGINT       NOT NULL REFERENCES accounts (id) ON DELETE CASCADE UNIQUE,
+      data        JSONB        NOT NULL DEFAULT '{}'::JSONB,
+      created_at  TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+      updated_at  TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  )
+  "
+PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
+  CREATE INDEX IF NOT EXISTS idx_account_metadata_account_id ON account_metadata (account_id);
 "
 
 PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
