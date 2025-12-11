@@ -389,6 +389,26 @@ PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
           updated_at       = NOW();
 
   GET DIAGNOSTICS rows_affected = ROW_COUNT;
+
+  INSERT INTO account_metadata (account_id, data, created_at, updated_at)
+  SELECT a.id,
+         jsonb_build_object('block_count', block_counts.cnt),
+         NOW(),
+         NOW()
+  FROM accounts a
+  INNER JOIN (
+      SELECT TRIM(BOTH ' ' FROM username) AS username,
+             COUNT(DISTINCT blockheight) AS cnt
+      FROM remote_shares
+      WHERE username IS NOT NULL
+        AND TRIM(BOTH ' ' FROM username) != ''
+        AND result = true
+      GROUP BY TRIM(BOTH ' ' FROM username)
+  ) block_counts ON a.username = block_counts.username
+  ON CONFLICT (account_id) DO UPDATE
+      SET data = account_metadata.data || jsonb_build_object('block_count', EXCLUDED.data->>'block_count')::jsonb,
+          updated_at = NOW();
+
   RETURN rows_affected;
   END;
   \$\$ LANGUAGE plpgsql;
