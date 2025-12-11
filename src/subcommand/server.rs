@@ -3,7 +3,7 @@ use {
     crate::{
         ckpool,
         subcommand::{
-            server::{account::account_router, templates::payouts::PayoutsHtml},
+            server::account::account_router,
             sync::{ShareBatch, SyncResponse},
         },
     },
@@ -18,7 +18,8 @@ use {
     std::sync::OnceLock,
     sysinfo::DiskRefreshKind,
     templates::{
-        PageContent, PageHtml, dashboard::DashboardHtml, home::HomeHtml, status::StatusHtml,
+        PageContent, PageHtml, dashboard::DashboardHtml, home::HomeHtml, payouts::PayoutsHtml,
+        status::StatusHtml,
     },
     tower_http::{
         services::ServeDir, set_header::SetResponseHeaderLayer,
