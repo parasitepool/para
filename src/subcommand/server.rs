@@ -351,13 +351,12 @@ impl Server {
     pub(crate) async fn payouts_all(
         Extension(config): Extension<Arc<ServerConfig>>,
         Extension(database): Extension<Database>,
-        AcceptJson(accept_json): AcceptJson,
         Query(params): Query<HashMap<String, String>>,
     ) -> ServerResult<Response> {
         let pending = database.get_pending_payouts().await?;
 
         let format_json = params.get("format").map(|f| f == "json").unwrap_or(false);
-        if accept_json || format_json {
+        if format_json {
             Ok(Json(&pending).into_response())
         } else {
             let failed = database.get_failed_payouts().await?;
