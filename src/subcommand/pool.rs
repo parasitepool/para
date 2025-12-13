@@ -11,7 +11,7 @@ pub(crate) struct Pool {
 impl Pool {
     pub(crate) async fn run(&self, cancel_token: CancellationToken) -> Result {
         let config = Arc::new(self.config.clone());
-        let metatron = Arc::new(Metatron::new(config.vardiff_window()));
+        let metatron = Arc::new(Metatron::new());
         let address = config.address();
         let port = config.port();
 

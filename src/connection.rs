@@ -11,14 +11,16 @@ pub(crate) enum State {
 pub(crate) struct Connection<R, W> {
     config: Arc<PoolConfig>,
     metatron: Arc<Metatron>,
-    worker: SocketAddr,
+    socket_addr: SocketAddr,
     reader: FramedRead<R, LinesCodec>,
     writer: FramedWrite<W, LinesCodec>,
     workbase_receiver: watch::Receiver<Arc<Workbase>>,
     cancel_token: CancellationToken,
     jobs: Jobs,
     state: State,
-    address: Option<Address>,
+    address: Option<Address<bitcoin::address::NetworkUnchecked>>,
+    workername: Option<String>,
+    worker_stats: Option<Arc<WorkerStats>>,
     authorized: Option<SystemTime>,
     version_mask: Option<Version>,
     extranonce1: Option<Extranonce>,
@@ -34,7 +36,7 @@ where
     pub(crate) fn new(
         config: Arc<PoolConfig>,
         metatron: Arc<Metatron>,
-        worker: SocketAddr,
+        socket_addr: SocketAddr,
         reader: R,
         writer: W,
         workbase_receiver: watch::Receiver<Arc<Workbase>>,
@@ -46,12 +48,12 @@ where
             config.vardiff_window(),
         );
 
-        metatron.add_worker();
+        metatron.add_connection();
 
         Self {
             config,
             metatron,
-            worker,
+            socket_addr,
             reader: FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_MESSAGE_SIZE)),
             writer: FramedWrite::new(writer, LinesCodec::new()),
             workbase_receiver,
@@ -59,6 +61,8 @@ where
             jobs: Jobs::new(),
             state: State::Init,
             address: None,
+            workername: None,
+            worker_stats: None,
             authorized: None,
             version_mask: None,
             extranonce1: None,
@@ -74,7 +78,7 @@ where
         loop {
             tokio::select! {
                 _ = cancel_token.cancelled() => {
-                    info!("Disconnecting from {}", self.worker);
+                    info!("Disconnecting from {}", self.socket_addr);
                     break;
                 }
                 message = self.read_message() => {
@@ -89,7 +93,7 @@ where
 
                     match method.as_str() {
                         "mining.configure" => {
-                            debug!("CONFIGURE from {} with {params}", self.worker);
+                            debug!("CONFIGURE from {} with {params}", self.socket_addr);
 
                             if !matches!(self.state,  State::Init | State::Configured) {
                                 self.send_error(
@@ -110,7 +114,7 @@ where
                             self.configure(id, configure).await?
                         }
                         "mining.subscribe" => {
-                            debug!("SUBSCRIBE from {} with {params}", self.worker);
+                            debug!("SUBSCRIBE from {} with {params}", self.socket_addr);
 
                             if !matches!(self.state,  State::Init | State::Configured) {
                                 self.send_error(
@@ -131,7 +135,7 @@ where
                             self.subscribe(id, subscribe).await?
                         }
                         "mining.authorize" => {
-                            debug!("AUTHORIZE from {} with {params}", self.worker);
+                            debug!("AUTHORIZE from {} with {params}", self.socket_addr);
 
                             if self.state != State::Subscribed {
                                 self.send_error(
@@ -152,7 +156,7 @@ where
                             self.authorize(id, authorize).await?
                         }
                         "mining.submit" => {
-                            debug!("SUBMIT from {} with params {params}", self.worker);
+                            debug!("SUBMIT from {} with params {params}", self.socket_addr);
 
                             if self.state != State::Working {
                                 self.send_error(id.clone(), StratumError::Unauthorized, None)
@@ -166,14 +170,14 @@ where
                             self.submit(id, submit).await?;
                         }
                         method => {
-                            warn!("UNKNOWN method {method} with {params} from {}", self.worker);
+                            warn!("UNKNOWN method {method} with {params} from {}", self.socket_addr);
                         }
                     }
                 }
 
                 changed = workbase_receiver.changed() => {
                     if changed.is_err() {
-                        warn!("Template receiver dropped, closing connection with {}", self.worker);
+                        warn!("Template receiver dropped, closing connection with {}", self.socket_addr);
                         break;
                     }
 
@@ -193,7 +197,12 @@ where
 
     async fn workbase_update(&mut self, workbase: Arc<Workbase>) -> Result {
         let (address, extranonce1) = match (&self.address, &self.extranonce1) {
-            (Some(a), Some(e)) => (a.clone(), e.clone()),
+            (Some(a), Some(e)) => (
+                a.clone()
+                    .require_network(self.config.chain().network())
+                    .expect("address already validated"),
+                e.clone(),
+            ),
             _ => return Ok(()),
         };
 
@@ -223,7 +232,7 @@ where
             let version_mask = self.config.version_mask();
             debug!(
                 "Configuring version rolling for {} with version mask {version_mask}",
-                self.worker
+                self.socket_addr
             );
 
             let message = Message::Response {
@@ -302,22 +311,31 @@ where
             .clone()
             .ok_or_else(|| anyhow!("missing extranonce1 do SUBSCRIBE first"))?;
 
-        let address = Address::from_str(
-            authorize
-                .username
-                .trim_matches('"')
-                .split('.')
-                .next()
-                .ok_or_else(|| anyhow!("invalid username {}", authorize.username))?,
-        )?
-        .require_network(self.config.chain().network())
-        .context(format!(
-            "invalid username {} for worker {}",
-            authorize.username, self.worker
-        ))?;
+        let username = authorize.username.trim_matches('"');
+        let workername = username.to_string();
+
+        let address_str = username
+            .split('.')
+            .next()
+            .ok_or_else(|| anyhow!("invalid username {}", authorize.username))?;
+
+        let unchecked_address: Address<bitcoin::address::NetworkUnchecked> =
+            Address::from_str(address_str)?;
+
+        let checked_address = unchecked_address
+            .clone()
+            .require_network(self.config.chain().network())
+            .context(format!(
+                "invalid username {} for connection {}",
+                authorize.username, self.socket_addr
+            ))?;
+
+        let worker_stats = self
+            .metatron
+            .get_or_create_worker(unchecked_address.clone(), &workername);
 
         let job = Arc::new(Job::new(
-            address.clone(),
+            checked_address,
             extranonce1.clone(),
             self.version_mask,
             self.workbase_receiver.borrow().clone(),
@@ -332,7 +350,9 @@ where
         })
         .await?;
 
-        self.address = Some(address);
+        self.address = Some(unchecked_address);
+        self.workername = Some(workername);
+        self.worker_stats = Some(worker_stats);
 
         if self.authorized.is_none() {
             self.authorized = Some(SystemTime::now());
@@ -465,7 +485,12 @@ where
         let current_diff = self.vardiff.current_diff();
 
         if current_diff.to_target().is_met_by(header.block_hash()) {
-            self.metatron.add_accepted(current_diff.as_f64());
+            if let Some(ref ws) = self.worker_stats {
+                ws.record_share(current_diff.as_f64());
+            }
+            if let (Some(addr), Some(wn)) = (&self.address, &self.workername) {
+                self.metatron.record_share(addr, wn, current_diff.as_f64());
+            }
 
             self.send(Message::Response {
                 id,
@@ -479,7 +504,7 @@ where
 
             debug!(
                 "Share accepted from {} | diff={} dsps={:.4} shares_since_change={}",
-                self.worker,
+                self.socket_addr,
                 current_diff,
                 self.vardiff.dsps(),
                 self.vardiff.shares_since_change()
@@ -490,7 +515,7 @@ where
                     "Adjusting difficulty {} -> {} for {} | dsps={:.4} period={}s",
                     current_diff,
                     new_diff,
-                    self.worker,
+                    self.socket_addr,
                     self.vardiff.dsps(),
                     self.config.vardiff_period().as_secs_f64()
                 );
@@ -515,14 +540,14 @@ where
                 let message = serde_json::from_str::<Message>(&line).map_err(|e| {
                     anyhow!(
                         "invalid stratum message from {}: {e}; line={line:?}",
-                        self.worker
+                        self.socket_addr
                     )
                 })?;
                 Ok(Some(message))
             }
-            Some(Err(e)) => Err(anyhow!("read error from {}: {e}", self.worker)),
+            Some(Err(e)) => Err(anyhow!("read error from {}: {e}", self.socket_addr)),
             None => {
-                info!("Worker {} disconnected", self.worker);
+                info!("Connection {} disconnected", self.socket_addr);
                 Ok(None)
             }
         }
@@ -552,11 +577,11 @@ where
 
 impl<R, W> Drop for Connection<R, W> {
     fn drop(&mut self) {
-        self.metatron.sub_worker();
+        self.metatron.sub_connection();
         info!(
-            "Worker {} disconnected (remaining: {})",
-            self.worker,
-            self.metatron.total_workers()
+            "Connection {} closed (remaining: {})",
+            self.socket_addr,
+            self.metatron.total_connections()
         );
     }
 }

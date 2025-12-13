@@ -31,7 +31,7 @@ use {
     clap::Parser,
     coinbase_builder::CoinbaseBuilder,
     connection::Connection,
-    decay::{DecayingAverage, calculate_time_bias},
+    decay::{DecayingAverage, SharedHashRates, calculate_time_bias},
     futures::{
         sink::SinkExt,
         stream::{FuturesUnordered, StreamExt},
@@ -41,7 +41,9 @@ use {
     job::Job,
     jobs::Jobs,
     lru::LruCache,
+    dashmap::DashMap,
     metatron::Metatron,
+    stats::{UserStats, WorkerStats},
     reqwest::Url,
     rust_embed::RustEmbed,
     rustls_acme::{
@@ -122,6 +124,7 @@ mod job;
 mod jobs;
 mod metatron;
 mod signal;
+mod stats;
 pub mod stratum;
 pub mod subcommand;
 mod throbber;
