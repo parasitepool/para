@@ -206,6 +206,12 @@ impl Server {
                     )
                     .route("/split", get(Self::open_split))
                     .route("/split/{blockheight}", get(Self::sat_split))
+                    .route("/highdiff/{blockheight}", get(Self::highdiff))
+                    .route(
+                        "/highdiff/{blockheight}/user/{username}",
+                        get(Self::highdiff_by_user),
+                    )
+                    .route("/highdiff/{blockheight}/all", get(Self::highdiff_all_users))
                     .route(
                         "/sync/batch",
                         post(Self::sync_batch).layer(DefaultBodyLimit::max(50 * MEBIBYTE)),
@@ -428,6 +434,37 @@ impl Server {
             payments,
         })
         .into_response())
+    }
+
+    pub(crate) async fn highdiff(
+        Path(blockheight): Path<i32>,
+        Extension(database): Extension<Database>,
+    ) -> ServerResult<Response> {
+        database
+            .get_highdiff(blockheight)
+            .await?
+            .ok_or_not_found(|| "HighDiff")
+            .map(Json)
+            .map(IntoResponse::into_response)
+    }
+
+    pub(crate) async fn highdiff_by_user(
+        Path((blockheight, username)): Path<(i32, String)>,
+        Extension(database): Extension<Database>,
+    ) -> ServerResult<Response> {
+        database
+            .get_highdiff_by_user(blockheight, &username)
+            .await?
+            .ok_or_not_found(|| "HighDiff")
+            .map(Json)
+            .map(IntoResponse::into_response)
+    }
+
+    pub(crate) async fn highdiff_all_users(
+        Path(blockheight): Path<i32>,
+        Extension(database): Extension<Database>,
+    ) -> ServerResult<Response> {
+        Ok(Json(database.get_highdiff_all_users(blockheight).await?).into_response())
     }
 
     pub(crate) async fn payouts_range(
