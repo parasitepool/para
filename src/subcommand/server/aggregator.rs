@@ -29,10 +29,10 @@ impl Aggregator {
         let cache = Arc::new(Cache::new(client.clone(), config.clone()));
 
         let mut router = Router::new()
+            .route("/aggregator/blockheight", get(Self::blockheight))
             .route("/aggregator/pool/pool.status", get(Self::pool_status))
             .route("/aggregator/users/{address}", get(Self::user_status))
-            .route("/aggregator/users", get(Self::users))
-            .route("/aggregator/blockheight", get(Self::blockheight));
+            .route("/aggregator/users", get(Self::users));
 
         router = if let Some(token) = config.api_token() {
             router.layer(bearer_auth(token))
