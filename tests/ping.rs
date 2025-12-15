@@ -1,6 +1,7 @@
 use super::*;
 
 #[test]
+#[serial(bitcoind)]
 fn ping_local() {
     let pool = TestPool::spawn();
 
@@ -14,7 +15,7 @@ fn ping_local() {
 }
 
 #[test]
-#[ignore = "ckpool"]
+#[serial(bitcoind)]
 fn ping_ckpool() {
     let ckpool = TestCkpool::spawn();
 
