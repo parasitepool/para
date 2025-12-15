@@ -15,7 +15,7 @@ use {
     database::Database,
     error::{OptionExt, ServerError, ServerResult},
     reqwest::{Client, ClientBuilder, header},
-    server_config::{ResolvedServerConfig, ServerConfig},
+    server_config::ServerConfig,
     std::sync::OnceLock,
     sysinfo::DiskRefreshKind,
     templates::{
@@ -113,6 +113,12 @@ fn exclusion_list_from_params(params: HashMap<String, String>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct ServerState {
+    pub(crate) settings: Arc<Settings>,
+    pub(crate) config: Arc<ServerConfig>,
+}
+
 #[derive(Clone, Debug, Parser)]
 pub struct Server {
     #[command(flatten)]
@@ -126,8 +132,14 @@ impl Server {
         handle: Handle,
         cancel_token: CancellationToken,
     ) -> Result {
-        let config = Arc::new(self.config.resolve(settings));
-        let log_dir = config.log_dir();
+        let settings = Arc::new(settings);
+        let config = Arc::new(self.config);
+        let state = ServerState {
+            settings: settings.clone(),
+            config: config.clone(),
+        };
+
+        let log_dir = config.log_dir(&settings);
         let pool_dir = log_dir.join("pool");
         let user_dir = log_dir.join("users");
 
@@ -159,8 +171,8 @@ impl Server {
                 HeaderValue::from_static("inline"),
             ));
 
-        router = if let Some(token) = config.api_token() {
-            router.layer(bearer_auth(token))
+        router = if let Some(token) = config.api_token(&settings) {
+            router.layer(bearer_auth(&token))
         } else {
             router
         };
@@ -169,13 +181,13 @@ impl Server {
             .route("/", get(Self::home))
             .route(
                 "/status",
-                Self::with_auth(config.clone(), get(Self::status)),
+                Self::with_auth(&config, &settings, get(Self::status)),
             )
             .route("/static/{*path}", get(Self::static_assets));
 
-        match Database::new(config.database_url()).await {
+        match Database::new(config.database_url(&settings)).await {
             Ok(database) => {
-                if config.migrate_accounts() {
+                if config.migrate_accounts(&settings) {
                     let pool = database.pool.clone();
                     tokio::spawn(async move {
                         info!("Starting account migration worker...");
@@ -228,18 +240,18 @@ impl Server {
                     .layer(Extension(database.clone()));
 
                 router = router
-                    .merge(Self::with_auth_router(config.clone(), db_router))
-                    .merge(account_router(config.clone(), database));
+                    .merge(Self::with_auth_router(&config, &settings, db_router))
+                    .merge(account_router(state.clone(), database));
             }
             Err(err) => {
                 warn!("Failed to connect to PostgreSQL: {err}",);
             }
         }
 
-        router = router.layer(Extension(config.clone()));
+        router = router.layer(Extension(state.clone()));
 
-        if !config.nodes().is_empty() {
-            let aggregator = Aggregator::init(config.clone())?;
+        if !config.nodes(&settings).is_empty() {
+            let aggregator = Aggregator::init(state.clone())?;
             router = router.merge(aggregator);
         } else {
             warn!("No aggregator nodes configured: skipping aggregator routes.");
@@ -247,40 +259,43 @@ impl Server {
 
         info!("Serving files in {}", log_dir.display());
 
-        Self::spawn(config, router, handle)?.await??;
+        Self::spawn(state, router, handle)?.await??;
 
         Ok(())
     }
 
     fn with_auth<S>(
-        config: Arc<ResolvedServerConfig>,
+        config: &ServerConfig,
+        settings: &Settings,
         method_router: MethodRouter<S>,
     ) -> MethodRouter<S>
     where
         S: Clone + Send + Sync + 'static,
     {
-        if let Some(token) = config.admin_token() {
-            method_router.layer(bearer_auth(token))
+        if let Some(token) = config.admin_token(settings) {
+            method_router.layer(bearer_auth(&token))
         } else {
             method_router
         }
     }
 
-    fn with_auth_router<S>(config: Arc<ResolvedServerConfig>, router: Router<S>) -> Router<S>
+    fn with_auth_router<S>(
+        config: &ServerConfig,
+        settings: &Settings,
+        router: Router<S>,
+    ) -> Router<S>
     where
         S: Clone + Send + Sync + 'static,
     {
-        if let Some(token) = config.admin_token() {
-            Router::new().merge(router).layer(bearer_auth(token))
+        if let Some(token) = config.admin_token(settings) {
+            Router::new().merge(router).layer(bearer_auth(&token))
         } else {
             router
         }
     }
 
-    async fn home(
-        Extension(config): Extension<Arc<ResolvedServerConfig>>,
-    ) -> ServerResult<PageHtml<HomeHtml>> {
-        let domain = config.domain();
+    async fn home(Extension(state): Extension<ServerState>) -> ServerResult<PageHtml<HomeHtml>> {
+        let domain = state.config.domain(&state.settings);
 
         Ok(HomeHtml {
             stratum_url: format!("{domain}:42069"),
@@ -288,12 +303,10 @@ impl Server {
         .page(domain))
     }
 
-    async fn users(
-        Extension(config): Extension<Arc<ResolvedServerConfig>>,
-    ) -> ServerResult<Response> {
+    async fn users(Extension(state): Extension<ServerState>) -> ServerResult<Response> {
         task::block_in_place(|| {
             Ok(Json(
-                fs::read_dir(config.log_dir().join("users"))
+                fs::read_dir(state.config.log_dir(&state.settings).join("users"))
                     .map_err(|err| anyhow!(err))?
                     .filter_map(Result::ok)
                     .filter_map(|entry| entry.file_name().to_str().map(|s| s.to_string()))
@@ -304,10 +317,10 @@ impl Server {
     }
 
     pub(crate) async fn status(
-        Extension(config): Extension<Arc<ResolvedServerConfig>>,
+        Extension(state): Extension<ServerState>,
         AcceptJson(accept_json): AcceptJson,
     ) -> ServerResult<Response> {
-        let blockheight = Self::get_synced_blockheight(&config).await;
+        let blockheight = Self::get_synced_blockheight(&state).await;
 
         task::block_in_place(|| {
             let mut system = System::new_all();
@@ -339,7 +352,10 @@ impl Server {
             system.refresh_cpu_all();
             let cpu_usage_percent: f64 = system.global_cpu_usage().into();
 
-            let status_file = config.log_dir().join("pool/pool.status");
+            let status_file = state
+                .config
+                .log_dir(&state.settings)
+                .join("pool/pool.status");
 
             let parsed_status = fs::read_to_string(&status_file)
                 .ok()
@@ -364,13 +380,15 @@ impl Server {
             Ok(if accept_json {
                 Json(status).into_response()
             } else {
-                status.page(config.domain()).into_response()
+                status
+                    .page(state.config.domain(&state.settings))
+                    .into_response()
             })
         })
     }
 
     pub(crate) async fn payouts_all(
-        Extension(config): Extension<Arc<ResolvedServerConfig>>,
+        Extension(state): Extension<ServerState>,
         Extension(database): Extension<Database>,
         Query(params): Query<HashMap<String, String>>,
     ) -> ServerResult<Response> {
@@ -383,7 +401,7 @@ impl Server {
             let failed = database.get_failed_payouts().await?;
 
             Ok(PayoutsHtml { pending, failed }
-                .page(config.domain())
+                .page(state.config.domain(&state.settings))
                 .into_response())
         }
     }
@@ -556,14 +574,15 @@ impl Server {
     }
 
     fn spawn(
-        config: Arc<ResolvedServerConfig>,
+        state: ServerState,
         router: Router,
         handle: Handle,
     ) -> Result<task::JoinHandle<io::Result<()>>> {
-        let acme_cache = config.acme_cache();
-        let acme_domains = config.domains()?;
-        let acme_contacts = config.acme_contacts();
-        let address = config.address();
+        let acme_cache = state.config.acme_cache(&state.settings);
+        let acme_domains = state.config.domains(&state.settings)?;
+        let acme_contacts = state.config.acme_contacts(&state.settings);
+        let address = state.config.address(&state.settings);
+        let port = state.config.port(&state.settings);
 
         Ok(tokio::spawn(async move {
             if !acme_domains.is_empty() && !acme_contacts.is_empty() {
@@ -572,7 +591,7 @@ impl Server {
                     acme_domains[0], acme_contacts[0]
                 );
 
-                let addr = (address, config.port().unwrap_or(443))
+                let addr = (address, port.unwrap_or(443))
                     .to_socket_addrs()?
                     .next()
                     .unwrap();
@@ -585,7 +604,7 @@ impl Server {
                     .serve(router.into_make_service())
                     .await
             } else {
-                let addr = (address, config.port().unwrap_or(80))
+                let addr = (address, port.unwrap_or(80))
                     .to_socket_addrs()?
                     .next()
                     .unwrap();
@@ -649,7 +668,7 @@ impl Server {
 
     pub(crate) async fn sync_batch(
         Extension(database): Extension<Database>,
-        Extension(config): Extension<Arc<ResolvedServerConfig>>,
+        Extension(state): Extension<ServerState>,
         Json(batch): Json<ShareBatch>,
     ) -> Result<Json<SyncResponse>, StatusCode> {
         info!(
@@ -659,7 +678,7 @@ impl Server {
             batch.hostname
         );
 
-        if config.migrate_accounts() && !MIGRATION_DONE.get_or_init(|| false) {
+        if state.config.migrate_accounts(&state.settings) && !MIGRATION_DONE.get_or_init(|| false) {
             warn!(
                 "Rejecting sync batch {} - migration in progress",
                 batch.batch_id
@@ -689,7 +708,7 @@ impl Server {
                     }
 
                     let notification_result = notifications::notify_block_found(
-                        config.alerts_ntfy_channel(),
+                        state.config.alerts_ntfy_channel(&state.settings),
                         block.blockheight,
                         block.blockhash.clone(),
                         block.coinbasevalue.unwrap_or(0),
@@ -964,8 +983,11 @@ impl Server {
         Ok(())
     }
 
-    async fn get_synced_blockheight(config: &ResolvedServerConfig) -> Option<i32> {
-        let id_file = config.data_dir().join("current_id.txt");
+    async fn get_synced_blockheight(state: &ServerState) -> Option<i32> {
+        let id_file = state
+            .config
+            .data_dir(&state.settings)
+            .join("current_id.txt");
         let id_file_str = id_file.to_string_lossy();
 
         let current_id = match sync::load_current_id_from_file(&id_file_str).await {
@@ -980,7 +1002,7 @@ impl Server {
             return None;
         }
 
-        let database = match Database::new(config.database_url()).await {
+        let database = match Database::new(state.config.database_url(&state.settings)).await {
             Ok(db) => db,
             Err(e) => {
                 warn!(

@@ -32,14 +32,14 @@ pub struct AccountResponse {
     pub remark: Option<String>,
 }
 
-pub(crate) fn account_router(config: Arc<ResolvedServerConfig>, database: Database) -> Router {
+pub(crate) fn account_router(state: ServerState, database: Database) -> Router {
     let mut router = Router::new()
         .route("/account/{address}", get(account_lookup))
         .route("/account/update", post(account_update))
         .route("/account/metadata", post(account_metadata_update));
 
-    if let Some(token) = config.api_token() {
-        router = router.layer(bearer_auth(token))
+    if let Some(token) = state.config.api_token(&state.settings) {
+        router = router.layer(bearer_auth(&token))
     };
 
     router.layer(Extension(database))

@@ -1,4 +1,4 @@
-use {super::*, subcommand::pool::pool_config::ResolvedPoolConfig};
+use {super::*, settings::Settings, subcommand::pool::pool_config::PoolConfig};
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum State {
@@ -9,7 +9,8 @@ pub(crate) enum State {
 }
 
 pub(crate) struct Connection<R, W> {
-    config: Arc<ResolvedPoolConfig>,
+    settings: Arc<Settings>,
+    config: Arc<PoolConfig>,
     metatron: Arc<Metatron>,
     worker: SocketAddr,
     reader: FramedRead<R, LinesCodec>,
@@ -31,8 +32,10 @@ where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        config: Arc<ResolvedPoolConfig>,
+        settings: Arc<Settings>,
+        config: Arc<PoolConfig>,
         metatron: Arc<Metatron>,
         worker: SocketAddr,
         reader: R,
@@ -41,14 +44,15 @@ where
         cancel_token: CancellationToken,
     ) -> Self {
         let vardiff = Vardiff::new(
-            config.start_diff(),
-            config.vardiff_period(),
-            config.vardiff_window(),
+            config.start_diff(&settings),
+            config.vardiff_period(&settings),
+            config.vardiff_window(&settings),
         );
 
         metatron.add_worker();
 
         Self {
+            settings,
             config,
             metatron,
             worker,
@@ -220,7 +224,7 @@ where
 
     async fn configure(&mut self, id: Id, configure: Configure) -> Result {
         if configure.version_rolling_mask.is_some() {
-            let version_mask = self.config.version_mask();
+            let version_mask = self.config.version_mask(&self.settings);
             debug!(
                 "Configuring version rolling for {} with version mask {version_mask}",
                 self.worker
@@ -229,7 +233,7 @@ where
             let message = Message::Response {
                 id,
                 result: Some(
-                    json!({"version-rolling": true, "version-rolling.mask": self.config.version_mask()}),
+                    json!({"version-rolling": true, "version-rolling.mask": version_mask}),
                 ),
                 error: None,
                 reject_reason: None,
@@ -310,7 +314,7 @@ where
                 .next()
                 .ok_or_else(|| anyhow!("invalid username {}", authorize.username))?,
         )?
-        .require_network(self.config.chain().network())
+        .require_network(self.settings.chain().network())
         .context(format!(
             "invalid username {} for worker {}",
             authorize.username, self.worker
@@ -453,7 +457,7 @@ where
 
             info!("Submitting potential block solve");
 
-            match self.config.bitcoin_rpc_client()?.submit_block(&block) {
+            match self.settings.bitcoin_rpc_client()?.submit_block(&block) {
                 Ok(_) => {
                     info!("SUCCESSFULLY mined block {}", block.block_hash());
                     self.metatron.add_block();
@@ -492,7 +496,7 @@ where
                     new_diff,
                     self.worker,
                     self.vardiff.dsps(),
-                    self.config.vardiff_period().as_secs_f64()
+                    self.config.vardiff_period(&self.settings).as_secs_f64()
                 );
 
                 self.send(Message::Notification {

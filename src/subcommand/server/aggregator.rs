@@ -3,9 +3,9 @@ use super::*;
 pub(crate) struct Aggregator;
 
 impl Aggregator {
-    pub(crate) fn init(config: Arc<ResolvedServerConfig>) -> Result<Router> {
+    pub(crate) fn init(state: ServerState) -> Result<Router> {
         let mut headers = header::HeaderMap::new();
-        if let Some(token) = config.api_token() {
+        if let Some(token) = state.config.api_token(&state.settings) {
             headers.insert(
                 header::AUTHORIZATION,
                 header::HeaderValue::from_str(&format!("Bearer {token}"))?,
@@ -26,25 +26,24 @@ impl Aggregator {
             .use_rustls_tls()
             .build()?;
 
-        let cache = Arc::new(Cache::new(client.clone(), config.clone()));
+        let cache = Arc::new(Cache::new(client.clone(), state.clone()));
 
         let mut router = Router::new()
             .route("/aggregator/pool/pool.status", get(Self::pool_status))
             .route("/aggregator/users/{address}", get(Self::user_status))
             .route("/aggregator/users", get(Self::users));
 
-        router = if let Some(token) = config.api_token() {
-            router.layer(bearer_auth(token))
+        router = if let Some(token) = state.config.api_token(&state.settings) {
+            router.layer(bearer_auth(&token))
         } else {
             router
         }
         .route(
             "/aggregator/dashboard",
-            Server::with_auth(config.clone(), get(Self::dashboard)),
+            Server::with_auth(&state.config, &state.settings, get(Self::dashboard)),
         )
         .layer(Extension(cache))
-        .layer(Extension(client))
-        .layer(Extension(config));
+        .layer(Extension(client));
 
         Ok(router)
     }
@@ -77,20 +76,21 @@ impl Aggregator {
 
     pub(crate) async fn dashboard(
         Extension(client): Extension<Client>,
-        Extension(config): Extension<Arc<ResolvedServerConfig>>,
+        Extension(state): Extension<ServerState>,
     ) -> ServerResult<Response> {
-        let mut nodes = config.nodes();
-        if let Some(sync_endpoint) = config.sync_endpoint() {
+        let mut nodes = state.config.nodes(&state.settings);
+        if let Some(sync_endpoint) = state.config.sync_endpoint(&state.settings) {
             nodes.push(Url::from_str(&sync_endpoint).map_err(|err| anyhow!(err))?);
         }
-        let admin_token = config.admin_token();
+        let admin_token = state.config.admin_token(&state.settings);
         let fetches = nodes.iter().map(|url| {
             let client = client.clone();
+            let admin_token = admin_token.clone();
             async move {
                 let result = async {
                     let mut request_builder = client.get(url.join("/status")?);
 
-                    if let Some(token) = admin_token {
+                    if let Some(ref token) = admin_token {
                         request_builder = request_builder.bearer_auth(token);
                     }
 
@@ -118,7 +118,7 @@ impl Aggregator {
         }
 
         Ok(DashboardHtml { statuses: checks }
-            .page(config.domain())
+            .page(state.config.domain(&state.settings))
             .into_response())
     }
 }

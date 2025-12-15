@@ -10,12 +10,13 @@ pub(crate) struct Pool {
 
 impl Pool {
     pub(crate) async fn run(self, settings: Settings, cancel_token: CancellationToken) -> Result {
-        let config = Arc::new(self.config.resolve(settings));
-        let metatron = Arc::new(Metatron::new(config.vardiff_window()));
-        let address = config.address();
-        let port = config.port();
+        let settings = Arc::new(settings);
+        let config = Arc::new(self.config);
+        let metatron = Arc::new(Metatron::new(config.vardiff_window(&settings)));
+        let address = config.address(&settings);
+        let port = config.port(&settings);
 
-        let mut generator = Generator::new(config.clone())?;
+        let mut generator = Generator::new(settings.clone(), config.clone())?;
         let workbase_receiver = generator.spawn().await?;
 
         let listener = TcpListener::bind((address.clone(), port)).await?;
@@ -38,12 +39,22 @@ impl Pool {
                     let (reader, writer) = stream.into_split();
 
                     let workbase_receiver = workbase_receiver.clone();
+                    let settings = settings.clone();
                     let config = config.clone();
                     let metatron = metatron.clone();
                     let conn_cancel_token = cancel_token.child_token();
 
                     connection_tasks.spawn(async move {
-                        let mut conn = Connection::new(config, metatron, worker, reader, writer, workbase_receiver, conn_cancel_token);
+                        let mut conn = Connection::new(
+                            settings,
+                            config,
+                            metatron,
+                            worker,
+                            reader,
+                            writer,
+                            workbase_receiver,
+                            conn_cancel_token,
+                        );
 
                         if let Err(err) = conn.serve().await {
                             error!("Worker connection error: {err}")

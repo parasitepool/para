@@ -109,31 +109,39 @@ impl<T: Clone> Cached<T> {
 #[derive(Debug)]
 pub(super) struct Cache {
     client: Client,
-    config: Arc<ResolvedServerConfig>,
+    state: ServerState,
     pool_status: Mutex<Cached<ckpool::Status>>,
     user_statuses: DashMap<String, Arc<Mutex<Cached<ckpool::User>>>>,
     users: Mutex<Cached<Vec<String>>>,
 }
 
 impl Cache {
-    pub(super) fn new(client: Client, config: Arc<ResolvedServerConfig>) -> Self {
+    pub(super) fn new(client: Client, state: ServerState) -> Self {
+        let ttl = state.config.ttl(&state.settings);
         Self {
             client,
-            config: config.clone(),
-            pool_status: Mutex::new(Cached::init(config.ttl())),
+            state,
+            pool_status: Mutex::new(Cached::init(ttl)),
             user_statuses: DashMap::new(),
-            users: Mutex::new(Cached::init(config.ttl())),
+            users: Mutex::new(Cached::init(ttl)),
         }
+    }
+
+    fn ttl(&self) -> Duration {
+        self.state.config.ttl(&self.state.settings)
+    }
+
+    fn nodes(&self) -> Vec<Url> {
+        self.state.config.nodes(&self.state.settings)
     }
 
     pub(super) async fn pool_status(&self) -> Result<Option<ckpool::Status>> {
         let mut cached = self.pool_status.lock().await;
-        if cached.is_fresh(self.config.ttl()) {
+        if cached.is_fresh(self.ttl()) {
             return Ok(cached.value());
         }
 
         let fetches: FuturesUnordered<_> = self
-            .config
             .nodes()
             .into_iter()
             .map(|base| {
@@ -175,16 +183,15 @@ impl Cache {
         let cell = self
             .user_statuses
             .entry(address.clone())
-            .or_insert_with(|| Arc::new(Mutex::new(Cached::init(self.config.ttl()))))
+            .or_insert_with(|| Arc::new(Mutex::new(Cached::init(self.ttl()))))
             .clone();
 
         let mut cached = cell.lock().await;
-        if cached.is_fresh(self.config.ttl()) {
+        if cached.is_fresh(self.ttl()) {
             return Ok(cached.value());
         }
 
         let fetches: FuturesUnordered<_> = self
-            .config
             .nodes()
             .into_iter()
             .map(|base| {
@@ -220,11 +227,10 @@ impl Cache {
 
     pub(super) async fn users(&self) -> Result<Option<Vec<String>>> {
         let mut cached = self.users.lock().await;
-        if cached.is_fresh(self.config.ttl()) {
+        if cached.is_fresh(self.ttl()) {
             return Ok(cached.value());
         }
         let fetches: FuturesUnordered<_> = self
-            .config
             .nodes()
             .into_iter()
             .map(|base| {
