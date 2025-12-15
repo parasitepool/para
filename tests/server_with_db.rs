@@ -638,3 +638,34 @@ async fn test_highestdiff_all_users_empty() {
 
     assert!(highestdiffs.is_empty());
 }
+
+#[tokio::test]
+async fn aggregator_blockheight_no_nodes() {
+    let server = TestServer::spawn_with_db().await;
+
+    let blockheight_response = server.get_json_async_raw("/aggregator/blockheight").await;
+    assert_eq!(
+        blockheight_response.status(),
+        StatusCode::NOT_FOUND,
+        "Should not find records when no nodes are configured"
+    );
+}
+
+#[tokio::test]
+async fn aggregator_blockheight_returns_minimum() {
+    let node1 = TestServer::spawn_with_db_args("--admin-token token1").await;
+    let node2 = TestServer::spawn_with_db_args("--admin-token token2").await;
+
+    let aggregator = TestServer::spawn_with_db_args(format!(
+        "--nodes {} --nodes {} --admin-token aggregator_token",
+        node1.url(),
+        node2.url()
+    ));
+
+    let blockheight: i32 = aggregator
+        .await
+        .get_json_async("/aggregator/blockheight")
+        .await;
+
+    assert!(blockheight >= 0);
+}

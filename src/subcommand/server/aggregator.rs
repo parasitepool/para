@@ -31,7 +31,8 @@ impl Aggregator {
         let mut router = Router::new()
             .route("/aggregator/pool/pool.status", get(Self::pool_status))
             .route("/aggregator/users/{address}", get(Self::user_status))
-            .route("/aggregator/users", get(Self::users));
+            .route("/aggregator/users", get(Self::users))
+            .route("/aggregator/blockheight", get(Self::blockheight));
 
         router = if let Some(token) = config.api_token() {
             router.layer(bearer_auth(token))
@@ -73,6 +74,49 @@ impl Aggregator {
 
     async fn users(Extension(cache): Extension<Arc<Cache>>) -> ServerResult<Response> {
         Ok(Json(cache.users().await?.ok_or_not_found(|| "Users")?).into_response())
+    }
+
+    async fn blockheight(
+        Extension(client): Extension<Client>,
+        Extension(config): Extension<Arc<ServerConfig>>,
+    ) -> ServerResult<Response> {
+        let mut nodes = config.nodes();
+        if let Some(sync_endpoint) = config.sync_endpoint() {
+            nodes.push(Url::from_str(&sync_endpoint).map_err(|err| anyhow!(err))?);
+        }
+        let admin_token = config.admin_token();
+
+        let fetches = nodes.iter().map(|url| {
+            let client = client.clone();
+            async move {
+                async {
+                    let mut request_builder = client.get(url.join("/status")?);
+
+                    if let Some(token) = admin_token {
+                        request_builder = request_builder.bearer_auth(token);
+                    }
+
+                    let resp = request_builder.send().await?;
+                    let status: api::Status =
+                        serde_json::from_str(&resp.text().await?).map_err(|err| anyhow!(err))?;
+
+                    Ok::<_, Error>(status.blockheight)
+                }
+                .await
+            }
+        });
+
+        let results: Vec<Result<Option<i32>>> = futures::future::join_all(fetches).await;
+
+        let blockheights: Vec<i32> = results
+            .into_iter()
+            .filter_map(|r| r.ok())
+            .flatten()
+            .collect();
+
+        let min_blockheight = blockheights.into_iter().min();
+
+        Ok(Json(min_blockheight.unwrap_or(0)).into_response())
     }
 
     pub(crate) async fn dashboard(
