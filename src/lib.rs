@@ -31,7 +31,8 @@ use {
     clap::Parser,
     coinbase_builder::CoinbaseBuilder,
     connection::Connection,
-    decay::{DecayingAverage, SharedHashRates, calculate_time_bias},
+    dashmap::DashMap,
+    decay::{DecayingAverage, calculate_time_bias},
     futures::{
         sink::SinkExt,
         stream::{FuturesUnordered, StreamExt},
@@ -41,9 +42,7 @@ use {
     job::Job,
     jobs::Jobs,
     lru::LruCache,
-    dashmap::DashMap,
     metatron::Metatron,
-    stats::{UserStats, WorkerStats},
     reqwest::Url,
     rust_embed::RustEmbed,
     rustls_acme::{
@@ -59,6 +58,7 @@ use {
     },
     serde_json::json,
     serde_with::{DeserializeFromStr, SerializeDisplay},
+    share::Share,
     snafu::Snafu,
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
     std::{
@@ -103,8 +103,10 @@ use {
     tracing::{debug, error, info, warn},
     tracing_appender::non_blocking,
     tracing_subscriber::EnvFilter,
+    user::User,
     vardiff::Vardiff,
     workbase::Workbase,
+    worker::Worker,
     zeromq::{Endpoint, Socket, SocketRecv, SubSocket},
     zmq::Zmq,
 };
@@ -115,7 +117,7 @@ mod arguments;
 mod block_template;
 mod chain;
 pub mod ckpool;
-pub mod coinbase_builder;
+mod coinbase_builder;
 mod connection;
 mod decay;
 mod generator;
@@ -123,22 +125,23 @@ mod hash_rate;
 mod job;
 mod jobs;
 mod metatron;
+mod share;
 mod signal;
-mod stats;
 pub mod stratum;
 pub mod subcommand;
 mod throbber;
+mod user;
 mod vardiff;
 mod workbase;
+mod worker;
 mod zmq;
 
 pub const COIN_VALUE: u64 = 100_000_000;
 pub const USER_AGENT: &str = "para/0.5.2";
-
 pub const EXTRANONCE1_SIZE: usize = 4;
 pub const EXTRANONCE2_SIZE: usize = 8;
 pub const MAX_MESSAGE_SIZE: usize = 32 * 1024;
-/// Subscription IDs do not seem to have a purpose in Stratum, hardcoding for now
+pub const SHARE_CHANNEL_CAPACITY: usize = 100_000;
 pub const SUBSCRIPTION_ID: &str = "deadbeef";
 pub const LRU_CACHE_SIZE: usize = 256;
 

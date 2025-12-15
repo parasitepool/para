@@ -6,7 +6,7 @@ pub(crate) struct Metatron {
     rejected: AtomicU64,
     started: Instant,
     connections: AtomicU64,
-    users: DashMap<Address<bitcoin::address::NetworkUnchecked>, Arc<UserStats>>,
+    users: DashMap<Address<bitcoin::address::NetworkUnchecked>, Arc<User>>,
 }
 
 impl Metatron {
@@ -21,39 +21,74 @@ impl Metatron {
         }
     }
 
-    pub(crate) fn get_or_create_worker(
+    pub(crate) async fn run(
+        self: Arc<Self>,
+        mut rx: mpsc::Receiver<Share>,
+        sink: Option<mpsc::Sender<Share>>,
+        cancel: CancellationToken,
+    ) {
+        loop {
+            tokio::select! {
+                biased;
+
+                _ = cancel.cancelled() => {
+                    info!("Metatron shutting down, draining {} pending shares", rx.len());
+
+                    while let Ok(share) = rx.try_recv() {
+                        self.process_share(&share, &sink);
+                    }
+
+                    break;
+                }
+
+                Some(share) = rx.recv() => {
+                    self.process_share(&share, &sink);
+                }
+            }
+        }
+
+        info!(
+            "Metatron stopped: {} users, {} workers, {} accepted, {} rejected",
+            self.total_users(),
+            self.total_workers(),
+            self.accepted(),
+            self.rejected()
+        );
+    }
+
+    fn process_share(&self, share: &Share, sink: &Option<mpsc::Sender<Share>>) {
+        let worker = self.get_or_create_worker(share.address.clone(), &share.workername);
+
+        if share.result {
+            worker.record_share(share.sdiff);
+            self.accepted.fetch_add(1, Ordering::Relaxed);
+        } else {
+            self.rejected.fetch_add(1, Ordering::Relaxed);
+        }
+
+        if let Some(tx) = sink
+            && tx.try_send(share.clone()).is_err()
+        {
+            warn!("Share sink full, dropping event");
+        }
+    }
+
+    fn get_or_create_worker(
         &self,
         address: Address<bitcoin::address::NetworkUnchecked>,
         workername: &str,
-    ) -> Arc<WorkerStats> {
+    ) -> Arc<Worker> {
         let user = self
             .users
             .entry(address.clone())
-            .or_insert_with(|| Arc::new(UserStats::new(address)))
+            .or_insert_with(|| Arc::new(User::new(address)))
             .clone();
 
         user.get_or_create_worker(workername)
     }
 
-    pub(crate) fn record_share(
-        &self,
-        address: &Address<bitcoin::address::NetworkUnchecked>,
-        workername: &str,
-        difficulty: f64,
-    ) {
-        if let Some(user) = self.users.get(address) {
-            let worker = user.get_or_create_worker(workername);
-            worker.record_share(difficulty);
-        }
-        self.accepted.fetch_add(1, Ordering::Relaxed);
-    }
-
     pub(crate) fn add_block(&self) {
         self.blocks.fetch_add(1, Ordering::Relaxed);
-    }
-
-    pub(crate) fn add_rejected(&self) {
-        self.rejected.fetch_add(1, Ordering::Relaxed);
     }
 
     pub(crate) fn add_connection(&self) {
@@ -67,35 +102,7 @@ impl Metatron {
     pub(crate) fn hash_rate_1m(&self) -> HashRate {
         self.users
             .iter()
-            .map(|u| u.hash_rate_1m())
-            .fold(HashRate::ZERO, |acc, r| acc + r)
-    }
-
-    pub(crate) fn hash_rate_5m(&self) -> HashRate {
-        self.users
-            .iter()
-            .map(|u| u.hash_rate_5m())
-            .fold(HashRate::ZERO, |acc, r| acc + r)
-    }
-
-    pub(crate) fn hash_rate_1h(&self) -> HashRate {
-        self.users
-            .iter()
-            .map(|u| u.hash_rate_1h())
-            .fold(HashRate::ZERO, |acc, r| acc + r)
-    }
-
-    pub(crate) fn hash_rate_1d(&self) -> HashRate {
-        self.users
-            .iter()
-            .map(|u| u.hash_rate_1d())
-            .fold(HashRate::ZERO, |acc, r| acc + r)
-    }
-
-    pub(crate) fn hash_rate_7d(&self) -> HashRate {
-        self.users
-            .iter()
-            .map(|u| u.hash_rate_7d())
+            .map(|user| user.hash_rate_1m())
             .fold(HashRate::ZERO, |acc, r| acc + r)
     }
 
@@ -123,23 +130,8 @@ impl Metatron {
         self.users.iter().map(|u| u.worker_count()).sum()
     }
 
-    pub(crate) fn total_shares(&self) -> u64 {
-        self.users.iter().map(|u| u.total_shares()).sum()
-    }
-
     pub(crate) fn uptime(&self) -> Duration {
         self.started.elapsed()
-    }
-
-    pub(crate) fn get_user(
-        &self,
-        address: &Address<bitcoin::address::NetworkUnchecked>,
-    ) -> Option<Arc<UserStats>> {
-        self.users.get(address).map(|r| r.value().clone())
-    }
-
-    pub(crate) fn users(&self) -> Vec<Arc<UserStats>> {
-        self.users.iter().map(|r| r.value().clone()).collect()
     }
 }
 
@@ -152,11 +144,11 @@ impl Default for Metatron {
 impl StatusLine for Metatron {
     fn status_line(&self) -> String {
         format!(
-            "hr_5m={}  users={}  workers={}  conns={}  accepted={}  rejected={}  blocks={}  uptime={}s",
-            self.hash_rate_5m(),
+            "hash_rate={}  conns={}  users={}  workers={}  accepted={}  rejected={}  blocks={}  uptime={}s",
+            self.hash_rate_1m(),
+            self.total_connections(),
             self.total_users(),
             self.total_workers(),
-            self.total_connections(),
             self.accepted(),
             self.rejected(),
             self.total_blocks(),
@@ -205,37 +197,21 @@ mod tests {
         let addr = test_address();
 
         let worker = metatron.get_or_create_worker(addr.clone(), "rig1");
-        assert_eq!(worker.workername, "rig1");
+        assert_eq!(worker.workername(), "rig1");
         assert_eq!(metatron.total_users(), 1);
         assert_eq!(metatron.total_workers(), 1);
 
         let worker2 = metatron.get_or_create_worker(addr.clone(), "rig2");
-        assert_eq!(worker2.workername, "rig2");
+        assert_eq!(worker2.workername(), "rig2");
         assert_eq!(metatron.total_users(), 1);
         assert_eq!(metatron.total_workers(), 2);
     }
 
     #[test]
-    fn record_share_updates_stats() {
-        let metatron = Metatron::new();
-        let addr = test_address();
-
-        metatron.get_or_create_worker(addr.clone(), "rig1");
-        metatron.record_share(&addr, "rig1", 100.0);
-        metatron.record_share(&addr, "rig1", 200.0);
-
-        assert_eq!(metatron.accepted(), 2);
-        assert_eq!(metatron.total_shares(), 2);
-
-        let user = metatron.get_user(&addr).unwrap();
-        assert_eq!(user.total_shares(), 2);
-    }
-
-    #[test]
     fn rejected_count_increments() {
         let metatron = Metatron::new();
-        metatron.add_rejected();
-        metatron.add_rejected();
+        metatron.rejected.fetch_add(1, Ordering::Relaxed);
+        metatron.rejected.fetch_add(1, Ordering::Relaxed);
         assert_eq!(metatron.rejected(), 2);
     }
 
@@ -244,17 +220,5 @@ mod tests {
         let metatron = Metatron::new();
         metatron.add_block();
         assert_eq!(metatron.total_blocks(), 1);
-    }
-
-    #[test]
-    fn hash_rates_aggregate_from_workers() {
-        let metatron = Metatron::new();
-        let addr = test_address();
-
-        metatron.get_or_create_worker(addr.clone(), "rig1");
-        metatron.record_share(&addr, "rig1", 1000.0);
-
-        let rate = metatron.hash_rate_5m();
-        assert!(rate.0 > 0.0, "hashrate should be positive: {}", rate);
     }
 }

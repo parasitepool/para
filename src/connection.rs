@@ -11,6 +11,7 @@ pub(crate) enum State {
 pub(crate) struct Connection<R, W> {
     config: Arc<PoolConfig>,
     metatron: Arc<Metatron>,
+    share_tx: mpsc::Sender<Share>,
     socket_addr: SocketAddr,
     reader: FramedRead<R, LinesCodec>,
     writer: FramedWrite<W, LinesCodec>,
@@ -20,7 +21,6 @@ pub(crate) struct Connection<R, W> {
     state: State,
     address: Option<Address<bitcoin::address::NetworkUnchecked>>,
     workername: Option<String>,
-    worker_stats: Option<Arc<WorkerStats>>,
     authorized: Option<SystemTime>,
     version_mask: Option<Version>,
     extranonce1: Option<Extranonce>,
@@ -33,9 +33,11 @@ where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         config: Arc<PoolConfig>,
         metatron: Arc<Metatron>,
+        share_tx: mpsc::Sender<Share>,
         socket_addr: SocketAddr,
         reader: R,
         writer: W,
@@ -53,6 +55,7 @@ where
         Self {
             config,
             metatron,
+            share_tx,
             socket_addr,
             reader: FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_MESSAGE_SIZE)),
             writer: FramedWrite::new(writer, LinesCodec::new()),
@@ -62,7 +65,6 @@ where
             state: State::Init,
             address: None,
             workername: None,
-            worker_stats: None,
             authorized: None,
             version_mask: None,
             extranonce1: None,
@@ -330,10 +332,6 @@ where
                 authorize.username, self.socket_addr
             ))?;
 
-        let worker_stats = self
-            .metatron
-            .get_or_create_worker(unchecked_address.clone(), &workername);
-
         let job = Arc::new(Job::new(
             checked_address,
             extranonce1.clone(),
@@ -352,7 +350,6 @@ where
 
         self.address = Some(unchecked_address);
         self.workername = Some(workername);
-        self.worker_stats = Some(worker_stats);
 
         if self.authorized.is_none() {
             self.authorized = Some(SystemTime::now());
@@ -383,23 +380,25 @@ where
 
     async fn submit(&mut self, id: Id, submit: Submit) -> Result {
         let Some(job) = self.jobs.get(&submit.job_id) else {
+            self.emit_rejected(&submit, None, StratumError::Stale, BlockHash::all_zeros());
             self.send_error(id, StratumError::Stale, None).await?;
-            self.metatron.add_rejected();
-
             return Ok(());
         };
 
         let version = if let Some(version_bits) = submit.version_bits {
             let Some(version_mask) = job.version_mask else {
+                self.emit_rejected(
+                    &submit,
+                    Some(&job),
+                    StratumError::InvalidVersionMask,
+                    BlockHash::all_zeros(),
+                );
                 self.send_error(
                     id,
                     StratumError::InvalidVersionMask,
                     Some(serde_json::json!({"reason": "Version rolling not negotiated"})),
                 )
                 .await?;
-
-                self.metatron.add_rejected();
-
                 return Ok(());
             };
 
@@ -435,10 +434,11 @@ where
             nonce: submit.nonce.into(),
         };
 
-        if self.jobs.is_duplicate(header.block_hash()) {
-            self.send_error(id, StratumError::Duplicate, None).await?;
-            self.metatron.add_rejected();
+        let hash = header.block_hash();
 
+        if self.jobs.is_duplicate(hash) {
+            self.emit_rejected(&submit, Some(&job), StratumError::Duplicate, hash);
+            self.send_error(id, StratumError::Duplicate, None).await?;
             return Ok(());
         }
 
@@ -484,13 +484,8 @@ where
 
         let current_diff = self.vardiff.current_diff();
 
-        if current_diff.to_target().is_met_by(header.block_hash()) {
-            if let Some(ref ws) = self.worker_stats {
-                ws.record_share(current_diff.as_f64());
-            }
-            if let (Some(addr), Some(wn)) = (&self.address, &self.workername) {
-                self.metatron.record_share(addr, wn, current_diff.as_f64());
-            }
+        if current_diff.to_target().is_met_by(hash) {
+            self.emit_accepted(&submit, &job, current_diff.as_f64(), hash);
 
             self.send(Message::Response {
                 id,
@@ -527,11 +522,87 @@ where
                 .await?;
             }
         } else {
-            self.metatron.add_rejected();
+            self.emit_rejected(&submit, Some(&job), StratumError::AboveTarget, hash);
             self.send_error(id, StratumError::AboveTarget, None).await?;
         }
 
         Ok(())
+    }
+
+    fn emit_accepted(&self, submit: &Submit, job: &Job, sdiff: f64, hash: BlockHash) {
+        let Some((addr, wn, en1)) = self.worker_info() else {
+            return;
+        };
+
+        let event = Share::accepted(
+            job.workbase.template().height,
+            submit.job_id,
+            wn,
+            addr,
+            self.socket_addr,
+            self.user_agent.clone(),
+            en1,
+            submit.extranonce2.to_string(),
+            submit.nonce,
+            submit.ntime,
+            submit.version_bits,
+            self.vardiff.current_diff().as_f64(),
+            sdiff,
+            hash,
+        );
+
+        if self.share_tx.try_send(event).is_err() {
+            error!("Share channel full, dropping accepted share");
+        }
+    }
+
+    fn emit_rejected(
+        &self,
+        submit: &Submit,
+        job: Option<&Job>,
+        reason: StratumError,
+        hash: BlockHash,
+    ) {
+        let Some((addr, wn, en1)) = self.worker_info() else {
+            return;
+        };
+
+        let height = job.map(|j| j.workbase.template().height).unwrap_or(0);
+
+        let event = Share::rejected(
+            height,
+            submit.job_id,
+            wn,
+            addr,
+            self.socket_addr,
+            self.user_agent.clone(),
+            en1,
+            submit.extranonce2.to_string(),
+            submit.nonce,
+            submit.ntime,
+            submit.version_bits,
+            self.vardiff.current_diff().as_f64(),
+            0.0,
+            hash,
+            reason,
+        );
+
+        if self.share_tx.try_send(event).is_err() {
+            error!("Share channel full, dropping rejected share");
+        }
+    }
+
+    fn worker_info(
+        &self,
+    ) -> Option<(
+        Address<bitcoin::address::NetworkUnchecked>,
+        String,
+        Extranonce,
+    )> {
+        match (&self.address, &self.workername, &self.extranonce1) {
+            (Some(a), Some(w), Some(e)) => Some((a.clone(), w.clone(), e.clone())),
+            _ => None,
+        }
     }
 
     async fn read_message(&mut self) -> Result<Option<Message>> {

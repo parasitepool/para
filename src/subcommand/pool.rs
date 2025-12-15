@@ -12,6 +12,8 @@ impl Pool {
     pub(crate) async fn run(&self, cancel_token: CancellationToken) -> Result {
         let config = Arc::new(self.config.clone());
         let metatron = Arc::new(Metatron::new());
+        let (share_tx, share_rx) = mpsc::channel(SHARE_CHANNEL_CAPACITY);
+
         let address = config.address();
         let port = config.port();
 
@@ -21,6 +23,14 @@ impl Pool {
         let listener = TcpListener::bind((address.clone(), port)).await?;
 
         eprintln!("Listening on {address}:{port}");
+
+        let metatron_handle = {
+            let metatron = metatron.clone();
+            let cancel = cancel_token.clone();
+            tokio::spawn(async move {
+                metatron.run(share_rx, None, cancel).await;
+            })
+        };
 
         if !integration_test() && !logs_enabled() {
             spawn_throbber(metatron.clone());
@@ -40,10 +50,20 @@ impl Pool {
                     let workbase_receiver = workbase_receiver.clone();
                     let config = config.clone();
                     let metatron = metatron.clone();
+                    let share_tx = share_tx.clone();
                     let conn_cancel_token = cancel_token.child_token();
 
                     connection_tasks.spawn(async move {
-                        let mut conn = Connection::new(config, metatron, worker, reader, writer, workbase_receiver, conn_cancel_token);
+                        let mut conn = Connection::new(
+                            config,
+                            metatron,
+                            share_tx,
+                            worker,
+                            reader,
+                            writer,
+                            workbase_receiver,
+                            conn_cancel_token,
+                        );
 
                         if let Err(err) = conn.serve().await {
                             error!("Worker connection error: {err}")
@@ -64,6 +84,10 @@ impl Pool {
         );
         while connection_tasks.join_next().await.is_some() {}
         info!("All connections closed");
+
+        drop(share_tx);
+        let _ = metatron_handle.await;
+        info!("Metatron stopped");
 
         Ok(())
     }
