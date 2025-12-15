@@ -7,7 +7,6 @@ pub(crate) struct User {
     authorized: Instant,
 }
 
-#[allow(unused)]
 impl User {
     pub(crate) fn new(address: Address) -> Self {
         Self {
@@ -35,40 +34,25 @@ impl User {
             .fold(HashRate::ZERO, |acc, r| acc + r)
     }
 
+    pub(crate) fn sps_1m(&self) -> f64 {
+        self.workers.iter().map(|worker| worker.sps_1m()).sum()
+    }
+
     pub(crate) fn total_shares(&self) -> u64 {
-        self.workers.iter().map(|w| w.shares()).sum()
+        self.workers.iter().map(|worker| worker.shares()).sum()
     }
 
     pub(crate) fn best_ever(&self) -> f64 {
         self.workers
             .iter()
-            .map(|w| w.best_ever())
+            .map(|worker| worker.best_ever())
             .fold(0.0, f64::max)
     }
 
     pub(crate) fn last_share(&self) -> Option<Instant> {
-        self.workers.iter().filter_map(|w| w.last_share()).max()
-    }
-
-    pub(crate) fn last_share_timestamp(&self) -> Option<u64> {
-        self.last_share().map(|_| {
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs()
-        })
-    }
-
-    pub(crate) fn authorized_timestamp(&self) -> u64 {
-        let elapsed = self.authorized.elapsed();
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .saturating_sub(elapsed)
-            .as_secs()
-    }
-
-    pub(crate) fn workers(&self) -> Vec<Arc<Worker>> {
-        self.workers.iter().map(|r| r.value().clone()).collect()
+        self.workers
+            .iter()
+            .filter_map(|worker| worker.last_share())
+            .max()
     }
 }

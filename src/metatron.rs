@@ -102,6 +102,10 @@ impl Metatron {
             .fold(HashRate::ZERO, |acc, r| acc + r)
     }
 
+    pub(crate) fn sps_1m(&self) -> f64 {
+        self.users.iter().map(|user| user.sps_1m()).sum()
+    }
+
     pub(crate) fn total_blocks(&self) -> u64 {
         self.blocks.load(Ordering::Relaxed)
     }
@@ -112,6 +116,10 @@ impl Metatron {
 
     pub(crate) fn rejected(&self) -> u64 {
         self.rejected.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn total(&self) -> u64 {
+        self.users.iter().map(|user| user.total_shares()).sum()
     }
 
     pub(crate) fn total_connections(&self) -> u64 {
@@ -126,6 +134,17 @@ impl Metatron {
         self.users.iter().map(|u| u.worker_count()).sum()
     }
 
+    pub(crate) fn last_share(&self) -> Option<Instant> {
+        self.users.iter().filter_map(|user| user.last_share()).max()
+    }
+
+    pub(crate) fn best_ever(&self) -> f64 {
+        self.users
+            .iter()
+            .map(|user| user.best_ever())
+            .fold(0.0, f64::max)
+    }
+
     pub(crate) fn uptime(&self) -> Duration {
         self.started.elapsed()
     }
@@ -133,14 +152,22 @@ impl Metatron {
 
 impl StatusLine for Metatron {
     fn status_line(&self) -> String {
+        let last = self
+            .last_share()
+            .map(|t| format!("{}s", t.elapsed().as_secs()))
+            .unwrap_or_else(|| "-".into());
+
         format!(
-            "hash_rate={}  conns={}  users={}  workers={}  accepted={}  rejected={}  blocks={}  uptime={}s",
+            "hash_rate={}  sps={:.2}  connections={}  users={}  workers={}  accepted={}  rejected={}  total={}  last={last}  best_ever={}  blocks={}  uptime={}s",
             self.hash_rate_1m(),
+            self.sps_1m(),
             self.total_connections(),
             self.total_users(),
             self.total_workers(),
             self.accepted(),
             self.rejected(),
+            self.total(),
+            self.best_ever(),
             self.total_blocks(),
             self.uptime().as_secs()
         )
