@@ -1,5 +1,161 @@
 use super::*;
 
+async fn insert_test_shares_with_diff(
+    database_url: String,
+    shares: Vec<(String, f64)>,
+    block_height: i64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use sqlx::{Pool, Postgres, postgres::PgPoolOptions};
+
+    let pool: Pool<Postgres> = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&database_url)
+        .await?;
+
+    for (i, (username, diff)) in shares.iter().enumerate() {
+        let share_id = block_height * 10000 + i as i64;
+
+        sqlx::query(
+            "INSERT INTO remote_shares (
+                id, origin, blockheight, workinfoid, clientid, enonce1, nonce2,
+                nonce, ntime, diff, sdiff, hash, result, workername, username,
+                createdate, createby, createcode, createinet
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+            )",
+        )
+        .bind(share_id)
+        .bind("test_origin")
+        .bind(block_height as i32)
+        .bind(1i64)
+        .bind(1i64)
+        .bind("enonce1")
+        .bind("nonce2")
+        .bind("nonce")
+        .bind("ntime")
+        .bind(diff)
+        .bind(diff)
+        .bind("hash")
+        .bind(true)
+        .bind(format!("{}_worker", username))
+        .bind(username)
+        .bind(chrono::Utc::now().to_rfc3339())
+        .bind("test")
+        .bind("test")
+        .bind("127.0.0.1")
+        .execute(&pool)
+        .await?;
+    }
+
+    pool.close().await;
+    Ok(())
+}
+
+async fn insert_test_shares_remote(
+    database_url: String,
+    count: u32,
+    block_height: i64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::address;
+    use sqlx::{Pool, Postgres, postgres::PgPoolOptions};
+
+    let pool: Pool<Postgres> = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&database_url)
+        .await?;
+
+    for i in 0..count {
+        let share_id = block_height * 100000 + i as i64;
+
+        sqlx::query(
+            "INSERT INTO remote_shares (
+                    id, origin, blockheight, workinfoid, clientid, enonce1, nonce2,
+                    nonce, ntime, diff, sdiff, hash, result, workername, username,
+                    createdate, createby, createcode, createinet, address
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
+                )"
+        )
+            .bind(share_id)
+            .bind("test_origin")
+            .bind(block_height as i32)
+            .bind(i as i64 + 1000)
+            .bind(i as i64 + 100)
+            .bind(format!("enonce1_{}", i))
+            .bind(format!("nonce2_{}", i))
+            .bind(format!("nonce_{}", i))
+            .bind("507f1f77")
+            .bind(1000.0 + i as f64)
+            .bind(500.0 + i as f64)
+            .bind(format!("hash_{:064x}", i))
+            .bind(true)
+            .bind(format!("worker_{}", i % 5))
+            .bind(format!("{}", i % 10))
+            .bind("2024-01-01 12:00:00")
+            .bind("ckpool")
+            .bind("")
+            .bind("127.0.0.1")
+            .bind(address(i % 10).to_string())
+            .execute(&pool)
+            .await?;
+    }
+
+    pool.close().await;
+    Ok(())
+}
+
+async fn insert_test_shares_with_users(
+    database_url: String,
+    users: Vec<(String, f64)>,
+    block_height: i64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use sqlx::{Pool, Postgres, postgres::PgPoolOptions};
+
+    let pool: Pool<Postgres> = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&database_url)
+        .await?;
+
+    let share_id_base = block_height * 10000;
+
+    for (i, (username, diff)) in users.iter().enumerate() {
+        let share_id = share_id_base + i as i64;
+
+        sqlx::query(
+            "INSERT INTO remote_shares (
+                    id, origin, blockheight, workinfoid, clientid, enonce1, nonce2,
+                    nonce, ntime, diff, sdiff, hash, result, workername, username,
+                    createdate, createby, createcode, createinet
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+                )"
+        )
+            .bind(share_id)
+            .bind("test_origin")
+            .bind(block_height as i32)
+            .bind(1i64)
+            .bind(1i64)
+            .bind("enonce1")
+            .bind("nonce2")
+            .bind("nonce")
+            .bind("ntime")
+            .bind(diff)
+            .bind(diff)
+            .bind("hash")
+            .bind(true)
+            .bind(format!("{}_worker", username))
+            .bind(username)
+            .bind(chrono::Utc::now().to_rfc3339())
+            .bind("test")
+            .bind("test")
+            .bind("127.0.0.1")
+            .execute(&pool)
+            .await?;
+    }
+
+    Ok(())
+}
+
 #[tokio::test]
 async fn test_payouts_range_basic() {
     let server = TestServer::spawn_with_db().await;
@@ -273,111 +429,6 @@ async fn test_payouts_range_url_encoded_exclusions() {
     );
 }
 
-async fn insert_test_shares_remote(
-    database_url: String,
-    count: u32,
-    block_height: i64,
-) -> Result<(), Box<dyn std::error::Error>> {
-    use crate::address;
-    use sqlx::{Pool, Postgres, postgres::PgPoolOptions};
-
-    let pool: Pool<Postgres> = PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&database_url)
-        .await?;
-
-    for i in 0..count {
-        let share_id = block_height * 100000 + i as i64;
-
-        sqlx::query(
-                "INSERT INTO remote_shares (
-                    id, origin, blockheight, workinfoid, clientid, enonce1, nonce2,
-                    nonce, ntime, diff, sdiff, hash, result, workername, username,
-                    createdate, createby, createcode, createinet, address
-                ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
-                )"
-            )
-                .bind(share_id)
-                .bind("test_origin")
-                .bind(block_height as i32)
-                .bind(i as i64 + 1000)
-                .bind(i as i64 + 100)
-                .bind(format!("enonce1_{}", i))
-                .bind(format!("nonce2_{}", i))
-                .bind(format!("nonce_{}", i))
-                .bind("507f1f77")
-                .bind(1000.0 + i as f64)
-                .bind(500.0 + i as f64)
-                .bind(format!("hash_{:064x}", i))
-                .bind(true)
-                .bind(format!("worker_{}", i % 5))
-                .bind(format!("{}", i % 10))
-                .bind("2024-01-01 12:00:00")
-                .bind("ckpool")
-                .bind("")
-                .bind("127.0.0.1")
-                .bind(address(i % 10).to_string())
-                .execute(&pool)
-                .await?;
-    }
-
-    pool.close().await;
-    Ok(())
-}
-
-async fn insert_test_shares_with_users(
-    database_url: String,
-    users: Vec<(String, f64)>,
-    block_height: i64,
-) -> Result<(), Box<dyn std::error::Error>> {
-    use sqlx::{Pool, Postgres, postgres::PgPoolOptions};
-
-    let pool: Pool<Postgres> = PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&database_url)
-        .await?;
-
-    let share_id_base = block_height * 10000;
-
-    for (i, (username, diff)) in users.iter().enumerate() {
-        let share_id = share_id_base + i as i64;
-
-        sqlx::query(
-                "INSERT INTO remote_shares (
-                    id, origin, blockheight, workinfoid, clientid, enonce1, nonce2,
-                    nonce, ntime, diff, sdiff, hash, result, workername, username,
-                    createdate, createby, createcode, createinet
-                ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
-                )"
-            )
-                .bind(share_id)
-                .bind("test_origin")
-                .bind(block_height as i32)
-                .bind(1i64)
-                .bind(1i64)
-                .bind("enonce1")
-                .bind("nonce2")
-                .bind("nonce")
-                .bind("ntime")
-                .bind(diff)
-                .bind(diff)
-                .bind("hash")
-                .bind(true)
-                .bind(format!("{}_worker", username))
-                .bind(username)
-                .bind(chrono::Utc::now().to_rfc3339())
-                .bind("test")
-                .bind("test")
-                .bind("127.0.0.1")
-                .execute(&pool)
-                .await?;
-    }
-
-    Ok(())
-}
-
 #[tokio::test]
 async fn test_invalid() {
     let server = TestServer::spawn_with_db_args("--admin-token verysecrettoken").await;
@@ -426,7 +477,7 @@ async fn test_valid_auth() {
 }
 
 #[tokio::test]
-async fn test_highdiff_basic() {
+async fn test_highestdiff_basic() {
     let server = TestServer::spawn_with_db().await;
     setup_test_schema(server.database_url().unwrap())
         .await
@@ -447,26 +498,26 @@ async fn test_highdiff_basic() {
     .await
     .unwrap();
 
-    let highdiff: HighDiff = server.get_json_async("/highdiff/100").await;
+    let highestdiff: HighestDiff = server.get_json_async("/highestdiff/100").await;
 
-    assert_eq!(highdiff.blockheight, 100);
-    assert_eq!(highdiff.username, "3EktnHQD7RiAE6uzMj2ZifT9YgRrkSgzQX");
-    assert_eq!(highdiff.diff, 5000.0);
+    assert_eq!(highestdiff.blockheight, 100);
+    assert_eq!(highestdiff.username, "3EktnHQD7RiAE6uzMj2ZifT9YgRrkSgzQX");
+    assert_eq!(highestdiff.diff, 5000.0);
 }
 
 #[tokio::test]
-async fn test_highdiff_not_found() {
+async fn test_highestdiff_not_found() {
     let server = TestServer::spawn_with_db().await;
     setup_test_schema(server.database_url().unwrap())
         .await
         .unwrap();
 
-    let res = server.get_json_async_raw("/highdiff/999").await;
+    let res = server.get_json_async_raw("/highestdiff/999").await;
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
-async fn test_highdiff_by_user_basic() {
+async fn test_highestdiff_by_user_basic() {
     let server = TestServer::spawn_with_db().await;
     setup_test_schema(server.database_url().unwrap())
         .await
@@ -490,20 +541,20 @@ async fn test_highdiff_by_user_basic() {
     .await
     .unwrap();
 
-    let highdiff: HighDiff = server
-        .get_json_async("/highdiff/200/user/bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4")
+    let highestdiff: HighestDiff = server
+        .get_json_async("/highestdiff/200/user/bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4")
         .await;
 
-    assert_eq!(highdiff.blockheight, 200);
+    assert_eq!(highestdiff.blockheight, 200);
     assert_eq!(
-        highdiff.username,
+        highestdiff.username,
         "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
     );
-    assert_eq!(highdiff.diff, 3000.0);
+    assert_eq!(highestdiff.diff, 3000.0);
 }
 
 #[tokio::test]
-async fn test_highdiff_by_user_not_found() {
+async fn test_highestdiff_by_user_not_found() {
     let server = TestServer::spawn_with_db().await;
     setup_test_schema(server.database_url().unwrap())
         .await
@@ -521,13 +572,13 @@ async fn test_highdiff_by_user_not_found() {
     .unwrap();
 
     let res = server
-        .get_json_async_raw("/highdiff/300/user/nonexistent")
+        .get_json_async_raw("/highestdiff/300/user/nonexistent")
         .await;
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
-async fn test_highdiff_all_users_basic() {
+async fn test_highestdiff_all_users_basic() {
     let server = TestServer::spawn_with_db().await;
     setup_test_schema(server.database_url().unwrap())
         .await
@@ -553,23 +604,23 @@ async fn test_highdiff_all_users_basic() {
     .await
     .unwrap();
 
-    let highdiffs: Vec<HighDiff> = server.get_json_async("/highdiff/400/all").await;
+    let highestdiffs: Vec<HighestDiff> = server.get_json_async("/highestdiff/400/all").await;
 
-    assert_eq!(highdiffs.len(), 3);
+    assert_eq!(highestdiffs.len(), 3);
 
-    let user_a = highdiffs
+    let user_a = highestdiffs
         .iter()
         .find(|h| h.username == "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4")
         .unwrap();
     assert_eq!(user_a.diff, 2000.0);
 
-    let user_b = highdiffs
+    let user_b = highestdiffs
         .iter()
         .find(|h| h.username == "3EktnHQD7RiAE6uzMj2ZifT9YgRrkSgzQX")
         .unwrap();
     assert_eq!(user_b.diff, 3000.0);
 
-    let user_c = highdiffs
+    let user_c = highestdiffs
         .iter()
         .find(|h| h.username == "1CPDJtMzuSyvnGi8o9ZAtAWPfqHZhjQQhB")
         .unwrap();
@@ -577,64 +628,13 @@ async fn test_highdiff_all_users_basic() {
 }
 
 #[tokio::test]
-async fn test_highdiff_all_users_empty() {
+async fn test_highestdiff_all_users_empty() {
     let server = TestServer::spawn_with_db().await;
     setup_test_schema(server.database_url().unwrap())
         .await
         .unwrap();
 
-    let highdiffs: Vec<HighDiff> = server.get_json_async("/highdiff/999/all").await;
+    let highestdiffs: Vec<HighestDiff> = server.get_json_async("/highestdiff/999/all").await;
 
-    assert!(highdiffs.is_empty());
-}
-
-async fn insert_test_shares_with_diff(
-    database_url: String,
-    shares: Vec<(String, f64)>,
-    block_height: i64,
-) -> Result<(), Box<dyn std::error::Error>> {
-    use sqlx::{Pool, Postgres, postgres::PgPoolOptions};
-
-    let pool: Pool<Postgres> = PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&database_url)
-        .await?;
-
-    for (i, (username, diff)) in shares.iter().enumerate() {
-        let share_id = block_height * 10000 + i as i64;
-
-        sqlx::query(
-            "INSERT INTO remote_shares (
-                id, origin, blockheight, workinfoid, clientid, enonce1, nonce2,
-                nonce, ntime, diff, sdiff, hash, result, workername, username,
-                createdate, createby, createcode, createinet
-            ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
-            )",
-        )
-        .bind(share_id)
-        .bind("test_origin")
-        .bind(block_height as i32)
-        .bind(1i64)
-        .bind(1i64)
-        .bind("enonce1")
-        .bind("nonce2")
-        .bind("nonce")
-        .bind("ntime")
-        .bind(diff)
-        .bind(diff)
-        .bind("hash")
-        .bind(true)
-        .bind(format!("{}_worker", username))
-        .bind(username)
-        .bind(chrono::Utc::now().to_rfc3339())
-        .bind("test")
-        .bind("test")
-        .bind("127.0.0.1")
-        .execute(&pool)
-        .await?;
-    }
-
-    pool.close().await;
-    Ok(())
+    assert!(highestdiffs.is_empty());
 }

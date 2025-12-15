@@ -1,7 +1,7 @@
 use super::*;
 
 #[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub struct HighDiff {
+pub struct HighestDiff {
     pub blockheight: i32,
     pub username: String,
     pub diff: f64,
@@ -438,8 +438,8 @@ impl Database {
         Ok(result as u64)
     }
 
-    pub async fn get_highdiff(&self, blockheight: i32) -> Result<Option<HighDiff>> {
-        sqlx::query_as::<_, HighDiff>(
+    pub async fn get_highestdiff(&self, blockheight: i32) -> Result<Option<HighestDiff>> {
+        sqlx::query_as::<_, HighestDiff>(
             "
             SELECT
                 blockheight,
@@ -457,12 +457,12 @@ impl Database {
         .map_err(|err| anyhow!(err))
     }
 
-    pub async fn get_highdiff_by_user(
+    pub async fn get_highestdiff_by_user(
         &self,
         blockheight: i32,
         username: &str,
-    ) -> Result<Option<HighDiff>> {
-        sqlx::query_as::<_, HighDiff>(
+    ) -> Result<Option<HighestDiff>> {
+        sqlx::query_as::<_, HighestDiff>(
             "
             SELECT
                 blockheight,
@@ -481,8 +481,8 @@ impl Database {
         .map_err(|err| anyhow!(err))
     }
 
-    pub async fn get_highdiff_all_users(&self, blockheight: i32) -> Result<Vec<HighDiff>> {
-        sqlx::query_as::<_, HighDiff>(
+    pub async fn get_highestdiff_all_users(&self, blockheight: i32) -> Result<Vec<HighestDiff>> {
+        sqlx::query_as::<_, HighestDiff>(
             "
             SELECT DISTINCT ON (username)
                 blockheight,

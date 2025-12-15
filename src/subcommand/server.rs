@@ -206,12 +206,15 @@ impl Server {
                     )
                     .route("/split", get(Self::open_split))
                     .route("/split/{blockheight}", get(Self::sat_split))
-                    .route("/highdiff/{blockheight}", get(Self::highdiff))
+                    .route("/highestdiff/{blockheight}", get(Self::highestdiff))
                     .route(
-                        "/highdiff/{blockheight}/user/{username}",
-                        get(Self::highdiff_by_user),
+                        "/highestdiff/{blockheight}/user/{username}",
+                        get(Self::highestdiff_by_user),
                     )
-                    .route("/highdiff/{blockheight}/all", get(Self::highdiff_all_users))
+                    .route(
+                        "/highestdiff/{blockheight}/all",
+                        get(Self::highestdiff_all_users),
+                    )
                     .route(
                         "/sync/batch",
                         post(Self::sync_batch).layer(DefaultBodyLimit::max(50 * MEBIBYTE)),
@@ -436,35 +439,35 @@ impl Server {
         .into_response())
     }
 
-    pub(crate) async fn highdiff(
+    pub(crate) async fn highestdiff(
         Path(blockheight): Path<i32>,
         Extension(database): Extension<Database>,
     ) -> ServerResult<Response> {
         database
-            .get_highdiff(blockheight)
+            .get_highestdiff(blockheight)
             .await?
-            .ok_or_not_found(|| "HighDiff")
+            .ok_or_not_found(|| "HighestDiff")
             .map(Json)
             .map(IntoResponse::into_response)
     }
 
-    pub(crate) async fn highdiff_by_user(
+    pub(crate) async fn highestdiff_by_user(
         Path((blockheight, username)): Path<(i32, String)>,
         Extension(database): Extension<Database>,
     ) -> ServerResult<Response> {
         database
-            .get_highdiff_by_user(blockheight, &username)
+            .get_highestdiff_by_user(blockheight, &username)
             .await?
-            .ok_or_not_found(|| "HighDiff")
+            .ok_or_not_found(|| "HighestDiff")
             .map(Json)
             .map(IntoResponse::into_response)
     }
 
-    pub(crate) async fn highdiff_all_users(
+    pub(crate) async fn highestdiff_all_users(
         Path(blockheight): Path<i32>,
         Extension(database): Extension<Database>,
     ) -> ServerResult<Response> {
-        Ok(Json(database.get_highdiff_all_users(blockheight).await?).into_response())
+        Ok(Json(database.get_highestdiff_all_users(blockheight).await?).into_response())
     }
 
     pub(crate) async fn payouts_range(
