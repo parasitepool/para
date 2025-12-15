@@ -131,12 +131,6 @@ impl Metatron {
     }
 }
 
-impl Default for Metatron {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl StatusLine for Metatron {
     fn status_line(&self) -> String {
         format!(
