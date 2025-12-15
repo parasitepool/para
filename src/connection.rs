@@ -559,8 +559,9 @@ where
             .worker_info()
             .expect("emit_share called before authorize");
 
-        // TODO: for rejected shares it should still add the correct blockheight not 0
-        let height = job.map(|job| job.workbase.template().height).unwrap_or(0);
+        let height = job
+            .map(|job| job.workbase.template().height)
+            .unwrap_or_else(|| self.workbase_receiver.borrow().template().height);
 
         let event = Share::new(
             height,
