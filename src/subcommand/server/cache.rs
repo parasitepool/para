@@ -109,14 +109,14 @@ impl<T: Clone> Cached<T> {
 #[derive(Debug)]
 pub(super) struct Cache {
     client: Client,
-    config: Arc<ServerConfig>,
+    config: Arc<ResolvedServerConfig>,
     pool_status: Mutex<Cached<ckpool::Status>>,
     user_statuses: DashMap<String, Arc<Mutex<Cached<ckpool::User>>>>,
     users: Mutex<Cached<Vec<String>>>,
 }
 
 impl Cache {
-    pub(super) fn new(client: Client, config: Arc<ServerConfig>) -> Self {
+    pub(super) fn new(client: Client, config: Arc<ResolvedServerConfig>) -> Self {
         Self {
             client,
             config: config.clone(),

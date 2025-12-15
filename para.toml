@@ -1,0 +1,195 @@
+# Para Configuration File
+# See `para --help` for setting documentation
+# https://github.com/parasitepool/para
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GLOBAL SETTINGS
+# These apply to all subcommands unless overridden in their respective sections
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Bitcoin network to use (mainnet, signet, regtest, testnet, testnet4)
+chain = "mainnet"
+
+# Directory to store Para data
+# data_dir = "/var/lib/para"
+
+# Bitcoin Core data directory
+# bitcoin_data_dir = "/var/lib/bitcoin"
+
+# Bitcoin Core RPC port (defaults based on chain)
+# bitcoin_rpc_port = 8332
+
+# Bitcoin Core RPC credentials (optional - uses cookie file by default)
+# bitcoin_rpc_username = "rpcuser"
+# bitcoin_rpc_password = "rpcpassword"
+
+# Path to Bitcoin Core RPC cookie file
+# bitcoin_rpc_cookie_file = "/var/lib/bitcoin/.cookie"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# POOL SETTINGS
+# Configuration for `para pool` subcommand
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[pool]
+# Pool-specific chain override (inherits from global if not set)
+# chain = "signet"
+
+# Address to bind the pool server
+address = "0.0.0.0"
+
+# Port to listen on for stratum connections
+port = 42069
+
+# Block template update interval in seconds
+update_interval = 10
+
+# Version rolling mask for ASIC miners
+version_mask = "1fffe000"
+
+# Starting difficulty for new connections
+start_diff = "1"
+
+# Target time between share submissions (seconds)
+vardiff_period = 5.0
+
+# Window for averaging share submission rate (seconds)
+vardiff_window = 300.0
+
+# ZMQ endpoint for block notifications from Bitcoin Core
+zmq_block_notifications = "tcp://127.0.0.1:28332"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SERVER SETTINGS
+# Configuration for `para server` subcommand (API/web server)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[server]
+# Address to bind the HTTP server
+address = "0.0.0.0"
+
+# Port to listen on (required for HTTPS with ACME)
+# port = 443
+
+# PostgreSQL connection URL
+database_url = "postgres://satoshi:nakamoto@127.0.0.1:5432/ckpool"
+
+# Admin authentication token for protected endpoints
+# admin_token = "your-secret-admin-token"
+
+# API authentication token
+# api_token = "your-api-token"
+
+# Domain names for ACME TLS certificates (comma-separated in env, array in TOML)
+# acme_domain = ["pool.example.com"]
+
+# ACME contact emails
+# acme_contact = ["admin@example.com"]
+
+# ntfy.sh channel for block found notifications
+# alerts_ntfy_channel = "parasite-blocks"
+
+# Directory containing CKpool log files
+# log_dir = "/var/log/ckpool"
+
+# Other Para nodes to aggregate stats from
+# nodes = ["https://node1.example.com", "https://node2.example.com"]
+
+# Endpoint for syncing shares to another Para server
+# sync_endpoint = "https://primary.example.com"
+
+# Cache TTL in seconds
+ttl = 30
+
+# Run account migration before processing sync batches
+migrate_accounts = false
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MINER SETTINGS
+# Configuration for `para miner` subcommand (test miner)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[miner]
+# Stratum server endpoint
+# stratum_endpoint = "pool.example.com:42069"
+
+# Miner username (typically bitcoin address)
+# username = "bc1q..."
+
+# Miner password (usually ignored by pools)
+# password = "x"
+
+# Mining mode: continuous, share-found, block-found
+mode = "continuous"
+
+# Number of CPU cores to use (defaults to all available)
+# cpu_cores = 4
+
+# Hash rate throttle (e.g., "1MH/s", "500kH/s")
+# throttle = "1MH/s"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SYNC SETTINGS
+# Configuration for `para sync` subcommand (share synchronization)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[sync]
+# HTTP endpoint to sync shares to
+endpoint = "http://127.0.0.1:8080"
+
+# Number of shares to process per batch
+batch_size = 1000000
+
+# PostgreSQL connection URL (can also use DATABASE_URL env var)
+database_url = "postgres://satoshi:nakamoto@127.0.0.1:5432/ckpool"
+
+# Bearer token for sync endpoint authentication
+# admin_token = "your-admin-token"
+
+# File to store current sync position
+id_file = "current_id.txt"
+
+# Reset sync position to 0 on start
+reset_id = false
+
+# Exit when caught up instead of waiting for new data
+terminate_when_complete = false
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TEMPLATE SETTINGS
+# Configuration for `para template` subcommand (block template monitoring)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[template]
+# Stratum server endpoint to monitor
+# stratum_endpoint = "pool.example.com:42069"
+
+# Username for stratum authentication
+# username = "monitor"
+
+# Password for stratum authentication
+# password = "x"
+
+# Continue watching for updates instead of exiting after first template
+watch = false
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PING SETTINGS
+# Configuration for `para ping` subcommand (stratum latency testing)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[ping]
+# Stratum server endpoint to ping
+# stratum_endpoint = "pool.example.com:42069"
+
+# Username for authenticated ping (optional)
+# username = "test"
+
+# Password for authenticated ping
+# password = "x"
+
+# Number of pings to send (omit for continuous)
+# count = 10
+
+# Timeout per ping in seconds
+timeout = 5

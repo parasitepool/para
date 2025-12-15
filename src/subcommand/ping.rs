@@ -1,13 +1,13 @@
-use super::*;
+use {super::*, settings::Settings};
 
 #[derive(Parser, Debug)]
 pub(crate) struct Ping {
     #[arg(help = "Stratum <HOST:PORT>.")]
-    stratum_endpoint: String,
+    stratum_endpoint: Option<String>,
     #[arg(long, help = "Stop after <COUNT> replies.")]
     count: Option<u64>,
-    #[arg(long, default_value = "5", help = "Fail after <TIMEOUT> seconds.")]
-    timeout: u64,
+    #[arg(long, help = "Fail after <TIMEOUT> seconds.")]
+    timeout: Option<u64>,
     #[arg(long, help = "Stratum <USERNAME>.")]
     username: Option<String>,
     #[arg(long, help = "Stratum <PASSWORD>.")]
@@ -15,12 +15,22 @@ pub(crate) struct Ping {
 }
 
 impl Ping {
-    pub(crate) async fn run(&self, cancel_token: CancellationToken) -> Result {
-        let addr = resolve_stratum_endpoint(&self.stratum_endpoint).await?;
+    pub(crate) async fn run(self, settings: Settings, cancel_token: CancellationToken) -> Result {
+        let stratum_endpoint = self
+            .stratum_endpoint
+            .or(settings.ping_stratum_endpoint.clone())
+            .ok_or_else(|| anyhow!("stratum endpoint required"))?;
 
-        let ping_type = PingType::new(self.username.as_deref(), self.password.as_deref());
+        let username = self.username.or(settings.ping_username.clone());
+        let password = self.password.or(settings.ping_password.clone());
+        let count = self.count.or(settings.ping_count);
+        let timeout = self.timeout.or(settings.ping_timeout).unwrap_or(5);
 
-        println!("{} {} ({})", ping_type, self.stratum_endpoint, addr);
+        let addr = resolve_stratum_endpoint(&stratum_endpoint).await?;
+
+        let ping_type = PingType::new(username.as_deref(), password.as_deref());
+
+        println!("{} {} ({})", ping_type, stratum_endpoint, addr);
 
         let stats = Arc::new(PingStats::new());
         let sequence = AtomicU64::new(0);
@@ -44,7 +54,7 @@ impl Ping {
                             println!("Ping cancelled for seq={seq}");
                             break;
                         }
-                        result = self.ping_once(addr, &ping_type) => {
+                        result = Self::ping_once(addr, &ping_type, timeout) => {
                             match result {
                                 Ok((duration, size)) => {
                                     success = true;
@@ -59,14 +69,14 @@ impl Ping {
                     }
 
                     reply_count += 1;
-                    if let Some(count) = self.count && count == reply_count {
+                    if let Some(cnt) = count && cnt == reply_count {
                         break;
                     }
                 }
             }
         }
 
-        print_final_stats(&self.stratum_endpoint, &stats);
+        print_final_stats(&stratum_endpoint, &stats);
 
         if success {
             Ok(())
@@ -75,7 +85,11 @@ impl Ping {
         }
     }
 
-    async fn ping_once(&self, addr: SocketAddr, ping_type: &PingType) -> Result<(Duration, usize)> {
+    async fn ping_once(
+        addr: SocketAddr,
+        ping_type: &PingType,
+        timeout: u64,
+    ) -> Result<(Duration, usize)> {
         match ping_type {
             PingType::Subscribe => {
                 let config = stratum::ClientConfig {
@@ -83,7 +97,7 @@ impl Ping {
                     username: "".into(),
                     user_agent: USER_AGENT.into(),
                     password: None,
-                    timeout: Duration::from_secs(self.timeout),
+                    timeout: Duration::from_secs(timeout),
                 };
 
                 let client = stratum::Client::new(config);
@@ -101,7 +115,7 @@ impl Ping {
                     username: username.clone(),
                     user_agent: USER_AGENT.into(),
                     password: Some(password.clone()),
-                    timeout: Duration::from_secs(self.timeout),
+                    timeout: Duration::from_secs(timeout),
                 };
 
                 let client = stratum::Client::new(config);

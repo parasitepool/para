@@ -1,14 +1,14 @@
-use super::*;
+use {super::*, subcommand::pool::pool_config::ResolvedPoolConfig};
 
 pub(crate) struct Generator {
     bitcoin_rpc_client: Arc<bitcoincore_rpc::Client>,
     cancel: CancellationToken,
-    config: Arc<PoolConfig>,
+    config: Arc<ResolvedPoolConfig>,
     handle: Option<JoinHandle<()>>,
 }
 
 impl Generator {
-    pub(crate) fn new(config: Arc<PoolConfig>) -> Result<Self> {
+    pub(crate) fn new(config: Arc<ResolvedPoolConfig>) -> Result<Self> {
         Ok(Self {
             bitcoin_rpc_client: Arc::new(config.bitcoin_rpc_client()?),
             cancel: CancellationToken::new(),
@@ -81,7 +81,7 @@ impl Generator {
 
 fn get_block_template_blocking(
     bitcoin_rpc_client: &bitcoincore_rpc::Client,
-    config: &PoolConfig,
+    config: &ResolvedPoolConfig,
 ) -> Result<BlockTemplate> {
     let mut rules = vec!["segwit"];
     if config.chain().network() == Network::Signet {

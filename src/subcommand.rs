@@ -1,9 +1,10 @@
-use super::*;
+use {super::*, settings::Settings};
 
 pub mod miner;
 mod ping;
 pub(crate) mod pool;
 pub mod server;
+mod settings_cmd;
 pub mod sync;
 pub mod template;
 
@@ -17,6 +18,8 @@ pub(crate) enum Subcommand {
     Pool(pool::Pool),
     #[command(about = "Run API server")]
     Server(server::Server),
+    #[command(about = "Show resolved settings")]
+    Settings(settings_cmd::SettingsCmd),
     #[command(about = "Sync shares via HTTP")]
     Sync(sync::Sync),
     #[command(about = "Monitor block templates")]
@@ -24,29 +27,31 @@ pub(crate) enum Subcommand {
 }
 
 impl Subcommand {
-    pub(crate) async fn run(self, cancel_token: CancellationToken) -> Result {
+    pub(crate) async fn run(self, settings: Settings, cancel_token: CancellationToken) -> Result {
         match self {
-            Self::Miner(miner) => miner.run(cancel_token).await,
-            Self::Ping(ping) => ping.run(cancel_token).await,
-            Self::Pool(pool) => pool.run(cancel_token).await,
+            Self::Miner(miner) => miner.run(settings, cancel_token).await,
+            Self::Ping(ping) => ping.run(settings, cancel_token).await,
+            Self::Pool(pool) => pool.run(settings, cancel_token).await,
             Self::Server(server) => {
                 let handle = Handle::new();
 
                 let mut sync_task = None;
 
-                if let Some(sync_endpoint) = server.config.sync_endpoint() {
+                if let Some(sync_endpoint) = &settings.server_sync_endpoint {
                     let hostname = System::host_name().ok_or(anyhow!("no hostname found"))?;
 
                     if !sync_endpoint.contains(&hostname) {
-                        let mut sync = sync::Sync::default().with_endpoint(sync_endpoint.clone());
-
-                        if let Some(token) = server.config.admin_token() {
-                            sync = sync.with_admin_token(token);
-                        }
-
+                        let sync_settings = settings.clone();
+                        let endpoint = sync_endpoint.clone();
                         let sync_cancel_token = cancel_token.clone();
                         let send_task = tokio::spawn(async move {
-                            if let Err(e) = sync.run(sync_cancel_token).await {
+                            if let Err(e) = sync::Sync::run_with_settings(
+                                sync_settings,
+                                endpoint,
+                                sync_cancel_token,
+                            )
+                            .await
+                            {
                                 error!("SyncSend failed: {}", e);
                             }
                         });
@@ -55,7 +60,7 @@ impl Subcommand {
                     }
                 }
 
-                let server_result = server.run(handle, cancel_token).await;
+                let server_result = server.run(settings, handle, cancel_token).await;
 
                 if let Some(task) = sync_task {
                     info!("Waiting for sync task to finish...");
@@ -65,8 +70,9 @@ impl Subcommand {
 
                 server_result
             }
-            Self::Sync(sync) => sync.run(cancel_token).await,
-            Self::Template(template) => template.run(cancel_token).await,
+            Self::Settings(cmd) => cmd.run(settings).await,
+            Self::Sync(sync) => sync.run(settings, cancel_token).await,
+            Self::Template(template) => template.run(settings, cancel_token).await,
         }
     }
 }

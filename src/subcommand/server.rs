@@ -2,6 +2,7 @@ use {
     super::*,
     crate::{
         ckpool,
+        settings::Settings,
         subcommand::{
             server::account::account_router,
             sync::{ShareBatch, SyncResponse},
@@ -14,7 +15,7 @@ use {
     database::Database,
     error::{OptionExt, ServerError, ServerResult},
     reqwest::{Client, ClientBuilder, header},
-    server_config::ServerConfig,
+    server_config::{ResolvedServerConfig, ServerConfig},
     std::sync::OnceLock,
     sysinfo::DiskRefreshKind,
     templates::{
@@ -119,8 +120,13 @@ pub struct Server {
 }
 
 impl Server {
-    pub async fn run(&self, handle: Handle, cancel_token: CancellationToken) -> Result {
-        let config = Arc::new(self.config.clone());
+    pub async fn run(
+        self,
+        settings: Settings,
+        handle: Handle,
+        cancel_token: CancellationToken,
+    ) -> Result {
+        let config = Arc::new(self.config.resolve(settings));
         let log_dir = config.log_dir();
         let pool_dir = log_dir.join("pool");
         let user_dir = log_dir.join("users");
@@ -241,12 +247,15 @@ impl Server {
 
         info!("Serving files in {}", log_dir.display());
 
-        self.spawn(config, router, handle)?.await??;
+        Self::spawn(config, router, handle)?.await??;
 
         Ok(())
     }
 
-    fn with_auth<S>(config: Arc<ServerConfig>, method_router: MethodRouter<S>) -> MethodRouter<S>
+    fn with_auth<S>(
+        config: Arc<ResolvedServerConfig>,
+        method_router: MethodRouter<S>,
+    ) -> MethodRouter<S>
     where
         S: Clone + Send + Sync + 'static,
     {
@@ -257,7 +266,7 @@ impl Server {
         }
     }
 
-    fn with_auth_router<S>(config: Arc<ServerConfig>, router: Router<S>) -> Router<S>
+    fn with_auth_router<S>(config: Arc<ResolvedServerConfig>, router: Router<S>) -> Router<S>
     where
         S: Clone + Send + Sync + 'static,
     {
@@ -269,7 +278,7 @@ impl Server {
     }
 
     async fn home(
-        Extension(config): Extension<Arc<ServerConfig>>,
+        Extension(config): Extension<Arc<ResolvedServerConfig>>,
     ) -> ServerResult<PageHtml<HomeHtml>> {
         let domain = config.domain();
 
@@ -279,7 +288,9 @@ impl Server {
         .page(domain))
     }
 
-    async fn users(Extension(config): Extension<Arc<ServerConfig>>) -> ServerResult<Response> {
+    async fn users(
+        Extension(config): Extension<Arc<ResolvedServerConfig>>,
+    ) -> ServerResult<Response> {
         task::block_in_place(|| {
             Ok(Json(
                 fs::read_dir(config.log_dir().join("users"))
@@ -293,7 +304,7 @@ impl Server {
     }
 
     pub(crate) async fn status(
-        Extension(config): Extension<Arc<ServerConfig>>,
+        Extension(config): Extension<Arc<ResolvedServerConfig>>,
         AcceptJson(accept_json): AcceptJson,
     ) -> ServerResult<Response> {
         let blockheight = Self::get_synced_blockheight(&config).await;
@@ -359,7 +370,7 @@ impl Server {
     }
 
     pub(crate) async fn payouts_all(
-        Extension(config): Extension<Arc<ServerConfig>>,
+        Extension(config): Extension<Arc<ResolvedServerConfig>>,
         Extension(database): Extension<Database>,
         Query(params): Query<HashMap<String, String>>,
     ) -> ServerResult<Response> {
@@ -545,8 +556,7 @@ impl Server {
     }
 
     fn spawn(
-        &self,
-        config: Arc<ServerConfig>,
+        config: Arc<ResolvedServerConfig>,
         router: Router,
         handle: Handle,
     ) -> Result<task::JoinHandle<io::Result<()>>> {
@@ -639,7 +649,7 @@ impl Server {
 
     pub(crate) async fn sync_batch(
         Extension(database): Extension<Database>,
-        Extension(config): Extension<Arc<ServerConfig>>,
+        Extension(config): Extension<Arc<ResolvedServerConfig>>,
         Json(batch): Json<ShareBatch>,
     ) -> Result<Json<SyncResponse>, StatusCode> {
         info!(
@@ -954,7 +964,7 @@ impl Server {
         Ok(())
     }
 
-    async fn get_synced_blockheight(config: &ServerConfig) -> Option<i32> {
+    async fn get_synced_blockheight(config: &ResolvedServerConfig) -> Option<i32> {
         let id_file = config.data_dir().join("current_id.txt");
         let id_file_str = id_file.to_string_lossy();
 
@@ -991,192 +1001,11 @@ impl Server {
     }
 }
 
+// ServerConfig tests are in server_config.rs
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn parse_server_config(args: &str) -> ServerConfig {
-        match Arguments::try_parse_from(args.split_whitespace()) {
-            Ok(arguments) => match arguments.subcommand {
-                Subcommand::Server(server) => server.config,
-                subcommand => panic!("unexpected subcommand: {subcommand:?}"),
-            },
-            Err(err) => panic!("error parsing arguments: {err}"),
-        }
-    }
-
-    #[test]
-    fn default_address() {
-        let config = parse_server_config("para server");
-        assert_eq!(config.address(), "0.0.0.0");
-    }
-
-    #[test]
-    fn override_address() {
-        let config = parse_server_config("para server --address 127.0.0.1");
-        assert_eq!(config.address(), "127.0.0.1");
-    }
-
-    #[test]
-    fn default_acme_cache() {
-        let config = parse_server_config("para server");
-        assert_eq!(config.acme_cache(), PathBuf::from("acme-cache"));
-    }
-
-    #[test]
-    fn override_acme_cache_via_data_dir() {
-        let config = parse_server_config("para server --data-dir /custom/path");
-        assert_eq!(
-            config.acme_cache(),
-            PathBuf::from("/custom/path/acme-cache")
-        );
-    }
-
-    #[test]
-    fn override_acme_domains() {
-        let config =
-            parse_server_config("para server --acme-domain example.com --acme-domain foo.bar");
-        assert_eq!(
-            config.domains().unwrap(),
-            vec!["example.com".to_string(), "foo.bar".to_string()]
-        );
-    }
-
-    #[test]
-    fn default_acme_contacts() {
-        let config = parse_server_config("para server");
-        assert!(config.acme_contacts().is_empty());
-    }
-
-    #[test]
-    fn override_acme_contacts() {
-        let config = parse_server_config("para server --acme-contact admin@example.com");
-        assert_eq!(
-            config.acme_contacts(),
-            vec!["admin@example.com".to_string()]
-        );
-    }
-
-    #[test]
-    fn default_no_admin_token() {
-        let config = parse_server_config("para server");
-        assert_eq!(config.admin_token(), None);
-    }
-
-    #[test]
-    fn admin_token() {
-        let config = parse_server_config("para server --admin-token verysecrettoken");
-        assert_eq!(config.admin_token(), Some("verysecrettoken"));
-    }
-
-    #[test]
-    fn default_domain() {
-        let config = parse_server_config("para server --acme-domain example.com");
-        assert_eq!(config.domain(), "example.com");
-    }
-
-    #[test]
-    fn default_domains_fallback() {
-        let config = parse_server_config("para server");
-        let domains = config.domains().unwrap();
-        assert!(!domains.is_empty(), "Expected hostname fallback");
-    }
-
-    #[test]
-    fn override_domains_no_fallback() {
-        let config = parse_server_config("para server --acme-domain custom.domain");
-        let domains = config.domains().unwrap();
-        assert_eq!(domains, vec!["custom.domain".to_string()]);
-    }
-
-    #[test]
-    fn default_data_dir() {
-        let config = parse_server_config("para server");
-        assert_eq!(config.data_dir(), PathBuf::new());
-    }
-
-    #[test]
-    fn override_data_dir() {
-        let config = parse_server_config("para server --data-dir /var/pool");
-        assert_eq!(config.data_dir(), PathBuf::from("/var/pool"));
-    }
-
-    #[test]
-    fn default_database_url() {
-        let config = parse_server_config("para server");
-        assert_eq!(
-            config.database_url(),
-            "postgres://satoshi:nakamoto@127.0.0.1:5432/ckpool"
-        );
-    }
-
-    #[test]
-    fn override_database_url() {
-        let config = parse_server_config("para server --database-url postgres://user:pass@host/db");
-        assert_eq!(config.database_url(), "postgres://user:pass@host/db");
-    }
-
-    #[test]
-    fn default_log_dir() {
-        let config = parse_server_config("para server");
-        assert_eq!(config.log_dir(), std::env::current_dir().unwrap());
-    }
-
-    #[test]
-    fn override_log_dir() {
-        let config = parse_server_config("para server --log-dir /logs");
-        assert_eq!(config.log_dir(), PathBuf::from("/logs"));
-    }
-
-    #[test]
-    fn default_port() {
-        let config = parse_server_config("para server");
-        assert_eq!(config.port(), None);
-    }
-
-    #[test]
-    fn override_port() {
-        let config = parse_server_config("para server --port 8080");
-        assert_eq!(config.port(), Some(8080));
-    }
-
-    #[test]
-    fn default_nodes() {
-        let config = parse_server_config("para server");
-        assert!(config.nodes().is_empty());
-    }
-
-    #[test]
-    fn override_nodes_single_http() {
-        let config = parse_server_config("para server --nodes http://localhost:80");
-        let expected = vec![Url::parse("http://localhost:80").unwrap()];
-        assert_eq!(config.nodes(), expected);
-    }
-
-    #[test]
-    fn override_nodes_single_https() {
-        let config = parse_server_config("para server --nodes https://parasite.wtf");
-        let expected = vec![Url::parse("https://parasite.wtf").unwrap()];
-        assert_eq!(config.nodes(), expected);
-    }
-
-    #[test]
-    fn multiple_nodes() {
-        let config = parse_server_config(
-            "para server --nodes http://localhost:80 --nodes https://parasite.wtf",
-        );
-        let expected = vec![
-            Url::parse("http://localhost:80").unwrap(),
-            Url::parse("https://parasite.wtf").unwrap(),
-        ];
-        assert_eq!(config.nodes(), expected);
-    }
-
-    #[test]
-    #[should_panic(expected = "error parsing arguments")]
-    fn invalid_node_url() {
-        parse_server_config("para server --nodes invalid_url");
-    }
 
     #[test]
     fn test_zero_seconds() {

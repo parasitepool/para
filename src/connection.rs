@@ -1,4 +1,4 @@
-use super::*;
+use {super::*, subcommand::pool::pool_config::ResolvedPoolConfig};
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum State {
@@ -9,7 +9,7 @@ pub(crate) enum State {
 }
 
 pub(crate) struct Connection<R, W> {
-    config: Arc<PoolConfig>,
+    config: Arc<ResolvedPoolConfig>,
     metatron: Arc<Metatron>,
     worker: SocketAddr,
     reader: FramedRead<R, LinesCodec>,
@@ -32,7 +32,7 @@ where
     W: AsyncWrite + Unpin,
 {
     pub(crate) fn new(
-        config: Arc<PoolConfig>,
+        config: Arc<ResolvedPoolConfig>,
         metatron: Arc<Metatron>,
         worker: SocketAddr,
         reader: R,

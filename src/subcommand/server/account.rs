@@ -32,7 +32,7 @@ pub struct AccountResponse {
     pub remark: Option<String>,
 }
 
-pub(crate) fn account_router(config: Arc<ServerConfig>, database: Database) -> Router {
+pub(crate) fn account_router(config: Arc<ResolvedServerConfig>, database: Database) -> Router {
     let mut router = Router::new()
         .route("/account/{address}", get(account_lookup))
         .route("/account/update", post(account_update))

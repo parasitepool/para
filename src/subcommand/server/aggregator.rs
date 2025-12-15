@@ -3,7 +3,7 @@ use super::*;
 pub(crate) struct Aggregator;
 
 impl Aggregator {
-    pub(crate) fn init(config: Arc<ServerConfig>) -> Result<Router> {
+    pub(crate) fn init(config: Arc<ResolvedServerConfig>) -> Result<Router> {
         let mut headers = header::HeaderMap::new();
         if let Some(token) = config.api_token() {
             headers.insert(
@@ -77,7 +77,7 @@ impl Aggregator {
 
     pub(crate) async fn dashboard(
         Extension(client): Extension<Client>,
-        Extension(config): Extension<Arc<ServerConfig>>,
+        Extension(config): Extension<Arc<ResolvedServerConfig>>,
     ) -> ServerResult<Response> {
         let mut nodes = config.nodes();
         if let Some(sync_endpoint) = config.sync_endpoint() {
