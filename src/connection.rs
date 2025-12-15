@@ -551,9 +551,9 @@ where
         hash: BlockHash,
         reject_reason: Option<StratumError>,
     ) {
-        let Some((address, workername, enonce1)) = self.worker_info() else {
-            return;
-        };
+        let (address, workername, enonce1) = self
+            .worker_info()
+            .expect("emit_share called before authorize");
 
         let height = job.map(|j| j.workbase.template().height).unwrap_or(0);
 

@@ -1,40 +1,46 @@
 use {super::*, parking_lot::Mutex};
 
+struct Stats {
+    dsps_1m: DecayingAverage,
+    sps_1m: DecayingAverage,
+    best_ever: f64,
+    last_share: Option<Instant>,
+}
+
 #[allow(unused)]
 pub(crate) struct Worker {
     workername: String,
-    dsps_1m: Mutex<DecayingAverage>,
-    sps_1m: Mutex<DecayingAverage>,
+    stats: Mutex<Stats>,
     accepted: AtomicU64,
     rejected: AtomicU64,
-    best_ever: Mutex<f64>,
-    last_share: Mutex<Option<Instant>>,
 }
 
 impl Worker {
     pub(crate) fn new(workername: String) -> Self {
         Self {
             workername,
-            dsps_1m: Mutex::new(DecayingAverage::new(Duration::from_secs(60))),
-            sps_1m: Mutex::new(DecayingAverage::new(Duration::from_secs(60))),
+            stats: Mutex::new(Stats {
+                dsps_1m: DecayingAverage::new(Duration::from_secs(60)),
+                sps_1m: DecayingAverage::new(Duration::from_secs(60)),
+                best_ever: 0.0,
+                last_share: None,
+            }),
             accepted: AtomicU64::new(0),
             rejected: AtomicU64::new(0),
-            best_ever: Mutex::new(0.0),
-            last_share: Mutex::new(None),
         }
     }
 
     pub(crate) fn record_accepted(&self, difficulty: f64) {
         let now = Instant::now();
-        self.dsps_1m.lock().record(difficulty, now);
-        self.sps_1m.lock().record(1.0, now);
-        self.accepted.fetch_add(1, Ordering::Relaxed);
-        *self.last_share.lock() = Some(now);
-
-        let mut best = self.best_ever.lock();
-        if difficulty > *best {
-            *best = difficulty;
+        let mut stats = self.stats.lock();
+        stats.dsps_1m.record(difficulty, now);
+        stats.sps_1m.record(1.0, now);
+        stats.last_share = Some(now);
+        if difficulty > stats.best_ever {
+            stats.best_ever = difficulty;
         }
+        drop(stats);
+        self.accepted.fetch_add(1, Ordering::Relaxed);
     }
 
     pub(crate) fn record_rejected(&self) {
@@ -47,11 +53,11 @@ impl Worker {
     }
 
     pub(crate) fn hash_rate_1m(&self) -> HashRate {
-        HashRate::from_dsps(self.dsps_1m.lock().value_at(Instant::now()))
+        HashRate::from_dsps(self.stats.lock().dsps_1m.value_at(Instant::now()))
     }
 
     pub(crate) fn sps_1m(&self) -> f64 {
-        self.sps_1m.lock().value_at(Instant::now())
+        self.stats.lock().sps_1m.value_at(Instant::now())
     }
 
     pub(crate) fn accepted(&self) -> u64 {
@@ -63,10 +69,10 @@ impl Worker {
     }
 
     pub(crate) fn best_ever(&self) -> f64 {
-        *self.best_ever.lock()
+        self.stats.lock().best_ever
     }
 
     pub(crate) fn last_share(&self) -> Option<Instant> {
-        *self.last_share.lock()
+        self.stats.lock().last_share
     }
 }
