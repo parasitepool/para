@@ -4,7 +4,7 @@ use {
         ckpool,
         settings::Settings,
         subcommand::{
-            server::account::account_router,
+            server::{account::account_router, sharediff::share_difficulty_router},
             sync::{ShareBatch, SyncResponse},
         },
     },
@@ -37,6 +37,7 @@ pub mod database;
 pub(crate) mod error;
 pub mod notifications;
 mod server_config;
+mod sharediff;
 mod templates;
 
 const MEBIBYTE: usize = 1 << 20;
@@ -224,15 +225,6 @@ impl Server {
                     )
                     .route("/split", get(Self::open_split))
                     .route("/split/{blockheight}", get(Self::sat_split))
-                    .route("/highestdiff/{blockheight}", get(Self::highestdiff))
-                    .route(
-                        "/highestdiff/{blockheight}/user/{username}",
-                        get(Self::highestdiff_by_user),
-                    )
-                    .route(
-                        "/highestdiff/{blockheight}/all",
-                        get(Self::highestdiff_all_users),
-                    )
                     .route(
                         "/sync/batch",
                         post(Self::sync_batch).layer(DefaultBodyLimit::max(50 * MEBIBYTE)),
@@ -241,7 +233,8 @@ impl Server {
 
                 router = router
                     .merge(Self::with_auth_router(&config, &settings, db_router))
-                    .merge(account_router(state.clone(), database));
+                    .merge(account_router(state.clone(), database.clone()))
+                    .merge(share_difficulty_router(state.clone(), database));
             }
             Err(err) => {
                 warn!("Failed to connect to PostgreSQL: {err}",);
@@ -466,37 +459,6 @@ impl Server {
             payments,
         })
         .into_response())
-    }
-
-    pub(crate) async fn highestdiff(
-        Path(blockheight): Path<i32>,
-        Extension(database): Extension<Database>,
-    ) -> ServerResult<Response> {
-        database
-            .get_highestdiff(blockheight)
-            .await?
-            .ok_or_not_found(|| "HighestDiff")
-            .map(Json)
-            .map(IntoResponse::into_response)
-    }
-
-    pub(crate) async fn highestdiff_by_user(
-        Path((blockheight, username)): Path<(i32, String)>,
-        Extension(database): Extension<Database>,
-    ) -> ServerResult<Response> {
-        database
-            .get_highestdiff_by_user(blockheight, &username)
-            .await?
-            .ok_or_not_found(|| "HighestDiff")
-            .map(Json)
-            .map(IntoResponse::into_response)
-    }
-
-    pub(crate) async fn highestdiff_all_users(
-        Path(blockheight): Path<i32>,
-        Extension(database): Extension<Database>,
-    ) -> ServerResult<Response> {
-        Ok(Json(database.get_highestdiff_all_users(blockheight).await?).into_response())
     }
 
     pub(crate) async fn payouts_range(
