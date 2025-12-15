@@ -43,7 +43,8 @@ impl Aggregator {
             Server::with_auth(&state.config, &state.settings, get(Self::dashboard)),
         )
         .layer(Extension(cache))
-        .layer(Extension(client));
+        .layer(Extension(client))
+        .layer(Extension(state));
 
         Ok(router)
     }
