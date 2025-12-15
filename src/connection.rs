@@ -375,6 +375,7 @@ where
 
     async fn submit(&mut self, id: Id, submit: Submit) -> Result {
         let Some(job) = self.jobs.get(&submit.job_id) else {
+            self.send_error(id, StratumError::Stale, None).await?;
             self.emit_share(
                 &submit,
                 None,
@@ -382,12 +383,19 @@ where
                 BlockHash::all_zeros(),
                 Some(StratumError::Stale),
             );
-            self.send_error(id, StratumError::Stale, None).await?;
+
             return Ok(());
         };
 
         let version = if let Some(version_bits) = submit.version_bits {
             let Some(version_mask) = job.version_mask else {
+                self.send_error(
+                    id,
+                    StratumError::InvalidVersionMask,
+                    Some(serde_json::json!({"reason": "Version rolling not negotiated"})),
+                )
+                .await?;
+
                 self.emit_share(
                     &submit,
                     Some(&job),
@@ -395,12 +403,7 @@ where
                     BlockHash::all_zeros(),
                     Some(StratumError::InvalidVersionMask),
                 );
-                self.send_error(
-                    id,
-                    StratumError::InvalidVersionMask,
-                    Some(serde_json::json!({"reason": "Version rolling not negotiated"})),
-                )
-                .await?;
+
                 return Ok(());
             };
 
@@ -439,6 +442,7 @@ where
         let hash = header.block_hash();
 
         if self.jobs.is_duplicate(hash) {
+            self.send_error(id, StratumError::Duplicate, None).await?;
             self.emit_share(
                 &submit,
                 Some(&job),
@@ -446,7 +450,7 @@ where
                 hash,
                 Some(StratumError::Duplicate),
             );
-            self.send_error(id, StratumError::Duplicate, None).await?;
+
             return Ok(());
         }
 
@@ -493,8 +497,6 @@ where
         let current_diff = self.vardiff.current_diff();
 
         if current_diff.to_target().is_met_by(hash) {
-            self.emit_share(&submit, Some(&job), current_diff.as_f64(), hash, None);
-
             self.send(Message::Response {
                 id,
                 result: Some(json!(true)),
@@ -502,6 +504,8 @@ where
                 reject_reason: None,
             })
             .await?;
+
+            self.emit_share(&submit, Some(&job), current_diff.as_f64(), hash, None);
 
             let network_diff = Difficulty::from(job.nbits());
 
@@ -530,6 +534,7 @@ where
                 .await?;
             }
         } else {
+            self.send_error(id, StratumError::AboveTarget, None).await?;
             self.emit_share(
                 &submit,
                 Some(&job),
@@ -537,7 +542,6 @@ where
                 hash,
                 Some(StratumError::AboveTarget),
             );
-            self.send_error(id, StratumError::AboveTarget, None).await?;
         }
 
         Ok(())
@@ -547,7 +551,7 @@ where
         &self,
         submit: &Submit,
         job: Option<&Job>,
-        sdiff: f64,
+        share_diff: f64,
         hash: BlockHash,
         reject_reason: Option<StratumError>,
     ) {
@@ -555,7 +559,8 @@ where
             .worker_info()
             .expect("emit_share called before authorize");
 
-        let height = job.map(|j| j.workbase.template().height).unwrap_or(0);
+        // TODO: for rejected shares it should still add the correct blockheight not 0
+        let height = job.map(|job| job.workbase.template().height).unwrap_or(0);
 
         let event = Share::new(
             height,
@@ -570,7 +575,7 @@ where
             submit.ntime,
             submit.version_bits,
             self.vardiff.current_diff().as_f64(),
-            sdiff,
+            share_diff,
             hash,
             reject_reason,
         );
