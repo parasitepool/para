@@ -25,7 +25,7 @@ pub(crate) struct Share {
 
 impl Share {
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn accepted(
+    pub(crate) fn new(
         height: u64,
         job_id: JobId,
         workername: String,
@@ -40,6 +40,7 @@ impl Share {
         diff: f64,
         sdiff: f64,
         hash: BlockHash,
+        reject_reason: Option<StratumError>,
     ) -> Self {
         Self {
             height,
@@ -56,51 +57,8 @@ impl Share {
             diff,
             sdiff,
             hash,
-            result: true,
-            reject_reason: None,
-            timestamp: Instant::now(),
-            created_at: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn rejected(
-        height: u64,
-        job_id: JobId,
-        workername: String,
-        address: Address,
-        client_addr: SocketAddr,
-        user_agent: Option<String>,
-        enonce1: Extranonce,
-        enonce2: String,
-        nonce: Nonce,
-        ntime: Ntime,
-        version_bits: Option<Version>,
-        diff: f64,
-        sdiff: f64,
-        hash: BlockHash,
-        reason: StratumError,
-    ) -> Self {
-        Self {
-            height,
-            job_id,
-            workername,
-            address,
-            client_addr,
-            user_agent,
-            enonce1,
-            enonce2,
-            nonce,
-            ntime,
-            version_bits,
-            diff,
-            sdiff,
-            hash,
-            result: false,
-            reject_reason: Some(reason),
+            result: reject_reason.is_none(),
+            reject_reason,
             timestamp: Instant::now(),
             created_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)

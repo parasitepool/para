@@ -2,8 +2,6 @@ use super::*;
 
 pub(crate) struct Metatron {
     blocks: AtomicU64,
-    accepted: AtomicU64,
-    rejected: AtomicU64,
     started: Instant,
     connections: AtomicU64,
     users: DashMap<Address, Arc<User>>,
@@ -13,8 +11,6 @@ impl Metatron {
     pub(crate) fn new() -> Self {
         Self {
             blocks: AtomicU64::new(0),
-            accepted: AtomicU64::new(0),
-            rejected: AtomicU64::new(0),
             started: Instant::now(),
             connections: AtomicU64::new(0),
             users: DashMap::new(),
@@ -60,10 +56,9 @@ impl Metatron {
         let worker = self.get_or_create_worker(share.address.clone(), &share.workername);
 
         if share.result {
-            worker.record_share(share.sdiff);
-            self.accepted.fetch_add(1, Ordering::Relaxed);
+            worker.record_accepted(share.sdiff);
         } else {
-            self.rejected.fetch_add(1, Ordering::Relaxed);
+            worker.record_rejected();
         }
 
         if let Some(tx) = sink
@@ -106,20 +101,16 @@ impl Metatron {
         self.users.iter().map(|user| user.sps_1m()).sum()
     }
 
-    pub(crate) fn total_blocks(&self) -> u64 {
-        self.blocks.load(Ordering::Relaxed)
-    }
-
     pub(crate) fn accepted(&self) -> u64 {
-        self.accepted.load(Ordering::Relaxed)
+        self.users.iter().map(|user| user.accepted()).sum()
     }
 
     pub(crate) fn rejected(&self) -> u64 {
-        self.rejected.load(Ordering::Relaxed)
+        self.users.iter().map(|user| user.rejected()).sum()
     }
 
-    pub(crate) fn total(&self) -> u64 {
-        self.users.iter().map(|user| user.total_shares()).sum()
+    pub(crate) fn total_blocks(&self) -> u64 {
+        self.blocks.load(Ordering::Relaxed)
     }
 
     pub(crate) fn total_connections(&self) -> u64 {
@@ -158,7 +149,7 @@ impl StatusLine for Metatron {
             .unwrap_or_else(|| "-".into());
 
         format!(
-            "hash_rate={}  sps={:.2}  connections={}  users={}  workers={}  accepted={}  rejected={}  total={}  last={last}  best_ever={}  blocks={}  uptime={}s",
+            "hash_rate={}  sps={:.2}  connections={}  users={}  workers={}  accepted={}  rejected={}  last={last}  best_ever={}  blocks={}  uptime={}s",
             self.hash_rate_1m(),
             self.sps_1m(),
             self.total_connections(),
@@ -166,7 +157,6 @@ impl StatusLine for Metatron {
             self.total_workers(),
             self.accepted(),
             self.rejected(),
-            self.total(),
             self.best_ever(),
             self.total_blocks(),
             self.uptime().as_secs()
@@ -228,8 +218,10 @@ mod tests {
     #[test]
     fn rejected_count_increments() {
         let metatron = Metatron::new();
-        metatron.rejected.fetch_add(1, Ordering::Relaxed);
-        metatron.rejected.fetch_add(1, Ordering::Relaxed);
+        let addr = test_address();
+        let worker = metatron.get_or_create_worker(addr, "rig1");
+        worker.record_rejected();
+        worker.record_rejected();
         assert_eq!(metatron.rejected(), 2);
     }
 

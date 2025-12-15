@@ -38,8 +38,12 @@ impl User {
         self.workers.iter().map(|worker| worker.sps_1m()).sum()
     }
 
-    pub(crate) fn total_shares(&self) -> u64 {
-        self.workers.iter().map(|worker| worker.shares()).sum()
+    pub(crate) fn accepted(&self) -> u64 {
+        self.workers.iter().map(|worker| worker.accepted()).sum()
+    }
+
+    pub(crate) fn rejected(&self) -> u64 {
+        self.workers.iter().map(|worker| worker.rejected()).sum()
     }
 
     pub(crate) fn best_ever(&self) -> f64 {

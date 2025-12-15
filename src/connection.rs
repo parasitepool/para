@@ -375,18 +375,25 @@ where
 
     async fn submit(&mut self, id: Id, submit: Submit) -> Result {
         let Some(job) = self.jobs.get(&submit.job_id) else {
-            self.emit_rejected(&submit, None, StratumError::Stale, BlockHash::all_zeros());
+            self.emit_share(
+                &submit,
+                None,
+                0.0,
+                BlockHash::all_zeros(),
+                Some(StratumError::Stale),
+            );
             self.send_error(id, StratumError::Stale, None).await?;
             return Ok(());
         };
 
         let version = if let Some(version_bits) = submit.version_bits {
             let Some(version_mask) = job.version_mask else {
-                self.emit_rejected(
+                self.emit_share(
                     &submit,
                     Some(&job),
-                    StratumError::InvalidVersionMask,
+                    0.0,
                     BlockHash::all_zeros(),
+                    Some(StratumError::InvalidVersionMask),
                 );
                 self.send_error(
                     id,
@@ -432,7 +439,13 @@ where
         let hash = header.block_hash();
 
         if self.jobs.is_duplicate(hash) {
-            self.emit_rejected(&submit, Some(&job), StratumError::Duplicate, hash);
+            self.emit_share(
+                &submit,
+                Some(&job),
+                0.0,
+                hash,
+                Some(StratumError::Duplicate),
+            );
             self.send_error(id, StratumError::Duplicate, None).await?;
             return Ok(());
         }
@@ -480,7 +493,7 @@ where
         let current_diff = self.vardiff.current_diff();
 
         if current_diff.to_target().is_met_by(hash) {
-            self.emit_accepted(&submit, &job, current_diff.as_f64(), hash);
+            self.emit_share(&submit, Some(&job), current_diff.as_f64(), hash, None);
 
             self.send(Message::Response {
                 id,
@@ -517,26 +530,41 @@ where
                 .await?;
             }
         } else {
-            self.emit_rejected(&submit, Some(&job), StratumError::AboveTarget, hash);
+            self.emit_share(
+                &submit,
+                Some(&job),
+                0.0,
+                hash,
+                Some(StratumError::AboveTarget),
+            );
             self.send_error(id, StratumError::AboveTarget, None).await?;
         }
 
         Ok(())
     }
 
-    fn emit_accepted(&self, submit: &Submit, job: &Job, sdiff: f64, hash: BlockHash) {
-        let Some((addr, wn, en1)) = self.worker_info() else {
+    fn emit_share(
+        &self,
+        submit: &Submit,
+        job: Option<&Job>,
+        sdiff: f64,
+        hash: BlockHash,
+        reject_reason: Option<StratumError>,
+    ) {
+        let Some((address, workername, enonce1)) = self.worker_info() else {
             return;
         };
 
-        let event = Share::accepted(
-            job.workbase.template().height,
+        let height = job.map(|j| j.workbase.template().height).unwrap_or(0);
+
+        let event = Share::new(
+            height,
             submit.job_id,
-            wn,
-            addr,
+            workername,
+            address,
             self.socket_addr,
             self.user_agent.clone(),
-            en1,
+            enonce1,
             submit.extranonce2.to_string(),
             submit.nonce,
             submit.ntime,
@@ -544,46 +572,11 @@ where
             self.vardiff.current_diff().as_f64(),
             sdiff,
             hash,
+            reject_reason,
         );
 
         if self.share_tx.try_send(event).is_err() {
-            error!("Share channel full, dropping accepted share");
-        }
-    }
-
-    fn emit_rejected(
-        &self,
-        submit: &Submit,
-        job: Option<&Job>,
-        reason: StratumError,
-        hash: BlockHash,
-    ) {
-        let Some((address, worker_name, extranonce1)) = self.worker_info() else {
-            return;
-        };
-
-        let height = job.map(|j| j.workbase.template().height).unwrap_or(0);
-
-        let event = Share::rejected(
-            height,
-            submit.job_id,
-            worker_name,
-            address,
-            self.socket_addr,
-            self.user_agent.clone(),
-            extranonce1,
-            submit.extranonce2.to_string(),
-            submit.nonce,
-            submit.ntime,
-            submit.version_bits,
-            self.vardiff.current_diff().as_f64(),
-            0.0,
-            hash,
-            reason,
-        );
-
-        if self.share_tx.try_send(event).is_err() {
-            error!("Share channel full, dropping rejected share");
+            error!("Share channel full, dropping share");
         }
     }
 
