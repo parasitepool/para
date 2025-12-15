@@ -1,6 +1,6 @@
 use super::*;
 
-pub(crate) fn share_difficulty_router(config: Arc<ServerConfig>, database: Database) -> Router {
+pub(crate) fn share_difficulty_router(state: ServerState, database: Database) -> Router {
     let mut router = Router::new()
         .route("/highestdiff/{blockheight}", get(highestdiff))
         .route(
@@ -9,8 +9,8 @@ pub(crate) fn share_difficulty_router(config: Arc<ServerConfig>, database: Datab
         )
         .route("/highestdiff/{blockheight}/all", get(highestdiff_all_users));
 
-    if let Some(token) = config.api_token() {
-        router = router.layer(bearer_auth(token))
+    if let Some(token) = state.config.api_token(&state.settings) {
+        router = router.layer(bearer_auth(&token))
     };
 
     router.layer(Extension(database))

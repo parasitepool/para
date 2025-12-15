@@ -1,6 +1,8 @@
 use {
     super::*,
     clap::builder::styling::{AnsiColor, Effects, Styles},
+    options::Options,
+    settings::Settings,
     subcommand::Subcommand,
 };
 
@@ -17,12 +19,15 @@ use {
     .valid(AnsiColor::Green.on_default()),
 )]
 pub(crate) struct Arguments {
+    #[command(flatten)]
+    pub(crate) options: Options,
     #[command(subcommand)]
     pub(crate) subcommand: Subcommand,
 }
 
 impl Arguments {
     pub(crate) async fn run(self, cancel_token: CancellationToken) -> Result {
-        self.subcommand.run(cancel_token).await
+        let settings = Settings::load(self.options)?;
+        self.subcommand.run(settings, cancel_token).await
     }
 }

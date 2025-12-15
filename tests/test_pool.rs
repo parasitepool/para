@@ -42,13 +42,13 @@ impl TestPool {
             Bitcoind::spawn(tempdir.clone(), bitcoind_port, rpc_port, zmq_port, false).unwrap();
 
         let pool_handle = CommandBuilder::new(format!(
-            "pool 
-                --chain signet
-                --address 127.0.0.1 
-                --port {pool_port} 
+            "--chain signet
                 --bitcoin-rpc-username satoshi
                 --bitcoin-rpc-password nakamoto
                 --bitcoin-rpc-port {rpc_port}
+                pool 
+                --address 127.0.0.1 
+                --port {pool_port} 
                 --zmq-block-notifications tcp://127.0.0.1:{zmq_port}
                 {}",
             args.to_args().join(" ")
@@ -113,9 +113,9 @@ impl TestPool {
         let current_height = self.get_block_height();
 
         CommandBuilder::new(format!(
-            "miner --mode block-found --username {} {}",
+            "miner {} --mode block-found --username {}",
+            self.stratum_endpoint(),
             signet_username(),
-            self.stratum_endpoint()
         ))
         .spawn()
         .wait()

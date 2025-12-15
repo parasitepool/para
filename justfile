@@ -54,18 +54,19 @@ miner-signet:
     --throttle 500K
 
 ping host='parasite.wtf':
-  cargo run ping {{host}}:42069
+  cargo run -- ping {{host}}:42069
 
 ping-auth host='parasite.wtf' username='bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg6dzw5nk24r45dzasde25r3.tick' password='x':
-  cargo run ping --username {{username}} --password {{password}} {{host}}:42069
+  cargo run -- ping {{host}}:42069 --username {{username}} --password {{password}}
 
 pool: 
-  cargo run -- pool \
+  cargo run -- \
     --chain signet \
-    --address 0.0.0.0 \
     --bitcoin-rpc-username satoshi \
     --bitcoin-rpc-password nakamoto \
     --bitcoin-rpc-port 38332 \
+    pool \
+    --address 0.0.0.0 \
     --start-diff 0.00001 \
     --vardiff-window 10 \
     --vardiff-period 1 \

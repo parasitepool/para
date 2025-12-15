@@ -3,6 +3,7 @@ use {
     controller::Controller,
     hasher::Hasher,
     metrics::Metrics,
+    settings::Settings,
     stratum::{Client, ClientConfig},
 };
 
@@ -20,18 +21,17 @@ pub enum Mode {
 #[derive(Debug, Parser)]
 pub(crate) struct Miner {
     #[arg(help = "Stratum <HOST:PORT>.")]
-    stratum_endpoint: String,
+    stratum_endpoint: Option<String>,
     #[arg(long, help = "Stratum <USERNAME>.")]
-    username: String,
+    username: Option<String>,
     #[arg(long, help = "Stratum <PASSWORD>.")]
     password: Option<String>,
     #[arg(
         long,
         value_enum,
-        default_value = "continuous",
         help = "Mining mode: <continuous|share-found|block-found>."
     )]
-    mode: Mode,
+    mode: Option<Mode>,
     #[arg(long, help = "Number of <CPU_CORES> to use.")]
     cpu_cores: Option<usize>,
     #[arg(long, help = "Hash rate to <THROTTLE> to.")]
@@ -50,19 +50,53 @@ pub struct Share {
 }
 
 impl Miner {
-    pub(crate) async fn run(&self, cancel_token: CancellationToken) -> Result {
-        info!(
-            "Connecting to {} with user {}",
-            self.stratum_endpoint, self.username
-        );
+    pub(crate) async fn run(self, settings: Settings, cancel_token: CancellationToken) -> Result {
+        let stratum_endpoint = self
+            .stratum_endpoint
+            .or(settings.miner_stratum_endpoint.clone())
+            .ok_or_else(|| anyhow!("stratum endpoint required"))?;
 
-        let address = resolve_stratum_endpoint(&self.stratum_endpoint).await?;
+        let username = self
+            .username
+            .or(settings.miner_username.clone())
+            .ok_or_else(|| anyhow!("username required"))?;
+
+        let password = self.password.or(settings.miner_password.clone());
+
+        let mode_str = self
+            .mode
+            .map(|m| match m {
+                Mode::Continuous => "continuous",
+                Mode::ShareFound => "share-found",
+                Mode::BlockFound => "block-found",
+            })
+            .or(settings.miner_mode.as_deref())
+            .unwrap_or("continuous");
+
+        let mode = match mode_str {
+            "share-found" => Mode::ShareFound,
+            "block-found" => Mode::BlockFound,
+            _ => Mode::Continuous,
+        };
+
+        let cpu_cores = self.cpu_cores.or(settings.miner_cpu_cores);
+
+        let throttle = self.throttle.or_else(|| {
+            settings
+                .miner_throttle
+                .as_ref()
+                .and_then(|s| s.parse::<HashRate>().ok())
+        });
+
+        info!("Connecting to {stratum_endpoint} with user {username}");
+
+        let address = resolve_stratum_endpoint(&stratum_endpoint).await?;
 
         let config = ClientConfig {
             address: address.to_string(),
-            username: self.username.clone(),
+            username: username.clone(),
             user_agent: USER_AGENT.into(),
-            password: self.password.clone(),
+            password,
             timeout: Duration::from_secs(10),
         };
 
@@ -72,7 +106,7 @@ impl Miner {
         system.refresh_cpu_all();
         let available_cpu_cores = system.cpus().len();
 
-        let cpu_cores = if let Some(cpu_cores) = self.cpu_cores {
+        let cpu_cores = if let Some(cpu_cores) = cpu_cores {
             std::cmp::min(cpu_cores, available_cpu_cores)
         } else {
             available_cpu_cores
@@ -81,15 +115,8 @@ impl Miner {
         info!("Available CPU cores: {}", available_cpu_cores);
         info!("CPU cores to use: {}", cpu_cores);
 
-        let shares = Controller::run(
-            client,
-            self.username.clone(),
-            cpu_cores,
-            self.throttle,
-            self.mode,
-            cancel_token,
-        )
-        .await?;
+        let shares =
+            Controller::run(client, username, cpu_cores, throttle, mode, cancel_token).await?;
 
         println!("{}", serde_json::to_string_pretty(&shares)?);
 
@@ -113,11 +140,12 @@ mod tests {
 
     #[test]
     fn parse_args() {
-        parse_miner_args(
+        let miner = parse_miner_args(
             "para miner parasite.wtf:42069 \
                 --username bc1q8jx6g9ujlqmdx3jnt3ap6ll2fdwqjdkdgs959m.worker1.aed48ef@parasite.sati.pro \
                 --password x",
         );
+        assert_eq!(miner.stratum_endpoint, Some("parasite.wtf:42069".into()));
     }
 
     #[test]
@@ -141,7 +169,7 @@ mod tests {
             --password x",
         );
 
-        assert!(matches!(miner.mode, Mode::Continuous));
+        assert!(miner.mode.is_none());
     }
 
     #[test]
@@ -153,7 +181,7 @@ mod tests {
             --mode share-found",
         );
 
-        assert!(matches!(miner.mode, Mode::ShareFound));
+        assert!(matches!(miner.mode, Some(Mode::ShareFound)));
     }
 
     #[test]
@@ -165,6 +193,6 @@ mod tests {
             --mode block-found",
         );
 
-        assert!(matches!(miner.mode, Mode::BlockFound));
+        assert!(matches!(miner.mode, Some(Mode::BlockFound)));
     }
 }

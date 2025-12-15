@@ -1,14 +1,17 @@
 use {
     super::*,
-    crate::stratum::{Client, ClientConfig, Event},
+    crate::{
+        settings::Settings,
+        stratum::{Client, ClientConfig, Event},
+    },
 };
 
 #[derive(Debug, Parser)]
 pub struct Template {
     #[arg(help = "Stratum <HOST:PORT>.")]
-    stratum_endpoint: String,
+    stratum_endpoint: Option<String>,
     #[arg(long, help = "Stratum <USERNAME>.")]
-    pub username: String,
+    pub username: Option<String>,
     #[arg(long, help = "Stratum <PASSWORD>.")]
     pub password: Option<String>,
     #[arg(long, help = "Continue watching for template updates.")]
@@ -34,19 +37,34 @@ pub struct Output {
 }
 
 impl Template {
-    pub async fn run(self, cancel_token: CancellationToken) -> anyhow::Result<()> {
-        info!(
-            "Connecting to {} with user {}",
-            self.stratum_endpoint, self.username
-        );
+    pub async fn run(
+        self,
+        settings: Settings,
+        cancel_token: CancellationToken,
+    ) -> anyhow::Result<()> {
+        let stratum_endpoint = self
+            .stratum_endpoint
+            .or(settings.template_stratum_endpoint.clone())
+            .ok_or_else(|| anyhow!("stratum endpoint required"))?;
 
-        let address = resolve_stratum_endpoint(&self.stratum_endpoint).await?;
+        let username = self
+            .username
+            .or(settings.template_username.clone())
+            .ok_or_else(|| anyhow!("username required"))?;
+
+        let password = self.password.or(settings.template_password.clone());
+
+        let watch = self.watch || settings.template_watch;
+
+        info!("Connecting to {stratum_endpoint} with user {username}");
+
+        let address = resolve_stratum_endpoint(&stratum_endpoint).await?;
 
         let config = ClientConfig {
             address: address.to_string(),
-            username: self.username.clone(),
+            username: username.clone(),
             user_agent: USER_AGENT.into(),
-            password: self.password.clone(),
+            password,
             timeout: Duration::from_secs(5),
         };
 
@@ -67,7 +85,7 @@ impl Template {
                     match event {
                         Ok(Event::Notify(notify)) => {
                             let output = Output {
-                                stratum_endpoint: self.stratum_endpoint.clone(),
+                                stratum_endpoint: stratum_endpoint.clone(),
                                 ip_address: address.ip().to_string(),
                                 timestamp: std::time::SystemTime::now()
                                     .duration_since(std::time::UNIX_EPOCH)
@@ -88,7 +106,7 @@ impl Template {
 
                             println!("{}", serde_json::to_string_pretty(&output)?);
 
-                            if !self.watch {
+                            if !watch {
                                 break;
                             }
                         }
