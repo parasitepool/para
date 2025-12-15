@@ -60,7 +60,7 @@ use {
             miner::Share,
             server::{
                 account::{Account, AccountUpdate},
-                database::Database,
+                database::{Database, HighestDiff, Payout},
             },
             sync::{ShareBatch, Sync, SyncResponse},
             template::Output as Template,
