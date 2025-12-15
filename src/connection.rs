@@ -19,7 +19,7 @@ pub(crate) struct Connection<R, W> {
     cancel_token: CancellationToken,
     jobs: Jobs,
     state: State,
-    address: Option<Address<bitcoin::address::NetworkUnchecked>>,
+    address: Option<Address>,
     workername: Option<String>,
     authorized: Option<SystemTime>,
     version_mask: Option<Version>,
@@ -199,12 +199,7 @@ where
 
     async fn workbase_update(&mut self, workbase: Arc<Workbase>) -> Result {
         let (address, extranonce1) = match (&self.address, &self.extranonce1) {
-            (Some(a), Some(e)) => (
-                a.clone()
-                    .require_network(self.config.chain().network())
-                    .expect("address already validated"),
-                e.clone(),
-            ),
+            (Some(address), Some(extranonce1)) => (address.clone(), extranonce1.clone()),
             _ => return Ok(()),
         };
 
@@ -321,19 +316,19 @@ where
             .next()
             .ok_or_else(|| anyhow!("invalid username {}", authorize.username))?;
 
-        let unchecked_address: Address<bitcoin::address::NetworkUnchecked> =
-            Address::from_str(address_str)?;
-
-        let checked_address = unchecked_address
-            .clone()
-            .require_network(self.config.chain().network())
+        let address = Address::from_str(address_str)
             .context(format!(
                 "invalid username {} for connection {}",
+                authorize.username, self.socket_addr
+            ))?
+            .require_network(self.config.chain().network())
+            .context(format!(
+                "invalid network {} for connection {}",
                 authorize.username, self.socket_addr
             ))?;
 
         let job = Arc::new(Job::new(
-            checked_address,
+            address.clone(),
             extranonce1.clone(),
             self.version_mask,
             self.workbase_receiver.borrow().clone(),
@@ -348,7 +343,7 @@ where
         })
         .await?;
 
-        self.address = Some(unchecked_address);
+        self.address = Some(address);
         self.workername = Some(workername);
 
         if self.authorized.is_none() {
@@ -563,7 +558,7 @@ where
         reason: StratumError,
         hash: BlockHash,
     ) {
-        let Some((addr, wn, en1)) = self.worker_info() else {
+        let Some((address, worker_name, extranonce1)) = self.worker_info() else {
             return;
         };
 
@@ -572,11 +567,11 @@ where
         let event = Share::rejected(
             height,
             submit.job_id,
-            wn,
-            addr,
+            worker_name,
+            address,
             self.socket_addr,
             self.user_agent.clone(),
-            en1,
+            extranonce1,
             submit.extranonce2.to_string(),
             submit.nonce,
             submit.ntime,
@@ -592,15 +587,11 @@ where
         }
     }
 
-    fn worker_info(
-        &self,
-    ) -> Option<(
-        Address<bitcoin::address::NetworkUnchecked>,
-        String,
-        Extranonce,
-    )> {
+    fn worker_info(&self) -> Option<(Address, String, Extranonce)> {
         match (&self.address, &self.workername, &self.extranonce1) {
-            (Some(a), Some(w), Some(e)) => Some((a.clone(), w.clone(), e.clone())),
+            (Some(address), Some(worker), Some(extranonce1)) => {
+                Some((address.clone(), worker.clone(), extranonce1.clone()))
+            }
             _ => None,
         }
     }

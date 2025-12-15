@@ -6,7 +6,7 @@ pub(crate) struct Metatron {
     rejected: AtomicU64,
     started: Instant,
     connections: AtomicU64,
-    users: DashMap<Address<bitcoin::address::NetworkUnchecked>, Arc<User>>,
+    users: DashMap<Address, Arc<User>>,
 }
 
 impl Metatron {
@@ -73,11 +73,7 @@ impl Metatron {
         }
     }
 
-    fn get_or_create_worker(
-        &self,
-        address: Address<bitcoin::address::NetworkUnchecked>,
-        workername: &str,
-    ) -> Arc<Worker> {
+    fn get_or_create_worker(&self, address: Address, workername: &str) -> Arc<Worker> {
         let user = self
             .users
             .entry(address.clone())
@@ -161,10 +157,11 @@ impl StatusLine for Metatron {
 mod tests {
     use super::*;
 
-    fn test_address() -> Address<bitcoin::address::NetworkUnchecked> {
-        "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq"
-            .parse()
+    fn test_address() -> Address {
+        "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc"
+            .parse::<Address<bitcoin::address::NetworkUnchecked>>()
             .unwrap()
+            .assume_checked()
     }
 
     #[test]

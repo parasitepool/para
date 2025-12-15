@@ -2,14 +2,14 @@ use {super::*, dashmap::DashMap};
 
 #[allow(unused)]
 pub(crate) struct User {
-    address: Address<bitcoin::address::NetworkUnchecked>,
+    address: Address,
     workers: DashMap<String, Arc<Worker>>,
     authorized: Instant,
 }
 
 #[allow(unused)]
 impl User {
-    pub(crate) fn new(address: Address<bitcoin::address::NetworkUnchecked>) -> Self {
+    pub(crate) fn new(address: Address) -> Self {
         Self {
             address,
             workers: DashMap::new(),
