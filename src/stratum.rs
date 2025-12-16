@@ -1,4 +1,5 @@
 use {
+    crate::username::Username,
     bitcoin::{
         BlockHash, CompactTarget, Target, TxMerkleNode, Txid, block,
         consensus::Encodable,

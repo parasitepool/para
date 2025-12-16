@@ -131,6 +131,7 @@ pub mod stratum;
 pub mod subcommand;
 mod throbber;
 mod user;
+pub mod username;
 mod vardiff;
 mod workbase;
 mod worker;

@@ -308,27 +308,27 @@ where
             .clone()
             .ok_or_else(|| anyhow!("missing extranonce1 do SUBSCRIBE first"))?;
 
-        let username = authorize.username.trim_matches('"');
-        let workername = username.to_string();
-
-        let address_str = username
-            .split('.')
-            .next()
-            .ok_or_else(|| anyhow!("invalid username {}", authorize.username))?;
-
-        let address = Address::from_str(address_str)
-            .context(format!(
-                "invalid username {} for connection {}",
-                authorize.username, self.socket_addr
-            ))?
-            .require_network(self.config.chain().network())
-            .context(format!(
-                "invalid network {} for connection {}",
-                authorize.username, self.socket_addr
-            ))?;
+        let parsed = match authorize
+            .username
+            .parse_with_network(self.config.chain().network())
+        {
+            Ok(parsed) => parsed,
+            Err(e) => {
+                self.send_error(
+                    id,
+                    StratumError::Unauthorized,
+                    Some(json!({
+                        "message": e.to_string(),
+                        "username": authorize.username.as_str(),
+                    })),
+                )
+                .await?;
+                return Ok(());
+            }
+        };
 
         let job = Arc::new(Job::new(
-            address.clone(),
+            parsed.address.clone(),
             extranonce1.clone(),
             self.version_mask,
             self.workbase_receiver.borrow().clone(),
@@ -343,8 +343,8 @@ where
         })
         .await?;
 
-        self.address = Some(address);
-        self.workername = Some(workername);
+        self.address = Some(parsed.address);
+        self.workername = Some(parsed.workername);
 
         if self.authorized.is_none() {
             self.authorized = Some(SystemTime::now());
