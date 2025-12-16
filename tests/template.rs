@@ -49,10 +49,17 @@ fn template_interpreted() {
 
     assert!(output.difficulty > 0.0);
     assert!(output.clean_jobs);
+
     // Verify timestamp is ISO 8601 format (contains T and ends with Z)
     let ts = &output.ntime_human;
     assert!(ts.contains('T'), "timestamp missing T: {}", ts);
     assert!(ts.trim().ends_with('Z'), "timestamp missing Z: {}", ts);
+
+    // Verify merkle root is present and valid hex (64 chars)
+    assert_eq!(output.merkle_root.len(), 64);
+
+    // Verify version_info is populated
+    assert!(output.version_info.bits > 0);
 
     assert_eq!(stdout.status.code(), Some(0));
 }
