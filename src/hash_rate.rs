@@ -32,6 +32,7 @@ impl HashRate {
         if window.is_zero() {
             return Self::ZERO;
         }
+
         Self(total_difficulty * HASHES_PER_DIFF_1 as f64 / window.as_secs_f64())
     }
 }

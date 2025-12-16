@@ -5,6 +5,7 @@ use {
 
 pub(crate) mod dashboard;
 pub(crate) mod home;
+pub(crate) mod payouts;
 pub(crate) mod status;
 
 #[derive(Boilerplate)]

@@ -1,6 +1,13 @@
 use super::*;
 
 #[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone, PartialEq)]
+pub struct HighestDiff {
+    pub blockheight: i32,
+    pub username: String,
+    pub diff: f64,
+}
+
+#[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub(crate) struct Split {
     pub(crate) worker_name: String,
     pub(crate) worker_total: i64,
@@ -429,6 +436,67 @@ impl Database {
             .map_err(|err| anyhow!(err))?;
 
         Ok(result as u64)
+    }
+
+    pub async fn get_highestdiff(&self, blockheight: i32) -> Result<Option<HighestDiff>> {
+        sqlx::query_as::<_, HighestDiff>(
+            "
+            SELECT
+                blockheight,
+                COALESCE(username, '') AS username,
+                diff
+            FROM remote_shares
+            WHERE blockheight = $1
+            ORDER BY diff DESC
+            LIMIT 1
+            ",
+        )
+        .bind(blockheight)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))
+    }
+
+    pub async fn get_highestdiff_by_user(
+        &self,
+        blockheight: i32,
+        username: &str,
+    ) -> Result<Option<HighestDiff>> {
+        sqlx::query_as::<_, HighestDiff>(
+            "
+            SELECT
+                blockheight,
+                COALESCE(username, '') AS username,
+                diff
+            FROM remote_shares
+            WHERE blockheight = $1 AND username = $2
+            ORDER BY diff DESC
+            LIMIT 1
+            ",
+        )
+        .bind(blockheight)
+        .bind(username)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))
+    }
+
+    pub async fn get_highestdiff_all_users(&self, blockheight: i32) -> Result<Vec<HighestDiff>> {
+        sqlx::query_as::<_, HighestDiff>(
+            "
+            SELECT DISTINCT ON (username)
+                blockheight,
+                COALESCE(username, '') AS username,
+                diff
+            FROM remote_shares
+            WHERE blockheight = $1
+            ORDER BY username, diff DESC
+            ",
+        )
+        .bind(blockheight)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))
     }
 
     pub async fn get_pending_payouts(&self) -> Result<Vec<PendingPayout>> {

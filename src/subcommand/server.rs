@@ -3,7 +3,7 @@ use {
     crate::{
         ckpool,
         subcommand::{
-            server::account::account_router,
+            server::{account::account_router, sharediff::share_difficulty_router},
             sync::{ShareBatch, SyncResponse},
         },
     },
@@ -18,7 +18,8 @@ use {
     std::sync::OnceLock,
     sysinfo::DiskRefreshKind,
     templates::{
-        PageContent, PageHtml, dashboard::DashboardHtml, home::HomeHtml, status::StatusHtml,
+        PageContent, PageHtml, dashboard::DashboardHtml, home::HomeHtml, payouts::PayoutsHtml,
+        status::StatusHtml,
     },
     tower_http::{
         services::ServeDir, set_header::SetResponseHeaderLayer,
@@ -35,6 +36,7 @@ pub mod database;
 pub(crate) mod error;
 pub mod notifications;
 mod server_config;
+mod sharediff;
 mod templates;
 
 const MEBIBYTE: usize = 1 << 20;
@@ -60,6 +62,7 @@ struct AccountUpdate {
     username: String,
     lnurl: Option<String>,
     total_diff: f64,
+    blockheights: HashSet<i32>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
@@ -212,7 +215,8 @@ impl Server {
 
                 router = router
                     .merge(Self::with_auth_router(config.clone(), db_router))
-                    .merge(account_router(config.clone(), database));
+                    .merge(account_router(config.clone(), database.clone()))
+                    .merge(share_difficulty_router(config.clone(), database));
             }
             Err(err) => {
                 warn!("Failed to connect to PostgreSQL: {err}",);
@@ -348,9 +352,22 @@ impl Server {
     }
 
     pub(crate) async fn payouts_all(
+        Extension(config): Extension<Arc<ServerConfig>>,
         Extension(database): Extension<Database>,
+        Query(params): Query<HashMap<String, String>>,
     ) -> ServerResult<Response> {
-        Ok(Json(database.get_pending_payouts().await?).into_response())
+        let pending = database.get_pending_payouts().await?;
+
+        let format_json = params.get("format").map(|f| f == "json").unwrap_or(false);
+        if format_json {
+            Ok(Json(&pending).into_response())
+        } else {
+            let failed = database.get_failed_payouts().await?;
+
+            Ok(PayoutsHtml { pending, failed }
+                .page(config.domain())
+                .into_response())
+        }
     }
 
     pub(crate) async fn payouts_failed(
@@ -781,12 +798,16 @@ impl Server {
                         username: username.to_string(),
                         lnurl: None,
                         total_diff: 0.0,
+                        blockheights: HashSet::new(),
                     });
 
-                if share.result == Some(true)
-                    && let Some(diff) = share.diff
-                {
-                    entry.total_diff += diff;
+                if share.result == Some(true) {
+                    if let Some(diff) = share.diff {
+                        entry.total_diff += diff;
+                    }
+                    if let Some(blockheight) = share.blockheight {
+                        entry.blockheights.insert(blockheight);
+                    }
                 }
 
                 if entry.lnurl.is_none()
@@ -830,6 +851,39 @@ impl Server {
                     .execute(&mut *tx)
                     .await
                     .map_err(|e| anyhow!("Failed to update account {}: {e}", update.username))?;
+
+                if !update.blockheights.is_empty() {
+                    let blockheights: Vec<i32> = update.blockheights.iter().copied().collect();
+                    let max_blockheight = *blockheights.iter().max().unwrap();
+                    sqlx::query(
+                        "
+                        INSERT INTO account_metadata (account_id, data, created_at, updated_at)
+                        SELECT id,
+                               jsonb_build_object(
+                                   'block_count', cardinality($2::int[]),
+                                   'highest_blockheight', $3
+                               ),
+                               NOW(), NOW()
+                        FROM accounts WHERE username = $1
+                        ON CONFLICT (account_id) DO UPDATE
+                        SET data = account_metadata.data || jsonb_build_object(
+                                'block_count',
+                                COALESCE((account_metadata.data->>'block_count')::bigint, 0) +
+                                    (SELECT COUNT(*) FROM unnest($2::int[]) AS bh
+                                     WHERE bh > COALESCE((account_metadata.data->>'highest_blockheight')::int, 0)),
+                                'highest_blockheight',
+                                GREATEST(COALESCE((account_metadata.data->>'highest_blockheight')::int, 0), $3)
+                            ),
+                            updated_at = NOW()
+                        ",
+                    )
+                        .bind(&update.username)
+                        .bind(&blockheights)
+                        .bind(max_blockheight)
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(|e| anyhow!("Failed to update account_metadata for {}: {e}", update.username))?;
+                }
             }
         }
 
