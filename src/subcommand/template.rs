@@ -1,6 +1,11 @@
 use {
     super::*,
     crate::stratum::{Client, ClientConfig, Event, MerkleNode, Notify, SubscribeResult},
+    bitcoin::{
+        Address, Network, Transaction,
+        consensus::Decodable,
+        hashes::{Hash, sha256d},
+    },
     bitcoin::{Address, Network, Transaction, consensus::Decodable, hashes::{Hash, sha256d}},
     std::io::Cursor,
 };
