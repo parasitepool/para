@@ -49,7 +49,7 @@ mod set_difficulty;
 mod submit;
 mod subscribe;
 mod suggest_difficulty;
-pub mod username;
+mod username;
 mod version;
 
 pub use {

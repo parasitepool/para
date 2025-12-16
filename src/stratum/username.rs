@@ -95,7 +95,10 @@ mod tests {
             username.parse_with_network(Network::Bitcoin).is_ok(),
             "address is a valid mainnet address"
         );
-        assert_eq!(username.as_str(), "1CPDJtMzuSyvnGi8o9ZAtAWPfqHZhjQQhB.worker1");
+        assert_eq!(
+            username.as_str(),
+            "1CPDJtMzuSyvnGi8o9ZAtAWPfqHZhjQQhB.worker1"
+        );
     }
 
     #[test]

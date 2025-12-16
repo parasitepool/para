@@ -308,7 +308,7 @@ where
             .clone()
             .ok_or_else(|| anyhow!("missing extranonce1 do SUBSCRIBE first"))?;
 
-        let parsed = match authorize
+        let address = match authorize
             .username
             .parse_with_network(self.config.chain().network())
         {
@@ -328,7 +328,7 @@ where
         };
 
         let job = Arc::new(Job::new(
-            parsed.clone(),
+            address.clone(),
             extranonce1.clone(),
             self.version_mask,
             self.workbase_receiver.borrow().clone(),
@@ -343,7 +343,7 @@ where
         })
         .await?;
 
-        self.address = Some(parsed);
+        self.address = Some(address);
         self.workername = Some(authorize.username.workername().to_string());
 
         if self.authorized.is_none() {
