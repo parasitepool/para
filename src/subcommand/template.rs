@@ -1,7 +1,11 @@
 use {
     super::*,
-    crate::stratum::{Client, ClientConfig, Event, Notify, SubscribeResult},
-    bitcoin::{Transaction, consensus::Decodable},
+    crate::stratum::{Client, ClientConfig, Event, MerkleNode, Notify, SubscribeResult},
+    bitcoin::{
+        Address, Network, Transaction,
+        consensus::Decodable,
+        hashes::{Hash, sha256d},
+    },
     std::io::Cursor,
 };
 
@@ -20,16 +24,29 @@ pub struct Template {
         help = "Show raw mining.notify JSON array as received from protocol."
     )]
     pub raw: bool,
+    #[arg(
+        long,
+        default_value = "bitcoin",
+        help = "Network for address encoding (bitcoin, testnet, signet, regtest)."
+    )]
+    pub network: Network,
+    #[arg(
+        long,
+        help = "Only show significant events (new blocks, difficulty changes). Implies --watch."
+    )]
+    pub quiet: bool,
 }
 
 /// Interpreted block template output
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InterpretedOutput {
     pub job_id: JobId,
     pub prevhash: String,
+    pub merkle_root: String,
     pub coinbase: CoinbaseInfo,
     pub merkle_branches: Vec<String>,
     pub version: String,
+    pub version_info: VersionInfo,
     pub nbits: String,
     pub ntime: String,
     pub ntime_human: String,
@@ -37,16 +54,50 @@ pub struct InterpretedOutput {
     pub clean_jobs: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VersionInfo {
+    pub bits: u32,
+    pub bip9_signaling: bool,
+    pub version_rolling_possible: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub signaled_bits: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CoinbaseInfo {
     pub input_text: Option<String>,
     pub outputs: Vec<CoinbaseOutput>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CoinbaseOutput {
     pub value_sats: u64,
     pub value_btc: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub address: Option<String>,
+}
+
+/// Template change event for watch mode
+#[derive(Debug, Serialize)]
+pub struct TemplateChange {
+    pub event: ChangeEvent,
+    pub job_id: JobId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prevhash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub difficulty: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ntime_human: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub clean_jobs: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChangeEvent {
+    NewBlock,
+    DifficultyChange,
+    TemplateUpdate,
 }
 
 impl Template {
@@ -73,6 +124,12 @@ impl Template {
 
         client.authorize().await?;
 
+        // Track previous state for change detection
+        let mut prev_output: Option<InterpretedOutput> = None;
+
+        // --quiet implies --watch
+        let watch = self.watch || self.quiet;
+
         loop {
             tokio::select! {
                 _ = cancel_token.cancelled() => {
@@ -97,10 +154,24 @@ impl Template {
                                     &address,
                                     timestamp,
                                 )?;
-                                println!("{}", serde_json::to_string_pretty(&output)?);
+
+                                if watch && prev_output.is_some() {
+                                    // Show changes instead of full output
+                                    if let Some(change) = self.detect_change(&prev_output, &output) {
+                                        // In quiet mode, only show significant events
+                                        if !self.quiet || self.is_significant(&change) {
+                                            println!("{}", serde_json::to_string_pretty(&change)?);
+                                        }
+                                    }
+                                } else {
+                                    // First template or not in watch mode - show full output
+                                    println!("{}", serde_json::to_string_pretty(&output)?);
+                                }
+
+                                prev_output = Some(output);
                             }
 
-                            if !self.watch {
+                            if !watch {
                                 break;
                             }
                         }
@@ -115,6 +186,54 @@ impl Template {
         }
 
         Ok(())
+    }
+
+    fn detect_change(
+        &self,
+        prev: &Option<InterpretedOutput>,
+        curr: &InterpretedOutput,
+    ) -> Option<TemplateChange> {
+        let prev = prev.as_ref()?;
+
+        // No change
+        if prev.job_id == curr.job_id {
+            return None;
+        }
+
+        let new_block = prev.prevhash != curr.prevhash;
+        let diff_change = (prev.difficulty - curr.difficulty).abs() > f64::EPSILON;
+
+        let event = if new_block {
+            ChangeEvent::NewBlock
+        } else if diff_change {
+            ChangeEvent::DifficultyChange
+        } else {
+            ChangeEvent::TemplateUpdate
+        };
+
+        Some(TemplateChange {
+            event,
+            job_id: curr.job_id,
+            prevhash: if new_block {
+                Some(curr.prevhash.clone())
+            } else {
+                None
+            },
+            difficulty: if diff_change {
+                Some(curr.difficulty)
+            } else {
+                None
+            },
+            ntime_human: Some(curr.ntime_human.clone()),
+            clean_jobs: if curr.clean_jobs { Some(true) } else { None },
+        })
+    }
+
+    fn is_significant(&self, change: &TemplateChange) -> bool {
+        matches!(
+            change.event,
+            ChangeEvent::NewBlock | ChangeEvent::DifficultyChange
+        )
     }
 
     fn interpret_template(
@@ -137,15 +256,19 @@ impl Template {
         // Extract ASCII text from coinbase input
         let input_text = Self::extract_coinbase_text(&coinbase_tx);
 
-        // Extract outputs
+        // Extract outputs with addresses
         let outputs: Vec<CoinbaseOutput> = coinbase_tx
             .output
             .iter()
             .map(|out| {
                 let sats = out.value.to_sat();
+                let address = Address::from_script(&out.script_pubkey, self.network)
+                    .ok()
+                    .map(|a| a.to_string());
                 CoinbaseOutput {
                     value_sats: sats,
                     value_btc: sats as f64 / 100_000_000.0,
+                    address,
                 }
             })
             .collect();
@@ -157,9 +280,18 @@ impl Template {
         let ntime_str = notify.ntime.to_string();
         let ntime_u64 = u64::from_str_radix(&ntime_str, 16).unwrap_or(0);
 
+        // Compute merkle root
+        let merkle_root = Self::compute_merkle_root(&coinbase_bytes, &notify.merkle_branches);
+
+        // Parse version info (ASICBoost/version rolling detection)
+        let version_str = notify.version.to_string();
+        let version_u32 = u32::from_str_radix(&version_str, 16).unwrap_or(0);
+        let version_info = Self::parse_version_info(version_u32);
+
         Ok(InterpretedOutput {
             job_id: notify.job_id,
             prevhash: notify.prevhash.to_string(),
+            merkle_root,
             coinbase: CoinbaseInfo {
                 input_text,
                 outputs,
@@ -170,6 +302,7 @@ impl Template {
                 .map(|m| m.to_string())
                 .collect(),
             version: notify.version.to_string(),
+            version_info,
             nbits: notify.nbits.to_string(),
             ntime: ntime_str,
             ntime_human: Self::format_timestamp(ntime_u64),
@@ -223,5 +356,55 @@ impl Template {
         chrono::DateTime::from_timestamp(unix_time as i64, 0)
             .map(|dt| dt.format("%Y-%m-%dT%H:%M:%SZ").to_string())
             .unwrap_or_else(|| unix_time.to_string())
+    }
+
+    fn compute_merkle_root(coinbase_bytes: &[u8], merkle_branches: &[MerkleNode]) -> String {
+        // Hash the coinbase transaction (double SHA256)
+        let mut current_hash = sha256d::Hash::hash(coinbase_bytes).to_byte_array();
+
+        // For each merkle branch, concatenate and hash
+        for branch in merkle_branches {
+            let branch_bytes = hex::decode(branch.to_string()).unwrap_or_default();
+            let mut combined = Vec::with_capacity(64);
+            combined.extend_from_slice(&current_hash);
+            combined.extend_from_slice(&branch_bytes);
+            current_hash = sha256d::Hash::hash(&combined).to_byte_array();
+        }
+
+        // Return as hex (reversed for display - little endian to big endian)
+        current_hash.reverse();
+        hex::encode(current_hash)
+    }
+
+    fn parse_version_info(version: u32) -> VersionInfo {
+        // BIP9 uses top 3 bits as 001 for signaling
+        let bip9_signaling = (version >> 29) == 0b001;
+
+        // BIP320: bits 13-28 can be used for version rolling (ASICBoost)
+        // Mask: 0x1FFFE000 (bits 13-28)
+        let version_rolling_mask: u32 = 0x1FFFE000;
+        let rolling_bits_set = version & version_rolling_mask;
+        let version_rolling_possible = rolling_bits_set != 0;
+
+        // Extract signaled BIP9 bits (bits 0-28, excluding rolling bits)
+        let mut signaled_bits = Vec::new();
+        if bip9_signaling {
+            for bit in 0..29 {
+                // Skip bits 13-28 (version rolling range)
+                if (13..=28).contains(&bit) {
+                    continue;
+                }
+                if (version >> bit) & 1 == 1 {
+                    signaled_bits.push(bit);
+                }
+            }
+        }
+
+        VersionInfo {
+            bits: version,
+            bip9_signaling,
+            version_rolling_possible,
+            signaled_bits,
+        }
     }
 }
