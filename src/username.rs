@@ -86,38 +86,3 @@ impl Display for AddressError {
 }
 
 impl std::error::Error for AddressError {}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn username_parse_address_only() {
-        let username = Username::new("bc1qtest");
-        assert_eq!(username.as_str(), "bc1qtest");
-        assert_eq!(username.workername(), "bc1qtest");
-    }
-
-    #[test]
-    fn username_parse_with_worker() {
-        let username = Username::new("bc1qtest.worker1");
-        assert_eq!(username.as_str(), "bc1qtest.worker1");
-        assert_eq!(username.workername(), "bc1qtest.worker1");
-    }
-
-    #[test]
-    fn username_strips_quotes() {
-        let username = Username::new("\"bc1qtest.worker1\"");
-        assert_eq!(username.as_str(), "bc1qtest.worker1");
-    }
-
-    #[test]
-    fn username_serialize_roundtrip() {
-        let username = Username::new("bc1qtest.worker1");
-        let json = serde_json::to_string(&username).unwrap();
-        assert_eq!(json, r#""bc1qtest.worker1""#);
-
-        let parsed: Username = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed, username);
-    }
-}

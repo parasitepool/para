@@ -65,6 +65,7 @@ use {
             sync::{ShareBatch, Sync, SyncResponse},
             template::Output as Template,
         },
+        username::Username,
     },
     pgtemp::{PgTempDB, PgTempDBBuilder},
     reqwest::Response,
