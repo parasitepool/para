@@ -328,7 +328,7 @@ where
         };
 
         let job = Arc::new(Job::new(
-            parsed.address.clone(),
+            parsed.clone(),
             extranonce1.clone(),
             self.version_mask,
             self.workbase_receiver.borrow().clone(),
@@ -343,8 +343,8 @@ where
         })
         .await?;
 
-        self.address = Some(parsed.address);
-        self.workername = Some(parsed.workername);
+        self.address = Some(parsed);
+        self.workername = Some(authorize.username.workername().to_string());
 
         if self.authorized.is_none() {
             self.authorized = Some(SystemTime::now());
