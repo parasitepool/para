@@ -61,13 +61,37 @@ async fn basic_initialization_flow() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001");
 
     let client = pool.stratum_client().await;
+    let client_invalid_username = pool.stratum_client_for_username("notabitcoinaddress").await;
+    let client_address_wrong_network = pool
+        .stratum_client_for_username("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4")
+        .await;
     let mut events = client.connect().await.unwrap();
+    client_invalid_username.connect().await.unwrap();
+    client_address_wrong_network.connect().await.unwrap();
 
     let (subscribe, _, _) = client.subscribe().await.unwrap();
+    client_invalid_username.subscribe().await.unwrap();
+    client_address_wrong_network.subscribe().await.unwrap();
 
     assert_eq!(subscribe.subscriptions.len(), 2);
 
     assert!(client.authorize().await.is_ok());
+    assert!(
+        client_invalid_username
+            .authorize()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid bitcoin address")
+    );
+    assert!(
+        client_address_wrong_network
+            .authorize()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4 is not valid for signet network")
+    );
 
     let difficulty = match events.recv().await.unwrap() {
         stratum::Event::SetDifficulty(difficulty) => difficulty,
