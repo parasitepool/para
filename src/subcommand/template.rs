@@ -1,11 +1,7 @@
 use {
     super::*,
     crate::stratum::{Client, ClientConfig, Event, MerkleNode, Notify, SubscribeResult},
-    bitcoin::{
-        Address, Network, Transaction,
-        consensus::Decodable,
-        hashes::{Hash, sha256d},
-    },
+    bitcoin::{Address, Network, Transaction, consensus::Decodable, hashes::{Hash, sha256d}},
     std::io::Cursor,
 };
 
@@ -406,5 +402,117 @@ impl Template {
             version_rolling_possible,
             signaled_bits,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bip9_signaling_detection() {
+        // Standard BIP9 version (top 3 bits = 001)
+        let info = Template::parse_version_info(0x20000000);
+        assert!(info.bip9_signaling);
+        assert!(!info.version_rolling_possible);
+        assert!(info.signaled_bits.is_empty());
+
+        // Non-BIP9 version (top 3 bits != 001)
+        let info = Template::parse_version_info(0x00000001);
+        assert!(!info.bip9_signaling);
+
+        // Another non-BIP9 (top 3 bits = 010)
+        let info = Template::parse_version_info(0x40000000);
+        assert!(!info.bip9_signaling);
+    }
+
+    #[test]
+    fn test_version_rolling_detection() {
+        // No rolling bits set
+        let info = Template::parse_version_info(0x20000000);
+        assert!(!info.version_rolling_possible);
+
+        // Bit 13 set (first rolling bit)
+        let info = Template::parse_version_info(0x20002000);
+        assert!(info.version_rolling_possible);
+
+        // Bit 28 set (last rolling bit)
+        let info = Template::parse_version_info(0x30000000);
+        assert!(info.version_rolling_possible);
+
+        // Multiple rolling bits set
+        let info = Template::parse_version_info(0x2FFFE000);
+        assert!(info.version_rolling_possible);
+
+        // Full mask (bits 13-28 all set)
+        let version_with_full_rolling = 0x20000000 | 0x1FFFE000;
+        let info = Template::parse_version_info(version_with_full_rolling);
+        assert!(info.version_rolling_possible);
+    }
+
+    #[test]
+    fn test_signaled_bits_extraction() {
+        // Bit 0 signaled
+        let info = Template::parse_version_info(0x20000001);
+        assert!(info.bip9_signaling);
+        assert_eq!(info.signaled_bits, vec![0]);
+
+        // Bit 1 signaled (e.g., SegWit)
+        let info = Template::parse_version_info(0x20000002);
+        assert_eq!(info.signaled_bits, vec![1]);
+
+        // Multiple bits signaled (bits 0, 1, 4)
+        let info = Template::parse_version_info(0x20000013);
+        assert_eq!(info.signaled_bits, vec![0, 1, 4]);
+
+        // Bit 12 signaled (last non-rolling bit)
+        let info = Template::parse_version_info(0x20001000);
+        assert_eq!(info.signaled_bits, vec![12]);
+
+        // Bits in rolling range should NOT appear in signaled_bits
+        // Set bit 13 (rolling range) - should not be in signaled_bits
+        let info = Template::parse_version_info(0x20002000);
+        assert!(info.signaled_bits.is_empty());
+    }
+
+    #[test]
+    fn test_combined_signaling_and_rolling() {
+        // BIP9 with both signaling bit 1 and rolling bits
+        let version = 0x20000002 | 0x00004000; // bit 1 + bit 14 (rolling)
+        let info = Template::parse_version_info(version);
+        
+        assert!(info.bip9_signaling);
+        assert!(info.version_rolling_possible);
+        assert_eq!(info.signaled_bits, vec![1]); // Only bit 1, not bit 14
+    }
+
+    #[test]
+    fn test_non_bip9_has_no_signaled_bits() {
+        // Even with bits set, non-BIP9 should have empty signaled_bits
+        let info = Template::parse_version_info(0x00000003);
+        assert!(!info.bip9_signaling);
+        assert!(info.signaled_bits.is_empty());
+    }
+
+    #[test]
+    fn test_real_world_versions() {
+        // Typical mainnet BIP9 version
+        let info = Template::parse_version_info(0x20000000);
+        assert!(info.bip9_signaling);
+        assert!(!info.version_rolling_possible);
+        assert!(info.signaled_bits.is_empty());
+
+        // Version with overt ASICBoost (common pattern)
+        // Pools often use bits in the 13-28 range for version rolling
+        let info = Template::parse_version_info(0x27FFE000);
+        assert!(info.bip9_signaling);
+        assert!(info.version_rolling_possible);
+    }
+
+    #[test]
+    fn test_version_bits_preserved() {
+        let version = 0x20004002;
+        let info = Template::parse_version_info(version);
+        assert_eq!(info.bits, version);
     }
 }
