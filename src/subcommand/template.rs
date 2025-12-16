@@ -1,7 +1,11 @@
 use {
     super::*,
     crate::stratum::{Client, ClientConfig, Event, MerkleNode, Notify, SubscribeResult},
-    bitcoin::{Address, Network, Transaction, consensus::Decodable, hashes::{Hash, sha256d}},
+    bitcoin::{
+        Address, Network, Transaction,
+        consensus::Decodable,
+        hashes::{Hash, sha256d},
+    },
     std::io::Cursor,
 };
 
@@ -480,7 +484,7 @@ mod tests {
         // BIP9 with both signaling bit 1 and rolling bits
         let version = 0x20000002 | 0x00004000; // bit 1 + bit 14 (rolling)
         let info = Template::parse_version_info(version);
-        
+
         assert!(info.bip9_signaling);
         assert!(info.version_rolling_possible);
         assert_eq!(info.signaled_bits, vec![1]); // Only bit 1, not bit 14
