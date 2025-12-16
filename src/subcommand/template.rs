@@ -59,7 +59,7 @@ pub struct VersionInfo {
     pub bits: u32,
     pub bip9_signaling: bool,
     pub version_rolling_possible: bool,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub signaled_bits: Vec<u8>,
 }
 
