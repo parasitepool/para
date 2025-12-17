@@ -196,7 +196,7 @@ impl Client {
             .send_request(
                 "mining.authorize".to_string(),
                 serde_json::to_value(Authorize {
-                    username: self.config.username.clone(),
+                    username: self.config.username.clone().into(),
                     password: self.config.password.clone().or(Some("x".to_string())),
                 })
                 .context(error::SerializationSnafu)?,
