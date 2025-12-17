@@ -33,7 +33,7 @@ async fn insert_test_shares_with_diff(
         .bind("nonce2")
         .bind("nonce")
         .bind("ntime")
-        .bind(diff)
+        .bind(1)
         .bind(diff)
         .bind("hash")
         .bind(true)
