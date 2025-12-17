@@ -444,10 +444,10 @@ impl Database {
             SELECT
                 blockheight,
                 COALESCE(username, '') AS username,
-                diff
+                sdiff
             FROM remote_shares
             WHERE blockheight = $1
-            ORDER BY diff DESC
+            ORDER BY sdiff DESC
             LIMIT 1
             ",
         )
@@ -467,10 +467,10 @@ impl Database {
             SELECT
                 blockheight,
                 COALESCE(username, '') AS username,
-                diff
+                sdiff
             FROM remote_shares
             WHERE blockheight = $1 AND username = $2
-            ORDER BY diff DESC
+            ORDER BY sdiff DESC
             LIMIT 1
             ",
         )
@@ -487,10 +487,10 @@ impl Database {
             SELECT DISTINCT ON (username)
                 blockheight,
                 COALESCE(username, '') AS username,
-                diff
+                sdiff
             FROM remote_shares
             WHERE blockheight = $1
-            ORDER BY username, diff DESC
+            ORDER BY username, sdiff DESC
             ",
         )
         .bind(blockheight)
