@@ -444,7 +444,7 @@ impl Database {
             SELECT
                 blockheight,
                 COALESCE(username, '') AS username,
-                sdiff
+                sdiff as diff
             FROM remote_shares
             WHERE blockheight = $1
             ORDER BY sdiff DESC
@@ -467,7 +467,7 @@ impl Database {
             SELECT
                 blockheight,
                 COALESCE(username, '') AS username,
-                sdiff
+                sdiff as diff
             FROM remote_shares
             WHERE blockheight = $1 AND username = $2
             ORDER BY sdiff DESC
@@ -487,7 +487,7 @@ impl Database {
             SELECT DISTINCT ON (username)
                 blockheight,
                 COALESCE(username, '') AS username,
-                sdiff
+                sdiff as diff
             FROM remote_shares
             WHERE blockheight = $1
             ORDER BY username, sdiff DESC
