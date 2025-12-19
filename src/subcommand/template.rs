@@ -1,6 +1,7 @@
 use {
     super::*,
     crate::stratum::{Client, ClientConfig, Event, MerkleNode, Notify, SubscribeResult},
+    anyhow::Context,
     bitcoin::{
         Address, Network, Transaction,
         consensus::Decodable,
@@ -65,6 +66,7 @@ pub struct VersionInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CoinbaseInfo {
+    pub size_bytes: usize,
     pub input_text: Option<String>,
     pub outputs: Vec<CoinbaseOutput>,
 }
@@ -100,6 +102,80 @@ pub enum ChangeEvent {
     TemplateUpdate,
 }
 
+/// Statistics tracked during watch mode
+#[derive(Debug, Default)]
+struct WatchStats {
+    templates_received: u64,
+    blocks_seen: u64,
+    start_time: Option<std::time::Instant>,
+    last_template_time: Option<std::time::Instant>,
+    total_interval_ms: u64,
+    // Difficulty tracking
+    difficulty_changes: u64,
+    min_difficulty: Option<f64>,
+    max_difficulty: Option<f64>,
+    last_difficulty: Option<f64>,
+}
+
+impl WatchStats {
+    fn record_template(&mut self, is_new_block: bool, difficulty: Option<f64>) {
+        let now = std::time::Instant::now();
+
+        if self.start_time.is_none() {
+            self.start_time = Some(now);
+        }
+
+        if let Some(last) = self.last_template_time {
+            self.total_interval_ms += now.duration_since(last).as_millis() as u64;
+        }
+
+        self.templates_received += 1;
+        if is_new_block {
+            self.blocks_seen += 1;
+        }
+        self.last_template_time = Some(now);
+
+        // Track difficulty
+        if let Some(diff) = difficulty {
+            if let Some(last_diff) = self.last_difficulty
+                && (diff - last_diff).abs() > f64::EPSILON
+            {
+                self.difficulty_changes += 1;
+            }
+
+            self.min_difficulty = Some(self.min_difficulty.map(|m| m.min(diff)).unwrap_or(diff));
+            self.max_difficulty = Some(self.max_difficulty.map(|m| m.max(diff)).unwrap_or(diff));
+            self.last_difficulty = Some(diff);
+        }
+    }
+
+    fn summary(&self) -> String {
+        let elapsed = self.start_time.map(|s| s.elapsed().as_secs()).unwrap_or(0);
+
+        let avg_interval = if self.templates_received > 1 {
+            self.total_interval_ms / (self.templates_received - 1)
+        } else {
+            0
+        };
+
+        let diff_info = match (self.min_difficulty, self.max_difficulty) {
+            (Some(min), Some(max)) if (max - min).abs() > f64::EPSILON => {
+                format!(
+                    ", difficulty range {:.2e}-{:.2e} ({} changes)",
+                    min, max, self.difficulty_changes
+                )
+            }
+            (Some(d), _) => format!(", difficulty {:.2e}", d),
+            _ => String::new(),
+        };
+
+        format!(
+            "Watch stats: {} templates, {} blocks, avg interval {}ms, elapsed {}s{}",
+            self.templates_received, self.blocks_seen, avg_interval, elapsed, diff_info
+        )
+    }
+}
+
 impl Template {
     pub async fn run(self, cancel_token: CancellationToken) -> anyhow::Result<()> {
         info!(
@@ -107,7 +183,9 @@ impl Template {
             self.stratum_endpoint, self.username
         );
 
-        let address = resolve_stratum_endpoint(&self.stratum_endpoint).await?;
+        let address = resolve_stratum_endpoint(&self.stratum_endpoint)
+            .await
+            .with_context(|| format!("Failed to resolve endpoint '{}'", self.stratum_endpoint))?;
 
         let config = ClientConfig {
             address: address.to_string(),
@@ -118,11 +196,20 @@ impl Template {
         };
 
         let client = Client::new(config);
-        let mut events = client.connect().await?;
+        let mut events = client
+            .connect()
+            .await
+            .with_context(|| format!("Failed to connect to {}", address))?;
 
-        let (subscription, _, _) = client.subscribe().await?;
+        let (subscription, _, _) = client
+            .subscribe()
+            .await
+            .context("Stratum subscribe failed")?;
 
-        client.authorize().await?;
+        client
+            .authorize()
+            .await
+            .with_context(|| format!("Authorization failed for user '{}'", self.username))?;
 
         // Track previous state for change detection
         let mut prev_output: Option<InterpretedOutput> = None;
@@ -130,9 +217,15 @@ impl Template {
         // --quiet implies --watch
         let watch = self.watch || self.quiet;
 
+        // Track stats in watch mode
+        let mut stats = WatchStats::default();
+
         loop {
             tokio::select! {
                 _ = cancel_token.cancelled() => {
+                    if watch {
+                        info!("{}", stats.summary());
+                    }
                     info!("Shutting down template monitor");
                     break;
                 }
@@ -147,6 +240,9 @@ impl Template {
                             if self.raw {
                                 // Print raw mining.notify as JSON array (protocol format)
                                 println!("{}", serde_json::to_string_pretty(&notify)?);
+                                if watch {
+                                    stats.record_template(false, None);
+                                }
                             } else {
                                 let output = self.interpret_template(
                                     &subscription,
@@ -154,6 +250,11 @@ impl Template {
                                     &address,
                                     timestamp,
                                 )?;
+
+                                let is_new_block = prev_output
+                                    .as_ref()
+                                    .map(|p| p.prevhash != output.prevhash)
+                                    .unwrap_or(false);
 
                                 if watch && prev_output.is_some() {
                                     // Show changes instead of full output
@@ -168,6 +269,10 @@ impl Template {
                                     println!("{}", serde_json::to_string_pretty(&output)?);
                                 }
 
+                                if watch {
+                                    stats.record_template(is_new_block, Some(output.difficulty));
+                                }
+
                                 prev_output = Some(output);
                             }
 
@@ -176,6 +281,9 @@ impl Template {
                             }
                         }
                         Ok(Event::Disconnected) => {
+                            if watch {
+                                info!("{}", stats.summary());
+                            }
                             error!("Disconnected from stratum server");
                             break;
                         }
@@ -293,6 +401,7 @@ impl Template {
             prevhash: notify.prevhash.to_string(),
             merkle_root,
             coinbase: CoinbaseInfo {
+                size_bytes: coinbase_bytes.len(),
                 input_text,
                 outputs,
             },
