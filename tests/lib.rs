@@ -63,7 +63,6 @@ use {
                 database::{Database, HighestDiff, Payout},
             },
             sync::{ShareBatch, Sync, SyncResponse},
-            template::Output as Template,
         },
     },
     pgtemp::{PgTempDB, PgTempDBBuilder},

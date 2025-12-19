@@ -30,26 +30,28 @@ fn configure_template_update_interval() {
     let stratum_endpoint = pool.stratum_endpoint();
 
     let output = CommandBuilder::new(format!(
-        "template {stratum_endpoint} --username {}",
+        "template {stratum_endpoint} --username {} --raw",
         signet_username()
     ))
     .spawn()
     .wait_with_output()
     .unwrap();
 
-    let t1 = serde_json::from_str::<Template>(&String::from_utf8_lossy(&output.stdout)).unwrap();
+    let t1 =
+        serde_json::from_str::<stratum::Notify>(&String::from_utf8_lossy(&output.stdout)).unwrap();
 
     std::thread::sleep(Duration::from_secs(1));
 
     let output = CommandBuilder::new(format!(
-        "template {stratum_endpoint} --username {}",
+        "template {stratum_endpoint} --username {} --raw",
         signet_username()
     ))
     .spawn()
     .wait_with_output()
     .unwrap();
 
-    let t2 = serde_json::from_str::<Template>(&String::from_utf8_lossy(&output.stdout)).unwrap();
+    let t2 =
+        serde_json::from_str::<stratum::Notify>(&String::from_utf8_lossy(&output.stdout)).unwrap();
 
     assert!(t1.ntime < t2.ntime);
 }
@@ -463,17 +465,18 @@ fn concurrently_listening_workers_receive_new_templates_on_new_block() {
             let user = user.clone();
 
             thread.spawn(move || {
-                let mut template_watcher =
-                    CommandBuilder::new(format!("template {endpoint} --username {user} --watch"))
-                        .spawn();
+                let mut template_watcher = CommandBuilder::new(format!(
+                    "template {endpoint} --username {user} --watch --raw"
+                ))
+                .spawn();
 
                 let mut reader = BufReader::new(template_watcher.stdout.take().unwrap());
 
-                let initial_template = next_json::<Template>(&mut reader);
+                let initial_template = next_json::<stratum::Notify>(&mut reader);
 
                 gate.wait();
 
-                let new_template = next_json::<Template>(&mut reader);
+                let new_template = next_json::<stratum::Notify>(&mut reader);
 
                 out.send((initial_template, new_template)).ok();
 
