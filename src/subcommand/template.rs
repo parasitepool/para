@@ -232,11 +232,6 @@ impl Template {
                 event = events.recv() => {
                     match event {
                         Ok(Event::Notify(notify)) => {
-                            let timestamp = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap()
-                                .as_secs();
-
                             if self.raw {
                                 // Print raw mining.notify as JSON array (protocol format)
                                 println!("{}", serde_json::to_string_pretty(&notify)?);
@@ -247,8 +242,6 @@ impl Template {
                                 let output = self.interpret_template(
                                     &subscription,
                                     &notify,
-                                    &address,
-                                    timestamp,
                                 )?;
 
                                 let is_new_block = prev_output
@@ -348,8 +341,6 @@ impl Template {
         &self,
         subscription: &SubscribeResult,
         notify: &Notify,
-        _address: &std::net::SocketAddr,
-        _timestamp: u64,
     ) -> anyhow::Result<InterpretedOutput> {
         // Build full coinbase transaction
         let extranonce2_placeholder = "00".repeat(subscription.extranonce2_size);
@@ -389,7 +380,7 @@ impl Template {
         let ntime_u64 = u64::from_str_radix(&ntime_str, 16).unwrap_or(0);
 
         // Compute merkle root
-        let merkle_root = Self::compute_merkle_root(&coinbase_bytes, &notify.merkle_branches);
+        let merkle_root = Self::compute_merkle_root(&coinbase_bytes, &notify.merkle_branches)?;
 
         // Parse version info (ASICBoost/version rolling detection)
         let version_str = notify.version.to_string();
@@ -467,13 +458,17 @@ impl Template {
             .unwrap_or_else(|| unix_time.to_string())
     }
 
-    fn compute_merkle_root(coinbase_bytes: &[u8], merkle_branches: &[MerkleNode]) -> String {
+    fn compute_merkle_root(
+        coinbase_bytes: &[u8],
+        merkle_branches: &[MerkleNode],
+    ) -> anyhow::Result<String> {
         // Hash the coinbase transaction (double SHA256)
         let mut current_hash = sha256d::Hash::hash(coinbase_bytes).to_byte_array();
 
         // For each merkle branch, concatenate and hash
         for branch in merkle_branches {
-            let branch_bytes = hex::decode(branch.to_string()).unwrap_or_default();
+            let branch_bytes =
+                hex::decode(branch.to_string()).context("Invalid merkle branch hex")?;
             let mut combined = Vec::with_capacity(64);
             combined.extend_from_slice(&current_hash);
             combined.extend_from_slice(&branch_bytes);
@@ -482,7 +477,7 @@ impl Template {
 
         // Return as hex (reversed for display - little endian to big endian)
         current_hash.reverse();
-        hex::encode(current_hash)
+        Ok(hex::encode(current_hash))
     }
 
     fn parse_version_info(version: u32) -> VersionInfo {
@@ -495,14 +490,10 @@ impl Template {
         let rolling_bits_set = version & version_rolling_mask;
         let version_rolling_possible = rolling_bits_set != 0;
 
-        // Extract signaled BIP9 bits (bits 0-28, excluding rolling bits)
+        // Extract signaled BIP9 bits (bits 0-12 only, excluding version rolling range 13-28)
         let mut signaled_bits = Vec::new();
         if bip9_signaling {
-            for bit in 0..29 {
-                // Skip bits 13-28 (version rolling range)
-                if (13..=28).contains(&bit) {
-                    continue;
-                }
+            for bit in 0..13u8 {
                 if (version >> bit) & 1 == 1 {
                     signaled_bits.push(bit);
                 }
