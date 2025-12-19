@@ -60,3 +60,9 @@ impl User {
             .max()
     }
 }
+
+impl From<Address> for User {
+    fn from(address: Address) -> Self {
+        Self::new(address)
+    }
+}
