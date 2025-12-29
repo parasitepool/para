@@ -290,9 +290,12 @@ impl Server {
                 // Merge all modular routers
                 // Endpoints:
                 //   Account:     /account/{address}, /account/update, /account/metadata
-                //   ShareDiff:   /highestdiff/{blockheight}, /highestdiff/{blockheight}/user/{username}, /highestdiff/{blockheight}/all
-                //   Payouts:     /payouts, /payouts/failed, /payouts/{blockheight}, /payouts/update,
-                //                /payouts/range/{start_height}/{end_height}, /payouts/range/{start_height}/{end_height}/user/{username},
+                //   ShareDiff:   /highestdiff/{blockheight},
+                //                /highestdiff/{blockheight}/user/{username},
+                //                /highestdiff/{blockheight}/all
+                //   Payouts:     /payouts, /payouts/failed, /payouts/{blockheight},
+                //                /payouts/update, /payouts/range/{start_height}/{end_height},
+                //                /payouts/range/{start_height}/{end_height}/user/{username},
                 //                /split, /split/{blockheight}
                 //   Sync:        /sync/batch
                 router = router
