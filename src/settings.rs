@@ -246,31 +246,22 @@ impl Settings {
             return Ok(Some(path.clone()));
         }
 
-        // 2. --config-dir/para.toml
-        if let Some(dir) = &settings.config_dir {
-            let path = dir.join("para.toml");
-            if path.exists() {
-                return Ok(Some(path));
-            }
+        // 2. Check config_dir or data_dir, or default data dir, joined with para.toml
+        let path = if let Some(dir) = settings.config_dir.clone().or(settings.data_dir.clone()) {
+            dir
+        } else {
+            Self::default_data_dir()?
         }
+        .join("para.toml");
 
-        // 3. --data-dir/para.toml
-        if let Some(dir) = &settings.data_dir {
-            let path = dir.join("para.toml");
-            if path.exists() {
-                return Ok(Some(path));
-            }
-        }
+        // Only use if it exists
+        Ok(path.exists().then_some(path))
+    }
 
-        // 4. XDG config dir (~/.config/para/para.toml)
-        if let Some(config_dir) = dirs::config_dir() {
-            let path = config_dir.join("para").join("para.toml");
-            if path.exists() {
-                return Ok(Some(path));
-            }
-        }
-
-        Ok(None)
+    pub fn default_data_dir() -> Result<PathBuf> {
+        Ok(dirs::data_dir()
+            .context("could not get data dir")?
+            .join("para"))
     }
 
     pub fn from_options(options: &crate::options::Options) -> Self {
@@ -624,9 +615,7 @@ impl Settings {
 
         let data_dir = match &self.data_dir {
             Some(dir) => dir.clone(),
-            None => dirs::data_dir()
-                .ok_or_else(|| anyhow!("could not get data dir"))?
-                .join("para"),
+            None => Self::default_data_dir()?,
         };
 
         let cookie_file = match &self.bitcoin_rpc_cookie_file {
