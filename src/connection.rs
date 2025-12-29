@@ -563,8 +563,6 @@ where
             .map(|job| job.workbase.template().height)
             .unwrap_or_else(|| self.workbase_receiver.borrow().template().height);
 
-        let sdiff = Difficulty::from(hash).as_f64();
-
         let event = Share::new(
             height,
             submit.job_id,
@@ -578,7 +576,6 @@ where
             submit.ntime,
             submit.version_bits,
             pool_diff,
-            sdiff,
             hash,
             reject_reason,
         );

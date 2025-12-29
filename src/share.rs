@@ -38,7 +38,6 @@ impl Share {
         ntime: Ntime,
         version_bits: Option<Version>,
         diff: f64,
-        sdiff: f64,
         hash: BlockHash,
         reject_reason: Option<StratumError>,
     ) -> Self {
@@ -55,7 +54,7 @@ impl Share {
             ntime,
             version_bits,
             diff,
-            sdiff,
+            sdiff: Difficulty::from(hash).as_f64(),
             hash,
             result: reject_reason.is_none(),
             reject_reason,
