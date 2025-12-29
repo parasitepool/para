@@ -58,9 +58,7 @@ impl Template {
             self.stratum_endpoint, self.username
         );
 
-        let address = resolve_stratum_endpoint(&self.stratum_endpoint)
-            .await
-            .with_context(|| format!("Failed to resolve endpoint '{}'", self.stratum_endpoint))?;
+        let address = resolve_stratum_endpoint(&self.stratum_endpoint).await?;
 
         let config = ClientConfig {
             address: address.to_string(),
