@@ -1,20 +1,20 @@
 use super::*;
 
-#[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone, PartialEq, ToSchema)]
 pub struct HighestDiff {
     pub blockheight: i32,
     pub username: String,
     pub diff: f64,
 }
 
-#[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone, PartialEq, ToSchema)]
 pub(crate) struct Split {
     pub(crate) worker_name: String,
     pub(crate) worker_total: i64,
     pub(crate) percentage: f64,
 }
 
-#[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone, PartialEq, ToSchema)]
 pub struct Payout {
     pub(crate) worker_name: String,
     pub btcaddress: Option<String>,
@@ -24,21 +24,21 @@ pub struct Payout {
     pub percentage: f64,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, ToSchema)]
 pub struct PendingPayout {
     pub ln_address: String,
     pub amount_sats: i64,
     pub payout_ids: Vec<i64>,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, ToSchema)]
 pub struct FailedPayout {
     pub btc_address: String,
     pub amount_sats: i64,
     pub payout_ids: Vec<i64>,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone, ToSchema)]
 pub struct UpdatePayoutStatusRequest {
     pub payout_ids: Vec<i64>,
     pub status: String,
