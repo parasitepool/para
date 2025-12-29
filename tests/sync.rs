@@ -516,7 +516,7 @@ async fn test_sync_endpoint_to_endpoint() {
     assert!(health_check.is_ok());
 
     sync_sender
-        .run(CancellationToken::new())
+        .run_standalone(CancellationToken::new())
         .await
         .expect("Syncing between servers failed!");
 
@@ -949,7 +949,7 @@ trait SyncSendTestExt {
 
 impl SyncSendTestExt for Sync {
     fn with_database_url(mut self, database_url: String) -> Self {
-        self.database_url = database_url;
+        self.database_url = Some(database_url);
         self
     }
 
@@ -959,13 +959,15 @@ impl SyncSendTestExt for Sync {
     }
 
     fn with_temp_file(mut self) -> Self {
-        self.id_file = tempdir()
-            .unwrap()
-            .path()
-            .join("id.txt")
-            .to_str()
-            .unwrap()
-            .to_string();
+        self.id_file = Some(
+            tempdir()
+                .unwrap()
+                .path()
+                .join("id.txt")
+                .to_str()
+                .unwrap()
+                .to_string(),
+        );
         self
     }
 }

@@ -1,12 +1,12 @@
-use super::*;
+use {super::*, settings::Settings, subcommand::pool::pool_config::PoolConfig};
 
 pub struct Zmq {
     socket: SubSocket,
 }
 
 impl Zmq {
-    pub async fn connect(config: Arc<PoolConfig>) -> Result<Self> {
-        let endpoint = config.zmq_block_notifications().to_string();
+    pub async fn connect(settings: &Settings, config: &PoolConfig) -> Result<Self> {
+        let endpoint = config.zmq_block_notifications(settings).to_string();
 
         info!("Subscribing to hashblock on ZMQ endpoint {endpoint}");
 

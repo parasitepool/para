@@ -9,7 +9,7 @@ fn mine_to_pool() {
     let stratum_endpoint = pool.stratum_endpoint();
 
     let miner = CommandBuilder::new(format!(
-        "miner --mode share-found --username {} {stratum_endpoint} --cpu-cores 1",
+        "miner {stratum_endpoint} --mode share-found --username {} --cpu-cores 1",
         signet_username()
     ))
     .spawn();

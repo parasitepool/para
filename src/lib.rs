@@ -25,7 +25,7 @@ use {
         secp256k1::Secp256k1,
         sign_message::MessageSignature,
     },
-    bitcoincore_rpc::{Auth, RpcApi},
+    bitcoincore_rpc::RpcApi,
     block_template::BlockTemplate,
     chain::Chain,
     clap::Parser,
@@ -85,7 +85,7 @@ use {
         Notify, Ntime, PrevHash, SetDifficulty, StratumError, Submit, Subscribe, SubscribeResult,
         Username, Version,
     },
-    subcommand::{pool::pool_config::PoolConfig, server::account::Account},
+    subcommand::server::account::Account,
     sysinfo::{Disks, System},
     throbber::{StatusLine, spawn_throbber},
     tokio::{
@@ -125,6 +125,8 @@ mod hash_rate;
 mod job;
 mod jobs;
 mod metatron;
+pub mod options;
+pub mod settings;
 mod share;
 mod signal;
 pub mod stratum;

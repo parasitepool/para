@@ -1,17 +1,20 @@
 use {
     super::*,
-    crate::stratum::{
-        Client, ClientConfig, Difficulty, Event, MerkleNode, Notify, SubscribeResult, Username,
-        merkle_root,
+    crate::{
+        settings::Settings,
+        stratum::{
+            Client, ClientConfig, Difficulty, Event, MerkleNode, Notify, SubscribeResult, Username,
+            merkle_root,
+        },
     },
 };
 
 #[derive(Debug, Parser)]
 pub struct Template {
     #[arg(help = "Stratum <HOST:PORT>.")]
-    stratum_endpoint: String,
+    stratum_endpoint: Option<String>,
     #[arg(long, help = "Stratum <USERNAME>.")]
-    pub username: Username,
+    pub username: Option<Username>,
     #[arg(long, help = "Stratum <PASSWORD>.")]
     pub password: Option<String>,
     #[arg(long, help = "Continue watching for template updates.")]
@@ -52,19 +55,41 @@ pub struct CoinbaseOutput {
 }
 
 impl Template {
-    pub async fn run(self, cancel_token: CancellationToken) -> anyhow::Result<()> {
-        info!(
-            "Connecting to {} with user {}",
-            self.stratum_endpoint, self.username
-        );
+    pub async fn run(
+        self,
+        settings: Settings,
+        cancel_token: CancellationToken,
+    ) -> anyhow::Result<()> {
+        let stratum_endpoint = self
+            .stratum_endpoint
+            .or(settings.template_stratum_endpoint.clone())
+            .ok_or_else(|| anyhow!("stratum endpoint required"))?;
 
-        let address = resolve_stratum_endpoint(&self.stratum_endpoint).await?;
+        let username: Username = self
+            .username
+            .clone()
+            .or_else(|| {
+                settings
+                    .template_username
+                    .as_ref()
+                    .map(|s| Username::from(s.as_str()))
+            })
+            .ok_or_else(|| anyhow!("username required"))?;
+
+        let password = self.password.clone().or(settings.template_password.clone());
+
+        let watch = self.watch || settings.template_watch;
+        let raw = self.raw;
+
+        info!("Connecting to {stratum_endpoint} with user {username}");
+
+        let address = resolve_stratum_endpoint(&stratum_endpoint).await?;
 
         let config = ClientConfig {
             address: address.to_string(),
-            username: self.username.clone(),
+            username: username.clone(),
             user_agent: USER_AGENT.into(),
-            password: self.password.clone(),
+            password,
             timeout: Duration::from_secs(5),
         };
 
@@ -86,20 +111,19 @@ impl Template {
                 event = events.recv() => {
                     match event {
                         Ok(Event::Notify(notify)) => {
-                            if self.raw {
+                            if raw {
                                 println!("{}", serde_json::to_string_pretty(&notify)?);
                             } else {
-                                let output = self.interpret_template(
+                                let output = Self::interpret_template(
+                                    &username,
                                     &subscription,
                                     &notify,
                                     pool_difficulty,
                                 )?;
-
                                 println!("{}", serde_json::to_string_pretty(&output)?);
-
                             }
 
-                            if !self.watch {
+                            if !watch {
                                 break;
                             }
                         }
@@ -120,7 +144,7 @@ impl Template {
     }
 
     fn interpret_template(
-        &self,
+        username: &Username,
         subscription: &SubscribeResult,
         notify: &Notify,
         pool_difficulty: Option<Difficulty>,
@@ -136,7 +160,7 @@ impl Template {
 
         let ascii_tag = Self::extract_coinbase_text(&coinbase_tx);
 
-        let network = self.username.infer_network()?;
+        let network = username.infer_network()?;
 
         let outputs = coinbase_tx
             .output

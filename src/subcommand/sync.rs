@@ -1,5 +1,8 @@
 use {
-    super::*, crate::subcommand::server::database::Database, reqwest::Client, tokio::time::Duration,
+    super::*,
+    crate::{settings::Settings, subcommand::server::database::Database},
+    reqwest::Client,
+    tokio::time::Duration,
 };
 
 const SYNC_DELAY_MS: u64 = 1000;
@@ -8,48 +11,26 @@ const TARGET_ID_BUFFER: i64 = 0;
 const HTTP_TIMEOUT_MS: u64 = 30000;
 const MAX_RETRIES: u32 = 3;
 
-#[derive(Debug, Parser)]
+#[derive(Debug, Default, Parser)]
 pub struct Sync {
-    #[arg(
-        long,
-        help = "Send shares to HTTP <ENDPOINT>.",
-        default_value = "http://127.0.0.1:8080"
-    )]
-    endpoint: String,
-    #[arg(
-        long,
-        help = "Process shares in <BATCH_SIZE>.",
-        default_value = "1000000"
-    )]
-    pub batch_size: i64,
+    #[arg(long, help = "Send shares to HTTP <ENDPOINT>.")]
+    pub endpoint: Option<String>,
+    #[arg(long, help = "Process shares in <BATCH_SIZE>.")]
+    pub batch_size: Option<i64>,
     #[arg(long, help = "<RESET> current id to 0.")]
-    reset_id: bool,
+    pub reset_id: bool,
     #[arg(
         long,
         help = "Terminate when no more records to process.",
         action = clap::ArgAction::SetTrue
     )]
     pub terminate_when_complete: bool,
-    #[arg(
-        long,
-        help = "Connect to Postgres running at <DATABASE_URL>.",
-        default_value = "postgres://satoshi:nakamoto@127.0.0.1:5432/ckpool"
-    )]
-    pub database_url: String,
+    #[arg(long, help = "Connect to Postgres running at <DATABASE_URL>.")]
+    pub database_url: Option<String>,
     #[arg(long, help = "<ADMIN_TOKEN> for bearer auth on sync endpoint.")]
-    admin_token: Option<String>,
-    #[arg(
-        long,
-        help = "Set <ID_FILE> to store sync progress to.",
-        default_value = "current_id.txt"
-    )]
-    pub id_file: String,
-}
-
-impl Default for Sync {
-    fn default() -> Self {
-        Self::try_parse_from(std::iter::empty::<String>()).unwrap()
-    }
+    pub admin_token: Option<String>,
+    #[arg(long, help = "Set <ID_FILE> to store sync progress to.")]
+    pub id_file: Option<String>,
 }
 
 #[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone)]
@@ -133,22 +114,119 @@ pub(crate) async fn load_current_id_from_file(id_file: &str) -> Result<i64> {
     }
 }
 
+/// Resolved sync configuration
+struct ResolvedSync {
+    endpoint: String,
+    batch_size: i64,
+    reset_id: bool,
+    terminate_when_complete: bool,
+    database_url: String,
+    admin_token: Option<String>,
+    id_file: String,
+}
+
 impl Sync {
-    pub async fn run(self, cancel_token: CancellationToken) -> Result {
+    fn resolve(self, settings: &Settings) -> ResolvedSync {
+        ResolvedSync {
+            endpoint: self
+                .endpoint
+                .or(settings.sync_endpoint.clone())
+                .unwrap_or_else(|| "http://127.0.0.1:8080".into()),
+            batch_size: self
+                .batch_size
+                .or(settings.sync_batch_size)
+                .unwrap_or(1_000_000),
+            reset_id: self.reset_id || settings.sync_reset_id,
+            terminate_when_complete: self.terminate_when_complete
+                || settings.sync_terminate_when_complete,
+            database_url: self
+                .database_url
+                .or(settings.sync_database_url.clone())
+                .unwrap_or_else(|| "postgres://satoshi:nakamoto@127.0.0.1:5432/ckpool".into()),
+            admin_token: self.admin_token.or(settings.sync_admin_token.clone()),
+            id_file: self
+                .id_file
+                .or(settings.sync_id_file.clone())
+                .unwrap_or_else(|| "current_id.txt".into()),
+        }
+    }
+
+    pub async fn run(self, settings: Settings, cancel_token: CancellationToken) -> Result {
+        let resolved = self.resolve(&settings);
+        Self::run_resolved(resolved, cancel_token).await
+    }
+
+    /// Run sync using only CLI args (useful for programmatic use without Settings)
+    pub async fn run_standalone(self, cancel_token: CancellationToken) -> Result {
+        let resolved = ResolvedSync {
+            endpoint: self
+                .endpoint
+                .unwrap_or_else(|| "http://127.0.0.1:8080".into()),
+            batch_size: self.batch_size.unwrap_or(1_000_000),
+            reset_id: self.reset_id,
+            terminate_when_complete: self.terminate_when_complete,
+            database_url: self
+                .database_url
+                .unwrap_or_else(|| "postgres://satoshi:nakamoto@127.0.0.1:5432/ckpool".into()),
+            admin_token: self.admin_token,
+            id_file: self.id_file.unwrap_or_else(|| "current_id.txt".into()),
+        };
+        Self::run_resolved(resolved, cancel_token).await
+    }
+
+    /// Builder method to set the endpoint
+    pub fn with_endpoint(mut self, endpoint: String) -> Self {
+        self.endpoint = Some(endpoint);
+        self
+    }
+
+    /// Builder method to set the admin token
+    pub fn with_admin_token(mut self, admin_token: &str) -> Self {
+        self.admin_token = Some(admin_token.to_string());
+        self
+    }
+
+    /// Run sync with a pre-resolved endpoint (used by server subcommand)
+    pub async fn run_with_settings(
+        settings: Settings,
+        endpoint: String,
+        cancel_token: CancellationToken,
+    ) -> Result {
+        let resolved = ResolvedSync {
+            endpoint,
+            batch_size: settings.sync_batch_size.unwrap_or(1_000_000),
+            reset_id: settings.sync_reset_id,
+            terminate_when_complete: settings.sync_terminate_when_complete,
+            database_url: settings
+                .sync_database_url
+                .clone()
+                .unwrap_or_else(|| "postgres://satoshi:nakamoto@127.0.0.1:5432/ckpool".into()),
+            admin_token: settings.sync_admin_token.clone(),
+            id_file: settings
+                .sync_id_file
+                .clone()
+                .unwrap_or_else(|| "current_id.txt".into()),
+        };
+        Self::run_resolved(resolved, cancel_token).await
+    }
+
+    async fn run_resolved(resolved: ResolvedSync, cancel_token: CancellationToken) -> Result {
         info!("Starting HTTP share sync send...");
-        if !self.terminate_when_complete {
+        if !resolved.terminate_when_complete {
             info!("Keep-alive mode enabled - will continue running even when caught up");
         }
 
-        let database = Database::new(self.database_url.clone()).await?;
+        let database = Database::new(resolved.database_url.clone()).await?;
         let client = Client::new();
 
-        let mut current_id = self.load_current_id().await?;
+        let mut current_id = load_current_id_from_file(&resolved.id_file).await?;
         let mut caught_up_logged = false;
 
-        if self.reset_id {
+        if resolved.reset_id {
             current_id = 0;
-            self.save_current_id(current_id).await?;
+            tokio::fs::write(&resolved.id_file, current_id.to_string())
+                .await
+                .map_err(|e| anyhow!("Failed to save ID file: {e}"))?;
             info!("Reset current ID to 0");
         }
 
@@ -160,9 +238,9 @@ impl Sync {
                 break;
             }
 
-            match self.sync_batch(&database, &client, &mut current_id).await {
+            match Self::sync_batch(&resolved, &database, &client, &mut current_id).await {
                 Ok(SyncResult::Complete) => {
-                    if !self.terminate_when_complete {
+                    if !resolved.terminate_when_complete {
                         if !caught_up_logged {
                             info!("Sync send caught up, waiting for new data...");
                             caught_up_logged = true;
@@ -190,7 +268,7 @@ impl Sync {
                     }
                 }
                 Ok(SyncResult::WaitForNewBlock) => {
-                    if self.terminate_when_complete {
+                    if resolved.terminate_when_complete {
                         info!("Sync send completed successfully");
                         break;
                     }
@@ -225,7 +303,7 @@ impl Sync {
     }
 
     async fn sync_batch(
-        &self,
+        resolved: &ResolvedSync,
         database: &Database,
         client: &Client,
         current_id: &mut i64,
@@ -246,7 +324,10 @@ impl Sync {
         if last_id_in_block.is_err() {
             return Ok(SyncResult::Continue);
         }
-        let target_id = std::cmp::min(*current_id + self.batch_size, last_id_in_block?.unwrap());
+        let target_id = std::cmp::min(
+            *current_id + resolved.batch_size,
+            last_id_in_block?.unwrap(),
+        );
         let latest_blockheight = database.get_blockheight_for_id(max_id).await?;
 
         match (current_blockheight, latest_blockheight) {
@@ -282,7 +363,9 @@ impl Sync {
         if shares.is_empty() && block.is_none() {
             info!("No shares found in range, moving to next batch");
             *current_id = target_id;
-            self.save_current_id(target_id).await?;
+            tokio::fs::write(&resolved.id_file, target_id.to_string())
+                .await
+                .map_err(|e| anyhow!("Failed to save ID file: {e}"))?;
             return Ok(SyncResult::Continue);
         }
 
@@ -290,13 +373,14 @@ impl Sync {
 
         // retry n times
         for attempt in 1..=MAX_RETRIES {
-            match self
-                .send_batch_http(client, &block, &shares, next_id, highest_id)
+            match Self::send_batch_http(resolved, client, &block, &shares, next_id, highest_id)
                 .await
             {
                 Ok(_) => {
                     *current_id = highest_id;
-                    self.save_current_id(*current_id).await?;
+                    tokio::fs::write(&resolved.id_file, current_id.to_string())
+                        .await
+                        .map_err(|e| anyhow!("Failed to save ID file: {e}"))?;
                     return Ok(SyncResult::Continue);
                 }
                 Err(e) => {
@@ -313,7 +397,7 @@ impl Sync {
     }
 
     async fn send_batch_http(
-        &self,
+        resolved: &ResolvedSync,
         client: &Client,
         block: &Option<FoundBlockRecord>,
         shares: &[Share],
@@ -335,10 +419,10 @@ impl Sync {
         };
 
         // force url format
-        let url = if self.endpoint.starts_with("http") {
-            format!("{}/sync/batch", self.endpoint.trim_end_matches('/'))
+        let url = if resolved.endpoint.starts_with("http") {
+            format!("{}/sync/batch", resolved.endpoint.trim_end_matches('/'))
         } else {
-            format!("http://{}/sync/batch", self.endpoint)
+            format!("http://{}/sync/batch", resolved.endpoint)
         };
 
         let mut req_client = client
@@ -346,7 +430,7 @@ impl Sync {
             .json(&batch)
             .timeout(Duration::from_millis(HTTP_TIMEOUT_MS));
 
-        if let Some(token) = self.get_admin_token() {
+        if let Some(token) = &resolved.admin_token {
             req_client = req_client.bearer_auth(token);
         }
 
@@ -400,31 +484,6 @@ impl Sync {
         );
 
         Ok(())
-    }
-
-    async fn load_current_id(&self) -> Result<i64> {
-        load_current_id_from_file(&self.id_file).await
-    }
-
-    async fn save_current_id(&self, id: i64) -> Result {
-        tokio::fs::write(&self.id_file, id.to_string())
-            .await
-            .map_err(|e| anyhow!("Failed to save ID file: {e}"))?;
-        Ok(())
-    }
-
-    pub fn with_endpoint(mut self, endpoint: String) -> Self {
-        self.endpoint = endpoint;
-        self
-    }
-
-    fn get_admin_token(&self) -> Option<String> {
-        self.admin_token.clone()
-    }
-
-    pub fn with_admin_token(mut self, admin_token: &str) -> Self {
-        self.admin_token = Some(admin_token.to_string());
-        self
     }
 }
 
