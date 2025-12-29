@@ -55,6 +55,9 @@ impl Metatron {
     fn process_share(&self, share: &Share, sink: &Option<mpsc::Sender<Share>>) {
         let worker = self.get_or_create_worker(share.address.clone(), &share.workername);
 
+        info!("SPS: {}", self.sps_1m());
+        info!("Hashrate: {}", self.hash_rate_1m());
+
         if share.result {
             worker.record_accepted(share.sdiff);
         } else {

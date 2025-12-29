@@ -551,7 +551,7 @@ where
         &self,
         submit: &Submit,
         job: Option<&Job>,
-        share_diff: f64,
+        pool_diff: f64,
         hash: BlockHash,
         reject_reason: Option<StratumError>,
     ) {
@@ -562,6 +562,8 @@ where
         let height = job
             .map(|job| job.workbase.template().height)
             .unwrap_or_else(|| self.workbase_receiver.borrow().template().height);
+
+        let sdiff = Difficulty::from(hash).as_f64();
 
         let event = Share::new(
             height,
@@ -575,8 +577,8 @@ where
             submit.nonce,
             submit.ntime,
             submit.version_bits,
-            self.vardiff.current_diff().as_f64(),
-            share_diff,
+            pool_diff,
+            sdiff,
             hash,
             reject_reason,
         );
