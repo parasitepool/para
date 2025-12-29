@@ -49,6 +49,7 @@ pub(crate) fn account_router(config: Arc<ServerConfig>, database: Database) -> R
 #[utoipa::path(
     get,
     path = "/account/{address}",
+    security(("api_token" = [])),
     params(
         ("address" = String, Path, description = "BTC address")
     ),
@@ -74,11 +75,13 @@ pub(crate) async fn account_lookup(
 }
 
 /// Update account lightning address
-/// BIP322 is used for signing when supported by underlying address
-/// P2PKH falls back to ECDSA(secp256k1) signature over the message value
+///
+/// BIP322 is used for signing when supported by underlying address.
+/// p2pkh falls back to ECDSA(secp256k1) signature over the message value
 #[utoipa::path(
     post,
     path = "/account/update",
+    security(("api_token" = [])),
     request_body = AccountUpdate,
     responses(
         (status = 200, description = "Account updated", body = Account),
@@ -113,6 +116,7 @@ pub(crate) async fn account_update(
 #[utoipa::path(
     post,
     path = "/account/metadata",
+    security(("api_token" = [])),
     request_body = AccountMetadataUpdate,
     responses(
         (status = 200, description = "Metadata updated", body = Account),

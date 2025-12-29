@@ -19,6 +19,7 @@ pub(crate) fn sync_router(config: Arc<ServerConfig>, database: Database) -> Rout
 #[utoipa::path(
     post,
     path = "/sync/batch",
+    security(("admin_token" = [])),
     request_body = ShareBatch,
     responses(
         (status = 200, description = "Batch processed", body = SyncResponse),

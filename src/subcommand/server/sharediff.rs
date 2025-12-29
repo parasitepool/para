@@ -21,6 +21,7 @@ pub(crate) fn share_difficulty_router(config: Arc<ServerConfig>, database: Datab
 #[utoipa::path(
     get,
     path = "/highestdiff/{blockheight}",
+    security(("api_token" = [])),
     params(
         ("blockheight" = i32, Path, description = "Block height")
     ),
@@ -46,6 +47,7 @@ pub(crate) async fn highestdiff(
 #[utoipa::path(
     get,
     path = "/highestdiff/{blockheight}/user/{username}",
+    security(("api_token" = [])),
     params(
         ("blockheight" = i32, Path, description = "Block height"),
         ("username" = String, Path, description = "Username")
@@ -72,6 +74,7 @@ pub(crate) async fn highestdiff_by_user(
 #[utoipa::path(
     get,
     path = "/highestdiff/{blockheight}/all",
+    security(("api_token" = [])),
     params(
         ("blockheight" = i32, Path, description = "Block height")
     ),

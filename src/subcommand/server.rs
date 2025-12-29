@@ -28,6 +28,8 @@ use {
         services::ServeDir, set_header::SetResponseHeaderLayer,
         validate_request::ValidateRequestHeaderLayer,
     },
+    utoipa::Modify,
+    utoipa::openapi::security::{Http, HttpAuthScheme, SecurityScheme},
 };
 
 mod accept_json;
@@ -91,6 +93,33 @@ pub(crate) struct SatSplit {
     pub(crate) payments: Vec<Payment>,
 }
 
+struct SecurityAddon;
+
+impl Modify for SecurityAddon {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        if let Some(components) = openapi.components.as_mut() {
+            components.add_security_scheme(
+                "api_token",
+                SecurityScheme::Http(
+                    Http::builder()
+                        .scheme(HttpAuthScheme::Bearer)
+                        .description(Some("API token for general endpoints"))
+                        .build(),
+                ),
+            );
+            components.add_security_scheme(
+                "admin_token",
+                SecurityScheme::Http(
+                    Http::builder()
+                        .scheme(HttpAuthScheme::Bearer)
+                        .description(Some("Admin token for privileged operations"))
+                        .build(),
+                ),
+            );
+        }
+    }
+}
+
 #[derive(OpenApi)]
 #[openapi(
     info(
@@ -98,6 +127,7 @@ pub(crate) struct SatSplit {
         version = env!("CARGO_PKG_VERSION"),
         description = "Mining pool API for share tracking, payouts, and account management"
     ),
+    modifiers(&SecurityAddon),
     paths(
         // Account endpoints
         account::account_lookup,
@@ -477,6 +507,7 @@ impl Server {
 #[utoipa::path(
     get,
     path = "/status",
+    security(("admin_token" = [])),
     responses(
         (status = 200, description = "Server status", body = StatusHtml),
     ),

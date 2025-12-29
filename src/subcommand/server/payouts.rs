@@ -32,6 +32,7 @@ pub(crate) fn payouts_router(config: Arc<ServerConfig>, database: Database) -> R
 #[utoipa::path(
     get,
     path = "/payouts",
+    security(("admin_token" = [])),
     params(
         ("format" = Option<String>, Query, description = "Set to 'json' for JSON response")
     ),
@@ -63,6 +64,7 @@ pub(crate) async fn payouts_all(
 #[utoipa::path(
     get,
     path = "/payouts/failed",
+    security(("admin_token" = [])),
     responses(
         (status = 200, description = "List of failed payouts", body = Vec<FailedPayout>),
     ),
@@ -78,6 +80,7 @@ pub(crate) async fn payouts_failed(
 #[utoipa::path(
     get,
     path = "/payouts/{blockheight}",
+    security(("admin_token" = [])),
     params(
         ("blockheight" = u32, Path, description = "Block height")
     ),
@@ -102,6 +105,7 @@ pub(crate) async fn payouts(
 #[utoipa::path(
     get,
     path = "/split",
+    security(("admin_token" = [])),
     responses(
         (status = 200, description = "Current split data", body = Vec<Split>),
     ),
@@ -115,6 +119,7 @@ pub(crate) async fn open_split(Extension(database): Extension<Database>) -> Serv
 #[utoipa::path(
     get,
     path = "/split/{blockheight}",
+    security(("admin_token" = [])),
     params(
         ("blockheight" = u32, Path, description = "Block height")
     ),
@@ -166,6 +171,7 @@ pub(crate) async fn sat_split(
 #[utoipa::path(
     get,
     path = "/payouts/range/{start_height}/{end_height}",
+    security(("admin_token" = [])),
     params(
         ("start_height" = u32, Path, description = "Start block height"),
         ("end_height" = u32, Path, description = "End block height"),
@@ -199,6 +205,7 @@ pub(crate) async fn payouts_range(
 #[utoipa::path(
     get,
     path = "/payouts/range/{start_height}/{end_height}/user/{username}",
+    security(("admin_token" = [])),
     params(
         ("start_height" = u32, Path, description = "Start block height"),
         ("end_height" = u32, Path, description = "End block height"),
@@ -234,6 +241,7 @@ pub(crate) async fn user_payout_range(
 #[utoipa::path(
     post,
     path = "/payouts/update",
+    security(("admin_token" = [])),
     request_body = UpdatePayoutStatusRequest,
     responses(
         (status = 200, description = "Status updated successfully"),
