@@ -2,7 +2,7 @@ use super::*;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Submit {
-    pub username: String,
+    pub username: Username,
     pub job_id: JobId,
     pub extranonce2: Extranonce,
     pub ntime: Ntime,
@@ -37,8 +37,8 @@ impl<'de> Deserialize<'de> for Submit {
         #[derive(Deserialize)]
         #[serde(untagged)]
         enum Raw {
-            Five((String, JobId, Extranonce, Ntime, Nonce)),
-            Six((String, JobId, Extranonce, Ntime, Nonce, Option<Version>)),
+            Five((Username, JobId, Extranonce, Ntime, Nonce)),
+            Six((Username, JobId, Extranonce, Ntime, Nonce, Option<Version>)),
         }
 
         match Raw::deserialize(deserializer)? {

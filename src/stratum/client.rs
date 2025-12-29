@@ -26,7 +26,7 @@ const CHANNEL_BUFFER_SIZE: usize = 32;
 #[derive(Debug, Clone)]
 pub struct ClientConfig {
     pub address: String,
-    pub username: String,
+    pub username: Username,
     pub user_agent: String,
     pub password: Option<String>,
     pub timeout: Duration,
@@ -196,7 +196,7 @@ impl Client {
             .send_request(
                 "mining.authorize".to_string(),
                 serde_json::to_value(Authorize {
-                    username: self.config.username.clone().into(),
+                    username: self.config.username.clone(),
                     password: self.config.password.clone().or(Some("x".to_string())),
                 })
                 .context(error::SerializationSnafu)?,

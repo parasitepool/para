@@ -99,7 +99,7 @@ impl TestPool {
     pub(crate) async fn stratum_client_for_username(&self, username: &str) -> stratum::Client {
         let config = stratum::ClientConfig {
             address: self.stratum_endpoint(),
-            username: username.to_string(),
+            username: Username::new(username),
             user_agent: USER_AGENT.into(),
             password: None,
             timeout: Duration::from_secs(1),

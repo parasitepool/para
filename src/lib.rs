@@ -83,7 +83,7 @@ use {
     stratum::{
         Authorize, Configure, Difficulty, Extranonce, Id, JobId, MerkleNode, Message, Nbits, Nonce,
         Notify, Ntime, PrevHash, SetDifficulty, StratumError, Submit, Subscribe, SubscribeResult,
-        Version,
+        Username, Version,
     },
     subcommand::{pool::pool_config::PoolConfig, server::account::Account},
     sysinfo::{Disks, System},
