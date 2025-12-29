@@ -26,7 +26,7 @@ const CHANNEL_BUFFER_SIZE: usize = 32;
 #[derive(Debug, Clone)]
 pub struct ClientConfig {
     pub address: String,
-    pub username: String,
+    pub username: Username,
     pub user_agent: String,
     pub password: Option<String>,
     pub timeout: Duration,

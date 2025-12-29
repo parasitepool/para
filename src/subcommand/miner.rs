@@ -45,7 +45,7 @@ pub struct Share {
     pub job_id: JobId,
     pub nonce: Nonce,
     pub ntime: Ntime,
-    pub username: String,
+    pub username: Username,
     pub version_bits: Option<Version>,
 }
 
@@ -87,6 +87,8 @@ impl Miner {
                 .as_ref()
                 .and_then(|s| s.parse::<HashRate>().ok())
         });
+
+        let username: Username = username.into();
 
         info!("Connecting to {stratum_endpoint} with user {username}");
 

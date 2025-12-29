@@ -31,6 +31,7 @@ use {
     clap::Parser,
     coinbase_builder::CoinbaseBuilder,
     connection::Connection,
+    dashmap::DashMap,
     decay::{DecayingAverage, calculate_time_bias},
     futures::{
         sink::SinkExt,
@@ -57,6 +58,7 @@ use {
     },
     serde_json::json,
     serde_with::{DeserializeFromStr, SerializeDisplay},
+    share::Share,
     snafu::Snafu,
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
     std::{
@@ -81,7 +83,7 @@ use {
     stratum::{
         Authorize, Configure, Difficulty, Extranonce, Id, JobId, MerkleNode, Message, Nbits, Nonce,
         Notify, Ntime, PrevHash, SetDifficulty, StratumError, Submit, Subscribe, SubscribeResult,
-        Version,
+        Username, Version,
     },
     subcommand::server::account::Account,
     sysinfo::{Disks, System},
@@ -101,8 +103,10 @@ use {
     tracing::{debug, error, info, warn},
     tracing_appender::non_blocking,
     tracing_subscriber::EnvFilter,
+    user::User,
     vardiff::Vardiff,
     workbase::Workbase,
+    worker::Worker,
     zeromq::{Endpoint, Socket, SocketRecv, SubSocket},
     zmq::Zmq,
 };
@@ -113,7 +117,7 @@ mod arguments;
 mod block_template;
 mod chain;
 pub mod ckpool;
-pub mod coinbase_builder;
+mod coinbase_builder;
 mod connection;
 mod decay;
 mod generator;
@@ -123,21 +127,23 @@ mod jobs;
 mod metatron;
 pub mod options;
 pub mod settings;
+mod share;
 mod signal;
 pub mod stratum;
 pub mod subcommand;
 mod throbber;
+mod user;
 mod vardiff;
 mod workbase;
+mod worker;
 mod zmq;
 
 pub const COIN_VALUE: u64 = 100_000_000;
 pub const USER_AGENT: &str = "para/0.5.2";
-
 pub const EXTRANONCE1_SIZE: usize = 4;
 pub const EXTRANONCE2_SIZE: usize = 8;
 pub const MAX_MESSAGE_SIZE: usize = 32 * 1024;
-/// Subscription IDs do not seem to have a purpose in Stratum, hardcoding for now
+pub const SHARE_CHANNEL_CAPACITY: usize = 100_000;
 pub const SUBSCRIPTION_ID: &str = "deadbeef";
 pub const LRU_CACHE_SIZE: usize = 256;
 

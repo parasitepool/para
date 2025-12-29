@@ -30,26 +30,28 @@ fn configure_template_update_interval() {
     let stratum_endpoint = pool.stratum_endpoint();
 
     let output = CommandBuilder::new(format!(
-        "template {stratum_endpoint} --username {}",
+        "template {stratum_endpoint} --username {} --raw",
         signet_username()
     ))
     .spawn()
     .wait_with_output()
     .unwrap();
 
-    let t1 = serde_json::from_str::<Template>(&String::from_utf8_lossy(&output.stdout)).unwrap();
+    let t1 =
+        serde_json::from_str::<stratum::Notify>(&String::from_utf8_lossy(&output.stdout)).unwrap();
 
     std::thread::sleep(Duration::from_secs(1));
 
     let output = CommandBuilder::new(format!(
-        "template {stratum_endpoint} --username {}",
+        "template {stratum_endpoint} --username {} --raw",
         signet_username()
     ))
     .spawn()
     .wait_with_output()
     .unwrap();
 
-    let t2 = serde_json::from_str::<Template>(&String::from_utf8_lossy(&output.stdout)).unwrap();
+    let t2 =
+        serde_json::from_str::<stratum::Notify>(&String::from_utf8_lossy(&output.stdout)).unwrap();
 
     assert!(t1.ntime < t2.ntime);
 }
@@ -61,13 +63,37 @@ async fn basic_initialization_flow() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001");
 
     let client = pool.stratum_client().await;
+    let client_invalid_username = pool.stratum_client_for_username("notabitcoinaddress").await;
+    let client_address_wrong_network = pool
+        .stratum_client_for_username("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4")
+        .await;
     let mut events = client.connect().await.unwrap();
+    client_invalid_username.connect().await.unwrap();
+    client_address_wrong_network.connect().await.unwrap();
 
     let (subscribe, _, _) = client.subscribe().await.unwrap();
+    client_invalid_username.subscribe().await.unwrap();
+    client_address_wrong_network.subscribe().await.unwrap();
 
     assert_eq!(subscribe.subscriptions.len(), 2);
 
     assert!(client.authorize().await.is_ok());
+    assert!(
+        client_invalid_username
+            .authorize()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid bitcoin address")
+    );
+    assert!(
+        client_address_wrong_network
+            .authorize()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4 is not valid for signet network")
+    );
 
     let difficulty = match events.recv().await.unwrap() {
         stratum::Event::SetDifficulty(difficulty) => difficulty,
@@ -439,17 +465,18 @@ fn concurrently_listening_workers_receive_new_templates_on_new_block() {
             let user = user.clone();
 
             thread.spawn(move || {
-                let mut template_watcher =
-                    CommandBuilder::new(format!("template {endpoint} --username {user} --watch"))
-                        .spawn();
+                let mut template_watcher = CommandBuilder::new(format!(
+                    "template {endpoint} --username {user} --watch --raw"
+                ))
+                .spawn();
 
                 let mut reader = BufReader::new(template_watcher.stdout.take().unwrap());
 
-                let initial_template = next_json::<Template>(&mut reader);
+                let initial_template = next_json::<stratum::Notify>(&mut reader);
 
                 gate.wait();
 
-                let new_template = next_json::<Template>(&mut reader);
+                let new_template = next_json::<stratum::Notify>(&mut reader);
 
                 out.send((initial_template, new_template)).ok();
 

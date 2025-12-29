@@ -96,6 +96,18 @@ impl TestPool {
         stratum::Client::new(config)
     }
 
+    pub(crate) async fn stratum_client_for_username(&self, username: &str) -> stratum::Client {
+        let config = stratum::ClientConfig {
+            address: self.stratum_endpoint(),
+            username: Username::new(username),
+            user_agent: USER_AGENT.into(),
+            password: None,
+            timeout: Duration::from_secs(1),
+        };
+
+        stratum::Client::new(config)
+    }
+
     #[allow(unused)]
     pub(crate) fn bitcoind_handle(&self) -> &Bitcoind {
         &self.bitcoind_handle

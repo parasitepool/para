@@ -1,6 +1,8 @@
 use {
     bitcoin::{
-        BlockHash, CompactTarget, Target, TxMerkleNode, Txid, block,
+        Address, BlockHash, CompactTarget, Network, Target, TxMerkleNode, Txid,
+        address::NetworkUnchecked,
+        block,
         consensus::Encodable,
         hashes::{Hash, sha256d},
     },
@@ -18,10 +20,13 @@ use {
     serde_with::{DeserializeFromStr, SerializeDisplay},
     snafu::{ResultExt, Snafu},
     std::{
-        fmt,
         ops::{BitAnd, BitOr, BitXor, Not},
         str::FromStr,
         sync::LazyLock,
+        {
+            fmt,
+            fmt::{Display, Formatter},
+        },
     },
 };
 
@@ -44,6 +49,7 @@ mod set_difficulty;
 mod submit;
 mod subscribe;
 mod suggest_difficulty;
+mod username;
 mod version;
 
 pub use {
@@ -66,5 +72,6 @@ pub use {
     submit::Submit,
     subscribe::{Subscribe, SubscribeResult},
     suggest_difficulty::SuggestDifficulty,
+    username::Username,
     version::Version,
 };
