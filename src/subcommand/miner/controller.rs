@@ -17,13 +17,13 @@ pub(crate) struct Controller {
     share_rx: mpsc::Receiver<(JobId, Header, Extranonce)>,
     shares: Vec<Share>,
     throttle: f64,
-    username: String,
+    username: Username,
 }
 
 impl Controller {
     pub(crate) async fn run(
         client: Client,
-        username: String,
+        username: Username,
         cpu_cores: usize,
         throttle: Option<HashRate>,
         mode: Mode,

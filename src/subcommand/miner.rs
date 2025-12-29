@@ -22,7 +22,7 @@ pub(crate) struct Miner {
     #[arg(help = "Stratum <HOST:PORT>.")]
     stratum_endpoint: String,
     #[arg(long, help = "Stratum <USERNAME>.")]
-    username: String,
+    username: Username,
     #[arg(long, help = "Stratum <PASSWORD>.")]
     password: Option<String>,
     #[arg(
@@ -45,7 +45,7 @@ pub struct Share {
     pub job_id: JobId,
     pub nonce: Nonce,
     pub ntime: Ntime,
-    pub username: String,
+    pub username: Username,
     pub version_bits: Option<Version>,
 }
 
