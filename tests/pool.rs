@@ -33,9 +33,6 @@ fn configure_template_update_interval() {
         "template {stratum_endpoint} --username {} --raw",
         signet_username()
     ))
-    .capture_stderr(false)
-    .capture_stdout(false)
-    .env("RUST_LOG", "info")
     .spawn()
     .wait_with_output()
     .unwrap();

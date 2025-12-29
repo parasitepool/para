@@ -2,11 +2,10 @@
 
 USERNAME=bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg6dzw5nk24r45dzasde25r3
 
-cargo run -- template parasite.wtf:42069 --username $USERNAME --watch
-# cargo run -- template mine.ocean.xyz:3334 --username $USERNAME
-# cargo run -- template stratum.antpool.com:3333 --username $USERNAME
+cargo run -- template parasite.wtf:42069 --username $USERNAME
+cargo run -- template mine.ocean.xyz:3334 --username $USERNAME
+cargo run -- template stratum.antpool.com:3333 --username $USERNAME
 # cargo run -- template stratum.braiins.com:3333 --username $USERNAME
-# cargo run -- template solo.atlaspool.io:3333 --username $USERNAME
-# cargo run -- template public-pool.io:3333 --username $USERNAME
-# cargo run -- template test.hydrapool.org:3333 --username $USERNAME
-
+cargo run -- template solo.atlaspool.io:3333 --username $USERNAME
+cargo run -- template public-pool.io:3333 --username $USERNAME
+cargo run -- template test.hydrapool.org:3333 --username $USERNAME

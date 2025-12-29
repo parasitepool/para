@@ -100,6 +100,10 @@ impl Template {
                                 println!("{}", serde_json::to_string_pretty(&output)?);
 
                             }
+
+                            if !self.watch {
+                                break;
+                            }
                         }
                         Ok(Event::SetDifficulty(difficulty)) => {
                            pool_difficulty = Some(difficulty);
