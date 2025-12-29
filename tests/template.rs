@@ -45,7 +45,6 @@ fn template_interpreted() {
     assert!(!output.coinbase.outputs.is_empty());
 
     assert!(output.ntime_human.contains('T'));
-    assert!(output.ntime_human.ends_with('Z'));
 
     assert_eq!(stdout.status.code(), Some(0));
 }

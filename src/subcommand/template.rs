@@ -150,8 +150,10 @@ impl Template {
             })
             .collect();
 
-        let ntime_str = notify.ntime.to_string();
-        let ntime_u64 = u64::from_str_radix(&ntime_str, 16).unwrap_or(0);
+        let ntime_unix = u32::from(notify.ntime);
+        let ntime_human = chrono::DateTime::from_timestamp(ntime_unix.into(), 0)
+            .map(|dt| dt.to_rfc3339())
+            .unwrap_or_else(|| ntime_unix.to_string());
 
         let merkle_root = merkle_root(
             &notify.coinb1,
@@ -173,7 +175,7 @@ impl Template {
             merkle_root,
             merkle_branches: notify.merkle_branches.clone(),
             ntime: notify.ntime,
-            ntime_human: Self::format_timestamp(ntime_u64),
+            ntime_human,
             nbits: notify.nbits,
             network_difficulty: Difficulty::from(notify.nbits),
             pool_difficulty,
@@ -224,11 +226,5 @@ impl Template {
         } else {
             Some(ascii_parts.join(" "))
         }
-    }
-
-    fn format_timestamp(unix_time: u64) -> String {
-        chrono::DateTime::from_timestamp(unix_time as i64, 0)
-            .map(|dt| dt.format("%Y-%m-%dT%H:%M:%SZ").to_string())
-            .unwrap_or_else(|| unix_time.to_string())
     }
 }

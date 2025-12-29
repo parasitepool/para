@@ -21,7 +21,7 @@ impl Username {
         self.as_str().split('.').next()
     }
 
-    pub fn parse_address(&self) -> std::result::Result<Address<NetworkUnchecked>, InternalError> {
+    pub fn parse_address(&self) -> Result<Address<NetworkUnchecked>, InternalError> {
         let address_str = self.address_str().ok_or(InternalError::EmptyUsername)?;
         Address::from_str(address_str).map_err(|source| InternalError::InvalidAddress { source })
     }
