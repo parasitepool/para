@@ -176,6 +176,9 @@ pub enum InternalError {
 
     #[snafu(display("Address {address} is not valid for {expected} network"))]
     NetworkMismatch { expected: Network, address: String },
+
+    #[snafu(display("Could not determine network from address"))]
+    UnknownNetwork,
 }
 
 #[cfg(test)]

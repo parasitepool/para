@@ -122,7 +122,7 @@ impl Template {
         subscription: &SubscribeResult,
         notify: &Notify,
         pool_difficulty: Option<Difficulty>,
-    ) -> anyhow::Result<Output> {
+    ) -> Result<Output> {
         let extranonce2 = Extranonce::random(subscription.extranonce2_size);
         let coinbase_bin = hex::decode(format!(
             "{}{}{}{}",
@@ -134,13 +134,15 @@ impl Template {
 
         let ascii_tag = Self::extract_coinbase_text(&coinbase_tx);
 
+        let network = self.username.infer_network()?;
+
         let outputs = coinbase_tx
             .output
             .iter()
             .map(|txout| CoinbaseOutput {
                 value: txout.value,
                 script_pubkey: txout.script_pubkey.clone(),
-                address: Address::from_script(&txout.script_pubkey, Network::Bitcoin)
+                address: Address::from_script(&txout.script_pubkey, network)
                     .map(|address| address.to_string())
                     .ok(),
             })
@@ -186,11 +188,23 @@ impl Template {
         let script_sig = &tx.input[0].script_sig;
         let bytes = script_sig.as_bytes();
 
-        // Extract ASCII strings from the scriptSig (skip first 4 bytes - height)
+        if bytes.is_empty() {
+            return None;
+        }
+
+        // BIP34: first byte is push opcode indicating block height length
+        let height_len = bytes[0] as usize;
+        let skip_bytes = 1 + height_len;
+
+        if bytes.len() <= skip_bytes {
+            return None;
+        }
+
+        // Extract ASCII strings from remaining bytes (pool tag / arbitrary data)
         let mut ascii_parts: Vec<String> = Vec::new();
         let mut current_string = String::new();
 
-        for &byte in bytes.iter().skip(4) {
+        for &byte in bytes.iter().skip(skip_bytes) {
             if (0x20..=0x7e).contains(&byte) {
                 current_string.push(byte as char);
             } else if !current_string.is_empty() {
@@ -200,6 +214,7 @@ impl Template {
                 current_string.clear();
             }
         }
+
         if current_string.len() >= 3 {
             ascii_parts.push(current_string);
         }
