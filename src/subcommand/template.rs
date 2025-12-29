@@ -196,7 +196,6 @@ impl Template {
             return None;
         }
 
-        // BIP34: first byte is push opcode indicating block height length
         let height_len = bytes[0] as usize;
         let skip_bytes = 1 + height_len;
 
@@ -204,7 +203,6 @@ impl Template {
             return None;
         }
 
-        // Extract ASCII strings from remaining bytes (pool tag / arbitrary data)
         let mut ascii_parts: Vec<String> = Vec::new();
         let mut current_string = String::new();
 

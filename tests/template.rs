@@ -30,7 +30,6 @@ fn template_raw() {
 #[timeout(90000)]
 fn template_interpreted() {
     let ckpool = TestCkpool::spawn();
-
     let stratum_endpoint = ckpool.stratum_endpoint();
 
     let template = CommandBuilder::new(format!(
@@ -44,17 +43,11 @@ fn template_interpreted() {
 
     assert!(output.network_difficulty > Difficulty::from(0.0));
     assert!(output.clean_jobs);
+    assert!(output.coinbase.size_bytes > 0);
+    assert!(!output.coinbase.outputs.is_empty());
 
-    // Verify timestamp is ISO 8601 format (contains T and ends with Z)
-    let ts = &output.ntime_human;
-    assert!(ts.contains('T'), "timestamp missing T: {}", ts);
-    assert!(ts.trim().ends_with('Z'), "timestamp missing Z: {}", ts);
-
-    // Verify merkle root is present and valid hex (64 chars)
-    // assert_eq!(output.merkle_root.len(), 64);
-
-    // Verify version_info is populated
-    // assert!(output.version_info.bits > 0);
+    assert!(output.ntime_human.contains('T'));
+    assert!(output.ntime_human.ends_with('Z'));
 
     assert_eq!(stdout.status.code(), Some(0));
 }
