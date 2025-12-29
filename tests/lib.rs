@@ -54,8 +54,8 @@ use {
     para::{
         USER_AGENT,
         stratum::{
-            self, ClientError, Difficulty, Extranonce, JobId, Nonce, Ntime, StratumError, Username,
-            Version,
+            self, ClientError, Difficulty, Extranonce, JobId, Nonce, Notify, Ntime, StratumError,
+            Username, Version,
         },
         subcommand::{
             miner::Share,

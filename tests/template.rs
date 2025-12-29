@@ -4,8 +4,6 @@ use {super::*, para::subcommand::template::Output};
 #[serial(bitcoind)]
 #[timeout(90000)]
 fn template_raw() {
-    use para::stratum::Notify;
-
     let ckpool = TestCkpool::spawn();
 
     let stratum_endpoint = ckpool.stratum_endpoint();
@@ -41,7 +39,7 @@ fn template_interpreted() {
     let stdout = template.wait_with_output().unwrap();
     let output = serde_json::from_str::<Output>(&String::from_utf8_lossy(&stdout.stdout)).unwrap();
 
-    assert!(output.network_difficulty > Difficulty::from(0.0));
+    assert!(output.network_difficulty > Difficulty::from(0.00001));
     assert!(output.clean_jobs);
     assert!(output.coinbase.size_bytes > 0);
     assert!(!output.coinbase.outputs.is_empty());
