@@ -398,11 +398,10 @@ mod tests {
 
     #[test]
     fn from_blockhash_max_target_is_difficulty_one() {
-        // Difficulty 1 target as a hash
         let target_max = Target::MAX;
         let hash = BlockHash::from_byte_array(target_max.to_le_bytes());
         let diff = Difficulty::from(hash);
-        // Should be very close to difficulty 1
+
         assert!(
             relative_error(diff.as_f64(), 1.0) < 1e-6,
             "max target hash should be difficulty 1, got {diff}"
@@ -411,11 +410,9 @@ mod tests {
 
     #[test]
     fn from_blockhash_lower_hash_means_higher_difficulty() {
-        // Create two hashes: one easier (larger value), one harder (smaller value)
-        // Use the scaling test approach - quarter the target for 4x difficulty
         let easy_target = Target::MAX;
         let easy_u256 = U256::from_big_endian(&easy_target.to_be_bytes());
-        let hard_u256 = easy_u256 >> 2; // Quarter = 4x difficulty
+        let hard_u256 = easy_u256 >> 2;
         let hard_target = Target::from_be_bytes(hard_u256.to_big_endian());
 
         let easy_hash = BlockHash::from_byte_array(easy_target.to_le_bytes());
@@ -432,10 +429,8 @@ mod tests {
 
     #[test]
     fn from_blockhash_difficulty_scales_correctly() {
-        // If we halve the target, difficulty should double
         let target_1 = Target::MAX;
 
-        // Create a target that's half of MAX (difficulty ~2)
         let target_bytes = target_1.to_be_bytes();
         let target_u256 = U256::from_big_endian(&target_bytes);
         let half_target_u256 = target_u256 >> 1;
