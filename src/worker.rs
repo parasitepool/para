@@ -30,14 +30,14 @@ impl Worker {
         }
     }
 
-    pub(crate) fn record_accepted(&self, difficulty: f64) {
+    pub(crate) fn record_accepted(&self, difficulty: f64, share_difficulty: f64) {
         let now = Instant::now();
         let mut stats = self.stats.lock();
         stats.dsps_1m.record(difficulty, now);
         stats.sps_1m.record(1.0, now);
         stats.last_share = Some(now);
-        if difficulty > stats.best_ever {
-            stats.best_ever = difficulty;
+        if share_difficulty > stats.best_ever {
+            stats.best_ever = share_difficulty;
         }
         drop(stats);
         self.accepted.fetch_add(1, Ordering::Relaxed);

@@ -56,7 +56,7 @@ impl Metatron {
         let worker = self.get_or_create_worker(share.address.clone(), &share.workername);
 
         if share.result {
-            worker.record_accepted(share.sdiff);
+            worker.record_accepted(share.diff, share.share_diff);
         } else {
             worker.record_rejected();
         }
