@@ -37,28 +37,39 @@ pub fn spawn_with_handle(
     let acme_contacts = config.acme_contacts.clone();
     let acme_cache = config.acme_cache.clone();
 
+    // Bind synchronously to fail fast if port is already in use
+    let addr = (address.as_str(), port)
+        .to_socket_addrs()?
+        .next()
+        .ok_or_else(|| anyhow!("failed to resolve address {}:{}", address, port))?;
+
+    let listener = std::net::TcpListener::bind(addr)
+        .with_context(|| format!("failed to bind HTTP server to {addr}"))?;
+
+    listener.set_nonblocking(true)?;
+
+    let tls_enabled = !acme_domains.is_empty() && !acme_contacts.is_empty();
+
+    if tls_enabled {
+        info!("HTTP server listening on https://{addr}");
+    } else {
+        info!("HTTP server listening on http://{addr}");
+    }
+
     Ok(tokio::spawn(async move {
-        if !acme_domains.is_empty() && !acme_contacts.is_empty() {
+        if tls_enabled {
             info!(
                 "Getting certificate for {} using contact email {}",
                 acme_domains[0], acme_contacts[0]
             );
 
-            let addr = (address.as_str(), port).to_socket_addrs()?.next().unwrap();
-
-            info!("HTTP server listening on https://{addr}");
-
-            axum_server::Server::bind(addr)
+            axum_server::from_tcp(listener)
                 .handle(handle)
                 .acceptor(acceptor(acme_domains, acme_contacts, acme_cache).unwrap())
                 .serve(router.into_make_service())
                 .await
         } else {
-            let addr = (address.as_str(), port).to_socket_addrs()?.next().unwrap();
-
-            info!("HTTP server listening on http://{addr}");
-
-            axum_server::Server::bind(addr)
+            axum_server::from_tcp(listener)
                 .handle(handle)
                 .serve(router.into_make_service())
                 .await
