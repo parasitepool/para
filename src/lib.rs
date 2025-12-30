@@ -120,7 +120,7 @@ mod coinbase_builder;
 mod connection;
 mod decay;
 mod generator;
-pub mod hash_rate;
+mod hash_rate;
 mod http_server;
 mod job;
 mod jobs;
