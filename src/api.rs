@@ -1,6 +1,7 @@
 use {
     super::*,
     axum::extract::{Json, Path, State},
+    http_server::error::{OptionExt, ServerResult},
 };
 
 pub(crate) fn router(metatron: Arc<Metatron>) -> Router {
@@ -11,22 +12,26 @@ pub(crate) fn router(metatron: Arc<Metatron>) -> Router {
         .with_state(metatron)
 }
 
-async fn stats(State(metatron): State<Arc<Metatron>>) -> Json<PoolStats> {
-    Json(metatron.stats())
+async fn stats(State(metatron): State<Arc<Metatron>>) -> ServerResult<Response> {
+    Ok(Json(metatron.stats()).into_response())
 }
 
-async fn users(State(metatron): State<Arc<Metatron>>) -> Json<Vec<UserSummary>> {
-    Json(metatron.users())
+async fn users(State(metatron): State<Arc<Metatron>>) -> ServerResult<Response> {
+    Ok(Json(metatron.users()).into_response())
 }
 
 async fn user(
     State(metatron): State<Arc<Metatron>>,
     Path(address): Path<Address<NetworkUnchecked>>,
-) -> impl IntoResponse {
-    match metatron.user(&address.assume_checked()) {
-        Some(user) => Ok(Json(user)),
-        None => Err(StatusCode::NOT_FOUND),
-    }
+) -> ServerResult<Response> {
+    let address = address.assume_checked();
+
+    Ok(Json(
+        metatron
+            .user(&address)
+            .ok_or_not_found(|| format!("User {address}"))?,
+    )
+    .into_response())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

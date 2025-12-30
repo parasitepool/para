@@ -5,7 +5,7 @@ use {
         Extension, Json, Router,
         extract::DefaultBodyLimit,
         http::{
-            self, HeaderValue, StatusCode,
+            HeaderValue, StatusCode,
             header::{CONTENT_DISPOSITION, CONTENT_TYPE},
         },
         response::{IntoResponse, Response},

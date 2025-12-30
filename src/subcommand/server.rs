@@ -2,18 +2,20 @@ use {
     super::*,
     crate::{
         ckpool,
-        http_server::{self, HttpConfig},
+        http_server::{
+            self, HttpConfig,
+            accept_json::AcceptJson,
+            error::{OptionExt, ServerError, ServerResult},
+        },
         subcommand::{
             server::{account::account_router, sharediff::share_difficulty_router},
             sync::{ShareBatch, SyncResponse},
         },
     },
-    accept_json::AcceptJson,
     aggregator::Aggregator,
     axum::extract::{Path, Query},
     cache::Cache,
     database::Database,
-    error::{OptionExt, ServerError, ServerResult},
     reqwest::{Client, ClientBuilder, header},
     server_config::ServerConfig,
     std::sync::OnceLock,
@@ -28,12 +30,10 @@ use {
     },
 };
 
-mod accept_json;
 pub mod account;
 mod aggregator;
 mod cache;
 pub mod database;
-pub(crate) mod error;
 pub mod notifications;
 mod server_config;
 mod sharediff;

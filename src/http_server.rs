@@ -1,5 +1,8 @@
 use super::*;
 
+pub(crate) mod accept_json;
+pub(crate) mod error;
+
 #[derive(Clone, Debug)]
 pub struct HttpConfig {
     pub address: String,
