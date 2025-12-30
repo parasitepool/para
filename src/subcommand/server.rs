@@ -30,7 +30,6 @@ use {
 mod accept_json;
 pub mod account;
 mod aggregator;
-pub mod api;
 mod cache;
 pub mod database;
 pub(crate) mod error;
@@ -56,6 +55,8 @@ pub(crate) fn bearer_auth<T: Default>(
 #[derive(RustEmbed)]
 #[folder = "static"]
 struct StaticAssets;
+
+pub type Status = StatusHtml;
 
 #[derive(Debug)]
 struct AccountUpdate {

@@ -60,7 +60,8 @@ ping-auth host='parasite.wtf' username='bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg
   cargo run ping --username {{username}} --password {{password}} {{host}}:42069
 
 pool: 
-  cargo run -- pool \
+  RUST_LOG=info cargo run -- pool \
+    --api-port 8080 \
     --chain signet \
     --address 0.0.0.0 \
     --bitcoin-rpc-username satoshi \
@@ -81,7 +82,7 @@ pool-mainnet:
     --start-diff 999 \
     --vardiff-window 300 \
     --vardiff-period 5 \
-    --zmq-block-notifications tcp://127.0.0.1:28332
+    --zmq-block-notifications tcp://127.0.0.1:28333
 
 server: 
   RUST_LOG=info cargo run -- server \

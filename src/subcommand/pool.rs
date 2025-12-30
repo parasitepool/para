@@ -1,4 +1,4 @@
-use {super::*, pool_config::PoolConfig};
+use {super::*, crate::http_server, pool_config::PoolConfig};
 
 pub(crate) mod pool_config;
 
@@ -30,6 +30,20 @@ impl Pool {
             tokio::spawn(async move {
                 metatron.run(share_rx, None, cancel).await;
             })
+        };
+
+        // Spawn HTTP API server if configured
+        let api_handle = if let Some(api_port) = config.api_port() {
+            let http_config = http_server::HttpConfig {
+                address: config.address(),
+                port: api_port,
+                acme_domains: config.acme_domains(),
+                acme_contacts: config.acme_contacts(),
+                acme_cache: config.acme_cache(),
+            };
+            Some(http_server::spawn(http_config, metatron.clone(), cancel_token.clone())?)
+        } else {
+            None
         };
 
         if !integration_test() && !logs_enabled() {
@@ -88,6 +102,11 @@ impl Pool {
         drop(share_tx);
         let _ = metatron_handle.await;
         info!("Metatron stopped");
+
+        if let Some(handle) = api_handle {
+            let _ = handle.await;
+            info!("HTTP API server stopped");
+        }
 
         Ok(())
     }

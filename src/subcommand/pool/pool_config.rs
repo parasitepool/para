@@ -4,6 +4,14 @@ use super::*;
 pub(crate) struct PoolConfig {
     #[arg(long, help = "Listen at <ADDRESS>.")]
     address: Option<String>,
+    #[arg(long, help = "Enable HTTP API on <API_PORT>. Disabled if not set.")]
+    api_port: Option<u16>,
+    #[arg(long, help = "ACME domain for TLS certificate.")]
+    acme_domain: Vec<String>,
+    #[arg(long, help = "ACME contact email for TLS certificate.")]
+    acme_contact: Vec<String>,
+    #[arg(long, help = "ACME cache directory.", default_value = "acme-cache")]
+    acme_cache: PathBuf,
     #[arg(long, help = "Load Bitcoin Core data dir from <BITCOIN_DATA_DIR>.")]
     bitcoin_data_dir: Option<PathBuf>,
     #[arg(
@@ -200,5 +208,25 @@ impl PoolConfig {
 
     pub fn vardiff_window(&self) -> Duration {
         Duration::from_secs_f64(self.vardiff_window)
+    }
+
+    pub fn api_port(&self) -> Option<u16> {
+        self.api_port
+    }
+
+    pub fn acme_domains(&self) -> Vec<String> {
+        self.acme_domain.clone()
+    }
+
+    pub fn acme_contacts(&self) -> Vec<String> {
+        self.acme_contact.clone()
+    }
+
+    pub fn acme_cache(&self) -> PathBuf {
+        if let Some(data_dir) = &self.data_dir {
+            data_dir.join(&self.acme_cache)
+        } else {
+            self.acme_cache.clone()
+        }
     }
 }

@@ -1,4 +1,7 @@
-use super::*;
+use {
+    super::*,
+    http_server::api::{PoolStats, UserDetail, UserSummary, WorkerSummary},
+};
 
 pub(crate) struct Metatron {
     blocks: AtomicU64,
@@ -138,6 +141,72 @@ impl Metatron {
 
     pub(crate) fn uptime(&self) -> Duration {
         self.started.elapsed()
+    }
+
+    /// Returns aggregate pool statistics for the HTTP API.
+    pub fn stats(&self) -> PoolStats {
+        PoolStats {
+            hash_rate: self.hash_rate_1m(),
+            shares_per_second: self.sps_1m(),
+            users: self.total_users(),
+            workers: self.total_workers(),
+            connections: self.total_connections(),
+            accepted: self.accepted(),
+            rejected: self.rejected(),
+            blocks: self.total_blocks(),
+            best_ever: self.best_ever(),
+            uptime_secs: self.uptime().as_secs(),
+        }
+    }
+
+    /// Returns summary information for all users.
+    pub fn users(&self) -> Vec<UserSummary> {
+        self.users
+            .iter()
+            .map(|entry| {
+                let user = entry.value();
+                UserSummary {
+                    address: entry.key().to_string(),
+                    hash_rate: user.hash_rate_1m(),
+                    shares_per_second: user.sps_1m(),
+                    workers: user.worker_count(),
+                    accepted: user.accepted(),
+                    rejected: user.rejected(),
+                    best_ever: user.best_ever(),
+                }
+            })
+            .collect()
+    }
+
+    /// Returns detailed information for a specific user by address.
+    pub fn user(&self, address: &str) -> Option<UserDetail> {
+        let parsed: Address = address
+            .parse::<Address<bitcoin::address::NetworkUnchecked>>()
+            .ok()?
+            .assume_checked();
+
+        self.users.get(&parsed).map(|entry| {
+            let user = entry.value();
+            UserDetail {
+                address: parsed.to_string(),
+                hash_rate: user.hash_rate_1m(),
+                shares_per_second: user.sps_1m(),
+                accepted: user.accepted(),
+                rejected: user.rejected(),
+                best_ever: user.best_ever(),
+                workers: user
+                    .workers()
+                    .map(|worker| WorkerSummary {
+                        name: worker.workername().to_string(),
+                        hash_rate: worker.hash_rate_1m(),
+                        shares_per_second: worker.sps_1m(),
+                        accepted: worker.accepted(),
+                        rejected: worker.rejected(),
+                        best_ever: worker.best_ever(),
+                    })
+                    .collect(),
+            }
+        })
     }
 }
 

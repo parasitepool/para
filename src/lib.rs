@@ -111,9 +111,8 @@ use {
     zmq::Zmq,
 };
 
-pub use subcommand::server::api;
-
 mod arguments;
+pub mod http_server;
 mod block_template;
 mod chain;
 pub mod ckpool;
@@ -121,7 +120,7 @@ mod coinbase_builder;
 mod connection;
 mod decay;
 mod generator;
-mod hash_rate;
+pub mod hash_rate;
 mod job;
 mod jobs;
 mod metatron;

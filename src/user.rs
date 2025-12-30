@@ -59,6 +59,10 @@ impl User {
             .filter_map(|worker| worker.last_share())
             .max()
     }
+
+    pub(crate) fn workers(&self) -> impl Iterator<Item = Arc<Worker>> + '_ {
+        self.workers.iter().map(|entry| entry.value().clone())
+    }
 }
 
 impl From<Address> for User {
