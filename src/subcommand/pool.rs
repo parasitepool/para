@@ -44,10 +44,10 @@ impl Pool {
                 acme_contacts: config.acme_contacts(),
                 acme_cache: config.acme_cache(),
             };
-            let router = api::router(metatron.clone());
+
             Some(http_server::spawn(
                 http_config,
-                router,
+                api::router(metatron.clone()),
                 cancel_token.clone(),
             )?)
         } else {
@@ -104,10 +104,13 @@ impl Pool {
             "Waiting for {} active connections to close...",
             connection_tasks.len()
         );
+
         while connection_tasks.join_next().await.is_some() {}
+
         info!("All connections closed");
 
         drop(share_tx);
+
         let _ = metatron_handle.await;
         info!("Metatron stopped");
 

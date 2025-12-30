@@ -62,7 +62,7 @@ impl User {
             .max()
     }
 
-    pub(crate) fn workers(&self) -> impl Iterator<Item = Arc<Worker>> + '_ {
+    pub(crate) fn workers(&self) -> impl Iterator<Item = Arc<Worker>> {
         self.workers.iter().map(|entry| entry.value().clone())
     }
 }
