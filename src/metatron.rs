@@ -177,16 +177,11 @@ impl Metatron {
             .collect()
     }
 
-    pub(crate) fn user(&self, address: &str) -> Option<UserDetail> {
-        let parsed: Address = address
-            .parse::<Address<bitcoin::address::NetworkUnchecked>>()
-            .ok()?
-            .assume_checked();
-
-        self.users.get(&parsed).map(|entry| {
+    pub(crate) fn user(&self, address: &Address) -> Option<UserDetail> {
+        self.users.get(address).map(|entry| {
             let user = entry.value();
             UserDetail {
-                address: parsed.to_string(),
+                address: address.to_string(),
                 hash_rate: user.hash_rate_1m(),
                 shares_per_second: user.sps_1m(),
                 accepted: user.accepted(),

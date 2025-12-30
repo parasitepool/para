@@ -21,9 +21,9 @@ async fn users(State(metatron): State<Arc<Metatron>>) -> Json<Vec<UserSummary>> 
 
 async fn user(
     State(metatron): State<Arc<Metatron>>,
-    Path(address): Path<String>,
+    Path(address): Path<Address<NetworkUnchecked>>,
 ) -> impl IntoResponse {
-    match metatron.user(&address) {
+    match metatron.user(&address.assume_checked()) {
         Some(user) => Ok(Json(user)),
         None => Err(StatusCode::NOT_FOUND),
     }

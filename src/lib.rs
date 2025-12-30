@@ -17,6 +17,7 @@ use {
     bitcoin::{
         Address, Amount, Block, BlockHash, CompactTarget, Network, OutPoint, ScriptBuf, Sequence,
         Target, Transaction, TxIn, TxOut, Txid, VarInt, Witness,
+        address::NetworkUnchecked,
         block::{self, Header},
         consensus::{self, Decodable, encode},
         hashes::Hash,
