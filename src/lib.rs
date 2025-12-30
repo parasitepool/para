@@ -112,7 +112,6 @@ use {
 };
 
 mod arguments;
-pub mod http_server;
 mod block_template;
 mod chain;
 pub mod ckpool;
@@ -121,6 +120,7 @@ mod connection;
 mod decay;
 mod generator;
 pub mod hash_rate;
+mod http_server;
 mod job;
 mod jobs;
 mod metatron;

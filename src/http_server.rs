@@ -1,27 +1,99 @@
 use {
-    crate::metatron::Metatron,
-    anyhow::{Result, ensure},
-    axum::Router,
-    axum_server::Handle,
-    futures::StreamExt,
-    rustls_acme::{
-        AcmeConfig,
-        acme::{LETS_ENCRYPT_PRODUCTION_DIRECTORY, LETS_ENCRYPT_STAGING_DIRECTORY},
-        axum::AxumAcceptor,
-        caches::DirCache,
+    super::*,
+    crate::{HashRate, metatron::Metatron},
+    axum::{
+        Json, Router,
+        extract::{Path, State},
+        http::StatusCode,
+        response::IntoResponse,
+        routing::get,
     },
-    std::{
-        io,
-        net::ToSocketAddrs,
-        path::PathBuf,
-        sync::{Arc, LazyLock},
-    },
-    tokio::task::JoinHandle,
-    tokio_util::sync::CancellationToken,
-    tracing::{error, info},
+    serde::{Deserialize, Serialize},
+    std::sync::Arc,
 };
 
-pub mod api;
+/// Aggregate pool statistics.
+///
+/// Returned by the `GET /api/stats` endpoint.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PoolStats {
+    pub hash_rate: HashRate,
+    pub shares_per_second: f64,
+    pub users: usize,
+    pub workers: usize,
+    pub connections: u64,
+    pub accepted: u64,
+    pub rejected: u64,
+    pub blocks: u64,
+    pub best_ever: f64,
+    pub uptime_secs: u64,
+}
+
+/// Summary information for a user.
+///
+/// Returned by the `GET /api/users` endpoint.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserSummary {
+    pub address: String,
+    pub hash_rate: HashRate,
+    pub shares_per_second: f64,
+    pub workers: usize,
+    pub accepted: u64,
+    pub rejected: u64,
+    pub best_ever: f64,
+}
+
+/// Detailed information for a user, including their workers.
+///
+/// Returned by the `GET /api/users/:address` endpoint.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserDetail {
+    pub address: String,
+    pub hash_rate: HashRate,
+    pub shares_per_second: f64,
+    pub accepted: u64,
+    pub rejected: u64,
+    pub best_ever: f64,
+    pub workers: Vec<WorkerSummary>,
+}
+
+/// Summary information for a worker.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkerSummary {
+    pub name: String,
+    pub hash_rate: HashRate,
+    pub shares_per_second: f64,
+    pub accepted: u64,
+    pub rejected: u64,
+    pub best_ever: f64,
+}
+
+/// Creates the API router with all endpoints.
+pub fn create_router(metatron: Arc<Metatron>) -> Router {
+    Router::new()
+        .route("/api/stats", get(api_stats))
+        .route("/api/users", get(api_users))
+        .route("/api/users/{address}", get(api_user))
+        .with_state(metatron)
+}
+
+async fn api_stats(State(metatron): State<Arc<Metatron>>) -> Json<PoolStats> {
+    Json(metatron.stats())
+}
+
+async fn api_users(State(metatron): State<Arc<Metatron>>) -> Json<Vec<UserSummary>> {
+    Json(metatron.users())
+}
+
+async fn api_user(
+    State(metatron): State<Arc<Metatron>>,
+    Path(address): Path<String>,
+) -> impl IntoResponse {
+    match metatron.user(&address) {
+        Some(user) => Ok(Json(user)),
+        None => Err(StatusCode::NOT_FOUND),
+    }
+}
 
 /// Configuration for the HTTP API server.
 #[derive(Clone, Debug)]
@@ -35,6 +107,7 @@ pub struct HttpConfig {
 
 impl HttpConfig {
     /// Returns true if TLS should be enabled (both domains and contacts are configured).
+    #[allow(unused)]
     pub fn tls_enabled(&self) -> bool {
         !self.acme_domains.is_empty() && !self.acme_contacts.is_empty()
     }
@@ -48,7 +121,7 @@ pub fn spawn(
     config: HttpConfig,
     metatron: Arc<Metatron>,
     cancel_token: CancellationToken,
-) -> Result<JoinHandle<io::Result<()>>> {
+) -> Result<task::JoinHandle<io::Result<()>>> {
     let router = api::create_router(metatron);
     let handle = Handle::new();
 
@@ -80,10 +153,7 @@ fn spawn_server(
                 acme_domains[0], acme_contacts[0]
             );
 
-            let addr = (address.as_str(), port)
-                .to_socket_addrs()?
-                .next()
-                .unwrap();
+            let addr = (address.as_str(), port).to_socket_addrs()?.next().unwrap();
 
             info!("HTTP API listening on https://{addr}");
 
@@ -93,10 +163,7 @@ fn spawn_server(
                 .serve(router.into_make_service())
                 .await
         } else {
-            let addr = (address.as_str(), port)
-                .to_socket_addrs()?
-                .next()
-                .unwrap();
+            let addr = (address.as_str(), port).to_socket_addrs()?.next().unwrap();
 
             info!("HTTP API listening on http://{addr}");
 
@@ -155,4 +222,3 @@ fn acceptor(
 
     Ok(acceptor)
 }
-

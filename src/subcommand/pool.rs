@@ -32,7 +32,6 @@ impl Pool {
             })
         };
 
-        // Spawn HTTP API server if configured
         let api_handle = if let Some(api_port) = config.api_port() {
             let http_config = http_server::HttpConfig {
                 address: config.address(),
@@ -41,7 +40,11 @@ impl Pool {
                 acme_contacts: config.acme_contacts(),
                 acme_cache: config.acme_cache(),
             };
-            Some(http_server::spawn(http_config, metatron.clone(), cancel_token.clone())?)
+            Some(http_server::spawn(
+                http_config,
+                metatron.clone(),
+                cancel_token.clone(),
+            )?)
         } else {
             None
         };
