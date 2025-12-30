@@ -145,8 +145,8 @@ impl Metatron {
 
     pub(crate) fn stats(&self) -> PoolStats {
         PoolStats {
-            hash_rate: self.hash_rate_1m(),
-            shares_per_second: self.sps_1m(),
+            hash_rate_1m: self.hash_rate_1m(),
+            sps_1m: self.sps_1m(),
             users: self.total_users(),
             workers: self.total_workers(),
             connections: self.total_connections(),
@@ -154,6 +154,7 @@ impl Metatron {
             rejected: self.rejected(),
             blocks: self.total_blocks(),
             best_ever: self.best_ever(),
+            last_share: self.last_share().map(|time| time.elapsed().as_secs()),
             uptime_secs: self.uptime().as_secs(),
         }
     }
@@ -209,21 +210,15 @@ impl Metatron {
 
 impl StatusLine for Metatron {
     fn status_line(&self) -> String {
-        let last = self
-            .last_share()
-            .map(|t| format!("{}s", t.elapsed().as_secs()))
-            .unwrap_or_else(|| "-".into());
-
         format!(
-            "hash_rate={}  sps={:.2}  connections={}  users={}  workers={}  accepted={}  rejected={}  last={last}  best_ever={}  blocks={}  uptime={}s",
+            "sps={:.2}  hash_rate={}  connections={}  users={}  workers={}  accepted={}  rejected={}  blocks={}  uptime={}s",
+            self.sps_1m() + 0.0,
             self.hash_rate_1m(),
-            self.sps_1m(),
             self.total_connections(),
             self.total_users(),
             self.total_workers(),
             self.accepted(),
             self.rejected(),
-            self.best_ever(),
             self.total_blocks(),
             self.uptime().as_secs()
         )

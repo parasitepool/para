@@ -5,21 +5,21 @@ use {
 
 pub(crate) fn router(metatron: Arc<Metatron>) -> Router {
     Router::new()
-        .route("/api/stats", get(api_stats))
-        .route("/api/users", get(api_users))
-        .route("/api/users/{address}", get(api_user))
+        .route("/api/stats", get(stats))
+        .route("/api/users", get(users))
+        .route("/api/users/{address}", get(user))
         .with_state(metatron)
 }
 
-async fn api_stats(State(metatron): State<Arc<Metatron>>) -> Json<PoolStats> {
+async fn stats(State(metatron): State<Arc<Metatron>>) -> Json<PoolStats> {
     Json(metatron.stats())
 }
 
-async fn api_users(State(metatron): State<Arc<Metatron>>) -> Json<Vec<UserSummary>> {
+async fn users(State(metatron): State<Arc<Metatron>>) -> Json<Vec<UserSummary>> {
     Json(metatron.users())
 }
 
-async fn api_user(
+async fn user(
     State(metatron): State<Arc<Metatron>>,
     Path(address): Path<String>,
 ) -> impl IntoResponse {
@@ -31,8 +31,8 @@ async fn api_user(
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolStats {
-    pub hash_rate: HashRate,
-    pub shares_per_second: f64,
+    pub hash_rate_1m: HashRate,
+    pub sps_1m: f64,
     pub users: usize,
     pub workers: usize,
     pub connections: u64,
@@ -40,6 +40,7 @@ pub struct PoolStats {
     pub rejected: u64,
     pub blocks: u64,
     pub best_ever: f64,
+    pub last_share: Option<u64>,
     pub uptime_secs: u64,
 }
 

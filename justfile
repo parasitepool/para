@@ -60,7 +60,7 @@ ping-auth host='parasite.wtf' username='bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg
   cargo run ping --username {{username}} --password {{password}} {{host}}:42069
 
 pool: 
-  RUST_LOG=info cargo run -- pool \
+  cargo run -- pool \
     --api-port 8080 \
     --chain signet \
     --address 0.0.0.0 \
@@ -73,7 +73,7 @@ pool:
     --zmq-block-notifications tcp://127.0.0.1:28332
 
 pool-mainnet: 
-  cargo run --release -- pool \
+  cargo run -- pool \
     --api-port 8080 \
     --chain mainnet \
     --address 0.0.0.0 \

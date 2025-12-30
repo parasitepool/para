@@ -37,7 +37,6 @@ pub fn spawn_with_handle(
     let acme_contacts = config.acme_contacts.clone();
     let acme_cache = config.acme_cache.clone();
 
-    // Bind synchronously to fail fast if port is already in use
     let addr = (address.as_str(), port)
         .to_socket_addrs()?
         .next()
@@ -51,7 +50,7 @@ pub fn spawn_with_handle(
     let tls_enabled = !acme_domains.is_empty() && !acme_contacts.is_empty();
 
     if tls_enabled {
-        info!("HTTP server listening on https://{addr}");
+        info!("HTTPS server listening on https://{addr}");
     } else {
         info!("HTTP server listening on http://{addr}");
     }
