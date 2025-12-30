@@ -1,14 +1,6 @@
 use {
-    crate::{HashRate, metatron::Metatron},
-    axum::{
-        Json, Router,
-        extract::{Path, State},
-        http::StatusCode,
-        response::IntoResponse,
-        routing::get,
-    },
-    serde::{Deserialize, Serialize},
-    std::sync::Arc,
+    super::*,
+    axum::extract::{Json, Path, State},
 };
 
 pub(crate) fn router(metatron: Arc<Metatron>) -> Router {

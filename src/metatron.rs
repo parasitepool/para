@@ -143,8 +143,7 @@ impl Metatron {
         self.started.elapsed()
     }
 
-    /// Returns aggregate pool statistics for the HTTP API.
-    pub fn stats(&self) -> PoolStats {
+    pub(crate) fn stats(&self) -> PoolStats {
         PoolStats {
             hash_rate: self.hash_rate_1m(),
             shares_per_second: self.sps_1m(),
@@ -159,8 +158,7 @@ impl Metatron {
         }
     }
 
-    /// Returns summary information for all users.
-    pub fn users(&self) -> Vec<UserSummary> {
+    pub(crate) fn users(&self) -> Vec<UserSummary> {
         self.users
             .iter()
             .map(|entry| {
@@ -178,8 +176,7 @@ impl Metatron {
             .collect()
     }
 
-    /// Returns detailed information for a specific user by address.
-    pub fn user(&self, address: &str) -> Option<UserDetail> {
+    pub(crate) fn user(&self, address: &str) -> Option<UserDetail> {
         let parsed: Address = address
             .parse::<Address<bitcoin::address::NetworkUnchecked>>()
             .ok()?

@@ -2,8 +2,8 @@ use {
     anyhow::{Context, Error, anyhow, bail, ensure},
     arguments::Arguments,
     axum::{
-        Extension, Router,
-        extract::{DefaultBodyLimit, Json},
+        Extension, Json, Router,
+        extract::DefaultBodyLimit,
         http::{
             self, HeaderValue, StatusCode,
             header::{CONTENT_DISPOSITION, CONTENT_TYPE},
@@ -45,6 +45,12 @@ use {
     metatron::Metatron,
     reqwest::Url,
     rust_embed::RustEmbed,
+    rustls_acme::{
+        AcmeConfig,
+        acme::{LETS_ENCRYPT_PRODUCTION_DIRECTORY, LETS_ENCRYPT_STAGING_DIRECTORY},
+        axum::AxumAcceptor,
+        caches::DirCache,
+    },
     serde::{
         Deserialize, Serialize,
         de::{self, Deserializer},
@@ -61,14 +67,14 @@ use {
         fmt::{self, Display, Formatter},
         fs,
         io::{self, Write},
-        net::SocketAddr,
+        net::{SocketAddr, ToSocketAddrs},
         num::NonZeroUsize,
         ops::{Add, AddAssign, Div, Mul, Sub, SubAssign},
         path::{Path, PathBuf},
         process,
         str::FromStr,
         sync::{
-            Arc,
+            Arc, LazyLock,
             atomic::{AtomicU64, Ordering},
         },
         thread,
