@@ -74,6 +74,7 @@ pool:
 
 pool-mainnet: 
   cargo run --release -- pool \
+    --api-port 8080 \
     --chain mainnet \
     --address 0.0.0.0 \
     --bitcoin-rpc-username satoshi \
