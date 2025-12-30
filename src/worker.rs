@@ -7,7 +7,6 @@ struct Stats {
     last_share: Option<Instant>,
 }
 
-#[allow(unused)]
 pub(crate) struct Worker {
     workername: String,
     stats: Mutex<Stats>,

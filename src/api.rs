@@ -68,6 +68,7 @@ pub struct UserDetail {
     pub accepted: u64,
     pub rejected: u64,
     pub best_ever: f64,
+    pub authorized: u64,
     pub workers: Vec<WorkerSummary>,
 }
 

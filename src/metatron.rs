@@ -181,12 +181,13 @@ impl Metatron {
         self.users.get(address).map(|entry| {
             let user = entry.value();
             UserDetail {
-                address: address.to_string(),
+                address: user.address.to_string(),
                 hash_rate: user.hash_rate_1m(),
                 shares_per_second: user.sps_1m(),
                 accepted: user.accepted(),
                 rejected: user.rejected(),
                 best_ever: user.best_ever(),
+                authorized: user.authorized,
                 workers: user
                     .workers()
                     .map(|worker| WorkerSummary {
