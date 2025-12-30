@@ -1,99 +1,24 @@
 use {
-    super::*,
-    crate::{HashRate, metatron::Metatron},
-    axum::{
-        Json, Router,
-        extract::{Path, State},
-        http::StatusCode,
-        response::IntoResponse,
-        routing::get,
+    crate::Result,
+    axum::Router,
+    axum_server::Handle,
+    futures::StreamExt,
+    rustls_acme::{
+        AcmeConfig,
+        acme::{LETS_ENCRYPT_PRODUCTION_DIRECTORY, LETS_ENCRYPT_STAGING_DIRECTORY},
+        axum::AxumAcceptor,
+        caches::DirCache,
     },
-    serde::{Deserialize, Serialize},
-    std::sync::Arc,
+    std::{
+        io,
+        net::ToSocketAddrs,
+        path::PathBuf,
+        sync::{Arc, LazyLock},
+    },
+    tokio::task::JoinHandle,
+    tokio_util::sync::CancellationToken,
+    tracing::{error, info},
 };
-
-/// Aggregate pool statistics.
-///
-/// Returned by the `GET /api/stats` endpoint.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PoolStats {
-    pub hash_rate: HashRate,
-    pub shares_per_second: f64,
-    pub users: usize,
-    pub workers: usize,
-    pub connections: u64,
-    pub accepted: u64,
-    pub rejected: u64,
-    pub blocks: u64,
-    pub best_ever: f64,
-    pub uptime_secs: u64,
-}
-
-/// Summary information for a user.
-///
-/// Returned by the `GET /api/users` endpoint.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UserSummary {
-    pub address: String,
-    pub hash_rate: HashRate,
-    pub shares_per_second: f64,
-    pub workers: usize,
-    pub accepted: u64,
-    pub rejected: u64,
-    pub best_ever: f64,
-}
-
-/// Detailed information for a user, including their workers.
-///
-/// Returned by the `GET /api/users/:address` endpoint.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UserDetail {
-    pub address: String,
-    pub hash_rate: HashRate,
-    pub shares_per_second: f64,
-    pub accepted: u64,
-    pub rejected: u64,
-    pub best_ever: f64,
-    pub workers: Vec<WorkerSummary>,
-}
-
-/// Summary information for a worker.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorkerSummary {
-    pub name: String,
-    pub hash_rate: HashRate,
-    pub shares_per_second: f64,
-    pub accepted: u64,
-    pub rejected: u64,
-    pub best_ever: f64,
-}
-
-/// Creates the API router with all endpoints.
-pub fn create_router(metatron: Arc<Metatron>) -> Router {
-    Router::new()
-        .route("/api/stats", get(api_stats))
-        .route("/api/users", get(api_users))
-        .route("/api/users/{address}", get(api_user))
-        .with_state(metatron)
-}
-
-async fn api_stats(State(metatron): State<Arc<Metatron>>) -> Json<PoolStats> {
-    Json(metatron.stats())
-}
-
-async fn api_users(State(metatron): State<Arc<Metatron>>) -> Json<Vec<UserSummary>> {
-    Json(metatron.users())
-}
-
-async fn api_user(
-    State(metatron): State<Arc<Metatron>>,
-    Path(address): Path<String>,
-) -> impl IntoResponse {
-    match metatron.user(&address) {
-        Some(user) => Ok(Json(user)),
-        None => Err(StatusCode::NOT_FOUND),
-    }
-}
 
 #[derive(Clone, Debug)]
 pub struct HttpConfig {
@@ -104,31 +29,24 @@ pub struct HttpConfig {
     pub acme_cache: PathBuf,
 }
 
-impl HttpConfig {
-    pub fn tls_enabled(&self) -> bool {
-        !self.acme_domains.is_empty() && !self.acme_contacts.is_empty()
-    }
-}
-
 pub fn spawn(
     config: HttpConfig,
-    metatron: Arc<Metatron>,
+    router: Router,
     cancel_token: CancellationToken,
-) -> Result<task::JoinHandle<io::Result<()>>> {
-    let router = create_router(metatron);
+) -> Result<JoinHandle<io::Result<()>>> {
     let handle = Handle::new();
 
     let shutdown_handle = handle.clone();
     tokio::spawn(async move {
         cancel_token.cancelled().await;
-        info!("Received shutdown signal, stopping HTTP API server...");
+        info!("Received shutdown signal, stopping HTTP server...");
         shutdown_handle.shutdown();
     });
 
-    spawn_server(config, router, handle)
+    spawn_with_handle(config, router, handle)
 }
 
-fn spawn_server(
+pub fn spawn_with_handle(
     config: HttpConfig,
     router: Router,
     handle: Handle,
@@ -148,7 +66,7 @@ fn spawn_server(
 
             let addr = (address.as_str(), port).to_socket_addrs()?.next().unwrap();
 
-            info!("HTTP API listening on https://{addr}");
+            info!("HTTP server listening on https://{addr}");
 
             axum_server::Server::bind(addr)
                 .handle(handle)
@@ -158,7 +76,7 @@ fn spawn_server(
         } else {
             let addr = (address.as_str(), port).to_socket_addrs()?.next().unwrap();
 
-            info!("HTTP API listening on http://{addr}");
+            info!("HTTP server listening on http://{addr}");
 
             axum_server::Server::bind(addr)
                 .handle(handle)
@@ -190,7 +108,7 @@ fn acceptor(
 
     let mut state = config.state();
 
-    ensure! {
+    anyhow::ensure! {
         *RUSTLS_PROVIDER_INSTALLED,
         "failed to install rustls ring crypto provider",
     }

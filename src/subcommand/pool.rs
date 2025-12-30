@@ -1,4 +1,8 @@
-use {super::*, crate::http_server, pool_config::PoolConfig};
+use {
+    super::*,
+    crate::{api, http_server},
+    pool_config::PoolConfig,
+};
 
 pub(crate) mod pool_config;
 
@@ -40,9 +44,10 @@ impl Pool {
                 acme_contacts: config.acme_contacts(),
                 acme_cache: config.acme_cache(),
             };
+            let router = api::router(metatron.clone());
             Some(http_server::spawn(
                 http_config,
-                metatron.clone(),
+                router,
                 cancel_token.clone(),
             )?)
         } else {
