@@ -191,7 +191,6 @@ pub fn main() {
 
             match args.run(cancel_token).await {
                 Err(err) => {
-                    eprintln!();
                     eprintln!("error: {err}");
 
                     for (i, cause) in err.chain().skip(1).enumerate() {

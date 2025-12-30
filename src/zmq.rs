@@ -10,12 +10,14 @@ impl Zmq {
 
         info!("Subscribing to hashblock on ZMQ endpoint {endpoint}");
 
-        let socket = match timeout(Duration::from_secs(5), async {
+        let socket = match timeout(Duration::from_secs(1), async {
             let mut socket = SubSocket::new();
+            
             socket
                 .connect(&endpoint)
                 .await
                 .with_context(|| format!("failed to connect to ZMQ endpoint `{endpoint}`"))?;
+
             socket
                 .subscribe("hashblock")
                 .await

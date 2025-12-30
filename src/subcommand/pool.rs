@@ -13,12 +13,12 @@ impl Pool {
         let config = Arc::new(self.config.clone());
         let metatron = Arc::new(Metatron::new());
         let (share_tx, share_rx) = mpsc::channel(SHARE_CHANNEL_CAPACITY);
-
         let address = config.address();
         let port = config.port();
 
         let mut generator =
             Generator::new(config.clone()).context("failed to connect to Bitcoin Core RPC")?;
+
         let workbase_receiver = generator
             .spawn()
             .await
@@ -28,7 +28,7 @@ impl Pool {
             .await
             .with_context(|| format!("failed to bind to {address}:{port}"))?;
 
-        eprintln!("Listening on {address}:{port}");
+        info!("Listening on {address}:{port}");
 
         let metatron_handle = {
             let metatron = metatron.clone();

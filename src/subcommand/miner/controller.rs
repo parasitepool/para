@@ -33,10 +33,12 @@ impl Controller {
             .connect()
             .await
             .context("failed to connect to stratum server")?;
+
         let (subscribe, _, _) = client
             .subscribe()
             .await
             .context("stratum mining.subscribe failed")?;
+
         client
             .authorize()
             .await

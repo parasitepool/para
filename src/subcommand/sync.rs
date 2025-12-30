@@ -143,6 +143,7 @@ impl Sync {
         let database = Database::new(self.database_url.clone())
             .await
             .context("failed to connect to PostgreSQL database")?;
+
         let client = Client::new();
 
         let mut current_id = self.load_current_id().await?;
