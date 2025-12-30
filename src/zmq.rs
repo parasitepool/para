@@ -12,7 +12,7 @@ impl Zmq {
 
         let socket = match timeout(Duration::from_secs(1), async {
             let mut socket = SubSocket::new();
-            
+
             socket
                 .connect(&endpoint)
                 .await

@@ -58,7 +58,12 @@ impl Miner {
 
         let address = resolve_stratum_endpoint(&self.stratum_endpoint)
             .await
-            .with_context(|| format!("failed to resolve stratum endpoint `{}`", self.stratum_endpoint))?;
+            .with_context(|| {
+                format!(
+                    "failed to resolve stratum endpoint `{}`",
+                    self.stratum_endpoint
+                )
+            })?;
 
         let config = ClientConfig {
             address: address.to_string(),

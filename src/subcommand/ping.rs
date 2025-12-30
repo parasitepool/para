@@ -18,7 +18,12 @@ impl Ping {
     pub(crate) async fn run(&self, cancel_token: CancellationToken) -> Result {
         let addr = resolve_stratum_endpoint(&self.stratum_endpoint)
             .await
-            .with_context(|| format!("failed to resolve stratum endpoint `{}`", self.stratum_endpoint))?;
+            .with_context(|| {
+                format!(
+                    "failed to resolve stratum endpoint `{}`",
+                    self.stratum_endpoint
+                )
+            })?;
 
         let ping_type = PingType::new(self.username.clone(), self.password.as_deref());
 
