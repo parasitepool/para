@@ -10,14 +10,27 @@ impl Zmq {
 
         info!("Subscribing to hashblock on ZMQ endpoint {endpoint}");
 
-        let socket = timeout(Duration::from_secs(1), async {
+        let socket = match timeout(Duration::from_secs(5), async {
             let mut socket = SubSocket::new();
-            socket.connect(&endpoint).await?;
-            socket.subscribe("hashblock").await?;
+            socket
+                .connect(&endpoint)
+                .await
+                .with_context(|| format!("failed to connect to ZMQ endpoint `{endpoint}`"))?;
+            socket
+                .subscribe("hashblock")
+                .await
+                .with_context(|| format!("failed to subscribe to hashblock on `{endpoint}`"))?;
 
             Ok::<_, Error>(socket)
         })
-        .await??;
+        .await
+        {
+            Ok(Ok(socket)) => socket,
+            Ok(Err(err)) => return Err(err),
+            Err(_) => bail!(
+                "timed out connecting to ZMQ endpoint `{endpoint}` - ensure bitcoind is running with `-zmqpubhashblock={endpoint}`"
+            ),
+        };
 
         Ok(Self { socket })
     }

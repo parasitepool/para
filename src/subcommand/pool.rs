@@ -17,10 +17,16 @@ impl Pool {
         let address = config.address();
         let port = config.port();
 
-        let mut generator = Generator::new(config.clone())?;
-        let workbase_receiver = generator.spawn().await?;
+        let mut generator =
+            Generator::new(config.clone()).context("failed to connect to Bitcoin Core RPC")?;
+        let workbase_receiver = generator
+            .spawn()
+            .await
+            .context("failed to subscribe to ZMQ block notifications")?;
 
-        let listener = TcpListener::bind((address.clone(), port)).await?;
+        let listener = TcpListener::bind((address.clone(), port))
+            .await
+            .with_context(|| format!("failed to bind to {address}:{port}"))?;
 
         eprintln!("Listening on {address}:{port}");
 
