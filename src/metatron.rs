@@ -1,6 +1,6 @@
 use {
     super::*,
-    http_server::api::{PoolStats, UserDetail, UserSummary, WorkerSummary},
+    http_server::{PoolStats, UserDetail, UserSummary, WorkerSummary},
 };
 
 pub(crate) struct Metatron {

@@ -95,7 +95,6 @@ async fn api_user(
     }
 }
 
-/// Configuration for the HTTP API server.
 #[derive(Clone, Debug)]
 pub struct HttpConfig {
     pub address: String,
@@ -106,23 +105,17 @@ pub struct HttpConfig {
 }
 
 impl HttpConfig {
-    /// Returns true if TLS should be enabled (both domains and contacts are configured).
-    #[allow(unused)]
     pub fn tls_enabled(&self) -> bool {
         !self.acme_domains.is_empty() && !self.acme_contacts.is_empty()
     }
 }
 
-/// Spawns the HTTP API server.
-///
-/// If `acme_domains` and `acme_contacts` are both non-empty, the server will use
-/// HTTPS with automatic Let's Encrypt certificates. Otherwise, plain HTTP.
 pub fn spawn(
     config: HttpConfig,
     metatron: Arc<Metatron>,
     cancel_token: CancellationToken,
 ) -> Result<task::JoinHandle<io::Result<()>>> {
-    let router = api::create_router(metatron);
+    let router = create_router(metatron);
     let handle = Handle::new();
 
     let shutdown_handle = handle.clone();
