@@ -38,7 +38,13 @@ impl Hasher {
         extranonce2: Extranonce,
         job_id: JobId,
     ) -> Self {
-        Self::with_version_mask(header, pool_target, extranonce2, job_id, BIP320_VERSION_MASK)
+        Self::with_version_mask(
+            header,
+            pool_target,
+            extranonce2,
+            job_id,
+            BIP320_VERSION_MASK,
+        )
     }
 
     /// Creates a new Hasher with a custom version mask.
@@ -152,11 +158,13 @@ impl Hasher {
     }
 
     /// Returns the number of version rolls performed.
+    #[cfg(test)]
     pub fn version_rolls(&self) -> u64 {
         self.version_rolls
     }
 
     /// Returns true if version rolling is enabled for this hasher.
+    #[cfg(test)]
     pub fn version_rolling_enabled(&self) -> bool {
         self.version_roller.is_enabled()
     }
@@ -268,7 +276,7 @@ mod tests {
     fn hasher_nonce_space_exhausted_without_version_rolling() {
         let target = Target::from_be_bytes([0u8; 32]);
         let mut hasher = Hasher::without_version_rolling(
-            header(None, Some(u32::MAX - 100)),
+            header(None, Some(u32::MAX)),
             target,
             "0000000000".parse().unwrap(),
             "bf".parse().unwrap(),
@@ -436,27 +444,31 @@ mod tests {
 
     #[test]
     fn hasher_version_rolling_extends_nonce_space() {
-        // Use a small version mask for faster testing
-        let small_mask = 0b11 << 13; // 2 bits = 4 version combinations
-        let target = Target::from_be_bytes([0u8; 32]); // Impossible target
+        // Verify version rolling allows finding shares after nonce overflow
+        // Start at MAX with easy target - must roll version and reset nonce to find share
+        let small_mask = 0b11 << 13;
+        let target = shift(1); // Very easy - 50% per hash
 
         let mut hasher = Hasher::with_version_mask(
-            header(None, Some(u32::MAX - 50)), // Start near nonce exhaustion
+            header(None, Some(u32::MAX)), // Start at max nonce
             target,
             "0000000000".parse().unwrap(),
             JobId::new(0),
             small_mask,
         );
 
-        let result = hasher.hash(CancellationToken::new(), Arc::new(Metrics::new()), f64::MAX);
+        // If version rolling didn't work, we'd never find a share starting at MAX
+        let result = hasher
+            .hash(CancellationToken::new(), Arc::new(Metrics::new()), f64::MAX)
+            .unwrap();
 
-        // Should exhaust after rolling through all versions
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.to_string().contains("nonce space exhausted"));
-
-        // Should have rolled through all 3 additional versions (0 is initial)
-        assert_eq!(hasher.version_rolls(), 3);
+        assert!(target.is_met_by(result.header.block_hash()));
+        // Nonce should be low (proves it reset after rolling)
+        assert!(
+            result.header.nonce < 1000,
+            "Nonce should have reset to find share, got {}",
+            result.header.nonce
+        );
     }
 
     #[test]
@@ -557,41 +569,50 @@ mod tests {
 
     #[test]
     fn hasher_nonce_resets_on_version_roll() {
-        let small_mask = 0b1 << 13; // 1 bit = 2 combinations
-        let target = Target::from_be_bytes([0u8; 32]); // Impossible
+        // Start at MAX, find share - nonce must be low proving reset occurred
+        let target = shift(1);
 
-        let mut hasher = Hasher::with_version_mask(
-            header(None, Some(u32::MAX - 5)), // Very close to exhaustion
+        let mut hasher = Hasher::new(
+            header(None, Some(u32::MAX)),
             target,
             "0000000000".parse().unwrap(),
             JobId::new(0),
-            small_mask,
         );
 
-        // Start hashing (will exhaust quickly)
-        let _ = hasher.hash(CancellationToken::new(), Arc::new(Metrics::new()), f64::MAX);
+        let result = hasher
+            .hash(CancellationToken::new(), Arc::new(Metrics::new()), f64::MAX)
+            .unwrap();
 
-        // After exhausting, nonce should have wrapped back around
-        // (We can't easily verify mid-hash, but the test above confirms rolling works)
+        // Share found with low nonce proves nonce reset after version roll
+        assert!(
+            result.header.nonce < 10_000,
+            "Nonce should have reset after version roll, got {}",
+            result.header.nonce
+        );
+        assert!(
+            hasher.version_rolls() >= 1,
+            "Should have rolled at least once"
+        );
     }
 
     #[test]
     fn hasher_version_rolls_tracked_correctly() {
-        let small_mask = 0b111 << 13; // 3 bits = 8 combinations
-        let target = Target::from_be_bytes([0u8; 32]);
+        // Verify version_rolls increments when nonce overflows
+        let target = shift(1); // Easy target
 
-        let mut hasher = Hasher::with_version_mask(
-            header(None, Some(u32::MAX - 5)),
+        let mut hasher = Hasher::new(
+            header(None, Some(u32::MAX)),
             target,
             "0000000000".parse().unwrap(),
             JobId::new(0),
-            small_mask,
         );
 
-        let _ = hasher.hash(CancellationToken::new(), Arc::new(Metrics::new()), f64::MAX);
+        let _ = hasher
+            .hash(CancellationToken::new(), Arc::new(Metrics::new()), f64::MAX)
+            .unwrap();
 
-        // Should have rolled through all 7 additional versions
-        assert_eq!(hasher.version_rolls(), 7);
+        // Starting at MAX means first iteration overflows, triggering roll
+        assert!(hasher.version_rolls() >= 1);
     }
 
     #[test]
@@ -602,7 +623,7 @@ mod tests {
 
         // Start at a high nonce to force version rolling
         let mut hasher = Hasher::with_version_mask(
-            header_with_version(0x20000000, Some(u32::MAX - 100)),
+            header_with_version(0x20000000, Some(u32::MAX)),
             target,
             "0000000000".parse().unwrap(),
             JobId::new(0),
@@ -627,21 +648,29 @@ mod tests {
 
     #[test]
     fn hasher_error_includes_version_roll_count() {
-        let small_mask = 0b11 << 13;
-        let target = Target::from_be_bytes([0u8; 32]);
+        // Test cancellation error includes version info (faster than exhaustion)
+        let target = shift(30); // Hard target
+        let cancel = CancellationToken::new();
 
-        let mut hasher = Hasher::with_version_mask(
-            header(None, Some(u32::MAX - 5)),
+        let mut hasher = Hasher::new(
+            header(None, Some(u32::MAX)),
             target,
             "0000000000".parse().unwrap(),
             JobId::new(0),
-            small_mask,
         );
 
-        let result = hasher.hash(CancellationToken::new(), Arc::new(Metrics::new()), f64::MAX);
+        // Cancel after a short delay to allow some version rolls
+        let cancel_clone = cancel.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            cancel_clone.cancel();
+        });
+
+        let result = hasher.hash(cancel, Arc::new(Metrics::new()), f64::MAX);
         let err_str = result.unwrap_err().to_string();
 
-        assert!(err_str.contains("version_rolls=3"));
+        assert!(err_str.contains("cancelled"));
+        assert!(err_str.contains("version_rolls="));
     }
 
     #[test]

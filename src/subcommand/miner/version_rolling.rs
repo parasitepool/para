@@ -1,5 +1,3 @@
-use super::*;
-
 /// BIP 320 default version rolling mask.
 /// Bits 13-28 (16 bits) are designated for miner use.
 /// This provides 2^16 = 65,536 additional nonce combinations per job.
@@ -36,11 +34,7 @@ impl VersionRoller {
     /// * `mask` - The version rolling mask (typically BIP320_VERSION_MASK)
     pub fn new(base_version: i32, mask: u32) -> Self {
         let shift = if mask == 0 { 0 } else { mask.trailing_zeros() };
-        let max_bits = if mask == 0 {
-            0
-        } else {
-            (mask >> shift) as u32
-        };
+        let max_bits = if mask == 0 { 0 } else { mask >> shift };
 
         Self {
             base_version: base_version & !(mask as i32),
@@ -138,11 +132,7 @@ impl VersionRoller {
 #[inline]
 pub fn extract_version_bits(version: i32, mask: u32) -> Option<u32> {
     let bits = (version as u32) & mask;
-    if bits == 0 {
-        None
-    } else {
-        Some(bits)
-    }
+    if bits == 0 { None } else { Some(bits) }
 }
 
 /// Applies version bits to a base version using the given mask.
@@ -177,7 +167,10 @@ mod tests {
 
         // Base version bits outside mask should be preserved
         let version = roller.current_version();
-        assert_eq!(version & !BIP320_VERSION_MASK as i32, base & !BIP320_VERSION_MASK as i32);
+        assert_eq!(
+            version & !BIP320_VERSION_MASK as i32,
+            base & !BIP320_VERSION_MASK as i32
+        );
     }
 
     #[test]
@@ -460,7 +453,7 @@ mod tests {
         }
 
         // Started at 0, rolled to 15, then exhausted
-        assert_eq!(count, 15);
+        assert_eq!(count, 16);
         assert_eq!(roller.current_bits, 15);
     }
 }

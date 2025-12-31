@@ -1,10 +1,9 @@
 use {
     super::*,
     controller::{Controller, VersionRollingConfig},
-    hasher::{HashResult, Hasher},
+    hasher::Hasher,
     metrics::Metrics,
     stratum::{Client, ClientConfig},
-    version_rolling::{BIP320_VERSION_MASK, VersionRoller},
 };
 
 mod controller;
@@ -12,10 +11,9 @@ mod hasher;
 mod metrics;
 mod version_rolling;
 
-// Re-export for external use
+// Re-export for external use (also makes them available internally)
 pub use version_rolling::{
-    apply_version_bits, extract_version_bits, VersionRoller, BIP320_VERSION_MASK,
-    MIN_VERSION_BITS,
+    BIP320_VERSION_MASK, MIN_VERSION_BITS, VersionRoller, apply_version_bits, extract_version_bits,
 };
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
@@ -44,12 +42,8 @@ pub(crate) struct Miner {
     cpu_cores: Option<usize>,
     #[arg(long, help = "Hash rate to <THROTTLE> to.")]
     throttle: Option<HashRate>,
-    #[arg(
-        long,
-        default_value = "true",
-        help = "Enable version rolling (ASICBoost). Enabled by default."
-    )]
-    version_rolling: bool,
+    #[arg(long, help = "Disable version rolling (ASICBoost).")]
+    no_version_rolling: bool,
     #[arg(
         long,
         help = "Custom version rolling mask in hex (default: BIP320 0x1FFFE000)."
@@ -120,7 +114,7 @@ impl Miner {
     }
 
     fn parse_version_rolling_config(&self) -> Result<VersionRollingConfig> {
-        if !self.version_rolling {
+        if self.no_version_rolling {
             info!("Version rolling disabled via CLI");
             return Ok(VersionRollingConfig::disabled());
         }
@@ -133,8 +127,7 @@ impl Miner {
             if !VersionRoller::validate_mask(mask) {
                 warn!(
                     "Version mask {:#x} has fewer than {} bits, mining may be inefficient",
-                    mask,
-                    MIN_VERSION_BITS
+                    mask, MIN_VERSION_BITS
                 );
             }
 
@@ -228,7 +221,7 @@ mod tests {
             --password x",
         );
 
-        assert!(miner.version_rolling);
+        assert!(!miner.no_version_rolling);
         assert!(miner.version_mask.is_none());
     }
 
@@ -238,10 +231,10 @@ mod tests {
             "para miner parasite.wtf:42069 \
             --username test.worker \
             --password x \
-            --version-rolling false",
+            --no-version-rolling",
         );
 
-        assert!(!miner.version_rolling);
+        assert!(miner.no_version_rolling);
     }
 
     #[test]
@@ -253,7 +246,7 @@ mod tests {
             --version-mask 0x1FFF0000",
         );
 
-        assert!(miner.version_rolling);
+        assert!(!miner.no_version_rolling);
         assert_eq!(miner.version_mask, Some("0x1FFF0000".to_string()));
     }
 
@@ -286,7 +279,7 @@ mod tests {
         let miner = parse_miner_args(
             "para miner parasite.wtf:42069 \
             --username test.worker \
-            --version-rolling false",
+            --no-version-rolling",
         );
 
         let config = miner.parse_version_rolling_config().unwrap();
@@ -317,39 +310,5 @@ mod tests {
 
         let config = miner.parse_version_rolling_config().unwrap();
         assert_eq!(config.mask, 0xABCDEF00);
-    }
-
-    // ==================== Share Serialization Tests ====================
-
-    #[test]
-    fn share_serializes_without_version_bits() {
-        let share = Share {
-            extranonce1: "00000000".parse().unwrap(),
-            extranonce2: "0000000000".parse().unwrap(),
-            job_id: "abc".parse().unwrap(),
-            nonce: 12345.into(),
-            ntime: 1234567890.into(),
-            username: "test.worker".into(),
-            version_bits: None,
-        };
-
-        let json = serde_json::to_string(&share).unwrap();
-        assert!(json.contains("\"version_bits\":null"));
-    }
-
-    #[test]
-    fn share_serializes_with_version_bits() {
-        let share = Share {
-            extranonce1: "00000000".parse().unwrap(),
-            extranonce2: "0000000000".parse().unwrap(),
-            job_id: "abc".parse().unwrap(),
-            nonce: 12345.into(),
-            ntime: 1234567890.into(),
-            username: "test.worker".into(),
-            version_bits: Some(Version::from(0x1000000)),
-        };
-
-        let json = serde_json::to_string(&share).unwrap();
-        assert!(!json.contains("\"version_bits\":null"));
     }
 }

@@ -1,11 +1,9 @@
+use super::hasher::HashResult;
 use super::*;
 
-/// Configuration for version rolling in the controller.
 #[derive(Debug, Clone, Copy)]
 pub struct VersionRollingConfig {
-    /// Whether version rolling is enabled
     pub enabled: bool,
-    /// The version mask to use (bits that can be modified)
     pub mask: u32,
 }
 
@@ -19,7 +17,6 @@ impl Default for VersionRollingConfig {
 }
 
 impl VersionRollingConfig {
-    /// Creates a disabled version rolling configuration.
     pub fn disabled() -> Self {
         Self {
             enabled: false,
@@ -27,7 +24,6 @@ impl VersionRollingConfig {
         }
     }
 
-    /// Creates configuration with a custom mask.
     pub fn with_mask(mask: u32) -> Self {
         Self {
             enabled: mask != 0,
@@ -58,29 +54,9 @@ pub(crate) struct Controller {
 }
 
 impl Controller {
-    pub(crate) async fn run(
-        client: Client,
-        username: Username,
-        cpu_cores: usize,
-        throttle: Option<HashRate>,
-        mode: Mode,
-        cancel_token: CancellationToken,
-    ) -> Result<Vec<Share>> {
-        Self::run_with_version_rolling(
-            client,
-            username,
-            cpu_cores,
-            throttle,
-            mode,
-            cancel_token,
-            VersionRollingConfig::default(),
-        )
-        .await
-    }
-
     pub(crate) async fn run_with_version_rolling(
         client: Client,
-        username: String,
+        username: Username,
         cpu_cores: usize,
         throttle: Option<HashRate>,
         mode: Mode,
@@ -179,7 +155,7 @@ impl Controller {
                         Err(broadcast::error::RecvError::Lagged(_)) => {
                             warn!("Event loop lagged, missed messages");
                         }
-                         Err(broadcast::error::RecvError::Closed) => {
+                        Err(broadcast::error::RecvError::Closed) => {
                             info!("Client event channel closed, shutting down");
                             break;
                         }
@@ -210,11 +186,9 @@ impl Controller {
             hash_result.version_bits
         );
 
-        // Convert version_bits to Version type for share submission
-        let version_bits = hash_result.version_bits.map(|bits| {
-            // The stratum Version type expects the raw bits value
-            Version::from(bits)
-        });
+        let version_bits = hash_result
+            .version_bits
+            .map(|bits| Version::from(bits as i32));
 
         let share = Share {
             extranonce1: self.extranonce1.clone(),
@@ -228,24 +202,31 @@ impl Controller {
 
         self.shares.push(share);
 
-        // Submit share to pool
-        // Note: If version rolling is used, some pools require the version_bits
-        // in the submit call. This depends on pool implementation.
-        match self.client.submit(
-            hash_result.job_id,
-            hash_result.extranonce2,
-            header.time.into(),
-            header.nonce.into(),
-        ).await {
-            Err(err) => warn!("Failed to submit share for job {}: {err}", hash_result.job_id),
-            Ok(_) => info!("Share for job {} submitted successfully", hash_result.job_id),
+        match self
+            .client
+            .submit(
+                hash_result.job_id,
+                hash_result.extranonce2,
+                header.time.into(),
+                header.nonce.into(),
+            )
+            .await
+        {
+            Err(err) => warn!(
+                "Failed to submit share for job {}: {err}",
+                hash_result.job_id
+            ),
+            Ok(_) => info!(
+                "Share for job {} submitted successfully",
+                hash_result.job_id
+            ),
         }
 
         match self.mode {
             Mode::ShareFound => {
                 info!("Share found, exiting");
                 return Ok(());
-            },
+            }
             Mode::BlockFound => {
                 if header.validate_pow(header.bits.into()).is_ok() {
                     info!("Block found, exiting");
@@ -259,11 +240,7 @@ impl Controller {
     }
 
     fn spawn_hashers(&mut self) {
-        let version_mask = if self.version_rolling.enabled {
-            self.version_rolling.mask
-        } else {
-            0
-        };
+        let version_rolling_config = self.version_rolling;
 
         for core_id in 0..self.cpu_cores {
             let mut notify_rx = self.notify_rx.clone();
@@ -317,13 +294,24 @@ impl Controller {
 
                         let pool_target = { pool_difficulty.lock().await.to_target() };
 
-                        let mut hasher = Hasher::with_version_mask(
-                            header,
-                            pool_target,
-                            extranonce2.clone(),
-                            notify.job_id,
-                            version_mask,
-                        );
+                        let mut hasher = if !version_rolling_config.enabled {
+                            Hasher::without_version_rolling(
+                                header,
+                                pool_target,
+                                extranonce2.clone(),
+                                notify.job_id,
+                            )
+                        } else if version_rolling_config.mask == BIP320_VERSION_MASK {
+                            Hasher::new(header, pool_target, extranonce2.clone(), notify.job_id)
+                        } else {
+                            Hasher::with_version_mask(
+                                header,
+                                pool_target,
+                                extranonce2.clone(),
+                                notify.job_id,
+                                version_rolling_config.mask,
+                            )
+                        };
 
                         let cancel_clone = cancel.clone();
                         let metrics_clone = metrics.clone();
