@@ -1,5 +1,41 @@
 use super::*;
 
+/// Configuration for version rolling in the controller.
+#[derive(Debug, Clone, Copy)]
+pub struct VersionRollingConfig {
+    /// Whether version rolling is enabled
+    pub enabled: bool,
+    /// The version mask to use (bits that can be modified)
+    pub mask: u32,
+}
+
+impl Default for VersionRollingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            mask: BIP320_VERSION_MASK,
+        }
+    }
+}
+
+impl VersionRollingConfig {
+    /// Creates a disabled version rolling configuration.
+    pub fn disabled() -> Self {
+        Self {
+            enabled: false,
+            mask: 0,
+        }
+    }
+
+    /// Creates configuration with a custom mask.
+    pub fn with_mask(mask: u32) -> Self {
+        Self {
+            enabled: mask != 0,
+            mask,
+        }
+    }
+}
+
 pub(crate) struct Controller {
     client: Client,
     cpu_cores: usize,
@@ -13,11 +49,12 @@ pub(crate) struct Controller {
     mode: Mode,
     pool_difficulty: Arc<Mutex<Difficulty>>,
     root_cancel: CancellationToken,
-    share_tx: mpsc::Sender<(JobId, Header, Extranonce)>,
-    share_rx: mpsc::Receiver<(JobId, Header, Extranonce)>,
+    share_tx: mpsc::Sender<HashResult>,
+    share_rx: mpsc::Receiver<HashResult>,
     shares: Vec<Share>,
     throttle: f64,
     username: Username,
+    version_rolling: VersionRollingConfig,
 }
 
 impl Controller {
@@ -29,6 +66,27 @@ impl Controller {
         mode: Mode,
         cancel_token: CancellationToken,
     ) -> Result<Vec<Share>> {
+        Self::run_with_version_rolling(
+            client,
+            username,
+            cpu_cores,
+            throttle,
+            mode,
+            cancel_token,
+            VersionRollingConfig::default(),
+        )
+        .await
+    }
+
+    pub(crate) async fn run_with_version_rolling(
+        client: Client,
+        username: String,
+        cpu_cores: usize,
+        throttle: Option<HashRate>,
+        mode: Mode,
+        cancel_token: CancellationToken,
+        version_rolling: VersionRollingConfig,
+    ) -> Result<Vec<Share>> {
         let events = client.connect().await?;
         let (subscribe, _, _) = client.subscribe().await?;
         client.authorize().await?;
@@ -39,6 +97,15 @@ impl Controller {
         );
 
         info!("Controller initialized with {} CPU cores", cpu_cores);
+        if version_rolling.enabled {
+            info!(
+                "Version rolling enabled with mask: {:#010x} ({} bits)",
+                version_rolling.mask,
+                version_rolling.mask.count_ones()
+            );
+        } else {
+            info!("Version rolling disabled");
+        }
 
         let (share_tx, share_rx) = mpsc::channel(256);
         let (notify_tx, notify_rx) = watch::channel(None);
@@ -65,6 +132,7 @@ impl Controller {
             shares: Vec::new(),
             throttle,
             username,
+            version_rolling,
         };
 
         controller.spawn_hashers();
@@ -118,39 +186,8 @@ impl Controller {
                     }
                 },
                 maybe = self.share_rx.recv() => match maybe {
-                    Some((job_id, header, extranonce2)) => {
-                        info!("Valid share found: blockhash={} nonce={}", header.block_hash(), header.nonce);
-
-                        let share = Share {
-                            extranonce1: self.extranonce1.clone(),
-                            extranonce2: extranonce2.clone(),
-                            job_id,
-                            nonce: header.nonce.into(),
-                            ntime: header.time.into(),
-                            username: self.username.clone(),
-                            version_bits: None,
-                        };
-
-                        self.shares.push(share);
-
-                        match self.client.submit(job_id, extranonce2, header.time.into(), header.nonce.into()).await {
-                            Err(err) => warn!("Failed to submit share for job {job_id}: {err}"),
-                            Ok(_) => info!("Share for job {job_id} submitted successfully"),
-                        }
-
-                        match self.mode {
-                            Mode::ShareFound => {
-                                info!("Share found, exiting");
-                                break;
-                            },
-                            Mode::BlockFound => {
-                                if header.validate_pow(header.bits.into()).is_ok() {
-                                    info!("Block found, exiting");
-                                    break;
-                                }
-                            }
-                            Mode::Continuous => continue,
-                        }
+                    Some(hash_result) => {
+                        self.handle_share_found(hash_result).await?;
                     }
                     None => {
                         info!("Share channel closed");
@@ -163,7 +200,71 @@ impl Controller {
         Ok(())
     }
 
+    async fn handle_share_found(&mut self, hash_result: HashResult) -> Result<()> {
+        let header = &hash_result.header;
+
+        info!(
+            "Valid share found: blockhash={} nonce={} version_bits={:?}",
+            header.block_hash(),
+            header.nonce,
+            hash_result.version_bits
+        );
+
+        // Convert version_bits to Version type for share submission
+        let version_bits = hash_result.version_bits.map(|bits| {
+            // The stratum Version type expects the raw bits value
+            Version::from(bits)
+        });
+
+        let share = Share {
+            extranonce1: self.extranonce1.clone(),
+            extranonce2: hash_result.extranonce2.clone(),
+            job_id: hash_result.job_id,
+            nonce: header.nonce.into(),
+            ntime: header.time.into(),
+            username: self.username.clone(),
+            version_bits,
+        };
+
+        self.shares.push(share);
+
+        // Submit share to pool
+        // Note: If version rolling is used, some pools require the version_bits
+        // in the submit call. This depends on pool implementation.
+        match self.client.submit(
+            hash_result.job_id,
+            hash_result.extranonce2,
+            header.time.into(),
+            header.nonce.into(),
+        ).await {
+            Err(err) => warn!("Failed to submit share for job {}: {err}", hash_result.job_id),
+            Ok(_) => info!("Share for job {} submitted successfully", hash_result.job_id),
+        }
+
+        match self.mode {
+            Mode::ShareFound => {
+                info!("Share found, exiting");
+                return Ok(());
+            },
+            Mode::BlockFound => {
+                if header.validate_pow(header.bits.into()).is_ok() {
+                    info!("Block found, exiting");
+                    return Ok(());
+                }
+            }
+            Mode::Continuous => {}
+        }
+
+        Ok(())
+    }
+
     fn spawn_hashers(&mut self) {
+        let version_mask = if self.version_rolling.enabled {
+            self.version_rolling.mask
+        } else {
+            0
+        };
+
         for core_id in 0..self.cpu_cores {
             let mut notify_rx = self.notify_rx.clone();
             let share_tx = self.share_tx.clone();
@@ -173,7 +274,7 @@ impl Controller {
             let metrics = self.metrics.clone();
             let throttle = self.throttle;
 
-            info!("Starting hasher for core {core_id}",);
+            info!("Starting hasher for core {core_id}");
             self.hashers.spawn(async move {
                 loop {
                     if notify_rx.changed().await.is_err() {
@@ -216,12 +317,13 @@ impl Controller {
 
                         let pool_target = { pool_difficulty.lock().await.to_target() };
 
-                        let mut hasher = Hasher {
+                        let mut hasher = Hasher::with_version_mask(
                             header,
                             pool_target,
-                            extranonce2: extranonce2.clone(),
-                            job_id: notify.job_id,
-                        };
+                            extranonce2.clone(),
+                            notify.job_id,
+                            version_mask,
+                        );
 
                         let cancel_clone = cancel.clone();
                         let metrics_clone = metrics.clone();
@@ -232,8 +334,8 @@ impl Controller {
                         .await;
 
                         match result {
-                            Ok(Ok(share)) => {
-                                let _ = share_tx.send(share).await;
+                            Ok(Ok(hash_result)) => {
+                                let _ = share_tx.send(hash_result).await;
                             }
                             Ok(Err(err)) => {
                                 warn!("Hasher failed on core {core_id}: {err}");
@@ -251,7 +353,7 @@ impl Controller {
     }
 
     async fn handle_notify(&mut self, notify: Notify) -> Result {
-        info!("New job: job_id={}", notify.job_id,);
+        info!("New job: job_id={}", notify.job_id);
 
         let cancel = if notify.clean_jobs {
             self.cancel_hashers()
