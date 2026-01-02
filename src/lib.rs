@@ -185,6 +185,21 @@ pub fn main() {
 
     let args = Arguments::parse();
 
+    // GUI subcommand must run on the main thread without a pre-existing tokio runtime
+    // because iced creates its own runtime and winit requires main thread
+    if let subcommand::Subcommand::Gui(gui) = args.subcommand {
+        let cancel_token = signal::setup_signal_handler_sync();
+        match gui.run(cancel_token) {
+            Err(err) => {
+                error!("error: {err}");
+                process::exit(1);
+            }
+            Ok(_) => {
+                process::exit(0);
+            }
+        }
+    }
+
     Runtime::new()
         .expect("Failed to create tokio runtime")
         .block_on(async {

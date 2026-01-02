@@ -33,3 +33,43 @@ pub(crate) fn setup_signal_handler() -> CancellationToken {
 
     cancel
 }
+
+/// Synchronous signal handler for use outside of tokio runtime (e.g., GUI)
+pub(crate) fn setup_signal_handler_sync() -> CancellationToken {
+    let cancel = CancellationToken::new();
+    let cancel_clone = cancel.clone();
+
+    std::thread::spawn(move || {
+        #[cfg(unix)]
+        {
+            use std::sync::atomic::{AtomicBool, Ordering};
+            static SIGNALED: AtomicBool = AtomicBool::new(false);
+
+            unsafe {
+                libc::signal(libc::SIGINT, handle_signal as usize);
+                libc::signal(libc::SIGTERM, handle_signal as usize);
+            }
+
+            extern "C" fn handle_signal(_: i32) {
+                SIGNALED.store(true, Ordering::SeqCst);
+            }
+
+            while !SIGNALED.load(Ordering::SeqCst) {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            info!("Received shutdown signal");
+        }
+
+        #[cfg(not(unix))]
+        {
+            // On non-unix, just wait indefinitely (window close will exit)
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(3600));
+            }
+        }
+
+        cancel_clone.cancel();
+    });
+
+    cancel
+}

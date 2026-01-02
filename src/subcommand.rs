@@ -29,7 +29,10 @@ pub(crate) enum Subcommand {
 impl Subcommand {
     pub(crate) async fn run(self, cancel_token: CancellationToken) -> Result {
         match self {
-            Self::Gui(gui) => gui.run(cancel_token),
+            Self::Gui(_) => {
+                // GUI is handled specially in main() - should not reach here
+                unreachable!("GUI subcommand should be handled before tokio runtime is created")
+            }
             Self::Miner(miner) => miner.run(cancel_token).await,
             Self::Ping(ping) => ping.run(cancel_token).await,
             Self::Pool(pool) => pool.run(cancel_token).await,

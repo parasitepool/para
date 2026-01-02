@@ -3,17 +3,17 @@ use {
     anyhow::Result,
     clap::Parser,
     iced::{
-        alignment::{Horizontal, Vertical},
-        mouse,
-        time,
-        widget::{
-            canvas::{self, Cache, Canvas, Frame, Geometry, Path, Stroke, Text},
-            column, container, row, svg, text, Scrollable,
-        },
         Alignment, Color, Element, Length, Point, Rectangle, Renderer, Size, Subscription, Task,
         Theme,
+        alignment::{Horizontal, Vertical},
+        mouse, time,
+        widget::{
+            Column, Scrollable, Space, button,
+            canvas::{self, Cache, Canvas, Frame, Geometry, Path, Stroke, Text},
+            column, container, row, svg, text, text_input,
+        },
     },
-    std::{collections::VecDeque, time::Duration},
+    std::{collections::VecDeque, net::IpAddr, str::FromStr, time::Duration},
     tokio_util::sync::CancellationToken,
 };
 
@@ -35,6 +35,25 @@ const TEXT_MUTED: Color = Color::from_rgb(0.35, 0.35, 0.35);
 const ACCENT_CYAN: Color = Color::from_rgb(0.3, 0.75, 0.95);
 const ACCENT_ORANGE: Color = Color::from_rgb(0.95, 0.6, 0.2);
 
+/// How often to refresh miner scan (30 seconds)
+const MINER_REFRESH_SECS: u64 = 30;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum ActiveTab {
+    #[default]
+    Dashboard,
+    Miners,
+}
+
+#[derive(Debug, Clone)]
+struct MinerInfo {
+    ip: IpAddr,
+    model: String,
+    hashrate: String,
+    temperature: String,
+    status: String,
+}
+
 #[derive(Parser, Debug)]
 pub(crate) struct Gui {
     #[arg(
@@ -47,19 +66,25 @@ pub(crate) struct Gui {
 
 impl Gui {
     pub(crate) fn run(self, cancel_token: CancellationToken) -> Result<()> {
-        // Spawn a thread that listens for Ctrl-C and exits the process
+        // Spawn a thread that polls the cancellation token and exits the process
         std::thread::spawn(move || {
-            tokio::runtime::Runtime::new()
-                .unwrap()
-                .block_on(cancel_token.cancelled());
+            while !cancel_token.is_cancelled() {
+                std::thread::sleep(Duration::from_millis(100));
+            }
             std::process::exit(0);
         });
 
-        iced::application("Parasite", ParaGui::update, ParaGui::view)
-            .subscription(ParaGui::subscription)
-            .theme(|_| Theme::Dark)
-            .window_size((960.0, 840.0))
-            .run_with(|| ParaGui::new(self.endpoint))?;
+        let endpoint = self.endpoint;
+        iced::application(
+            move || ParaGui::new(endpoint.clone()),
+            ParaGui::update,
+            ParaGui::view,
+        )
+        .subscription(ParaGui::subscription)
+        .theme(|_state: &ParaGui| Theme::Dark)
+        .title("Parasite")
+        .window_size((960.0, 840.0))
+        .run()?;
 
         Ok(())
     }
@@ -70,6 +95,12 @@ enum Message {
     Tick,
     StatsReceived(Result<PoolStats, String>),
     UsersReceived(Result<Vec<UserSummary>, String>),
+    TabSelected(ActiveTab),
+    ScanMiners,
+    MinersDiscovered(Result<Vec<MinerInfo>, String>),
+    ManualIpChanged(String),
+    AddManualMiner,
+    ManualMinerResult(Result<MinerInfo, String>),
 }
 
 struct ParaGui {
@@ -82,6 +113,15 @@ struct ParaGui {
     sps_history: VecDeque<f64>,
     hash_rate_cache: Cache,
     sps_cache: Cache,
+    // Tab state
+    active_tab: ActiveTab,
+    // Miner scanner state
+    miners: Vec<MinerInfo>,
+    miners_loading: bool,
+    miners_error: Option<String>,
+    // Manual miner input
+    manual_ip_input: String,
+    manual_ip_loading: bool,
 }
 
 impl ParaGui {
@@ -96,6 +136,12 @@ impl ParaGui {
             sps_history: VecDeque::with_capacity(HISTORY_SIZE),
             hash_rate_cache: Cache::new(),
             sps_cache: Cache::new(),
+            active_tab: ActiveTab::default(),
+            miners: Vec::new(),
+            miners_loading: false,
+            miners_error: None,
+            manual_ip_input: String::new(),
+            manual_ip_loading: false,
         };
 
         let stats_task = fetch_stats(endpoint.clone());
@@ -105,7 +151,15 @@ impl ParaGui {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        time::every(Duration::from_millis(POLL_INTERVAL_MS)).map(|_| Message::Tick)
+        let tick = time::every(Duration::from_millis(POLL_INTERVAL_MS)).map(|_| Message::Tick);
+
+        if self.active_tab == ActiveTab::Miners {
+            let miner_refresh =
+                time::every(Duration::from_secs(MINER_REFRESH_SECS)).map(|_| Message::ScanMiners);
+            Subscription::batch([tick, miner_refresh])
+        } else {
+            tick
+        }
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -149,19 +203,94 @@ impl ParaGui {
                 }
                 Task::none()
             }
+            Message::TabSelected(tab) => {
+                self.active_tab = tab;
+                // Auto-scan when switching to Miners tab if empty
+                if tab == ActiveTab::Miners && self.miners.is_empty() && !self.miners_loading {
+                    self.miners_loading = true;
+                    return scan_miners();
+                }
+                Task::none()
+            }
+            Message::ScanMiners => {
+                self.miners_loading = true;
+                self.miners_error = None;
+                scan_miners()
+            }
+            Message::MinersDiscovered(result) => {
+                self.miners_loading = false;
+                match result {
+                    Ok(mut miners) => {
+                        // Merge with existing miners (keep manually added ones)
+                        let existing_ips: Vec<_> = miners.iter().map(|m| m.ip).collect();
+                        for existing in &self.miners {
+                            if !existing_ips.contains(&existing.ip) {
+                                miners.push(existing.clone());
+                            }
+                        }
+                        self.miners = miners;
+                        self.miners_error = None;
+                    }
+                    Err(e) => {
+                        self.miners_error = Some(e);
+                    }
+                }
+                Task::none()
+            }
+            Message::ManualIpChanged(ip) => {
+                self.manual_ip_input = ip;
+                Task::none()
+            }
+            Message::AddManualMiner => {
+                let ip_str = self.manual_ip_input.trim().to_string();
+                if ip_str.is_empty() {
+                    return Task::none();
+                }
+                // Check if already exists
+                if let Ok(ip) = IpAddr::from_str(&ip_str) {
+                    if self.miners.iter().any(|m| m.ip == ip) {
+                        return Task::none();
+                    }
+                }
+                self.manual_ip_loading = true;
+                fetch_single_miner(ip_str)
+            }
+            Message::ManualMinerResult(result) => {
+                self.manual_ip_loading = false;
+                match result {
+                    Ok(miner) => {
+                        // Add if not already present
+                        if !self.miners.iter().any(|m| m.ip == miner.ip) {
+                            self.miners.push(miner);
+                        }
+                        self.manual_ip_input.clear();
+                    }
+                    Err(e) => {
+                        self.miners_error = Some(e);
+                    }
+                }
+                Task::none()
+            }
         }
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let content = if let Some(stats) = &self.stats {
-            self.view_dashboard(stats)
-        } else if let Some(error) = &self.error {
-            self.view_error(error.clone())
-        } else {
-            self.view_loading()
+        let header = self.view_header();
+
+        let content = match self.active_tab {
+            ActiveTab::Dashboard => {
+                if let Some(stats) = &self.stats {
+                    self.view_dashboard_content(stats)
+                } else if let Some(error) = &self.error {
+                    self.view_error(error.clone())
+                } else {
+                    self.view_loading()
+                }
+            }
+            ActiveTab::Miners => self.view_miners(),
         };
 
-        container(content)
+        container(column![header, content].spacing(10))
             .width(Length::Fill)
             .height(Length::Fill)
             .style(|_| container::Style {
@@ -171,18 +300,44 @@ impl ParaGui {
             .into()
     }
 
-    fn view_dashboard(&self, stats: &PoolStats) -> Element<'_, Message> {
-        // Logo header
+    fn view_header(&self) -> Element<'_, Message> {
         let logo_handle = svg::Handle::from_memory(LOGO_SVG);
         let logo = svg(logo_handle)
             .width(Length::Fixed(50.0))
             .height(Length::Fixed(53.0));
 
-        let header = container(logo)
+        let dashboard_color = if self.active_tab == ActiveTab::Dashboard {
+            TEXT_PRIMARY
+        } else {
+            TEXT_SECONDARY
+        };
+        let miners_color = if self.active_tab == ActiveTab::Miners {
+            TEXT_PRIMARY
+        } else {
+            TEXT_SECONDARY
+        };
+
+        // Tabs centered with logo in the middle
+        let tabs = row![
+            button(text("Dashboard").size(16).color(dashboard_color))
+                .on_press(Message::TabSelected(ActiveTab::Dashboard))
+                .style(button::text),
+            logo,
+            button(text("Miners").size(16).color(miners_color))
+                .on_press(Message::TabSelected(ActiveTab::Miners))
+                .style(button::text),
+        ]
+        .spacing(15)
+        .align_y(Alignment::Center);
+
+        container(tabs)
             .width(Length::Fill)
             .center_x(Length::Fill)
-            .padding(10);
+            .padding(10)
+            .into()
+    }
 
+    fn view_dashboard_content(&self, stats: &PoolStats) -> Element<'_, Message> {
         // Stats rows (all at top)
         let stats_row_1 = row![
             stat_card("Hash Rate", stats.hash_rate_1m.to_string(), ACCENT_CYAN),
@@ -200,7 +355,10 @@ impl ParaGui {
             stat_card("Best Ever", format!("{:.4}", stats.best_ever), TEXT_PRIMARY),
             stat_card(
                 "Last Share",
-                stats.last_share.map(format_time_ago).unwrap_or_else(|| "N/A".to_string()),
+                stats
+                    .last_share
+                    .map(format_time_ago)
+                    .unwrap_or_else(|| "N/A".to_string()),
                 TEXT_PRIMARY
             ),
             stat_card("Uptime", format_duration(stats.uptime_secs), TEXT_PRIMARY),
@@ -223,7 +381,7 @@ impl ParaGui {
             ACCENT_ORANGE,
         );
 
-        let content = column![header, stats_row_1, stats_row_2, hash_rate_chart, sps_chart,]
+        let content = column![stats_row_1, stats_row_2, hash_rate_chart, sps_chart]
             .spacing(15)
             .padding(20)
             .width(Length::Fill);
@@ -248,12 +406,9 @@ impl ParaGui {
         .into();
 
         container(
-            column![
-                text(title).size(14).color(TEXT_SECONDARY),
-                graph,
-            ]
-            .spacing(10)
-            .width(Length::Fill),
+            column![text(title).size(14).color(TEXT_SECONDARY), graph,]
+                .spacing(10)
+                .width(Length::Fill),
         )
         .padding(15)
         .style(|_| container::Style {
@@ -271,9 +426,13 @@ impl ParaGui {
     fn view_error(&self, error: String) -> Element<'_, Message> {
         container(
             column![
-                text("Connection Error").size(20).color(Color::from_rgb(0.8, 0.3, 0.3)),
+                text("Connection Error")
+                    .size(20)
+                    .color(Color::from_rgb(0.8, 0.3, 0.3)),
                 text(error).size(14).color(TEXT_SECONDARY),
-                text(format!("Endpoint: {}", self.endpoint)).size(12).color(TEXT_MUTED),
+                text(format!("Endpoint: {}", self.endpoint))
+                    .size(12)
+                    .color(TEXT_MUTED),
             ]
             .spacing(10)
             .align_x(Alignment::Center),
@@ -291,6 +450,245 @@ impl ParaGui {
             .height(Length::Fill)
             .center_x(Length::Fill)
             .center_y(Length::Fill)
+            .into()
+    }
+
+    fn view_miners(&self) -> Element<'_, Message> {
+        let header_row = row![
+            text("Network Miners").size(18).color(TEXT_PRIMARY),
+            Space::new().width(Length::Fill),
+            button(
+                text(if self.miners_loading {
+                    "Scanning..."
+                } else {
+                    "Refresh"
+                })
+                .size(14)
+                .color(TEXT_PRIMARY)
+            )
+            .on_press_maybe(if self.miners_loading {
+                None
+            } else {
+                Some(Message::ScanMiners)
+            })
+            .style(|theme, status| {
+                let mut style = button::text(theme, status);
+                style.background = Some(BG_CARD.into());
+                style.border = iced::Border {
+                    color: BORDER_COLOR,
+                    width: 1.0,
+                    radius: 4.0.into(),
+                };
+                style
+            })
+            .padding([8, 16]),
+        ]
+        .align_y(Alignment::Center)
+        .padding([0, 20]);
+
+        // Manual IP input section
+        let manual_input = self.view_manual_ip_input();
+
+        let content: Element<'_, Message> = if self.miners_loading && self.miners.is_empty() {
+            container(
+                text("Scanning network for miners...")
+                    .size(14)
+                    .color(TEXT_SECONDARY),
+            )
+            .width(Length::Fill)
+            .height(Length::Fixed(200.0))
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .into()
+        } else if self.miners.is_empty() {
+            container(
+                column![
+                    text("No miners found on local network")
+                        .size(14)
+                        .color(TEXT_MUTED),
+                    Space::new().height(Length::Fixed(20.0)),
+                    text("Add a miner manually by IP address:")
+                        .size(12)
+                        .color(TEXT_SECONDARY),
+                ]
+                .align_x(Alignment::Center)
+                .spacing(8),
+            )
+            .width(Length::Fill)
+            .height(Length::Fixed(150.0))
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .into()
+        } else {
+            self.view_miner_list()
+        };
+
+        // Show error if any
+        let error_display: Element<'_, Message> = if let Some(err) = &self.miners_error {
+            container(text(err).size(12).color(Color::from_rgb(0.8, 0.3, 0.3)))
+                .padding([0, 20])
+                .into()
+        } else {
+            Space::new().height(Length::Fixed(0.0)).into()
+        };
+
+        column![header_row, manual_input, error_display, content]
+            .spacing(10)
+            .padding([10, 0])
+            .into()
+    }
+
+    fn view_manual_ip_input(&self) -> Element<'_, Message> {
+        let input = text_input(
+            "Enter miner IP address (e.g., 192.168.1.100)",
+            &self.manual_ip_input,
+        )
+        .on_input(Message::ManualIpChanged)
+        .on_submit(Message::AddManualMiner)
+        .padding([10, 15])
+        .size(14)
+        .width(Length::Fixed(350.0))
+        .style(|theme, status| {
+            let mut style = text_input::default(theme, status);
+            style.background = BG_CARD.into();
+            style.border = iced::Border {
+                color: BORDER_COLOR,
+                width: 1.0,
+                radius: 4.0.into(),
+            };
+            style
+        });
+
+        let add_button = button(
+            text(if self.manual_ip_loading {
+                "Adding..."
+            } else {
+                "Add"
+            })
+            .size(14)
+            .color(TEXT_PRIMARY),
+        )
+        .on_press_maybe(
+            if self.manual_ip_loading || self.manual_ip_input.trim().is_empty() {
+                None
+            } else {
+                Some(Message::AddManualMiner)
+            },
+        )
+        .style(|theme, status| {
+            let mut style = button::text(theme, status);
+            style.background = Some(ACCENT_CYAN.into());
+            style.border = iced::Border {
+                color: ACCENT_CYAN,
+                width: 1.0,
+                radius: 4.0.into(),
+            };
+            style
+        })
+        .padding([10, 20]);
+
+        container(
+            row![input, add_button]
+                .spacing(10)
+                .align_y(Alignment::Center),
+        )
+        .width(Length::Fill)
+        .center_x(Length::Fill)
+        .padding([5, 20])
+        .into()
+    }
+
+    fn view_miner_list(&self) -> Element<'_, Message> {
+        // Header row
+        let header = container(
+            row![
+                text("IP Address")
+                    .size(12)
+                    .color(TEXT_MUTED)
+                    .width(Length::FillPortion(2)),
+                text("Model")
+                    .size(12)
+                    .color(TEXT_MUTED)
+                    .width(Length::FillPortion(2)),
+                text("Hashrate")
+                    .size(12)
+                    .color(TEXT_MUTED)
+                    .width(Length::FillPortion(2)),
+                text("Temp")
+                    .size(12)
+                    .color(TEXT_MUTED)
+                    .width(Length::FillPortion(1)),
+                text("Status")
+                    .size(12)
+                    .color(TEXT_MUTED)
+                    .width(Length::FillPortion(1)),
+            ]
+            .spacing(10)
+            .padding([0, 20]),
+        )
+        .style(|_| container::Style {
+            border: iced::Border {
+                color: BORDER_COLOR,
+                width: 0.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        });
+
+        // Miner rows
+        let rows: Vec<Element<'_, Message>> = self
+            .miners
+            .iter()
+            .map(|m| {
+                let status_color = if m.status == "Mining" {
+                    Color::from_rgb(0.3, 0.8, 0.3)
+                } else {
+                    Color::from_rgb(0.8, 0.5, 0.2)
+                };
+
+                container(
+                    row![
+                        text(m.ip.to_string())
+                            .size(13)
+                            .color(TEXT_PRIMARY)
+                            .width(Length::FillPortion(2)),
+                        text(&m.model)
+                            .size(13)
+                            .color(TEXT_SECONDARY)
+                            .width(Length::FillPortion(2)),
+                        text(&m.hashrate)
+                            .size(13)
+                            .color(ACCENT_CYAN)
+                            .width(Length::FillPortion(2)),
+                        text(&m.temperature)
+                            .size(13)
+                            .color(TEXT_SECONDARY)
+                            .width(Length::FillPortion(1)),
+                        text(&m.status)
+                            .size(13)
+                            .color(status_color)
+                            .width(Length::FillPortion(1)),
+                    ]
+                    .spacing(10)
+                    .padding([12, 20]),
+                )
+                .style(|_| container::Style {
+                    background: Some(BG_CARD.into()),
+                    border: iced::Border {
+                        color: BORDER_COLOR,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                })
+                .into()
+            })
+            .collect();
+
+        let list = Column::with_children(rows).spacing(8).padding([0, 20]);
+
+        Scrollable::new(column![header, list].spacing(10))
+            .height(Length::Fill)
             .into()
     }
 }
@@ -380,7 +778,10 @@ impl<'a> LineChart<'a> {
                 Point::new(left_margin, y),
                 Point::new(size.width - right_margin, y),
             );
-            frame.stroke(&line, Stroke::default().with_color(grid_color).with_width(1.0));
+            frame.stroke(
+                &line,
+                Stroke::default().with_color(grid_color).with_width(1.0),
+            );
 
             // Y-axis label
             let label = format_chart_value(value);
@@ -389,8 +790,8 @@ impl<'a> LineChart<'a> {
                 position: Point::new(left_margin - 8.0, y),
                 color: TEXT_MUTED,
                 size: 10.0.into(),
-                horizontal_alignment: Horizontal::Right,
-                vertical_alignment: Vertical::Center,
+                align_x: Horizontal::Right.into(),
+                align_y: Vertical::Center.into(),
                 ..Default::default()
             };
             frame.fill_text(text);
@@ -415,7 +816,10 @@ impl<'a> LineChart<'a> {
             }
 
             let path = builder.build();
-            frame.stroke(&path, Stroke::default().with_color(self.color).with_width(1.5));
+            frame.stroke(
+                &path,
+                Stroke::default().with_color(self.color).with_width(1.5),
+            );
         }
 
         // Time labels
@@ -426,8 +830,8 @@ impl<'a> LineChart<'a> {
             position: Point::new(left_margin, size.height - 3.0),
             color: TEXT_MUTED,
             size: 9.0.into(),
-            horizontal_alignment: Horizontal::Left,
-            vertical_alignment: Vertical::Bottom,
+            align_x: Horizontal::Left.into(),
+            align_y: Vertical::Bottom.into(),
             ..Default::default()
         });
 
@@ -436,8 +840,8 @@ impl<'a> LineChart<'a> {
             position: Point::new(size.width - right_margin, size.height - 3.0),
             color: TEXT_MUTED,
             size: 9.0.into(),
-            horizontal_alignment: Horizontal::Right,
-            vertical_alignment: Vertical::Bottom,
+            align_x: Horizontal::Right.into(),
+            align_y: Vertical::Bottom.into(),
             ..Default::default()
         });
 
@@ -448,8 +852,8 @@ impl<'a> LineChart<'a> {
                 position: Point::new(size.width - right_margin - 5.0, top_margin + 3.0),
                 color: self.color,
                 size: 12.0.into(),
-                horizontal_alignment: Horizontal::Right,
-                vertical_alignment: Vertical::Top,
+                align_x: Horizontal::Right.into(),
+                align_y: Vertical::Top.into(),
                 ..Default::default()
             });
         }
@@ -461,10 +865,182 @@ fn fetch_stats(endpoint: String) -> Task<Message> {
         async move {
             let url = format!("{}/api/stats", endpoint);
             let response = reqwest::get(&url).await.map_err(|e| e.to_string())?;
-            response.json::<PoolStats>().await.map_err(|e| e.to_string())
+            response
+                .json::<PoolStats>()
+                .await
+                .map_err(|e| e.to_string())
         },
         Message::StatsReceived,
     )
+}
+
+fn scan_miners() -> Task<Message> {
+    Task::perform(
+        async {
+            use asic_rs::MinerFactory;
+
+            // Scan common local network subnets
+            let subnets = [
+                "192.168.0.0/24",
+                "192.168.1.0/24",
+                "192.168.4.0/24",
+                "10.0.0.0/24",
+            ];
+
+            let mut all_miners = Vec::new();
+
+            for subnet in subnets {
+                if let Ok(factory) = MinerFactory::from_subnet(subnet) {
+                    if let Ok(miners) = factory.scan().await {
+                        for miner in miners {
+                            let data = miner.get_data().await;
+
+                            let hashrate_str = data
+                                .hashrate
+                                .map(|h| h.to_string())
+                                .unwrap_or_else(|| "N/A".to_string());
+
+                            let temp_str = data
+                                .average_temperature
+                                .map(|t| format!("{:.1}°C", t.as_celsius()))
+                                .unwrap_or_else(|| "N/A".to_string());
+
+                            let status = if data.is_mining {
+                                "Mining".to_string()
+                            } else {
+                                "Idle".to_string()
+                            };
+
+                            all_miners.push(MinerInfo {
+                                ip: data.ip,
+                                model: format!(
+                                    "{} {}",
+                                    data.device_info.make, data.device_info.model
+                                ),
+                                hashrate: hashrate_str,
+                                temperature: temp_str,
+                                status,
+                            });
+                        }
+                    }
+                }
+            }
+
+            Ok(all_miners)
+        },
+        Message::MinersDiscovered,
+    )
+}
+
+fn fetch_single_miner(ip_str: String) -> Task<Message> {
+    Task::perform(
+        async move {
+            use asic_rs::MinerFactory;
+
+            let ip = IpAddr::from_str(&ip_str).map_err(|e| format!("Invalid IP: {}", e))?;
+
+            // First try asic-rs
+            let factory = MinerFactory::new();
+            if let Ok(Some(miner)) = factory.get_miner(ip).await {
+                let data = miner.get_data().await;
+
+                let hashrate_str = data
+                    .hashrate
+                    .map(|h| h.to_string())
+                    .unwrap_or_else(|| "N/A".to_string());
+
+                let temp_str = data
+                    .average_temperature
+                    .map(|t| format!("{:.1}°C", t.as_celsius()))
+                    .unwrap_or_else(|| "N/A".to_string());
+
+                let status = if data.is_mining {
+                    "Mining".to_string()
+                } else {
+                    "Idle".to_string()
+                };
+
+                return Ok(MinerInfo {
+                    ip: data.ip,
+                    model: format!("{} {}", data.device_info.make, data.device_info.model),
+                    hashrate: hashrate_str,
+                    temperature: temp_str,
+                    status,
+                });
+            }
+
+            // Fallback: Try NerdAxe/AxeOS API directly
+            fetch_axeos_miner(ip).await
+        },
+        Message::ManualMinerResult,
+    )
+}
+
+/// Fallback for NerdAxe/AxeOS devices that asic-rs doesn't recognize
+async fn fetch_axeos_miner(ip: IpAddr) -> Result<MinerInfo, String> {
+    let url = format!("http://{}/api/system/info", ip);
+    
+    let response = reqwest::Client::new()
+        .get(&url)
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+        .map_err(|e| format!("Connection failed: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("HTTP {}", response.status()));
+    }
+
+    let json: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("Invalid JSON: {}", e))?;
+
+    // Parse NerdAxe/AxeOS response
+    let model = json["deviceModel"]
+        .as_str()
+        .or_else(|| json["ASICModel"].as_str())
+        .unwrap_or("Unknown")
+        .to_string();
+
+    let hashrate = json["hashRate"]
+        .as_f64()
+        .or_else(|| json["hashRate_1m"].as_f64())
+        .map(|h| format_hashrate_gh(h))
+        .unwrap_or_else(|| "N/A".to_string());
+
+    let temp = json["temp"]
+        .as_f64()
+        .map(|t| format!("{:.1}°C", t))
+        .unwrap_or_else(|| "N/A".to_string());
+
+    // Check if mining based on hashrate > 0 or shares accepted
+    let is_mining = json["hashRate"].as_f64().unwrap_or(0.0) > 0.0
+        || json["sharesAccepted"].as_u64().unwrap_or(0) > 0;
+
+    let status = if is_mining {
+        "Mining".to_string()
+    } else {
+        "Idle".to_string()
+    };
+
+    Ok(MinerInfo {
+        ip,
+        model,
+        hashrate,
+        temperature: temp,
+        status,
+    })
+}
+
+fn format_hashrate_gh(gh: f64) -> String {
+    if gh >= 1000.0 {
+        format!("{:.2} TH/s", gh / 1000.0)
+    } else if gh >= 1.0 {
+        format!("{:.2} GH/s", gh)
+    } else {
+        format!("{:.2} MH/s", gh * 1000.0)
+    }
 }
 
 fn fetch_users(endpoint: String) -> Task<Message> {
@@ -472,7 +1048,10 @@ fn fetch_users(endpoint: String) -> Task<Message> {
         async move {
             let url = format!("{}/api/users", endpoint);
             let response = reqwest::get(&url).await.map_err(|e| e.to_string())?;
-            response.json::<Vec<UserSummary>>().await.map_err(|e| e.to_string())
+            response
+                .json::<Vec<UserSummary>>()
+                .await
+                .map_err(|e| e.to_string())
         },
         Message::UsersReceived,
     )
