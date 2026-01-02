@@ -52,6 +52,9 @@ jobs:
 
     - uses: egor-tensin/setup-gcc@v1
 
+    - name: Install autotools
+      run: sudo apt-get install -y libtool automake autoconf
+
     - name: Install bitcoind
       run: |
         ./bin/install-bitcoin-core-linux
