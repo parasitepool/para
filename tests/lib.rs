@@ -124,15 +124,15 @@ fn signet_username() -> Username {
 #[cfg(target_os = "linux")]
 fn solve_share(
     notify: &stratum::Notify,
-    extranonce1: &Extranonce,
-    extranonce2: &Extranonce,
+    enonce1: &Extranonce,
+    enonce2: &Extranonce,
     difficulty: stratum::Difficulty,
 ) -> (Ntime, Nonce) {
     let merkle_root = stratum::merkle_root(
         &notify.coinb1,
         &notify.coinb2,
-        extranonce1,
-        extranonce2,
+        enonce1,
+        enonce2,
         &notify.merkle_branches,
     )
     .unwrap();

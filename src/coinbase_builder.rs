@@ -4,8 +4,8 @@ use super::*;
 pub struct CoinbaseBuilder {
     address: Address,
     aux: BTreeMap<String, String>,
-    extranonce1: Extranonce,
-    extranonce2_size: usize,
+    enonce1: Extranonce,
+    enonce2_size: usize,
     height: u64,
     pool_sig: Option<String>,
     timestamp: Option<u64>,
@@ -18,8 +18,8 @@ impl CoinbaseBuilder {
 
     pub fn new(
         address: Address,
-        extranonce1: Extranonce,
-        extranonce2_size: usize,
+        enonce1: Extranonce,
+        enonce2_size: usize,
         height: u64,
         value: Amount,
         witness_commitment: ScriptBuf,
@@ -27,8 +27,8 @@ impl CoinbaseBuilder {
         Self {
             address,
             aux: BTreeMap::new(),
-            extranonce1,
-            extranonce2_size,
+            enonce1,
+            enonce2_size,
             height,
             value,
             witness_commitment,
@@ -77,8 +77,8 @@ impl CoinbaseBuilder {
 
         let script_prefix_size = buf.len();
 
-        buf.extend_from_slice(self.extranonce1.as_bytes());
-        buf.extend_from_slice(vec![0u8; self.extranonce2_size].as_slice());
+        buf.extend_from_slice(self.enonce1.as_bytes());
+        buf.extend_from_slice(vec![0u8; self.enonce2_size].as_slice());
 
         if let Some(sig) = self.pool_sig {
             buf.extend_from_slice(sig.as_bytes())
@@ -120,13 +120,13 @@ impl CoinbaseBuilder {
             ],
         };
 
-        let total_extranonce_size = self.extranonce1.len() + self.extranonce2_size;
+        let total_extranonce_size = self.enonce1.len() + self.enonce2_size;
 
         // offset = size of tx version
         //  + size of #inputs
         //  + size of coinbase outpoint
         //  + size of scriptSig length
-        //  + size of everything before extranonce1 + extranonce2
+        //  + size of everything before enonce1 + enonce2
         let offset = 4
             + VarInt(coinbase.input.len().try_into().unwrap()).size()
             + 36
@@ -177,7 +177,7 @@ mod tests {
     }
 
     #[test]
-    fn split_reassembles_with_zero_extranonce2() {
+    fn split_reassembles_with_zero_enonce2() {
         let (tx, coinb1, coinb2) = CoinbaseBuilder::new(
             address(),
             "abcd1234".parse().unwrap(),
@@ -190,13 +190,13 @@ mod tests {
         .build()
         .unwrap();
 
-        let extranonce1 = hex::decode("abcd1234").unwrap();
-        let extranonce2 = vec![0u8; 8];
+        let enonce1 = hex::decode("abcd1234").unwrap();
+        let enonce2 = vec![0u8; 8];
 
         let full = {
             let mut v = hex::decode(&coinb1).unwrap();
-            v.extend_from_slice(&extranonce1);
-            v.extend_from_slice(&extranonce2);
+            v.extend_from_slice(&enonce1);
+            v.extend_from_slice(&enonce2);
             v.extend_from_slice(&hex::decode(&coinb2).unwrap());
             v
         };
@@ -205,7 +205,7 @@ mod tests {
     }
 
     #[test]
-    fn split_allows_custom_extranonce2() {
+    fn split_allows_custom_enonce2() {
         let (tx, coinb1, coinb2) = CoinbaseBuilder::new(
             address(),
             "abcd1234".parse().unwrap(),
@@ -217,13 +217,13 @@ mod tests {
         .build()
         .unwrap();
 
-        let extranonce1 = hex::decode("abcd1234").unwrap();
-        let extranonce2_custom = [0x11; 8];
+        let enonce1 = hex::decode("abcd1234").unwrap();
+        let enonce2_custom = [0x11; 8];
 
         let joined = {
             let mut v = hex::decode(&coinb1).unwrap();
-            v.extend_from_slice(&extranonce1);
-            v.extend_from_slice(&extranonce2_custom);
+            v.extend_from_slice(&enonce1);
+            v.extend_from_slice(&enonce2_custom);
             v.extend_from_slice(&hex::decode(&coinb2).unwrap());
             v
         };
@@ -232,7 +232,7 @@ mod tests {
         assert_eq!(joined.len(), original.len(), "length must match");
         assert_ne!(
             joined, original,
-            "bytes should differ when extranonce2 != zeros"
+            "bytes should differ when enonce2 != zeros"
         );
     }
 
@@ -280,7 +280,7 @@ mod tests {
     }
 
     #[test]
-    fn coinb1_ends_before_extranonce1() {
+    fn coinb1_ends_before_enonce1() {
         let (_tx, coinb1, _coinb2) = CoinbaseBuilder::new(
             address(),
             "abcd1234".parse().unwrap(),
@@ -294,12 +294,12 @@ mod tests {
 
         assert!(
             !coinb1.contains("abcd1234"),
-            "coinb1 must end before extranonce1 bytes"
+            "coinb1 must end before enonce1 bytes"
         );
     }
 
     #[test]
-    fn extranonce2_boundary_occurs_once() {
+    fn enonce2_boundary_occurs_once() {
         let (tx, coinb1, coinb2) = CoinbaseBuilder::new(
             address(),
             "abcd1234".parse().unwrap(),
@@ -311,26 +311,26 @@ mod tests {
         .build()
         .unwrap();
 
-        let extranonce1 = hex::decode("abcd1234").unwrap();
-        let extranonce2_zeros = vec![0u8; 8];
+        let enonce1 = hex::decode("abcd1234").unwrap();
+        let enonce2_zeros = vec![0u8; 8];
 
         let mut full = hex::decode(&coinb1).unwrap();
-        full.extend_from_slice(&extranonce1);
-        full.extend_from_slice(&extranonce2_zeros);
+        full.extend_from_slice(&enonce1);
+        full.extend_from_slice(&enonce2_zeros);
         full.extend_from_slice(&hex::decode(&coinb2).unwrap());
 
         let bin = bitcoin::consensus::serialize(&tx);
         pretty_assert_eq!(full, bin);
 
-        let mut needle = extranonce1.clone();
-        needle.extend_from_slice(&extranonce2_zeros);
+        let mut needle = enonce1.clone();
+        needle.extend_from_slice(&enonce2_zeros);
 
         let count = bin
             .windows(needle.len())
             .filter(|w| *w == needle.as_slice())
             .count();
 
-        assert_eq!(count, 1, "extranonce1 || zeros should appear exactly once");
+        assert_eq!(count, 1, "enonce1 || zeros should appear exactly once");
     }
 
     #[test]
@@ -412,7 +412,7 @@ mod tests {
     }
 
     #[test]
-    fn join_roundtrip_various_extranonce2_sizes() {
+    fn join_roundtrip_various_enonce2_sizes() {
         for x2 in [0, 1, 8, 16, 32] {
             let (tx, c1, c2) = CoinbaseBuilder::new(
                 address(),
@@ -516,12 +516,12 @@ mod tests {
     }
 
     #[test]
-    fn coinbase_script_sig_too_large_via_extranonce2_errors() {
-        let extranonce2_size = CoinbaseBuilder::MAX_COINBASE_SCRIPT_SIG_SIZE;
+    fn coinbase_script_sig_too_large_via_enonce2_errors() {
+        let enonce2_size = CoinbaseBuilder::MAX_COINBASE_SCRIPT_SIG_SIZE;
         let err = CoinbaseBuilder::new(
             address(),
             "abcd1234".parse().unwrap(),
-            extranonce2_size,
+            enonce2_size,
             2222,
             Amount::from_sat(50 * COIN_VALUE),
             ScriptBuf::new(),
