@@ -2,17 +2,20 @@ use {
     super::*,
     crate::{
         ckpool,
+        http_server::{
+            self, HttpConfig,
+            accept_json::AcceptJson,
+            error::{OptionExt, ServerError, ServerResult},
+        },
         subcommand::{
             server::{account::account_router, sharediff::share_difficulty_router},
             sync::{ShareBatch, SyncResponse},
         },
     },
-    accept_json::AcceptJson,
     aggregator::Aggregator,
     axum::extract::{Path, Query},
     cache::Cache,
     database::Database,
-    error::{OptionExt, ServerError, ServerResult},
     reqwest::{Client, ClientBuilder, header},
     server_config::ServerConfig,
     std::sync::OnceLock,
@@ -27,13 +30,10 @@ use {
     },
 };
 
-mod accept_json;
 pub mod account;
 mod aggregator;
-pub mod api;
 mod cache;
 pub mod database;
-pub(crate) mod error;
 pub mod notifications;
 mod server_config;
 mod sharediff;
@@ -56,6 +56,8 @@ pub(crate) fn bearer_auth<T: Default>(
 #[derive(RustEmbed)]
 #[folder = "static"]
 struct StaticAssets;
+
+pub type Status = StatusHtml;
 
 #[derive(Debug)]
 struct AccountUpdate {
@@ -234,7 +236,19 @@ impl Server {
 
         info!("Serving files in {}", log_dir.display());
 
-        self.spawn(config, router, handle)?.await??;
+        let acme_domains = config.domains()?;
+        let acme_contacts = config.acme_contacts();
+        let tls_enabled = !acme_domains.is_empty() && !acme_contacts.is_empty();
+
+        let http_config = HttpConfig {
+            address: config.address(),
+            port: config.port().unwrap_or(if tls_enabled { 443 } else { 80 }),
+            acme_domains,
+            acme_contacts,
+            acme_cache: config.acme_cache(),
+        };
+
+        http_server::spawn_with_handle(http_config, router, handle)?.await??;
 
         Ok(())
     }
@@ -504,99 +518,6 @@ impl Server {
             .header(CONTENT_TYPE, mime.as_ref())
             .body(content.data.into())
             .unwrap())
-    }
-
-    fn spawn(
-        &self,
-        config: Arc<ServerConfig>,
-        router: Router,
-        handle: Handle,
-    ) -> Result<task::JoinHandle<io::Result<()>>> {
-        let acme_cache = config.acme_cache();
-        let acme_domains = config.domains()?;
-        let acme_contacts = config.acme_contacts();
-        let address = config.address();
-
-        Ok(tokio::spawn(async move {
-            if !acme_domains.is_empty() && !acme_contacts.is_empty() {
-                info!(
-                    "Getting certificate for {} using contact email {}",
-                    acme_domains[0], acme_contacts[0]
-                );
-
-                let addr = (address, config.port().unwrap_or(443))
-                    .to_socket_addrs()?
-                    .next()
-                    .unwrap();
-
-                info!("Listening on https://{addr}");
-
-                axum_server::Server::bind(addr)
-                    .handle(handle)
-                    .acceptor(Self::acceptor(acme_domains, acme_contacts, acme_cache).unwrap())
-                    .serve(router.into_make_service())
-                    .await
-            } else {
-                let addr = (address, config.port().unwrap_or(80))
-                    .to_socket_addrs()?
-                    .next()
-                    .unwrap();
-
-                info!("Listening on http://{addr}");
-
-                axum_server::Server::bind(addr)
-                    .handle(handle)
-                    .serve(router.into_make_service())
-                    .await
-            }
-        }))
-    }
-
-    fn acceptor(
-        acme_domain: Vec<String>,
-        acme_contact: Vec<String>,
-        acme_cache: PathBuf,
-    ) -> Result<AxumAcceptor> {
-        static RUSTLS_PROVIDER_INSTALLED: LazyLock<bool> = LazyLock::new(|| {
-            rustls::crypto::ring::default_provider()
-                .install_default()
-                .is_ok()
-        });
-
-        let config = AcmeConfig::new(acme_domain)
-            .contact(acme_contact)
-            .cache_option(Some(DirCache::new(acme_cache)))
-            .directory(if cfg!(test) {
-                LETS_ENCRYPT_STAGING_DIRECTORY
-            } else {
-                LETS_ENCRYPT_PRODUCTION_DIRECTORY
-            });
-
-        let mut state = config.state();
-
-        ensure! {
-          *RUSTLS_PROVIDER_INSTALLED,
-          "failed to install rustls ring crypto provider",
-        }
-
-        let mut server_config = rustls::ServerConfig::builder()
-            .with_no_client_auth()
-            .with_cert_resolver(state.resolver());
-
-        server_config.alpn_protocols = vec!["h2".into(), "http/1.1".into()];
-
-        let acceptor = state.axum_acceptor(Arc::new(server_config));
-
-        tokio::spawn(async move {
-            while let Some(result) = state.next().await {
-                match result {
-                    Ok(ok) => info!("ACME event: {:?}", ok),
-                    Err(err) => error!("ACME error: {:?}", err),
-                }
-            }
-        });
-
-        Ok(acceptor)
     }
 
     pub(crate) async fn sync_batch(

@@ -1,4 +1,8 @@
-use {super::*, pool_config::PoolConfig};
+use {
+    super::*,
+    crate::{api, http_server},
+    pool_config::PoolConfig,
+};
 
 pub(crate) mod pool_config;
 
@@ -13,16 +17,22 @@ impl Pool {
         let config = Arc::new(self.config.clone());
         let metatron = Arc::new(Metatron::new());
         let (share_tx, share_rx) = mpsc::channel(SHARE_CHANNEL_CAPACITY);
-
         let address = config.address();
         let port = config.port();
 
-        let mut generator = Generator::new(config.clone())?;
-        let workbase_receiver = generator.spawn().await?;
+        let mut generator =
+            Generator::new(config.clone()).context("failed to connect to Bitcoin Core RPC")?;
 
-        let listener = TcpListener::bind((address.clone(), port)).await?;
+        let workbase_receiver = generator
+            .spawn()
+            .await
+            .context("failed to subscribe to ZMQ block notifications")?;
 
-        eprintln!("Listening on {address}:{port}");
+        let listener = TcpListener::bind((address.clone(), port))
+            .await
+            .with_context(|| format!("failed to bind to {address}:{port}"))?;
+
+        info!("Listening on {address}:{port}");
 
         let metatron_handle = {
             let metatron = metatron.clone();
@@ -30,6 +40,24 @@ impl Pool {
             tokio::spawn(async move {
                 metatron.run(share_rx, None, cancel).await;
             })
+        };
+
+        let api_handle = if let Some(api_port) = config.api_port() {
+            let http_config = http_server::HttpConfig {
+                address: config.address(),
+                port: api_port,
+                acme_domains: config.acme_domains(),
+                acme_contacts: config.acme_contacts(),
+                acme_cache: config.acme_cache(),
+            };
+
+            Some(http_server::spawn(
+                http_config,
+                api::router(metatron.clone()),
+                cancel_token.clone(),
+            )?)
+        } else {
+            None
         };
 
         if !integration_test() && !logs_enabled() {
@@ -82,12 +110,20 @@ impl Pool {
             "Waiting for {} active connections to close...",
             connection_tasks.len()
         );
+
         while connection_tasks.join_next().await.is_some() {}
+
         info!("All connections closed");
 
         drop(share_tx);
+
         let _ = metatron_handle.await;
         info!("Metatron stopped");
+
+        if let Some(handle) = api_handle {
+            let _ = handle.await;
+            info!("HTTP API server stopped");
+        }
 
         Ok(())
     }

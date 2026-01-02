@@ -2,7 +2,7 @@ use super::*;
 
 pub(crate) struct AcceptJson(pub(crate) bool);
 
-impl<S> axum::extract::FromRequestParts<S> for AcceptJson
+impl<S> FromRequestParts<S> for AcceptJson
 where
     S: Send + Sync,
 {

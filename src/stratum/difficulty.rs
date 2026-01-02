@@ -26,6 +26,13 @@ impl Difficulty {
     }
 }
 
+impl From<BlockHash> for Difficulty {
+    fn from(hash: BlockHash) -> Self {
+        let target = Target::from_le_bytes(hash.to_byte_array());
+        Difficulty(target.to_compact_lossy())
+    }
+}
+
 impl Ord for Difficulty {
     fn cmp(&self, other: &Self) -> Ordering {
         let target_self = self.to_target();
@@ -387,5 +394,58 @@ mod tests {
         ] {
             assert!(Difficulty::from_str(s).is_err(), "should reject {s}");
         }
+    }
+
+    #[test]
+    fn from_blockhash_max_target_is_difficulty_one() {
+        let target_max = Target::MAX;
+        let hash = BlockHash::from_byte_array(target_max.to_le_bytes());
+        let diff = Difficulty::from(hash);
+
+        assert!(
+            relative_error(diff.as_f64(), 1.0) < 1e-6,
+            "max target hash should be difficulty 1, got {diff}"
+        );
+    }
+
+    #[test]
+    fn from_blockhash_lower_hash_means_higher_difficulty() {
+        let easy_target = Target::MAX;
+        let easy_u256 = U256::from_big_endian(&easy_target.to_be_bytes());
+        let hard_u256 = easy_u256 >> 2;
+        let hard_target = Target::from_be_bytes(hard_u256.to_big_endian());
+
+        let easy_hash = BlockHash::from_byte_array(easy_target.to_le_bytes());
+        let hard_hash = BlockHash::from_byte_array(hard_target.to_le_bytes());
+
+        let easy_diff = Difficulty::from(easy_hash);
+        let hard_diff = Difficulty::from(hard_hash);
+
+        assert!(
+            hard_diff > easy_diff,
+            "lower hash should mean higher difficulty: hard={hard_diff} easy={easy_diff}"
+        );
+    }
+
+    #[test]
+    fn from_blockhash_difficulty_scales_correctly() {
+        let target_1 = Target::MAX;
+
+        let target_bytes = target_1.to_be_bytes();
+        let target_u256 = U256::from_big_endian(&target_bytes);
+        let half_target_u256 = target_u256 >> 1;
+        let half_target = Target::from_be_bytes(half_target_u256.to_big_endian());
+
+        let hash_1 = BlockHash::from_byte_array(target_1.to_le_bytes());
+        let hash_2 = BlockHash::from_byte_array(half_target.to_le_bytes());
+
+        let diff_1 = Difficulty::from(hash_1);
+        let diff_2 = Difficulty::from(hash_2);
+
+        assert!(
+            relative_error(diff_2.as_f64() / diff_1.as_f64(), 2.0) < 1e-6,
+            "halving target should double difficulty: diff_1={diff_1} diff_2={diff_2} ratio={}",
+            diff_2.as_f64() / diff_1.as_f64()
+        );
     }
 }
