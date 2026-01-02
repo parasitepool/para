@@ -63,9 +63,20 @@ impl Controller {
         cancel_token: CancellationToken,
         version_rolling: VersionRollingConfig,
     ) -> Result<Vec<Share>> {
-        let events = client.connect().await?;
-        let (subscribe, _, _) = client.subscribe().await?;
-        client.authorize().await?;
+        let events = client
+            .connect()
+            .await
+            .context("failed to connect to stratum server")?;
+
+        let (subscribe, _, _) = client
+            .subscribe()
+            .await
+            .context("stratum mining.subscribe failed")?;
+
+        client
+            .authorize()
+            .await
+            .context("stratum mining.authorize failed")?;
 
         info!(
             "Authorized: extranonce1={}, extranonce2_size={}",

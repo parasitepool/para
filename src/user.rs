@@ -1,10 +1,9 @@
 use {super::*, dashmap::DashMap};
 
-#[allow(unused)]
 pub(crate) struct User {
-    address: Address,
-    workers: DashMap<String, Arc<Worker>>,
-    authorized: Instant,
+    pub(crate) address: Address,
+    pub(crate) workers: DashMap<String, Arc<Worker>>,
+    pub(crate) authorized: u64,
 }
 
 impl User {
@@ -12,7 +11,10 @@ impl User {
         Self {
             address,
             workers: DashMap::new(),
-            authorized: Instant::now(),
+            authorized: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time went backwards")
+                .as_secs(),
         }
     }
 
@@ -58,6 +60,10 @@ impl User {
             .iter()
             .filter_map(|worker| worker.last_share())
             .max()
+    }
+
+    pub(crate) fn workers(&self) -> impl Iterator<Item = Arc<Worker>> {
+        self.workers.iter().map(|entry| entry.value().clone())
     }
 }
 

@@ -7,7 +7,6 @@ struct Stats {
     last_share: Option<Instant>,
 }
 
-#[allow(unused)]
 pub(crate) struct Worker {
     workername: String,
     stats: Mutex<Stats>,
@@ -30,14 +29,14 @@ impl Worker {
         }
     }
 
-    pub(crate) fn record_accepted(&self, difficulty: f64) {
+    pub(crate) fn record_accepted(&self, pool_diff: f64, share_diff: f64) {
         let now = Instant::now();
         let mut stats = self.stats.lock();
-        stats.dsps_1m.record(difficulty, now);
+        stats.dsps_1m.record(pool_diff, now);
         stats.sps_1m.record(1.0, now);
         stats.last_share = Some(now);
-        if difficulty > stats.best_ever {
-            stats.best_ever = difficulty;
+        if share_diff > stats.best_ever {
+            stats.best_ever = share_diff;
         }
         drop(stats);
         self.accepted.fetch_add(1, Ordering::Relaxed);
@@ -47,9 +46,8 @@ impl Worker {
         self.rejected.fetch_add(1, Ordering::Relaxed);
     }
 
-    #[cfg(test)]
-    pub(crate) fn workername(&self) -> String {
-        self.workername.clone()
+    pub(crate) fn workername(&self) -> &str {
+        &self.workername
     }
 
     pub(crate) fn hash_rate_1m(&self) -> HashRate {

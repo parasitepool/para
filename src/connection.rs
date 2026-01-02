@@ -551,7 +551,7 @@ where
         &self,
         submit: &Submit,
         job: Option<&Job>,
-        share_diff: f64,
+        pool_diff: f64,
         hash: BlockHash,
         reject_reason: Option<StratumError>,
     ) {
@@ -575,8 +575,7 @@ where
             submit.nonce,
             submit.ntime,
             submit.version_bits,
-            self.vardiff.current_diff().as_f64(),
-            share_diff,
+            pool_diff,
             hash,
             reject_reason,
         );
