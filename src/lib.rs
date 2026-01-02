@@ -207,13 +207,22 @@ pub fn main() {
 
             match args.run(cancel_token).await {
                 Err(err) => {
-                    error!("error: {err}");
+                    eprintln!("error: {err}");
+
+                    for (i, cause) in err.chain().skip(1).enumerate() {
+                        if i == 0 {
+                            eprintln!();
+                            eprintln!("because:");
+                        }
+                        eprintln!("- {cause}");
+                    }
 
                     if env::var_os("RUST_BACKTRACE")
                         .map(|val| val == "1")
                         .unwrap_or_default()
                     {
-                        error!("{}", err.backtrace());
+                        eprintln!();
+                        eprintln!("{}", err.backtrace());
                     }
                     process::exit(1);
                 }
