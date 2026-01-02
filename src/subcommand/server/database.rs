@@ -61,7 +61,8 @@ impl Database {
                     Duration::from_secs(5)
                 })
                 .connect(&database_url)
-                .await?,
+                .await
+                .with_context(|| format!("failed to connect to database at `{database_url}`"))?,
         })
     }
 
