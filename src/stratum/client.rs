@@ -235,22 +235,9 @@ impl Client {
         // Build params array explicitly to avoid serializing None as null
         // Stratum expects 5 params without version rolling, 6 with
         let params = if let Some(vb) = version_bits {
-            serde_json::json!([
-                self.config.username,
-                job_id,
-                extranonce2,
-                ntime,
-                nonce,
-                vb
-            ])
+            serde_json::json!([self.config.username, job_id, extranonce2, ntime, nonce, vb])
         } else {
-            serde_json::json!([
-                self.config.username,
-                job_id,
-                extranonce2,
-                ntime,
-                nonce
-            ])
+            serde_json::json!([self.config.username, job_id, extranonce2, ntime, nonce])
         };
 
         let (rx, instant) = self
