@@ -68,6 +68,7 @@ tracing = "0.1.41"
 tracing-appender = "0.2.3"
 tracing-subscriber = { version =  "0.3.19", features = ["env-filter", "fmt"] }
 zeromq = "0.4.1"
+iced = { version = "0.13", features = ["tokio", "canvas", "svg"] }
 
 [dev-dependencies]
 chrono = "0.4.41"
