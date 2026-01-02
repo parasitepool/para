@@ -1,19 +1,10 @@
 use super::hasher::HashResult;
 use super::*;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct VersionRollingConfig {
     pub enabled: bool,
     pub mask: u32,
-}
-
-impl Default for VersionRollingConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            mask: BIP320_VERSION_MASK,
-        }
-    }
 }
 
 impl VersionRollingConfig {
@@ -63,20 +54,54 @@ impl Controller {
         cancel_token: CancellationToken,
         version_rolling: VersionRollingConfig,
     ) -> Result<Vec<Share>> {
-        let events = client
-            .connect()
-            .await
-            .context("failed to connect to stratum server")?;
+        let events = client.connect().await?;
 
-        let (subscribe, _, _) = client
-            .subscribe()
-            .await
-            .context("stratum mining.subscribe failed")?;
+        // Negotiate version rolling with pool before subscribing
+        let version_rolling = if version_rolling.enabled {
+            match client
+                .configure(
+                    vec!["version-rolling".to_string()],
+                    Some(Version::from(version_rolling.mask as i32)),
+                )
+                .await
+            {
+                Ok((result, _, _)) => {
+                    // Check if pool accepted version-rolling
+                    let accepted = result
+                        .get("version-rolling")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
 
-        client
-            .authorize()
-            .await
-            .context("stratum mining.authorize failed")?;
+                    if accepted {
+                        // Get the negotiated mask from pool response
+                        let mask = result
+                            .get("version-rolling.mask")
+                            .and_then(|v| v.as_str())
+                            .and_then(|s| u32::from_str_radix(s, 16).ok())
+                            .unwrap_or(version_rolling.mask);
+
+                        info!(
+                            "Pool accepted version rolling with mask: {:#010x} ({} bits)",
+                            mask,
+                            mask.count_ones()
+                        );
+                        VersionRollingConfig::with_mask(mask)
+                    } else {
+                        info!("Pool rejected version rolling, disabling");
+                        VersionRollingConfig::disabled()
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to negotiate version rolling: {e}, disabling");
+                    VersionRollingConfig::disabled()
+                }
+            }
+        } else {
+            version_rolling
+        };
+
+        let (subscribe, _, _) = client.subscribe().await?;
+        client.authorize().await?;
 
         info!(
             "Authorized: extranonce1={}, extranonce2_size={}",
@@ -84,15 +109,6 @@ impl Controller {
         );
 
         info!("Controller initialized with {} CPU cores", cpu_cores);
-        if version_rolling.enabled {
-            info!(
-                "Version rolling enabled with mask: {:#010x} ({} bits)",
-                version_rolling.mask,
-                version_rolling.mask.count_ones()
-            );
-        } else {
-            info!("Version rolling disabled");
-        }
 
         let (share_tx, share_rx) = mpsc::channel(256);
         let (notify_tx, notify_rx) = watch::channel(None);
@@ -148,6 +164,10 @@ impl Controller {
                 biased;
                 _ = cancel_token.cancelled() => {
                     info!("Shutting down stratum client and hasher");
+                    break;
+                },
+                _ = self.root_cancel.cancelled() => {
+                    info!("Controller stop requested");
                     break;
                 },
                 event = events.recv() => {
@@ -220,6 +240,7 @@ impl Controller {
                 hash_result.extranonce2,
                 header.time.into(),
                 header.nonce.into(),
+                version_bits,
             )
             .await
         {
@@ -236,11 +257,15 @@ impl Controller {
         match self.mode {
             Mode::ShareFound => {
                 info!("Share found, exiting");
+                self.root_cancel.cancel();
+                self.cancel_hashers();
                 return Ok(());
             }
             Mode::BlockFound => {
                 if header.validate_pow(header.bits.into()).is_ok() {
                     info!("Block found, exiting");
+                    self.root_cancel.cancel();
+                    self.cancel_hashers();
                     return Ok(());
                 }
             }
