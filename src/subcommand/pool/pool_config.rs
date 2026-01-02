@@ -4,6 +4,14 @@ use super::*;
 pub(crate) struct PoolConfig {
     #[arg(long, help = "Listen at <ADDRESS>.")]
     address: Option<String>,
+    #[arg(long, help = "Enable HTTP API on <API_PORT>. Disabled if not set.")]
+    api_port: Option<u16>,
+    #[arg(long, help = "ACME domain for TLS certificate.")]
+    acme_domain: Vec<String>,
+    #[arg(long, help = "ACME contact email for TLS certificate.")]
+    acme_contact: Vec<String>,
+    #[arg(long, help = "ACME cache directory.", default_value = "acme-cache")]
+    acme_cache: PathBuf,
     #[arg(long, help = "Load Bitcoin Core data dir from <BITCOIN_DATA_DIR>.")]
     bitcoin_data_dir: Option<PathBuf>,
     #[arg(
@@ -74,7 +82,7 @@ impl PoolConfig {
             .unwrap_or_else(|| self.chain().default_rpc_port())
     }
 
-    pub fn bitcoin_credentials(&self) -> Result<Auth> {
+    pub(crate) fn bitcoin_credentials(&self) -> Result<Auth> {
         if let Some((user, pass)) = &self
             .bitcoin_rpc_username
             .as_ref()
@@ -86,7 +94,7 @@ impl PoolConfig {
         }
     }
 
-    pub fn bitcoin_rpc_url(&self) -> String {
+    pub(crate) fn bitcoin_rpc_url(&self) -> String {
         format!("127.0.0.1:{}/", self.bitcoin_rpc_port())
     }
 
@@ -148,7 +156,7 @@ impl PoolConfig {
         Ok(client)
     }
 
-    pub fn cookie_file(&self) -> Result<PathBuf> {
+    pub(crate) fn cookie_file(&self) -> Result<PathBuf> {
         if let Some(cookie_file) = &self.bitcoin_rpc_cookie_file {
             return Ok(cookie_file.clone());
         }
@@ -170,35 +178,55 @@ impl PoolConfig {
         Ok(path.join(".cookie"))
     }
 
-    pub fn port(&self) -> u16 {
+    pub(crate) fn port(&self) -> u16 {
         self.port.unwrap_or(42069)
     }
 
-    pub fn address(&self) -> String {
+    pub(crate) fn address(&self) -> String {
         self.address.clone().unwrap_or("0.0.0.0".into())
     }
 
-    pub fn version_mask(&self) -> Version {
+    pub(crate) fn version_mask(&self) -> Version {
         self.version_mask
     }
 
-    pub fn start_diff(&self) -> Difficulty {
+    pub(crate) fn start_diff(&self) -> Difficulty {
         self.start_diff
     }
 
-    pub fn update_interval(&self) -> Duration {
+    pub(crate) fn update_interval(&self) -> Duration {
         Duration::from_secs(self.update_interval)
     }
 
-    pub fn zmq_block_notifications(&self) -> Endpoint {
+    pub(crate) fn zmq_block_notifications(&self) -> Endpoint {
         self.zmq_block_notifications.clone()
     }
 
-    pub fn vardiff_period(&self) -> Duration {
+    pub(crate) fn vardiff_period(&self) -> Duration {
         Duration::from_secs_f64(self.vardiff_period)
     }
 
-    pub fn vardiff_window(&self) -> Duration {
+    pub(crate) fn vardiff_window(&self) -> Duration {
         Duration::from_secs_f64(self.vardiff_window)
+    }
+
+    pub(crate) fn api_port(&self) -> Option<u16> {
+        self.api_port
+    }
+
+    pub(crate) fn acme_domains(&self) -> Vec<String> {
+        self.acme_domain.clone()
+    }
+
+    pub(crate) fn acme_contacts(&self) -> Vec<String> {
+        self.acme_contact.clone()
+    }
+
+    pub(crate) fn acme_cache(&self) -> PathBuf {
+        if let Some(data_dir) = &self.data_dir {
+            data_dir.join(&self.acme_cache)
+        } else {
+            self.acme_cache.clone()
+        }
     }
 }

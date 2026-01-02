@@ -2,8 +2,8 @@ use {
     anyhow::{Context, Error, anyhow, bail, ensure},
     arguments::Arguments,
     axum::{
-        Extension, Router,
-        extract::{DefaultBodyLimit, Json},
+        Extension, Json, Router,
+        extract::{DefaultBodyLimit, FromRequestParts},
         http::{
             self, HeaderValue, StatusCode,
             header::{CONTENT_DISPOSITION, CONTENT_TYPE},
@@ -17,6 +17,7 @@ use {
     bitcoin::{
         Address, Amount, Block, BlockHash, CompactTarget, Network, OutPoint, ScriptBuf, Sequence,
         Target, Transaction, TxIn, TxOut, Txid, VarInt, Witness,
+        address::NetworkUnchecked,
         block::{self, Header},
         consensus::{self, Decodable, encode},
         hashes::Hash,
@@ -111,8 +112,7 @@ use {
     zmq::Zmq,
 };
 
-pub use subcommand::server::api;
-
+mod api;
 mod arguments;
 mod block_template;
 mod chain;
@@ -122,6 +122,7 @@ mod connection;
 mod decay;
 mod generator;
 mod hash_rate;
+mod http_server;
 mod job;
 mod jobs;
 mod metatron;

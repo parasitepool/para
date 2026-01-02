@@ -3,10 +3,10 @@ use {
     command_builder::CommandBuilder,
     executable_path::executable_path,
     para::{
-        api::Status,
         ckpool::{self, HashRate, HashRateStatus, PoolStatus, ShareStatus, User, Worker},
-        subcommand::server::notifications::{
-            NotificationHandler, NotificationPriority, NotificationType,
+        subcommand::server::{
+            Status,
+            notifications::{NotificationHandler, NotificationPriority, NotificationType},
         },
     },
     pretty_assertions::assert_eq as pretty_assert_eq,
