@@ -7,7 +7,6 @@ struct Stats {
     last_share: Option<Instant>,
 }
 
-#[allow(unused)]
 pub(crate) struct Worker {
     workername: String,
     stats: Mutex<Stats>,
@@ -47,9 +46,8 @@ impl Worker {
         self.rejected.fetch_add(1, Ordering::Relaxed);
     }
 
-    #[cfg(test)]
-    pub(crate) fn workername(&self) -> String {
-        self.workername.clone()
+    pub(crate) fn workername(&self) -> &str {
+        &self.workername
     }
 
     pub(crate) fn hash_rate_1m(&self) -> HashRate {
