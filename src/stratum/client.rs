@@ -221,21 +221,40 @@ impl Client {
         extranonce2: Extranonce,
         ntime: Ntime,
         nonce: Nonce,
+        version_bits: Option<Version>,
     ) -> Result<Submit> {
         let submit = Submit {
             username: self.config.username.clone(),
             job_id,
-            extranonce2,
+            extranonce2: extranonce2.clone(),
             ntime,
             nonce,
-            version_bits: None,
+            version_bits,
+        };
+
+        // Build params array explicitly to avoid serializing None as null
+        // Stratum expects 5 params without version rolling, 6 with
+        let params = if let Some(vb) = version_bits {
+            serde_json::json!([
+                self.config.username,
+                job_id,
+                extranonce2,
+                ntime,
+                nonce,
+                vb
+            ])
+        } else {
+            serde_json::json!([
+                self.config.username,
+                job_id,
+                extranonce2,
+                ntime,
+                nonce
+            ])
         };
 
         let (rx, instant) = self
-            .send_request(
-                "mining.submit".to_string(),
-                serde_json::to_value(&submit).context(error::SerializationSnafu)?,
-            )
+            .send_request("mining.submit".to_string(), params)
             .await?;
 
         let (message, _, _) = self.await_response(rx, instant).await?;
