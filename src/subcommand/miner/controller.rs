@@ -1,4 +1,27 @@
+use super::hasher::HashResult;
 use super::*;
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct VersionRollingConfig {
+    pub enabled: bool,
+    pub mask: u32,
+}
+
+impl VersionRollingConfig {
+    pub fn disabled() -> Self {
+        Self {
+            enabled: false,
+            mask: 0,
+        }
+    }
+
+    pub fn with_mask(mask: u32) -> Self {
+        Self {
+            enabled: mask != 0,
+            mask,
+        }
+    }
+}
 
 pub(crate) struct Controller {
     client: Client,
@@ -13,36 +36,72 @@ pub(crate) struct Controller {
     mode: Mode,
     pool_difficulty: Arc<Mutex<Difficulty>>,
     root_cancel: CancellationToken,
-    share_tx: mpsc::Sender<(JobId, Header, Extranonce)>,
-    share_rx: mpsc::Receiver<(JobId, Header, Extranonce)>,
+    share_tx: mpsc::Sender<HashResult>,
+    share_rx: mpsc::Receiver<HashResult>,
     shares: Vec<Share>,
     throttle: f64,
     username: Username,
+    version_rolling: VersionRollingConfig,
 }
 
 impl Controller {
-    pub(crate) async fn run(
+    pub(crate) async fn run_with_version_rolling(
         client: Client,
         username: Username,
         cpu_cores: usize,
         throttle: Option<HashRate>,
         mode: Mode,
         cancel_token: CancellationToken,
+        version_rolling: VersionRollingConfig,
     ) -> Result<Vec<Share>> {
-        let events = client
-            .connect()
-            .await
-            .context("failed to connect to stratum server")?;
+        let events = client.connect().await?;
 
-        let (subscribe, _, _) = client
-            .subscribe()
-            .await
-            .context("stratum mining.subscribe failed")?;
+        // Negotiate version rolling with pool before subscribing
+        let version_rolling = if version_rolling.enabled {
+            match client
+                .configure(
+                    vec!["version-rolling".to_string()],
+                    Some(Version::from(version_rolling.mask as i32)),
+                )
+                .await
+            {
+                Ok((result, _, _)) => {
+                    // Check if pool accepted version-rolling
+                    let accepted = result
+                        .get("version-rolling")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
 
-        client
-            .authorize()
-            .await
-            .context("stratum mining.authorize failed")?;
+                    if accepted {
+                        // Get the negotiated mask from pool response
+                        let mask = result
+                            .get("version-rolling.mask")
+                            .and_then(|v| v.as_str())
+                            .and_then(|s| u32::from_str_radix(s, 16).ok())
+                            .unwrap_or(version_rolling.mask);
+
+                        info!(
+                            "Pool accepted version rolling with mask: {:#010x} ({} bits)",
+                            mask,
+                            mask.count_ones()
+                        );
+                        VersionRollingConfig::with_mask(mask)
+                    } else {
+                        info!("Pool rejected version rolling, disabling");
+                        VersionRollingConfig::disabled()
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to negotiate version rolling: {e}, disabling");
+                    VersionRollingConfig::disabled()
+                }
+            }
+        } else {
+            version_rolling
+        };
+
+        let (subscribe, _, _) = client.subscribe().await?;
+        client.authorize().await?;
 
         info!(
             "Authorized: extranonce1={}, extranonce2_size={}",
@@ -76,6 +135,7 @@ impl Controller {
             shares: Vec::new(),
             throttle,
             username,
+            version_rolling,
         };
 
         controller.spawn_hashers();
@@ -106,6 +166,10 @@ impl Controller {
                     info!("Shutting down stratum client and hasher");
                     break;
                 },
+                _ = self.root_cancel.cancelled() => {
+                    info!("Controller stop requested");
+                    break;
+                },
                 event = events.recv() => {
                     match event {
                         Ok(stratum::Event::Notify(notify)) => {
@@ -122,46 +186,15 @@ impl Controller {
                         Err(broadcast::error::RecvError::Lagged(_)) => {
                             warn!("Event loop lagged, missed messages");
                         }
-                         Err(broadcast::error::RecvError::Closed) => {
+                        Err(broadcast::error::RecvError::Closed) => {
                             info!("Client event channel closed, shutting down");
                             break;
                         }
                     }
                 },
                 maybe = self.share_rx.recv() => match maybe {
-                    Some((job_id, header, extranonce2)) => {
-                        info!("Valid share found: blockhash={} nonce={}", header.block_hash(), header.nonce);
-
-                        let share = Share {
-                            extranonce1: self.extranonce1.clone(),
-                            extranonce2: extranonce2.clone(),
-                            job_id,
-                            nonce: header.nonce.into(),
-                            ntime: header.time.into(),
-                            username: self.username.clone(),
-                            version_bits: None,
-                        };
-
-                        self.shares.push(share);
-
-                        match self.client.submit(job_id, extranonce2, header.time.into(), header.nonce.into()).await {
-                            Err(err) => warn!("Failed to submit share for job {job_id}: {err}"),
-                            Ok(_) => info!("Share for job {job_id} submitted successfully"),
-                        }
-
-                        match self.mode {
-                            Mode::ShareFound => {
-                                info!("Share found, exiting");
-                                break;
-                            },
-                            Mode::BlockFound => {
-                                if header.validate_pow(header.bits.into()).is_ok() {
-                                    info!("Block found, exiting");
-                                    break;
-                                }
-                            }
-                            Mode::Continuous => continue,
-                        }
+                    Some(hash_result) => {
+                        self.handle_share_found(hash_result).await?;
                     }
                     None => {
                         info!("Share channel closed");
@@ -174,7 +207,77 @@ impl Controller {
         Ok(())
     }
 
+    async fn handle_share_found(&mut self, hash_result: HashResult) -> Result<()> {
+        let header = &hash_result.header;
+
+        info!(
+            "Valid share found: blockhash={} nonce={} version_bits={:?}",
+            header.block_hash(),
+            header.nonce,
+            hash_result.version_bits
+        );
+
+        let version_bits = hash_result
+            .version_bits
+            .map(|bits| Version::from(bits as i32));
+
+        let share = Share {
+            extranonce1: self.extranonce1.clone(),
+            extranonce2: hash_result.extranonce2.clone(),
+            job_id: hash_result.job_id,
+            nonce: header.nonce.into(),
+            ntime: header.time.into(),
+            username: self.username.clone(),
+            version_bits,
+        };
+
+        self.shares.push(share);
+
+        match self
+            .client
+            .submit(
+                hash_result.job_id,
+                hash_result.extranonce2,
+                header.time.into(),
+                header.nonce.into(),
+                version_bits,
+            )
+            .await
+        {
+            Err(err) => warn!(
+                "Failed to submit share for job {}: {err}",
+                hash_result.job_id
+            ),
+            Ok(_) => info!(
+                "Share for job {} submitted successfully",
+                hash_result.job_id
+            ),
+        }
+
+        match self.mode {
+            Mode::ShareFound => {
+                info!("Share found, exiting");
+                self.root_cancel.cancel();
+                self.cancel_hashers();
+                return Ok(());
+            }
+            Mode::BlockFound => {
+                if header.validate_pow(header.bits.into()).is_ok() {
+                    info!("Block found, exiting");
+                    self.root_cancel.cancel();
+                    self.cancel_hashers();
+                    return Ok(());
+                }
+            }
+            Mode::Continuous => {}
+        }
+
+        Ok(())
+    }
+
     fn spawn_hashers(&mut self) {
+        let version_rolling_config = self.version_rolling;
+
         for core_id in 0..self.cpu_cores {
             let mut notify_rx = self.notify_rx.clone();
             let share_tx = self.share_tx.clone();
@@ -184,7 +287,7 @@ impl Controller {
             let metrics = self.metrics.clone();
             let throttle = self.throttle;
 
-            info!("Starting hasher for core {core_id}",);
+            info!("Starting hasher for core {core_id}");
             self.hashers.spawn(async move {
                 loop {
                     if notify_rx.changed().await.is_err() {
@@ -227,11 +330,23 @@ impl Controller {
 
                         let pool_target = { pool_difficulty.lock().await.to_target() };
 
-                        let mut hasher = Hasher {
-                            header,
-                            pool_target,
-                            extranonce2: extranonce2.clone(),
-                            job_id: notify.job_id,
+                        let mut hasher = if !version_rolling_config.enabled {
+                            Hasher::without_version_rolling(
+                                header,
+                                pool_target,
+                                extranonce2.clone(),
+                                notify.job_id,
+                            )
+                        } else if version_rolling_config.mask == BIP320_VERSION_MASK {
+                            Hasher::new(header, pool_target, extranonce2.clone(), notify.job_id)
+                        } else {
+                            Hasher::with_version_mask(
+                                header,
+                                pool_target,
+                                extranonce2.clone(),
+                                notify.job_id,
+                                version_rolling_config.mask,
+                            )
                         };
 
                         let cancel_clone = cancel.clone();
@@ -243,8 +358,8 @@ impl Controller {
                         .await;
 
                         match result {
-                            Ok(Ok(share)) => {
-                                let _ = share_tx.send(share).await;
+                            Ok(Ok(hash_result)) => {
+                                let _ = share_tx.send(hash_result).await;
                             }
                             Ok(Err(err)) => {
                                 warn!("Hasher failed on core {core_id}: {err}");
@@ -262,7 +377,7 @@ impl Controller {
     }
 
     async fn handle_notify(&mut self, notify: Notify) -> Result {
-        info!("New job: job_id={}", notify.job_id,);
+        info!("New job: job_id={}", notify.job_id);
 
         let cancel = if notify.clean_jobs {
             self.cancel_hashers()

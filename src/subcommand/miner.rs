@@ -1,6 +1,6 @@
 use {
     super::*,
-    controller::Controller,
+    controller::{Controller, VersionRollingConfig},
     hasher::Hasher,
     metrics::Metrics,
     stratum::{Client, ClientConfig},
@@ -9,6 +9,12 @@ use {
 mod controller;
 mod hasher;
 mod metrics;
+mod version_rolling;
+
+// Re-export for external use (also makes them available internally)
+pub use version_rolling::{
+    BIP320_VERSION_MASK, MIN_VERSION_BITS, VersionRoller, apply_version_bits, extract_version_bits,
+};
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum Mode {
@@ -36,6 +42,13 @@ pub(crate) struct Miner {
     cpu_cores: Option<usize>,
     #[arg(long, help = "Hash rate to <THROTTLE> to.")]
     throttle: Option<HashRate>,
+    #[arg(long, help = "Disable version rolling (ASICBoost).")]
+    no_version_rolling: bool,
+    #[arg(
+        long,
+        help = "Custom version rolling mask in hex (default: BIP320 0x1FFFE000)."
+    )]
+    version_mask: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -88,19 +101,49 @@ impl Miner {
         info!("Available CPU cores: {}", available_cpu_cores);
         info!("CPU cores to use: {}", cpu_cores);
 
-        let shares = Controller::run(
+        // Parse version rolling configuration
+        let version_rolling = self.parse_version_rolling_config()?;
+
+        let shares = Controller::run_with_version_rolling(
             client,
             self.username.clone(),
             cpu_cores,
             self.throttle,
             self.mode,
             cancel_token,
+            version_rolling,
         )
         .await?;
 
         println!("{}", serde_json::to_string_pretty(&shares)?);
 
         Ok(())
+    }
+
+    fn parse_version_rolling_config(&self) -> Result<VersionRollingConfig> {
+        if self.no_version_rolling {
+            info!("Version rolling disabled via CLI");
+            return Ok(VersionRollingConfig::disabled());
+        }
+
+        let mask = if let Some(mask_str) = &self.version_mask {
+            let mask_str = mask_str.trim_start_matches("0x").trim_start_matches("0X");
+            let mask = u32::from_str_radix(mask_str, 16)
+                .map_err(|e| anyhow::anyhow!("Invalid version mask: {e}"))?;
+
+            if !VersionRoller::validate_mask(mask) {
+                warn!(
+                    "Version mask {:#x} has fewer than {} bits, mining may be inefficient",
+                    mask, MIN_VERSION_BITS
+                );
+            }
+
+            mask
+        } else {
+            BIP320_VERSION_MASK
+        };
+
+        Ok(VersionRollingConfig::with_mask(mask))
     }
 }
 
@@ -173,5 +216,106 @@ mod tests {
         );
 
         assert!(matches!(miner.mode, Mode::BlockFound));
+    }
+
+    // ==================== Version Rolling CLI Tests ====================
+
+    #[test]
+    fn parse_args_version_rolling_enabled_by_default() {
+        let miner = parse_miner_args(
+            "para miner parasite.wtf:42069 \
+            --username test.worker \
+            --password x",
+        );
+
+        assert!(!miner.no_version_rolling);
+        assert!(miner.version_mask.is_none());
+    }
+
+    #[test]
+    fn parse_args_version_rolling_disabled() {
+        let miner = parse_miner_args(
+            "para miner parasite.wtf:42069 \
+            --username test.worker \
+            --password x \
+            --no-version-rolling",
+        );
+
+        assert!(miner.no_version_rolling);
+    }
+
+    #[test]
+    fn parse_args_custom_version_mask() {
+        let miner = parse_miner_args(
+            "para miner parasite.wtf:42069 \
+            --username test.worker \
+            --password x \
+            --version-mask 0x1FFF0000",
+        );
+
+        assert!(!miner.no_version_rolling);
+        assert_eq!(miner.version_mask, Some("0x1FFF0000".to_string()));
+    }
+
+    #[test]
+    fn parse_args_custom_version_mask_without_prefix() {
+        let miner = parse_miner_args(
+            "para miner parasite.wtf:42069 \
+            --username test.worker \
+            --password x \
+            --version-mask 1FFFE000",
+        );
+
+        assert_eq!(miner.version_mask, Some("1FFFE000".to_string()));
+    }
+
+    #[test]
+    fn parse_version_rolling_config_default() {
+        let miner = parse_miner_args(
+            "para miner parasite.wtf:42069 \
+            --username test.worker",
+        );
+
+        let config = miner.parse_version_rolling_config().unwrap();
+        assert!(config.enabled);
+        assert_eq!(config.mask, BIP320_VERSION_MASK);
+    }
+
+    #[test]
+    fn parse_version_rolling_config_disabled() {
+        let miner = parse_miner_args(
+            "para miner parasite.wtf:42069 \
+            --username test.worker \
+            --no-version-rolling",
+        );
+
+        let config = miner.parse_version_rolling_config().unwrap();
+        assert!(!config.enabled);
+        assert_eq!(config.mask, 0);
+    }
+
+    #[test]
+    fn parse_version_rolling_config_custom_mask() {
+        let miner = parse_miner_args(
+            "para miner parasite.wtf:42069 \
+            --username test.worker \
+            --version-mask 0xFF000000",
+        );
+
+        let config = miner.parse_version_rolling_config().unwrap();
+        assert!(config.enabled);
+        assert_eq!(config.mask, 0xFF000000);
+    }
+
+    #[test]
+    fn parse_version_rolling_config_custom_mask_lowercase() {
+        let miner = parse_miner_args(
+            "para miner parasite.wtf:42069 \
+            --username test.worker \
+            --version-mask 0xabcdef00",
+        );
+
+        let config = miner.parse_version_rolling_config().unwrap();
+        assert_eq!(config.mask, 0xABCDEF00);
     }
 }

@@ -193,6 +193,7 @@ async fn submit_before_authorize_fails() {
                 Extranonce::random(8),
                 Ntime::from(0),
                 Nonce::from(12345),
+                None,
             )
             .await
             .unwrap_err()
@@ -231,13 +232,13 @@ async fn duplicate_share_rejected() {
     let (ntime, nonce) = solve_share(&notify, &extranonce1, &extranonce2, difficulty);
 
     let submit = client
-        .submit(notify.job_id, extranonce2.clone(), ntime, nonce)
+        .submit(notify.job_id, extranonce2.clone(), ntime, nonce, None)
         .await;
 
     assert!(submit.is_ok());
 
     let submit_duplicate = client
-        .submit(notify.job_id, extranonce2, ntime, nonce)
+        .submit(notify.job_id, extranonce2, ntime, nonce, None)
         .await;
 
     assert!(submit_duplicate.is_err());
@@ -348,7 +349,7 @@ async fn shares_must_meet_pool_difficulty() {
     }
 
     let submit = client
-        .submit(notify.job_id, extranonce2, ntime, nonce)
+        .submit(notify.job_id, extranonce2, ntime, nonce, None)
         .await;
 
     assert!(submit.is_err());
@@ -403,7 +404,7 @@ async fn stale_share_rejected() {
     .expect("Timeout waiting for new block notification");
 
     let submit = client
-        .submit(notify_a.job_id, extranonce2, ntime, nonce)
+        .submit(notify_a.job_id, extranonce2, ntime, nonce, None)
         .await;
 
     assert!(submit.is_err());
@@ -436,7 +437,9 @@ async fn invalid_job_id_rejected_as_stale() {
 
     let bad_job_id = stratum::JobId::from(0xdeadbeef);
 
-    let submit = client.submit(bad_job_id, extranonce2, ntime, nonce).await;
+    let submit = client
+        .submit(bad_job_id, extranonce2, ntime, nonce, None)
+        .await;
 
     assert!(submit.is_err());
     assert!(matches!(
@@ -560,7 +563,7 @@ async fn vardiff_adjusts_difficulty() {
         let (ntime, nonce) = solve_share(&notify, &extranonce1, &extranonce2, initial_difficulty);
 
         match client
-            .submit(notify.job_id, extranonce2, ntime, nonce)
+            .submit(notify.job_id, extranonce2, ntime, nonce, None)
             .await
         {
             Ok(_) => accepted_shares += 1,
