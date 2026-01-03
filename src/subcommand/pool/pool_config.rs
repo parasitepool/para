@@ -76,7 +76,7 @@ pub(crate) struct PoolConfig {
         default_value = "8",
         value_parser = clap::value_parser!(u8).range(2..=8)
     )]
-    extranonce2_size: u8,
+    extranonce2_size: usize,
 }
 
 impl PoolConfig {
@@ -238,6 +238,6 @@ impl PoolConfig {
     }
 
     pub(crate) fn extranonce2_size(&self) -> usize {
-        self.extranonce2_size as usize
+        self.extranonce2_size
     }
 }
