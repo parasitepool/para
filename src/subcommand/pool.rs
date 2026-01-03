@@ -1,6 +1,6 @@
 use {
     super::*,
-    crate::{api, http_server},
+    crate::{api, http_server, stratifier::SessionStore},
     pool_config::PoolConfig,
 };
 
@@ -15,8 +15,10 @@ pub(crate) struct Pool {
 impl Pool {
     pub(crate) async fn run(&self, cancel_token: CancellationToken) -> Result {
         let config = Arc::new(self.config.clone());
-        let metatron = Arc::new(Metatron::new());
+        let session_store = Arc::new(SessionStore::new(config.session_ttl()));
+        let metatron = Arc::new(Metatron::new(session_store.clone()));
         let (share_tx, share_rx) = mpsc::channel(SHARE_CHANNEL_CAPACITY);
+        let connection_counter = AtomicU64::new(0);
         let address = config.address();
         let port = config.port();
 
@@ -71,7 +73,8 @@ impl Pool {
                 Ok((stream, worker)) = listener.accept() => {
                     stream.set_nodelay(true)?;
 
-                    info!("Accepted connection from {worker}");
+                    let connection_id = connection_counter.fetch_add(1, Ordering::Relaxed);
+                    info!("Accepted connection {} from {}", connection_id, worker);
 
                     let (reader, writer) = stream.into_split();
 
@@ -79,10 +82,12 @@ impl Pool {
                     let config = config.clone();
                     let metatron = metatron.clone();
                     let share_tx = share_tx.clone();
+                    let session_store = session_store.clone();
+                    let reject_config = config.reject_config();
                     let conn_cancel_token = cancel_token.child_token();
 
                     connection_tasks.spawn(async move {
-                        let mut conn = Connection::new(
+                        let mut stratifier = Stratifier::new(
                             config,
                             metatron,
                             share_tx,
@@ -91,10 +96,12 @@ impl Pool {
                             writer,
                             workbase_receiver,
                             conn_cancel_token,
+                            session_store,
+                            reject_config,
                         );
 
-                        if let Err(err) = conn.serve().await {
-                            error!("Worker connection error: {err}")
+                        if let Err(err) = stratifier.serve().await {
+                            error!("Stratifier {} error: {err}", connection_id)
                         }
                     });
                 }

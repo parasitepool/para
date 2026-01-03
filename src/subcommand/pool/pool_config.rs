@@ -77,6 +77,30 @@ pub(crate) struct PoolConfig {
         value_parser = clap::value_parser!(u8).range(2..=8)
     )]
     extranonce2_size: u8,
+    #[arg(
+        long,
+        help = "Warn after <REJECT_WARN_THRESHOLD> seconds of consecutive rejects.",
+        default_value = "60"
+    )]
+    reject_warn_threshold: u64,
+    #[arg(
+        long,
+        help = "Suggest reconnect after <REJECT_RECONNECT_THRESHOLD> seconds of consecutive rejects.",
+        default_value = "120"
+    )]
+    reject_reconnect_threshold: u64,
+    #[arg(
+        long,
+        help = "Force disconnect after <REJECT_DROP_THRESHOLD> seconds of consecutive rejects.",
+        default_value = "180"
+    )]
+    reject_drop_threshold: u64,
+    #[arg(
+        long,
+        help = "Session TTL for reconnecting miners in seconds.",
+        default_value = "600"
+    )]
+    session_ttl: u64,
 }
 
 impl PoolConfig {
@@ -239,5 +263,17 @@ impl PoolConfig {
 
     pub(crate) fn extranonce2_size(&self) -> usize {
         self.extranonce2_size as usize
+    }
+
+    pub(crate) fn reject_config(&self) -> reject_tracker::RejectConfig {
+        reject_tracker::RejectConfig {
+            warn_threshold: Duration::from_secs(self.reject_warn_threshold),
+            reconnect_threshold: Duration::from_secs(self.reject_reconnect_threshold),
+            drop_threshold: Duration::from_secs(self.reject_drop_threshold),
+        }
+    }
+
+    pub(crate) fn session_ttl(&self) -> Duration {
+        Duration::from_secs(self.session_ttl)
     }
 }

@@ -9,6 +9,7 @@ pub(crate) fn router(metatron: Arc<Metatron>) -> Router {
         .route("/api/stats", get(stats))
         .route("/api/users", get(users))
         .route("/api/users/{address}", get(user))
+        .route("/api/sessions", get(sessions))
         .with_state(metatron)
 }
 
@@ -34,6 +35,10 @@ async fn user(
     .into_response())
 }
 
+async fn sessions(State(metatron): State<Arc<Metatron>>) -> ServerResult<Response> {
+    Ok(Json(metatron.sessions()).into_response())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolStats {
     pub hash_rate_1m: HashRate,
@@ -47,6 +52,8 @@ pub struct PoolStats {
     pub best_ever: f64,
     pub last_share: Option<u64>,
     pub uptime_secs: u64,
+    pub sessions: usize,
+    pub active_sessions: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,4 +87,13 @@ pub struct WorkerSummary {
     pub accepted: u64,
     pub rejected: u64,
     pub best_ever: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionSummary {
+    pub enonce1: String,
+    pub address: String,
+    pub workername: String,
+    pub created_at_secs: u64,
+    pub ttl_remaining_secs: u64,
 }

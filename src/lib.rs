@@ -31,7 +31,6 @@ use {
     chain::Chain,
     clap::Parser,
     coinbase_builder::CoinbaseBuilder,
-    connection::Connection,
     dashmap::DashMap,
     decay::{DecayingAverage, calculate_time_bias},
     futures::{
@@ -81,6 +80,7 @@ use {
         thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     },
+    stratifier::Stratifier,
     stratum::{
         Authorize, Configure, Difficulty, Extranonce, Id, JobId, MerkleNode, Message, Nbits, Nonce,
         Notify, Ntime, PrevHash, SetDifficulty, StratumError, Submit, Subscribe, SubscribeResult,
@@ -118,7 +118,6 @@ mod block_template;
 mod chain;
 pub mod ckpool;
 mod coinbase_builder;
-mod connection;
 mod decay;
 mod generator;
 mod hash_rate;
@@ -126,8 +125,10 @@ mod http_server;
 mod job;
 mod jobs;
 mod metatron;
+mod reject_tracker;
 mod share;
 mod signal;
+mod stratifier;
 pub mod stratum;
 pub mod subcommand;
 mod throbber;

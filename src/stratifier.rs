@@ -1,4 +1,132 @@
 use super::*;
+use reject_tracker::{EscalationLevel, RejectConfig, RejectTracker};
+use std::sync::Mutex as StdMutex;
+
+// ============================================================================
+// Session Storage (for reconnecting miners)
+// ============================================================================
+
+/// Snapshot of a stratifier's session state for persistence after disconnect.
+#[derive(Debug, Clone)]
+pub(crate) struct StoredSession {
+    pub enonce1: Extranonce,
+    pub address: Address<NetworkUnchecked>,
+    pub workername: String,
+    pub user_agent: Option<String>,
+    pub version_mask: Option<Version>,
+    pub created_at: Instant,
+    pub last_seen: Instant,
+    pub authorized_at: Option<SystemTime>,
+}
+
+impl StoredSession {
+    fn new(
+        enonce1: Extranonce,
+        address: Address<NetworkUnchecked>,
+        workername: String,
+        user_agent: Option<String>,
+        version_mask: Option<Version>,
+        authorized_at: Option<SystemTime>,
+    ) -> Self {
+        let now = Instant::now();
+        Self {
+            enonce1,
+            address,
+            workername,
+            user_agent,
+            version_mask,
+            created_at: now,
+            last_seen: now,
+            authorized_at,
+        }
+    }
+
+    fn is_valid(&self, ttl: Duration) -> bool {
+        self.last_seen.elapsed() < ttl
+    }
+
+    pub(crate) fn ttl_remaining(&self, ttl: Duration) -> Duration {
+        ttl.saturating_sub(self.last_seen.elapsed())
+    }
+}
+
+/// Storage for persisted sessions with TTL-based expiry.
+pub(crate) struct SessionStore {
+    sessions: DashMap<Extranonce, StoredSession>,
+    ttl: Duration,
+    last_cleanup: StdMutex<Instant>,
+}
+
+impl SessionStore {
+    pub(crate) fn new(ttl: Duration) -> Self {
+        Self {
+            sessions: DashMap::new(),
+            ttl,
+            last_cleanup: StdMutex::new(Instant::now()),
+        }
+    }
+
+    pub(crate) fn store(&self, session: StoredSession) {
+        info!(
+            "Storing session for {} ({:?}) with enonce1 {}",
+            session.workername, session.address, session.enonce1
+        );
+        self.sessions.insert(session.enonce1.clone(), session);
+        self.maybe_cleanup();
+    }
+
+    pub(crate) fn take(&self, enonce1: &Extranonce) -> Option<StoredSession> {
+        let (_, session) = self.sessions.remove(enonce1)?;
+        if session.is_valid(self.ttl) {
+            Some(session)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn count(&self) -> usize {
+        self.sessions.len()
+    }
+
+    pub(crate) fn active_count(&self) -> usize {
+        let ttl = self.ttl;
+        self.sessions.iter().filter(|s| s.is_valid(ttl)).count()
+    }
+
+    pub(crate) fn list(&self) -> Vec<StoredSession> {
+        let ttl = self.ttl;
+        self.sessions
+            .iter()
+            .filter(|s| s.is_valid(ttl))
+            .map(|s| s.clone())
+            .collect()
+    }
+
+    pub(crate) fn ttl(&self) -> Duration {
+        self.ttl
+    }
+
+    fn maybe_cleanup(&self) {
+        let mut last_cleanup = self.last_cleanup.lock().unwrap();
+        if last_cleanup.elapsed() < Duration::from_secs(60) {
+            return;
+        }
+        *last_cleanup = Instant::now();
+        drop(last_cleanup);
+
+        let ttl = self.ttl;
+        let before = self.sessions.len();
+        self.sessions.retain(|_, session| session.is_valid(ttl));
+        let removed = before.saturating_sub(self.sessions.len());
+        if removed > 0 {
+            info!("Cleaned up {} expired sessions", removed);
+        }
+    }
+}
+
+// ============================================================================
+// Stratifier (connection handler)
+// ============================================================================
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum State {
@@ -8,7 +136,7 @@ pub(crate) enum State {
     Working,
 }
 
-pub(crate) struct Connection<R, W> {
+pub(crate) struct Stratifier<R, W> {
     config: Arc<PoolConfig>,
     metatron: Arc<Metatron>,
     share_tx: mpsc::Sender<Share>,
@@ -26,9 +154,11 @@ pub(crate) struct Connection<R, W> {
     enonce1: Option<Extranonce>,
     user_agent: Option<String>,
     vardiff: Vardiff,
+    session_store: Arc<SessionStore>,
+    reject_tracker: RejectTracker,
 }
 
-impl<R, W> Connection<R, W>
+impl<R, W> Stratifier<R, W>
 where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
@@ -43,6 +173,8 @@ where
         writer: W,
         workbase_receiver: watch::Receiver<Arc<Workbase>>,
         cancel_token: CancellationToken,
+        session_store: Arc<SessionStore>,
+        reject_config: RejectConfig,
     ) -> Self {
         let vardiff = Vardiff::new(
             config.start_diff(),
@@ -70,6 +202,8 @@ where
             enonce1: None,
             user_agent: None,
             vardiff,
+            session_store,
+            reject_tracker: RejectTracker::new(reject_config),
         }
     }
 
@@ -170,6 +304,18 @@ where
                                 .context(format!("failed to deserialize {method}"))?;
 
                             self.submit(id, submit).await?;
+
+                            // Check reject escalation after submit
+                            if let Some(EscalationAction::Drop) = self.check_reject_escalation().await {
+                                warn!(
+                                    "Disconnecting {} due to {} seconds of consecutive rejects",
+                                    self.socket_addr,
+                                    self.reject_tracker.reject_duration()
+                                        .map(|d| d.as_secs())
+                                        .unwrap_or(0)
+                                );
+                                break;
+                            }
                         }
                         method => {
                             warn!("UNKNOWN method {method} with {params} from {}", self.socket_addr);
@@ -195,6 +341,71 @@ where
         }
 
         Ok(())
+    }
+
+    /// Check reject escalation and take appropriate action
+    async fn check_reject_escalation(&mut self) -> Option<EscalationAction> {
+        let level = self.reject_tracker.current_level();
+        match level {
+            EscalationLevel::None => None,
+            EscalationLevel::Warn => {
+                // Send a fresh job to help the miner recover
+                if let (Some(address), Some(enonce1)) = (&self.address, &self.enonce1) {
+                    info!(
+                        "Warning {} - {} consecutive rejects for {}s",
+                        self.socket_addr,
+                        self.reject_tracker.consecutive_rejects(),
+                        self.reject_tracker
+                            .reject_duration()
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0)
+                    );
+
+                    // Try to send a fresh job
+                    let workbase = self.workbase_receiver.borrow().clone();
+                    if let Ok(new_job) = Job::new(
+                        address.clone(),
+                        enonce1.clone(),
+                        self.config.extranonce2_size(),
+                        self.version_mask,
+                        workbase,
+                        self.jobs.next_id(),
+                    ) {
+                        let new_job = Arc::new(new_job);
+                        let clean_jobs = self.jobs.upsert(new_job.clone());
+                        if let Ok(notify) = new_job.notify(clean_jobs) {
+                            let _ = self
+                                .send(Message::Notification {
+                                    method: "mining.notify".into(),
+                                    params: json!(notify),
+                                })
+                                .await;
+                        }
+                    }
+                }
+                Some(EscalationAction::Warn)
+            }
+            EscalationLevel::Reconnect => {
+                info!(
+                    "Suggesting reconnect to {} - {} consecutive rejects for {}s",
+                    self.socket_addr,
+                    self.reject_tracker.consecutive_rejects(),
+                    self.reject_tracker
+                        .reject_duration()
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0)
+                );
+                // Send client.reconnect notification
+                let _ = self
+                    .send(Message::Notification {
+                        method: "client.reconnect".into(),
+                        params: json!([]),
+                    })
+                    .await;
+                Some(EscalationAction::Reconnect)
+            }
+            EscalationLevel::Drop => Some(EscalationAction::Drop),
+        }
     }
 
     async fn workbase_update(&mut self, workbase: Arc<Workbase>) -> Result {
@@ -268,11 +479,32 @@ where
     }
 
     async fn subscribe(&mut self, id: Id, subscribe: Subscribe) -> Result {
-        if let Some(enonce1) = subscribe.enonce1 {
-            warn!("Ignoring worker enonce1 suggestion: {enonce1}");
-        }
+        // Check for session resume request
+        let enonce1 = if let Some(ref requested_enonce1) = subscribe.enonce1 {
+            if let Some(session) = self.session_store.take(requested_enonce1) {
+                info!(
+                    "Resuming session for {} ({:?}) with enonce1 {}",
+                    session.workername, session.address, session.enonce1
+                );
 
-        let enonce1 = Extranonce::random(ENONCE1_SIZE);
+                // Restore session state
+                self.address = Some(session.address.assume_checked());
+                self.workername = Some(session.workername);
+                self.user_agent = session.user_agent.clone();
+                self.version_mask = session.version_mask;
+                self.authorized = session.authorized_at;
+
+                session.enonce1
+            } else {
+                debug!(
+                    "Session resume failed for enonce1 {}, issuing new enonce1",
+                    requested_enonce1
+                );
+                Extranonce::random(ENONCE1_SIZE)
+            }
+        } else {
+            Extranonce::random(ENONCE1_SIZE)
+        };
 
         let subscriptions = vec![
             (
@@ -297,7 +529,10 @@ where
         .await?;
 
         self.enonce1 = Some(enonce1.clone());
-        self.user_agent = Some(subscribe.user_agent);
+        if subscribe.enonce1.is_none() {
+            // Only update user_agent if this is a new subscription (not session resume)
+            self.user_agent = Some(subscribe.user_agent);
+        }
         self.state = State::Subscribed;
 
         Ok(())
@@ -385,6 +620,8 @@ where
                 BlockHash::all_zeros(),
                 Some(StratumError::Stale),
             );
+            // Record reject for escalation tracking
+            self.reject_tracker.record_reject();
 
             return Ok(());
         };
@@ -415,6 +652,8 @@ where
                 BlockHash::all_zeros(),
                 Some(StratumError::InvalidNonce2Length),
             );
+            // Record reject for escalation tracking
+            self.reject_tracker.record_reject();
 
             return Ok(());
         }
@@ -435,6 +674,8 @@ where
                     BlockHash::all_zeros(),
                     Some(StratumError::InvalidVersionMask),
                 );
+                // Record reject for escalation tracking
+                self.reject_tracker.record_reject();
 
                 return Ok(());
             };
@@ -482,6 +723,8 @@ where
                 hash,
                 Some(StratumError::Duplicate),
             );
+            // Record reject for escalation tracking
+            self.reject_tracker.record_reject();
 
             return Ok(());
         }
@@ -539,6 +782,9 @@ where
 
             self.emit_share(&submit, Some(&job), current_diff.as_f64(), hash, None);
 
+            // Record accept - resets consecutive reject tracking
+            self.reject_tracker.record_accept();
+
             let network_diff = Difficulty::from(job.nbits());
 
             debug!(
@@ -574,6 +820,8 @@ where
                 hash,
                 Some(StratumError::AboveTarget),
             );
+            // Record reject for escalation tracking
+            self.reject_tracker.record_reject();
         }
 
         Ok(())
@@ -667,13 +915,102 @@ where
     }
 }
 
-impl<R, W> Drop for Connection<R, W> {
+/// Actions to take based on reject escalation
+enum EscalationAction {
+    Warn,
+    Reconnect,
+    Drop,
+}
+
+impl<R, W> Drop for Stratifier<R, W> {
     fn drop(&mut self) {
+        // Store session for potential reconnection if the miner was authorized
+        if let (Some(address), Some(workername), Some(enonce1)) =
+            (&self.address, &self.workername, &self.enonce1)
+        {
+            let session = StoredSession::new(
+                enonce1.clone(),
+                address.as_unchecked().clone(),
+                workername.clone(),
+                self.user_agent.clone(),
+                self.version_mask,
+                self.authorized,
+            );
+            self.session_store.store(session);
+        }
+
         self.metatron.sub_connection();
         info!(
-            "Connection {} closed (remaining: {})",
+            "Stratifier {} closed (remaining: {})",
             self.socket_addr,
             self.metatron.total_connections()
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_session(enonce1: &str) -> StoredSession {
+        StoredSession::new(
+            enonce1.parse().unwrap(),
+            "tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx"
+                .parse::<Address<NetworkUnchecked>>()
+                .unwrap(),
+            "test_worker".to_string(),
+            Some("TestMiner/1.0".to_string()),
+            None,
+            None,
+        )
+    }
+
+    #[test]
+    fn store_and_take_session() {
+        let store = SessionStore::new(Duration::from_secs(60));
+        let session = test_session("deadbeef");
+        let enonce1 = session.enonce1.clone();
+
+        store.store(session);
+        assert_eq!(store.count(), 1);
+
+        let taken = store.take(&enonce1);
+        assert!(taken.is_some());
+        assert_eq!(store.count(), 0);
+    }
+
+    #[test]
+    fn expired_session_not_taken() {
+        let store = SessionStore::new(Duration::from_millis(10));
+        let session = test_session("deadbeef");
+        let enonce1 = session.enonce1.clone();
+
+        store.store(session);
+        std::thread::sleep(Duration::from_millis(20));
+
+        let taken = store.take(&enonce1);
+        assert!(taken.is_none());
+    }
+
+    #[test]
+    fn active_count_excludes_expired() {
+        let store = SessionStore::new(Duration::from_millis(50));
+
+        store.store(test_session("aaaabbbb"));
+        std::thread::sleep(Duration::from_millis(30));
+
+        store.store(test_session("ccccdddd"));
+        assert_eq!(store.active_count(), 2);
+
+        std::thread::sleep(Duration::from_millis(30));
+        assert_eq!(store.active_count(), 1);
+    }
+
+    #[test]
+    fn take_nonexistent_returns_none() {
+        let store = SessionStore::new(Duration::from_secs(60));
+        let enonce1: Extranonce = "deadbeef".parse().unwrap();
+
+        assert!(store.take(&enonce1).is_none());
     }
 }
