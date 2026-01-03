@@ -40,8 +40,8 @@ pub(crate) struct Miner {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Share {
-    pub extranonce1: Extranonce,
-    pub extranonce2: Extranonce,
+    pub enonce1: Extranonce,
+    pub enonce2: Extranonce,
     pub job_id: JobId,
     pub nonce: Nonce,
     pub ntime: Ntime,

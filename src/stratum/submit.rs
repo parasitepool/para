@@ -4,7 +4,7 @@ use super::*;
 pub struct Submit {
     pub username: Username,
     pub job_id: JobId,
-    pub extranonce2: Extranonce,
+    pub enonce2: Extranonce,
     pub ntime: Ntime,
     pub nonce: Nonce,
     pub version_bits: Option<Version>,
@@ -19,7 +19,7 @@ impl Serialize for Submit {
         let mut seq = serializer.serialize_seq(Some(len))?;
         seq.serialize_element(&self.username)?;
         seq.serialize_element(&self.job_id)?;
-        seq.serialize_element(&self.extranonce2)?;
+        seq.serialize_element(&self.enonce2)?;
         seq.serialize_element(&self.ntime)?;
         seq.serialize_element(&self.nonce)?;
         if let Some(v) = &self.version_bits {
@@ -42,18 +42,18 @@ impl<'de> Deserialize<'de> for Submit {
         }
 
         match Raw::deserialize(deserializer)? {
-            Raw::Five((username, job_id, extranonce2, ntime, nonce)) => Ok(Submit {
+            Raw::Five((username, job_id, enonce2, ntime, nonce)) => Ok(Submit {
                 username,
                 job_id,
-                extranonce2,
+                enonce2,
                 ntime,
                 nonce,
                 version_bits: None,
             }),
-            Raw::Six((username, job_id, extranonce2, ntime, nonce, version_bits)) => Ok(Submit {
+            Raw::Six((username, job_id, enonce2, ntime, nonce, version_bits)) => Ok(Submit {
                 username,
                 job_id,
-                extranonce2,
+                enonce2,
                 ntime,
                 nonce,
                 version_bits,
@@ -87,7 +87,7 @@ mod tests {
             Submit {
                 username: "slush.miner1".into(),
                 job_id: "bf".parse().unwrap(),
-                extranonce2: "00000001".parse().unwrap(),
+                enonce2: "00000001".parse().unwrap(),
                 ntime: "504e86ed".parse().unwrap(),
                 nonce: "b2957c02".parse().unwrap(),
                 version_bits: None,
@@ -102,7 +102,7 @@ mod tests {
             Submit {
                 username: "slush.miner1".into(),
                 job_id: "bf".parse().unwrap(),
-                extranonce2: "00000001".parse().unwrap(),
+                enonce2: "00000001".parse().unwrap(),
                 ntime: "504e86ed".parse().unwrap(),
                 nonce: "b2957c02".parse().unwrap(),
                 version_bits: Some("04d46000".parse().unwrap()),
@@ -115,7 +115,7 @@ mod tests {
         let a = Submit {
             username: "u".into(),
             job_id: "deadbeef".parse().unwrap(),
-            extranonce2: "01".parse().unwrap(),
+            enonce2: "01".parse().unwrap(),
             ntime: "00000000".parse().unwrap(),
             nonce: "00000000".parse().unwrap(),
             version_bits: None,

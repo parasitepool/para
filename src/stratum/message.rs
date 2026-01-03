@@ -257,7 +257,7 @@ mod tests {
                 params: serde_json::to_value(&Submit {
                     username: "slush.miner1".into(),
                     job_id: "bf".parse().unwrap(),
-                    extranonce2: "00000001".parse().unwrap(),
+                    enonce2: "00000001".parse().unwrap(),
                     ntime: "504e86ed".parse().unwrap(),
                     nonce: "b2957c02".parse().unwrap(),
                     version_bits: None,
@@ -287,7 +287,7 @@ mod tests {
                 params: serde_json::to_value(&Submit {
                     username: "slush.miner1".into(),
                     job_id: "bf".parse().unwrap(),
-                    extranonce2: "00000001".parse().unwrap(),
+                    enonce2: "00000001".parse().unwrap(),
                     ntime: "504e86ed".parse().unwrap(),
                     nonce: "b2957c02".parse().unwrap(),
                     version_bits: Some("04d46000".parse().unwrap()),
@@ -371,7 +371,7 @@ mod tests {
                 method: "mining.subscribe".into(),
                 params: serde_json::to_value(Subscribe {
                     user_agent: "para/0.5.2".into(),
-                    extranonce1: None,
+                    enonce1: None,
                 })
                 .unwrap(),
             },
@@ -384,7 +384,7 @@ mod tests {
                 method: "mining.subscribe".into(),
                 params: serde_json::to_value(Subscribe {
                     user_agent: "para/0.1".into(),
-                    extranonce1: Some("abcd".parse().unwrap()),
+                    enonce1: Some("abcd".parse().unwrap()),
                 })
                 .unwrap(),
             },
@@ -409,8 +409,8 @@ mod tests {
                                 "ae6812eb4cd7735a302a8a9dd95cf71f".into(),
                             ),
                         ],
-                        extranonce1: "08000002".parse().unwrap(),
-                        extranonce2_size: 4,
+                        enonce1: "08000002".parse().unwrap(),
+                        enonce2_size: 4,
                     })
                     .unwrap(),
                 ),

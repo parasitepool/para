@@ -175,7 +175,7 @@ impl Client {
                 "mining.subscribe".to_string(),
                 serde_json::to_value(Subscribe {
                     user_agent: self.config.user_agent.clone(),
-                    extranonce1: None,
+                    enonce1: None,
                 })
                 .context(error::SerializationSnafu)?,
             )
@@ -218,14 +218,14 @@ impl Client {
     pub async fn submit(
         &self,
         job_id: JobId,
-        extranonce2: Extranonce,
+        enonce2: Extranonce,
         ntime: Ntime,
         nonce: Nonce,
     ) -> Result<Submit> {
         let submit = Submit {
             username: self.config.username.clone(),
             job_id,
-            extranonce2,
+            enonce2,
             ntime,
             nonce,
             version_bits: None,

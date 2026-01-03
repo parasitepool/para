@@ -141,10 +141,10 @@ impl Template {
         notify: &Notify,
         pool_difficulty: Option<Difficulty>,
     ) -> Result<Output> {
-        let extranonce2 = Extranonce::random(subscription.extranonce2_size);
+        let enonce2 = Extranonce::random(subscription.enonce2_size);
         let coinbase_bin = hex::decode(format!(
             "{}{}{}{}",
-            notify.coinb1, subscription.extranonce1, extranonce2, notify.coinb2
+            notify.coinb1, subscription.enonce1, enonce2, notify.coinb2
         ))?;
 
         let mut cursor = bitcoin::io::Cursor::new(&coinbase_bin);
@@ -174,8 +174,8 @@ impl Template {
         let merkle_root = merkle_root(
             &notify.coinb1,
             &notify.coinb2,
-            &subscription.extranonce1,
-            &extranonce2,
+            &subscription.enonce1,
+            &enonce2,
             &notify.merkle_branches,
         )?;
 
