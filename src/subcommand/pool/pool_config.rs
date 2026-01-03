@@ -70,6 +70,13 @@ pub(crate) struct PoolConfig {
         default_value = "tcp://127.0.0.1:28332"
     )]
     zmq_block_notifications: Endpoint,
+    #[arg(
+        long,
+        help = "Set extranonce2 size in bytes (2-8).",
+        default_value = "8",
+        value_parser = clap::value_parser!(u8).range(2..=8)
+    )]
+    extranonce2_size: u8,
 }
 
 impl PoolConfig {
@@ -228,5 +235,9 @@ impl PoolConfig {
         } else {
             self.acme_cache.clone()
         }
+    }
+
+    pub(crate) fn extranonce2_size(&self) -> usize {
+        self.extranonce2_size as usize
     }
 }

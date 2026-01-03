@@ -206,6 +206,7 @@ where
         let new_job = Arc::new(Job::new(
             address,
             enonce1,
+            self.config.extranonce2_size(),
             self.version_mask,
             workbase,
             self.jobs.next_id(),
@@ -284,7 +285,7 @@ where
         let result = SubscribeResult {
             subscriptions,
             enonce1: enonce1.clone(),
-            enonce2_size: ENONCE2_SIZE,
+            enonce2_size: self.config.extranonce2_size(),
         };
 
         self.send(Message::Response {
@@ -330,6 +331,7 @@ where
         let job = Arc::new(Job::new(
             address.clone(),
             enonce1.clone(),
+            self.config.extranonce2_size(),
             self.version_mask,
             self.workbase_receiver.borrow().clone(),
             self.jobs.next_id(),
@@ -386,6 +388,36 @@ where
 
             return Ok(());
         };
+
+        let expected_extranonce2_size = self.config.extranonce2_size();
+        if submit.enonce2.len() != expected_extranonce2_size {
+            warn!(
+                "Invalid extranonce2 length from {}: got {} bytes, expected {}",
+                self.socket_addr,
+                submit.enonce2.len(),
+                expected_extranonce2_size
+            );
+
+            self.send_error(
+                id,
+                StratumError::InvalidNonce2Length,
+                Some(json!({
+                    "expected": expected_extranonce2_size,
+                    "received": submit.enonce2.len()
+                })),
+            )
+            .await?;
+
+            self.emit_share(
+                &submit,
+                Some(&job),
+                0.0,
+                BlockHash::all_zeros(),
+                Some(StratumError::InvalidNonce2Length),
+            );
+
+            return Ok(());
+        }
 
         let version = if let Some(version_bits) = submit.version_bits {
             let Some(version_mask) = job.version_mask else {
