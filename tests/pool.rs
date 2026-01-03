@@ -210,8 +210,8 @@ async fn duplicate_share_rejected() {
     let mut events = client.connect().await.unwrap();
 
     let (subscribe, _, _) = client.subscribe().await.unwrap();
-    let extranonce1 = subscribe.extranonce1;
-    let extranonce2 = Extranonce::random(subscribe.extranonce2_size);
+    let enonce1 = subscribe.enonce1;
+    let enonce2 = Extranonce::random(subscribe.enonce2_size);
 
     client.authorize().await.unwrap();
 
@@ -228,17 +228,15 @@ async fn duplicate_share_rejected() {
     .await
     .expect("Timeout waiting for initial notification");
 
-    let (ntime, nonce) = solve_share(&notify, &extranonce1, &extranonce2, difficulty);
+    let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, difficulty);
 
     let submit = client
-        .submit(notify.job_id, extranonce2.clone(), ntime, nonce)
+        .submit(notify.job_id, enonce2.clone(), ntime, nonce)
         .await;
 
     assert!(submit.is_ok());
 
-    let submit_duplicate = client
-        .submit(notify.job_id, extranonce2, ntime, nonce)
-        .await;
+    let submit_duplicate = client.submit(notify.job_id, enonce2, ntime, nonce).await;
 
     assert!(submit_duplicate.is_err());
     assert!(matches!(
@@ -300,8 +298,8 @@ async fn shares_must_meet_pool_difficulty() {
     let mut events = client.connect().await.unwrap();
 
     let (subscribe, _, _) = client.subscribe().await.unwrap();
-    let extranonce1 = subscribe.extranonce1;
-    let extranonce2 = Extranonce::random(subscribe.extranonce2_size);
+    let enonce1 = subscribe.enonce1;
+    let enonce2 = Extranonce::random(subscribe.enonce2_size);
 
     client.authorize().await.unwrap();
 
@@ -319,13 +317,13 @@ async fn shares_must_meet_pool_difficulty() {
     .expect("Timeout waiting for initial notification");
 
     let easy_diff = stratum::Difficulty::from(0.0000001);
-    let (ntime, nonce) = solve_share(&notify, &extranonce1, &extranonce2, easy_diff);
+    let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, easy_diff);
 
     let merkle_root = stratum::merkle_root(
         &notify.coinb1,
         &notify.coinb2,
-        &extranonce1,
-        &extranonce2,
+        &enonce1,
+        &enonce2,
         &notify.merkle_branches,
     )
     .unwrap();
@@ -347,9 +345,7 @@ async fn shares_must_meet_pool_difficulty() {
         return;
     }
 
-    let submit = client
-        .submit(notify.job_id, extranonce2, ntime, nonce)
-        .await;
+    let submit = client.submit(notify.job_id, enonce2, ntime, nonce).await;
 
     assert!(submit.is_err());
     assert!(matches!(
@@ -367,8 +363,8 @@ async fn stale_share_rejected() {
     let mut events = client.connect().await.unwrap();
 
     let (subscribe, _, _) = client.subscribe().await.unwrap();
-    let extranonce1 = subscribe.extranonce1;
-    let extranonce2 = Extranonce::random(subscribe.extranonce2_size);
+    let enonce1 = subscribe.enonce1;
+    let enonce2 = Extranonce::random(subscribe.enonce2_size);
 
     client.authorize().await.unwrap();
 
@@ -385,7 +381,7 @@ async fn stale_share_rejected() {
     .await
     .expect("Timeout waiting for initial notification");
 
-    let (ntime, nonce) = solve_share(&notify_a, &extranonce1, &extranonce2, difficulty);
+    let (ntime, nonce) = solve_share(&notify_a, &enonce1, &enonce2, difficulty);
 
     pool.mine_block();
 
@@ -402,9 +398,7 @@ async fn stale_share_rejected() {
     .await
     .expect("Timeout waiting for new block notification");
 
-    let submit = client
-        .submit(notify_a.job_id, extranonce2, ntime, nonce)
-        .await;
+    let submit = client.submit(notify_a.job_id, enonce2, ntime, nonce).await;
 
     assert!(submit.is_err());
     assert!(matches!(
@@ -423,8 +417,8 @@ async fn invalid_job_id_rejected_as_stale() {
     let mut events = client.connect().await.unwrap();
 
     let (subscribe, _, _) = client.subscribe().await.unwrap();
-    let _extranonce1 = subscribe.extranonce1;
-    let extranonce2 = Extranonce::random(subscribe.extranonce2_size);
+    let _enonce1 = subscribe.enonce1;
+    let enonce2 = Extranonce::random(subscribe.enonce2_size);
 
     client.authorize().await.unwrap();
 
@@ -436,13 +430,74 @@ async fn invalid_job_id_rejected_as_stale() {
 
     let bad_job_id = stratum::JobId::from(0xdeadbeef);
 
-    let submit = client.submit(bad_job_id, extranonce2, ntime, nonce).await;
+    let submit = client.submit(bad_job_id, enonce2, ntime, nonce).await;
 
     assert!(submit.is_err());
     assert!(matches!(
         submit,
         Err(ClientError::Stratum { response }) if response.error_code == StratumError::Stale as i32
     ));
+}
+
+#[tokio::test]
+#[serial(bitcoind)]
+#[timeout(90000)]
+async fn invalid_extranonce2_length_rejected() {
+    let pool = TestPool::spawn();
+    let client = pool.stratum_client().await;
+    let mut events = client.connect().await.unwrap();
+
+    let (subscribe, _, _) = client.subscribe().await.unwrap();
+    let expected_size = subscribe.enonce2_size;
+
+    let wrong_size_short = Extranonce::random(expected_size - 1);
+
+    let wrong_size_long = Extranonce::random(expected_size + 1);
+
+    client.authorize().await.unwrap();
+
+    let notify = timeout(Duration::from_secs(10), async {
+        loop {
+            match events.recv().await.unwrap() {
+                stratum::Event::Notify(n) => return n,
+                _ => continue,
+            }
+        }
+    })
+    .await
+    .expect("Timeout waiting for notify");
+
+    let ntime = notify.ntime;
+    let nonce = Nonce::from(0);
+
+    let submit_short = client
+        .submit(notify.job_id, wrong_size_short, ntime, nonce)
+        .await;
+
+    assert!(submit_short.is_err());
+
+    assert!(
+        matches!(
+            &submit_short,
+            Err(ClientError::Stratum { response }) if response.error_code == StratumError::InvalidNonce2Length as i32
+        ),
+        "Expected InvalidNonce2Length error for too-short extranonce2, got: {:?}",
+        submit_short
+    );
+
+    let submit_long = client
+        .submit(notify.job_id, wrong_size_long, ntime, nonce)
+        .await;
+
+    assert!(submit_long.is_err());
+    assert!(
+        matches!(
+            &submit_long,
+            Err(ClientError::Stratum { response }) if response.error_code == StratumError::InvalidNonce2Length as i32
+        ),
+        "Expected InvalidNonce2Length error for too-long extranonce2, got: {:?}",
+        submit_long
+    );
 }
 
 #[test]
@@ -531,7 +586,7 @@ async fn vardiff_adjusts_difficulty() {
     let mut events = client.connect().await.unwrap();
 
     let (subscribe, _, _) = client.subscribe().await.unwrap();
-    let extranonce1 = subscribe.extranonce1;
+    let enonce1 = subscribe.enonce1;
 
     client.authorize().await.unwrap();
 
@@ -556,13 +611,10 @@ async fn vardiff_adjusts_difficulty() {
 
     let mut accepted_shares = 0;
     for _ in 0..30 {
-        let extranonce2 = Extranonce::random(subscribe.extranonce2_size);
-        let (ntime, nonce) = solve_share(&notify, &extranonce1, &extranonce2, initial_difficulty);
+        let enonce2 = Extranonce::random(subscribe.enonce2_size);
+        let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, initial_difficulty);
 
-        match client
-            .submit(notify.job_id, extranonce2, ntime, nonce)
-            .await
-        {
+        match client.submit(notify.job_id, enonce2, ntime, nonce).await {
             Ok(_) => accepted_shares += 1,
             Err(ClientError::Stratum { response })
                 if response.error_code == StratumError::Duplicate as i32 =>
