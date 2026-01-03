@@ -139,7 +139,7 @@ mod zmq;
 
 pub const COIN_VALUE: u64 = 100_000_000;
 pub const USER_AGENT: &str = "para/0.5.2";
-pub const EXTRANONCE1_SIZE: usize = 4;
+pub const ENONCE1_SIZE: usize = 4;
 pub const MAX_MESSAGE_SIZE: usize = 32 * 1024;
 pub const SHARE_CHANNEL_CAPACITY: usize = 100_000;
 pub const SUBSCRIPTION_ID: &str = "deadbeef";

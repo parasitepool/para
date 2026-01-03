@@ -98,62 +98,62 @@ mod tests {
 
     #[test]
     fn valid_hex_roundtrip() {
-        let extranonce: Extranonce = serde_json::from_str(r#""abcd""#).unwrap();
-        assert_eq!(extranonce.len(), 2);
-        assert_eq!(extranonce.to_hex(), "abcd");
-        let ser = serde_json::to_string(&extranonce).unwrap();
+        let enonce: Extranonce = serde_json::from_str(r#""abcd""#).unwrap();
+        assert_eq!(enonce.len(), 2);
+        assert_eq!(enonce.to_hex(), "abcd");
+        let ser = serde_json::to_string(&enonce).unwrap();
         assert_eq!(ser, r#""abcd""#);
     }
 
     #[test]
     fn generate_has_correct_length() {
-        let extranonce2 = Extranonce::random(8);
-        assert_eq!(extranonce2.len(), 8);
-        assert!(!extranonce2.as_bytes().is_empty());
+        let enonce2 = Extranonce::random(8);
+        assert_eq!(enonce2.len(), 8);
+        assert!(!enonce2.as_bytes().is_empty());
     }
 
     #[test]
-    fn extranonce_serializes_as_hex_string() {
-        let extranonce1: Extranonce = serde_json::from_str(r#""abcd""#).unwrap();
-        let ser = serde_json::to_string(&extranonce1).unwrap();
+    fn enonce_serializes_as_hex_string() {
+        let enonce1: Extranonce = serde_json::from_str(r#""abcd""#).unwrap();
+        let ser = serde_json::to_string(&enonce1).unwrap();
         assert_eq!(ser, r#""abcd""#);
     }
 
     #[test]
     fn increment() {
-        let mut extranonce = Extranonce::zeros(1);
-        extranonce.increment_wrapping();
-        assert_eq!(extranonce.to_hex(), "01");
+        let mut enonce = Extranonce::zeros(1);
+        enonce.increment_wrapping();
+        assert_eq!(enonce.to_hex(), "01");
     }
 
     #[test]
     fn increment_with_carry() {
-        let mut extranonce = "00ff".parse::<Extranonce>().unwrap();
-        extranonce.increment_wrapping();
-        assert_eq!(extranonce.to_hex(), "0100");
+        let mut enonce = "00ff".parse::<Extranonce>().unwrap();
+        enonce.increment_wrapping();
+        assert_eq!(enonce.to_hex(), "0100");
     }
 
     #[test]
     fn increment_multi_byte_carry() {
-        let mut extranonce = "00ffff".parse::<Extranonce>().unwrap();
-        extranonce.increment_wrapping();
-        assert_eq!(extranonce.to_hex(), "010000");
+        let mut enonce = "00ffff".parse::<Extranonce>().unwrap();
+        enonce.increment_wrapping();
+        assert_eq!(enonce.to_hex(), "010000");
     }
 
     #[test]
     fn increment_wraps() {
-        let mut extranonce = "ffff".parse::<Extranonce>().unwrap();
-        extranonce.increment_wrapping();
-        assert_eq!(extranonce.to_hex(), "0000");
-        assert_eq!(extranonce.len(), 2);
+        let mut enonce = "ffff".parse::<Extranonce>().unwrap();
+        enonce.increment_wrapping();
+        assert_eq!(enonce.to_hex(), "0000");
+        assert_eq!(enonce.len(), 2);
     }
 
     #[test]
     fn increment_sequence() {
-        let mut extranonce = "00fe".parse::<Extranonce>().unwrap();
-        extranonce.increment_wrapping();
-        assert_eq!(extranonce.to_hex(), "00ff");
-        extranonce.increment_wrapping();
-        assert_eq!(extranonce.to_hex(), "0100");
+        let mut enonce = "00fe".parse::<Extranonce>().unwrap();
+        enonce.increment_wrapping();
+        assert_eq!(enonce.to_hex(), "00ff");
+        enonce.increment_wrapping();
+        assert_eq!(enonce.to_hex(), "0100");
     }
 }

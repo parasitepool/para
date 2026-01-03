@@ -84,12 +84,12 @@ impl From<bitcoin::Txid> for MerkleNode {
 pub fn merkle_root(
     coinb1: &str,
     coinb2: &str,
-    extranonce1: &Extranonce,
-    extranonce2: &Extranonce,
+    enonce1: &Extranonce,
+    enonce2: &Extranonce,
     merkle_branches: &[MerkleNode],
 ) -> Result<MerkleNode, InternalError> {
-    let coinbase_bin = hex::decode(format!("{coinb1}{extranonce1}{extranonce2}{coinb2}"))
-        .context(error::HexParseSnafu)?;
+    let coinbase_bin =
+        hex::decode(format!("{coinb1}{enonce1}{enonce2}{coinb2}")).context(error::HexParseSnafu)?;
     let coinbase_hash = sha256d::Hash::hash(&coinbase_bin);
 
     let mut merkle_root = coinbase_hash;
@@ -165,11 +165,11 @@ pub fn merkle_branches(non_coinbase_txids: Vec<Txid>) -> Vec<MerkleNode> {
 mod tests {
     use super::*;
 
-    fn extranonce1() -> Extranonce {
+    fn enonce1() -> Extranonce {
         "abcd1234".parse().unwrap()
     }
 
-    fn extranonce2() -> Extranonce {
+    fn enonce2() -> Extranonce {
         "0011223344556677".parse().unwrap()
     }
 
@@ -245,15 +245,15 @@ mod tests {
     fn merkle_root_no_branches_equals_hash_of_coinbase() {
         let coinb1 = "aa";
         let coinb2 = "dd";
-        let extranonce1 = extranonce1();
-        let extranonce2 = extranonce2();
+        let enonce1 = enonce1();
+        let enonce2 = enonce2();
 
         let want = {
-            let bin = hex::decode(format!("{coinb1}{extranonce1}{extranonce2}{coinb2}")).unwrap();
+            let bin = hex::decode(format!("{coinb1}{enonce1}{enonce2}{coinb2}")).unwrap();
             MerkleNode::from_raw_hash(sha256d::Hash::hash(&bin))
         };
 
-        let got = merkle_root(coinb1, coinb2, &extranonce1, &extranonce2, &[]).unwrap();
+        let got = merkle_root(coinb1, coinb2, &enonce1, &enonce2, &[]).unwrap();
 
         assert_eq!(want, got);
     }
@@ -273,13 +273,13 @@ mod tests {
         // Leaves: [ coinbase , t1 , t2 ] → root = H( H(cb||t1) || H(t2||t2) )
         let coinb1 = "aa";
         let coinb2 = "dd";
-        let extranonce1 = extranonce1();
-        let extranonce2 = extranonce2();
+        let enonce1 = enonce1();
+        let enonce2 = enonce2();
 
-        let root = merkle_root(coinb1, coinb2, &extranonce1, &extranonce2, &branches).unwrap();
+        let root = merkle_root(coinb1, coinb2, &enonce1, &enonce2, &branches).unwrap();
 
         let branch_0 = {
-            let bin = hex::decode(format!("{coinb1}{extranonce1}{extranonce2}{coinb2}")).unwrap();
+            let bin = hex::decode(format!("{coinb1}{enonce1}{enonce2}{coinb2}")).unwrap();
             let coinbase_txid = MerkleNode::from_raw_hash(sha256d::Hash::hash(&bin));
 
             hash(coinbase_txid.into(), txid(1).into())
@@ -306,13 +306,13 @@ mod tests {
         // Leaves: [ coinbase , t1 , t2, t3 ] → root = H( H(cb||t1) || H(t2||t3) )
         let coinb1 = "aa";
         let coinb2 = "dd";
-        let extranonce1 = extranonce1();
-        let extranonce2 = extranonce2();
+        let enonce1 = enonce1();
+        let enonce2 = enonce2();
 
-        let root = merkle_root(coinb1, coinb2, &extranonce1, &extranonce2, &branches).unwrap();
+        let root = merkle_root(coinb1, coinb2, &enonce1, &enonce2, &branches).unwrap();
 
         let branch_0 = {
-            let bin = hex::decode(format!("{coinb1}{extranonce1}{extranonce2}{coinb2}")).unwrap();
+            let bin = hex::decode(format!("{coinb1}{enonce1}{enonce2}{coinb2}")).unwrap();
             let coinbase_txid = MerkleNode::from_raw_hash(sha256d::Hash::hash(&bin));
 
             hash(coinbase_txid.into(), txid(1).into())
@@ -346,13 +346,13 @@ mod tests {
         // Leaves: [ coinbase , t1 , t2, t3, t4, t5 ] → root = H (H( H(cb||t1) || H(t2||t3) ) H (H(t4||t5) || H(t4||t5)))
         let coinb1 = "aa";
         let coinb2 = "dd";
-        let extranonce1 = extranonce1();
-        let extranonce2 = extranonce2();
+        let enonce1 = enonce1();
+        let enonce2 = enonce2();
 
-        let root = merkle_root(coinb1, coinb2, &extranonce1, &extranonce2, &branches).unwrap();
+        let root = merkle_root(coinb1, coinb2, &enonce1, &enonce2, &branches).unwrap();
 
         let branch_0 = {
-            let bin = hex::decode(format!("{coinb1}{extranonce1}{extranonce2}{coinb2}")).unwrap();
+            let bin = hex::decode(format!("{coinb1}{enonce1}{enonce2}{coinb2}")).unwrap();
             let coinbase_txid = MerkleNode::from_raw_hash(sha256d::Hash::hash(&bin));
 
             hash(coinbase_txid.into(), txid(1).into())

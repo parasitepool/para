@@ -23,7 +23,7 @@ pub(crate) struct Connection<R, W> {
     workername: Option<String>,
     authorized: Option<SystemTime>,
     version_mask: Option<Version>,
-    extranonce1: Option<Extranonce>,
+    enonce1: Option<Extranonce>,
     user_agent: Option<String>,
     vardiff: Vardiff,
 }
@@ -67,7 +67,7 @@ where
             workername: None,
             authorized: None,
             version_mask: None,
-            extranonce1: None,
+            enonce1: None,
             user_agent: None,
             vardiff,
         }
@@ -198,14 +198,14 @@ where
     }
 
     async fn workbase_update(&mut self, workbase: Arc<Workbase>) -> Result {
-        let (address, extranonce1) = match (&self.address, &self.extranonce1) {
-            (Some(address), Some(extranonce1)) => (address.clone(), extranonce1.clone()),
+        let (address, enonce1) = match (&self.address, &self.enonce1) {
+            (Some(address), Some(enonce1)) => (address.clone(), enonce1.clone()),
             _ => return Ok(()),
         };
 
         let new_job = Arc::new(Job::new(
             address,
-            extranonce1,
+            enonce1,
             self.config.extranonce2_size(),
             self.version_mask,
             workbase,
@@ -268,11 +268,11 @@ where
     }
 
     async fn subscribe(&mut self, id: Id, subscribe: Subscribe) -> Result {
-        if let Some(extranonce1) = subscribe.extranonce1 {
-            warn!("Ignoring worker extranonce1 suggestion: {extranonce1}");
+        if let Some(enonce1) = subscribe.enonce1 {
+            warn!("Ignoring worker enonce1 suggestion: {enonce1}");
         }
 
-        let extranonce1 = Extranonce::random(EXTRANONCE1_SIZE);
+        let enonce1 = Extranonce::random(ENONCE1_SIZE);
 
         let subscriptions = vec![
             (
@@ -284,8 +284,8 @@ where
 
         let result = SubscribeResult {
             subscriptions,
-            extranonce1: extranonce1.clone(),
-            extranonce2_size: self.config.extranonce2_size(),
+            enonce1: enonce1.clone(),
+            enonce2_size: self.config.extranonce2_size(),
         };
 
         self.send(Message::Response {
@@ -296,7 +296,7 @@ where
         })
         .await?;
 
-        self.extranonce1 = Some(extranonce1.clone());
+        self.enonce1 = Some(enonce1.clone());
         self.user_agent = Some(subscribe.user_agent);
         self.state = State::Subscribed;
 
@@ -304,10 +304,10 @@ where
     }
 
     async fn authorize(&mut self, id: Id, authorize: Authorize) -> Result {
-        let extranonce1 = self
-            .extranonce1
+        let enonce1 = self
+            .enonce1
             .clone()
-            .ok_or_else(|| anyhow!("missing extranonce1 do SUBSCRIBE first"))?;
+            .ok_or_else(|| anyhow!("missing enonce1 do SUBSCRIBE first"))?;
 
         let address = match authorize
             .username
@@ -330,7 +330,7 @@ where
 
         let job = Arc::new(Job::new(
             address.clone(),
-            extranonce1.clone(),
+            enonce1.clone(),
             self.config.extranonce2_size(),
             self.version_mask,
             self.workbase_receiver.borrow().clone(),
@@ -461,8 +461,8 @@ where
             merkle_root: stratum::merkle_root(
                 &job.coinb1,
                 &job.coinb2,
-                &job.extranonce1,
-                &submit.extranonce2,
+                &job.enonce1,
+                &submit.enonce2,
                 job.workbase.merkle_branches(),
             )?
             .into(),
@@ -491,7 +491,7 @@ where
 
             let coinbase_bin = hex::decode(format!(
                 "{}{}{}{}",
-                job.coinb1, job.extranonce1, submit.extranonce2, job.coinb2,
+                job.coinb1, job.enonce1, submit.enonce2, job.coinb2,
             ))?;
 
             let mut cursor = bitcoin::io::Cursor::new(&coinbase_bin);
@@ -603,7 +603,7 @@ where
             self.socket_addr,
             self.user_agent.clone(),
             enonce1,
-            submit.extranonce2.to_string(),
+            submit.enonce2.to_string(),
             submit.nonce,
             submit.ntime,
             submit.version_bits,
@@ -618,9 +618,9 @@ where
     }
 
     fn worker_info(&self) -> Option<(Address, String, Extranonce)> {
-        match (&self.address, &self.workername, &self.extranonce1) {
-            (Some(address), Some(worker), Some(extranonce1)) => {
-                Some((address.clone(), worker.clone(), extranonce1.clone()))
+        match (&self.address, &self.workername, &self.enonce1) {
+            (Some(address), Some(worker), Some(enonce1)) => {
+                Some((address.clone(), worker.clone(), enonce1.clone()))
             }
             _ => None,
         }

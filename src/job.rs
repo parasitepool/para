@@ -4,7 +4,7 @@ use super::*;
 pub(crate) struct Job {
     pub(crate) coinb1: String,
     pub(crate) coinb2: String,
-    pub(crate) extranonce1: Extranonce,
+    pub(crate) enonce1: Extranonce,
     pub(crate) workbase: Arc<Workbase>,
     pub(crate) job_id: JobId,
     pub(crate) version_mask: Option<Version>,
@@ -13,8 +13,8 @@ pub(crate) struct Job {
 impl Job {
     pub(crate) fn new(
         address: Address,
-        extranonce1: Extranonce,
-        extranonce2_size: usize,
+        enonce1: Extranonce,
+        enonce2_size: usize,
         version_mask: Option<Version>,
         workbase: Arc<Workbase>,
         job_id: JobId,
@@ -22,8 +22,8 @@ impl Job {
         let template = workbase.template();
         let (_coinbase_tx, coinb1, coinb2) = CoinbaseBuilder::new(
             address.clone(),
-            extranonce1.clone(),
-            extranonce2_size,
+            enonce1.clone(),
+            enonce2_size,
             template.height,
             template.coinbase_value,
             template.default_witness_commitment.clone(),
@@ -36,7 +36,7 @@ impl Job {
         Ok(Self {
             coinb1,
             coinb2,
-            extranonce1,
+            enonce1,
             workbase,
             job_id,
             version_mask,
