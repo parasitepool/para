@@ -390,11 +390,11 @@ where
         };
 
         let expected_extranonce2_size = self.config.extranonce2_size();
-        if submit.extranonce2.len() != expected_extranonce2_size {
+        if submit.enonce2.len() != expected_extranonce2_size {
             warn!(
                 "Invalid extranonce2 length from {}: got {} bytes, expected {}",
                 self.socket_addr,
-                submit.extranonce2.len(),
+                submit.enonce2.len(),
                 expected_extranonce2_size
             );
 
@@ -403,7 +403,7 @@ where
                 StratumError::InvalidNonce2Length,
                 Some(json!({
                     "expected": expected_extranonce2_size,
-                    "received": submit.extranonce2.len()
+                    "received": submit.enonce2.len()
                 })),
             )
             .await?;

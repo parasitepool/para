@@ -448,7 +448,7 @@ async fn invalid_extranonce2_length_rejected() {
     let mut events = client.connect().await.unwrap();
 
     let (subscribe, _, _) = client.subscribe().await.unwrap();
-    let expected_size = subscribe.extranonce2_size;
+    let expected_size = subscribe.enonce2_size;
 
     let wrong_size_short = Extranonce::random(expected_size - 1);
 
