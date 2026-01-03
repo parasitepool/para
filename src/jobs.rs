@@ -86,7 +86,7 @@ mod tests {
             Job::new(
                 address,
                 Extranonce::random(EXTRANONCE1_SIZE),
-                8, // default extranonce2 size
+                8,
                 None,
                 workbase,
                 id,

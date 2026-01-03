@@ -456,15 +456,12 @@ async fn invalid_extranonce2_length_rejected() {
     let (subscribe, _, _) = client.subscribe().await.unwrap();
     let expected_size = subscribe.extranonce2_size;
 
-    // Create extranonce2 with wrong size (too short)
     let wrong_size_short = Extranonce::random(expected_size - 1);
 
-    // Create extranonce2 with wrong size (too long)
     let wrong_size_long = Extranonce::random(expected_size + 1);
 
     client.authorize().await.unwrap();
 
-    // Drain initial events (SetDifficulty and Notify)
     let notify = timeout(Duration::from_secs(10), async {
         loop {
             match events.recv().await.unwrap() {
@@ -479,12 +476,12 @@ async fn invalid_extranonce2_length_rejected() {
     let ntime = notify.ntime;
     let nonce = Nonce::from(0);
 
-    // Test with too-short extranonce2
     let submit_short = client
         .submit(notify.job_id, wrong_size_short, ntime, nonce)
         .await;
 
     assert!(submit_short.is_err());
+
     assert!(
         matches!(
             &submit_short,
@@ -494,7 +491,6 @@ async fn invalid_extranonce2_length_rejected() {
         submit_short
     );
 
-    // Test with too-long extranonce2
     let submit_long = client
         .submit(notify.job_id, wrong_size_long, ntime, nonce)
         .await;
