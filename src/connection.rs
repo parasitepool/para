@@ -206,6 +206,7 @@ where
         let new_job = Arc::new(Job::new(
             address,
             extranonce1,
+            self.config.extranonce2_size(),
             self.version_mask,
             workbase,
             self.jobs.next_id(),
@@ -284,7 +285,7 @@ where
         let result = SubscribeResult {
             subscriptions,
             extranonce1: extranonce1.clone(),
-            extranonce2_size: EXTRANONCE2_SIZE,
+            extranonce2_size: self.config.extranonce2_size(),
         };
 
         self.send(Message::Response {
@@ -330,6 +331,7 @@ where
         let job = Arc::new(Job::new(
             address.clone(),
             extranonce1.clone(),
+            self.config.extranonce2_size(),
             self.version_mask,
             self.workbase_receiver.borrow().clone(),
             self.jobs.next_id(),
@@ -386,6 +388,35 @@ where
 
             return Ok(());
         };
+
+        // Validate extranonce2 length matches what we told the miner
+        let expected_extranonce2_size = self.config.extranonce2_size();
+        if submit.extranonce2.len() != expected_extranonce2_size {
+            warn!(
+                "Invalid extranonce2 length from {}: got {} bytes, expected {}",
+                self.socket_addr,
+                submit.extranonce2.len(),
+                expected_extranonce2_size
+            );
+            self.send_error(
+                id,
+                StratumError::InvalidNonce2Length,
+                Some(json!({
+                    "expected": expected_extranonce2_size,
+                    "received": submit.extranonce2.len()
+                })),
+            )
+            .await?;
+            self.emit_share(
+                &submit,
+                Some(&job),
+                0.0,
+                BlockHash::all_zeros(),
+                Some(StratumError::InvalidNonce2Length),
+            );
+
+            return Ok(());
+        }
 
         let version = if let Some(version_bits) = submit.version_bits {
             let Some(version_mask) = job.version_mask else {

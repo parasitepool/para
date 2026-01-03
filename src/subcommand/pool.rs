@@ -164,6 +164,7 @@ mod tests {
             config.zmq_block_notifications().to_string(),
             "tcp://127.0.0.1:28332".to_string()
         );
+        assert_eq!(config.extranonce2_size(), 8);
     }
 
     #[test]
@@ -320,5 +321,38 @@ mod tests {
 
         let config = parse_pool_config("para pool");
         assert_eq!(config.vardiff_window(), Duration::from_secs(300));
+    }
+
+    #[test]
+    fn extranonce2_size_default() {
+        let config = parse_pool_config("para pool");
+        assert_eq!(config.extranonce2_size(), 8);
+    }
+
+    #[test]
+    fn extranonce2_size_override() {
+        let config = parse_pool_config("para pool --extranonce2-size 4");
+        assert_eq!(config.extranonce2_size(), 4);
+    }
+
+    #[test]
+    fn extranonce2_size_boundaries() {
+        let config = parse_pool_config("para pool --extranonce2-size 2");
+        assert_eq!(config.extranonce2_size(), 2);
+
+        let config = parse_pool_config("para pool --extranonce2-size 8");
+        assert_eq!(config.extranonce2_size(), 8);
+    }
+
+    #[test]
+    #[should_panic(expected = "error parsing arguments")]
+    fn extranonce2_size_too_small() {
+        parse_pool_config("para pool --extranonce2-size 1");
+    }
+
+    #[test]
+    #[should_panic(expected = "error parsing arguments")]
+    fn extranonce2_size_too_large() {
+        parse_pool_config("para pool --extranonce2-size 9");
     }
 }

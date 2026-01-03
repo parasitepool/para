@@ -14,6 +14,7 @@ impl Job {
     pub(crate) fn new(
         address: Address,
         extranonce1: Extranonce,
+        extranonce2_size: usize,
         version_mask: Option<Version>,
         workbase: Arc<Workbase>,
         job_id: JobId,
@@ -22,7 +23,7 @@ impl Job {
         let (_coinbase_tx, coinb1, coinb2) = CoinbaseBuilder::new(
             address.clone(),
             extranonce1.clone(),
-            EXTRANONCE2_SIZE,
+            extranonce2_size,
             template.height,
             template.coinbase_value,
             template.default_witness_commitment.clone(),
