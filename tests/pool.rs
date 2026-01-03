@@ -445,6 +445,71 @@ async fn invalid_job_id_rejected_as_stale() {
     ));
 }
 
+#[tokio::test]
+#[serial(bitcoind)]
+#[timeout(90000)]
+async fn invalid_extranonce2_length_rejected() {
+    let pool = TestPool::spawn();
+    let client = pool.stratum_client().await;
+    let mut events = client.connect().await.unwrap();
+
+    let (subscribe, _, _) = client.subscribe().await.unwrap();
+    let expected_size = subscribe.extranonce2_size;
+
+    // Create extranonce2 with wrong size (too short)
+    let wrong_size_short = Extranonce::random(expected_size - 1);
+
+    // Create extranonce2 with wrong size (too long)
+    let wrong_size_long = Extranonce::random(expected_size + 1);
+
+    client.authorize().await.unwrap();
+
+    // Drain initial events (SetDifficulty and Notify)
+    let notify = timeout(Duration::from_secs(10), async {
+        loop {
+            match events.recv().await.unwrap() {
+                stratum::Event::Notify(n) => return n,
+                _ => continue,
+            }
+        }
+    })
+    .await
+    .expect("Timeout waiting for notify");
+
+    let ntime = notify.ntime;
+    let nonce = Nonce::from(0);
+
+    // Test with too-short extranonce2
+    let submit_short = client
+        .submit(notify.job_id, wrong_size_short, ntime, nonce)
+        .await;
+
+    assert!(submit_short.is_err());
+    assert!(
+        matches!(
+            &submit_short,
+            Err(ClientError::Stratum { response }) if response.error_code == StratumError::InvalidNonce2Length as i32
+        ),
+        "Expected InvalidNonce2Length error for too-short extranonce2, got: {:?}",
+        submit_short
+    );
+
+    // Test with too-long extranonce2
+    let submit_long = client
+        .submit(notify.job_id, wrong_size_long, ntime, nonce)
+        .await;
+
+    assert!(submit_long.is_err());
+    assert!(
+        matches!(
+            &submit_long,
+            Err(ClientError::Stratum { response }) if response.error_code == StratumError::InvalidNonce2Length as i32
+        ),
+        "Expected InvalidNonce2Length error for too-long extranonce2, got: {:?}",
+        submit_long
+    );
+}
+
 #[test]
 #[serial(bitcoind)]
 #[timeout(90000)]

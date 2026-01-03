@@ -389,7 +389,6 @@ where
             return Ok(());
         };
 
-        // Validate extranonce2 length matches what we told the miner
         let expected_extranonce2_size = self.config.extranonce2_size();
         if submit.extranonce2.len() != expected_extranonce2_size {
             warn!(
@@ -398,6 +397,7 @@ where
                 submit.extranonce2.len(),
                 expected_extranonce2_size
             );
+
             self.send_error(
                 id,
                 StratumError::InvalidNonce2Length,
@@ -407,6 +407,7 @@ where
                 })),
             )
             .await?;
+
             self.emit_share(
                 &submit,
                 Some(&job),
