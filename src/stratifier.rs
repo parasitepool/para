@@ -1,6 +1,5 @@
 use super::*;
 use reject_tracker::{EscalationLevel, RejectTracker};
-use session::Session;
 
 mod reject_tracker;
 

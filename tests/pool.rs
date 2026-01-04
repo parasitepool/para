@@ -1,5 +1,53 @@
 use super::*;
 
+async fn wait_for_notify(
+    events: &mut tokio::sync::broadcast::Receiver<stratum::Event>,
+) -> (stratum::Notify, Difficulty) {
+    let mut difficulty = Difficulty::from(1);
+    timeout(Duration::from_secs(10), async {
+        loop {
+            match events.recv().await.unwrap() {
+                stratum::Event::SetDifficulty(diff) => difficulty = diff,
+                stratum::Event::Notify(notify) => return (notify, difficulty),
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("Timeout waiting for notify")
+}
+
+async fn wait_for_new_block(
+    events: &mut tokio::sync::broadcast::Receiver<stratum::Event>,
+    old_job_id: JobId,
+) {
+    timeout(Duration::from_secs(10), async {
+        loop {
+            match events.recv().await.unwrap() {
+                stratum::Event::Notify(n) if n.job_id != old_job_id && n.clean_jobs => break,
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("Timeout waiting for new block")
+}
+
+fn assert_stratum_error<T: std::fmt::Debug>(
+    result: Result<T, ClientError>,
+    expected: StratumError,
+) {
+    assert!(
+        matches!(
+            &result,
+            Err(ClientError::Stratum { response }) if response.error_code == expected as i32
+        ),
+        "Expected {:?}, got {:?}",
+        expected,
+        result
+    );
+}
+
 #[test]
 #[serial(bitcoind)]
 #[timeout(90000)]
@@ -204,50 +252,6 @@ async fn submit_before_authorize_fails() {
 #[tokio::test]
 #[serial(bitcoind)]
 #[timeout(90000)]
-async fn duplicate_share_rejected() {
-    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
-    let client = pool.stratum_client().await;
-    let mut events = client.connect().await.unwrap();
-
-    let (subscribe, _, _) = client.subscribe().await.unwrap();
-    let enonce1 = subscribe.enonce1;
-    let enonce2 = Extranonce::random(subscribe.enonce2_size);
-
-    client.authorize().await.unwrap();
-
-    let (notify, difficulty) = timeout(Duration::from_secs(10), async {
-        let mut difficulty = stratum::Difficulty::from(1);
-        loop {
-            match events.recv().await.unwrap() {
-                stratum::Event::SetDifficulty(diff) => difficulty = diff,
-                stratum::Event::Notify(notify) => return (notify, difficulty),
-                _ => {}
-            }
-        }
-    })
-    .await
-    .expect("Timeout waiting for initial notification");
-
-    let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, difficulty);
-
-    let submit = client
-        .submit(notify.job_id, enonce2.clone(), ntime, nonce)
-        .await;
-
-    assert!(submit.is_ok());
-
-    let submit_duplicate = client.submit(notify.job_id, enonce2, ntime, nonce).await;
-
-    assert!(submit_duplicate.is_err());
-    assert!(matches!(
-        submit_duplicate,
-        Err(ClientError::Stratum { response }) if response.error_code == StratumError::Duplicate as i32
-    ));
-}
-
-#[tokio::test]
-#[serial(bitcoind)]
-#[timeout(90000)]
 #[ignore]
 async fn clean_jobs_true_on_init_and_new_block() {
     let pool = TestPool::spawn_with_args("--start-diff 0.0001");
@@ -287,217 +291,6 @@ async fn clean_jobs_true_on_init_and_new_block() {
     notify = timeout_result.expect("Timeout waiting for new block notification");
 
     assert!(notify.clean_jobs);
-}
-
-#[tokio::test]
-#[serial(bitcoind)]
-#[timeout(90000)]
-async fn shares_must_meet_pool_difficulty() {
-    let pool = TestPool::spawn_with_args("--start-diff 0.0001");
-    let client = pool.stratum_client().await;
-    let mut events = client.connect().await.unwrap();
-
-    let (subscribe, _, _) = client.subscribe().await.unwrap();
-    let enonce1 = subscribe.enonce1;
-    let enonce2 = Extranonce::random(subscribe.enonce2_size);
-
-    client.authorize().await.unwrap();
-
-    let (notify, difficulty) = timeout(Duration::from_secs(10), async {
-        let mut difficulty = stratum::Difficulty::from(1.0);
-        loop {
-            match events.recv().await.unwrap() {
-                stratum::Event::SetDifficulty(diff) => difficulty = diff,
-                stratum::Event::Notify(notify) => return (notify, difficulty),
-                _ => {}
-            }
-        }
-    })
-    .await
-    .expect("Timeout waiting for initial notification");
-
-    let easy_diff = stratum::Difficulty::from(0.0000001);
-    let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, easy_diff);
-
-    let merkle_root = stratum::merkle_root(
-        &notify.coinb1,
-        &notify.coinb2,
-        &enonce1,
-        &enonce2,
-        &notify.merkle_branches,
-    )
-    .unwrap();
-
-    let header = Header {
-        version: notify.version.into(),
-        prev_blockhash: notify.prevhash.clone().into(),
-        merkle_root: merkle_root.into(),
-        time: ntime.into(),
-        bits: notify.nbits.into(),
-        nonce: nonce.into(),
-    };
-
-    let hash = header.block_hash();
-    let pool_target = difficulty.to_target();
-
-    if pool_target.is_met_by(hash) {
-        println!("Accidentally found valid share, skipping negative test");
-        return;
-    }
-
-    let submit = client.submit(notify.job_id, enonce2, ntime, nonce).await;
-
-    assert!(submit.is_err());
-    assert!(matches!(
-        submit,
-        Err(ClientError::Stratum { response }) if response.error_code == StratumError::AboveTarget as i32
-    ));
-}
-
-#[tokio::test]
-#[serial(bitcoind)]
-#[timeout(90000)]
-async fn stale_share_rejected() {
-    let pool = TestPool::spawn_with_args("--start-diff 0.0001");
-    let client = pool.stratum_client().await;
-    let mut events = client.connect().await.unwrap();
-
-    let (subscribe, _, _) = client.subscribe().await.unwrap();
-    let enonce1 = subscribe.enonce1;
-    let enonce2 = Extranonce::random(subscribe.enonce2_size);
-
-    client.authorize().await.unwrap();
-
-    let (notify_a, difficulty) = timeout(Duration::from_secs(10), async {
-        let mut difficulty = stratum::Difficulty::from(1.0);
-        loop {
-            match events.recv().await.unwrap() {
-                stratum::Event::SetDifficulty(diff) => difficulty = diff,
-                stratum::Event::Notify(notify) => return (notify, difficulty),
-                _ => {}
-            }
-        }
-    })
-    .await
-    .expect("Timeout waiting for initial notification");
-
-    let (ntime, nonce) = solve_share(&notify_a, &enonce1, &enonce2, difficulty);
-
-    pool.mine_block();
-
-    timeout(Duration::from_secs(10), async {
-        loop {
-            match events.recv().await.unwrap() {
-                stratum::Event::Notify(n) if n.job_id != notify_a.job_id && n.clean_jobs => {
-                    break;
-                }
-                _ => {}
-            }
-        }
-    })
-    .await
-    .expect("Timeout waiting for new block notification");
-
-    let submit = client.submit(notify_a.job_id, enonce2, ntime, nonce).await;
-
-    assert!(submit.is_err());
-    assert!(matches!(
-        submit,
-        Err(ClientError::Stratum { response })
-        if response.error_code == StratumError::Stale as i32
-    ));
-}
-
-#[tokio::test]
-#[serial(bitcoind)]
-#[timeout(90000)]
-async fn invalid_job_id_rejected_as_stale() {
-    let pool = TestPool::spawn();
-    let client = pool.stratum_client().await;
-    let mut events = client.connect().await.unwrap();
-
-    let (subscribe, _, _) = client.subscribe().await.unwrap();
-    let _enonce1 = subscribe.enonce1;
-    let enonce2 = Extranonce::random(subscribe.enonce2_size);
-
-    client.authorize().await.unwrap();
-
-    let _ = events.recv().await.unwrap();
-    let _ = events.recv().await.unwrap();
-
-    let ntime = Ntime::from(0);
-    let nonce = Nonce::from(0);
-
-    let bad_job_id = stratum::JobId::from(0xdeadbeef);
-
-    let submit = client.submit(bad_job_id, enonce2, ntime, nonce).await;
-
-    assert!(submit.is_err());
-    assert!(matches!(
-        submit,
-        Err(ClientError::Stratum { response }) if response.error_code == StratumError::Stale as i32
-    ));
-}
-
-#[tokio::test]
-#[serial(bitcoind)]
-#[timeout(90000)]
-async fn invalid_extranonce2_length_rejected() {
-    let pool = TestPool::spawn();
-    let client = pool.stratum_client().await;
-    let mut events = client.connect().await.unwrap();
-
-    let (subscribe, _, _) = client.subscribe().await.unwrap();
-    let expected_size = subscribe.enonce2_size;
-
-    let wrong_size_short = Extranonce::random(expected_size - 1);
-
-    let wrong_size_long = Extranonce::random(expected_size + 1);
-
-    client.authorize().await.unwrap();
-
-    let notify = timeout(Duration::from_secs(10), async {
-        loop {
-            match events.recv().await.unwrap() {
-                stratum::Event::Notify(n) => return n,
-                _ => continue,
-            }
-        }
-    })
-    .await
-    .expect("Timeout waiting for notify");
-
-    let ntime = notify.ntime;
-    let nonce = Nonce::from(0);
-
-    let submit_short = client
-        .submit(notify.job_id, wrong_size_short, ntime, nonce)
-        .await;
-
-    assert!(submit_short.is_err());
-
-    assert!(
-        matches!(
-            &submit_short,
-            Err(ClientError::Stratum { response }) if response.error_code == StratumError::InvalidNonce2Length as i32
-        ),
-        "Expected InvalidNonce2Length error for too-short extranonce2, got: {:?}",
-        submit_short
-    );
-
-    let submit_long = client
-        .submit(notify.job_id, wrong_size_long, ntime, nonce)
-        .await;
-
-    assert!(submit_long.is_err());
-    assert!(
-        matches!(
-            &submit_long,
-            Err(ClientError::Stratum { response }) if response.error_code == StratumError::InvalidNonce2Length as i32
-        ),
-        "Expected InvalidNonce2Length error for too-long extranonce2, got: {:?}",
-        submit_long
-    );
 }
 
 #[test]
@@ -660,5 +453,186 @@ async fn vardiff_adjusts_difficulty() {
         "Difficulty should increase when shares come faster than target: {} -> {}",
         initial_difficulty,
         new_difficulty
+    );
+}
+
+#[tokio::test]
+#[serial(bitcoind)]
+#[timeout(90000)]
+async fn share_validation() {
+    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
+    let client = pool.stratum_client().await;
+    let mut events = client.connect().await.unwrap();
+
+    let (subscribe, _, _) = client.subscribe().await.unwrap();
+    let enonce1 = subscribe.enonce1;
+    let enonce2_size = subscribe.enonce2_size;
+
+    client.authorize().await.unwrap();
+
+    let (notify, difficulty) = wait_for_notify(&mut events).await;
+
+    // Valid share accepted
+    let enonce2 = Extranonce::random(enonce2_size);
+    let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, difficulty);
+    assert!(
+        client
+            .submit(notify.job_id, enonce2.clone(), ntime, nonce)
+            .await
+            .is_ok()
+    );
+
+    // Duplicate rejected
+    assert_stratum_error(
+        client.submit(notify.job_id, enonce2, ntime, nonce).await,
+        StratumError::Duplicate,
+    );
+
+    // Invalid enonce2 length (too short)
+    assert_stratum_error(
+        client
+            .submit(
+                notify.job_id,
+                Extranonce::random(enonce2_size - 1),
+                ntime,
+                nonce,
+            )
+            .await,
+        StratumError::InvalidNonce2Length,
+    );
+
+    // Invalid enonce2 length (too long)
+    assert_stratum_error(
+        client
+            .submit(
+                notify.job_id,
+                Extranonce::random(enonce2_size + 1),
+                ntime,
+                nonce,
+            )
+            .await,
+        StratumError::InvalidNonce2Length,
+    );
+
+    // Invalid job id (stale)
+    assert_stratum_error(
+        client
+            .submit(
+                JobId::from(0xdeadbeef),
+                Extranonce::random(enonce2_size),
+                ntime,
+                nonce,
+            )
+            .await,
+        StratumError::Stale,
+    );
+
+    // Share above target
+    assert_stratum_error(
+        client
+            .submit(
+                notify.job_id,
+                Extranonce::random(enonce2_size),
+                notify.ntime,
+                Nonce::from(0),
+            )
+            .await,
+        StratumError::AboveTarget,
+    );
+
+    // Stale after new block
+    let old_job_id = notify.job_id;
+    let fresh_enonce2 = Extranonce::random(enonce2_size);
+    let (old_ntime, old_nonce) = solve_share(&notify, &enonce1, &fresh_enonce2, difficulty);
+
+    pool.mine_block();
+    wait_for_new_block(&mut events, old_job_id).await;
+
+    assert_stratum_error(
+        client
+            .submit(old_job_id, fresh_enonce2, old_ntime, old_nonce)
+            .await,
+        StratumError::Stale,
+    );
+}
+
+/// Tests the reject escalation behavior:
+/// - WARN_THRESHOLD (5s in test mode): Pool sends fresh job
+/// - RECONNECT_THRESHOLD (10s in test mode): Pool sends client.reconnect
+/// - DROP_THRESHOLD (15s in test mode): Pool closes connection
+///
+/// In integration test mode, thresholds are set to 5/10/15s for fast testing.
+#[tokio::test]
+#[serial(bitcoind)]
+#[timeout(90000)]
+async fn reject_escalation() {
+    // Use high difficulty (1.0) to ensure shares are always rejected
+    let pool = TestPool::spawn_with_args("--start-diff 1");
+    let client = pool.stratum_client().await;
+    let mut events = client.connect().await.unwrap();
+
+    let (subscribe, _, _) = client.subscribe().await.unwrap();
+    let enonce2_size = subscribe.enonce2_size;
+
+    client.authorize().await.unwrap();
+
+    let (initial_notify, _) = wait_for_notify(&mut events).await;
+    let initial_job_id = initial_notify.job_id;
+
+    let start = std::time::Instant::now();
+    let mut fresh_job_received = false;
+    let mut last_job_id = initial_job_id;
+
+    // Submit bad shares continuously until connection drops
+    loop {
+        let elapsed = start.elapsed();
+
+        // Submit invalid share (nonce=0 won't meet target at this difficulty)
+        let result = client
+            .submit(
+                initial_notify.job_id,
+                Extranonce::random(enonce2_size),
+                initial_notify.ntime,
+                Nonce::from(0),
+            )
+            .await;
+
+        // Check if connection was dropped
+        match &result {
+            Err(ClientError::Io { .. }) => {
+                // Connection closed by server - expected after DROP_THRESHOLD
+                break;
+            }
+            Err(ClientError::NotConnected) => {
+                // Client detected disconnect
+                break;
+            }
+            Err(ClientError::ChannelRecv { .. }) => {
+                // Response channel closed - connection dropped
+                break;
+            }
+            _ => {}
+        }
+
+        // Check for fresh job notification (WARN_THRESHOLD behavior)
+        while let Ok(event) = events.try_recv() {
+            if let stratum::Event::Notify(notify) = event
+                && notify.job_id != last_job_id
+            {
+                last_job_id = notify.job_id;
+                fresh_job_received = true;
+            }
+        }
+
+        // Safety timeout - thresholds are 5/10/15s in test mode
+        if elapsed > Duration::from_secs(30) {
+            panic!("Connection still alive after 30s - expected drop at DROP_THRESHOLD (15s)");
+        }
+    }
+
+    // Verify we received a fresh job (WARN_THRESHOLD at 10ms)
+    assert!(
+        fresh_job_received,
+        "Expected fresh job notification at WARN_THRESHOLD"
     );
 }

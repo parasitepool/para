@@ -23,9 +23,9 @@ impl RejectTracker {
         let elapsed = self.first_reject.get_or_insert_with(Instant::now).elapsed();
 
         let new_level = [
-            (DROP_THRESHOLD, EscalationLevel::Drop),
-            (RECONNECT_THRESHOLD, EscalationLevel::Reconnect),
-            (WARN_THRESHOLD, EscalationLevel::Warn),
+            (drop_threshold(), EscalationLevel::Drop),
+            (reconnect_threshold(), EscalationLevel::Reconnect),
+            (warn_threshold(), EscalationLevel::Warn),
         ]
         .into_iter()
         .find(|(threshold, _)| elapsed >= *threshold)
