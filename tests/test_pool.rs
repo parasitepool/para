@@ -15,12 +15,7 @@ impl TestPool {
     pub(crate) fn spawn_with_args(args: impl ToArgs) -> Self {
         let tempdir = Arc::new(TempDir::new().unwrap());
 
-        let (bitcoind_port, rpc_port, zmq_port, pool_port, api_port) = (
-            TcpListener::bind("127.0.0.1:0")
-                .unwrap()
-                .local_addr()
-                .unwrap()
-                .port(),
+        let (bitcoind_port, rpc_port, zmq_port, pool_port) = (
             TcpListener::bind("127.0.0.1:0")
                 .unwrap()
                 .local_addr()
@@ -51,7 +46,6 @@ impl TestPool {
                 --chain signet
                 --address 127.0.0.1
                 --port {pool_port}
-                --api-port {api_port}
                 --bitcoin-rpc-username satoshi
                 --bitcoin-rpc-password nakamoto
                 --bitcoin-rpc-port {rpc_port}
@@ -73,20 +67,6 @@ impl TestPool {
                 }
                 Err(e) => panic!(
                     "Failed to connect to para pool after {} attempts: {}",
-                    attempt, e
-                ),
-            }
-        }
-
-        // Also wait for API to be ready
-        for attempt in 0.. {
-            match TcpStream::connect(format!("127.0.0.1:{api_port}")) {
-                Ok(_) => break,
-                Err(_) if attempt < 100 => {
-                    thread::sleep(Duration::from_millis(50));
-                }
-                Err(e) => panic!(
-                    "Failed to connect to para API after {} attempts: {}",
                     attempt, e
                 ),
             }
