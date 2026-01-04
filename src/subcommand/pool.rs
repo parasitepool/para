@@ -1,6 +1,6 @@
 use {
     super::*,
-    crate::{api, http_server, session::SessionStore},
+    crate::{api, http_server},
     pool_config::PoolConfig,
 };
 
@@ -15,7 +15,6 @@ pub(crate) struct Pool {
 impl Pool {
     pub(crate) async fn run(&self, cancel_token: CancellationToken) -> Result {
         let config = Arc::new(self.config.clone());
-        let session_store = Arc::new(SessionStore::new(SESSION_TTL));
         let metatron = Arc::new(Metatron::new());
         let (share_tx, share_rx) = mpsc::channel(SHARE_CHANNEL_CAPACITY);
         let connection_counter = AtomicU64::new(0);
@@ -82,7 +81,6 @@ impl Pool {
                     let config = config.clone();
                     let metatron = metatron.clone();
                     let share_tx = share_tx.clone();
-                    let session_store = session_store.clone();
                     let conn_cancel_token = cancel_token.child_token();
 
                     connection_tasks.spawn(async move {
@@ -95,7 +93,6 @@ impl Pool {
                             writer,
                             workbase_receiver,
                             conn_cancel_token,
-                            session_store,
                         );
 
                         if let Err(err) = stratifier.serve().await {

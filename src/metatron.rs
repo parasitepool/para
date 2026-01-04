@@ -3,11 +3,48 @@ use {
     crate::api::{PoolStats, UserDetail, UserSummary, WorkerSummary},
 };
 
+#[derive(Debug, Clone)]
+pub(crate) struct Session {
+    pub enonce1: Extranonce,
+    pub address: Address<NetworkUnchecked>,
+    pub workername: String,
+    pub user_agent: Option<String>,
+    pub version_mask: Option<Version>,
+    pub last_seen: Instant,
+    pub authorized_at: Option<SystemTime>,
+}
+
+impl Session {
+    pub(crate) fn new(
+        enonce1: Extranonce,
+        address: Address<NetworkUnchecked>,
+        workername: String,
+        user_agent: Option<String>,
+        version_mask: Option<Version>,
+        authorized_at: Option<SystemTime>,
+    ) -> Self {
+        Self {
+            enonce1,
+            address,
+            workername,
+            user_agent,
+            version_mask,
+            last_seen: Instant::now(),
+            authorized_at,
+        }
+    }
+
+    fn is_valid(&self, ttl: Duration) -> bool {
+        self.last_seen.elapsed() < ttl
+    }
+}
+
 pub(crate) struct Metatron {
     blocks: AtomicU64,
     started: Instant,
     connections: AtomicU64,
     users: DashMap<Address, Arc<User>>,
+    sessions: DashMap<Extranonce, Session>,
 }
 
 impl Metatron {
@@ -17,6 +54,7 @@ impl Metatron {
             started: Instant::now(),
             connections: AtomicU64::new(0),
             users: DashMap::new(),
+            sessions: DashMap::new(),
         }
     }
 
@@ -26,6 +64,8 @@ impl Metatron {
         sink: Option<mpsc::Sender<Share>>,
         cancel: CancellationToken,
     ) {
+        let mut cleanup_interval = tokio::time::interval(Duration::from_secs(60));
+
         loop {
             tokio::select! {
                 biased;
@@ -38,6 +78,10 @@ impl Metatron {
                     }
 
                     break;
+                }
+
+                _ = cleanup_interval.tick() => {
+                    self.cleanup_expired_sessions();
                 }
 
                 Some(share) = rx.recv() => {
@@ -79,6 +123,36 @@ impl Metatron {
             .clone();
 
         user.get_or_create_worker(workername)
+    }
+
+    pub(crate) fn store_session(&self, session: Session) {
+        info!(
+            "Storing session for {} ({:?}) with enonce1 {}",
+            session.workername, session.address, session.enonce1
+        );
+        self.sessions.insert(session.enonce1.clone(), session);
+    }
+
+    pub(crate) fn take_session(&self, enonce1: &Extranonce) -> Option<Session> {
+        let (_, session) = self.sessions.remove(enonce1)?;
+        if session.is_valid(SESSION_TTL) {
+            Some(session)
+        } else {
+            None
+        }
+    }
+
+    fn cleanup_expired_sessions(&self) {
+        let before = self.sessions.len();
+
+        self.sessions
+            .retain(|_, session| session.is_valid(SESSION_TTL));
+
+        let removed = before.saturating_sub(self.sessions.len());
+
+        if removed > 0 {
+            info!("Cleaned up {} expired sessions", removed);
+        }
     }
 
     pub(crate) fn add_block(&self) {
@@ -232,6 +306,19 @@ mod tests {
             .assume_checked()
     }
 
+    fn test_session(enonce1: &str) -> Session {
+        Session::new(
+            enonce1.parse().unwrap(),
+            "tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx"
+                .parse::<Address<NetworkUnchecked>>()
+                .unwrap(),
+            "test_worker".to_string(),
+            Some("TestMiner/1.0".to_string()),
+            None,
+            None,
+        )
+    }
+
     #[test]
     fn new_metatron_starts_at_zero() {
         let metatron = Metatron::new();
@@ -287,5 +374,38 @@ mod tests {
         let metatron = Metatron::new();
         metatron.add_block();
         assert_eq!(metatron.total_blocks(), 1);
+    }
+
+    #[test]
+    fn store_and_take_session() {
+        let metatron = Metatron::new();
+        let session = test_session("deadbeef");
+        let enonce1 = session.enonce1.clone();
+
+        metatron.store_session(session);
+
+        let taken = metatron.take_session(&enonce1);
+        assert!(taken.is_some());
+        assert_eq!(taken.unwrap().workername, "test_worker");
+    }
+
+    #[test]
+    fn take_nonexistent_session_returns_none() {
+        let metatron = Metatron::new();
+        let enonce1: Extranonce = "deadbeef".parse().unwrap();
+
+        assert!(metatron.take_session(&enonce1).is_none());
+    }
+
+    #[test]
+    fn take_removes_session() {
+        let metatron = Metatron::new();
+        let session = test_session("deadbeef");
+        let enonce1 = session.enonce1.clone();
+
+        metatron.store_session(session);
+
+        assert!(metatron.take_session(&enonce1).is_some());
+        assert!(metatron.take_session(&enonce1).is_none());
     }
 }

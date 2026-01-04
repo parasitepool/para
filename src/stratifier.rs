@@ -1,4 +1,5 @@
 use super::*;
+use metatron::Session;
 use reject_tracker::{EscalationLevel, RejectTracker};
 
 mod reject_tracker;
@@ -29,7 +30,6 @@ pub(crate) struct Stratifier<R, W> {
     enonce1: Option<Extranonce>,
     user_agent: Option<String>,
     vardiff: Vardiff,
-    session_store: Arc<session::SessionStore>,
     reject_tracker: RejectTracker,
     connected_at: Instant,
     last_share_at: Option<Instant>,
@@ -50,7 +50,6 @@ where
         writer: W,
         workbase_receiver: watch::Receiver<Arc<Workbase>>,
         cancel_token: CancellationToken,
-        session_store: Arc<session::SessionStore>,
     ) -> Self {
         let vardiff = Vardiff::new(
             config.start_diff(),
@@ -78,7 +77,6 @@ where
             enonce1: None,
             user_agent: None,
             vardiff,
-            session_store,
             reject_tracker: RejectTracker::default(),
             connected_at: Instant::now(),
             last_share_at: None,
@@ -217,10 +215,7 @@ where
         Ok(())
     }
 
-    /// Check if the connection should be dropped due to idle timeout.
-    /// Returns true if the connection should be dropped.
     fn check_idle_timeout(&self) -> bool {
-        // Authorization timeout: 60s to authorize
         if self.authorized.is_none() && self.connected_at.elapsed() > AUTH_TIMEOUT {
             warn!(
                 "Dropping {} - not authorized within {}s",
@@ -230,7 +225,6 @@ where
             return true;
         }
 
-        // Idle timeout: 1 hour without shares (only for authorized clients)
         if let Some(last_share) = self.last_share_at
             && last_share.elapsed() > IDLE_TIMEOUT
         {
@@ -245,8 +239,6 @@ where
         false
     }
 
-    /// Handle reject escalation based on the level transition returned by record_reject().
-    /// Returns true if the connection should be dropped.
     async fn handle_escalation(&mut self, level: EscalationLevel) -> bool {
         match level {
             EscalationLevel::None => false,
@@ -261,7 +253,6 @@ where
                         .unwrap_or(0)
                 );
 
-                // Send a fresh job to help the miner recover
                 if let (Some(address), Some(enonce1)) = (&self.address, &self.enonce1) {
                     let workbase = self.workbase_receiver.borrow().clone();
                     if let Ok(new_job) = Job::new(
@@ -390,15 +381,13 @@ where
     }
 
     async fn subscribe(&mut self, id: Id, subscribe: Subscribe) -> Result {
-        // Check for session resume request
         let enonce1 = if let Some(ref requested_enonce1) = subscribe.enonce1 {
-            if let Some(session) = self.session_store.take(requested_enonce1) {
+            if let Some(session) = self.metatron.take_session(requested_enonce1) {
                 info!(
                     "Resuming session for {} ({:?}) with enonce1 {}",
                     session.workername, session.address, session.enonce1
                 );
 
-                // Restore session state
                 self.address = Some(session.address.assume_checked());
                 self.workername = Some(session.workername);
                 self.user_agent = session.user_agent;
@@ -411,6 +400,7 @@ where
                     "Session resume failed for enonce1 {}, issuing new enonce1",
                     requested_enonce1
                 );
+
                 Extranonce::random(ENONCE1_SIZE)
             }
         } else {
@@ -440,10 +430,11 @@ where
         .await?;
 
         self.enonce1 = Some(enonce1.clone());
+
         if subscribe.enonce1.is_none() {
-            // Only update user_agent if this is a new subscription (not session resume)
             self.user_agent = Some(subscribe.user_agent);
         }
+
         self.state = State::Subscribed;
 
         Ok(())
@@ -522,7 +513,6 @@ where
         Ok(())
     }
 
-    /// Process a share submission. Returns true if the connection should be dropped.
     async fn submit(&mut self, id: Id, submit: Submit) -> Result<bool> {
         let Some(job) = self.jobs.get(&submit.job_id) else {
             self.send_error(id, StratumError::Stale, None).await?;
@@ -687,7 +677,6 @@ where
 
             self.emit_share(&submit, Some(&job), current_diff.as_f64(), hash, None);
 
-            // Record accept - resets consecutive reject tracking and idle timeout
             self.reject_tracker.record_accept();
             self.last_share_at = Some(Instant::now());
 
@@ -822,14 +811,13 @@ where
 
 impl<R, W> Drop for Stratifier<R, W> {
     fn drop(&mut self) {
-        // Store session for potential reconnection only if the miner was fully authorized
         if let (Some(address), Some(workername), Some(enonce1), Some(authorized)) = (
             self.address.take(),
             self.workername.take(),
             self.enonce1.take(),
             self.authorized,
         ) {
-            let session = session::StoredSession::new(
+            let session = Session::new(
                 enonce1,
                 address.as_unchecked().clone(),
                 workername,
@@ -837,7 +825,7 @@ impl<R, W> Drop for Stratifier<R, W> {
                 self.version_mask,
                 Some(authorized),
             );
-            self.session_store.store(session);
+            self.metatron.store_session(session);
         }
 
         self.metatron.sub_connection();
