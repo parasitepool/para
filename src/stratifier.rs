@@ -386,6 +386,7 @@ where
                 self.user_agent = session.user_agent;
                 self.version_mask = session.version_mask;
                 self.authorized = Some(session.authorized_at);
+                self.bouncer.authorize();
 
                 session.enonce1
             } else {

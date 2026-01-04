@@ -170,12 +170,19 @@ impl Client {
     }
 
     pub async fn subscribe(&self) -> Result<(SubscribeResult, Duration, usize)> {
+        self.subscribe_with_enonce1(None).await
+    }
+
+    pub async fn subscribe_with_enonce1(
+        &self,
+        enonce1: Option<Extranonce>,
+    ) -> Result<(SubscribeResult, Duration, usize)> {
         let (rx, instant) = self
             .send_request(
                 "mining.subscribe".to_string(),
                 serde_json::to_value(Subscribe {
                     user_agent: self.config.user_agent.clone(),
-                    enonce1: None,
+                    enonce1,
                 })
                 .context(error::SerializationSnafu)?,
             )

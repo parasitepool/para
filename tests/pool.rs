@@ -153,6 +153,81 @@ async fn basic_initialization_flow() {
 #[tokio::test]
 #[serial(bitcoind)]
 #[timeout(90000)]
+async fn sessions() {
+    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
+
+    let original_enonce1 = {
+        let client = pool.stratum_client().await;
+        let mut events = client.connect().await.unwrap();
+
+        let (subscribe_result, _, _) = client.subscribe().await.unwrap();
+        let enonce1 = subscribe_result.enonce1.clone();
+
+        client.authorize().await.unwrap();
+
+        let (notify, difficulty) = wait_for_notify(&mut events).await;
+
+        let enonce2 = Extranonce::random(subscribe_result.enonce2_size);
+        let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, difficulty);
+        client
+            .submit(notify.job_id, enonce2, ntime, nonce)
+            .await
+            .unwrap();
+
+        client.disconnect().await.unwrap();
+        enonce1
+    };
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    {
+        let client = pool.stratum_client().await;
+        let mut events = client.connect().await.unwrap();
+
+        let (subscribe_result, _, _) = client
+            .subscribe_with_enonce1(Some(original_enonce1.clone()))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            subscribe_result.enonce1, original_enonce1,
+            "Session resumption should return the same enonce1"
+        );
+
+        client.authorize().await.unwrap();
+
+        let (notify, difficulty) = wait_for_notify(&mut events).await;
+
+        let enonce2 = Extranonce::random(subscribe_result.enonce2_size);
+        let (ntime, nonce) = solve_share(&notify, &original_enonce1, &enonce2, difficulty);
+        client
+            .submit(notify.job_id, enonce2, ntime, nonce)
+            .await
+            .expect("Should be able to submit after session resume");
+    }
+
+    {
+        let client = pool.stratum_client().await;
+        let _ = client.connect().await.unwrap();
+
+        let fake_enonce1: Extranonce = "deadbeef".parse().unwrap();
+        let (subscribe_result, _, _) = client
+            .subscribe_with_enonce1(Some(fake_enonce1.clone()))
+            .await
+            .unwrap();
+
+        assert_ne!(
+            subscribe_result.enonce1, fake_enonce1,
+            "Unknown enonce1 should result in new enonce1 being issued"
+        );
+
+        client.authorize().await.unwrap();
+    }
+}
+
+#[tokio::test]
+#[serial(bitcoind)]
+#[timeout(90000)]
 async fn configure_with_multiple_negotiation_steps() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001");
 
