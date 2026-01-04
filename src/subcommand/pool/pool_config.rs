@@ -240,8 +240,4 @@ impl PoolConfig {
     pub(crate) fn extranonce2_size(&self) -> usize {
         self.extranonce2_size as usize
     }
-
-    pub(crate) fn session_ttl(&self) -> Duration {
-        Duration::from_secs(600)
-    }
 }

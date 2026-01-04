@@ -48,10 +48,6 @@ impl RejectTracker {
         *self = Self::default();
     }
 
-    pub(crate) fn current_level(&self) -> EscalationLevel {
-        self.current_level
-    }
-
     pub(crate) fn consecutive_rejects(&self) -> u32 {
         self.consecutive_rejects
     }
@@ -66,10 +62,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn new_tracker_starts_at_none() {
+    fn new_tracker_starts_at_zero() {
         let tracker = RejectTracker::default();
-        assert_eq!(tracker.current_level(), EscalationLevel::None);
         assert_eq!(tracker.consecutive_rejects(), 0);
+        assert!(tracker.reject_duration().is_none());
     }
 
     #[test]

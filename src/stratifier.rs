@@ -263,17 +263,7 @@ where
                             let submit = serde_json::from_value::<Submit>(params)
                                 .context(format!("failed to deserialize {method}"))?;
 
-                            self.submit(id, submit).await?;
-
-                            // Check reject escalation after submit
-                            if let Some(EscalationAction::Drop) = self.check_reject_escalation().await {
-                                warn!(
-                                    "Disconnecting {} due to {} seconds of consecutive rejects",
-                                    self.socket_addr,
-                                    self.reject_tracker.reject_duration()
-                                        .map(|d| d.as_secs())
-                                        .unwrap_or(0)
-                                );
+                            if self.submit(id, submit).await? {
                                 break;
                             }
                         }
@@ -303,25 +293,24 @@ where
         Ok(())
     }
 
-    /// Check reject escalation and take appropriate action
-    async fn check_reject_escalation(&mut self) -> Option<EscalationAction> {
-        let level = self.reject_tracker.current_level();
+    /// Handle reject escalation based on the level transition returned by record_reject().
+    /// Returns true if the connection should be dropped.
+    async fn handle_escalation(&mut self, level: EscalationLevel) -> bool {
         match level {
-            EscalationLevel::None => None,
+            EscalationLevel::None => false,
             EscalationLevel::Warn => {
+                info!(
+                    "Warning {} - {} consecutive rejects for {}s, sending fresh job",
+                    self.socket_addr,
+                    self.reject_tracker.consecutive_rejects(),
+                    self.reject_tracker
+                        .reject_duration()
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0)
+                );
+
                 // Send a fresh job to help the miner recover
                 if let (Some(address), Some(enonce1)) = (&self.address, &self.enonce1) {
-                    info!(
-                        "Warning {} - {} consecutive rejects for {}s",
-                        self.socket_addr,
-                        self.reject_tracker.consecutive_rejects(),
-                        self.reject_tracker
-                            .reject_duration()
-                            .map(|d| d.as_secs())
-                            .unwrap_or(0)
-                    );
-
-                    // Try to send a fresh job
                     let workbase = self.workbase_receiver.borrow().clone();
                     if let Ok(new_job) = Job::new(
                         address.clone(),
@@ -343,7 +332,7 @@ where
                         }
                     }
                 }
-                Some(EscalationAction::Warn)
+                false
             }
             EscalationLevel::Reconnect => {
                 info!(
@@ -355,16 +344,26 @@ where
                         .map(|d| d.as_secs())
                         .unwrap_or(0)
                 );
-                // Send client.reconnect notification
                 let _ = self
                     .send(Message::Notification {
                         method: "client.reconnect".into(),
                         params: json!([]),
                     })
                     .await;
-                Some(EscalationAction::Reconnect)
+                false
             }
-            EscalationLevel::Drop => Some(EscalationAction::Drop),
+            EscalationLevel::Drop => {
+                warn!(
+                    "Dropping {} - {} consecutive rejects for {}s",
+                    self.socket_addr,
+                    self.reject_tracker.consecutive_rejects(),
+                    self.reject_tracker
+                        .reject_duration()
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0)
+                );
+                true
+            }
         }
     }
 
@@ -450,7 +449,7 @@ where
                 // Restore session state
                 self.address = Some(session.address.assume_checked());
                 self.workername = Some(session.workername);
-                self.user_agent = session.user_agent.clone();
+                self.user_agent = session.user_agent;
                 self.version_mask = session.version_mask;
                 self.authorized = session.authorized_at;
 
@@ -570,7 +569,8 @@ where
         Ok(())
     }
 
-    async fn submit(&mut self, id: Id, submit: Submit) -> Result {
+    /// Process a share submission. Returns true if the connection should be dropped.
+    async fn submit(&mut self, id: Id, submit: Submit) -> Result<bool> {
         let Some(job) = self.jobs.get(&submit.job_id) else {
             self.send_error(id, StratumError::Stale, None).await?;
             self.emit_share(
@@ -580,10 +580,8 @@ where
                 BlockHash::all_zeros(),
                 Some(StratumError::Stale),
             );
-            // Record reject for escalation tracking
-            self.reject_tracker.record_reject();
-
-            return Ok(());
+            let level = self.reject_tracker.record_reject();
+            return Ok(self.handle_escalation(level).await);
         };
 
         let expected_extranonce2_size = self.config.extranonce2_size();
@@ -612,10 +610,8 @@ where
                 BlockHash::all_zeros(),
                 Some(StratumError::InvalidNonce2Length),
             );
-            // Record reject for escalation tracking
-            self.reject_tracker.record_reject();
-
-            return Ok(());
+            let level = self.reject_tracker.record_reject();
+            return Ok(self.handle_escalation(level).await);
         }
 
         let version = if let Some(version_bits) = submit.version_bits {
@@ -634,10 +630,8 @@ where
                     BlockHash::all_zeros(),
                     Some(StratumError::InvalidVersionMask),
                 );
-                // Record reject for escalation tracking
-                self.reject_tracker.record_reject();
-
-                return Ok(());
+                let level = self.reject_tracker.record_reject();
+                return Ok(self.handle_escalation(level).await);
             };
 
             assert!(version_bits != Version::from(0));
@@ -683,10 +677,8 @@ where
                 hash,
                 Some(StratumError::Duplicate),
             );
-            // Record reject for escalation tracking
-            self.reject_tracker.record_reject();
-
-            return Ok(());
+            let level = self.reject_tracker.record_reject();
+            return Ok(self.handle_escalation(level).await);
         }
 
         if let Ok(blockhash) = header.validate_pow(Target::from_compact(nbits.into())) {
@@ -771,20 +763,19 @@ where
                 })
                 .await?;
             }
-        } else {
-            self.send_error(id, StratumError::AboveTarget, None).await?;
-            self.emit_share(
-                &submit,
-                Some(&job),
-                0.0,
-                hash,
-                Some(StratumError::AboveTarget),
-            );
-            // Record reject for escalation tracking
-            self.reject_tracker.record_reject();
+            return Ok(false);
         }
 
-        Ok(())
+        self.send_error(id, StratumError::AboveTarget, None).await?;
+        self.emit_share(
+            &submit,
+            Some(&job),
+            0.0,
+            hash,
+            Some(StratumError::AboveTarget),
+        );
+        let level = self.reject_tracker.record_reject();
+        Ok(self.handle_escalation(level).await)
     }
 
     fn emit_share(
@@ -875,26 +866,22 @@ where
     }
 }
 
-/// Actions to take based on reject escalation
-enum EscalationAction {
-    Warn,
-    Reconnect,
-    Drop,
-}
-
 impl<R, W> Drop for Stratifier<R, W> {
     fn drop(&mut self) {
-        // Store session for potential reconnection if the miner was authorized
-        if let (Some(address), Some(workername), Some(enonce1)) =
-            (&self.address, &self.workername, &self.enonce1)
-        {
+        // Store session for potential reconnection only if the miner was fully authorized
+        if let (Some(address), Some(workername), Some(enonce1), Some(authorized)) = (
+            self.address.take(),
+            self.workername.take(),
+            self.enonce1.take(),
+            self.authorized,
+        ) {
             let session = StoredSession::new(
-                enonce1.clone(),
+                enonce1,
                 address.as_unchecked().clone(),
-                workername.clone(),
-                self.user_agent.clone(),
+                workername,
+                self.user_agent.take(),
                 self.version_mask,
-                self.authorized,
+                Some(authorized),
             );
             self.session_store.store(session);
         }

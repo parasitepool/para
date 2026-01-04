@@ -15,7 +15,7 @@ pub(crate) struct Pool {
 impl Pool {
     pub(crate) async fn run(&self, cancel_token: CancellationToken) -> Result {
         let config = Arc::new(self.config.clone());
-        let session_store = Arc::new(SessionStore::new(config.session_ttl()));
+        let session_store = Arc::new(SessionStore::new(SESSION_TTL));
         let metatron = Arc::new(Metatron::new());
         let (share_tx, share_rx) = mpsc::channel(SHARE_CHANNEL_CAPACITY);
         let connection_counter = AtomicU64::new(0);
