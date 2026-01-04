@@ -20,11 +20,11 @@ async fn wait_for_notify(
 async fn wait_for_new_block(
     events: &mut tokio::sync::broadcast::Receiver<stratum::Event>,
     old_job_id: JobId,
-) {
+) -> stratum::Notify {
     timeout(Duration::from_secs(10), async {
         loop {
             match events.recv().await.unwrap() {
-                stratum::Event::Notify(n) if n.job_id != old_job_id && n.clean_jobs => break,
+                stratum::Event::Notify(n) if n.job_id != old_job_id && n.clean_jobs => return n,
                 _ => {}
             }
         }
@@ -143,18 +143,9 @@ async fn basic_initialization_flow() {
             .contains("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4 is not valid for signet network")
     );
 
-    let difficulty = match events.recv().await.unwrap() {
-        stratum::Event::SetDifficulty(difficulty) => difficulty,
-        _ => panic!("Expected SetDifficulty"),
-    };
+    let (notify, difficulty) = wait_for_notify(&mut events).await;
 
     assert_eq!(difficulty, Difficulty::from(0.00001));
-
-    let notify = match events.recv().await.unwrap() {
-        stratum::Event::Notify(n) => n,
-        _ => panic!("Expected Notify"),
-    };
-
     assert_eq!(notify.job_id, JobId::from(0));
     assert!(notify.clean_jobs);
 }
@@ -261,35 +252,12 @@ async fn clean_jobs_true_on_init_and_new_block() {
     client.subscribe().await.unwrap();
     client.authorize().await.unwrap();
 
-    let mut notify = match events.recv().await.unwrap() {
-        stratum::Event::Notify(n) => n,
-        stratum::Event::SetDifficulty(_) => match events.recv().await.unwrap() {
-            stratum::Event::Notify(n) => n,
-            _ => panic!("expected notify"),
-        },
-        _ => panic!("expected notify"),
-    };
-
+    let (notify, _) = wait_for_notify(&mut events).await;
     assert!(notify.clean_jobs);
 
     pool.mine_block();
 
-    let timeout_result = timeout(Duration::from_secs(10), async {
-        loop {
-            match events.recv().await.unwrap() {
-                stratum::Event::Notify(notif)
-                    if notif.job_id != notify.job_id && notify.clean_jobs =>
-                {
-                    return notif;
-                }
-                _ => {}
-            }
-        }
-    })
-    .await;
-
-    notify = timeout_result.expect("Timeout waiting for new block notification");
-
+    let notify = wait_for_new_block(&mut events, notify.job_id).await;
     assert!(notify.clean_jobs);
 }
 
@@ -383,18 +351,7 @@ async fn vardiff_adjusts_difficulty() {
 
     client.authorize().await.unwrap();
 
-    let (notify, initial_difficulty) = timeout(Duration::from_secs(10), async {
-        let mut difficulty = stratum::Difficulty::from(1);
-        loop {
-            match events.recv().await.unwrap() {
-                stratum::Event::SetDifficulty(diff) => difficulty = diff,
-                stratum::Event::Notify(notify) => return (notify, difficulty),
-                _ => {}
-            }
-        }
-    })
-    .await
-    .expect("Timeout waiting for initial notification");
+    let (notify, initial_difficulty) = wait_for_notify(&mut events).await;
 
     assert_eq!(
         initial_difficulty,
@@ -546,7 +503,7 @@ async fn share_validation() {
     let (old_ntime, old_nonce) = solve_share(&notify, &enonce1, &fresh_enonce2, difficulty);
 
     pool.mine_block();
-    wait_for_new_block(&mut events, old_job_id).await;
+    let _ = wait_for_new_block(&mut events, old_job_id).await;
 
     assert_stratum_error(
         client
@@ -556,17 +513,10 @@ async fn share_validation() {
     );
 }
 
-/// Tests the reject escalation behavior:
-/// - WARN_THRESHOLD (5s in test mode): Pool sends fresh job
-/// - RECONNECT_THRESHOLD (10s in test mode): Pool sends client.reconnect
-/// - DROP_THRESHOLD (15s in test mode): Pool closes connection
-///
-/// In integration test mode, thresholds are set to 5/10/15s for fast testing.
 #[tokio::test]
 #[serial(bitcoind)]
 #[timeout(90000)]
-async fn reject_escalation() {
-    // Use high difficulty (1.0) to ensure shares are always rejected
+async fn bouncer() {
     let pool = TestPool::spawn_with_args("--start-diff 1");
     let client = pool.stratum_client().await;
     let mut events = client.connect().await.unwrap();
@@ -583,11 +533,9 @@ async fn reject_escalation() {
     let mut fresh_job_received = false;
     let mut last_job_id = initial_job_id;
 
-    // Submit bad shares continuously until connection drops
     loop {
         let elapsed = start.elapsed();
 
-        // Submit invalid share (nonce=0 won't meet target at this difficulty)
         let result = client
             .submit(
                 initial_notify.job_id,
@@ -597,24 +545,19 @@ async fn reject_escalation() {
             )
             .await;
 
-        // Check if connection was dropped
         match &result {
             Err(ClientError::Io { .. }) => {
-                // Connection closed by server - expected after DROP_THRESHOLD
                 break;
             }
             Err(ClientError::NotConnected) => {
-                // Client detected disconnect
                 break;
             }
             Err(ClientError::ChannelRecv { .. }) => {
-                // Response channel closed - connection dropped
                 break;
             }
             _ => {}
         }
 
-        // Check for fresh job notification (WARN_THRESHOLD behavior)
         while let Ok(event) = events.try_recv() {
             if let stratum::Event::Notify(notify) = event
                 && notify.job_id != last_job_id
@@ -624,15 +567,73 @@ async fn reject_escalation() {
             }
         }
 
-        // Safety timeout - thresholds are 5/10/15s in test mode
-        if elapsed > Duration::from_secs(30) {
-            panic!("Connection still alive after 30s - expected drop at DROP_THRESHOLD (15s)");
+        if elapsed > Duration::from_secs(10) {
+            panic!("Connection still alive after 10s - expected drop at DROP_THRESHOLD (3s)");
         }
     }
 
-    // Verify we received a fresh job (WARN_THRESHOLD at 10ms)
     assert!(
         fresh_job_received,
         "Expected fresh job notification at WARN_THRESHOLD"
     );
+}
+
+#[tokio::test]
+#[serial(bitcoind)]
+#[timeout(90000)]
+async fn auth_and_idle_timeouts() {
+    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
+
+    let auth_timeout_test = async {
+        let client = pool.stratum_client().await;
+        let _events = client.connect().await.unwrap();
+
+        client.subscribe().await.unwrap();
+
+        tokio::time::sleep(Duration::from_secs(4)).await;
+
+        let result = client.authorize().await;
+        assert!(
+            result.is_err(),
+            "Expected connection to be dropped after AUTH_TIMEOUT"
+        );
+    };
+
+    let idle_timeout_test = async {
+        let client = pool.stratum_client().await;
+        let mut events = client.connect().await.unwrap();
+
+        let (subscribe, _, _) = client.subscribe().await.unwrap();
+        let enonce1 = subscribe.enonce1;
+        let enonce2_size = subscribe.enonce2_size;
+
+        client.authorize().await.unwrap();
+
+        let (notify, difficulty) = wait_for_notify(&mut events).await;
+
+        let enonce2 = Extranonce::random(enonce2_size);
+        let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, difficulty);
+        client
+            .submit(notify.job_id, enonce2, ntime, nonce)
+            .await
+            .unwrap();
+
+        tokio::time::sleep(Duration::from_secs(8)).await;
+
+        let result = client
+            .submit(
+                notify.job_id,
+                Extranonce::random(enonce2_size),
+                ntime,
+                nonce,
+            )
+            .await;
+
+        assert!(
+            result.is_err(),
+            "Expected connection to be dropped after IDLE_TIMEOUT"
+        );
+    };
+
+    tokio::join!(auth_timeout_test, idle_timeout_test);
 }

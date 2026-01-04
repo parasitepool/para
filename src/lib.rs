@@ -147,8 +147,6 @@ pub const SHARE_CHANNEL_CAPACITY: usize = 100_000;
 pub const SUBSCRIPTION_ID: &str = "deadbeef";
 pub const LRU_CACHE_SIZE: usize = 256;
 pub const SESSION_TTL: Duration = Duration::from_secs(600);
-pub const AUTH_TIMEOUT: Duration = Duration::from_secs(60);
-pub const IDLE_TIMEOUT: Duration = Duration::from_secs(3600);
 
 type Result<T = (), E = Error> = std::result::Result<T, E>;
 

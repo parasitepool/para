@@ -3,6 +3,9 @@ use bouncer::{Bouncer, Consequence};
 
 mod bouncer;
 
+const IDLE_CHECK_INTERVAL: Duration = Duration::from_secs(30);
+const TEST_IDLE_CHECK_INTERVAL: Duration = Duration::from_secs(1);
+
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum State {
     Init,
@@ -30,8 +33,7 @@ pub(crate) struct Stratifier<R, W> {
     user_agent: Option<String>,
     vardiff: Vardiff,
     bouncer: Bouncer,
-    connected_at: Instant,
-    last_share_at: Option<Instant>,
+    idle_check_interval: Duration,
 }
 
 impl<R, W> Stratifier<R, W>
@@ -58,6 +60,12 @@ where
 
         metatron.add_connection();
 
+        let idle_check_interval = if integration_test() {
+            TEST_IDLE_CHECK_INTERVAL
+        } else {
+            IDLE_CHECK_INTERVAL
+        };
+
         Self {
             config,
             metatron,
@@ -77,15 +85,14 @@ where
             user_agent: None,
             vardiff,
             bouncer: Bouncer::new(),
-            connected_at: Instant::now(),
-            last_share_at: None,
+            idle_check_interval,
         }
     }
 
     pub(crate) async fn serve(&mut self) -> Result {
         let mut workbase_receiver = self.workbase_receiver.clone();
         let cancel_token = self.cancel_token.clone();
-        let mut idle_check = tokio::time::interval(Duration::from_secs(30));
+        let mut idle_check = tokio::time::interval(self.idle_check_interval);
 
         loop {
             tokio::select! {
@@ -215,27 +222,25 @@ where
     }
 
     fn check_idle_timeout(&self) -> bool {
-        if self.authorized.is_none() && self.connected_at.elapsed() > AUTH_TIMEOUT {
-            warn!(
-                "Dropping {} - not authorized within {}s",
-                self.socket_addr,
-                AUTH_TIMEOUT.as_secs()
-            );
-            return true;
+        match self.bouncer.check() {
+            Consequence::Drop => {
+                if !self.bouncer.is_authorized() {
+                    warn!(
+                        "Dropping {} - not authorized within {}s",
+                        self.socket_addr,
+                        self.bouncer.auth_timeout().as_secs()
+                    );
+                } else {
+                    warn!(
+                        "Dropping {} - idle for {}s",
+                        self.socket_addr,
+                        self.bouncer.idle_timeout().as_secs()
+                    );
+                }
+                true
+            }
+            _ => false,
         }
-
-        if let Some(last_share) = self.last_share_at
-            && last_share.elapsed() > IDLE_TIMEOUT
-        {
-            warn!(
-                "Dropping {} - idle for {}s",
-                self.socket_addr,
-                IDLE_TIMEOUT.as_secs()
-            );
-            return true;
-        }
-
-        false
     }
 
     async fn handle_consequence(&mut self, consequence: Consequence) -> bool {
@@ -486,7 +491,7 @@ where
 
         if self.authorized.is_none() {
             self.authorized = Some(SystemTime::now());
-            self.last_share_at = Some(Instant::now());
+            self.bouncer.authorize();
         }
 
         debug!("Sending SET DIFFICULTY");
@@ -677,7 +682,6 @@ where
             self.emit_share(&submit, Some(&job), current_diff.as_f64(), hash, None);
 
             self.bouncer.accept();
-            self.last_share_at = Some(Instant::now());
 
             let network_diff = Difficulty::from(job.nbits());
 
