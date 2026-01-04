@@ -1,7 +1,7 @@
 use super::*;
-use reject_tracker::{EscalationLevel, RejectTracker};
+use bouncer::{Bouncer, Consequence};
 
-mod reject_tracker;
+mod bouncer;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum State {
@@ -29,7 +29,7 @@ pub(crate) struct Stratifier<R, W> {
     enonce1: Option<Extranonce>,
     user_agent: Option<String>,
     vardiff: Vardiff,
-    reject_tracker: RejectTracker,
+    bouncer: Bouncer,
     connected_at: Instant,
     last_share_at: Option<Instant>,
 }
@@ -76,7 +76,7 @@ where
             enonce1: None,
             user_agent: None,
             vardiff,
-            reject_tracker: RejectTracker::default(),
+            bouncer: Bouncer::default(),
             connected_at: Instant::now(),
             last_share_at: None,
         }
@@ -238,15 +238,15 @@ where
         false
     }
 
-    async fn handle_escalation(&mut self, level: EscalationLevel) -> bool {
-        match level {
-            EscalationLevel::None => false,
-            EscalationLevel::Warn => {
+    async fn handle_consequence(&mut self, consequence: Consequence) -> bool {
+        match consequence {
+            Consequence::None => false,
+            Consequence::Warn => {
                 info!(
                     "Warning {} - {} consecutive rejects for {}s, sending fresh job",
                     self.socket_addr,
-                    self.reject_tracker.consecutive_rejects(),
-                    self.reject_tracker
+                    self.bouncer.consecutive_rejects(),
+                    self.bouncer
                         .reject_duration()
                         .map(|d| d.as_secs())
                         .unwrap_or(0)
@@ -276,12 +276,12 @@ where
                 }
                 false
             }
-            EscalationLevel::Reconnect => {
+            Consequence::Reconnect => {
                 info!(
                     "Suggesting reconnect to {} - {} consecutive rejects for {}s",
                     self.socket_addr,
-                    self.reject_tracker.consecutive_rejects(),
-                    self.reject_tracker
+                    self.bouncer.consecutive_rejects(),
+                    self.bouncer
                         .reject_duration()
                         .map(|d| d.as_secs())
                         .unwrap_or(0)
@@ -294,12 +294,12 @@ where
                     .await;
                 false
             }
-            EscalationLevel::Drop => {
+            Consequence::Drop => {
                 warn!(
                     "Dropping {} - {} consecutive rejects for {}s",
                     self.socket_addr,
-                    self.reject_tracker.consecutive_rejects(),
-                    self.reject_tracker
+                    self.bouncer.consecutive_rejects(),
+                    self.bouncer
                         .reject_duration()
                         .map(|d| d.as_secs())
                         .unwrap_or(0)
@@ -522,8 +522,8 @@ where
                 BlockHash::all_zeros(),
                 Some(StratumError::Stale),
             );
-            let level = self.reject_tracker.record_reject();
-            return Ok(self.handle_escalation(level).await);
+            let consequence = self.bouncer.reject();
+            return Ok(self.handle_consequence(consequence).await);
         };
 
         let expected_extranonce2_size = self.config.extranonce2_size();
@@ -552,8 +552,8 @@ where
                 BlockHash::all_zeros(),
                 Some(StratumError::InvalidNonce2Length),
             );
-            let level = self.reject_tracker.record_reject();
-            return Ok(self.handle_escalation(level).await);
+            let consequence = self.bouncer.reject();
+            return Ok(self.handle_consequence(consequence).await);
         }
 
         let version = if let Some(version_bits) = submit.version_bits {
@@ -572,8 +572,8 @@ where
                     BlockHash::all_zeros(),
                     Some(StratumError::InvalidVersionMask),
                 );
-                let level = self.reject_tracker.record_reject();
-                return Ok(self.handle_escalation(level).await);
+                let consequence = self.bouncer.reject();
+                return Ok(self.handle_consequence(consequence).await);
             };
 
             assert!(version_bits != Version::from(0));
@@ -619,8 +619,8 @@ where
                 hash,
                 Some(StratumError::Duplicate),
             );
-            let level = self.reject_tracker.record_reject();
-            return Ok(self.handle_escalation(level).await);
+            let consequence = self.bouncer.reject();
+            return Ok(self.handle_consequence(consequence).await);
         }
 
         if let Ok(blockhash) = header.validate_pow(Target::from_compact(nbits.into())) {
@@ -676,7 +676,7 @@ where
 
             self.emit_share(&submit, Some(&job), current_diff.as_f64(), hash, None);
 
-            self.reject_tracker.record_accept();
+            self.bouncer.accept();
             self.last_share_at = Some(Instant::now());
 
             let network_diff = Difficulty::from(job.nbits());
@@ -716,8 +716,8 @@ where
             hash,
             Some(StratumError::AboveTarget),
         );
-        let level = self.reject_tracker.record_reject();
-        Ok(self.handle_escalation(level).await)
+        let consequence = self.bouncer.reject();
+        Ok(self.handle_consequence(consequence).await)
     }
 
     fn emit_share(

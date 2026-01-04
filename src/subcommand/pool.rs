@@ -17,7 +17,6 @@ impl Pool {
         let config = Arc::new(self.config.clone());
         let metatron = Arc::new(Metatron::new());
         let (share_tx, share_rx) = mpsc::channel(SHARE_CHANNEL_CAPACITY);
-        let connection_counter = AtomicU64::new(0);
         let address = config.address();
         let port = config.port();
 
@@ -72,8 +71,7 @@ impl Pool {
                 Ok((stream, worker)) = listener.accept() => {
                     stream.set_nodelay(true)?;
 
-                    let connection_id = connection_counter.fetch_add(1, Ordering::Relaxed);
-                    info!("Accepted connection {} from {}", connection_id, worker);
+                    info!("Accepted connection from {}", worker);
 
                     let (reader, writer) = stream.into_split();
 
@@ -96,7 +94,7 @@ impl Pool {
                         );
 
                         if let Err(err) = stratifier.serve().await {
-                            error!("Stratifier {} error: {err}", connection_id)
+                            error!("Stratifier error: {err}")
                         }
                     });
                 }
