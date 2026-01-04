@@ -125,6 +125,7 @@ mod http_server;
 mod job;
 mod jobs;
 mod metatron;
+mod session;
 mod share;
 mod signal;
 mod stratifier;

@@ -1,6 +1,6 @@
 use super::*;
-use metatron::Session;
 use reject_tracker::{EscalationLevel, RejectTracker};
+use session::Session;
 
 mod reject_tracker;
 
@@ -388,11 +388,11 @@ where
                     session.workername, session.address, session.enonce1
                 );
 
-                self.address = Some(session.address.assume_checked());
+                self.address = Some(session.address);
                 self.workername = Some(session.workername);
                 self.user_agent = session.user_agent;
                 self.version_mask = session.version_mask;
-                self.authorized = session.authorized_at;
+                self.authorized = Some(session.authorized_at);
 
                 session.enonce1
             } else {
@@ -819,11 +819,11 @@ impl<R, W> Drop for Stratifier<R, W> {
         ) {
             let session = Session::new(
                 enonce1,
-                address.as_unchecked().clone(),
+                address,
                 workername,
                 self.user_agent.take(),
                 self.version_mask,
-                Some(authorized),
+                authorized,
             );
             self.metatron.store_session(session);
         }
