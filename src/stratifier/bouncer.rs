@@ -4,7 +4,7 @@ const WARN_THRESHOLD: Duration = Duration::from_secs(60);
 const RECONNECT_THRESHOLD: Duration = Duration::from_secs(120);
 const DROP_THRESHOLD: Duration = Duration::from_secs(180);
 const AUTH_TIMEOUT: Duration = Duration::from_secs(60);
-const IDLE_TIMEOUT: Duration = Duration::from_secs(3600);
+const IDLE_TIMEOUT: Duration = Duration::from_secs(600);
 const CHECK_INTERVAL: Duration = Duration::from_secs(30);
 
 const TEST_WARN_THRESHOLD: Duration = Duration::from_secs(1);

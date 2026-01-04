@@ -376,17 +376,10 @@ where
     async fn subscribe(&mut self, id: Id, subscribe: Subscribe) -> Result {
         let enonce1 = if let Some(ref requested_enonce1) = subscribe.enonce1 {
             if let Some(session) = self.metatron.take_session(requested_enonce1) {
-                info!(
-                    "Resuming session for {} ({:?}) with enonce1 {}",
-                    session.workername, session.address, session.enonce1
-                );
+                info!("Resuming session for enonce1 {}", session.enonce1);
 
-                self.address = Some(session.address);
-                self.workername = Some(session.workername);
                 self.user_agent = session.user_agent;
                 self.version_mask = session.version_mask;
-                self.authorized = Some(session.authorized_at);
-                self.bouncer.authorize();
 
                 session.enonce1
             } else {
@@ -804,20 +797,9 @@ where
 
 impl<R, W> Drop for Stratifier<R, W> {
     fn drop(&mut self) {
-        if let (Some(address), Some(workername), Some(enonce1), Some(authorized)) = (
-            self.address.take(),
-            self.workername.take(),
-            self.enonce1.take(),
-            self.authorized,
-        ) {
-            let session = Session::new(
-                enonce1,
-                address,
-                workername,
-                self.user_agent.take(),
-                self.version_mask,
-                authorized,
-            );
+        // Only store session for authorized clients
+        if let (Some(enonce1), Some(_authorized)) = (self.enonce1.take(), self.authorized) {
+            let session = Session::new(enonce1, self.user_agent.take(), self.version_mask);
             self.metatron.store_session(session);
         }
 

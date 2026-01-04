@@ -90,16 +90,13 @@ impl Metatron {
     }
 
     pub(crate) fn store_session(&self, session: Session) {
-        info!(
-            "Storing session for {} ({:?}) with enonce1 {}",
-            session.workername, session.address, session.enonce1
-        );
+        info!("Storing session for enonce1 {}", session.enonce1);
         self.sessions.insert(session.enonce1.clone(), session);
     }
 
     pub(crate) fn take_session(&self, enonce1: &Extranonce) -> Option<Session> {
         let (_, session) = self.sessions.remove(enonce1)?;
-        if session.is_valid(SESSION_TTL) {
+        if !session.is_expired(SESSION_TTL) {
             Some(session)
         } else {
             None
@@ -110,12 +107,16 @@ impl Metatron {
         let before = self.sessions.len();
 
         self.sessions
-            .retain(|_, session| session.is_valid(SESSION_TTL));
+            .retain(|_, session| !session.is_expired(SESSION_TTL));
 
         let removed = before.saturating_sub(self.sessions.len());
 
         if removed > 0 {
-            info!("Cleaned up {} expired sessions", removed);
+            info!(
+                "Cleaned up {} expired sessions ({} remaining)",
+                removed,
+                self.sessions.len()
+            );
         }
     }
 
