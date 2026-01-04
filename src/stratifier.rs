@@ -14,7 +14,6 @@ pub(crate) struct StoredSession {
     pub workername: String,
     pub user_agent: Option<String>,
     pub version_mask: Option<Version>,
-    pub created_at: Instant,
     pub last_seen: Instant,
     pub authorized_at: Option<SystemTime>,
 }
@@ -28,25 +27,19 @@ impl StoredSession {
         version_mask: Option<Version>,
         authorized_at: Option<SystemTime>,
     ) -> Self {
-        let now = Instant::now();
         Self {
             enonce1,
             address,
             workername,
             user_agent,
             version_mask,
-            created_at: now,
-            last_seen: now,
+            last_seen: Instant::now(),
             authorized_at,
         }
     }
 
     fn is_valid(&self, ttl: Duration) -> bool {
         self.last_seen.elapsed() < ttl
-    }
-
-    pub(crate) fn ttl_remaining(&self, ttl: Duration) -> Duration {
-        ttl.saturating_sub(self.last_seen.elapsed())
     }
 }
 
@@ -82,28 +75,6 @@ impl SessionStore {
         } else {
             None
         }
-    }
-
-    pub(crate) fn count(&self) -> usize {
-        self.sessions.len()
-    }
-
-    pub(crate) fn active_count(&self) -> usize {
-        let ttl = self.ttl;
-        self.sessions.iter().filter(|s| s.is_valid(ttl)).count()
-    }
-
-    pub(crate) fn list(&self) -> Vec<StoredSession> {
-        let ttl = self.ttl;
-        self.sessions
-            .iter()
-            .filter(|s| s.is_valid(ttl))
-            .map(|s| s.clone())
-            .collect()
-    }
-
-    pub(crate) fn ttl(&self) -> Duration {
-        self.ttl
     }
 
     fn maybe_cleanup(&self) {
@@ -972,11 +943,10 @@ mod tests {
         let enonce1 = session.enonce1.clone();
 
         store.store(session);
-        assert_eq!(store.count(), 1);
 
         let taken = store.take(&enonce1);
         assert!(taken.is_some());
-        assert_eq!(store.count(), 0);
+        assert_eq!(taken.unwrap().workername, "test_worker");
     }
 
     #[test]
@@ -993,24 +963,24 @@ mod tests {
     }
 
     #[test]
-    fn active_count_excludes_expired() {
-        let store = SessionStore::new(Duration::from_millis(50));
-
-        store.store(test_session("aaaabbbb"));
-        std::thread::sleep(Duration::from_millis(30));
-
-        store.store(test_session("ccccdddd"));
-        assert_eq!(store.active_count(), 2);
-
-        std::thread::sleep(Duration::from_millis(30));
-        assert_eq!(store.active_count(), 1);
-    }
-
-    #[test]
     fn take_nonexistent_returns_none() {
         let store = SessionStore::new(Duration::from_secs(60));
         let enonce1: Extranonce = "deadbeef".parse().unwrap();
 
+        assert!(store.take(&enonce1).is_none());
+    }
+
+    #[test]
+    fn take_removes_session() {
+        let store = SessionStore::new(Duration::from_secs(60));
+        let session = test_session("deadbeef");
+        let enonce1 = session.enonce1.clone();
+
+        store.store(session);
+
+        // First take succeeds
+        assert!(store.take(&enonce1).is_some());
+        // Second take fails (session was removed)
         assert!(store.take(&enonce1).is_none());
     }
 }

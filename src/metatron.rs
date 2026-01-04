@@ -1,7 +1,6 @@
 use {
     super::*,
-    crate::api::{PoolStats, SessionSummary, UserDetail, UserSummary, WorkerSummary},
-    stratifier::SessionStore,
+    crate::api::{PoolStats, UserDetail, UserSummary, WorkerSummary},
 };
 
 pub(crate) struct Metatron {
@@ -9,17 +8,15 @@ pub(crate) struct Metatron {
     started: Instant,
     connections: AtomicU64,
     users: DashMap<Address, Arc<User>>,
-    session_store: Arc<SessionStore>,
 }
 
 impl Metatron {
-    pub(crate) fn new(session_store: Arc<SessionStore>) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             blocks: AtomicU64::new(0),
             started: Instant::now(),
             connections: AtomicU64::new(0),
             users: DashMap::new(),
-            session_store,
         }
     }
 
@@ -146,33 +143,6 @@ impl Metatron {
         self.started.elapsed()
     }
 
-    pub(crate) fn session_count(&self) -> usize {
-        self.session_store.count()
-    }
-
-    pub(crate) fn active_session_count(&self) -> usize {
-        self.session_store.active_count()
-    }
-
-    pub(crate) fn sessions(&self) -> Vec<SessionSummary> {
-        let ttl = self.session_store.ttl();
-        self.session_store
-            .list()
-            .into_iter()
-            .map(|s| {
-                let ttl_remaining_secs = s.ttl_remaining(ttl).as_secs();
-                let created_at_secs = s.created_at.elapsed().as_secs();
-                SessionSummary {
-                    enonce1: s.enonce1.to_string(),
-                    address: s.address.assume_checked().to_string(),
-                    workername: s.workername,
-                    created_at_secs,
-                    ttl_remaining_secs,
-                }
-            })
-            .collect()
-    }
-
     pub(crate) fn stats(&self) -> PoolStats {
         PoolStats {
             hash_rate_1m: self.hash_rate_1m(),
@@ -186,8 +156,6 @@ impl Metatron {
             best_ever: self.best_ever(),
             last_share: self.last_share().map(|time| time.elapsed().as_secs()),
             uptime_secs: self.uptime().as_secs(),
-            sessions: self.session_count(),
-            active_sessions: self.active_session_count(),
         }
     }
 
@@ -257,10 +225,6 @@ impl StatusLine for Metatron {
 mod tests {
     use super::*;
 
-    fn test_session_store() -> Arc<SessionStore> {
-        Arc::new(SessionStore::new(Duration::from_secs(600)))
-    }
-
     fn test_address() -> Address {
         "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc"
             .parse::<Address<bitcoin::address::NetworkUnchecked>>()
@@ -270,7 +234,7 @@ mod tests {
 
     #[test]
     fn new_metatron_starts_at_zero() {
-        let metatron = Metatron::new(test_session_store());
+        let metatron = Metatron::new();
         assert_eq!(metatron.total_connections(), 0);
         assert_eq!(metatron.accepted(), 0);
         assert_eq!(metatron.rejected(), 0);
@@ -281,7 +245,7 @@ mod tests {
 
     #[test]
     fn connection_count_increments_and_decrements() {
-        let metatron = Metatron::new(test_session_store());
+        let metatron = Metatron::new();
         assert_eq!(metatron.total_connections(), 0);
 
         metatron.add_connection();
@@ -294,7 +258,7 @@ mod tests {
 
     #[test]
     fn get_or_create_worker_creates_user_and_worker() {
-        let metatron = Metatron::new(test_session_store());
+        let metatron = Metatron::new();
         let addr = test_address();
 
         let worker = metatron.get_or_create_worker(addr.clone(), "rig1");
@@ -310,7 +274,7 @@ mod tests {
 
     #[test]
     fn rejected_count_increments() {
-        let metatron = Metatron::new(test_session_store());
+        let metatron = Metatron::new();
         let addr = test_address();
         let worker = metatron.get_or_create_worker(addr, "rig1");
         worker.record_rejected();
@@ -320,7 +284,7 @@ mod tests {
 
     #[test]
     fn block_count_increments() {
-        let metatron = Metatron::new(test_session_store());
+        let metatron = Metatron::new();
         metatron.add_block();
         assert_eq!(metatron.total_blocks(), 1);
     }

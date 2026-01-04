@@ -4,7 +4,6 @@ pub(crate) struct TestPool {
     bitcoind_handle: Bitcoind,
     pool_handle: Child,
     pool_port: u16,
-    api_port: u16,
     _tempdir: Arc<TempDir>,
 }
 
@@ -97,17 +96,12 @@ impl TestPool {
             bitcoind_handle,
             pool_handle,
             pool_port,
-            api_port,
             _tempdir: tempdir,
         }
     }
 
     pub(crate) fn stratum_endpoint(&self) -> String {
         format!("127.0.0.1:{}", self.pool_port)
-    }
-
-    pub(crate) fn api_endpoint(&self) -> String {
-        format!("http://127.0.0.1:{}", self.api_port)
     }
 
     pub(crate) async fn stratum_client(&self) -> stratum::Client {
