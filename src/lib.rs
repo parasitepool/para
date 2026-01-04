@@ -149,29 +149,6 @@ pub const LRU_CACHE_SIZE: usize = 256;
 pub const SESSION_TTL: Duration = Duration::from_secs(600);
 pub const AUTH_TIMEOUT: Duration = Duration::from_secs(60);
 pub const IDLE_TIMEOUT: Duration = Duration::from_secs(3600);
-pub fn warn_threshold() -> Duration {
-    if integration_test() {
-        Duration::from_secs(5)
-    } else {
-        Duration::from_secs(60)
-    }
-}
-
-pub fn reconnect_threshold() -> Duration {
-    if integration_test() {
-        Duration::from_secs(10)
-    } else {
-        Duration::from_secs(120)
-    }
-}
-
-pub fn drop_threshold() -> Duration {
-    if integration_test() {
-        Duration::from_secs(15)
-    } else {
-        Duration::from_secs(180)
-    }
-}
 
 type Result<T = (), E = Error> = std::result::Result<T, E>;
 

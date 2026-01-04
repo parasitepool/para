@@ -76,7 +76,7 @@ where
             enonce1: None,
             user_agent: None,
             vardiff,
-            bouncer: Bouncer::default(),
+            bouncer: Bouncer::new(),
             connected_at: Instant::now(),
             last_share_at: None,
         }
