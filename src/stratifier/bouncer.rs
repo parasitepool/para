@@ -5,12 +5,14 @@ const RECONNECT_THRESHOLD: Duration = Duration::from_secs(120);
 const DROP_THRESHOLD: Duration = Duration::from_secs(180);
 const AUTH_TIMEOUT: Duration = Duration::from_secs(60);
 const IDLE_TIMEOUT: Duration = Duration::from_secs(3600);
+const CHECK_INTERVAL: Duration = Duration::from_secs(30);
 
 const TEST_WARN_THRESHOLD: Duration = Duration::from_secs(1);
 const TEST_RECONNECT_THRESHOLD: Duration = Duration::from_secs(2);
 const TEST_DROP_THRESHOLD: Duration = Duration::from_secs(3);
 const TEST_AUTH_TIMEOUT: Duration = Duration::from_secs(2);
 const TEST_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
+const TEST_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub(crate) enum Consequence {
@@ -27,6 +29,7 @@ pub(crate) struct Bouncer {
     drop_threshold: Duration,
     auth_timeout: Duration,
     idle_timeout: Duration,
+    check_interval: Duration,
     first_reject: Option<Instant>,
     consecutive_rejects: u32,
     current_consequence: Consequence,
@@ -37,24 +40,32 @@ pub(crate) struct Bouncer {
 
 impl Bouncer {
     pub(crate) fn new() -> Self {
-        let (warn_threshold, reconnect_threshold, drop_threshold, auth_timeout, idle_timeout) =
-            if integration_test() {
-                (
-                    TEST_WARN_THRESHOLD,
-                    TEST_RECONNECT_THRESHOLD,
-                    TEST_DROP_THRESHOLD,
-                    TEST_AUTH_TIMEOUT,
-                    TEST_IDLE_TIMEOUT,
-                )
-            } else {
-                (
-                    WARN_THRESHOLD,
-                    RECONNECT_THRESHOLD,
-                    DROP_THRESHOLD,
-                    AUTH_TIMEOUT,
-                    IDLE_TIMEOUT,
-                )
-            };
+        let (
+            warn_threshold,
+            reconnect_threshold,
+            drop_threshold,
+            auth_timeout,
+            idle_timeout,
+            check_interval,
+        ) = if integration_test() {
+            (
+                TEST_WARN_THRESHOLD,
+                TEST_RECONNECT_THRESHOLD,
+                TEST_DROP_THRESHOLD,
+                TEST_AUTH_TIMEOUT,
+                TEST_IDLE_TIMEOUT,
+                TEST_CHECK_INTERVAL,
+            )
+        } else {
+            (
+                WARN_THRESHOLD,
+                RECONNECT_THRESHOLD,
+                DROP_THRESHOLD,
+                AUTH_TIMEOUT,
+                IDLE_TIMEOUT,
+                CHECK_INTERVAL,
+            )
+        };
 
         Self {
             warn_threshold,
@@ -62,6 +73,7 @@ impl Bouncer {
             drop_threshold,
             auth_timeout,
             idle_timeout,
+            check_interval,
             first_reject: None,
             consecutive_rejects: 0,
             current_consequence: Consequence::None,
@@ -138,6 +150,10 @@ impl Bouncer {
 
     pub(crate) fn idle_timeout(&self) -> Duration {
         self.idle_timeout
+    }
+
+    pub(crate) fn check_interval(&self) -> Duration {
+        self.check_interval
     }
 }
 

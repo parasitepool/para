@@ -517,71 +517,6 @@ async fn share_validation() {
 #[serial(bitcoind)]
 #[timeout(90000)]
 async fn bouncer() {
-    let pool = TestPool::spawn_with_args("--start-diff 1");
-    let client = pool.stratum_client().await;
-    let mut events = client.connect().await.unwrap();
-
-    let (subscribe, _, _) = client.subscribe().await.unwrap();
-    let enonce2_size = subscribe.enonce2_size;
-
-    client.authorize().await.unwrap();
-
-    let (initial_notify, _) = wait_for_notify(&mut events).await;
-    let initial_job_id = initial_notify.job_id;
-
-    let start = std::time::Instant::now();
-    let mut fresh_job_received = false;
-    let mut last_job_id = initial_job_id;
-
-    loop {
-        let elapsed = start.elapsed();
-
-        let result = client
-            .submit(
-                initial_notify.job_id,
-                Extranonce::random(enonce2_size),
-                initial_notify.ntime,
-                Nonce::from(0),
-            )
-            .await;
-
-        match &result {
-            Err(ClientError::Io { .. }) => {
-                break;
-            }
-            Err(ClientError::NotConnected) => {
-                break;
-            }
-            Err(ClientError::ChannelRecv { .. }) => {
-                break;
-            }
-            _ => {}
-        }
-
-        while let Ok(event) = events.try_recv() {
-            if let stratum::Event::Notify(notify) = event
-                && notify.job_id != last_job_id
-            {
-                last_job_id = notify.job_id;
-                fresh_job_received = true;
-            }
-        }
-
-        if elapsed > Duration::from_secs(10) {
-            panic!("Connection still alive after 10s - expected drop at DROP_THRESHOLD (3s)");
-        }
-    }
-
-    assert!(
-        fresh_job_received,
-        "Expected fresh job notification at WARN_THRESHOLD"
-    );
-}
-
-#[tokio::test]
-#[serial(bitcoind)]
-#[timeout(90000)]
-async fn auth_and_idle_timeouts() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001");
 
     let auth_timeout_test = async {
@@ -635,5 +570,60 @@ async fn auth_and_idle_timeouts() {
         );
     };
 
-    tokio::join!(auth_timeout_test, idle_timeout_test);
+    let reject_escalation_test = async {
+        let client = pool.stratum_client().await;
+        let mut events = client.connect().await.unwrap();
+
+        let (subscribe, _, _) = client.subscribe().await.unwrap();
+        let enonce2_size = subscribe.enonce2_size;
+
+        client.authorize().await.unwrap();
+
+        let (initial_notify, _) = wait_for_notify(&mut events).await;
+        let initial_job_id = initial_notify.job_id;
+
+        let start = std::time::Instant::now();
+        let mut fresh_job_received = false;
+        let mut last_job_id = initial_job_id;
+
+        loop {
+            let elapsed = start.elapsed();
+
+            let result = client
+                .submit(
+                    initial_notify.job_id,
+                    Extranonce::random(enonce2_size),
+                    initial_notify.ntime,
+                    Nonce::from(0),
+                )
+                .await;
+
+            match &result {
+                Err(ClientError::Io { .. })
+                | Err(ClientError::NotConnected)
+                | Err(ClientError::ChannelRecv { .. }) => break,
+                _ => {}
+            }
+
+            while let Ok(event) = events.try_recv() {
+                if let stratum::Event::Notify(notify) = event
+                    && notify.job_id != last_job_id
+                {
+                    last_job_id = notify.job_id;
+                    fresh_job_received = true;
+                }
+            }
+
+            if elapsed > Duration::from_secs(10) {
+                panic!("Connection still alive after 10s - expected drop at DROP_THRESHOLD (3s)");
+            }
+        }
+
+        assert!(
+            fresh_job_received,
+            "Expected fresh job notification at WARN_THRESHOLD"
+        );
+    };
+
+    tokio::join!(auth_timeout_test, idle_timeout_test, reject_escalation_test);
 }

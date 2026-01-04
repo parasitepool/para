@@ -3,9 +3,6 @@ use bouncer::{Bouncer, Consequence};
 
 mod bouncer;
 
-const IDLE_CHECK_INTERVAL: Duration = Duration::from_secs(30);
-const TEST_IDLE_CHECK_INTERVAL: Duration = Duration::from_secs(1);
-
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum State {
     Init,
@@ -33,7 +30,6 @@ pub(crate) struct Stratifier<R, W> {
     user_agent: Option<String>,
     vardiff: Vardiff,
     bouncer: Bouncer,
-    idle_check_interval: Duration,
 }
 
 impl<R, W> Stratifier<R, W>
@@ -60,12 +56,6 @@ where
 
         metatron.add_connection();
 
-        let idle_check_interval = if integration_test() {
-            TEST_IDLE_CHECK_INTERVAL
-        } else {
-            IDLE_CHECK_INTERVAL
-        };
-
         Self {
             config,
             metatron,
@@ -85,14 +75,13 @@ where
             user_agent: None,
             vardiff,
             bouncer: Bouncer::new(),
-            idle_check_interval,
         }
     }
 
     pub(crate) async fn serve(&mut self) -> Result {
         let mut workbase_receiver = self.workbase_receiver.clone();
         let cancel_token = self.cancel_token.clone();
-        let mut idle_check = tokio::time::interval(self.idle_check_interval);
+        let mut idle_check = tokio::time::interval(self.bouncer.check_interval());
 
         loop {
             tokio::select! {
