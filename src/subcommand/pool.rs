@@ -83,7 +83,6 @@ impl Pool {
                     let metatron = metatron.clone();
                     let share_tx = share_tx.clone();
                     let session_store = session_store.clone();
-                    let reject_config = config.reject_config();
                     let conn_cancel_token = cancel_token.child_token();
 
                     connection_tasks.spawn(async move {
@@ -97,7 +96,6 @@ impl Pool {
                             workbase_receiver,
                             conn_cancel_token,
                             session_store,
-                            reject_config,
                         );
 
                         if let Err(err) = stratifier.serve().await {

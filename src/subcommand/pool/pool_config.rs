@@ -241,10 +241,6 @@ impl PoolConfig {
         self.extranonce2_size as usize
     }
 
-    pub(crate) fn reject_config(&self) -> reject_tracker::RejectConfig {
-        reject_tracker::RejectConfig::default()
-    }
-
     pub(crate) fn session_ttl(&self) -> Duration {
         Duration::from_secs(600)
     }

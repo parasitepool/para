@@ -1,12 +1,7 @@
 use super::*;
-use reject_tracker::{EscalationLevel, RejectConfig, RejectTracker};
+use reject_tracker::{EscalationLevel, RejectTracker};
 use std::sync::Mutex as StdMutex;
 
-// ============================================================================
-// Session Storage (for reconnecting miners)
-// ============================================================================
-
-/// Snapshot of a stratifier's session state for persistence after disconnect.
 #[derive(Debug, Clone)]
 pub(crate) struct StoredSession {
     pub enonce1: Extranonce,
@@ -43,7 +38,6 @@ impl StoredSession {
     }
 }
 
-/// Storage for persisted sessions with TTL-based expiry.
 pub(crate) struct SessionStore {
     sessions: DashMap<Extranonce, StoredSession>,
     ttl: Duration,
@@ -95,10 +89,6 @@ impl SessionStore {
     }
 }
 
-// ============================================================================
-// Stratifier (connection handler)
-// ============================================================================
-
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum State {
     Init,
@@ -145,7 +135,6 @@ where
         workbase_receiver: watch::Receiver<Arc<Workbase>>,
         cancel_token: CancellationToken,
         session_store: Arc<SessionStore>,
-        reject_config: RejectConfig,
     ) -> Self {
         let vardiff = Vardiff::new(
             config.start_diff(),
@@ -174,7 +163,7 @@ where
             user_agent: None,
             vardiff,
             session_store,
-            reject_tracker: RejectTracker::new(reject_config),
+            reject_tracker: RejectTracker::default(),
         }
     }
 

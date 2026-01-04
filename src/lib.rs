@@ -145,6 +145,9 @@ pub const MAX_MESSAGE_SIZE: usize = 32 * 1024;
 pub const SHARE_CHANNEL_CAPACITY: usize = 100_000;
 pub const SUBSCRIPTION_ID: &str = "deadbeef";
 pub const LRU_CACHE_SIZE: usize = 256;
+pub const WARN_THRESHOLD: Duration = Duration::from_secs(60);
+pub const RECONNECT_THRESHOLD: Duration = Duration::from_secs(120);
+pub const DROP_THRESHOLD: Duration = Duration::from_secs(180);
 
 type Result<T = (), E = Error> = std::result::Result<T, E>;
 
