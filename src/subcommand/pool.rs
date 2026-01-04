@@ -1,6 +1,6 @@
 use {
     super::*,
-    crate::{api, http_server, stratifier::SessionStore},
+    crate::{api, http_server, session::SessionStore},
     pool_config::PoolConfig,
 };
 

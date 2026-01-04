@@ -1,93 +1,7 @@
 use super::*;
 use reject_tracker::{EscalationLevel, RejectTracker};
-use std::sync::Mutex as StdMutex;
 
-#[derive(Debug, Clone)]
-pub(crate) struct StoredSession {
-    pub enonce1: Extranonce,
-    pub address: Address<NetworkUnchecked>,
-    pub workername: String,
-    pub user_agent: Option<String>,
-    pub version_mask: Option<Version>,
-    pub last_seen: Instant,
-    pub authorized_at: Option<SystemTime>,
-}
-
-impl StoredSession {
-    fn new(
-        enonce1: Extranonce,
-        address: Address<NetworkUnchecked>,
-        workername: String,
-        user_agent: Option<String>,
-        version_mask: Option<Version>,
-        authorized_at: Option<SystemTime>,
-    ) -> Self {
-        Self {
-            enonce1,
-            address,
-            workername,
-            user_agent,
-            version_mask,
-            last_seen: Instant::now(),
-            authorized_at,
-        }
-    }
-
-    fn is_valid(&self, ttl: Duration) -> bool {
-        self.last_seen.elapsed() < ttl
-    }
-}
-
-pub(crate) struct SessionStore {
-    sessions: DashMap<Extranonce, StoredSession>,
-    ttl: Duration,
-    last_cleanup: StdMutex<Instant>,
-}
-
-impl SessionStore {
-    pub(crate) fn new(ttl: Duration) -> Self {
-        Self {
-            sessions: DashMap::new(),
-            ttl,
-            last_cleanup: StdMutex::new(Instant::now()),
-        }
-    }
-
-    pub(crate) fn store(&self, session: StoredSession) {
-        info!(
-            "Storing session for {} ({:?}) with enonce1 {}",
-            session.workername, session.address, session.enonce1
-        );
-        self.sessions.insert(session.enonce1.clone(), session);
-        self.maybe_cleanup();
-    }
-
-    pub(crate) fn take(&self, enonce1: &Extranonce) -> Option<StoredSession> {
-        let (_, session) = self.sessions.remove(enonce1)?;
-        if session.is_valid(self.ttl) {
-            Some(session)
-        } else {
-            None
-        }
-    }
-
-    fn maybe_cleanup(&self) {
-        let mut last_cleanup = self.last_cleanup.lock().unwrap();
-        if last_cleanup.elapsed() < Duration::from_secs(60) {
-            return;
-        }
-        *last_cleanup = Instant::now();
-        drop(last_cleanup);
-
-        let ttl = self.ttl;
-        let before = self.sessions.len();
-        self.sessions.retain(|_, session| session.is_valid(ttl));
-        let removed = before.saturating_sub(self.sessions.len());
-        if removed > 0 {
-            info!("Cleaned up {} expired sessions", removed);
-        }
-    }
-}
+mod reject_tracker;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum State {
@@ -115,8 +29,10 @@ pub(crate) struct Stratifier<R, W> {
     enonce1: Option<Extranonce>,
     user_agent: Option<String>,
     vardiff: Vardiff,
-    session_store: Arc<SessionStore>,
+    session_store: Arc<session::SessionStore>,
     reject_tracker: RejectTracker,
+    connected_at: Instant,
+    last_share_at: Option<Instant>,
 }
 
 impl<R, W> Stratifier<R, W>
@@ -134,7 +50,7 @@ where
         writer: W,
         workbase_receiver: watch::Receiver<Arc<Workbase>>,
         cancel_token: CancellationToken,
-        session_store: Arc<SessionStore>,
+        session_store: Arc<session::SessionStore>,
     ) -> Self {
         let vardiff = Vardiff::new(
             config.start_diff(),
@@ -164,18 +80,26 @@ where
             vardiff,
             session_store,
             reject_tracker: RejectTracker::default(),
+            connected_at: Instant::now(),
+            last_share_at: None,
         }
     }
 
     pub(crate) async fn serve(&mut self) -> Result {
         let mut workbase_receiver = self.workbase_receiver.clone();
         let cancel_token = self.cancel_token.clone();
+        let mut idle_check = tokio::time::interval(Duration::from_secs(30));
 
         loop {
             tokio::select! {
                 _ = cancel_token.cancelled() => {
                     info!("Disconnecting from {}", self.socket_addr);
                     break;
+                }
+                _ = idle_check.tick() => {
+                    if self.check_idle_timeout() {
+                        break;
+                    }
                 }
                 message = self.read_message() => {
                     let Some(message) = message? else {
@@ -291,6 +215,34 @@ where
         }
 
         Ok(())
+    }
+
+    /// Check if the connection should be dropped due to idle timeout.
+    /// Returns true if the connection should be dropped.
+    fn check_idle_timeout(&self) -> bool {
+        // Authorization timeout: 60s to authorize
+        if self.authorized.is_none() && self.connected_at.elapsed() > AUTH_TIMEOUT {
+            warn!(
+                "Dropping {} - not authorized within {}s",
+                self.socket_addr,
+                AUTH_TIMEOUT.as_secs()
+            );
+            return true;
+        }
+
+        // Idle timeout: 1 hour without shares (only for authorized clients)
+        if let Some(last_share) = self.last_share_at
+            && last_share.elapsed() > IDLE_TIMEOUT
+        {
+            warn!(
+                "Dropping {} - idle for {}s",
+                self.socket_addr,
+                IDLE_TIMEOUT.as_secs()
+            );
+            return true;
+        }
+
+        false
     }
 
     /// Handle reject escalation based on the level transition returned by record_reject().
@@ -544,6 +496,7 @@ where
 
         if self.authorized.is_none() {
             self.authorized = Some(SystemTime::now());
+            self.last_share_at = Some(Instant::now());
         }
 
         debug!("Sending SET DIFFICULTY");
@@ -734,8 +687,9 @@ where
 
             self.emit_share(&submit, Some(&job), current_diff.as_f64(), hash, None);
 
-            // Record accept - resets consecutive reject tracking
+            // Record accept - resets consecutive reject tracking and idle timeout
             self.reject_tracker.record_accept();
+            self.last_share_at = Some(Instant::now());
 
             let network_diff = Difficulty::from(job.nbits());
 
@@ -875,7 +829,7 @@ impl<R, W> Drop for Stratifier<R, W> {
             self.enonce1.take(),
             self.authorized,
         ) {
-            let session = StoredSession::new(
+            let session = session::StoredSession::new(
                 enonce1,
                 address.as_unchecked().clone(),
                 workername,
@@ -892,71 +846,5 @@ impl<R, W> Drop for Stratifier<R, W> {
             self.socket_addr,
             self.metatron.total_connections()
         );
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn test_session(enonce1: &str) -> StoredSession {
-        StoredSession::new(
-            enonce1.parse().unwrap(),
-            "tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx"
-                .parse::<Address<NetworkUnchecked>>()
-                .unwrap(),
-            "test_worker".to_string(),
-            Some("TestMiner/1.0".to_string()),
-            None,
-            None,
-        )
-    }
-
-    #[test]
-    fn store_and_take_session() {
-        let store = SessionStore::new(Duration::from_secs(60));
-        let session = test_session("deadbeef");
-        let enonce1 = session.enonce1.clone();
-
-        store.store(session);
-
-        let taken = store.take(&enonce1);
-        assert!(taken.is_some());
-        assert_eq!(taken.unwrap().workername, "test_worker");
-    }
-
-    #[test]
-    fn expired_session_not_taken() {
-        let store = SessionStore::new(Duration::from_millis(10));
-        let session = test_session("deadbeef");
-        let enonce1 = session.enonce1.clone();
-
-        store.store(session);
-        std::thread::sleep(Duration::from_millis(20));
-
-        let taken = store.take(&enonce1);
-        assert!(taken.is_none());
-    }
-
-    #[test]
-    fn take_nonexistent_returns_none() {
-        let store = SessionStore::new(Duration::from_secs(60));
-        let enonce1: Extranonce = "deadbeef".parse().unwrap();
-
-        assert!(store.take(&enonce1).is_none());
-    }
-
-    #[test]
-    fn take_removes_session() {
-        let store = SessionStore::new(Duration::from_secs(60));
-        let session = test_session("deadbeef");
-        let enonce1 = session.enonce1.clone();
-
-        store.store(session);
-
-        // First take succeeds
-        assert!(store.take(&enonce1).is_some());
-        // Second take fails (session was removed)
-        assert!(store.take(&enonce1).is_none());
     }
 }

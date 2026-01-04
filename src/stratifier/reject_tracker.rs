@@ -1,8 +1,4 @@
-use std::time::{Duration, Instant};
-
-const WARN_THRESHOLD: Duration = Duration::from_secs(60);
-const RECONNECT_THRESHOLD: Duration = Duration::from_secs(120);
-const DROP_THRESHOLD: Duration = Duration::from_secs(180);
+use super::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub(crate) enum EscalationLevel {

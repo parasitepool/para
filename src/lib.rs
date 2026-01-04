@@ -125,7 +125,7 @@ mod http_server;
 mod job;
 mod jobs;
 mod metatron;
-mod reject_tracker;
+mod session;
 mod share;
 mod signal;
 mod stratifier;
@@ -146,6 +146,11 @@ pub const SHARE_CHANNEL_CAPACITY: usize = 100_000;
 pub const SUBSCRIPTION_ID: &str = "deadbeef";
 pub const LRU_CACHE_SIZE: usize = 256;
 pub const SESSION_TTL: Duration = Duration::from_secs(600);
+pub const AUTH_TIMEOUT: Duration = Duration::from_secs(60);
+pub const IDLE_TIMEOUT: Duration = Duration::from_secs(3600);
+pub const WARN_THRESHOLD: Duration = Duration::from_secs(60);
+pub const RECONNECT_THRESHOLD: Duration = Duration::from_secs(120);
+pub const DROP_THRESHOLD: Duration = Duration::from_secs(180);
 
 type Result<T = (), E = Error> = std::result::Result<T, E>;
 
