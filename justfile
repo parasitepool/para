@@ -72,7 +72,8 @@ pool:
     --zmq-block-notifications tcp://127.0.0.1:28332
 
 server: 
-  RUST_LOG=info cargo run -- server \
+  RUST_LOG=info cargo run --features swagger-ui -- \
+    server \
     --log-dir copr/logs \
     --port 8080
 

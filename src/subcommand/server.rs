@@ -260,8 +260,15 @@ impl Server {
         router = router
             .route("/", get(Self::home))
             .route("/status", Self::with_auth(config.clone(), get(status)))
-            .route("/static/{*path}", get(Self::static_assets))
-            .merge(SwaggerUi::new("/swagger-ui/").url("/api-docs/openapi.json", ApiDoc::openapi()));
+            .route("/static/{*path}", get(Self::static_assets));
+
+        #[cfg(feature = "swagger-ui")]
+        {
+            router = router.merge(
+                utoipa_swagger_ui::SwaggerUi::new("/swagger-ui/")
+                    .url("/api-docs/openapi.json", ApiDoc::openapi()),
+            );
+        }
 
         match Database::new(config.database_url()).await {
             Ok(database) => {
