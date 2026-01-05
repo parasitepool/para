@@ -2,7 +2,7 @@
 
 set -euxo pipefail
 
-version=30.0
+version=29.2
 if ! bitcoind --version | grep $version; then
   wget \
     -O bitcoin.tar.gz \

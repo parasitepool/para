@@ -2,6 +2,11 @@ use {
     super::*,
     crate::{
         ckpool,
+        http_server::{
+            self, HttpConfig,
+            accept_json::AcceptJson,
+            error::{OptionExt, ServerError, ServerResult},
+        },
         subcommand::{
             server::{
                 account::account_router, payouts::payouts_router,
@@ -10,12 +15,10 @@ use {
             sync::{ShareBatch, SyncResponse},
         },
     },
-    accept_json::AcceptJson,
     aggregator::Aggregator,
     axum::extract::{Path, Query},
     cache::Cache,
     database::Database,
-    error::{OptionExt, ServerError, ServerResult},
     reqwest::{Client, ClientBuilder, header},
     server_config::ServerConfig,
     std::sync::OnceLock,
@@ -32,13 +35,10 @@ use {
     utoipa::openapi::security::{Http, HttpAuthScheme, SecurityScheme},
 };
 
-mod accept_json;
 pub mod account;
 mod aggregator;
-pub mod api;
 mod cache;
 pub mod database;
-pub(crate) mod error;
 pub mod notifications;
 mod payouts;
 mod server_config;
@@ -70,6 +70,8 @@ fn exclusion_list_from_params(params: HashMap<String, String>) -> Vec<String> {
 #[derive(RustEmbed)]
 #[folder = "static"]
 struct StaticAssets;
+
+pub type Status = StatusHtml;
 
 #[derive(Debug)]
 struct AccountUpdate {
@@ -316,7 +318,19 @@ impl Server {
 
         info!("Serving files in {}", log_dir.display());
 
-        self.spawn(config, router, handle)?.await??;
+        let acme_domains = config.domains()?;
+        let acme_contacts = config.acme_contacts();
+        let tls_enabled = !acme_domains.is_empty() && !acme_contacts.is_empty();
+
+        let http_config = HttpConfig {
+            address: config.address(),
+            port: config.port().unwrap_or(if tls_enabled { 443 } else { 80 }),
+            acme_domains,
+            acme_contacts,
+            acme_cache: config.acme_cache(),
+        };
+
+        http_server::spawn_with_handle(http_config, router, handle)?.await??;
 
         Ok(())
     }

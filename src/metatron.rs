@@ -1,10 +1,14 @@
-use super::*;
+use {
+    super::*,
+    crate::api::{PoolStats, UserDetail, UserSummary, WorkerSummary},
+};
 
 pub(crate) struct Metatron {
     blocks: AtomicU64,
     started: Instant,
     connections: AtomicU64,
     users: DashMap<Address, Arc<User>>,
+    sessions: DashMap<Extranonce, SessionSnapshot>,
 }
 
 impl Metatron {
@@ -14,6 +18,7 @@ impl Metatron {
             started: Instant::now(),
             connections: AtomicU64::new(0),
             users: DashMap::new(),
+            sessions: DashMap::new(),
         }
     }
 
@@ -23,6 +28,8 @@ impl Metatron {
         sink: Option<mpsc::Sender<Share>>,
         cancel: CancellationToken,
     ) {
+        let mut cleanup_interval = tokio::time::interval(Duration::from_secs(60));
+
         loop {
             tokio::select! {
                 biased;
@@ -35,6 +42,11 @@ impl Metatron {
                     }
 
                     break;
+                }
+
+                _ = cleanup_interval.tick() => {
+                    self.sessions
+                        .retain(|_, session| !session.is_expired(SESSION_TTL));
                 }
 
                 Some(share) = rx.recv() => {
@@ -56,7 +68,7 @@ impl Metatron {
         let worker = self.get_or_create_worker(share.address.clone(), &share.workername);
 
         if share.result {
-            worker.record_accepted(share.sdiff);
+            worker.record_accepted(share.pool_diff, share.share_diff);
         } else {
             worker.record_rejected();
         }
@@ -76,6 +88,18 @@ impl Metatron {
             .clone();
 
         user.get_or_create_worker(workername)
+    }
+
+    pub(crate) fn store_session(&self, session: SessionSnapshot) {
+        info!("Storing session for enonce1 {}", session.enonce1);
+        self.sessions.insert(session.enonce1.clone(), session);
+    }
+
+    pub(crate) fn take_session(&self, enonce1: &Extranonce) -> Option<SessionSnapshot> {
+        self.sessions
+            .remove(enonce1)
+            .map(|(_, session)| session)
+            .filter(|s| !s.is_expired(SESSION_TTL))
     }
 
     pub(crate) fn add_block(&self) {
@@ -139,25 +163,79 @@ impl Metatron {
     pub(crate) fn uptime(&self) -> Duration {
         self.started.elapsed()
     }
+
+    pub(crate) fn stats(&self) -> PoolStats {
+        PoolStats {
+            hash_rate_1m: self.hash_rate_1m(),
+            sps_1m: self.sps_1m(),
+            users: self.total_users(),
+            workers: self.total_workers(),
+            connections: self.total_connections(),
+            accepted: self.accepted(),
+            rejected: self.rejected(),
+            blocks: self.total_blocks(),
+            best_ever: self.best_ever(),
+            last_share: self.last_share().map(|time| time.elapsed().as_secs()),
+            uptime_secs: self.uptime().as_secs(),
+        }
+    }
+
+    pub(crate) fn users(&self) -> Vec<UserSummary> {
+        self.users
+            .iter()
+            .map(|entry| {
+                let user = entry.value();
+                UserSummary {
+                    address: entry.key().to_string(),
+                    hash_rate: user.hash_rate_1m(),
+                    shares_per_second: user.sps_1m(),
+                    workers: user.worker_count(),
+                    accepted: user.accepted(),
+                    rejected: user.rejected(),
+                    best_ever: user.best_ever(),
+                }
+            })
+            .collect()
+    }
+
+    pub(crate) fn user(&self, address: &Address) -> Option<UserDetail> {
+        self.users.get(address).map(|entry| {
+            let user = entry.value();
+            UserDetail {
+                address: user.address.to_string(),
+                hash_rate: user.hash_rate_1m(),
+                shares_per_second: user.sps_1m(),
+                accepted: user.accepted(),
+                rejected: user.rejected(),
+                best_ever: user.best_ever(),
+                authorized: user.authorized,
+                workers: user
+                    .workers()
+                    .map(|worker| WorkerSummary {
+                        name: worker.workername().to_string(),
+                        hash_rate: worker.hash_rate_1m(),
+                        shares_per_second: worker.sps_1m(),
+                        accepted: worker.accepted(),
+                        rejected: worker.rejected(),
+                        best_ever: worker.best_ever(),
+                    })
+                    .collect(),
+            }
+        })
+    }
 }
 
 impl StatusLine for Metatron {
     fn status_line(&self) -> String {
-        let last = self
-            .last_share()
-            .map(|t| format!("{}s", t.elapsed().as_secs()))
-            .unwrap_or_else(|| "-".into());
-
         format!(
-            "hash_rate={}  sps={:.2}  connections={}  users={}  workers={}  accepted={}  rejected={}  last={last}  best_ever={}  blocks={}  uptime={}s",
+            "sps={:.2}  hash_rate={}  connections={}  users={}  workers={}  accepted={}  rejected={}  blocks={}  uptime={}s",
+            self.sps_1m() + 0.0,
             self.hash_rate_1m(),
-            self.sps_1m(),
             self.total_connections(),
             self.total_users(),
             self.total_workers(),
             self.accepted(),
             self.rejected(),
-            self.best_ever(),
             self.total_blocks(),
             self.uptime().as_secs()
         )

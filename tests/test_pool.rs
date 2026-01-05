@@ -42,10 +42,10 @@ impl TestPool {
             Bitcoind::spawn(tempdir.clone(), bitcoind_port, rpc_port, zmq_port, false).unwrap();
 
         let pool_handle = CommandBuilder::new(format!(
-            "pool 
+            "pool
                 --chain signet
-                --address 127.0.0.1 
-                --port {pool_port} 
+                --address 127.0.0.1
+                --port {pool_port}
                 --bitcoin-rpc-username satoshi
                 --bitcoin-rpc-password nakamoto
                 --bitcoin-rpc-port {rpc_port}
