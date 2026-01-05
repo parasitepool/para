@@ -488,6 +488,22 @@ async fn vardiff_adjusts_difficulty() {
     );
 }
 
+/// Helper to submit a valid share (resets bouncer reject tracking)
+async fn submit_valid_share(
+    client: &stratum::Client,
+    notify: &stratum::Notify,
+    enonce1: &Extranonce,
+    enonce2_size: usize,
+    difficulty: Difficulty,
+) {
+    let enonce2 = Extranonce::random(enonce2_size);
+    let (ntime, nonce) = solve_share(notify, enonce1, &enonce2, difficulty);
+    client
+        .submit(notify.job_id, enonce2, ntime, nonce)
+        .await
+        .unwrap();
+}
+
 #[tokio::test]
 #[serial(bitcoind)]
 #[timeout(90000)]
@@ -520,6 +536,9 @@ async fn share_validation() {
         StratumError::Duplicate,
     );
 
+    // Valid share to reset bouncer
+    submit_valid_share(&client, &notify, &enonce1, enonce2_size, difficulty).await;
+
     // Invalid enonce2 length (too short)
     assert_stratum_error(
         client
@@ -532,6 +551,9 @@ async fn share_validation() {
             .await,
         StratumError::InvalidNonce2Length,
     );
+
+    // Valid share to reset bouncer
+    submit_valid_share(&client, &notify, &enonce1, enonce2_size, difficulty).await;
 
     // Invalid enonce2 length (too long)
     assert_stratum_error(
@@ -546,6 +568,9 @@ async fn share_validation() {
         StratumError::InvalidNonce2Length,
     );
 
+    // Valid share to reset bouncer
+    submit_valid_share(&client, &notify, &enonce1, enonce2_size, difficulty).await;
+
     // Invalid job id (stale)
     assert_stratum_error(
         client
@@ -558,6 +583,9 @@ async fn share_validation() {
             .await,
         StratumError::Stale,
     );
+
+    // Valid share to reset bouncer
+    submit_valid_share(&client, &notify, &enonce1, enonce2_size, difficulty).await;
 
     // Share above target
     assert_stratum_error(
@@ -689,8 +717,8 @@ async fn bouncer() {
                 }
             }
 
-            if elapsed > Duration::from_secs(10) {
-                panic!("Connection still alive after 10s - expected drop at DROP_THRESHOLD (3s)");
+            if elapsed > Duration::from_secs(20) {
+                panic!("Connection still alive after 20s - expected drop at DROP_THRESHOLD (10s)");
             }
         }
 

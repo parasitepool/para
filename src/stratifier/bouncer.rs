@@ -7,9 +7,9 @@ const AUTH_TIMEOUT: Duration = Duration::from_secs(60);
 const IDLE_TIMEOUT: Duration = Duration::from_secs(600);
 const CHECK_INTERVAL: Duration = Duration::from_secs(30);
 
-const TEST_WARN_THRESHOLD: Duration = Duration::from_secs(1);
-const TEST_RECONNECT_THRESHOLD: Duration = Duration::from_secs(2);
-const TEST_DROP_THRESHOLD: Duration = Duration::from_secs(3);
+const TEST_WARN_THRESHOLD: Duration = Duration::from_secs(3);
+const TEST_RECONNECT_THRESHOLD: Duration = Duration::from_secs(6);
+const TEST_DROP_THRESHOLD: Duration = Duration::from_secs(10);
 const TEST_AUTH_TIMEOUT: Duration = Duration::from_secs(2);
 const TEST_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
 const TEST_CHECK_INTERVAL: Duration = Duration::from_secs(1);
