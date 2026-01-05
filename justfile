@@ -86,9 +86,12 @@ pool-mainnet:
     --zmq-block-notifications tcp://127.0.0.1:28333
 
 server: 
-  RUST_LOG=info cargo run -- server \
+  RUST_LOG=info cargo run --features swagger-ui -- server \
     --log-dir copr/logs \
     --port 8080
+
+openapi:
+  cargo run --example openapi > openapi.json
 
 harness: build-bitcoind
   cargo run -p harness

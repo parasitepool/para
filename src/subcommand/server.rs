@@ -8,7 +8,10 @@ use {
             error::{OptionExt, ServerError, ServerResult},
         },
         subcommand::{
-            server::{account::account_router, sharediff::share_difficulty_router},
+            server::{
+                account::account_router, payouts::payouts_router,
+                sharediff::share_difficulty_router, sync_routes::sync_router,
+            },
             sync::{ShareBatch, SyncResponse},
         },
     },
@@ -28,6 +31,8 @@ use {
         services::ServeDir, set_header::SetResponseHeaderLayer,
         validate_request::ValidateRequestHeaderLayer,
     },
+    utoipa::Modify,
+    utoipa::openapi::security::{Http, HttpAuthScheme, SecurityScheme},
 };
 
 pub mod account;
@@ -35,8 +40,10 @@ mod aggregator;
 mod cache;
 pub mod database;
 pub mod notifications;
+mod payouts;
 mod server_config;
 mod sharediff;
+mod sync_routes;
 mod templates;
 
 const MEBIBYTE: usize = 1 << 20;
@@ -53,6 +60,13 @@ pub(crate) fn bearer_auth<T: Default>(
     ValidateRequestHeaderLayer::bearer(token)
 }
 
+fn exclusion_list_from_params(params: HashMap<String, String>) -> Vec<String> {
+    params
+        .get("excluded")
+        .map(|s| s.split(',').map(String::from).collect::<Vec<_>>())
+        .unwrap_or_default()
+}
+
 #[derive(RustEmbed)]
 #[folder = "static"]
 struct StaticAssets;
@@ -67,19 +81,109 @@ struct AccountUpdate {
     blockheights: HashSet<i32>,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, ToSchema)]
 pub(crate) struct Payment {
     pub(crate) lightning_address: String,
     pub(crate) amount: i64,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, ToSchema)]
 pub(crate) struct SatSplit {
     pub(crate) block_height: i32,
     pub(crate) block_hash: String,
     pub(crate) total_payment_amount: i64,
     pub(crate) payments: Vec<Payment>,
 }
+
+struct SecurityAddon;
+
+impl Modify for SecurityAddon {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        if let Some(components) = openapi.components.as_mut() {
+            components.add_security_scheme(
+                "api_token",
+                SecurityScheme::Http(
+                    Http::builder()
+                        .scheme(HttpAuthScheme::Bearer)
+                        .description(Some("API token for general endpoints"))
+                        .build(),
+                ),
+            );
+            components.add_security_scheme(
+                "admin_token",
+                SecurityScheme::Http(
+                    Http::builder()
+                        .scheme(HttpAuthScheme::Bearer)
+                        .description(Some("Admin token for privileged operations"))
+                        .build(),
+                ),
+            );
+        }
+    }
+}
+
+#[derive(OpenApi)]
+#[openapi(
+    info(
+        title = "Parasite Pool API",
+        version = env!("CARGO_PKG_VERSION"),
+        description = "Mining pool API for share tracking, payouts, and account management"
+    ),
+    modifiers(&SecurityAddon),
+    paths(
+        // Account endpoints
+        account::account_lookup,
+        account::account_update,
+        account::account_metadata_update,
+        // Share difficulty endpoints
+        sharediff::highestdiff,
+        sharediff::highestdiff_by_user,
+        sharediff::highestdiff_all_users,
+        // Payout endpoints
+        payouts::payouts_all,
+        payouts::payouts_failed,
+        payouts::payouts,
+        payouts::open_split,
+        payouts::sat_split,
+        payouts::payouts_range,
+        payouts::user_payout_range,
+        payouts::update_payout_status,
+        // Sync endpoints
+        sync_routes::sync_batch,
+        // Status endpoints
+        status,
+    ),
+    components(schemas(
+        // Account schemas
+        account::Account,
+        account::AccountUpdate,
+        account::AccountMetadataUpdate,
+        account::AccountResponse,
+        // Database schemas
+        database::HighestDiff,
+        database::Split,
+        database::Payout,
+        database::PendingPayout,
+        database::FailedPayout,
+        database::UpdatePayoutStatusRequest,
+        // Server schemas
+        Payment,
+        SatSplit,
+        // Sync schemas (Sent from Sync)
+        ShareBatch,
+        SyncResponse,
+        // Status schema
+        StatusHtml,
+    )),
+    tags(
+        (name = "account", description = "Account management endpoints"),
+        (name = "sharediff", description = "Share difficulty endpoints"),
+        (name = "payouts", description = "Payout and split endpoints"),
+        (name = "sync", description = "Share synchronization endpoints"),
+        (name = "status", description = "Server status endpoints"),
+    )
+)]
+pub struct ApiDoc;
 
 fn format_uptime(uptime_seconds: u64) -> String {
     let days = uptime_seconds / 86400;
@@ -106,13 +210,6 @@ fn format_uptime(uptime_seconds: u64) -> String {
     }
 
     parts.join(", ")
-}
-
-fn exclusion_list_from_params(params: HashMap<String, String>) -> Vec<String> {
-    params
-        .get("excluded")
-        .map(|s| s.split(',').map(String::from).collect::<Vec<_>>())
-        .unwrap_or_default()
 }
 
 #[derive(Clone, Debug, Parser)]
@@ -164,11 +261,16 @@ impl Server {
 
         router = router
             .route("/", get(Self::home))
-            .route(
-                "/status",
-                Self::with_auth(config.clone(), get(Self::status)),
-            )
+            .route("/status", Self::with_auth(config.clone(), get(status)))
             .route("/static/{*path}", get(Self::static_assets));
+
+        #[cfg(feature = "swagger-ui")]
+        {
+            router = router.merge(
+                utoipa_swagger_ui::SwaggerUi::new("/swagger-ui/")
+                    .url("/api-docs/openapi.json", ApiDoc::openapi()),
+            );
+        }
 
         match Database::new(config.database_url()).await {
             Ok(database) => {
@@ -194,31 +296,11 @@ impl Server {
                     });
                 }
 
-                let db_router = Router::new()
-                    .route("/payouts", get(Self::payouts_all))
-                    .route("/payouts/failed", get(Self::payouts_failed))
-                    .route("/payouts/{blockheight}", get(Self::payouts))
-                    .route("/payouts/update", post(Self::update_payout_status))
-                    .route(
-                        "/payouts/range/{start_height}/{end_height}",
-                        get(Self::payouts_range),
-                    )
-                    .route(
-                        "/payouts/range/{start_height}/{end_height}/user/{username}",
-                        get(Self::user_payout_range),
-                    )
-                    .route("/split", get(Self::open_split))
-                    .route("/split/{blockheight}", get(Self::sat_split))
-                    .route(
-                        "/sync/batch",
-                        post(Self::sync_batch).layer(DefaultBodyLimit::max(50 * MEBIBYTE)),
-                    )
-                    .layer(Extension(database.clone()));
-
                 router = router
-                    .merge(Self::with_auth_router(config.clone(), db_router))
                     .merge(account_router(config.clone(), database.clone()))
-                    .merge(share_difficulty_router(config.clone(), database));
+                    .merge(share_difficulty_router(config.clone(), database.clone()))
+                    .merge(payouts_router(config.clone(), database.clone()))
+                    .merge(sync_router(config.clone(), database));
             }
             Err(err) => {
                 warn!("Failed to connect to PostgreSQL: {err}",);
@@ -264,17 +346,6 @@ impl Server {
         }
     }
 
-    fn with_auth_router<S>(config: Arc<ServerConfig>, router: Router<S>) -> Router<S>
-    where
-        S: Clone + Send + Sync + 'static,
-    {
-        if let Some(token) = config.admin_token() {
-            Router::new().merge(router).layer(bearer_auth(token))
-        } else {
-            router
-        }
-    }
-
     async fn home(
         Extension(config): Extension<Arc<ServerConfig>>,
     ) -> ServerResult<PageHtml<HomeHtml>> {
@@ -299,211 +370,6 @@ impl Server {
         })
     }
 
-    pub(crate) async fn status(
-        Extension(config): Extension<Arc<ServerConfig>>,
-        AcceptJson(accept_json): AcceptJson,
-    ) -> ServerResult<Response> {
-        let blockheight = Self::get_synced_blockheight(&config).await;
-
-        task::block_in_place(|| {
-            let mut system = System::new_all();
-            system.refresh_all();
-
-            let path = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
-
-            let mut disk_usage_percent = 0.0;
-            let disks =
-                Disks::new_with_refreshed_list_specifics(DiskRefreshKind::nothing().with_storage());
-            for disk in &disks {
-                if path.starts_with(disk.mount_point()) {
-                    let total = disk.total_space();
-                    if total > 0 {
-                        disk_usage_percent =
-                            100.0 * (total - disk.available_space()) as f64 / total as f64;
-                    }
-                    break;
-                }
-            }
-
-            let total_memory = system.total_memory();
-            let memory_usage_percent = if total_memory > 0 {
-                100.0 * system.used_memory() as f64 / total_memory as f64
-            } else {
-                -1.0
-            };
-
-            system.refresh_cpu_all();
-            let cpu_usage_percent: f64 = system.global_cpu_usage().into();
-
-            let status_file = config.log_dir().join("pool/pool.status");
-
-            let parsed_status = fs::read_to_string(&status_file)
-                .ok()
-                .and_then(|s| ckpool::Status::from_str(&s).ok());
-
-            let status = StatusHtml {
-                disk_usage_percent,
-                memory_usage_percent,
-                cpu_usage_percent,
-                uptime: System::uptime(),
-                hashrate: parsed_status.map(|st| st.hash_rates.hashrate1m),
-                users: parsed_status.map(|st| st.pool.users),
-                workers: parsed_status.map(|st| st.pool.workers),
-                accepted: parsed_status.map(|st| st.shares.accepted),
-                rejected: parsed_status.map(|st| st.shares.rejected),
-                best_share: parsed_status.map(|st| st.shares.bestshare),
-                sps: parsed_status.map(|st| st.shares.sps1m),
-                total_work: parsed_status.map(|st| st.shares.diff),
-                blockheight,
-            };
-
-            Ok(if accept_json {
-                Json(status).into_response()
-            } else {
-                status.page(config.domain()).into_response()
-            })
-        })
-    }
-
-    pub(crate) async fn payouts_all(
-        Extension(config): Extension<Arc<ServerConfig>>,
-        Extension(database): Extension<Database>,
-        Query(params): Query<HashMap<String, String>>,
-    ) -> ServerResult<Response> {
-        let pending = database.get_pending_payouts().await?;
-
-        let format_json = params.get("format").map(|f| f == "json").unwrap_or(false);
-        if format_json {
-            Ok(Json(&pending).into_response())
-        } else {
-            let failed = database.get_failed_payouts().await?;
-
-            Ok(PayoutsHtml { pending, failed }
-                .page(config.domain())
-                .into_response())
-        }
-    }
-
-    pub(crate) async fn payouts_failed(
-        Extension(database): Extension<Database>,
-    ) -> ServerResult<Response> {
-        Ok(Json(database.get_failed_payouts().await?).into_response())
-    }
-
-    pub(crate) async fn payouts(
-        Path(blockheight): Path<u32>,
-        Extension(database): Extension<Database>,
-    ) -> ServerResult<Response> {
-        Ok(Json(
-            database
-                .get_payouts(blockheight.try_into().unwrap(), "no filter address".into())
-                .await?,
-        )
-        .into_response())
-    }
-
-    pub(crate) async fn open_split(
-        Extension(database): Extension<Database>,
-    ) -> ServerResult<Response> {
-        Ok(Json(database.get_split().await?).into_response())
-    }
-
-    pub(crate) async fn sat_split(
-        Path(blockheight): Path<u32>,
-        Extension(database): Extension<Database>,
-    ) -> ServerResult<Response> {
-        if blockheight == 0 {
-            return Err(ServerError::NotFound("block not mined by parasite".into()));
-        }
-
-        let Some((blockheight, blockhash, coinbasevalue, _, username)) = database
-            .get_total_coinbase(blockheight.try_into().unwrap())
-            .await?
-        else {
-            return Err(ServerError::NotFound("block not mined by parasite".into()));
-        };
-
-        let total_payment_amount = coinbasevalue.saturating_sub(COIN_VALUE.try_into().unwrap());
-
-        let payouts = database.get_payouts(blockheight, username).await?;
-
-        let mut payments = Vec::new();
-        for payout in payouts {
-            if let Some(lnurl) = payout.lnurl {
-                payments.push(Payment {
-                    lightning_address: lnurl,
-                    amount: (total_payment_amount / payout.total_shares) * payout.payable_shares,
-                });
-            }
-        }
-
-        Ok(Json(SatSplit {
-            block_height: blockheight,
-            block_hash: blockhash,
-            total_payment_amount,
-            payments,
-        })
-        .into_response())
-    }
-
-    pub(crate) async fn payouts_range(
-        Path((start_height, end_height)): Path<(u32, u32)>,
-        Query(params): Query<HashMap<String, String>>,
-        Extension(database): Extension<Database>,
-    ) -> ServerResult<Response> {
-        let excluded_usernames = exclusion_list_from_params(params);
-
-        Ok(Json(
-            database
-                .get_payouts_range(
-                    start_height.try_into().unwrap(),
-                    end_height.try_into().unwrap(),
-                    excluded_usernames,
-                )
-                .await?,
-        )
-        .into_response())
-    }
-
-    pub(crate) async fn user_payout_range(
-        Path((start_height, end_height, username)): Path<(u32, u32, String)>,
-        Query(params): Query<HashMap<String, String>>,
-        Extension(database): Extension<Database>,
-    ) -> ServerResult<Response> {
-        let excluded_usernames = exclusion_list_from_params(params);
-
-        Ok(Json(
-            database
-                .get_user_payout_range(
-                    start_height.try_into().unwrap(),
-                    end_height.try_into().unwrap(),
-                    username,
-                    excluded_usernames,
-                )
-                .await?,
-        )
-        .into_response())
-    }
-
-    pub(crate) async fn update_payout_status(
-        Extension(database): Extension<Database>,
-        Json(request): Json<database::UpdatePayoutStatusRequest>,
-    ) -> ServerResult<Response> {
-        let rows_affected = database
-            .update_payout_status(
-                &request.payout_ids,
-                &request.status,
-                request.failure_reason.as_deref(),
-            )
-            .await?;
-
-        Ok(Json(json!({
-            "status": "OK",
-            "rows_affected": rows_affected,
-        }))
-        .into_response())
-    }
-
     pub(crate) async fn static_assets(Path(path): Path<String>) -> ServerResult<Response> {
         let content = StaticAssets::get(if let Some(stripped) = path.strip_prefix('/') {
             stripped
@@ -518,323 +384,6 @@ impl Server {
             .header(CONTENT_TYPE, mime.as_ref())
             .body(content.data.into())
             .unwrap())
-    }
-
-    pub(crate) async fn sync_batch(
-        Extension(database): Extension<Database>,
-        Extension(config): Extension<Arc<ServerConfig>>,
-        Json(batch): Json<ShareBatch>,
-    ) -> Result<Json<SyncResponse>, StatusCode> {
-        info!(
-            "Received sync batch {} with {} shares from {}",
-            batch.batch_id,
-            batch.shares.len(),
-            batch.hostname
-        );
-
-        if config.migrate_accounts() && !MIGRATION_DONE.get_or_init(|| false) {
-            warn!(
-                "Rejecting sync batch {} - migration in progress",
-                batch.batch_id
-            );
-            let response = SyncResponse {
-                batch_id: batch.batch_id,
-                received_count: 0,
-                status: "UNAVAILABLE".to_string(),
-                error_message: Some("Migration in progress, try again later".to_string()),
-            };
-            return Ok(Json(response));
-        }
-
-        if let Some(block) = &batch.block {
-            match database.upsert_block(block).await {
-                Ok(was_inserted) => {
-                    if was_inserted {
-                        info!(
-                            "Successfully inserted new block at height {}",
-                            block.blockheight
-                        );
-                    } else {
-                        info!(
-                            "Successfully updated existing block at height {}",
-                            block.blockheight
-                        );
-                    }
-
-                    let notification_result = notifications::notify_block_found(
-                        config.alerts_ntfy_channel(),
-                        block.blockheight,
-                        block.blockhash.clone(),
-                        block.coinbasevalue.unwrap_or(0),
-                        block
-                            .username
-                            .clone()
-                            .unwrap_or_else(|| "unknown".to_string()),
-                    )
-                    .await;
-
-                    match notification_result {
-                        Ok(_) => info!("Block notification sent successfully"),
-                        Err(e) => error!("Failed to send block notification: {}", e),
-                    }
-                }
-                Err(e) => error!("Warning: Failed to upsert block: {}", e),
-            }
-        }
-
-        match Self::process_share_batch(&batch, &database).await {
-            Ok(_) => {
-                let response = SyncResponse {
-                    batch_id: batch.batch_id,
-                    received_count: batch.shares.len(),
-                    status: "OK".to_string(),
-                    error_message: None,
-                };
-                info!("Successfully processed batch {}", batch.batch_id);
-                Ok(Json(response))
-            }
-            Err(e) => {
-                let response = SyncResponse {
-                    batch_id: batch.batch_id,
-                    received_count: 0,
-                    status: "ERROR".to_string(),
-                    error_message: Some(e.to_string()),
-                };
-                error!("Failed to process batch {}: {}", batch.batch_id, e);
-                Ok(Json(response))
-            }
-        }
-    }
-
-    async fn process_share_batch(batch: &ShareBatch, database: &Database) -> Result<()> {
-        info!(
-            "Processing {} shares from batch {}",
-            batch.shares.len(),
-            batch.batch_id
-        );
-
-        if batch.shares.is_empty() {
-            return Ok(());
-        }
-
-        const MAX_SHARES_PER_SUBBATCH: usize = 2500;
-        let mut tx = database
-            .pool
-            .begin()
-            .await
-            .map_err(|e| anyhow!("Failed to start transaction: {e}"))?;
-
-        for (chunk_idx, chunk) in batch.shares.chunks(MAX_SHARES_PER_SUBBATCH).enumerate() {
-            info!(
-                "Processing sub-batch {}/{} with {} shares",
-                chunk_idx + 1,
-                batch.shares.len().div_ceil(MAX_SHARES_PER_SUBBATCH),
-                chunk.len()
-            );
-
-            let mut query_builder = sqlx::QueryBuilder::new(
-                "INSERT INTO remote_shares (
-                id, origin, blockheight, workinfoid, clientid, enonce1, nonce2, nonce, ntime,
-                diff, sdiff, hash, result, reject_reason, error, errn, createdate, createby,
-                createcode, createinet, workername, username, lnurl, address, agent
-            ) ",
-            );
-
-            query_builder.push_values(chunk, |mut b, share| {
-                b.push_bind(share.id)
-                    .push_bind(&batch.hostname)
-                    .push_bind(share.blockheight)
-                    .push_bind(share.workinfoid)
-                    .push_bind(share.clientid)
-                    .push_bind(&share.enonce1)
-                    .push_bind(&share.nonce2)
-                    .push_bind(&share.nonce)
-                    .push_bind(&share.ntime)
-                    .push_bind(share.diff)
-                    .push_bind(share.sdiff)
-                    .push_bind(&share.hash)
-                    .push_bind(share.result)
-                    .push_bind(&share.reject_reason)
-                    .push_bind(&share.error)
-                    .push_bind(share.errn)
-                    .push_bind(&share.createdate)
-                    .push_bind(&share.createby)
-                    .push_bind(&share.createcode)
-                    .push_bind(&share.createinet)
-                    .push_bind(&share.workername)
-                    .push_bind(&share.username)
-                    .push_bind(&share.lnurl)
-                    .push_bind(&share.address)
-                    .push_bind(&share.agent);
-            });
-
-            query_builder.push(
-                " ON CONFLICT (id, origin) DO UPDATE SET
-                blockheight = EXCLUDED.blockheight,
-                workinfoid = EXCLUDED.workinfoid,
-                clientid = EXCLUDED.clientid,
-                enonce1 = EXCLUDED.enonce1,
-                nonce2 = EXCLUDED.nonce2,
-                nonce = EXCLUDED.nonce,
-                ntime = EXCLUDED.ntime,
-                diff = EXCLUDED.diff,
-                sdiff = EXCLUDED.sdiff,
-                hash = EXCLUDED.hash,
-                result = EXCLUDED.result,
-                reject_reason = EXCLUDED.reject_reason,
-                error = EXCLUDED.error,
-                errn = EXCLUDED.errn,
-                createdate = EXCLUDED.createdate,
-                createby = EXCLUDED.createby,
-                createcode = EXCLUDED.createcode,
-                createinet = EXCLUDED.createinet,
-                workername = EXCLUDED.workername,
-                username = EXCLUDED.username,
-                lnurl = EXCLUDED.lnurl,
-                address = EXCLUDED.address,
-                agent = EXCLUDED.agent",
-            );
-
-            let query = query_builder.build();
-            query.execute(&mut *tx).await.map_err(|e| {
-                anyhow!(
-                    "Failed to batch insert shares in sub-batch {}: {e}",
-                    chunk_idx + 1
-                )
-            })?;
-        }
-
-        let mut account_updates: HashMap<String, AccountUpdate> = HashMap::new();
-
-        for share in &batch.shares {
-            if let Some(username) = &share.username {
-                let username = username.trim();
-                if username.is_empty() {
-                    continue;
-                }
-
-                let entry = account_updates
-                    .entry(username.to_string())
-                    .or_insert_with(|| AccountUpdate {
-                        username: username.to_string(),
-                        lnurl: None,
-                        total_diff: 0.0,
-                        blockheights: HashSet::new(),
-                    });
-
-                if share.result == Some(true) {
-                    if let Some(diff) = share.diff {
-                        entry.total_diff += diff;
-                    }
-                    if let Some(blockheight) = share.blockheight {
-                        entry.blockheights.insert(blockheight);
-                    }
-                }
-
-                if entry.lnurl.is_none()
-                    && let Some(lnurl) = &share.lnurl
-                {
-                    let trimmed_lnurl = lnurl.trim();
-                    if !trimmed_lnurl.is_empty() && trimmed_lnurl.len() < 255 {
-                        entry.lnurl = Some(trimmed_lnurl.to_string());
-                    }
-                }
-            }
-        }
-
-        if !account_updates.is_empty() {
-            info!(
-                "Updating {} accounts from batch {}",
-                account_updates.len(),
-                batch.batch_id
-            );
-
-            for update in account_updates.values() {
-                sqlx::query(
-                    "
-                    INSERT INTO accounts (username, lnurl, total_diff, lnurl_updated_at, created_at, updated_at)
-                    VALUES ($1, $2, $3, NOW(), NOW(), NOW())
-                    ON CONFLICT (username) DO UPDATE
-                    SET
-                        lnurl = CASE
-                            WHEN accounts.lnurl IS NULL
-                                AND EXCLUDED.lnurl IS NOT NULL
-                            THEN EXCLUDED.lnurl
-                            ELSE accounts.lnurl
-                        END,
-                        total_diff = accounts.total_diff + EXCLUDED.total_diff,
-                        updated_at = NOW()
-                    ",
-                )
-                    .bind(&update.username)
-                    .bind(&update.lnurl)
-                    .bind(update.total_diff)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(|e| anyhow!("Failed to update account {}: {e}", update.username))?;
-
-                if !update.blockheights.is_empty() {
-                    let blockheights: Vec<i32> = update.blockheights.iter().copied().collect();
-                    let max_blockheight = *blockheights.iter().max().unwrap();
-                    sqlx::query(
-                        "
-                        INSERT INTO account_metadata (account_id, data, created_at, updated_at)
-                        SELECT id,
-                               jsonb_build_object(
-                                   'block_count', cardinality($2::int[]),
-                                   'highest_blockheight', $3
-                               ),
-                               NOW(), NOW()
-                        FROM accounts WHERE username = $1
-                        ON CONFLICT (account_id) DO UPDATE
-                        SET data = account_metadata.data || jsonb_build_object(
-                                'block_count',
-                                COALESCE((account_metadata.data->>'block_count')::bigint, 0) +
-                                    (SELECT COUNT(*) FROM unnest($2::int[]) AS bh
-                                     WHERE bh > COALESCE((account_metadata.data->>'highest_blockheight')::int, 0)),
-                                'highest_blockheight',
-                                GREATEST(COALESCE((account_metadata.data->>'highest_blockheight')::int, 0), $3)
-                            ),
-                            updated_at = NOW()
-                        ",
-                    )
-                        .bind(&update.username)
-                        .bind(&blockheights)
-                        .bind(max_blockheight)
-                        .execute(&mut *tx)
-                        .await
-                        .map_err(|e| anyhow!("Failed to update account_metadata for {}: {e}", update.username))?;
-                }
-            }
-        }
-
-        tx.commit()
-            .await
-            .map_err(|e| anyhow!("Failed to commit transaction: {e}"))?;
-
-        let total_diff: f64 = batch.shares.iter().filter_map(|s| s.diff).sum();
-        let worker_count = batch
-            .shares
-            .iter()
-            .filter_map(|s| s.workername.as_ref())
-            .collect::<HashSet<_>>()
-            .len();
-
-        let min_blockheight = batch.shares.iter().filter_map(|s| s.blockheight).min();
-        let max_blockheight = batch.shares.iter().filter_map(|s| s.blockheight).max();
-
-        info!(
-            "Stored batch {} with {} shares: total difficulty: {:.2}, {} unique workers, blockheights: {:?}-{:?}, origin: {}",
-            batch.batch_id,
-            batch.shares.len(),
-            total_diff,
-            worker_count,
-            min_blockheight,
-            max_blockheight,
-            batch.hostname
-        );
-
-        Ok(())
     }
 
     async fn get_synced_blockheight(config: &ServerConfig) -> Option<i32> {
@@ -872,6 +421,82 @@ impl Server {
             }
         }
     }
+}
+
+/// Get server status
+#[utoipa::path(
+    get,
+    path = "/status",
+    security(("admin_token" = [])),
+    responses(
+        (status = 200, description = "Server status", body = StatusHtml),
+    ),
+    tag = "status"
+)]
+pub(crate) async fn status(
+    Extension(config): Extension<Arc<ServerConfig>>,
+    AcceptJson(accept_json): AcceptJson,
+) -> ServerResult<Response> {
+    let blockheight = Server::get_synced_blockheight(&config).await;
+
+    task::block_in_place(|| {
+        let mut system = System::new_all();
+        system.refresh_all();
+
+        let path = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+
+        let mut disk_usage_percent = 0.0;
+        let disks =
+            Disks::new_with_refreshed_list_specifics(DiskRefreshKind::nothing().with_storage());
+        for disk in &disks {
+            if path.starts_with(disk.mount_point()) {
+                let total = disk.total_space();
+                if total > 0 {
+                    disk_usage_percent =
+                        100.0 * (total - disk.available_space()) as f64 / total as f64;
+                }
+                break;
+            }
+        }
+
+        let total_memory = system.total_memory();
+        let memory_usage_percent = if total_memory > 0 {
+            100.0 * system.used_memory() as f64 / total_memory as f64
+        } else {
+            -1.0
+        };
+
+        system.refresh_cpu_all();
+        let cpu_usage_percent: f64 = system.global_cpu_usage().into();
+
+        let status_file = config.log_dir().join("pool/pool.status");
+
+        let parsed_status = fs::read_to_string(&status_file)
+            .ok()
+            .and_then(|s| ckpool::Status::from_str(&s).ok());
+
+        let status = StatusHtml {
+            disk_usage_percent,
+            memory_usage_percent,
+            cpu_usage_percent,
+            uptime: System::uptime(),
+            hashrate: parsed_status.map(|st| st.hash_rates.hashrate1m),
+            users: parsed_status.map(|st| st.pool.users),
+            workers: parsed_status.map(|st| st.pool.workers),
+            accepted: parsed_status.map(|st| st.shares.accepted),
+            rejected: parsed_status.map(|st| st.shares.rejected),
+            best_share: parsed_status.map(|st| st.shares.bestshare),
+            sps: parsed_status.map(|st| st.shares.sps1m),
+            total_work: parsed_status.map(|st| st.shares.diff),
+            blockheight,
+        };
+
+        Ok(if accept_json {
+            Json(status).into_response()
+        } else {
+            status.page(config.domain()).into_response()
+        })
+    })
 }
 
 #[cfg(test)]

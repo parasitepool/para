@@ -106,6 +106,7 @@ use {
     tracing_appender::non_blocking,
     tracing_subscriber::EnvFilter,
     user::User,
+    utoipa::{OpenApi, ToSchema},
     vardiff::Vardiff,
     workbase::Workbase,
     worker::Worker,
