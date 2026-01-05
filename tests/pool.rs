@@ -1,5 +1,20 @@
 use super::*;
 
+async fn submit_valid_share(
+    client: &stratum::Client,
+    notify: &stratum::Notify,
+    enonce1: &Extranonce,
+    enonce2_size: usize,
+    difficulty: Difficulty,
+) {
+    let enonce2 = Extranonce::random(enonce2_size);
+    let (ntime, nonce) = solve_share(notify, enonce1, &enonce2, difficulty);
+    client
+        .submit(notify.job_id, enonce2, ntime, nonce)
+        .await
+        .unwrap();
+}
+
 async fn wait_for_notify(
     events: &mut tokio::sync::broadcast::Receiver<stratum::Event>,
 ) -> (stratum::Notify, Difficulty) {
@@ -486,22 +501,6 @@ async fn vardiff_adjusts_difficulty() {
         initial_difficulty,
         new_difficulty
     );
-}
-
-/// Helper to submit a valid share (resets bouncer reject tracking)
-async fn submit_valid_share(
-    client: &stratum::Client,
-    notify: &stratum::Notify,
-    enonce1: &Extranonce,
-    enonce2_size: usize,
-    difficulty: Difficulty,
-) {
-    let enonce2 = Extranonce::random(enonce2_size);
-    let (ntime, nonce) = solve_share(notify, enonce1, &enonce2, difficulty);
-    client
-        .submit(notify.job_id, enonce2, ntime, nonce)
-        .await
-        .unwrap();
 }
 
 #[tokio::test]
