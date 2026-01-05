@@ -77,7 +77,7 @@ pub(crate) struct PoolConfig {
         value_parser = clap::value_parser!(u8).range(2..=8)
     )]
     extranonce2_size: u8,
-    #[arg(long, help = "Disable bouncer reject escalation.")]
+    #[arg(long, help = "Disable bouncer.")]
     disable_bouncer: bool,
 }
 

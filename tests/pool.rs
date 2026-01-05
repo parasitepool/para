@@ -207,6 +207,30 @@ async fn stratum_state_machine() {
             .await
             .unwrap();
 
+        // configure with unsupported extension in Working -> error but stays in Working
+        assert!(
+            client
+                .configure(vec!["unknown-extension".into()], None)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("Unsupported extension")
+        );
+
+        // Verify we're still in Working state by submitting a share
+        let enonce2_for_state_check = Extranonce::random(enonce2_size);
+        let (ntime_check, nonce_check) =
+            solve_share(&notify, &enonce1, &enonce2_for_state_check, difficulty);
+        client
+            .submit(
+                notify.job_id,
+                enonce2_for_state_check,
+                ntime_check,
+                nonce_check,
+            )
+            .await
+            .unwrap();
+
         // authorize in Working -> MethodNotAllowed
         assert_stratum_error(client.authorize().await, StratumError::MethodNotAllowed);
 

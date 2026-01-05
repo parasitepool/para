@@ -1,5 +1,7 @@
-use super::*;
-use bouncer::{Bouncer, Consequence};
+use {
+    super::*,
+    bouncer::{Bouncer, Consequence},
+};
 
 mod bouncer;
 
@@ -30,6 +32,7 @@ pub(crate) struct Stratifier<R, W> {
     user_agent: Option<String>,
     vardiff: Vardiff,
     bouncer: Bouncer,
+    dropped_by_bouncer: bool,
 }
 
 impl<R, W> Stratifier<R, W>
@@ -77,6 +80,7 @@ where
             user_agent: None,
             vardiff,
             bouncer,
+            dropped_by_bouncer: false,
         }
     }
 
@@ -98,6 +102,7 @@ where
                             self.socket_addr,
                             self.bouncer.last_interaction_since().as_secs()
                         );
+                        self.dropped_by_bouncer = true;
                         break
                     }
                 }
@@ -162,6 +167,7 @@ where
                                 .context(format!("failed to deserialize {method}"))?;
 
                             if self.submit(id, submit).await? == Consequence::Drop {
+                                self.dropped_by_bouncer = true;
                                 break;
                             }
                         }
@@ -329,11 +335,7 @@ where
 
             self.send(message).await?;
 
-            // Only reset to Init if in Init or Configured state
-            // Don't disrupt Subscribed or Working states
-            if matches!(self.state, State::Init | State::Configured) {
-                self.state = State::Init;
-            }
+            // Don't change state on unsupported extension - client can retry with valid extension
         }
 
         Ok(())
@@ -783,12 +785,15 @@ where
 
 impl<R, W> Drop for Stratifier<R, W> {
     fn drop(&mut self) {
-        if let (Some(enonce1), Some(_authorized)) = (self.enonce1.take(), self.authorized) {
+        if !self.dropped_by_bouncer
+            && let (Some(enonce1), Some(_authorized)) = (self.enonce1.take(), self.authorized)
+        {
             let session = SessionSnapshot::new(enonce1);
             self.metatron.store_session(session);
         }
 
         self.metatron.sub_connection();
+
         info!(
             "Stratifier {} closed (remaining: {})",
             self.socket_addr,
