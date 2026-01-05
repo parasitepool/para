@@ -45,7 +45,8 @@ impl Metatron {
                 }
 
                 _ = cleanup_interval.tick() => {
-                    self.cleanup_expired_sessions();
+                    self.sessions
+                        .retain(|_, session| !session.is_expired(SESSION_TTL));
                 }
 
                 Some(share) = rx.recv() => {
@@ -100,23 +101,6 @@ impl Metatron {
             Some(session)
         } else {
             None
-        }
-    }
-
-    fn cleanup_expired_sessions(&self) {
-        let before = self.sessions.len();
-
-        self.sessions
-            .retain(|_, session| !session.is_expired(SESSION_TTL));
-
-        let removed = before.saturating_sub(self.sessions.len());
-
-        if removed > 0 {
-            info!(
-                "Cleaned up {} expired sessions ({} remaining)",
-                removed,
-                self.sessions.len()
-            );
         }
     }
 
