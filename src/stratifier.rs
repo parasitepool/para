@@ -115,19 +115,6 @@ where
                         "mining.configure" => {
                             debug!("CONFIGURE from {} with {params}", self.socket_addr);
 
-                            if !matches!(self.state,  State::Init | State::Configured) {
-                                self.send_error(
-                                    id.clone(),
-                                    StratumError::MethodNotAllowed,
-                                    Some(serde_json::json!({
-                                        "method": "mining.configure",
-                                        "current_state": format!("{:?}", self.state)
-                                    })),
-                                )
-                                .await?;
-                                continue;
-                            };
-
                             let configure = serde_json::from_value::<Configure>(params)
                                 .context(format!("failed to deserialize {method}"))?;
 
@@ -135,19 +122,6 @@ where
                         }
                         "mining.subscribe" => {
                             debug!("SUBSCRIBE from {} with {params}", self.socket_addr);
-
-                            if !matches!(self.state,  State::Init | State::Configured) {
-                                self.send_error(
-                                    id.clone(),
-                                    StratumError::MethodNotAllowed,
-                                    Some(serde_json::json!({
-                                        "method": "mining.subscribe",
-                                        "current_state": format!("{:?}", self.state)
-                                    })),
-                                )
-                                .await?;
-                                continue;
-                            };
 
                             let subscribe = serde_json::from_value::<Subscribe>(params)
                                 .context(format!("failed to deserialize {method}"))?;
@@ -356,13 +330,25 @@ where
     }
 
     async fn subscribe(&mut self, id: Id, subscribe: Subscribe) -> Result {
+        // Handle resubscription: reset state but keep bouncer and version_mask
+        if matches!(self.state, State::Subscribed | State::Working) {
+            info!("Client {} resubscribing", self.socket_addr);
+            self.jobs = Jobs::new();
+            self.vardiff = Vardiff::new(
+                self.config.start_diff(),
+                self.config.vardiff_period(),
+                self.config.vardiff_window(),
+            );
+            self.authorized = None;
+            self.address = None;
+            self.workername = None;
+            // Keep self.bouncer (same connection)
+            // Keep self.version_mask (miner can reconfigure if needed)
+        }
+
         let enonce1 = if let Some(ref requested_enonce1) = subscribe.enonce1 {
             if let Some(session) = self.metatron.take_session(requested_enonce1) {
                 info!("Resuming session for enonce1 {}", session.enonce1);
-
-                self.user_agent = session.user_agent;
-                self.version_mask = session.version_mask;
-
                 session.enonce1
             } else {
                 debug!(
@@ -399,11 +385,7 @@ where
         .await?;
 
         self.enonce1 = Some(enonce1.clone());
-
-        if subscribe.enonce1.is_none() {
-            self.user_agent = Some(subscribe.user_agent);
-        }
-
+        self.user_agent = Some(subscribe.user_agent);
         self.state = State::Subscribed;
 
         Ok(())
@@ -453,11 +435,8 @@ where
 
         self.address = Some(address);
         self.workername = Some(authorize.username.workername().to_string());
-
-        if self.authorized.is_none() {
-            self.authorized = Some(SystemTime::now());
-            self.bouncer.authorize();
-        }
+        self.authorized = Some(SystemTime::now());
+        self.bouncer.authorize();
 
         debug!("Sending SET DIFFICULTY");
 
@@ -795,7 +774,7 @@ where
 impl<R, W> Drop for Stratifier<R, W> {
     fn drop(&mut self) {
         if let (Some(enonce1), Some(_authorized)) = (self.enonce1.take(), self.authorized) {
-            let session = SessionSnapshot::new(enonce1, self.user_agent.take(), self.version_mask);
+            let session = SessionSnapshot::new(enonce1);
             self.metatron.store_session(session);
         }
 

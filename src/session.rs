@@ -3,21 +3,13 @@ use super::*;
 #[derive(Debug, Clone)]
 pub(crate) struct SessionSnapshot {
     pub(crate) enonce1: Extranonce,
-    pub(crate) user_agent: Option<String>,
-    pub(crate) version_mask: Option<Version>,
     stored_at: Instant,
 }
 
 impl SessionSnapshot {
-    pub(crate) fn new(
-        enonce1: Extranonce,
-        user_agent: Option<String>,
-        version_mask: Option<Version>,
-    ) -> Self {
+    pub(crate) fn new(enonce1: Extranonce) -> Self {
         Self {
             enonce1,
-            user_agent,
-            version_mask,
             stored_at: Instant::now(),
         }
     }
@@ -32,11 +24,7 @@ mod tests {
     use super::*;
 
     fn test_session(enonce1: &str) -> SessionSnapshot {
-        SessionSnapshot::new(
-            enonce1.parse().unwrap(),
-            Some("TestMiner/1.0".to_string()),
-            None,
-        )
+        SessionSnapshot::new(enonce1.parse().unwrap())
     }
 
     #[test]
@@ -44,8 +32,6 @@ mod tests {
         let session = test_session("deadbeef");
 
         assert_eq!(session.enonce1.to_string(), "deadbeef");
-        assert_eq!(session.user_agent, Some("TestMiner/1.0".to_string()));
-        assert!(session.version_mask.is_none());
     }
 
     #[test]
@@ -73,24 +59,5 @@ mod tests {
 
         assert!(!session.is_expired(Duration::from_secs(60)));
         assert!(session.is_expired(Duration::from_millis(10)));
-    }
-
-    #[test]
-    fn session_with_version_mask() {
-        let session = SessionSnapshot::new(
-            "cafebabe".parse().unwrap(),
-            None,
-            Some(Version::from(0x1fffe000)),
-        );
-
-        assert!(session.version_mask.is_some());
-        assert_eq!(session.version_mask.unwrap(), Version::from(0x1fffe000));
-    }
-
-    #[test]
-    fn session_without_user_agent() {
-        let session = SessionSnapshot::new("12345678".parse().unwrap(), None, None);
-
-        assert!(session.user_agent.is_none());
     }
 }

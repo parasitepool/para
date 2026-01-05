@@ -69,41 +69,6 @@ fn mine_to_pool() {
     assert_eq!(output.len(), 1);
 }
 
-#[test]
-#[serial(bitcoind)]
-#[timeout(90000)]
-fn configure_template_update_interval() {
-    let pool = TestPool::spawn_with_args("--update-interval 1 --start-diff 0.00001");
-
-    let stratum_endpoint = pool.stratum_endpoint();
-
-    let output = CommandBuilder::new(format!(
-        "template {stratum_endpoint} --username {} --raw",
-        signet_username()
-    ))
-    .spawn()
-    .wait_with_output()
-    .unwrap();
-
-    let t1 =
-        serde_json::from_str::<stratum::Notify>(&String::from_utf8_lossy(&output.stdout)).unwrap();
-
-    std::thread::sleep(Duration::from_secs(1));
-
-    let output = CommandBuilder::new(format!(
-        "template {stratum_endpoint} --username {} --raw",
-        signet_username()
-    ))
-    .spawn()
-    .wait_with_output()
-    .unwrap();
-
-    let t2 =
-        serde_json::from_str::<stratum::Notify>(&String::from_utf8_lossy(&output.stdout)).unwrap();
-
-    assert!(t1.ntime < t2.ntime);
-}
-
 #[tokio::test]
 #[serial(bitcoind)]
 #[timeout(90000)]
@@ -148,81 +113,6 @@ async fn basic_initialization_flow() {
     assert_eq!(difficulty, Difficulty::from(0.00001));
     assert_eq!(notify.job_id, JobId::from(0));
     assert!(notify.clean_jobs);
-}
-
-#[tokio::test]
-#[serial(bitcoind)]
-#[timeout(90000)]
-async fn sessions() {
-    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
-
-    let original_enonce1 = {
-        let client = pool.stratum_client().await;
-        let mut events = client.connect().await.unwrap();
-
-        let (subscribe_result, _, _) = client.subscribe().await.unwrap();
-        let enonce1 = subscribe_result.enonce1.clone();
-
-        client.authorize().await.unwrap();
-
-        let (notify, difficulty) = wait_for_notify(&mut events).await;
-
-        let enonce2 = Extranonce::random(subscribe_result.enonce2_size);
-        let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, difficulty);
-        client
-            .submit(notify.job_id, enonce2, ntime, nonce)
-            .await
-            .unwrap();
-
-        client.disconnect().await.unwrap();
-        enonce1
-    };
-
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    {
-        let client = pool.stratum_client().await;
-        let mut events = client.connect().await.unwrap();
-
-        let (subscribe_result, _, _) = client
-            .subscribe_with_enonce1(Some(original_enonce1.clone()))
-            .await
-            .unwrap();
-
-        assert_eq!(
-            subscribe_result.enonce1, original_enonce1,
-            "Session resumption should return the same enonce1"
-        );
-
-        client.authorize().await.unwrap();
-
-        let (notify, difficulty) = wait_for_notify(&mut events).await;
-
-        let enonce2 = Extranonce::random(subscribe_result.enonce2_size);
-        let (ntime, nonce) = solve_share(&notify, &original_enonce1, &enonce2, difficulty);
-        client
-            .submit(notify.job_id, enonce2, ntime, nonce)
-            .await
-            .expect("Should be able to submit after session resume");
-    }
-
-    {
-        let client = pool.stratum_client().await;
-        let _ = client.connect().await.unwrap();
-
-        let fake_enonce1: Extranonce = "deadbeef".parse().unwrap();
-        let (subscribe_result, _, _) = client
-            .subscribe_with_enonce1(Some(fake_enonce1.clone()))
-            .await
-            .unwrap();
-
-        assert_ne!(
-            subscribe_result.enonce1, fake_enonce1,
-            "Unknown enonce1 should result in new enonce1 being issued"
-        );
-
-        client.authorize().await.unwrap();
-    }
 }
 
 #[tokio::test]
@@ -334,6 +224,41 @@ async fn clean_jobs_true_on_init_and_new_block() {
 
     let notify = wait_for_new_block(&mut events, notify.job_id).await;
     assert!(notify.clean_jobs);
+}
+
+#[test]
+#[serial(bitcoind)]
+#[timeout(90000)]
+fn configure_template_update_interval() {
+    let pool = TestPool::spawn_with_args("--update-interval 1 --start-diff 0.00001");
+
+    let stratum_endpoint = pool.stratum_endpoint();
+
+    let output = CommandBuilder::new(format!(
+        "template {stratum_endpoint} --username {} --raw",
+        signet_username()
+    ))
+    .spawn()
+    .wait_with_output()
+    .unwrap();
+
+    let t1 =
+        serde_json::from_str::<stratum::Notify>(&String::from_utf8_lossy(&output.stdout)).unwrap();
+
+    std::thread::sleep(Duration::from_secs(1));
+
+    let output = CommandBuilder::new(format!(
+        "template {stratum_endpoint} --username {} --raw",
+        signet_username()
+    ))
+    .spawn()
+    .wait_with_output()
+    .unwrap();
+
+    let t2 =
+        serde_json::from_str::<stratum::Notify>(&String::from_utf8_lossy(&output.stdout)).unwrap();
+
+    assert!(t1.ntime < t2.ntime);
 }
 
 #[test]
@@ -703,4 +628,79 @@ async fn bouncer() {
     };
 
     tokio::join!(auth_timeout_test, idle_timeout_test, reject_escalation_test);
+}
+
+#[tokio::test]
+#[serial(bitcoind)]
+#[timeout(90000)]
+async fn sessions() {
+    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
+
+    let original_enonce1 = {
+        let client = pool.stratum_client().await;
+        let mut events = client.connect().await.unwrap();
+
+        let (subscribe_result, _, _) = client.subscribe().await.unwrap();
+        let enonce1 = subscribe_result.enonce1.clone();
+
+        client.authorize().await.unwrap();
+
+        let (notify, difficulty) = wait_for_notify(&mut events).await;
+
+        let enonce2 = Extranonce::random(subscribe_result.enonce2_size);
+        let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, difficulty);
+        client
+            .submit(notify.job_id, enonce2, ntime, nonce)
+            .await
+            .unwrap();
+
+        client.disconnect().await.unwrap();
+        enonce1
+    };
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    {
+        let client = pool.stratum_client().await;
+        let mut events = client.connect().await.unwrap();
+
+        let (subscribe_result, _, _) = client
+            .subscribe_with_enonce1(Some(original_enonce1.clone()))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            subscribe_result.enonce1, original_enonce1,
+            "Session resumption should return the same enonce1"
+        );
+
+        client.authorize().await.unwrap();
+
+        let (notify, difficulty) = wait_for_notify(&mut events).await;
+
+        let enonce2 = Extranonce::random(subscribe_result.enonce2_size);
+        let (ntime, nonce) = solve_share(&notify, &original_enonce1, &enonce2, difficulty);
+        client
+            .submit(notify.job_id, enonce2, ntime, nonce)
+            .await
+            .expect("Should be able to submit after session resume");
+    }
+
+    {
+        let client = pool.stratum_client().await;
+        let _ = client.connect().await.unwrap();
+
+        let fake_enonce1: Extranonce = "deadbeef".parse().unwrap();
+        let (subscribe_result, _, _) = client
+            .subscribe_with_enonce1(Some(fake_enonce1.clone()))
+            .await
+            .unwrap();
+
+        assert_ne!(
+            subscribe_result.enonce1, fake_enonce1,
+            "Unknown enonce1 should result in new enonce1 being issued"
+        );
+
+        client.authorize().await.unwrap();
+    }
 }
