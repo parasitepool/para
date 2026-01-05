@@ -1,4 +1,9 @@
-use super::*;
+use {
+    super::*,
+    bouncer::{Bouncer, Consequence},
+};
+
+mod bouncer;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum State {
@@ -8,7 +13,7 @@ pub(crate) enum State {
     Working,
 }
 
-pub(crate) struct Connection<R, W> {
+pub(crate) struct Stratifier<R, W> {
     config: Arc<PoolConfig>,
     metatron: Arc<Metatron>,
     share_tx: mpsc::Sender<Share>,
@@ -23,12 +28,14 @@ pub(crate) struct Connection<R, W> {
     workername: Option<String>,
     authorized: Option<SystemTime>,
     version_mask: Option<Version>,
-    extranonce1: Option<Extranonce>,
+    enonce1: Option<Extranonce>,
     user_agent: Option<String>,
     vardiff: Vardiff,
+    bouncer: Bouncer,
+    dropped_by_bouncer: bool,
 }
 
-impl<R, W> Connection<R, W>
+impl<R, W> Stratifier<R, W>
 where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
@@ -50,6 +57,8 @@ where
             config.vardiff_window(),
         );
 
+        let bouncer = Bouncer::new(config.disable_bouncer());
+
         metatron.add_connection();
 
         Self {
@@ -67,21 +76,35 @@ where
             workername: None,
             authorized: None,
             version_mask: None,
-            extranonce1: None,
+            enonce1: None,
             user_agent: None,
             vardiff,
+            bouncer,
+            dropped_by_bouncer: false,
         }
     }
 
     pub(crate) async fn serve(&mut self) -> Result {
         let mut workbase_receiver = self.workbase_receiver.clone();
         let cancel_token = self.cancel_token.clone();
+        let mut idle_check = tokio::time::interval(self.bouncer.check_interval());
 
         loop {
             tokio::select! {
                 _ = cancel_token.cancelled() => {
                     info!("Disconnecting from {}", self.socket_addr);
                     break;
+                }
+                _ = idle_check.tick() => {
+                    if self.bouncer.idle_check() == Consequence::Drop {
+                        warn!(
+                            "Dropping {} - idle for {}s",
+                            self.socket_addr,
+                            self.bouncer.last_interaction_since().as_secs()
+                        );
+                        self.dropped_by_bouncer = true;
+                        break
+                    }
                 }
                 message = self.read_message() => {
                     let Some(message) = message? else {
@@ -97,19 +120,6 @@ where
                         "mining.configure" => {
                             debug!("CONFIGURE from {} with {params}", self.socket_addr);
 
-                            if !matches!(self.state,  State::Init | State::Configured) {
-                                self.send_error(
-                                    id.clone(),
-                                    StratumError::MethodNotAllowed,
-                                    Some(serde_json::json!({
-                                        "method": "mining.configure",
-                                        "current_state": format!("{:?}", self.state)
-                                    })),
-                                )
-                                .await?;
-                                continue;
-                            };
-
                             let configure = serde_json::from_value::<Configure>(params)
                                 .context(format!("failed to deserialize {method}"))?;
 
@@ -117,19 +127,6 @@ where
                         }
                         "mining.subscribe" => {
                             debug!("SUBSCRIBE from {} with {params}", self.socket_addr);
-
-                            if !matches!(self.state,  State::Init | State::Configured) {
-                                self.send_error(
-                                    id.clone(),
-                                    StratumError::MethodNotAllowed,
-                                    Some(serde_json::json!({
-                                        "method": "mining.subscribe",
-                                        "current_state": format!("{:?}", self.state)
-                                    })),
-                                )
-                                .await?;
-                                continue;
-                            };
 
                             let subscribe = serde_json::from_value::<Subscribe>(params)
                                 .context(format!("failed to deserialize {method}"))?;
@@ -169,7 +166,10 @@ where
                             let submit = serde_json::from_value::<Submit>(params)
                                 .context(format!("failed to deserialize {method}"))?;
 
-                            self.submit(id, submit).await?;
+                            if self.submit(id, submit).await? == Consequence::Drop {
+                                self.dropped_by_bouncer = true;
+                                break;
+                            }
                         }
                         method => {
                             warn!("UNKNOWN method {method} with {params} from {}", self.socket_addr);
@@ -197,15 +197,84 @@ where
         Ok(())
     }
 
+    async fn handle_consequence(&mut self, consequence: Consequence) {
+        match consequence {
+            Consequence::None => {}
+            Consequence::Warn => {
+                info!(
+                    "Warning {} - {} consecutive rejects for {}s, sending fresh job",
+                    self.socket_addr,
+                    self.bouncer.consecutive_rejects(),
+                    self.bouncer
+                        .reject_duration()
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0)
+                );
+
+                if let (Some(address), Some(enonce1)) = (&self.address, &self.enonce1) {
+                    let workbase = self.workbase_receiver.borrow().clone();
+                    if let Ok(new_job) = Job::new(
+                        address.clone(),
+                        enonce1.clone(),
+                        self.config.extranonce2_size(),
+                        self.version_mask,
+                        workbase,
+                        self.jobs.next_id(),
+                    ) {
+                        let new_job = Arc::new(new_job);
+                        let clean_jobs = self.jobs.upsert(new_job.clone());
+                        if let Ok(notify) = new_job.notify(clean_jobs) {
+                            let _ = self
+                                .send(Message::Notification {
+                                    method: "mining.notify".into(),
+                                    params: json!(notify),
+                                })
+                                .await;
+                        }
+                    }
+                }
+            }
+            Consequence::Reconnect => {
+                info!(
+                    "Suggesting reconnect to {} - {} consecutive rejects for {}s",
+                    self.socket_addr,
+                    self.bouncer.consecutive_rejects(),
+                    self.bouncer
+                        .reject_duration()
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0)
+                );
+                let _ = self
+                    .send(Message::Notification {
+                        method: "client.reconnect".into(),
+                        params: json!([]),
+                    })
+                    .await;
+            }
+            Consequence::Drop => {
+                warn!(
+                    "Dropping {} - {} consecutive rejects for {}s",
+                    self.socket_addr,
+                    self.bouncer.consecutive_rejects(),
+                    self.bouncer
+                        .reject_duration()
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0)
+                );
+            }
+        }
+    }
+
     async fn workbase_update(&mut self, workbase: Arc<Workbase>) -> Result {
-        let (address, extranonce1) = match (&self.address, &self.extranonce1) {
-            (Some(address), Some(extranonce1)) => (address.clone(), extranonce1.clone()),
+        let (address, enonce1) = match (&self.address, &self.enonce1) {
+            (Some(address), Some(enonce1)) => (address.clone(), enonce1.clone()),
             _ => return Ok(()),
         };
 
         let new_job = Arc::new(Job::new(
             address,
-            extranonce1,
+            enonce1,
+            self.config.extranonce2_size(),
             self.version_mask,
             workbase,
             self.jobs.next_id(),
@@ -243,7 +312,10 @@ where
 
             self.send(message).await?;
             self.version_mask = Some(version_mask);
-            self.state = State::Configured;
+
+            if self.state == State::Init {
+                self.state = State::Configured;
+            }
         } else {
             warn!("Unsupported extension {:?}", configure);
 
@@ -260,18 +332,40 @@ where
             };
 
             self.send(message).await?;
-            self.state = State::Init;
         }
 
         Ok(())
     }
 
     async fn subscribe(&mut self, id: Id, subscribe: Subscribe) -> Result {
-        if let Some(extranonce1) = subscribe.extranonce1 {
-            warn!("Ignoring worker extranonce1 suggestion: {extranonce1}");
+        if matches!(self.state, State::Subscribed | State::Working) {
+            info!("Client {} resubscribing", self.socket_addr);
+            self.jobs = Jobs::new();
+            self.vardiff = Vardiff::new(
+                self.config.start_diff(),
+                self.config.vardiff_period(),
+                self.config.vardiff_window(),
+            );
+            self.authorized = None;
+            self.address = None;
+            self.workername = None;
         }
 
-        let extranonce1 = Extranonce::random(EXTRANONCE1_SIZE);
+        let enonce1 = if let Some(ref requested_enonce1) = subscribe.enonce1 {
+            if let Some(session) = self.metatron.take_session(requested_enonce1) {
+                info!("Resuming session for enonce1 {}", session.enonce1);
+                session.enonce1
+            } else {
+                debug!(
+                    "Session resume failed for enonce1 {}, issuing new enonce1",
+                    requested_enonce1
+                );
+
+                Extranonce::random(ENONCE1_SIZE)
+            }
+        } else {
+            Extranonce::random(ENONCE1_SIZE)
+        };
 
         let subscriptions = vec![
             (
@@ -283,8 +377,8 @@ where
 
         let result = SubscribeResult {
             subscriptions,
-            extranonce1: extranonce1.clone(),
-            extranonce2_size: EXTRANONCE2_SIZE,
+            enonce1: enonce1.clone(),
+            enonce2_size: self.config.extranonce2_size(),
         };
 
         self.send(Message::Response {
@@ -295,7 +389,7 @@ where
         })
         .await?;
 
-        self.extranonce1 = Some(extranonce1.clone());
+        self.enonce1 = Some(enonce1.clone());
         self.user_agent = Some(subscribe.user_agent);
         self.state = State::Subscribed;
 
@@ -303,33 +397,34 @@ where
     }
 
     async fn authorize(&mut self, id: Id, authorize: Authorize) -> Result {
-        let extranonce1 = self
-            .extranonce1
+        let enonce1 = self
+            .enonce1
             .clone()
-            .ok_or_else(|| anyhow!("missing extranonce1 do SUBSCRIBE first"))?;
+            .ok_or_else(|| anyhow!("missing enonce1 do SUBSCRIBE first"))?;
 
-        let username = authorize.username.trim_matches('"');
-        let workername = username.to_string();
-
-        let address_str = username
-            .split('.')
-            .next()
-            .ok_or_else(|| anyhow!("invalid username {}", authorize.username))?;
-
-        let address = Address::from_str(address_str)
-            .context(format!(
-                "invalid username {} for connection {}",
-                authorize.username, self.socket_addr
-            ))?
-            .require_network(self.config.chain().network())
-            .context(format!(
-                "invalid network {} for connection {}",
-                authorize.username, self.socket_addr
-            ))?;
+        let address = match authorize
+            .username
+            .parse_with_network(self.config.chain().network())
+        {
+            Ok(parsed) => parsed,
+            Err(e) => {
+                self.send_error(
+                    id,
+                    StratumError::Unauthorized,
+                    Some(json!({
+                        "message": e.to_string(),
+                        "username": authorize.username.as_str(),
+                    })),
+                )
+                .await?;
+                return Ok(());
+            }
+        };
 
         let job = Arc::new(Job::new(
             address.clone(),
-            extranonce1.clone(),
+            enonce1.clone(),
+            self.config.extranonce2_size(),
             self.version_mask,
             self.workbase_receiver.borrow().clone(),
             self.jobs.next_id(),
@@ -344,11 +439,9 @@ where
         .await?;
 
         self.address = Some(address);
-        self.workername = Some(workername);
-
-        if self.authorized.is_none() {
-            self.authorized = Some(SystemTime::now());
-        }
+        self.workername = Some(authorize.username.workername().to_string());
+        self.authorized = Some(SystemTime::now());
+        self.bouncer.authorize();
 
         debug!("Sending SET DIFFICULTY");
 
@@ -373,7 +466,7 @@ where
         Ok(())
     }
 
-    async fn submit(&mut self, id: Id, submit: Submit) -> Result {
+    async fn submit(&mut self, id: Id, submit: Submit) -> Result<Consequence> {
         let Some(job) = self.jobs.get(&submit.job_id) else {
             self.send_error(id, StratumError::Stale, None).await?;
             self.emit_share(
@@ -384,8 +477,44 @@ where
                 Some(StratumError::Stale),
             );
 
-            return Ok(());
+            let consequence = self.bouncer.reject();
+            self.handle_consequence(consequence).await;
+
+            return Ok(consequence);
         };
+
+        let expected_extranonce2_size = self.config.extranonce2_size();
+        if submit.enonce2.len() != expected_extranonce2_size {
+            warn!(
+                "Invalid extranonce2 length from {}: got {} bytes, expected {}",
+                self.socket_addr,
+                submit.enonce2.len(),
+                expected_extranonce2_size
+            );
+
+            self.send_error(
+                id,
+                StratumError::InvalidNonce2Length,
+                Some(json!({
+                    "expected": expected_extranonce2_size,
+                    "received": submit.enonce2.len()
+                })),
+            )
+            .await?;
+
+            self.emit_share(
+                &submit,
+                Some(&job),
+                0.0,
+                BlockHash::all_zeros(),
+                Some(StratumError::InvalidNonce2Length),
+            );
+
+            let consequence = self.bouncer.reject();
+            self.handle_consequence(consequence).await;
+
+            return Ok(consequence);
+        }
 
         let version = if let Some(version_bits) = submit.version_bits {
             let Some(version_mask) = job.version_mask else {
@@ -403,8 +532,10 @@ where
                     BlockHash::all_zeros(),
                     Some(StratumError::InvalidVersionMask),
                 );
+                let consequence = self.bouncer.reject();
+                self.handle_consequence(consequence).await;
 
-                return Ok(());
+                return Ok(consequence);
             };
 
             assert!(version_bits != Version::from(0));
@@ -429,8 +560,8 @@ where
             merkle_root: stratum::merkle_root(
                 &job.coinb1,
                 &job.coinb2,
-                &job.extranonce1,
-                &submit.extranonce2,
+                &job.enonce1,
+                &submit.enonce2,
                 job.workbase.merkle_branches(),
             )?
             .into(),
@@ -450,8 +581,11 @@ where
                 hash,
                 Some(StratumError::Duplicate),
             );
+            let consequence = self.bouncer.reject();
 
-            return Ok(());
+            self.handle_consequence(consequence).await;
+
+            return Ok(consequence);
         }
 
         if let Ok(blockhash) = header.validate_pow(Target::from_compact(nbits.into())) {
@@ -459,7 +593,7 @@ where
 
             let coinbase_bin = hex::decode(format!(
                 "{}{}{}{}",
-                job.coinb1, job.extranonce1, submit.extranonce2, job.coinb2,
+                job.coinb1, job.enonce1, submit.enonce2, job.coinb2,
             ))?;
 
             let mut cursor = bitcoin::io::Cursor::new(&coinbase_bin);
@@ -507,6 +641,8 @@ where
 
             self.emit_share(&submit, Some(&job), current_diff.as_f64(), hash, None);
 
+            self.bouncer.accept();
+
             let network_diff = Difficulty::from(job.nbits());
 
             debug!(
@@ -533,25 +669,30 @@ where
                 })
                 .await?;
             }
-        } else {
-            self.send_error(id, StratumError::AboveTarget, None).await?;
-            self.emit_share(
-                &submit,
-                Some(&job),
-                0.0,
-                hash,
-                Some(StratumError::AboveTarget),
-            );
+
+            return Ok(Consequence::None);
         }
 
-        Ok(())
+        self.send_error(id, StratumError::AboveTarget, None).await?;
+        self.emit_share(
+            &submit,
+            Some(&job),
+            0.0,
+            hash,
+            Some(StratumError::AboveTarget),
+        );
+
+        let consequence = self.bouncer.reject();
+        self.handle_consequence(consequence).await;
+
+        Ok(consequence)
     }
 
     fn emit_share(
         &self,
         submit: &Submit,
         job: Option<&Job>,
-        share_diff: f64,
+        pool_diff: f64,
         hash: BlockHash,
         reject_reason: Option<StratumError>,
     ) {
@@ -571,12 +712,11 @@ where
             self.socket_addr,
             self.user_agent.clone(),
             enonce1,
-            submit.extranonce2.to_string(),
+            submit.enonce2.to_string(),
             submit.nonce,
             submit.ntime,
             submit.version_bits,
-            self.vardiff.current_diff().as_f64(),
-            share_diff,
+            pool_diff,
             hash,
             reject_reason,
         );
@@ -587,9 +727,9 @@ where
     }
 
     fn worker_info(&self) -> Option<(Address, String, Extranonce)> {
-        match (&self.address, &self.workername, &self.extranonce1) {
-            (Some(address), Some(worker), Some(extranonce1)) => {
-                Some((address.clone(), worker.clone(), extranonce1.clone()))
+        match (&self.address, &self.workername, &self.enonce1) {
+            (Some(address), Some(worker), Some(enonce1)) => {
+                Some((address.clone(), worker.clone(), enonce1.clone()))
             }
             _ => None,
         }
@@ -636,11 +776,19 @@ where
     }
 }
 
-impl<R, W> Drop for Connection<R, W> {
+impl<R, W> Drop for Stratifier<R, W> {
     fn drop(&mut self) {
+        if !self.dropped_by_bouncer
+            && let (Some(enonce1), Some(_authorized)) = (self.enonce1.take(), self.authorized)
+        {
+            let session = SessionSnapshot::new(enonce1);
+            self.metatron.store_session(session);
+        }
+
         self.metatron.sub_connection();
+
         info!(
-            "Connection {} closed (remaining: {})",
+            "Stratifier {} closed (remaining: {})",
             self.socket_addr,
             self.metatron.total_connections()
         );

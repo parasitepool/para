@@ -2,7 +2,7 @@ use super::*;
 
 #[derive(Debug, PartialEq)]
 pub struct Authorize {
-    pub username: String,
+    pub username: Username,
     pub password: Option<String>,
 }
 
@@ -35,10 +35,13 @@ impl<'de> Deserialize<'de> for Authorize {
 
         match Raw::deserialize(deserializer)? {
             Raw::One((username,)) => Ok(Authorize {
-                username,
+                username: username.into(),
                 password: None,
             }),
-            Raw::Two((username, password)) => Ok(Authorize { username, password }),
+            Raw::Two((username, password)) => Ok(Authorize {
+                username: username.into(),
+                password,
+            }),
         }
     }
 }

@@ -42,10 +42,10 @@ impl TestPool {
             Bitcoind::spawn(tempdir.clone(), bitcoind_port, rpc_port, zmq_port, false).unwrap();
 
         let pool_handle = CommandBuilder::new(format!(
-            "pool 
+            "pool
                 --chain signet
-                --address 127.0.0.1 
-                --port {pool_port} 
+                --address 127.0.0.1
+                --port {pool_port}
                 --bitcoin-rpc-username satoshi
                 --bitcoin-rpc-password nakamoto
                 --bitcoin-rpc-port {rpc_port}
@@ -88,6 +88,18 @@ impl TestPool {
         let config = stratum::ClientConfig {
             address: self.stratum_endpoint(),
             username: signet_username(),
+            user_agent: USER_AGENT.into(),
+            password: None,
+            timeout: Duration::from_secs(1),
+        };
+
+        stratum::Client::new(config)
+    }
+
+    pub(crate) async fn stratum_client_for_username(&self, username: &str) -> stratum::Client {
+        let config = stratum::ClientConfig {
+            address: self.stratum_endpoint(),
+            username: Username::new(username),
             user_agent: USER_AGENT.into(),
             password: None,
             timeout: Duration::from_secs(1),

@@ -1,20 +1,20 @@
 use super::*;
 
-#[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone, PartialEq, ToSchema)]
 pub struct HighestDiff {
     pub blockheight: i32,
     pub username: String,
     pub diff: f64,
 }
 
-#[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone, PartialEq, ToSchema)]
 pub(crate) struct Split {
     pub(crate) worker_name: String,
     pub(crate) worker_total: i64,
     pub(crate) percentage: f64,
 }
 
-#[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone, PartialEq, ToSchema)]
 pub struct Payout {
     pub(crate) worker_name: String,
     pub btcaddress: Option<String>,
@@ -24,21 +24,21 @@ pub struct Payout {
     pub percentage: f64,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, ToSchema)]
 pub struct PendingPayout {
     pub ln_address: String,
     pub amount_sats: i64,
     pub payout_ids: Vec<i64>,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, ToSchema)]
 pub struct FailedPayout {
     pub btc_address: String,
     pub amount_sats: i64,
     pub payout_ids: Vec<i64>,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone, ToSchema)]
 pub struct UpdatePayoutStatusRequest {
     pub payout_ids: Vec<i64>,
     pub status: String,
@@ -61,7 +61,8 @@ impl Database {
                     Duration::from_secs(5)
                 })
                 .connect(&database_url)
-                .await?,
+                .await
+                .with_context(|| format!("failed to connect to database at `{database_url}`"))?,
         })
     }
 
@@ -444,10 +445,10 @@ impl Database {
             SELECT
                 blockheight,
                 COALESCE(username, '') AS username,
-                diff
+                sdiff as diff
             FROM remote_shares
             WHERE blockheight = $1
-            ORDER BY diff DESC
+            ORDER BY sdiff DESC
             LIMIT 1
             ",
         )
@@ -467,10 +468,10 @@ impl Database {
             SELECT
                 blockheight,
                 COALESCE(username, '') AS username,
-                diff
+                sdiff as diff
             FROM remote_shares
             WHERE blockheight = $1 AND username = $2
-            ORDER BY diff DESC
+            ORDER BY sdiff DESC
             LIMIT 1
             ",
         )
@@ -487,10 +488,10 @@ impl Database {
             SELECT DISTINCT ON (username)
                 blockheight,
                 COALESCE(username, '') AS username,
-                diff
+                sdiff as diff
             FROM remote_shares
             WHERE blockheight = $1
-            ORDER BY username, diff DESC
+            ORDER BY username, sdiff DESC
             ",
         )
         .bind(blockheight)

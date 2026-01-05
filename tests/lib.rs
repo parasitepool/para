@@ -3,10 +3,10 @@ use {
     command_builder::CommandBuilder,
     executable_path::executable_path,
     para::{
-        api::Status,
         ckpool::{self, HashRate, HashRateStatus, PoolStatus, ShareStatus, User, Worker},
-        subcommand::server::notifications::{
-            NotificationHandler, NotificationPriority, NotificationType,
+        subcommand::server::{
+            Status,
+            notifications::{NotificationHandler, NotificationPriority, NotificationType},
         },
     },
     pretty_assertions::assert_eq as pretty_assert_eq,
@@ -54,7 +54,8 @@ use {
     para::{
         USER_AGENT,
         stratum::{
-            self, ClientError, Difficulty, Extranonce, JobId, Nonce, Ntime, StratumError, Version,
+            self, ClientError, Difficulty, Extranonce, JobId, Nonce, Notify, Ntime, StratumError,
+            Username, Version,
         },
         subcommand::{
             miner::Share,
@@ -63,7 +64,6 @@ use {
                 database::{Database, HighestDiff, Payout},
             },
             sync::{ShareBatch, Sync, SyncResponse},
-            template::Output as Template,
         },
     },
     pgtemp::{PgTempDB, PgTempDBBuilder},
@@ -117,22 +117,22 @@ fn next_json<T: DeserializeOwned>(r: &mut BufReader<ChildStdout>) -> T {
 }
 
 #[cfg(target_os = "linux")]
-fn signet_username() -> String {
-    "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.tick.abcdef@lnurl.com".to_string()
+fn signet_username() -> Username {
+    Username::new("tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.tick.abcdef@lnurl.com")
 }
 
 #[cfg(target_os = "linux")]
 fn solve_share(
     notify: &stratum::Notify,
-    extranonce1: &Extranonce,
-    extranonce2: &Extranonce,
+    enonce1: &Extranonce,
+    enonce2: &Extranonce,
     difficulty: stratum::Difficulty,
 ) -> (Ntime, Nonce) {
     let merkle_root = stratum::merkle_root(
         &notify.coinb1,
         &notify.coinb2,
-        extranonce1,
-        extranonce2,
+        enonce1,
+        enonce2,
         &notify.merkle_branches,
     )
     .unwrap();

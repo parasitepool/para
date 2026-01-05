@@ -165,6 +165,20 @@ pub enum InternalError {
         input: String,
         source: bitcoin::error::UnprefixedHexError,
     },
+
+    #[snafu(display("Username is empty"))]
+    EmptyUsername,
+
+    #[snafu(display("Invalid bitcoin address: {source}"))]
+    InvalidAddress {
+        source: bitcoin::address::ParseError,
+    },
+
+    #[snafu(display("Address {address} is not valid for {expected} network"))]
+    NetworkMismatch { expected: Network, address: String },
+
+    #[snafu(display("Could not determine network from address"))]
+    UnknownNetwork,
 }
 
 #[cfg(test)]

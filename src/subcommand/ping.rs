@@ -9,16 +9,23 @@ pub(crate) struct Ping {
     #[arg(long, default_value = "5", help = "Fail after <TIMEOUT> seconds.")]
     timeout: u64,
     #[arg(long, help = "Stratum <USERNAME>.")]
-    username: Option<String>,
+    username: Option<Username>,
     #[arg(long, help = "Stratum <PASSWORD>.")]
     password: Option<String>,
 }
 
 impl Ping {
     pub(crate) async fn run(&self, cancel_token: CancellationToken) -> Result {
-        let addr = resolve_stratum_endpoint(&self.stratum_endpoint).await?;
+        let addr = resolve_stratum_endpoint(&self.stratum_endpoint)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to resolve stratum endpoint `{}`",
+                    self.stratum_endpoint
+                )
+            })?;
 
-        let ping_type = PingType::new(self.username.as_deref(), self.password.as_deref());
+        let ping_type = PingType::new(self.username.clone(), self.password.as_deref());
 
         println!("{} {} ({})", ping_type, self.stratum_endpoint, addr);
 
@@ -140,14 +147,17 @@ impl Ping {
 #[derive(Debug, Clone)]
 enum PingType {
     Subscribe,
-    Authorized { username: String, password: String },
+    Authorized {
+        username: Username,
+        password: String,
+    },
 }
 
 impl PingType {
-    fn new(username: Option<&str>, password: Option<&str>) -> Self {
+    fn new(username: Option<Username>, password: Option<&str>) -> Self {
         match username {
             Some(user) => Self::Authorized {
-                username: user.to_string(),
+                username: user,
                 password: password.unwrap_or("x").to_string(),
             },
             None => Self::Subscribe,

@@ -2,8 +2,8 @@ use {
     anyhow::{Context, Error, anyhow, bail, ensure},
     arguments::Arguments,
     axum::{
-        Extension, Router,
-        extract::{DefaultBodyLimit, Json},
+        Extension, Json, Router,
+        extract::{DefaultBodyLimit, FromRequestParts},
         http::{
             self, HeaderValue, StatusCode,
             header::{CONTENT_DISPOSITION, CONTENT_TYPE},
@@ -17,6 +17,7 @@ use {
     bitcoin::{
         Address, Amount, Block, BlockHash, CompactTarget, Network, OutPoint, ScriptBuf, Sequence,
         Target, Transaction, TxIn, TxOut, Txid, VarInt, Witness,
+        address::NetworkUnchecked,
         block::{self, Header},
         consensus::{self, Decodable, encode},
         hashes::Hash,
@@ -30,7 +31,6 @@ use {
     chain::Chain,
     clap::Parser,
     coinbase_builder::CoinbaseBuilder,
-    connection::Connection,
     dashmap::DashMap,
     decay::{DecayingAverage, calculate_time_bias},
     futures::{
@@ -58,6 +58,7 @@ use {
     },
     serde_json::json,
     serde_with::{DeserializeFromStr, SerializeDisplay},
+    session::SessionSnapshot,
     share::Share,
     snafu::Snafu,
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
@@ -80,10 +81,11 @@ use {
         thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     },
+    stratifier::Stratifier,
     stratum::{
         Authorize, Configure, Difficulty, Extranonce, Id, JobId, MerkleNode, Message, Nbits, Nonce,
         Notify, Ntime, PrevHash, SetDifficulty, StratumError, Submit, Subscribe, SubscribeResult,
-        Version,
+        Username, Version,
     },
     subcommand::{pool::pool_config::PoolConfig, server::account::Account},
     sysinfo::{Disks, System},
@@ -104,6 +106,7 @@ use {
     tracing_appender::non_blocking,
     tracing_subscriber::EnvFilter,
     user::User,
+    utoipa::{OpenApi, ToSchema},
     vardiff::Vardiff,
     workbase::Workbase,
     worker::Worker,
@@ -111,22 +114,23 @@ use {
     zmq::Zmq,
 };
 
-pub use subcommand::server::api;
-
+mod api;
 mod arguments;
 mod block_template;
 mod chain;
 pub mod ckpool;
 mod coinbase_builder;
-mod connection;
 mod decay;
 mod generator;
 mod hash_rate;
+mod http_server;
 mod job;
 mod jobs;
 mod metatron;
+mod session;
 mod share;
 mod signal;
+mod stratifier;
 pub mod stratum;
 pub mod subcommand;
 mod throbber;
@@ -138,12 +142,12 @@ mod zmq;
 
 pub const COIN_VALUE: u64 = 100_000_000;
 pub const USER_AGENT: &str = "para/0.5.2";
-pub const EXTRANONCE1_SIZE: usize = 4;
-pub const EXTRANONCE2_SIZE: usize = 8;
+pub const ENONCE1_SIZE: usize = 4;
 pub const MAX_MESSAGE_SIZE: usize = 32 * 1024;
 pub const SHARE_CHANNEL_CAPACITY: usize = 100_000;
 pub const SUBSCRIPTION_ID: &str = "deadbeef";
 pub const LRU_CACHE_SIZE: usize = 256;
+pub const SESSION_TTL: Duration = Duration::from_secs(600);
 
 type Result<T = (), E = Error> = std::result::Result<T, E>;
 
@@ -191,13 +195,22 @@ pub fn main() {
 
             match args.run(cancel_token).await {
                 Err(err) => {
-                    error!("error: {err}");
+                    eprintln!("error: {err}");
+
+                    for (i, cause) in err.chain().skip(1).enumerate() {
+                        if i == 0 {
+                            eprintln!();
+                            eprintln!("because:");
+                        }
+                        eprintln!("- {cause}");
+                    }
 
                     if env::var_os("RUST_BACKTRACE")
                         .map(|val| val == "1")
                         .unwrap_or_default()
                     {
-                        error!("{}", err.backtrace());
+                        eprintln!();
+                        eprintln!("{}", err.backtrace());
                     }
                     process::exit(1);
                 }

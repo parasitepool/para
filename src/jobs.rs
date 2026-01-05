@@ -85,7 +85,8 @@ mod tests {
         Arc::new(
             Job::new(
                 address,
-                Extranonce::random(EXTRANONCE1_SIZE),
+                Extranonce::random(ENONCE1_SIZE),
+                8,
                 None,
                 workbase,
                 id,

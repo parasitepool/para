@@ -140,7 +140,7 @@ impl Aggregator {
 
                     let resp = request_builder.send().await?;
 
-                    let status: Result<api::Status> =
+                    let status: Result<server::Status> =
                         serde_json::from_str(&resp.text().await?).map_err(|err| anyhow!(err));
 
                     status
@@ -151,7 +151,7 @@ impl Aggregator {
             }
         });
 
-        let results: Vec<(&Url, Result<api::Status>)> = futures::future::join_all(fetches).await;
+        let results: Vec<(&Url, Result<server::Status>)> = futures::future::join_all(fetches).await;
 
         let mut checks = BTreeMap::new();
 

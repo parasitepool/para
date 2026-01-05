@@ -26,7 +26,7 @@ const CHANNEL_BUFFER_SIZE: usize = 32;
 #[derive(Debug, Clone)]
 pub struct ClientConfig {
     pub address: String,
-    pub username: String,
+    pub username: Username,
     pub user_agent: String,
     pub password: Option<String>,
     pub timeout: Duration,
@@ -170,12 +170,19 @@ impl Client {
     }
 
     pub async fn subscribe(&self) -> Result<(SubscribeResult, Duration, usize)> {
+        self.subscribe_with_enonce1(None).await
+    }
+
+    pub async fn subscribe_with_enonce1(
+        &self,
+        enonce1: Option<Extranonce>,
+    ) -> Result<(SubscribeResult, Duration, usize)> {
         let (rx, instant) = self
             .send_request(
                 "mining.subscribe".to_string(),
                 serde_json::to_value(Subscribe {
                     user_agent: self.config.user_agent.clone(),
-                    extranonce1: None,
+                    enonce1,
                 })
                 .context(error::SerializationSnafu)?,
             )
@@ -218,14 +225,14 @@ impl Client {
     pub async fn submit(
         &self,
         job_id: JobId,
-        extranonce2: Extranonce,
+        enonce2: Extranonce,
         ntime: Ntime,
         nonce: Nonce,
     ) -> Result<Submit> {
         let submit = Submit {
             username: self.config.username.clone(),
             job_id,
-            extranonce2,
+            enonce2,
             ntime,
             nonce,
             version_bits: None,
