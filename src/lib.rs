@@ -31,7 +31,6 @@ use {
     chain::Chain,
     clap::Parser,
     coinbase_builder::CoinbaseBuilder,
-    connection::Connection,
     dashmap::DashMap,
     decay::{DecayingAverage, calculate_time_bias},
     futures::{
@@ -59,6 +58,7 @@ use {
     },
     serde_json::json,
     serde_with::{DeserializeFromStr, SerializeDisplay},
+    session::SessionSnapshot,
     share::Share,
     snafu::Snafu,
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
@@ -81,6 +81,7 @@ use {
         thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     },
+    stratifier::Stratifier,
     stratum::{
         Authorize, Configure, Difficulty, Extranonce, Id, JobId, MerkleNode, Message, Nbits, Nonce,
         Notify, Ntime, PrevHash, SetDifficulty, StratumError, Submit, Subscribe, SubscribeResult,
@@ -118,7 +119,6 @@ mod block_template;
 mod chain;
 pub mod ckpool;
 mod coinbase_builder;
-mod connection;
 mod decay;
 mod generator;
 mod hash_rate;
@@ -126,8 +126,10 @@ mod http_server;
 mod job;
 mod jobs;
 mod metatron;
+mod session;
 mod share;
 mod signal;
+mod stratifier;
 pub mod stratum;
 pub mod subcommand;
 mod throbber;
@@ -144,6 +146,7 @@ pub const MAX_MESSAGE_SIZE: usize = 32 * 1024;
 pub const SHARE_CHANNEL_CAPACITY: usize = 100_000;
 pub const SUBSCRIPTION_ID: &str = "deadbeef";
 pub const LRU_CACHE_SIZE: usize = 256;
+pub const SESSION_TTL: Duration = Duration::from_secs(600);
 
 type Result<T = (), E = Error> = std::result::Result<T, E>;
 

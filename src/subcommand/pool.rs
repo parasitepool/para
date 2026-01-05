@@ -82,7 +82,7 @@ impl Pool {
                     let conn_cancel_token = cancel_token.child_token();
 
                     connection_tasks.spawn(async move {
-                        let mut conn = Connection::new(
+                        let mut stratifier = Stratifier::new(
                             config,
                             metatron,
                             share_tx,
@@ -93,8 +93,8 @@ impl Pool {
                             conn_cancel_token,
                         );
 
-                        if let Err(err) = conn.serve().await {
-                            error!("Worker connection error: {err}")
+                        if let Err(err) = stratifier.serve().await {
+                            error!("Stratifier error: {err}")
                         }
                     });
                 }
