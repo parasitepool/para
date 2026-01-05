@@ -1,14 +1,14 @@
 use super::*;
 
 #[derive(Debug, Clone)]
-pub(crate) struct Session {
+pub(crate) struct SessionSnapshot {
     pub(crate) enonce1: Extranonce,
     pub(crate) user_agent: Option<String>,
     pub(crate) version_mask: Option<Version>,
     stored_at: Instant,
 }
 
-impl Session {
+impl SessionSnapshot {
     pub(crate) fn new(
         enonce1: Extranonce,
         user_agent: Option<String>,
@@ -30,10 +30,9 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::thread;
 
-    fn test_session(enonce1: &str) -> Session {
-        Session::new(
+    fn test_session(enonce1: &str) -> SessionSnapshot {
+        SessionSnapshot::new(
             enonce1.parse().unwrap(),
             Some("TestMiner/1.0".to_string()),
             None,
@@ -70,7 +69,7 @@ mod tests {
 
         assert!(!session.is_expired(Duration::from_secs(60)));
 
-        thread::sleep(Duration::from_millis(15));
+        std::thread::sleep(Duration::from_millis(15));
 
         assert!(!session.is_expired(Duration::from_secs(60)));
         assert!(session.is_expired(Duration::from_millis(10)));
@@ -78,7 +77,7 @@ mod tests {
 
     #[test]
     fn session_with_version_mask() {
-        let session = Session::new(
+        let session = SessionSnapshot::new(
             "cafebabe".parse().unwrap(),
             None,
             Some(Version::from(0x1fffe000)),
@@ -90,7 +89,7 @@ mod tests {
 
     #[test]
     fn session_without_user_agent() {
-        let session = Session::new("12345678".parse().unwrap(), None, None);
+        let session = SessionSnapshot::new("12345678".parse().unwrap(), None, None);
 
         assert!(session.user_agent.is_none());
     }

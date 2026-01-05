@@ -71,7 +71,7 @@ impl Pool {
                 Ok((stream, worker)) = listener.accept() => {
                     stream.set_nodelay(true)?;
 
-                    info!("Accepted connection from {}", worker);
+                    info!("Accepted connection from {worker}");
 
                     let (reader, writer) = stream.into_split();
 

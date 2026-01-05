@@ -8,7 +8,7 @@ pub(crate) struct Metatron {
     started: Instant,
     connections: AtomicU64,
     users: DashMap<Address, Arc<User>>,
-    sessions: DashMap<Extranonce, Session>,
+    sessions: DashMap<Extranonce, SessionSnapshot>,
 }
 
 impl Metatron {
@@ -89,12 +89,12 @@ impl Metatron {
         user.get_or_create_worker(workername)
     }
 
-    pub(crate) fn store_session(&self, session: Session) {
+    pub(crate) fn store_session(&self, session: SessionSnapshot) {
         info!("Storing session for enonce1 {}", session.enonce1);
         self.sessions.insert(session.enonce1.clone(), session);
     }
 
-    pub(crate) fn take_session(&self, enonce1: &Extranonce) -> Option<Session> {
+    pub(crate) fn take_session(&self, enonce1: &Extranonce) -> Option<SessionSnapshot> {
         let (_, session) = self.sessions.remove(enonce1)?;
         if !session.is_expired(SESSION_TTL) {
             Some(session)

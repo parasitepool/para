@@ -54,11 +54,7 @@ where
             config.vardiff_window(),
         );
 
-        let bouncer = if config.disable_bouncer() {
-            Bouncer::new_disabled()
-        } else {
-            Bouncer::new()
-        };
+        let bouncer = Bouncer::new(config.disable_bouncer());
 
         metatron.add_connection();
 
@@ -96,8 +92,13 @@ where
                     break;
                 }
                 _ = idle_check.tick() => {
-                    if self.check_idle_timeout() {
-                        break;
+                    if self.bouncer.idle_check() == Consequence::Drop {
+                        warn!(
+                            "Dropping {} - idle for {}s",
+                            self.socket_addr,
+                            self.bouncer.last_interaction_since().as_secs()
+                        );
+                        break
                     }
                 }
                 message = self.read_message() => {
@@ -186,7 +187,7 @@ where
                             let submit = serde_json::from_value::<Submit>(params)
                                 .context(format!("failed to deserialize {method}"))?;
 
-                            if self.submit(id, submit).await? {
+                            if self.submit(id, submit).await? == Consequence::Drop {
                                 break;
                             }
                         }
@@ -216,31 +217,9 @@ where
         Ok(())
     }
 
-    fn check_idle_timeout(&self) -> bool {
-        match self.bouncer.check() {
-            Consequence::Drop => {
-                if !self.bouncer.is_authorized() {
-                    warn!(
-                        "Dropping {} - not authorized within {}s",
-                        self.socket_addr,
-                        self.bouncer.auth_timeout().as_secs()
-                    );
-                } else {
-                    warn!(
-                        "Dropping {} - idle for {}s",
-                        self.socket_addr,
-                        self.bouncer.idle_timeout().as_secs()
-                    );
-                }
-                true
-            }
-            _ => false,
-        }
-    }
-
-    async fn handle_consequence(&mut self, consequence: Consequence) -> bool {
+    async fn handle_consequence(&mut self, consequence: Consequence) {
         match consequence {
-            Consequence::None => false,
+            Consequence::None => {}
             Consequence::Warn => {
                 info!(
                     "Warning {} - {} consecutive rejects for {}s, sending fresh job",
@@ -274,7 +253,6 @@ where
                         }
                     }
                 }
-                false
             }
             Consequence::Reconnect => {
                 info!(
@@ -292,7 +270,6 @@ where
                         params: json!([]),
                     })
                     .await;
-                false
             }
             Consequence::Drop => {
                 warn!(
@@ -304,7 +281,6 @@ where
                         .map(|d| d.as_secs())
                         .unwrap_or(0)
                 );
-                true
             }
         }
     }
@@ -506,7 +482,7 @@ where
         Ok(())
     }
 
-    async fn submit(&mut self, id: Id, submit: Submit) -> Result<bool> {
+    async fn submit(&mut self, id: Id, submit: Submit) -> Result<Consequence> {
         let Some(job) = self.jobs.get(&submit.job_id) else {
             self.send_error(id, StratumError::Stale, None).await?;
             self.emit_share(
@@ -516,8 +492,11 @@ where
                 BlockHash::all_zeros(),
                 Some(StratumError::Stale),
             );
+
             let consequence = self.bouncer.reject();
-            return Ok(self.handle_consequence(consequence).await);
+            self.handle_consequence(consequence).await;
+
+            return Ok(consequence);
         };
 
         let expected_extranonce2_size = self.config.extranonce2_size();
@@ -546,8 +525,11 @@ where
                 BlockHash::all_zeros(),
                 Some(StratumError::InvalidNonce2Length),
             );
+
             let consequence = self.bouncer.reject();
-            return Ok(self.handle_consequence(consequence).await);
+            self.handle_consequence(consequence).await;
+
+            return Ok(consequence);
         }
 
         let version = if let Some(version_bits) = submit.version_bits {
@@ -567,7 +549,9 @@ where
                     Some(StratumError::InvalidVersionMask),
                 );
                 let consequence = self.bouncer.reject();
-                return Ok(self.handle_consequence(consequence).await);
+                self.handle_consequence(consequence).await;
+
+                return Ok(consequence);
             };
 
             assert!(version_bits != Version::from(0));
@@ -614,7 +598,10 @@ where
                 Some(StratumError::Duplicate),
             );
             let consequence = self.bouncer.reject();
-            return Ok(self.handle_consequence(consequence).await);
+
+            self.handle_consequence(consequence).await;
+
+            return Ok(consequence);
         }
 
         if let Ok(blockhash) = header.validate_pow(Target::from_compact(nbits.into())) {
@@ -698,7 +685,8 @@ where
                 })
                 .await?;
             }
-            return Ok(false);
+
+            return Ok(Consequence::None);
         }
 
         self.send_error(id, StratumError::AboveTarget, None).await?;
@@ -709,8 +697,11 @@ where
             hash,
             Some(StratumError::AboveTarget),
         );
+
         let consequence = self.bouncer.reject();
-        Ok(self.handle_consequence(consequence).await)
+        self.handle_consequence(consequence).await;
+
+        Ok(consequence)
     }
 
     fn emit_share(
@@ -803,9 +794,8 @@ where
 
 impl<R, W> Drop for Stratifier<R, W> {
     fn drop(&mut self) {
-        // Only store session for authorized clients
         if let (Some(enonce1), Some(_authorized)) = (self.enonce1.take(), self.authorized) {
-            let session = Session::new(enonce1, self.user_agent.take(), self.version_mask);
+            let session = SessionSnapshot::new(enonce1, self.user_agent.take(), self.version_mask);
             self.metatron.store_session(session);
         }
 

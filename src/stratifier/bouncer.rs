@@ -1,18 +1,36 @@
 use super::*;
 
-const WARN_THRESHOLD: Duration = Duration::from_secs(60);
-const RECONNECT_THRESHOLD: Duration = Duration::from_secs(120);
-const DROP_THRESHOLD: Duration = Duration::from_secs(180);
-const AUTH_TIMEOUT: Duration = Duration::from_secs(60);
-const IDLE_TIMEOUT: Duration = Duration::from_secs(600);
-const CHECK_INTERVAL: Duration = Duration::from_secs(30);
+struct BouncerConfig {
+    warn_threshold: Duration,
+    reconnect_threshold: Duration,
+    drop_threshold: Duration,
+    auth_timeout: Duration,
+    idle_timeout: Duration,
+    check_interval: Duration,
+}
 
-const TEST_WARN_THRESHOLD: Duration = Duration::from_secs(1);
-const TEST_RECONNECT_THRESHOLD: Duration = Duration::from_secs(2);
-const TEST_DROP_THRESHOLD: Duration = Duration::from_secs(3);
-const TEST_AUTH_TIMEOUT: Duration = Duration::from_secs(2);
-const TEST_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
-const TEST_CHECK_INTERVAL: Duration = Duration::from_secs(1);
+static CONFIG: LazyLock<BouncerConfig> = LazyLock::new(|| {
+    if integration_test() {
+        BouncerConfig {
+            warn_threshold: Duration::from_secs(1),
+            reconnect_threshold: Duration::from_secs(2),
+            drop_threshold: Duration::from_secs(3),
+            auth_timeout: Duration::from_secs(2),
+            idle_timeout: Duration::from_secs(5),
+            check_interval: Duration::from_secs(1),
+        }
+    } else {
+        // Values derived from ckpool
+        BouncerConfig {
+            warn_threshold: Duration::from_secs(60),
+            reconnect_threshold: Duration::from_secs(120),
+            drop_threshold: Duration::from_secs(180),
+            auth_timeout: Duration::from_secs(60),
+            idle_timeout: Duration::from_secs(600),
+            check_interval: Duration::from_secs(30),
+        }
+    }
+});
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub(crate) enum Consequence {
@@ -36,67 +54,31 @@ pub(crate) struct Bouncer {
     current_consequence: Consequence,
     connected_at: Instant,
     authorized: bool,
-    last_share_at: Option<Instant>,
+    last_interaction: Instant,
 }
 
 impl Bouncer {
-    pub(crate) fn new() -> Self {
-        let (
-            warn_threshold,
-            reconnect_threshold,
-            drop_threshold,
-            auth_timeout,
-            idle_timeout,
-            check_interval,
-        ) = if integration_test() {
-            (
-                TEST_WARN_THRESHOLD,
-                TEST_RECONNECT_THRESHOLD,
-                TEST_DROP_THRESHOLD,
-                TEST_AUTH_TIMEOUT,
-                TEST_IDLE_TIMEOUT,
-                TEST_CHECK_INTERVAL,
-            )
-        } else {
-            (
-                WARN_THRESHOLD,
-                RECONNECT_THRESHOLD,
-                DROP_THRESHOLD,
-                AUTH_TIMEOUT,
-                IDLE_TIMEOUT,
-                CHECK_INTERVAL,
-            )
-        };
-
+    pub(crate) fn new(disabled: bool) -> Self {
         Self {
-            disabled: false,
-            warn_threshold,
-            reconnect_threshold,
-            drop_threshold,
-            auth_timeout,
-            idle_timeout,
-            check_interval,
+            disabled,
+            warn_threshold: CONFIG.warn_threshold,
+            reconnect_threshold: CONFIG.reconnect_threshold,
+            drop_threshold: CONFIG.drop_threshold,
+            auth_timeout: CONFIG.auth_timeout,
+            idle_timeout: CONFIG.idle_timeout,
+            check_interval: CONFIG.check_interval,
             first_reject: None,
             consecutive_rejects: 0,
             current_consequence: Consequence::None,
             connected_at: Instant::now(),
             authorized: false,
-            last_share_at: None,
+            last_interaction: Instant::now(),
         }
-    }
-
-    pub(crate) fn new_disabled() -> Self {
-        let mut bouncer = Self::new();
-        bouncer.disabled = true;
-        // Also disable auth/idle timeouts for testing
-        bouncer.auth_timeout = Duration::from_secs(3600);
-        bouncer.idle_timeout = Duration::from_secs(3600);
-        bouncer
     }
 
     pub(crate) fn authorize(&mut self) {
         self.authorized = true;
-        self.last_share_at = Some(Instant::now());
+        self.last_interaction = Instant::now();
     }
 
     pub(crate) fn reject(&mut self) -> Consequence {
@@ -130,23 +112,26 @@ impl Bouncer {
         self.first_reject = None;
         self.consecutive_rejects = 0;
         self.current_consequence = Consequence::None;
-        self.last_share_at = Some(Instant::now());
+        self.last_interaction = Instant::now();
     }
 
-    pub(crate) fn check(&self) -> Consequence {
+    pub(crate) fn idle_check(&self) -> Consequence {
+        if self.disabled {
+            return Consequence::None;
+        }
+
         if !self.authorized && self.connected_at.elapsed() > self.auth_timeout {
             return Consequence::Drop;
         }
 
-        if let Some(last_share) = self.last_share_at
-            && last_share.elapsed() > self.idle_timeout
-        {
+        if self.last_interaction.elapsed() > self.idle_timeout {
             return Consequence::Drop;
         }
 
         Consequence::None
     }
 
+    #[cfg(test)]
     pub(crate) fn is_authorized(&self) -> bool {
         self.authorized
     }
@@ -159,16 +144,12 @@ impl Bouncer {
         self.first_reject.map(|t| t.elapsed())
     }
 
-    pub(crate) fn auth_timeout(&self) -> Duration {
-        self.auth_timeout
-    }
-
-    pub(crate) fn idle_timeout(&self) -> Duration {
-        self.idle_timeout
-    }
-
     pub(crate) fn check_interval(&self) -> Duration {
         self.check_interval
+    }
+
+    pub(crate) fn last_interaction_since(&self) -> Duration {
+        self.last_interaction.elapsed()
     }
 }
 
@@ -179,7 +160,7 @@ mod tests {
 
     #[test]
     fn new_bouncer_starts_at_zero() {
-        let bouncer = Bouncer::new();
+        let bouncer = Bouncer::new(false);
         assert_eq!(bouncer.consecutive_rejects(), 0);
         assert!(bouncer.reject_duration().is_none());
         assert!(!bouncer.is_authorized());
@@ -187,7 +168,7 @@ mod tests {
 
     #[test]
     fn reject_before_warn_threshold_returns_none() {
-        let mut bouncer = Bouncer::new();
+        let mut bouncer = Bouncer::new(false);
 
         let consequence = bouncer.reject();
         assert_eq!(consequence, Consequence::None);
@@ -196,7 +177,7 @@ mod tests {
 
     #[test]
     fn accept_resets_consecutive_rejects() {
-        let mut bouncer = Bouncer::new();
+        let mut bouncer = Bouncer::new(false);
 
         bouncer.reject();
         bouncer.reject();
@@ -208,7 +189,7 @@ mod tests {
 
     #[test]
     fn authorize_sets_authorized_flag() {
-        let mut bouncer = Bouncer::new();
+        let mut bouncer = Bouncer::new(false);
         assert!(!bouncer.is_authorized());
 
         bouncer.authorize();
@@ -217,36 +198,36 @@ mod tests {
 
     #[test]
     fn check_returns_none_when_authorized() {
-        let mut bouncer = Bouncer::new();
+        let mut bouncer = Bouncer::new(false);
         bouncer.authorize();
 
-        assert_eq!(bouncer.check(), Consequence::None);
+        assert_eq!(bouncer.idle_check(), Consequence::None);
     }
 
     #[test]
     fn check_returns_drop_when_not_authorized_after_timeout() {
-        let mut bouncer = Bouncer::new();
+        let mut bouncer = Bouncer::new(false);
         bouncer.auth_timeout = Duration::from_millis(10);
 
         thread::sleep(Duration::from_millis(15));
 
-        assert_eq!(bouncer.check(), Consequence::Drop);
+        assert_eq!(bouncer.idle_check(), Consequence::Drop);
     }
 
     #[test]
     fn check_returns_drop_when_idle_after_timeout() {
-        let mut bouncer = Bouncer::new();
+        let mut bouncer = Bouncer::new(false);
         bouncer.authorize();
         bouncer.idle_timeout = Duration::from_millis(10);
 
         thread::sleep(Duration::from_millis(15));
 
-        assert_eq!(bouncer.check(), Consequence::Drop);
+        assert_eq!(bouncer.idle_check(), Consequence::Drop);
     }
 
     #[test]
     fn accept_updates_last_share_time() {
-        let mut bouncer = Bouncer::new();
+        let mut bouncer = Bouncer::new(false);
         bouncer.authorize();
         bouncer.idle_timeout = Duration::from_millis(50);
 
@@ -254,10 +235,10 @@ mod tests {
 
         bouncer.accept();
 
-        assert_eq!(bouncer.check(), Consequence::None);
+        assert_eq!(bouncer.idle_check(), Consequence::None);
 
         thread::sleep(Duration::from_millis(60));
 
-        assert_eq!(bouncer.check(), Consequence::Drop);
+        assert_eq!(bouncer.idle_check(), Consequence::Drop);
     }
 }
