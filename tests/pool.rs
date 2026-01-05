@@ -71,138 +71,325 @@ fn mine_to_pool() {
 
 #[tokio::test]
 #[serial(bitcoind)]
-#[timeout(90000)]
-async fn basic_initialization_flow() {
-    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
+#[timeout(120000)]
+async fn stratum_state_machine() {
+    let pool = TestPool::spawn_with_args("--start-diff 0.00001 --disable-bouncer");
 
-    let client = pool.stratum_client().await;
-    let client_invalid_username = pool.stratum_client_for_username("notabitcoinaddress").await;
-    let client_address_wrong_network = pool
-        .stratum_client_for_username("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4")
-        .await;
-    let mut events = client.connect().await.unwrap();
-    client_invalid_username.connect().await.unwrap();
-    client_address_wrong_network.connect().await.unwrap();
+    // State::Init
+    {
+        let client = pool.stratum_client().await;
+        client.connect().await.unwrap();
 
-    let (subscribe, _, _) = client.subscribe().await.unwrap();
-    client_invalid_username.subscribe().await.unwrap();
-    client_address_wrong_network.subscribe().await.unwrap();
+        // configure with unsupported extension -> error
+        assert!(
+            client
+                .configure(vec!["unknown-extension".into()], None)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("Unsupported extension")
+        );
 
-    assert_eq!(subscribe.subscriptions.len(), 2);
+        // authorize before subscribe -> MethodNotAllowed
+        assert_stratum_error(client.authorize().await, StratumError::MethodNotAllowed);
 
-    assert!(client.authorize().await.is_ok());
-    assert!(
-        client_invalid_username
-            .authorize()
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("Invalid bitcoin address")
-    );
-    assert!(
-        client_address_wrong_network
-            .authorize()
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4 is not valid for signet network")
-    );
+        // submit before subscribe -> Unauthorized
+        assert_stratum_error(
+            client
+                .submit(
+                    JobId::new(0),
+                    Extranonce::random(8),
+                    Ntime::from(0),
+                    Nonce::from(0),
+                )
+                .await,
+            StratumError::Unauthorized,
+        );
+    }
 
-    let (notify, difficulty) = wait_for_notify(&mut events).await;
+    // State::Configured
+    {
+        let client = pool.stratum_client().await;
+        client.connect().await.unwrap();
 
-    assert_eq!(difficulty, Difficulty::from(0.00001));
-    assert_eq!(notify.job_id, JobId::from(0));
-    assert!(notify.clean_jobs);
-}
-
-#[tokio::test]
-#[serial(bitcoind)]
-#[timeout(90000)]
-async fn configure_with_multiple_negotiation_steps() {
-    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
-
-    let client = pool.stratum_client().await;
-    let _ = client.connect().await.unwrap();
-
-    assert!(
-        client
-            .configure(vec!["unknown-extension".into()], None)
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("Unsupported extension")
-    );
-
-    assert!(
+        // configure -> Configured
         client
             .configure(
                 vec!["version-rolling".into()],
-                Some(Version::from_str("1fffe000").unwrap())
+                Some(Version::from_str("1fffe000").unwrap()),
             )
             .await
-            .is_ok()
-    );
+            .unwrap();
 
-    assert!(
+        // configure again (reconfigure) -> still Configured
         client
             .configure(
                 vec!["version-rolling".into()],
-                Some(Version::from_str("1fffe111").unwrap())
+                Some(Version::from_str("1fffe000").unwrap()),
             )
             .await
-            .is_ok()
-    );
+            .unwrap();
 
-    let (subscribe, _, _) = client.subscribe().await.unwrap();
+        // authorize in Configured -> MethodNotAllowed
+        assert_stratum_error(client.authorize().await, StratumError::MethodNotAllowed);
 
-    assert_eq!(subscribe.subscriptions.len(), 2);
+        // submit in Configured -> Unauthorized
+        assert_stratum_error(
+            client
+                .submit(
+                    JobId::new(0),
+                    Extranonce::random(8),
+                    Ntime::from(0),
+                    Nonce::from(0),
+                )
+                .await,
+            StratumError::Unauthorized,
+        );
+    }
 
-    assert!(client.authorize().await.is_ok());
-}
+    // State::Subscribed
+    {
+        let client = pool.stratum_client().await;
+        client.connect().await.unwrap();
 
-#[tokio::test]
-#[serial(bitcoind)]
-#[timeout(90000)]
-async fn authorize_before_subscribe_fails() {
-    let pool = TestPool::spawn();
+        let (subscribe, _, _) = client.subscribe().await.unwrap();
+        assert_eq!(subscribe.subscriptions.len(), 2);
 
-    let client = pool.stratum_client().await;
-    let _ = client.connect().await.unwrap();
-
-    assert!(
+        // configure in Subscribed -> allowed
         client
-            .authorize()
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("Method not allowed")
-    );
-}
-
-#[tokio::test]
-#[serial(bitcoind)]
-#[timeout(90000)]
-async fn submit_before_authorize_fails() {
-    let pool = TestPool::spawn();
-
-    let client = pool.stratum_client().await;
-    let _ = client.connect().await.unwrap();
-
-    client.subscribe().await.unwrap();
-
-    assert!(
-        client
-            .submit(
-                JobId::new(3),
-                Extranonce::random(8),
-                Ntime::from(0),
-                Nonce::from(12345),
+            .configure(
+                vec!["version-rolling".into()],
+                Some(Version::from_str("1fffe000").unwrap()),
             )
             .await
-            .unwrap_err()
-            .to_string()
-            .contains("Unauthorized")
-    );
+            .unwrap();
+
+        // subscribe again (resubscription in Subscribed) -> allowed
+        client.subscribe().await.unwrap();
+
+        // submit in Subscribed -> Unauthorized
+        assert_stratum_error(
+            client
+                .submit(
+                    JobId::new(0),
+                    Extranonce::random(8),
+                    Ntime::from(0),
+                    Nonce::from(0),
+                )
+                .await,
+            StratumError::Unauthorized,
+        );
+    }
+
+    // State::Working
+    {
+        let client = pool.stratum_client().await;
+        let mut events = client.connect().await.unwrap();
+
+        let (subscribe_result, _, _) = client.subscribe().await.unwrap();
+        let enonce1 = subscribe_result.enonce1.clone();
+        let enonce2_size = subscribe_result.enonce2_size;
+
+        client.authorize().await.unwrap();
+
+        let (notify, difficulty) = wait_for_notify(&mut events).await;
+
+        assert_eq!(difficulty, Difficulty::from(0.00001));
+        assert_eq!(notify.job_id, JobId::from(0));
+        assert!(notify.clean_jobs);
+
+        // configure in Working -> allowed
+        client
+            .configure(
+                vec!["version-rolling".into()],
+                Some(Version::from_str("1fffe000").unwrap()),
+            )
+            .await
+            .unwrap();
+
+        // authorize in Working -> MethodNotAllowed
+        assert_stratum_error(client.authorize().await, StratumError::MethodNotAllowed);
+
+        // submit in Working -> allowed
+        let enonce2 = Extranonce::random(enonce2_size);
+        let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, difficulty);
+        client
+            .submit(notify.job_id, enonce2, ntime, nonce)
+            .await
+            .unwrap();
+    }
+
+    // Resubscription behavior (same connection)
+    {
+        let client = pool.stratum_client().await;
+        let mut events = client.connect().await.unwrap();
+
+        // Configure version rolling first
+        client
+            .configure(
+                vec!["version-rolling".into()],
+                Some(Version::from_str("1fffe000").unwrap()),
+            )
+            .await
+            .unwrap();
+
+        let (subscribe_result, _, _) = client.subscribe().await.unwrap();
+        let enonce1 = subscribe_result.enonce1.clone();
+        let enonce2_size = subscribe_result.enonce2_size;
+
+        client.authorize().await.unwrap();
+
+        let (notify, difficulty) = wait_for_notify(&mut events).await;
+
+        // Submit a valid share (confirms Working state)
+        let enonce2 = Extranonce::random(enonce2_size);
+        let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, difficulty);
+        client
+            .submit(notify.job_id, enonce2, ntime, nonce)
+            .await
+            .unwrap();
+
+        // Resubscribe on same connection -> goes back to Subscribed state
+        let (new_subscribe_result, _, _) = client.subscribe().await.unwrap();
+
+        // Submit should fail with Unauthorized (not in Working state anymore)
+        assert_stratum_error(
+            client
+                .submit(
+                    notify.job_id,
+                    Extranonce::random(enonce2_size),
+                    ntime,
+                    nonce,
+                )
+                .await,
+            StratumError::Unauthorized,
+        );
+
+        // Must re-authorize after resubscription
+        client.authorize().await.unwrap();
+
+        // Wait for new job
+        let (new_notify, new_difficulty) = wait_for_notify(&mut events).await;
+
+        // New job ID should work
+        let new_enonce2 = Extranonce::random(enonce2_size);
+        let (new_ntime, new_nonce) = solve_share(
+            &new_notify,
+            &new_subscribe_result.enonce1,
+            &new_enonce2,
+            new_difficulty,
+        );
+        client
+            .submit(new_notify.job_id, new_enonce2, new_ntime, new_nonce)
+            .await
+            .unwrap();
+    }
+
+    // Successful session resume preserves enonce1
+    let original_enonce1 = {
+        let client = pool.stratum_client().await;
+        let mut events = client.connect().await.unwrap();
+
+        let (subscribe_result, _, _) = client.subscribe().await.unwrap();
+        let enonce1 = subscribe_result.enonce1.clone();
+
+        client.authorize().await.unwrap();
+
+        // Must submit a share for session to be stored (requires authorization)
+        let (notify, difficulty) = wait_for_notify(&mut events).await;
+        let enonce2 = Extranonce::random(subscribe_result.enonce2_size);
+        let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, difficulty);
+        client
+            .submit(notify.job_id, enonce2, ntime, nonce)
+            .await
+            .unwrap();
+
+        client.disconnect().await.unwrap();
+        enonce1
+    };
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Resume session with original enonce1
+    {
+        let client = pool.stratum_client().await;
+        let mut events = client.connect().await.unwrap();
+
+        let (subscribe_result, _, _) = client
+            .subscribe_with_enonce1(Some(original_enonce1.clone()))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            subscribe_result.enonce1, original_enonce1,
+            "Session resumption should return the same enonce1"
+        );
+
+        // Must re-authorize even after session resume
+        client.authorize().await.unwrap();
+
+        // Should be able to work with resumed session
+        let (notify, difficulty) = wait_for_notify(&mut events).await;
+        let enonce2 = Extranonce::random(subscribe_result.enonce2_size);
+        let (ntime, nonce) = solve_share(&notify, &original_enonce1, &enonce2, difficulty);
+        client
+            .submit(notify.job_id, enonce2, ntime, nonce)
+            .await
+            .unwrap();
+    }
+
+    // Unknown enonce1 results in new enonce1
+    {
+        let client = pool.stratum_client().await;
+        client.connect().await.unwrap();
+
+        let fake_enonce1: Extranonce = "deadbeef".parse().unwrap();
+        let (subscribe_result, _, _) = client
+            .subscribe_with_enonce1(Some(fake_enonce1.clone()))
+            .await
+            .unwrap();
+
+        assert_ne!(
+            subscribe_result.enonce1, fake_enonce1,
+            "Unknown enonce1 should result in new enonce1 being issued"
+        );
+
+        client.authorize().await.unwrap();
+    }
+
+    // Authorization Validation
+    {
+        let client_invalid_username = pool.stratum_client_for_username("notabitcoinaddress").await;
+        let client_address_wrong_network = pool
+            .stratum_client_for_username("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4")
+            .await;
+
+        client_invalid_username.connect().await.unwrap();
+        client_address_wrong_network.connect().await.unwrap();
+
+        client_invalid_username.subscribe().await.unwrap();
+        client_address_wrong_network.subscribe().await.unwrap();
+
+        assert!(
+            client_invalid_username
+                .authorize()
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid bitcoin address")
+        );
+
+        assert!(
+            client_address_wrong_network
+                .authorize()
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains(
+                    "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4 is not valid for signet network"
+                )
+        );
+    }
 }
 
 #[tokio::test]
@@ -628,79 +815,4 @@ async fn bouncer() {
     };
 
     tokio::join!(auth_timeout_test, idle_timeout_test, reject_escalation_test);
-}
-
-#[tokio::test]
-#[serial(bitcoind)]
-#[timeout(90000)]
-async fn sessions() {
-    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
-
-    let original_enonce1 = {
-        let client = pool.stratum_client().await;
-        let mut events = client.connect().await.unwrap();
-
-        let (subscribe_result, _, _) = client.subscribe().await.unwrap();
-        let enonce1 = subscribe_result.enonce1.clone();
-
-        client.authorize().await.unwrap();
-
-        let (notify, difficulty) = wait_for_notify(&mut events).await;
-
-        let enonce2 = Extranonce::random(subscribe_result.enonce2_size);
-        let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, difficulty);
-        client
-            .submit(notify.job_id, enonce2, ntime, nonce)
-            .await
-            .unwrap();
-
-        client.disconnect().await.unwrap();
-        enonce1
-    };
-
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    {
-        let client = pool.stratum_client().await;
-        let mut events = client.connect().await.unwrap();
-
-        let (subscribe_result, _, _) = client
-            .subscribe_with_enonce1(Some(original_enonce1.clone()))
-            .await
-            .unwrap();
-
-        assert_eq!(
-            subscribe_result.enonce1, original_enonce1,
-            "Session resumption should return the same enonce1"
-        );
-
-        client.authorize().await.unwrap();
-
-        let (notify, difficulty) = wait_for_notify(&mut events).await;
-
-        let enonce2 = Extranonce::random(subscribe_result.enonce2_size);
-        let (ntime, nonce) = solve_share(&notify, &original_enonce1, &enonce2, difficulty);
-        client
-            .submit(notify.job_id, enonce2, ntime, nonce)
-            .await
-            .expect("Should be able to submit after session resume");
-    }
-
-    {
-        let client = pool.stratum_client().await;
-        let _ = client.connect().await.unwrap();
-
-        let fake_enonce1: Extranonce = "deadbeef".parse().unwrap();
-        let (subscribe_result, _, _) = client
-            .subscribe_with_enonce1(Some(fake_enonce1.clone()))
-            .await
-            .unwrap();
-
-        assert_ne!(
-            subscribe_result.enonce1, fake_enonce1,
-            "Unknown enonce1 should result in new enonce1 being issued"
-        );
-
-        client.authorize().await.unwrap();
-    }
 }

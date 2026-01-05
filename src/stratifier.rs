@@ -306,7 +306,12 @@ where
 
             self.send(message).await?;
             self.version_mask = Some(version_mask);
-            self.state = State::Configured;
+
+            // Only transition to Configured if in Init state
+            // In other states (Subscribed, Working), just update version_mask without state change
+            if self.state == State::Init {
+                self.state = State::Configured;
+            }
         } else {
             warn!("Unsupported extension {:?}", configure);
 
@@ -323,7 +328,12 @@ where
             };
 
             self.send(message).await?;
-            self.state = State::Init;
+
+            // Only reset to Init if in Init or Configured state
+            // Don't disrupt Subscribed or Working states
+            if matches!(self.state, State::Init | State::Configured) {
+                self.state = State::Init;
+            }
         }
 
         Ok(())
