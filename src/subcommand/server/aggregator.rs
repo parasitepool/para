@@ -8,13 +8,13 @@ impl Aggregator {
         if let Some(token) = config.api_token() {
             headers.insert(
                 header::AUTHORIZATION,
-                header::HeaderValue::from_str(&format!("Bearer {token}"))?,
+                HeaderValue::from_str(&format!("Bearer {token}"))?,
             );
         }
 
         headers.insert(
             header::ACCEPT,
-            header::HeaderValue::from_str("application/json")?,
+            HeaderValue::from_str("application/json")?,
         );
 
         let client = ClientBuilder::new()
@@ -97,7 +97,7 @@ impl Aggregator {
                     }
 
                     let resp = request_builder.send().await?;
-                    let status: api::Status =
+                    let status: Status =
                         serde_json::from_str(&resp.text().await?).map_err(|err| anyhow!(err))?;
 
                     Ok::<_, Error>(status.blockheight)
@@ -140,7 +140,7 @@ impl Aggregator {
 
                     let resp = request_builder.send().await?;
 
-                    let status: Result<server::Status> =
+                    let status: Result<Status> =
                         serde_json::from_str(&resp.text().await?).map_err(|err| anyhow!(err));
 
                     status
@@ -151,7 +151,7 @@ impl Aggregator {
             }
         });
 
-        let results: Vec<(&Url, Result<server::Status>)> = futures::future::join_all(fetches).await;
+        let results: Vec<(&Url, Result<Status>)> = futures::future::join_all(fetches).await;
 
         let mut checks = BTreeMap::new();
 
