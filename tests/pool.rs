@@ -600,6 +600,9 @@ async fn share_validation() {
         StratumError::AboveTarget,
     );
 
+    // Valid share to reset bouncer before mining new block
+    submit_valid_share(&client, &notify, &enonce1, enonce2_size, difficulty).await;
+
     // Stale after new block
     let old_job_id = notify.job_id;
     let fresh_enonce2 = Extranonce::random(enonce2_size);
