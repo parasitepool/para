@@ -715,7 +715,6 @@ async fn share_validation() {
     let (old_ntime, old_nonce) = solve_share(&notify, &enonce1, &fresh_enonce2, difficulty);
 
     pool.mine_block();
-    // Give pool time to process the new block and invalidate old jobs
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     assert_stratum_error(
