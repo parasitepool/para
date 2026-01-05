@@ -87,6 +87,7 @@ impl Bouncer {
         }
 
         self.consecutive_rejects += 1;
+        self.last_interaction = Instant::now();
 
         let elapsed = self.first_reject.get_or_insert_with(Instant::now).elapsed();
 

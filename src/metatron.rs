@@ -96,12 +96,10 @@ impl Metatron {
     }
 
     pub(crate) fn take_session(&self, enonce1: &Extranonce) -> Option<SessionSnapshot> {
-        let (_, session) = self.sessions.remove(enonce1)?;
-        if !session.is_expired(SESSION_TTL) {
-            Some(session)
-        } else {
-            None
-        }
+        self.sessions
+            .remove(enonce1)
+            .map(|(_, session)| session)
+            .filter(|s| !s.is_expired(SESSION_TTL))
     }
 
     pub(crate) fn add_block(&self) {

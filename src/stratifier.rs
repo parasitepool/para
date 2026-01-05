@@ -313,8 +313,6 @@ where
             self.send(message).await?;
             self.version_mask = Some(version_mask);
 
-            // Only transition to Configured if in Init state
-            // In other states (Subscribed, Working), just update version_mask without state change
             if self.state == State::Init {
                 self.state = State::Configured;
             }
@@ -334,15 +332,12 @@ where
             };
 
             self.send(message).await?;
-
-            // Don't change state on unsupported extension - client can retry with valid extension
         }
 
         Ok(())
     }
 
     async fn subscribe(&mut self, id: Id, subscribe: Subscribe) -> Result {
-        // Handle resubscription: reset state but keep bouncer and version_mask
         if matches!(self.state, State::Subscribed | State::Working) {
             info!("Client {} resubscribing", self.socket_addr);
             self.jobs = Jobs::new();
@@ -354,8 +349,6 @@ where
             self.authorized = None;
             self.address = None;
             self.workername = None;
-            // Keep self.bouncer (same connection)
-            // Keep self.version_mask (miner can reconfigure if needed)
         }
 
         let enonce1 = if let Some(ref requested_enonce1) = subscribe.enonce1 {
