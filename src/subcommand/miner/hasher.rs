@@ -10,7 +10,7 @@ pub(crate) enum HasherError {
 
 #[derive(Debug)]
 pub(crate) struct Hasher {
-    pub(crate) extranonce2: Extranonce,
+    pub(crate) enonce2: Extranonce,
     pub(crate) header: Header,
     pub(crate) job_id: JobId,
     pub(crate) pool_target: Target,
@@ -40,7 +40,7 @@ impl Hasher {
 
                 if self.pool_target.is_met_by(hash) {
                     metrics.add_share();
-                    return Ok((self.job_id, self.header, self.extranonce2.clone()));
+                    return Ok((self.job_id, self.header, self.enonce2.clone()));
                 }
 
                 if let Some(next_nonce) = self.header.nonce.checked_add(1) {
@@ -145,7 +145,7 @@ mod tests {
         let mut hasher = Hasher {
             header: header(None, None),
             pool_target: target,
-            extranonce2: "0000000000".parse().unwrap(),
+            enonce2: "0000000000".parse().unwrap(),
             job_id: "bf".parse().unwrap(),
         };
 
@@ -161,7 +161,7 @@ mod tests {
         let mut hasher = Hasher {
             header: header(None, Some(u32::MAX - 100)),
             pool_target: target,
-            extranonce2: "0000000000".parse().unwrap(),
+            enonce2: "0000000000".parse().unwrap(),
             job_id: "bf".parse().unwrap(),
         };
 
@@ -223,7 +223,7 @@ mod tests {
             let mut hasher = Hasher {
                 header: header(None, None),
                 pool_target: target,
-                extranonce2: "0000000000".parse().unwrap(),
+                enonce2: "0000000000".parse().unwrap(),
                 job_id: JobId::new(0),
             };
 
@@ -244,7 +244,7 @@ mod tests {
         let mut hasher = Hasher {
             header: header(None, None),
             pool_target: target,
-            extranonce2: "0000000000".parse().unwrap(),
+            enonce2: "0000000000".parse().unwrap(),
             job_id: JobId::new(0),
         };
 
@@ -268,7 +268,7 @@ mod tests {
         let mut hasher = Hasher {
             header: header(None, None),
             pool_target: target,
-            extranonce2: "0000000000".parse().unwrap(),
+            enonce2: "0000000000".parse().unwrap(),
             job_id: JobId::new(1),
         };
 

@@ -58,7 +58,14 @@ impl Template {
             self.stratum_endpoint, self.username
         );
 
-        let address = resolve_stratum_endpoint(&self.stratum_endpoint).await?;
+        let address = resolve_stratum_endpoint(&self.stratum_endpoint)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to resolve stratum endpoint `{}`",
+                    self.stratum_endpoint
+                )
+            })?;
 
         let config = ClientConfig {
             address: address.to_string(),
@@ -69,11 +76,20 @@ impl Template {
         };
 
         let client = Client::new(config);
-        let mut events = client.connect().await?;
+        let mut events = client
+            .connect()
+            .await
+            .with_context(|| format!("failed to connect to stratum server at `{address}`"))?;
 
-        let (subscription, _, _) = client.subscribe().await?;
+        let (subscription, _, _) = client
+            .subscribe()
+            .await
+            .context("stratum mining.subscribe failed")?;
 
-        client.authorize().await?;
+        client
+            .authorize()
+            .await
+            .context("stratum mining.authorize failed")?;
 
         let mut pool_difficulty = None;
 
@@ -125,10 +141,10 @@ impl Template {
         notify: &Notify,
         pool_difficulty: Option<Difficulty>,
     ) -> Result<Output> {
-        let extranonce2 = Extranonce::random(subscription.extranonce2_size);
+        let enonce2 = Extranonce::random(subscription.enonce2_size);
         let coinbase_bin = hex::decode(format!(
             "{}{}{}{}",
-            notify.coinb1, subscription.extranonce1, extranonce2, notify.coinb2
+            notify.coinb1, subscription.enonce1, enonce2, notify.coinb2
         ))?;
 
         let mut cursor = bitcoin::io::Cursor::new(&coinbase_bin);
@@ -158,8 +174,8 @@ impl Template {
         let merkle_root = merkle_root(
             &notify.coinb1,
             &notify.coinb2,
-            &subscription.extranonce1,
-            &extranonce2,
+            &subscription.enonce1,
+            &enonce2,
             &notify.merkle_branches,
         )?;
 

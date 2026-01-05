@@ -40,8 +40,8 @@ pub(crate) struct Miner {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Share {
-    pub extranonce1: Extranonce,
-    pub extranonce2: Extranonce,
+    pub enonce1: Extranonce,
+    pub enonce2: Extranonce,
     pub job_id: JobId,
     pub nonce: Nonce,
     pub ntime: Ntime,
@@ -56,7 +56,14 @@ impl Miner {
             self.stratum_endpoint, self.username
         );
 
-        let address = resolve_stratum_endpoint(&self.stratum_endpoint).await?;
+        let address = resolve_stratum_endpoint(&self.stratum_endpoint)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to resolve stratum endpoint `{}`",
+                    self.stratum_endpoint
+                )
+            })?;
 
         let config = ClientConfig {
             address: address.to_string(),

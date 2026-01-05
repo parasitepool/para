@@ -140,7 +140,10 @@ impl Sync {
             info!("Keep-alive mode enabled - will continue running even when caught up");
         }
 
-        let database = Database::new(self.database_url.clone()).await?;
+        let database = Database::new(self.database_url.clone())
+            .await
+            .context("failed to connect to PostgreSQL database")?;
+
         let client = Client::new();
 
         let mut current_id = self.load_current_id().await?;

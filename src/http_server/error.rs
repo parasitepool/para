@@ -31,7 +31,7 @@ impl From<Error> for ServerError {
     }
 }
 
-pub(super) trait OptionExt<T> {
+pub(crate) trait OptionExt<T> {
     fn ok_or_not_found<F: FnOnce() -> S, S: Into<String>>(self, f: F) -> ServerResult<T>;
 }
 

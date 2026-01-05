@@ -3,8 +3,8 @@ use super::*;
 pub(crate) struct Controller {
     client: Client,
     cpu_cores: usize,
-    extranonce1: Extranonce,
-    extranonce2: Arc<Mutex<Extranonce>>,
+    enonce1: Extranonce,
+    enonce2: Arc<Mutex<Extranonce>>,
     hasher_cancel: Option<CancellationToken>,
     hashers: JoinSet<()>,
     metrics: Arc<Metrics>,
@@ -29,13 +29,24 @@ impl Controller {
         mode: Mode,
         cancel_token: CancellationToken,
     ) -> Result<Vec<Share>> {
-        let events = client.connect().await?;
-        let (subscribe, _, _) = client.subscribe().await?;
-        client.authorize().await?;
+        let events = client
+            .connect()
+            .await
+            .context("failed to connect to stratum server")?;
+
+        let (subscribe, _, _) = client
+            .subscribe()
+            .await
+            .context("stratum mining.subscribe failed")?;
+
+        client
+            .authorize()
+            .await
+            .context("stratum mining.authorize failed")?;
 
         info!(
-            "Authorized: extranonce1={}, extranonce2_size={}",
-            subscribe.extranonce1, subscribe.extranonce2_size
+            "Authorized: enonce1={}, enonce2_size={}",
+            subscribe.enonce1, subscribe.enonce2_size
         );
 
         info!("Controller initialized with {} CPU cores", cpu_cores);
@@ -50,8 +61,8 @@ impl Controller {
         let mut controller = Self {
             client,
             cpu_cores,
-            extranonce1: subscribe.extranonce1,
-            extranonce2: Arc::new(Mutex::new(Extranonce::zeros(subscribe.extranonce2_size))),
+            enonce1: subscribe.enonce1,
+            enonce2: Arc::new(Mutex::new(Extranonce::zeros(subscribe.enonce2_size))),
             hasher_cancel: None,
             hashers: JoinSet::new(),
             metrics: Arc::new(Metrics::new()),
@@ -118,12 +129,12 @@ impl Controller {
                     }
                 },
                 maybe = self.share_rx.recv() => match maybe {
-                    Some((job_id, header, extranonce2)) => {
+                    Some((job_id, header, enonce2)) => {
                         info!("Valid share found: blockhash={} nonce={}", header.block_hash(), header.nonce);
 
                         let share = Share {
-                            extranonce1: self.extranonce1.clone(),
-                            extranonce2: extranonce2.clone(),
+                            enonce1: self.enonce1.clone(),
+                            enonce2: enonce2.clone(),
                             job_id,
                             nonce: header.nonce.into(),
                             ntime: header.time.into(),
@@ -133,7 +144,7 @@ impl Controller {
 
                         self.shares.push(share);
 
-                        match self.client.submit(job_id, extranonce2, header.time.into(), header.nonce.into()).await {
+                        match self.client.submit(job_id, enonce2, header.time.into(), header.nonce.into()).await {
                             Err(err) => warn!("Failed to submit share for job {job_id}: {err}"),
                             Ok(_) => info!("Share for job {job_id} submitted successfully"),
                         }
@@ -167,8 +178,8 @@ impl Controller {
         for core_id in 0..self.cpu_cores {
             let mut notify_rx = self.notify_rx.clone();
             let share_tx = self.share_tx.clone();
-            let extranonce1 = self.extranonce1.clone();
-            let extranonce2 = self.extranonce2.clone();
+            let enonce1 = self.enonce1.clone();
+            let enonce2 = self.enonce2.clone();
             let pool_difficulty = self.pool_difficulty.clone();
             let metrics = self.metrics.clone();
             let throttle = self.throttle;
@@ -189,18 +200,18 @@ impl Controller {
                             break;
                         }
 
-                        let extranonce2 = {
-                            let mut guard = extranonce2.lock().await;
-                            let extranonce2 = guard.clone();
+                        let enonce2 = {
+                            let mut guard = enonce2.lock().await;
+                            let enonce2 = guard.clone();
                             guard.increment_wrapping();
-                            extranonce2
+                            enonce2
                         };
 
                         let merkle = stratum::merkle_root(
                             &notify.coinb1,
                             &notify.coinb2,
-                            &extranonce1,
-                            &extranonce2,
+                            &enonce1,
+                            &enonce2,
                             &notify.merkle_branches,
                         )
                         .expect("merkle");
@@ -219,7 +230,7 @@ impl Controller {
                         let mut hasher = Hasher {
                             header,
                             pool_target,
-                            extranonce2: extranonce2.clone(),
+                            enonce2: enonce2.clone(),
                             job_id: notify.job_id,
                         };
 

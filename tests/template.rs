@@ -3,7 +3,7 @@ use {super::*, para::subcommand::template::Output};
 #[test]
 #[serial(bitcoind)]
 #[timeout(90000)]
-fn template_raw() {
+fn template_with_ckpool() {
     let ckpool = TestCkpool::spawn();
 
     let stratum_endpoint = ckpool.stratum_endpoint();
@@ -21,14 +21,6 @@ fn template_raw() {
     assert!(output.clean_jobs); // Initial job should have clean_jobs=true
 
     assert_eq!(stdout.status.code(), Some(0));
-}
-
-#[test]
-#[serial(bitcoind)]
-#[timeout(90000)]
-fn template_interpreted() {
-    let ckpool = TestCkpool::spawn();
-    let stratum_endpoint = ckpool.stratum_endpoint();
 
     let template = CommandBuilder::new(format!(
         "template {stratum_endpoint} --username {}",
