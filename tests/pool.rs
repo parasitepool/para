@@ -1,20 +1,5 @@
 use super::*;
 
-async fn submit_valid_share(
-    client: &stratum::Client,
-    notify: &stratum::Notify,
-    enonce1: &Extranonce,
-    enonce2_size: usize,
-    difficulty: Difficulty,
-) {
-    let enonce2 = Extranonce::random(enonce2_size);
-    let (ntime, nonce) = solve_share(notify, enonce1, &enonce2, difficulty);
-    client
-        .submit(notify.job_id, enonce2, ntime, nonce)
-        .await
-        .unwrap();
-}
-
 async fn wait_for_notify(
     events: &mut tokio::sync::broadcast::Receiver<stratum::Event>,
 ) -> (stratum::Notify, Difficulty) {
@@ -430,8 +415,9 @@ fn concurrently_listening_workers_receive_new_templates_on_new_block() {
 #[serial(bitcoind)]
 #[timeout(120000)]
 async fn vardiff_adjusts_difficulty() {
-    let pool =
-        TestPool::spawn_with_args("--start-diff 0.00001 --vardiff-period 1 --vardiff-window 5");
+    let pool = TestPool::spawn_with_args(
+        "--start-diff 0.00001 --vardiff-period 1 --vardiff-window 5 --disable-bouncer",
+    );
 
     let client = pool.stratum_client().await;
     let mut events = client.connect().await.unwrap();
@@ -507,7 +493,7 @@ async fn vardiff_adjusts_difficulty() {
 #[serial(bitcoind)]
 #[timeout(90000)]
 async fn share_validation() {
-    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
+    let pool = TestPool::spawn_with_args("--start-diff 0.00001 --disable-bouncer");
     let client = pool.stratum_client().await;
     let mut events = client.connect().await.unwrap();
 
@@ -535,9 +521,6 @@ async fn share_validation() {
         StratumError::Duplicate,
     );
 
-    // Valid share to reset bouncer
-    submit_valid_share(&client, &notify, &enonce1, enonce2_size, difficulty).await;
-
     // Invalid enonce2 length (too short)
     assert_stratum_error(
         client
@@ -550,9 +533,6 @@ async fn share_validation() {
             .await,
         StratumError::InvalidNonce2Length,
     );
-
-    // Valid share to reset bouncer
-    submit_valid_share(&client, &notify, &enonce1, enonce2_size, difficulty).await;
 
     // Invalid enonce2 length (too long)
     assert_stratum_error(
@@ -567,9 +547,6 @@ async fn share_validation() {
         StratumError::InvalidNonce2Length,
     );
 
-    // Valid share to reset bouncer
-    submit_valid_share(&client, &notify, &enonce1, enonce2_size, difficulty).await;
-
     // Invalid job id (stale)
     assert_stratum_error(
         client
@@ -583,9 +560,6 @@ async fn share_validation() {
         StratumError::Stale,
     );
 
-    // Valid share to reset bouncer
-    submit_valid_share(&client, &notify, &enonce1, enonce2_size, difficulty).await;
-
     // Share above target
     assert_stratum_error(
         client
@@ -598,9 +572,6 @@ async fn share_validation() {
             .await,
         StratumError::AboveTarget,
     );
-
-    // Valid share to reset bouncer before mining new block
-    submit_valid_share(&client, &notify, &enonce1, enonce2_size, difficulty).await;
 
     // Stale after new block
     let old_job_id = notify.job_id;
@@ -719,8 +690,8 @@ async fn bouncer() {
                 }
             }
 
-            if elapsed > Duration::from_secs(20) {
-                panic!("Connection still alive after 20s - expected drop at DROP_THRESHOLD (10s)");
+            if elapsed > Duration::from_secs(10) {
+                panic!("Connection still alive after 10s - expected drop at DROP_THRESHOLD (3s)");
             }
         }
 

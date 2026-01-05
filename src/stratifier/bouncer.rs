@@ -7,9 +7,9 @@ const AUTH_TIMEOUT: Duration = Duration::from_secs(60);
 const IDLE_TIMEOUT: Duration = Duration::from_secs(600);
 const CHECK_INTERVAL: Duration = Duration::from_secs(30);
 
-const TEST_WARN_THRESHOLD: Duration = Duration::from_secs(3);
-const TEST_RECONNECT_THRESHOLD: Duration = Duration::from_secs(6);
-const TEST_DROP_THRESHOLD: Duration = Duration::from_secs(10);
+const TEST_WARN_THRESHOLD: Duration = Duration::from_secs(1);
+const TEST_RECONNECT_THRESHOLD: Duration = Duration::from_secs(2);
+const TEST_DROP_THRESHOLD: Duration = Duration::from_secs(3);
 const TEST_AUTH_TIMEOUT: Duration = Duration::from_secs(2);
 const TEST_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
 const TEST_CHECK_INTERVAL: Duration = Duration::from_secs(1);
@@ -24,6 +24,7 @@ pub(crate) enum Consequence {
 }
 
 pub(crate) struct Bouncer {
+    disabled: bool,
     warn_threshold: Duration,
     reconnect_threshold: Duration,
     drop_threshold: Duration,
@@ -68,6 +69,7 @@ impl Bouncer {
         };
 
         Self {
+            disabled: false,
             warn_threshold,
             reconnect_threshold,
             drop_threshold,
@@ -83,12 +85,22 @@ impl Bouncer {
         }
     }
 
+    pub(crate) fn new_disabled() -> Self {
+        let mut bouncer = Self::new();
+        bouncer.disabled = true;
+        bouncer
+    }
+
     pub(crate) fn authorize(&mut self) {
         self.authorized = true;
         self.last_share_at = Some(Instant::now());
     }
 
     pub(crate) fn reject(&mut self) -> Consequence {
+        if self.disabled {
+            return Consequence::None;
+        }
+
         self.consecutive_rejects += 1;
 
         let elapsed = self.first_reject.get_or_insert_with(Instant::now).elapsed();

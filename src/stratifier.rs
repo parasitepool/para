@@ -54,6 +54,12 @@ where
             config.vardiff_window(),
         );
 
+        let bouncer = if config.disable_bouncer() {
+            Bouncer::new_disabled()
+        } else {
+            Bouncer::new()
+        };
+
         metatron.add_connection();
 
         Self {
@@ -74,7 +80,7 @@ where
             enonce1: None,
             user_agent: None,
             vardiff,
-            bouncer: Bouncer::new(),
+            bouncer,
         }
     }
 
