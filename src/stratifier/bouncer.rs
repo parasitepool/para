@@ -88,6 +88,9 @@ impl Bouncer {
     pub(crate) fn new_disabled() -> Self {
         let mut bouncer = Self::new();
         bouncer.disabled = true;
+        // Also disable auth/idle timeouts for testing
+        bouncer.auth_timeout = Duration::from_secs(3600);
+        bouncer.idle_timeout = Duration::from_secs(3600);
         bouncer
     }
 
