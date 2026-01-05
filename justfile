@@ -77,6 +77,9 @@ server:
     --log-dir copr/logs \
     --port 8080
 
+openapi:
+  cargo run --example openapi > openapi.json
+
 harness: build-bitcoind
   cargo run -p harness
 
