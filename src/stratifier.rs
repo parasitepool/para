@@ -516,8 +516,8 @@ where
             return Ok(consequence);
         }
 
-        let job_ntime: u32 = job.ntime().into();
-        let submit_ntime: u32 = submit.ntime.into();
+        let job_ntime = job.ntime().0;
+        let submit_ntime = submit.ntime.0;
         if submit_ntime < job_ntime || submit_ntime > job_ntime + MAX_NTIME_OFFSET {
             self.send_error(
                 id,
