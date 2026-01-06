@@ -56,6 +56,8 @@ where
             config.start_diff(),
             config.vardiff_period(),
             config.vardiff_window(),
+            config.min_diff(),
+            config.max_diff(),
         );
 
         let bouncer = Bouncer::new(config.disable_bouncer());
@@ -347,6 +349,8 @@ where
                 self.config.start_diff(),
                 self.config.vardiff_period(),
                 self.config.vardiff_window(),
+                self.config.min_diff(),
+                self.config.max_diff(),
             );
             self.authorized = None;
             self.address = None;

@@ -26,10 +26,18 @@ pub(crate) struct Vardiff {
     first_share: Option<Instant>,
     last_diff_change: Instant,
     shares_since_change: u32,
+    min_diff: Option<Difficulty>,
+    max_diff: Option<Difficulty>,
 }
 
 impl Vardiff {
-    pub(crate) fn new(start_diff: Difficulty, period: Duration, window: Duration) -> Self {
+    pub(crate) fn new(
+        start_diff: Difficulty,
+        period: Duration,
+        window: Duration,
+        min_diff: Option<Difficulty>,
+        max_diff: Option<Difficulty>,
+    ) -> Self {
         let window_secs = window.as_secs_f64();
         let expected_shares_per_window = window_secs / period.as_secs_f64();
 
@@ -45,7 +53,20 @@ impl Vardiff {
             first_share: None,
             last_diff_change: Instant::now(),
             shares_since_change: 0,
+            min_diff,
+            max_diff,
         }
+    }
+
+    fn clamp_difficulty(&self, diff: Difficulty) -> Difficulty {
+        let mut result = diff;
+        if let Some(min) = self.min_diff {
+            result = result.max(min);
+        }
+        if let Some(max) = self.max_diff {
+            result = result.min(max);
+        }
+        result
     }
 
     fn target_rate(&self) -> f64 {
@@ -127,6 +148,17 @@ impl Vardiff {
 
         let new_diff = Difficulty::from(optimal.min(network_diff.as_f64()));
 
+        let new_diff = {
+            let clamped = self.clamp_difficulty(new_diff);
+            if clamped != new_diff {
+                debug!(
+                    "Vardiff clamped {} -> {} (min={:?}, max={:?})",
+                    new_diff, clamped, self.min_diff, self.max_diff
+                );
+            }
+            clamped
+        };
+
         if self.current_diff == new_diff {
             return None;
         }
@@ -160,6 +192,8 @@ impl Default for Vardiff {
             Difficulty::from(1),
             Duration::from_secs(5),
             Duration::from_secs(300),
+            None,
+            None,
         )
     }
 }
@@ -200,20 +234,20 @@ mod tests {
 
     #[test]
     fn tracks_initial_difficulty() {
-        let vardiff = Vardiff::new(Difficulty::from(10), secs(5), secs(300));
+        let vardiff = Vardiff::new(Difficulty::from(10), secs(5), secs(300), None, None);
         assert_eq!(vardiff.current_diff(), Difficulty::from(10));
     }
 
     #[test]
     fn no_change_on_first_share() {
-        let mut vardiff = Vardiff::new(Difficulty::from(10), secs(5), secs(300));
+        let mut vardiff = Vardiff::new(Difficulty::from(10), secs(5), secs(300), None, None);
         let result = vardiff.record_share(Difficulty::from(10), Difficulty::from(1_000_000));
         assert!(result.is_none());
     }
 
     #[test]
     fn respects_min_shares_threshold() {
-        let mut vardiff = Vardiff::new(Difficulty::from(10), secs(5), secs(300));
+        let mut vardiff = Vardiff::new(Difficulty::from(10), secs(5), secs(300), None, None);
 
         for _ in 0..10 {
             let result = vardiff.record_share(Difficulty::from(10), Difficulty::from(1_000_000));
@@ -234,7 +268,7 @@ mod tests {
     #[test]
     fn increases_difficulty_for_fast_shares() {
         let start_diff = Difficulty::from(10);
-        let mut vardiff = Vardiff::new(start_diff, secs(5), secs(10));
+        let mut vardiff = Vardiff::new(start_diff, secs(5), secs(10), None, None);
 
         let base = Instant::now();
         vardiff.first_share = Some(base);
@@ -255,7 +289,7 @@ mod tests {
 
     #[test]
     fn respects_network_diff_ceiling() {
-        let mut vardiff = Vardiff::new(Difficulty::from(10), secs(5), secs(10));
+        let mut vardiff = Vardiff::new(Difficulty::from(10), secs(5), secs(10), None, None);
 
         let base = Instant::now();
         vardiff.first_share = Some(base);
@@ -280,25 +314,91 @@ mod tests {
 
     #[test]
     fn min_shares_derived_from_window_ratio() {
-        let vardiff = Vardiff::new(Difficulty::from(1), secs(1), secs(60));
+        let vardiff = Vardiff::new(Difficulty::from(1), secs(1), secs(60), None, None);
         assert_eq!(vardiff.min_shares_for_adjustment, 72);
 
-        let vardiff = Vardiff::new(Difficulty::from(1), secs(5), secs(300));
+        let vardiff = Vardiff::new(Difficulty::from(1), secs(5), secs(300), None, None);
         assert_eq!(vardiff.min_shares_for_adjustment, 72);
 
-        let vardiff = Vardiff::new(Difficulty::from(1), secs(1), secs(2));
+        let vardiff = Vardiff::new(Difficulty::from(1), secs(1), secs(2), None, None);
         assert_eq!(vardiff.min_shares_for_adjustment, 2);
     }
 
     #[test]
     fn min_time_derived_from_window_ratio() {
-        let vardiff = Vardiff::new(Difficulty::from(1), secs(5), secs(300));
+        let vardiff = Vardiff::new(Difficulty::from(1), secs(5), secs(300), None, None);
         assert_eq!(vardiff.min_time_for_adjustment, secs(240));
 
-        let vardiff = Vardiff::new(Difficulty::from(1), secs(1), secs(60));
+        let vardiff = Vardiff::new(Difficulty::from(1), secs(1), secs(60), None, None);
         assert_eq!(vardiff.min_time_for_adjustment, secs(48));
 
-        let vardiff = Vardiff::new(Difficulty::from(1), secs(1), secs(10));
+        let vardiff = Vardiff::new(Difficulty::from(1), secs(1), secs(10), None, None);
         assert_eq!(vardiff.min_time_for_adjustment, secs(8));
+    }
+
+    #[test]
+    fn respects_min_diff_floor() {
+        let min_diff = Difficulty::from(5);
+        let mut vardiff = Vardiff::new(
+            Difficulty::from(10),
+            secs(5),
+            secs(10),
+            Some(min_diff),
+            None,
+        );
+
+        let base = Instant::now();
+        vardiff.first_share = Some(base);
+        vardiff.last_diff_change = base;
+        vardiff.dsps = DecayingAverage::with_start_time(secs(10), base);
+
+        let mut t = base;
+        for _ in 0..100 {
+            t += secs(10);
+            vardiff.dsps.record(0.1, t);
+            vardiff.shares_since_change += 1;
+        }
+
+        if let Some(new_diff) = vardiff.evaluate_adjustment(Difficulty::from(1_000_000), t) {
+            assert!(
+                new_diff >= min_diff,
+                "Difficulty {} should not go below min_diff {}",
+                new_diff,
+                min_diff
+            );
+        }
+    }
+
+    #[test]
+    fn respects_max_diff_ceiling() {
+        let max_diff = Difficulty::from(50);
+        let mut vardiff = Vardiff::new(
+            Difficulty::from(10),
+            secs(5),
+            secs(10),
+            None,
+            Some(max_diff),
+        );
+
+        let base = Instant::now();
+        vardiff.first_share = Some(base);
+        vardiff.last_diff_change = base;
+        vardiff.dsps = DecayingAverage::with_start_time(secs(10), base);
+
+        let mut t = base;
+        for _ in 0..100 {
+            t += millis(10);
+            vardiff.dsps.record(100.0, t);
+            vardiff.shares_since_change += 1;
+        }
+
+        if let Some(new_diff) = vardiff.evaluate_adjustment(Difficulty::from(1_000_000), t) {
+            assert!(
+                new_diff <= max_diff,
+                "Difficulty {} should not exceed max_diff {}",
+                new_diff,
+                max_diff
+            );
+        }
     }
 }
