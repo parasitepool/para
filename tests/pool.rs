@@ -709,6 +709,20 @@ async fn share_validation() {
         StratumError::AboveTarget,
     );
 
+    // Worker mismatch rejected
+    assert_stratum_error(
+        client
+            .submit_with_username(
+                Username::from("different_address.different_worker"),
+                notify.job_id,
+                Extranonce::random(enonce2_size),
+                notify.ntime,
+                Nonce::from(0),
+            )
+            .await,
+        StratumError::WorkerMismatch,
+    );
+
     // Stale after new block
     let old_job_id = notify.job_id;
     let fresh_enonce2 = Extranonce::random(enonce2_size);
