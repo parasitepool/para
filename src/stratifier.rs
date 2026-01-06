@@ -470,7 +470,6 @@ where
     }
 
     async fn submit(&mut self, id: Id, submit: Submit) -> Result<Consequence> {
-        // Validate username matches authorized username
         if let Some(ref authorized) = self.authorized_username
             && submit.username.as_str() != authorized.as_str()
         {
