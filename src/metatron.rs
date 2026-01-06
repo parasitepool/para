@@ -4,6 +4,7 @@ use {
 };
 
 pub(crate) struct Metatron {
+    enonce1_counter: AtomicU64,
     blocks: AtomicU64,
     started: Instant,
     connections: AtomicU64,
@@ -13,13 +14,25 @@ pub(crate) struct Metatron {
 
 impl Metatron {
     pub(crate) fn new() -> Self {
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
         Self {
+            enonce1_counter: AtomicU64::new(seed),
             blocks: AtomicU64::new(0),
             started: Instant::now(),
             connections: AtomicU64::new(0),
             users: DashMap::new(),
             sessions: DashMap::new(),
         }
+    }
+
+    pub(crate) fn next_enonce1(&self) -> Extranonce {
+        let value = self.enonce1_counter.fetch_add(1, Ordering::Relaxed);
+        let bytes = value.to_le_bytes();
+        Extranonce::from_bytes(&bytes[..ENONCE1_SIZE])
     }
 
     pub(crate) async fn run(
@@ -308,5 +321,36 @@ mod tests {
         let metatron = Metatron::new();
         metatron.add_block();
         assert_eq!(metatron.total_blocks(), 1);
+    }
+
+    #[test]
+    fn next_enonce1_is_sequential() {
+        let metatron = Metatron::new();
+        let e1 = metatron.next_enonce1();
+        let e2 = metatron.next_enonce1();
+        let e3 = metatron.next_enonce1();
+
+        let v1 = u32::from_le_bytes(e1.as_bytes().try_into().unwrap());
+        let v2 = u32::from_le_bytes(e2.as_bytes().try_into().unwrap());
+        let v3 = u32::from_le_bytes(e3.as_bytes().try_into().unwrap());
+
+        assert_eq!(v2, v1 + 1);
+        assert_eq!(v3, v2 + 1);
+    }
+
+    #[test]
+    fn next_enonce1_has_correct_size() {
+        let metatron = Metatron::new();
+        assert_eq!(metatron.next_enonce1().len(), ENONCE1_SIZE);
+    }
+
+    #[test]
+    fn next_enonce1_is_unique() {
+        let metatron = Metatron::new();
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..1000 {
+            let enonce = metatron.next_enonce1();
+            assert!(seen.insert(enonce), "duplicate enonce1 generated");
+        }
     }
 }
