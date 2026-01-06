@@ -148,7 +148,6 @@ impl Vardiff {
 
         let new_diff = Difficulty::from(optimal.min(network_diff.as_f64()));
 
-        // Clamp to pool min/max bounds (like ckpool)
         let new_diff = {
             let clamped = self.clamp_difficulty(new_diff);
             if clamped != new_diff {
@@ -353,11 +352,10 @@ mod tests {
         vardiff.last_diff_change = base;
         vardiff.dsps = DecayingAverage::with_start_time(secs(10), base);
 
-        // Simulate very slow shares that would normally drop difficulty below min
         let mut t = base;
         for _ in 0..100 {
-            t += secs(10); // Very slow - 10 seconds per share
-            vardiff.dsps.record(0.1, t); // Low difficulty shares
+            t += secs(10);
+            vardiff.dsps.record(0.1, t);
             vardiff.shares_since_change += 1;
         }
 
@@ -387,11 +385,10 @@ mod tests {
         vardiff.last_diff_change = base;
         vardiff.dsps = DecayingAverage::with_start_time(secs(10), base);
 
-        // Simulate very fast shares that would normally push difficulty above max
         let mut t = base;
         for _ in 0..100 {
-            t += millis(10); // Very fast
-            vardiff.dsps.record(100.0, t); // High difficulty shares
+            t += millis(10);
+            vardiff.dsps.record(100.0, t);
             vardiff.shares_since_change += 1;
         }
 
