@@ -3,7 +3,7 @@ use super::*;
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, DeserializeFromStr, SerializeDisplay,
 )]
-pub struct Ntime(u32);
+pub struct Ntime(pub u32);
 
 impl FromStr for Ntime {
     type Err = InternalError;

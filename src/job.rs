@@ -43,6 +43,10 @@ impl Job {
         })
     }
 
+    pub(crate) fn ntime(&self) -> Ntime {
+        self.workbase.template().current_time
+    }
+
     pub(crate) fn nbits(&self) -> Nbits {
         self.workbase.template().bits
     }
