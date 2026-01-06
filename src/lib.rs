@@ -148,6 +148,7 @@ pub const SHARE_CHANNEL_CAPACITY: usize = 100_000;
 pub const SUBSCRIPTION_ID: &str = "deadbeef";
 pub const LRU_CACHE_SIZE: usize = 256;
 pub const SESSION_TTL: Duration = Duration::from_secs(600);
+/// Max ntime forward roll in seconds. Conservative margin under Bitcoin's 2-hour limit.
 pub const MAX_NTIME_OFFSET: u32 = 7000;
 
 type Result<T = (), E = Error> = std::result::Result<T, E>;
