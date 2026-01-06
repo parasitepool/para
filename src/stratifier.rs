@@ -363,10 +363,10 @@ where
                     requested_enonce1
                 );
 
-                Extranonce::random(ENONCE1_SIZE)
+                self.metatron.next_enonce1()
             }
         } else {
-            Extranonce::random(ENONCE1_SIZE)
+            self.metatron.next_enonce1()
         };
 
         let subscriptions = vec![

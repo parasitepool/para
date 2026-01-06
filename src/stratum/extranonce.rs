@@ -14,6 +14,10 @@ impl Extranonce {
         Self(vec![0u8; size])
     }
 
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        Self(bytes.to_vec())
+    }
+
     pub fn increment_wrapping(&mut self) {
         for b in self.0.iter_mut().rev() {
             let (next, carry) = b.overflowing_add(1);
@@ -155,5 +159,13 @@ mod tests {
         assert_eq!(enonce.to_hex(), "00ff");
         enonce.increment_wrapping();
         assert_eq!(enonce.to_hex(), "0100");
+    }
+
+    #[test]
+    fn from_bytes_roundtrip() {
+        let enonce = Extranonce::from_bytes(&[0xde, 0xad, 0xbe, 0xef]);
+        assert_eq!(enonce.len(), 4);
+        assert_eq!(enonce.to_hex(), "deadbeef");
+        assert_eq!(enonce.as_bytes(), &[0xde, 0xad, 0xbe, 0xef]);
     }
 }
