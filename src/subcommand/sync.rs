@@ -128,7 +128,7 @@ pub(crate) async fn load_current_id_from_file(id_file: &str) -> Result<i64> {
                 .map_err(|e| anyhow!("Invalid ID in file: {}", e))?;
             Ok(id)
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(0),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(0),
         Err(e) => Err(anyhow!("Failed to read ID file: {}", e)),
     }
 }
@@ -323,9 +323,7 @@ impl Sync {
         start_id: i64,
         end_id: i64,
     ) -> Result {
-        let batch_id = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)?
-            .as_secs();
+        let batch_id = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
 
         let batch = ShareBatch {
             block: block.clone(),
