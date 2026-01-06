@@ -5,6 +5,11 @@ use {
 
 mod bouncer;
 
+/// Maximum allowed ntime offset from job's timestamp in seconds.
+/// Miners can roll ntime forward up to this value (~117 minutes).
+/// This is conservative margin under Bitcoin's 2-hour (7200s) future block limit.
+const MAX_NTIME_OFFSET: u32 = 7000;
+
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum State {
     Init,
@@ -508,6 +513,36 @@ where
                 0.0,
                 BlockHash::all_zeros(),
                 Some(StratumError::InvalidNonce2Length),
+            );
+
+            let consequence = self.bouncer.reject();
+            self.handle_consequence(consequence).await;
+
+            return Ok(consequence);
+        }
+
+        // Validate ntime range: cannot be before job's ntime, and cannot exceed
+        // job's ntime + MAX_NTIME_OFFSET to stay within Bitcoin consensus limits
+        let job_ntime: u32 = job.ntime().into();
+        let submit_ntime: u32 = submit.ntime.into();
+        if submit_ntime < job_ntime || submit_ntime > job_ntime + MAX_NTIME_OFFSET {
+            self.send_error(
+                id,
+                StratumError::NtimeOutOfRange,
+                Some(json!({
+                    "job_ntime": job_ntime,
+                    "submit_ntime": submit_ntime,
+                    "max_ntime": job_ntime + MAX_NTIME_OFFSET,
+                })),
+            )
+            .await?;
+
+            self.emit_share(
+                &submit,
+                Some(&job),
+                0.0,
+                BlockHash::all_zeros(),
+                Some(StratumError::NtimeOutOfRange),
             );
 
             let consequence = self.bouncer.reject();
