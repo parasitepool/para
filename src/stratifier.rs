@@ -546,6 +546,34 @@ where
             return Ok(consequence);
         }
 
+        let job_ntime = job.ntime().0;
+        let submit_ntime = submit.ntime.0;
+        if submit_ntime < job_ntime || submit_ntime > job_ntime + MAX_NTIME_OFFSET {
+            self.send_error(
+                id,
+                StratumError::NtimeOutOfRange,
+                Some(json!({
+                    "job_ntime": job_ntime,
+                    "submit_ntime": submit_ntime,
+                    "max_ntime": job_ntime + MAX_NTIME_OFFSET,
+                })),
+            )
+            .await?;
+
+            self.emit_share(
+                &submit,
+                Some(&job),
+                0.0,
+                BlockHash::all_zeros(),
+                Some(StratumError::NtimeOutOfRange),
+            );
+
+            let consequence = self.bouncer.reject();
+            self.handle_consequence(consequence).await;
+
+            return Ok(consequence);
+        }
+
         let version = if let Some(version_bits) = submit.version_bits {
             let Some(version_mask) = job.version_mask else {
                 self.send_error(
