@@ -8,6 +8,7 @@ pub(crate) struct Metatron {
     started: Instant,
     connections: AtomicU64,
     users: DashMap<Address, Arc<User>>,
+    sessions: DashMap<Extranonce, SessionSnapshot>,
 }
 
 impl Metatron {
@@ -17,6 +18,7 @@ impl Metatron {
             started: Instant::now(),
             connections: AtomicU64::new(0),
             users: DashMap::new(),
+            sessions: DashMap::new(),
         }
     }
 
@@ -26,6 +28,8 @@ impl Metatron {
         sink: Option<mpsc::Sender<Share>>,
         cancel: CancellationToken,
     ) {
+        let mut cleanup_interval = tokio::time::interval(Duration::from_secs(60));
+
         loop {
             tokio::select! {
                 biased;
@@ -38,6 +42,11 @@ impl Metatron {
                     }
 
                     break;
+                }
+
+                _ = cleanup_interval.tick() => {
+                    self.sessions
+                        .retain(|_, session| !session.is_expired(SESSION_TTL));
                 }
 
                 Some(share) = rx.recv() => {
@@ -79,6 +88,18 @@ impl Metatron {
             .clone();
 
         user.get_or_create_worker(workername)
+    }
+
+    pub(crate) fn store_session(&self, session: SessionSnapshot) {
+        info!("Storing session for enonce1 {}", session.enonce1);
+        self.sessions.insert(session.enonce1.clone(), session);
+    }
+
+    pub(crate) fn take_session(&self, enonce1: &Extranonce) -> Option<SessionSnapshot> {
+        self.sessions
+            .remove(enonce1)
+            .map(|(_, session)| session)
+            .filter(|s| !s.is_expired(SESSION_TTL))
     }
 
     pub(crate) fn add_block(&self) {

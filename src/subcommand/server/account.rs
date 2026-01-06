@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, ToSchema)]
 pub struct Account {
     pub btc_address: String,
     pub ln_address: Option<String>,
@@ -12,21 +12,21 @@ pub struct Account {
     pub metadata: Option<serde_json::Value>,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, ToSchema)]
 pub struct AccountUpdate {
     pub btc_address: String,
     pub ln_address: String,
     pub signature: String,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, ToSchema)]
 pub struct AccountMetadataUpdate {
     pub btc_address: String,
     pub metadata: serde_json::Value,
     pub signature: String,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, ToSchema)]
 pub struct AccountResponse {
     pub success: bool,
     pub remark: Option<String>,
@@ -45,6 +45,20 @@ pub(crate) fn account_router(config: Arc<ServerConfig>, database: Database) -> R
     router.layer(Extension(database))
 }
 
+/// Look up account by BTC address
+#[utoipa::path(
+    get,
+    path = "/account/{address}",
+    security(("api_token" = [])),
+    params(
+        ("address" = String, Path, description = "BTC address")
+    ),
+    responses(
+        (status = 200, description = "Account found", body = Account),
+        (status = 404, description = "Account not found"),
+    ),
+    tag = "account"
+)]
 pub(crate) async fn account_lookup(
     Extension(database): Extension<Database>,
     Path(address): Path<String>,
@@ -60,6 +74,22 @@ pub(crate) async fn account_lookup(
         .map(IntoResponse::into_response)
 }
 
+/// Update account lightning address
+///
+/// BIP322 is used for signing when supported by underlying address.
+/// p2pkh falls back to ECDSA(secp256k1) signature over the message value
+#[utoipa::path(
+    post,
+    path = "/account/update",
+    security(("api_token" = [])),
+    request_body = AccountUpdate,
+    responses(
+        (status = 200, description = "Account updated", body = Account),
+        (status = 401, description = "Invalid signature"),
+        (status = 404, description = "Account not found"),
+    ),
+    tag = "account"
+)]
 pub(crate) async fn account_update(
     Extension(database): Extension<Database>,
     Json(account_update): Json<AccountUpdate>,
@@ -82,6 +112,19 @@ pub(crate) async fn account_update(
         .map(IntoResponse::into_response)
 }
 
+/// Update account metadata
+#[utoipa::path(
+    post,
+    path = "/account/metadata",
+    security(("api_token" = [])),
+    request_body = AccountMetadataUpdate,
+    responses(
+        (status = 200, description = "Metadata updated", body = Account),
+        (status = 401, description = "Invalid signature"),
+        (status = 404, description = "Account not found"),
+    ),
+    tag = "account"
+)]
 pub(crate) async fn account_metadata_update(
     Extension(database): Extension<Database>,
     Json(metadata_update): Json<AccountMetadataUpdate>,

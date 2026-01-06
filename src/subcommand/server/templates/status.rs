@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Boilerplate, Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Boilerplate, Debug, Deserialize, Serialize, PartialEq, ToSchema)]
 pub struct StatusHtml {
     pub cpu_usage_percent: f64,
     pub disk_usage_percent: f64,

@@ -2,7 +2,9 @@ use super::*;
 
 const UNITS: &[&str] = &["", "K", "M", "G", "T", "P", "E", "Z", "Y"];
 
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, DeserializeFromStr, SerializeDisplay)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, PartialOrd, DeserializeFromStr, SerializeDisplay, ToSchema,
+)]
 pub struct HashRate(pub f64);
 
 impl fmt::Display for HashRate {

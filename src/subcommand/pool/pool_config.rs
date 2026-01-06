@@ -77,6 +77,8 @@ pub(crate) struct PoolConfig {
         value_parser = clap::value_parser!(u8).range(2..=8)
     )]
     extranonce2_size: u8,
+    #[arg(long, help = "Disable bouncer.")]
+    disable_bouncer: bool,
 }
 
 impl PoolConfig {
@@ -239,5 +241,9 @@ impl PoolConfig {
 
     pub(crate) fn extranonce2_size(&self) -> usize {
         self.extranonce2_size as usize
+    }
+
+    pub(crate) fn disable_bouncer(&self) -> bool {
+        self.disable_bouncer
     }
 }
