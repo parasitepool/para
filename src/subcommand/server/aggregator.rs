@@ -12,10 +12,7 @@ impl Aggregator {
             );
         }
 
-        headers.insert(
-            header::ACCEPT,
-            HeaderValue::from_str("application/json")?,
-        );
+        headers.insert(header::ACCEPT, HeaderValue::from_str("application/json")?);
 
         let client = ClientBuilder::new()
             .default_headers(headers)

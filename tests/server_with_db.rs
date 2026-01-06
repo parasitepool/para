@@ -653,19 +653,53 @@ async fn aggregator_blockheight_no_nodes() {
 
 #[tokio::test]
 async fn aggregator_blockheight_returns_minimum() {
-    let node1 = TestServer::spawn_with_db_args("--admin-token token1").await;
-    let node2 = TestServer::spawn_with_db_args("--admin-token token2").await;
+    let low_node = TestServer::spawn_with_db_args("--admin-token admin_token").await;
+    fs::write(low_node.tempdir.path().join("current_id.txt"), "1").unwrap();
+    let source_db_url = low_node.database_url().unwrap();
+    setup_test_schema(source_db_url.clone()).await.unwrap();
+    insert_test_shares(source_db_url.clone(), 1, 800000)
+        .await
+        .unwrap();
+
+    let high_node = TestServer::spawn_with_db_args("--admin-token admin_token").await;
+    fs::write(high_node.tempdir.path().join("current_id.txt"), "1").unwrap();
+    let source_db_url = high_node.database_url().unwrap();
+    setup_test_schema(source_db_url.clone()).await.unwrap();
+    insert_test_shares(source_db_url.clone(), 1, 800001)
+        .await
+        .unwrap();
 
     let aggregator = TestServer::spawn_with_db_args(format!(
-        "--nodes {} --nodes {} --admin-token aggregator_token",
-        node1.url(),
-        node2.url()
-    ));
+        "--nodes {} --nodes {} --api-token aggregator_api_token --admin-token admin_token",
+        low_node.url(),
+        high_node.url()
+    ))
+    .await;
+    let aggregator_db_url = aggregator.database_url().unwrap();
+    setup_test_schema(aggregator_db_url.clone()).await.unwrap();
 
-    let blockheight: i32 = aggregator
+    let client = reqwest::Client::new();
+    let response = client
+        .get(
+            aggregator
+                .url()
+                .join("/aggregator/blockheight".as_ref())
+                .unwrap(),
+        )
+        .header(reqwest::header::ACCEPT, "application/json")
+        .bearer_auth("aggregator_api_token")
+        .send()
         .await
-        .get_json_async("/aggregator/blockheight")
-        .await;
+        .unwrap();
 
-    assert!(blockheight >= 0);
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "Response: {}",
+        response.text().await.unwrap()
+    );
+
+    let blockheight: i32 = response.json().await.unwrap();
+
+    assert_eq!(blockheight, 800000);
 }

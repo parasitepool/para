@@ -941,7 +941,7 @@ async fn test_sync_batch_block_count_ignores_lower_blocks() {
     pool.close().await;
 }
 
-trait SyncSendTestExt {
+pub trait SyncSendTestExt {
     fn with_database_url(self, database_url: String) -> Self;
     fn with_terminate_when_complete(self, terminate: bool) -> Self;
     fn with_temp_file(self) -> Self;

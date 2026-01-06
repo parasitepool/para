@@ -7,7 +7,7 @@ use reqwest::header;
 pub(crate) struct TestServer {
     child: Child,
     port: u16,
-    tempdir: Arc<TempDir>,
+    pub(crate) tempdir: Arc<TempDir>,
     #[cfg(target_os = "linux")]
     pg_db: Option<PgTempDB>,
 
@@ -116,7 +116,8 @@ impl TestServer {
         fs::create_dir(logdir.join("users")).unwrap();
 
         let child = CommandBuilder::new(format!(
-            "server --address 127.0.0.1 --port {port} --log-dir {} --database-url {} {}",
+            "server --address 127.0.0.1 --port {port} --data-dir {} --log-dir {} --database-url {} {}",
+            tempdir.path().display(),
             logdir.display(),
             database_url,
             args.to_args().join(" ")
