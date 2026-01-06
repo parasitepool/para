@@ -14,6 +14,8 @@ pub(crate) struct Pool {
 
 impl Pool {
     pub(crate) async fn run(&self, cancel_token: CancellationToken) -> Result {
+        self.config.validate()?;
+
         let config = Arc::new(self.config.clone());
         let metatron = Arc::new(Metatron::new());
         let (share_tx, share_rx) = mpsc::channel(SHARE_CHANNEL_CAPACITY);
@@ -354,5 +356,48 @@ mod tests {
     #[should_panic(expected = "error parsing arguments")]
     fn extranonce2_size_too_large() {
         parse_pool_config("para pool --extranonce2-size 9");
+    }
+
+    #[test]
+    fn min_diff_parsing() {
+        let config = parse_pool_config("para pool --min-diff 0.001");
+        assert_eq!(config.min_diff(), Some(Difficulty::from(0.001)));
+    }
+
+    #[test]
+    fn max_diff_parsing() {
+        let config = parse_pool_config("para pool --max-diff 1000");
+        assert_eq!(config.max_diff(), Some(Difficulty::from(1000)));
+    }
+
+    #[test]
+    fn min_max_diff_not_set_by_default() {
+        let config = parse_pool_config("para pool");
+        assert_eq!(config.min_diff(), None);
+        assert_eq!(config.max_diff(), None);
+    }
+
+    #[test]
+    fn valid_min_max_diff_config() {
+        let config = parse_pool_config("para pool --start-diff 10 --min-diff 1 --max-diff 100");
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn start_diff_below_min_diff_fails() {
+        let config = parse_pool_config("para pool --start-diff 1 --min-diff 10");
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn start_diff_above_max_diff_fails() {
+        let config = parse_pool_config("para pool --start-diff 100 --max-diff 10");
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn min_diff_above_max_diff_fails() {
+        let config = parse_pool_config("para pool --start-diff 50 --min-diff 100 --max-diff 10");
+        assert!(config.validate().is_err());
     }
 }
