@@ -1,5 +1,4 @@
-use super::*;
-use para::api::proxy::Status;
+use {super::*, api::proxy::Status};
 
 pub(crate) struct TestProxy {
     proxy_handle: Child,

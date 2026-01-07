@@ -1,5 +1,4 @@
 use super::*;
-use test_proxy::TestProxy;
 
 #[tokio::test]
 #[serial(bitcoind)]

@@ -1,8 +1,4 @@
-use {
-    super::*,
-    axum::extract::{Path, State},
-    http_server::error::{OptionExt, ServerResult},
-};
+use super::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Stats {

@@ -1,11 +1,11 @@
 use {
     super::*,
-    crate::{http_server, sandalphon::Sandalphon},
+    crate::http_server,
     proxy_config::ProxyConfig,
     stratum::{Client, ClientConfig},
 };
 
-pub(crate) mod proxy_config;
+mod proxy_config;
 
 #[derive(Parser, Debug)]
 pub(crate) struct Proxy {

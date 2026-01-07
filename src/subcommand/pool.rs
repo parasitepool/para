@@ -1,6 +1,6 @@
 use {
     super::*,
-    crate::{api::pool as api, http_server},
+    crate::{api, http_server},
     pool_config::PoolConfig,
 };
 
@@ -55,7 +55,7 @@ impl Pool {
 
             Some(http_server::spawn(
                 http_config,
-                api::router(metatron.clone()),
+                api::pool::router(metatron.clone()),
                 cancel_token.clone(),
             )?)
         } else {

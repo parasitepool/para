@@ -52,7 +52,7 @@ use {
     harness::bitcoind::Bitcoind,
     ntest::timeout,
     para::{
-        USER_AGENT,
+        USER_AGENT, api,
         stratum::{
             self, ClientError, Difficulty, Extranonce, JobId, Nonce, Notify, Ntime, StratumError,
             Username, Version,
@@ -80,6 +80,7 @@ use {
     tempfile::tempdir,
     test_ckpool::TestCkpool,
     test_pool::TestPool,
+    test_proxy::TestProxy,
 };
 
 mod command_builder;

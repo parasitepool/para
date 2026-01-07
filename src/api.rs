@@ -1,4 +1,8 @@
-use super::*;
+use {
+    super::*,
+    axum::extract::{Path, State},
+    http_server::error::{OptionExt, ServerResult},
+};
 
-pub(crate) mod pool;
+pub mod pool;
 pub mod proxy;
