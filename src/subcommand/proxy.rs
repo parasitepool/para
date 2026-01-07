@@ -1,6 +1,6 @@
 use {
     super::*,
-    crate::http_server,
+    crate::{http_server, sandalphon::Sandalphon},
     proxy_config::ProxyConfig,
     stratum::{Client, ClientConfig},
 };
@@ -65,14 +65,14 @@ impl Proxy {
 
         info!("Authorized with upstream as {}", config.username());
 
-        let proxy_status = Arc::new(api::proxy::ProxyStatus::new(
+        let sandalphon = Arc::new(Sandalphon::new(
             config.upstream().to_string(),
             config.username().to_string(),
             config.address(),
             config.port(),
         ));
 
-        proxy_status.set_connected(true);
+        sandalphon.set_connected(true);
 
         let api_handle = if let Some(api_port) = config.api_port() {
             let http_config = http_server::HttpConfig {
@@ -87,7 +87,7 @@ impl Proxy {
 
             Some(http_server::spawn(
                 http_config,
-                api::proxy::router(proxy_status.clone()),
+                api::proxy::router(sandalphon.clone()),
                 cancel_token.clone(),
             )?)
         } else {
@@ -112,12 +112,12 @@ impl Proxy {
                         }
                         Ok(stratum::Event::Disconnected) => {
                             warn!("Disconnected from upstream");
-                            proxy_status.set_connected(false);
+                            sandalphon.set_connected(false);
                             break;
                         }
                         Err(e) => {
                             error!("Upstream event error: {}", e);
-                            proxy_status.set_connected(false);
+                            sandalphon.set_connected(false);
                             break;
                         }
                     }

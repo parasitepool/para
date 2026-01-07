@@ -1,77 +1,26 @@
-use {
-    super::*,
-    axum::extract::State,
-    std::sync::atomic::{AtomicBool, Ordering},
-};
-
-pub struct ProxyStatus {
-    upstream_url: String,
-    upstream_username: String,
-    downstream_address: String,
-    downstream_port: u16,
-    connected: AtomicBool,
-}
-
-impl ProxyStatus {
-    pub fn new(
-        upstream_url: String,
-        upstream_username: String,
-        downstream_address: String,
-        downstream_port: u16,
-    ) -> Self {
-        Self {
-            upstream_url,
-            upstream_username,
-            downstream_address,
-            downstream_port,
-            connected: AtomicBool::new(false),
-        }
-    }
-
-    pub fn set_connected(&self, connected: bool) {
-        self.connected.store(connected, Ordering::SeqCst);
-    }
-
-    pub fn is_connected(&self) -> bool {
-        self.connected.load(Ordering::SeqCst)
-    }
-}
+use {super::*, crate::sandalphon::Sandalphon, axum::extract::State};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StatusResponse {
-    pub upstream: UpstreamStatus,
-    pub downstream: DownstreamStatus,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UpstreamStatus {
-    pub url: String,
+pub struct Status {
+    pub upstream_url: String,
+    pub upstream_username: String,
+    pub downstream_address: String,
+    pub downstream_port: u16,
     pub connected: bool,
-    pub username: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DownstreamStatus {
-    pub address: String,
-    pub port: u16,
-}
-
-pub fn router(status: Arc<ProxyStatus>) -> Router {
+pub(crate) fn router(sandalphon: Arc<Sandalphon>) -> Router {
     Router::new()
         .route("/api/status", get(get_status))
-        .with_state(status)
+        .with_state(sandalphon)
 }
 
-async fn get_status(State(status): State<Arc<ProxyStatus>>) -> Json<StatusResponse> {
-    Json(StatusResponse {
-        upstream: UpstreamStatus {
-            url: status.upstream_url.clone(),
-            connected: status.is_connected(),
-            username: status.upstream_username.clone(),
-        },
-        downstream: DownstreamStatus {
-            address: status.downstream_address.clone(),
-            port: status.downstream_port,
-        },
+async fn get_status(State(sandalphon): State<Arc<Sandalphon>>) -> Json<Status> {
+    Json(Status {
+        upstream_url: sandalphon.upstream_url().to_string(),
+        upstream_username: sandalphon.upstream_username().to_string(),
+        downstream_address: sandalphon.downstream_address().to_string(),
+        downstream_port: sandalphon.downstream_port(),
+        connected: sandalphon.is_connected(),
     })
 }

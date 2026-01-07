@@ -127,6 +127,7 @@ mod http_server;
 mod job;
 mod jobs;
 mod metatron;
+mod sandalphon;
 mod session;
 mod share;
 mod signal;

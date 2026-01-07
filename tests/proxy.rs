@@ -17,25 +17,22 @@ async fn proxy_connects_to_upstream() {
         .await
         .expect("Failed to get proxy status");
 
-    assert!(
-        status.upstream.connected,
-        "Proxy should be connected to upstream"
-    );
+    assert!(status.connected, "Proxy should be connected to upstream");
 
     assert_eq!(
-        status.upstream.url, upstream_endpoint,
+        status.upstream_url, upstream_endpoint,
         "Upstream URL should match"
     );
 
     assert_eq!(
-        status.upstream.username,
+        status.upstream_username,
         signet_username().to_string(),
         "Username should match"
     );
 
-    assert_eq!(status.downstream.address, "127.0.0.1");
+    assert_eq!(status.downstream_address, "127.0.0.1");
     assert_eq!(
-        status.downstream.port,
+        status.downstream_port,
         proxy
             .stratum_endpoint()
             .split(':')

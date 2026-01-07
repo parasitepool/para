@@ -1,5 +1,5 @@
 use super::*;
-use para::api::proxy::StatusResponse;
+use para::api::proxy::Status;
 
 pub(crate) struct TestProxy {
     proxy_handle: Child,
@@ -73,7 +73,7 @@ impl TestProxy {
         format!("http://127.0.0.1:{}", self.api_port)
     }
 
-    pub(crate) async fn get_status(&self) -> reqwest::Result<StatusResponse> {
+    pub(crate) async fn get_status(&self) -> reqwest::Result<Status> {
         let client = reqwest::Client::new();
         let url = format!("{}/api/status", self.api_endpoint());
         client.get(&url).send().await?.json().await

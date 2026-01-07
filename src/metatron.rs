@@ -1,7 +1,4 @@
-use {
-    super::*,
-    api::pool::{PoolStats, UserDetail, UserSummary, WorkerSummary},
-};
+use super::*;
 
 pub(crate) struct Metatron {
     enonce1_counter: AtomicU64,
@@ -177,64 +174,14 @@ impl Metatron {
         self.started.elapsed()
     }
 
-    pub(crate) fn stats(&self) -> PoolStats {
-        PoolStats {
-            hash_rate_1m: self.hash_rate_1m(),
-            sps_1m: self.sps_1m(),
-            users: self.total_users(),
-            workers: self.total_workers(),
-            connections: self.total_connections(),
-            accepted: self.accepted(),
-            rejected: self.rejected(),
-            blocks: self.total_blocks(),
-            best_ever: self.best_ever(),
-            last_share: self.last_share().map(|time| time.elapsed().as_secs()),
-            uptime_secs: self.uptime().as_secs(),
-        }
+    pub(crate) fn get_user(&self, address: &Address) -> Option<Arc<User>> {
+        self.users.get(address).map(|entry| entry.value().clone())
     }
 
-    pub(crate) fn users(&self) -> Vec<UserSummary> {
+    pub(crate) fn iter_users(&self) -> impl Iterator<Item = (Address, Arc<User>)> + '_ {
         self.users
             .iter()
-            .map(|entry| {
-                let user = entry.value();
-                UserSummary {
-                    address: entry.key().to_string(),
-                    hash_rate: user.hash_rate_1m(),
-                    shares_per_second: user.sps_1m(),
-                    workers: user.worker_count(),
-                    accepted: user.accepted(),
-                    rejected: user.rejected(),
-                    best_ever: user.best_ever(),
-                }
-            })
-            .collect()
-    }
-
-    pub(crate) fn user(&self, address: &Address) -> Option<UserDetail> {
-        self.users.get(address).map(|entry| {
-            let user = entry.value();
-            UserDetail {
-                address: user.address.to_string(),
-                hash_rate: user.hash_rate_1m(),
-                shares_per_second: user.sps_1m(),
-                accepted: user.accepted(),
-                rejected: user.rejected(),
-                best_ever: user.best_ever(),
-                authorized: user.authorized,
-                workers: user
-                    .workers()
-                    .map(|worker| WorkerSummary {
-                        name: worker.workername().to_string(),
-                        hash_rate: worker.hash_rate_1m(),
-                        shares_per_second: worker.sps_1m(),
-                        accepted: worker.accepted(),
-                        rejected: worker.rejected(),
-                        best_ever: worker.best_ever(),
-                    })
-                    .collect(),
-            }
-        })
+            .map(|entry| (entry.key().clone(), entry.value().clone()))
     }
 }
 

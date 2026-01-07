@@ -1,4 +1,4 @@
 use super::*;
 
-pub mod pool;
+pub(crate) mod pool;
 pub mod proxy;
