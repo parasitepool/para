@@ -52,6 +52,55 @@ impl SubmitHandle {
     }
 }
 
+/// Receiver for stratum events (notifications from the server).
+///
+/// This wrapper provides proper error handling for event reception,
+/// including detection of lagged events (when the receiver is too slow
+/// to keep up with incoming events).
+#[derive(Debug)]
+pub struct EventReceiver {
+    rx: broadcast::Receiver<Event>,
+}
+
+impl EventReceiver {
+    /// Receive the next event, waiting until one is available.
+    ///
+    /// # Errors
+    ///
+    /// - `ClientError::EventChannelClosed` - The client has disconnected and no more events will arrive
+    /// - `ClientError::EventsLagged { count }` - The receiver fell behind and missed `count` events
+    pub async fn recv(&mut self) -> Result<Event> {
+        match self.rx.recv().await {
+            Ok(event) => Ok(event),
+            Err(broadcast::error::RecvError::Closed) => Err(ClientError::EventChannelClosed),
+            Err(broadcast::error::RecvError::Lagged(count)) => {
+                Err(ClientError::EventsLagged { count })
+            }
+        }
+    }
+
+    /// Try to receive an event without waiting.
+    ///
+    /// Returns `None` if no event is currently available.
+    ///
+    /// # Errors
+    ///
+    /// - `ClientError::EventChannelClosed` - The client has disconnected
+    /// - `ClientError::EventsLagged { count }` - The receiver fell behind and missed `count` events
+    pub fn try_recv(&mut self) -> Option<Result<Event>> {
+        match self.rx.try_recv() {
+            Ok(event) => Some(Ok(event)),
+            Err(broadcast::error::TryRecvError::Empty) => None,
+            Err(broadcast::error::TryRecvError::Closed) => {
+                Some(Err(ClientError::EventChannelClosed))
+            }
+            Err(broadcast::error::TryRecvError::Lagged(count)) => {
+                Some(Err(ClientError::EventsLagged { count }))
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Client {
     config: Arc<ClientConfig>,
@@ -79,7 +128,7 @@ impl Client {
         }
     }
 
-    pub async fn connect(&self) -> Result<broadcast::Receiver<Event>> {
+    pub async fn connect(&self) -> Result<EventReceiver> {
         let (respond_to, rx) = oneshot::channel();
 
         self.tx
@@ -89,18 +138,27 @@ impl Client {
 
         rx.await.map_err(|_| ClientError::NotConnected)??;
 
-        Ok(self.events.subscribe())
+        Ok(EventReceiver {
+            rx: self.events.subscribe(),
+        })
     }
 
     pub async fn disconnect(&self) {
         let (respond_to, rx) = oneshot::channel();
 
-        self.tx
+        if self
+            .tx
             .send(ClientMessage::Disconnect { respond_to })
             .await
-            .ok();
+            .is_err()
+        {
+            debug!("Disconnect send failed: actor already shut down");
+            return;
+        }
 
-        rx.await.ok();
+        if rx.await.is_err() {
+            debug!("Disconnect response failed: actor shut down during disconnect");
+        }
     }
 
     async fn send_request(

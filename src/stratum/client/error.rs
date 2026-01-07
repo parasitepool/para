@@ -37,4 +37,10 @@ pub enum ClientError {
 
     #[snafu(display("Too many pending requests"))]
     TooManyPendingRequests,
+
+    #[snafu(display("Missed {count} events due to slow processing"))]
+    EventsLagged { count: u64 },
+
+    #[snafu(display("Event channel closed"))]
+    EventChannelClosed,
 }

@@ -96,7 +96,7 @@ impl Controller {
 
     async fn event_loop(
         &mut self,
-        mut events: broadcast::Receiver<stratum::Event>,
+        mut events: stratum::EventReceiver,
         cancel_token: CancellationToken,
     ) -> Result {
         loop {
@@ -119,12 +119,15 @@ impl Controller {
                             self.cancel_hashers();
                             break;
                         }
-                        Err(broadcast::error::RecvError::Lagged(_)) => {
-                            warn!("Event loop lagged, missed messages");
+                        Err(stratum::ClientError::EventsLagged { count }) => {
+                            warn!("Event loop lagged, missed {count} messages");
                         }
-                         Err(broadcast::error::RecvError::Closed) => {
+                        Err(stratum::ClientError::EventChannelClosed) => {
                             info!("Client event channel closed, shutting down");
                             break;
+                        }
+                        Err(e) => {
+                            warn!("Unexpected event error: {e}");
                         }
                     }
                 },

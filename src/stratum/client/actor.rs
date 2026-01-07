@@ -78,13 +78,17 @@ impl ClientActor {
                     match msg {
                         ClientMessage::Connect { respond_to } => {
                             let result = self.handle_connect(incoming_tx.clone()).await;
-                            respond_to.send(result).ok();
+                            if respond_to.send(result).is_err() {
+                                debug!("Connect response dropped: caller gave up");
+                            }
                         }
                         ClientMessage::Request { method, params, respond_to } => {
                             self.evict_expired_pending();
 
                             if self.pending.len() >= MAX_PENDING_REQUESTS {
-                                respond_to.send(Err(ClientError::TooManyPendingRequests)).ok();
+                                if respond_to.send(Err(ClientError::TooManyPendingRequests)).is_err() {
+                                    debug!("TooManyPendingRequests response dropped: caller gave up");
+                                }
                                 continue;
                             }
 
@@ -96,7 +100,9 @@ impl ClientActor {
                                     self.pending.insert(id, (respond_to, deadline));
                                 }
                                 Err(err) => {
-                                    respond_to.send(Err(err)).ok();
+                                    if respond_to.send(Err(err)).is_err() {
+                                        debug!("Request error response dropped: caller gave up");
+                                    }
                                 }
                             }
                         }
@@ -104,7 +110,9 @@ impl ClientActor {
                             self.evict_expired_pending();
 
                             if self.pending_submits.len() >= MAX_PENDING_REQUESTS {
-                                respond_to.send(Err(ClientError::TooManyPendingRequests)).ok();
+                                if respond_to.send(Err(ClientError::TooManyPendingRequests)).is_err() {
+                                    debug!("TooManyPendingRequests response dropped: caller gave up");
+                                }
                                 continue;
                             }
 
@@ -116,13 +124,17 @@ impl ClientActor {
                                     self.pending_submits.insert(id, (respond_to, deadline));
                                 }
                                 Err(err) => {
-                                    respond_to.send(Err(err)).ok();
+                                    if respond_to.send(Err(err)).is_err() {
+                                        debug!("Submit error response dropped: caller gave up");
+                                    }
                                 }
                             }
                         }
                         ClientMessage::Disconnect { respond_to } => {
                             self.handle_disconnect().await;
-                            respond_to.send(()).ok();
+                            if respond_to.send(()).is_err() {
+                                debug!("Disconnect response dropped: caller gave up");
+                            }
                         }
                     }
                 }
@@ -155,8 +167,10 @@ impl ClientActor {
             .collect();
 
         for id in expired_ids {
-            if let Some((tx, _)) = self.pending.remove(&id) {
-                tx.send(Err(ClientError::RequestExpired)).ok();
+            if let Some((tx, _)) = self.pending.remove(&id)
+                && tx.send(Err(ClientError::RequestExpired)).is_err()
+            {
+                debug!("RequestExpired response dropped: caller gave up");
             }
         }
 
@@ -168,8 +182,10 @@ impl ClientActor {
             .collect();
 
         for id in expired_submit_ids {
-            if let Some((tx, _)) = self.pending_submits.remove(&id) {
-                tx.send(Err(ClientError::RequestExpired)).ok();
+            if let Some((tx, _)) = self.pending_submits.remove(&id)
+                && tx.send(Err(ClientError::RequestExpired)).is_err()
+            {
+                debug!("RequestExpired response dropped: caller gave up");
             }
         }
     }
@@ -254,15 +270,21 @@ impl ClientActor {
 
         let pending = std::mem::take(&mut self.pending);
         for (_, (tx, _)) in pending {
-            tx.send(Err(ClientError::NotConnected)).ok();
+            if tx.send(Err(ClientError::NotConnected)).is_err() {
+                debug!("NotConnected response dropped: caller gave up");
+            }
         }
 
         let pending_submits = std::mem::take(&mut self.pending_submits);
         for (_, (tx, _)) in pending_submits {
-            tx.send(Err(ClientError::NotConnected)).ok();
+            if tx.send(Err(ClientError::NotConnected)).is_err() {
+                debug!("NotConnected response dropped: caller gave up");
+            }
         }
 
-        self.events.send(Event::Disconnected).ok();
+        if self.events.send(Event::Disconnected).is_err() {
+            debug!("Disconnected event dropped: no subscribers");
+        }
     }
 
     async fn handle_incoming(&mut self, msg: IncomingMessage) {
@@ -281,9 +303,13 @@ impl ClientActor {
                         } => serde_json::from_value::<bool>(val.clone()).unwrap_or(false),
                         _ => false,
                     };
-                    tx.send(Ok(result)).ok();
+                    if tx.send(Ok(result)).is_err() {
+                        debug!("Submit result dropped: caller gave up");
+                    }
                 } else if let Some((tx, _)) = self.pending.remove(&id) {
-                    tx.send(Ok((message, bytes_read))).ok();
+                    if tx.send(Ok((message, bytes_read))).is_err() {
+                        debug!("Response dropped: caller gave up");
+                    }
                 } else {
                     warn!("Unmatched response ID={:?}", id);
                 }
@@ -291,15 +317,21 @@ impl ClientActor {
             IncomingMessage::Notification { method, params } => match method.as_str() {
                 "mining.notify" => match serde_json::from_value::<Notify>(params) {
                     Ok(notify) => {
-                        self.events.send(Event::Notify(notify)).ok();
+                        if self.events.send(Event::Notify(notify)).is_err() {
+                            debug!("Notify event dropped: no subscribers");
+                        }
                     }
                     Err(e) => warn!("Failed to parse mining.notify: {}", e),
                 },
                 "mining.set_difficulty" => match serde_json::from_value::<SetDifficulty>(params) {
                     Ok(set_diff) => {
-                        self.events
+                        if self
+                            .events
                             .send(Event::SetDifficulty(set_diff.difficulty()))
-                            .ok();
+                            .is_err()
+                        {
+                            debug!("SetDifficulty event dropped: no subscribers");
+                        }
                     }
                     Err(e) => warn!("Failed to parse mining.set_difficulty: {}", e),
                 },
@@ -324,12 +356,15 @@ impl ClientActor {
                 Ok(line) => line,
                 Err(e) => {
                     error!("Read error: {e}");
-                    incoming_tx
+                    if incoming_tx
                         .send(IncomingMessage::Error(ClientError::Io {
                             source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
                         }))
                         .await
-                        .ok();
+                        .is_err()
+                    {
+                        debug!("Error notification dropped: actor shutting down");
+                    }
                     break;
                 }
             };
@@ -346,23 +381,31 @@ impl ClientActor {
 
             match &msg {
                 Message::Response { id, .. } => {
-                    incoming_tx
+                    if incoming_tx
                         .send(IncomingMessage::Response {
                             id: id.clone(),
                             message: msg,
                             bytes_read,
                         })
                         .await
-                        .ok();
+                        .is_err()
+                    {
+                        debug!("Response forwarding dropped: actor shutting down");
+                        break;
+                    }
                 }
                 Message::Notification { method, params } => {
-                    incoming_tx
+                    if incoming_tx
                         .send(IncomingMessage::Notification {
                             method: method.clone(),
                             params: params.clone(),
                         })
                         .await
-                        .ok();
+                        .is_err()
+                    {
+                        debug!("Notification forwarding dropped: actor shutting down");
+                        break;
+                    }
                 }
                 _ => {
                     warn!("Unexpected message type: {:?}", msg);
@@ -370,6 +413,12 @@ impl ClientActor {
             }
         }
 
-        incoming_tx.send(IncomingMessage::Disconnected).await.ok();
+        if incoming_tx
+            .send(IncomingMessage::Disconnected)
+            .await
+            .is_err()
+        {
+            debug!("Disconnected notification dropped: actor already shut down");
+        }
     }
 }

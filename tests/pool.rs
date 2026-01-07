@@ -1,8 +1,6 @@
 use super::*;
 
-async fn wait_for_notify(
-    events: &mut tokio::sync::broadcast::Receiver<stratum::Event>,
-) -> (stratum::Notify, Difficulty) {
+async fn wait_for_notify(events: &mut stratum::EventReceiver) -> (stratum::Notify, Difficulty) {
     let mut difficulty = Difficulty::from(1);
     timeout(Duration::from_secs(10), async {
         loop {
@@ -18,7 +16,7 @@ async fn wait_for_notify(
 }
 
 async fn wait_for_new_block(
-    events: &mut tokio::sync::broadcast::Receiver<stratum::Event>,
+    events: &mut stratum::EventReceiver,
     old_job_id: JobId,
 ) -> stratum::Notify {
     timeout(Duration::from_secs(10), async {
@@ -877,7 +875,7 @@ async fn bouncer() {
                 _ => {}
             }
 
-            while let Ok(event) = events.try_recv() {
+            while let Some(Ok(event)) = events.try_recv() {
                 if let stratum::Event::Notify(notify) = event
                     && notify.job_id != last_job_id
                 {
