@@ -159,12 +159,12 @@ impl ClientActor {
     fn evict_expired_pending(&mut self) {
         let now = Instant::now();
 
-        let expired_ids: Vec<_> = self
+        let expired_ids = self
             .pending
             .iter()
             .filter(|(_, (_, deadline))| now > *deadline)
             .map(|(id, _)| id.clone())
-            .collect();
+            .collect::<Vec<_>>();
 
         for id in expired_ids {
             if let Some((tx, _)) = self.pending.remove(&id)
@@ -174,12 +174,12 @@ impl ClientActor {
             }
         }
 
-        let expired_submit_ids: Vec<_> = self
+        let expired_submit_ids = self
             .pending_submits
             .iter()
             .filter(|(_, (_, deadline))| now > *deadline)
             .map(|(id, _)| id.clone())
-            .collect();
+            .collect::<Vec<_>>();
 
         for id in expired_submit_ids {
             if let Some((tx, _)) = self.pending_submits.remove(&id)

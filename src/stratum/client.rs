@@ -52,23 +52,12 @@ impl SubmitHandle {
     }
 }
 
-/// Receiver for stratum events (notifications from the server).
-///
-/// This wrapper provides proper error handling for event reception,
-/// including detection of lagged events (when the receiver is too slow
-/// to keep up with incoming events).
 #[derive(Debug)]
 pub struct EventReceiver {
     rx: broadcast::Receiver<Event>,
 }
 
 impl EventReceiver {
-    /// Receive the next event, waiting until one is available.
-    ///
-    /// # Errors
-    ///
-    /// - `ClientError::EventChannelClosed` - The client has disconnected and no more events will arrive
-    /// - `ClientError::EventsLagged { count }` - The receiver fell behind and missed `count` events
     pub async fn recv(&mut self) -> Result<Event> {
         match self.rx.recv().await {
             Ok(event) => Ok(event),
@@ -79,14 +68,6 @@ impl EventReceiver {
         }
     }
 
-    /// Try to receive an event without waiting.
-    ///
-    /// Returns `None` if no event is currently available.
-    ///
-    /// # Errors
-    ///
-    /// - `ClientError::EventChannelClosed` - The client has disconnected
-    /// - `ClientError::EventsLagged { count }` - The receiver fell behind and missed `count` events
     pub fn try_recv(&mut self) -> Option<Result<Event>> {
         match self.rx.try_recv() {
             Ok(event) => Some(Ok(event)),
