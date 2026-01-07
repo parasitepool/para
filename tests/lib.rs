@@ -88,6 +88,8 @@ mod test_ckpool;
 #[cfg(target_os = "linux")]
 mod test_pool;
 #[cfg(target_os = "linux")]
+mod test_proxy;
+#[cfg(target_os = "linux")]
 mod test_psql;
 mod test_server;
 mod to_args;
@@ -101,6 +103,8 @@ mod payouts;
 mod ping;
 #[cfg(target_os = "linux")]
 mod pool;
+#[cfg(target_os = "linux")]
+mod proxy;
 mod server;
 #[cfg(target_os = "linux")]
 mod server_with_db;

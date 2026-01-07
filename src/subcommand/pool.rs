@@ -1,6 +1,6 @@
 use {
     super::*,
-    crate::{api, http_server},
+    crate::{api::pool as api, http_server},
     pool_config::PoolConfig,
 };
 
