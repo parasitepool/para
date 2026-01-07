@@ -22,4 +22,25 @@ pub enum ClientError {
 
     #[snafu(display("Client not connected"))]
     NotConnected,
+
+    #[snafu(display("{method} rejected: {reason}"))]
+    Rejected { method: String, reason: String },
+
+    #[snafu(display("Unhandled response for {method}"))]
+    UnhandledResponse { method: String },
+
+    #[snafu(display("Server returned false for submit"))]
+    SubmitFalse,
+
+    #[snafu(display("Request expired without response"))]
+    RequestExpired,
+
+    #[snafu(display("Too many pending requests"))]
+    TooManyPendingRequests,
+
+    #[snafu(display("Missed {count} events due to slow processing"))]
+    EventsLagged { count: u64 },
+
+    #[snafu(display("Event channel closed"))]
+    EventChannelClosed,
 }

@@ -89,14 +89,14 @@ impl Controller {
         controller.root_cancel.cancel();
         drop(controller.notify_tx);
         while controller.hashers.join_next().await.is_some() {}
-        controller.client.disconnect().await?;
+        controller.client.disconnect().await;
 
         Ok(controller.shares)
     }
 
     async fn event_loop(
         &mut self,
-        mut events: broadcast::Receiver<stratum::Event>,
+        mut events: stratum::EventReceiver,
         cancel_token: CancellationToken,
     ) -> Result {
         loop {
@@ -119,12 +119,15 @@ impl Controller {
                             self.cancel_hashers();
                             break;
                         }
-                        Err(broadcast::error::RecvError::Lagged(_)) => {
-                            warn!("Event loop lagged, missed messages");
+                        Err(stratum::ClientError::EventsLagged { count }) => {
+                            warn!("Event loop lagged, missed {count} messages");
                         }
-                         Err(broadcast::error::RecvError::Closed) => {
+                        Err(stratum::ClientError::EventChannelClosed) => {
                             info!("Client event channel closed, shutting down");
                             break;
+                        }
+                        Err(e) => {
+                            warn!("Unexpected event error: {e}");
                         }
                     }
                 },
@@ -144,7 +147,7 @@ impl Controller {
 
                         self.shares.push(share);
 
-                        match self.client.submit(job_id, enonce2, header.time.into(), header.nonce.into()).await {
+                        match self.client.submit(job_id, enonce2, header.time.into(), header.nonce.into(), None).await {
                             Err(err) => warn!("Failed to submit share for job {job_id}: {err}"),
                             Ok(_) => info!("Share for job {job_id} submitted successfully"),
                         }

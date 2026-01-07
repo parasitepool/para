@@ -98,7 +98,7 @@ impl Ping {
 
                 let (_, duration, size) = client.subscribe().await?;
 
-                client.disconnect().await?;
+                client.disconnect().await;
 
                 Ok((duration, size))
             }
@@ -136,7 +136,7 @@ impl Ping {
 
                 let duration = duration + instant.elapsed();
 
-                client.disconnect().await?;
+                client.disconnect().await;
 
                 Ok((duration, size))
             }

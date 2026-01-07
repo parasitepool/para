@@ -1,16 +1,18 @@
 use {
     super::*,
     actor::{ClientActor, ClientMessage},
+    futures::StreamExt,
     std::{
-        collections::BTreeMap,
+        collections::HashMap,
         sync::Arc,
         time::{Duration, Instant},
     },
     tokio::{
-        io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter},
+        io::{AsyncWriteExt, BufWriter},
         net::TcpStream,
         sync::{broadcast, mpsc, oneshot},
     },
+    tokio_util::codec::{FramedRead, LinesCodec},
     tracing::{debug, error, warn},
 };
 
@@ -21,7 +23,7 @@ mod error;
 
 pub type Result<T = (), E = ClientError> = std::result::Result<T, E>;
 
-const CHANNEL_BUFFER_SIZE: usize = 32;
+const CHANNEL_BUFFER_SIZE: usize = 256;
 
 #[derive(Debug, Clone)]
 pub struct ClientConfig {
@@ -32,6 +34,54 @@ pub struct ClientConfig {
     pub timeout: Duration,
 }
 
+pub struct SubmitHandle {
+    rx: oneshot::Receiver<Result<bool>>,
+}
+
+impl SubmitHandle {
+    pub async fn wait(self) -> Result<bool> {
+        self.rx.await.map_err(|_| ClientError::NotConnected)?
+    }
+
+    pub fn try_recv(&mut self) -> Option<Result<bool>> {
+        match self.rx.try_recv() {
+            Ok(result) => Some(result),
+            Err(oneshot::error::TryRecvError::Empty) => None,
+            Err(oneshot::error::TryRecvError::Closed) => Some(Err(ClientError::NotConnected)),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct EventReceiver {
+    rx: broadcast::Receiver<Event>,
+}
+
+impl EventReceiver {
+    pub async fn recv(&mut self) -> Result<Event> {
+        match self.rx.recv().await {
+            Ok(event) => Ok(event),
+            Err(broadcast::error::RecvError::Closed) => Err(ClientError::EventChannelClosed),
+            Err(broadcast::error::RecvError::Lagged(count)) => {
+                Err(ClientError::EventsLagged { count })
+            }
+        }
+    }
+
+    pub fn try_recv(&mut self) -> Option<Result<Event>> {
+        match self.rx.try_recv() {
+            Ok(event) => Some(Ok(event)),
+            Err(broadcast::error::TryRecvError::Empty) => None,
+            Err(broadcast::error::TryRecvError::Closed) => {
+                Some(Err(ClientError::EventChannelClosed))
+            }
+            Err(broadcast::error::TryRecvError::Lagged(count)) => {
+                Some(Err(ClientError::EventsLagged { count }))
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Client {
     config: Arc<ClientConfig>,
@@ -40,6 +90,7 @@ pub struct Client {
 }
 
 impl Client {
+    #[must_use]
     pub fn new(config: ClientConfig) -> Self {
         let (tx, rx) = mpsc::channel(CHANNEL_BUFFER_SIZE);
         let (event_tx, _event_rx) = broadcast::channel(CHANNEL_BUFFER_SIZE);
@@ -58,7 +109,7 @@ impl Client {
         }
     }
 
-    pub async fn connect(&self) -> Result<broadcast::Receiver<Event>> {
+    pub async fn connect(&self) -> Result<EventReceiver> {
         let (respond_to, rx) = oneshot::channel();
 
         self.tx
@@ -68,22 +119,32 @@ impl Client {
 
         rx.await.map_err(|_| ClientError::NotConnected)??;
 
-        Ok(self.events.subscribe())
+        Ok(EventReceiver {
+            rx: self.events.subscribe(),
+        })
     }
 
-    pub async fn disconnect(&self) -> Result {
+    pub async fn disconnect(&self) {
         let (respond_to, rx) = oneshot::channel();
 
-        let _ = self.tx.send(ClientMessage::Disconnect { respond_to }).await;
+        if self
+            .tx
+            .send(ClientMessage::Disconnect { respond_to })
+            .await
+            .is_err()
+        {
+            debug!("Disconnect send failed: actor already shut down");
+            return;
+        }
 
-        let _ = rx.await;
-
-        Ok(())
+        if rx.await.is_err() {
+            debug!("Disconnect response failed: actor shut down during disconnect");
+        }
     }
 
     async fn send_request(
         &self,
-        method: String,
+        method: &'static str,
         params: Value,
     ) -> Result<(oneshot::Receiver<Result<(Message, usize)>>, Instant)> {
         let (respond_to, rx) = oneshot::channel();
@@ -128,19 +189,12 @@ impl Client {
             Message::Response {
                 reject_reason: Some(reason),
                 ..
-            } => Err(ClientError::Stratum {
-                response: StratumErrorResponse {
-                    error_code: -100,
-                    message: format!("{method} rejected: {reason}"),
-                    traceback: None,
-                },
+            } => Err(ClientError::Rejected {
+                method: method.to_owned(),
+                reason,
             }),
-            _ => Err(ClientError::Stratum {
-                response: StratumErrorResponse {
-                    error_code: -101,
-                    message: format!("Unhandled {method} response"),
-                    traceback: None,
-                },
+            _ => Err(ClientError::UnhandledResponse {
+                method: method.to_owned(),
             }),
         }
     }
@@ -149,10 +203,10 @@ impl Client {
         &self,
         extensions: Vec<String>,
         version_rolling_mask: Option<Version>,
-    ) -> Result<(Value, Duration, usize)> {
+    ) -> Result<(ConfigureResponse, Duration, usize)> {
         let (rx, instant) = self
             .send_request(
-                "mining.configure".to_string(),
+                "mining.configure",
                 serde_json::to_value(Configure {
                     extensions,
                     minimum_difficulty_value: None,
@@ -166,7 +220,10 @@ impl Client {
         let (message, bytes_read, duration) = self.await_response(rx, instant).await?;
         let result = self.handle_response(message, "mining.configure")?;
 
-        Ok((result, duration, bytes_read))
+        let response: ConfigureResponse =
+            serde_json::from_value(result).context(error::SerializationSnafu)?;
+
+        Ok((response, duration, bytes_read))
     }
 
     pub async fn subscribe(&self) -> Result<(SubscribeResult, Duration, usize)> {
@@ -179,7 +236,7 @@ impl Client {
     ) -> Result<(SubscribeResult, Duration, usize)> {
         let (rx, instant) = self
             .send_request(
-                "mining.subscribe".to_string(),
+                "mining.subscribe",
                 serde_json::to_value(Subscribe {
                     user_agent: self.config.user_agent.clone(),
                     enonce1,
@@ -191,17 +248,16 @@ impl Client {
         let (message, bytes_read, duration) = self.await_response(rx, instant).await?;
         let result = self.handle_response(message, "mining.subscribe")?;
 
-        Ok((
-            serde_json::from_value(result).context(error::SerializationSnafu)?,
-            duration,
-            bytes_read,
-        ))
+        let subscribe_result: SubscribeResult =
+            serde_json::from_value(result).context(error::SerializationSnafu)?;
+
+        Ok((subscribe_result, duration, bytes_read))
     }
 
     pub async fn authorize(&self) -> Result<(Duration, usize)> {
         let (rx, instant) = self
             .send_request(
-                "mining.authorize".to_string(),
+                "mining.authorize",
                 serde_json::to_value(Authorize {
                     username: self.config.username.clone(),
                     password: self.config.password.clone().or(Some("x".to_string())),
@@ -228,37 +284,17 @@ impl Client {
         enonce2: Extranonce,
         ntime: Ntime,
         nonce: Nonce,
+        version_bits: Option<Version>,
     ) -> Result<Submit> {
-        let submit = Submit {
-            username: self.config.username.clone(),
+        self.submit_with_username(
+            self.config.username.clone(),
             job_id,
             enonce2,
             ntime,
             nonce,
-            version_bits: None,
-        };
-
-        let (rx, instant) = self
-            .send_request(
-                "mining.submit".to_string(),
-                serde_json::to_value(&submit).context(error::SerializationSnafu)?,
-            )
-            .await?;
-
-        let (message, _, _) = self.await_response(rx, instant).await?;
-        let result = self.handle_response(message, "mining.submit")?;
-
-        if !serde_json::from_value::<bool>(result).context(error::SerializationSnafu)? {
-            return Err(ClientError::Stratum {
-                response: StratumErrorResponse {
-                    error_code: -102,
-                    message: "Server returned false for submit".to_string(),
-                    traceback: None,
-                },
-            });
-        }
-
-        Ok(submit)
+            version_bits,
+        )
+        .await
     }
 
     pub async fn submit_with_username(
@@ -268,6 +304,7 @@ impl Client {
         enonce2: Extranonce,
         ntime: Ntime,
         nonce: Nonce,
+        version_bits: Option<Version>,
     ) -> Result<Submit> {
         let submit = Submit {
             username,
@@ -275,12 +312,12 @@ impl Client {
             enonce2,
             ntime,
             nonce,
-            version_bits: None,
+            version_bits,
         };
 
         let (rx, instant) = self
             .send_request(
-                "mining.submit".to_string(),
+                "mining.submit",
                 serde_json::to_value(&submit).context(error::SerializationSnafu)?,
             )
             .await?;
@@ -289,16 +326,57 @@ impl Client {
         let result = self.handle_response(message, "mining.submit")?;
 
         if !serde_json::from_value::<bool>(result).context(error::SerializationSnafu)? {
-            return Err(ClientError::Stratum {
-                response: StratumErrorResponse {
-                    error_code: -102,
-                    message: "Server returned false for submit".to_string(),
-                    traceback: None,
-                },
-            });
+            return Err(ClientError::SubmitFalse);
         }
 
         Ok(submit)
+    }
+
+    pub async fn submit_async(
+        &self,
+        job_id: JobId,
+        enonce2: Extranonce,
+        ntime: Ntime,
+        nonce: Nonce,
+        version_bits: Option<Version>,
+    ) -> Result<SubmitHandle> {
+        self.submit_async_with_username(
+            self.config.username.clone(),
+            job_id,
+            enonce2,
+            ntime,
+            nonce,
+            version_bits,
+        )
+        .await
+    }
+
+    pub async fn submit_async_with_username(
+        &self,
+        username: Username,
+        job_id: JobId,
+        enonce2: Extranonce,
+        ntime: Ntime,
+        nonce: Nonce,
+        version_bits: Option<Version>,
+    ) -> Result<SubmitHandle> {
+        let submit = Submit {
+            username,
+            job_id,
+            enonce2,
+            ntime,
+            nonce,
+            version_bits,
+        };
+
+        let (respond_to, rx) = oneshot::channel();
+
+        self.tx
+            .send(ClientMessage::SubmitAsync { submit, respond_to })
+            .await
+            .map_err(|_| ClientError::NotConnected)?;
+
+        Ok(SubmitHandle { rx })
     }
 }
 
@@ -421,5 +499,55 @@ mod tests {
             "Expected NotConnected, got: {:?}",
             err
         );
+    }
+
+    #[tokio::test]
+    async fn submit_handle_wait_returns_result() {
+        let (tx, rx) = oneshot::channel();
+        let mut handle = SubmitHandle { rx };
+
+        assert!(handle.try_recv().is_none(), "Should be empty before send");
+
+        tx.send(Ok(true)).unwrap();
+
+        let result = handle.wait().await;
+        assert!(matches!(result, Ok(true)));
+    }
+
+    #[tokio::test]
+    async fn submit_handle_try_recv_returns_result() {
+        let (tx, rx) = oneshot::channel();
+        let mut handle = SubmitHandle { rx };
+
+        assert!(handle.try_recv().is_none(), "Should be empty before send");
+
+        tx.send(Ok(false)).unwrap();
+
+        let result = handle.try_recv();
+        assert!(matches!(result, Some(Ok(false))));
+    }
+
+    #[tokio::test]
+    async fn submit_handle_closed_channel_returns_not_connected() {
+        let (tx, rx) = oneshot::channel::<Result<bool>>();
+        let mut handle = SubmitHandle { rx };
+
+        drop(tx);
+
+        assert!(matches!(
+            handle.try_recv(),
+            Some(Err(ClientError::NotConnected))
+        ));
+    }
+
+    #[tokio::test]
+    async fn submit_handle_wait_closed_channel_returns_not_connected() {
+        let (tx, rx) = oneshot::channel::<Result<bool>>();
+        let handle = SubmitHandle { rx };
+
+        drop(tx);
+
+        let result = handle.wait().await;
+        assert!(matches!(result, Err(ClientError::NotConnected)));
     }
 }
