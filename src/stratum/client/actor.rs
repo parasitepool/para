@@ -1,4 +1,4 @@
-use {super::*, crate::MAX_MESSAGE_SIZE, parking_lot::RwLock, std::time::Instant};
+use {super::*, crate::MAX_MESSAGE_SIZE, std::time::Instant};
 
 struct ConnectionState {
     writer: BufWriter<tokio::net::tcp::OwnedWriteHalf>,
@@ -46,7 +46,6 @@ pub(super) struct ClientActor {
     config: Arc<ClientConfig>,
     rx: mpsc::Receiver<ClientMessage>,
     events: broadcast::Sender<Event>,
-    state: Arc<RwLock<ClientState>>,
     id_counter: u64,
     pending: HashMap<Id, PendingRequest>,
     pending_submits: HashMap<Id, PendingSubmit>,
@@ -58,13 +57,11 @@ impl ClientActor {
         config: Arc<ClientConfig>,
         rx: mpsc::Receiver<ClientMessage>,
         events: broadcast::Sender<Event>,
-        state: Arc<RwLock<ClientState>>,
     ) -> Self {
         Self {
             config,
             rx,
             events,
-            state,
             id_counter: 0,
             pending: HashMap::new(),
             pending_submits: HashMap::new(),
@@ -255,8 +252,6 @@ impl ClientActor {
             debug!("Disconnected");
         }
 
-        self.state.write().clear();
-
         let pending = std::mem::take(&mut self.pending);
         for (_, (tx, _)) in pending {
             tx.send(Err(ClientError::NotConnected)).ok();
@@ -302,9 +297,9 @@ impl ClientActor {
                 },
                 "mining.set_difficulty" => match serde_json::from_value::<SetDifficulty>(params) {
                     Ok(set_diff) => {
-                        let difficulty = set_diff.difficulty();
-                        self.state.write().difficulty = Some(difficulty);
-                        self.events.send(Event::SetDifficulty(difficulty)).ok();
+                        self.events
+                            .send(Event::SetDifficulty(set_diff.difficulty()))
+                            .ok();
                     }
                     Err(e) => warn!("Failed to parse mining.set_difficulty: {}", e),
                 },

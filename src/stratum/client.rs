@@ -2,7 +2,6 @@ use {
     super::*,
     actor::{ClientActor, ClientMessage},
     futures::StreamExt,
-    parking_lot::RwLock,
     std::{
         collections::HashMap,
         sync::Arc,
@@ -35,23 +34,6 @@ pub struct ClientConfig {
     pub timeout: Duration,
 }
 
-#[derive(Debug, Default, Clone)]
-pub struct ClientState {
-    pub enonce1: Option<Extranonce>,
-    pub enonce2_size: Option<usize>,
-    pub difficulty: Option<Difficulty>,
-    pub version_mask: Option<Version>,
-}
-
-impl ClientState {
-    fn clear(&mut self) {
-        self.enonce1 = None;
-        self.enonce2_size = None;
-        self.difficulty = None;
-        self.version_mask = None;
-    }
-}
-
 pub struct SubmitHandle {
     rx: oneshot::Receiver<Result<bool>>,
 }
@@ -75,7 +57,6 @@ pub struct Client {
     config: Arc<ClientConfig>,
     tx: mpsc::Sender<ClientMessage>,
     events: broadcast::Sender<Event>,
-    state: Arc<RwLock<ClientState>>,
 }
 
 impl Client {
@@ -85,8 +66,7 @@ impl Client {
         let (event_tx, _event_rx) = broadcast::channel(CHANNEL_BUFFER_SIZE);
 
         let config = Arc::new(config);
-        let state = Arc::new(RwLock::new(ClientState::default()));
-        let actor = ClientActor::new(config.clone(), rx, event_tx.clone(), state.clone());
+        let actor = ClientActor::new(config.clone(), rx, event_tx.clone());
 
         tokio::spawn(async move {
             actor.run().await;
@@ -96,12 +76,7 @@ impl Client {
             config,
             tx,
             events: event_tx,
-            state,
         }
-    }
-
-    pub fn state(&self) -> ClientState {
-        self.state.read().clone()
     }
 
     pub async fn connect(&self) -> Result<broadcast::Receiver<Event>> {
@@ -209,10 +184,6 @@ impl Client {
         let response: ConfigureResponse =
             serde_json::from_value(result).context(error::SerializationSnafu)?;
 
-        if let Some(mask) = response.version_rolling_mask {
-            self.state.write().version_mask = Some(mask);
-        }
-
         Ok((response, duration, bytes_read))
     }
 
@@ -240,12 +211,6 @@ impl Client {
 
         let subscribe_result: SubscribeResult =
             serde_json::from_value(result).context(error::SerializationSnafu)?;
-
-        {
-            let mut state = self.state.write();
-            state.enonce1 = Some(subscribe_result.enonce1.clone());
-            state.enonce2_size = Some(subscribe_result.enonce2_size);
-        }
 
         Ok((subscribe_result, duration, bytes_read))
     }
