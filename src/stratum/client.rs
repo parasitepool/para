@@ -144,7 +144,7 @@ impl Client {
 
     async fn send_request(
         &self,
-        method: &str,
+        method: &'static str,
         params: Value,
     ) -> Result<(oneshot::Receiver<Result<(Message, usize)>>, Instant)> {
         let (respond_to, rx) = oneshot::channel();
@@ -152,7 +152,7 @@ impl Client {
 
         self.tx
             .send(ClientMessage::Request {
-                method: method.to_owned(),
+                method,
                 params,
                 respond_to,
             })

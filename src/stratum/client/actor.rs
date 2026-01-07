@@ -1,8 +1,15 @@
-use {super::*, crate::MAX_MESSAGE_SIZE, std::time::Instant};
+use {super::*, crate::MAX_MESSAGE_SIZE, serde::Serialize, std::time::Instant};
 
 struct ConnectionState {
     writer: BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     reader_handle: tokio::task::JoinHandle<()>,
+}
+
+#[derive(Serialize)]
+struct SubmitRequest<'a> {
+    id: Id,
+    method: &'static str,
+    params: &'a Submit,
 }
 
 enum IncomingMessage {
@@ -29,7 +36,7 @@ pub(super) enum ClientMessage {
         respond_to: oneshot::Sender<Result>,
     },
     Request {
-        method: String,
+        method: &'static str,
         params: Value,
         respond_to: oneshot::Sender<Result<(Message, usize)>>,
     },
@@ -74,6 +81,11 @@ impl ClientActor {
 
         loop {
             tokio::select! {
+                biased;
+
+                Some(msg) = incoming_rx.recv() => {
+                    self.handle_incoming(msg).await;
+                }
                 Some(msg) = self.rx.recv() => {
                     match msg {
                         ClientMessage::Connect { respond_to } => {
@@ -137,9 +149,6 @@ impl ClientActor {
                             }
                         }
                     }
-                }
-                Some(msg) = incoming_rx.recv() => {
-                    self.handle_incoming(msg).await;
                 }
                 else => {
                     debug!("Client actor shutting down");
@@ -247,19 +256,41 @@ impl ClientActor {
         Ok(())
     }
 
-    async fn handle_request(&mut self, id: Id, method: String, params: Value) -> Result {
-        let msg = Message::Request { id, method, params };
+    async fn handle_request(&mut self, id: Id, method: &'static str, params: Value) -> Result {
+        let msg = Message::Request {
+            id,
+            method: method.to_owned(),
+            params,
+        };
         self.send_message(&msg).await
     }
 
     async fn handle_submit_request(&mut self, id: Id, submit: &Submit) -> Result {
-        let msg = Message::Request {
+        let connection = self.connection.as_mut().ok_or(ClientError::NotConnected)?;
+
+        let request = SubmitRequest {
             id,
-            method: "mining.submit".to_owned(),
-            params: serde_json::to_value(submit)
-                .map_err(|e| ClientError::Serialization { source: e })?,
+            method: "mining.submit",
+            params: submit,
         };
-        self.send_message(&msg).await
+
+        let frame = serde_json::to_string(&request)
+            .map_err(|e| ClientError::Serialization { source: e })?
+            + "\n";
+
+        connection
+            .writer
+            .write_all(frame.as_bytes())
+            .await
+            .map_err(|e| ClientError::Io { source: e })?;
+
+        connection
+            .writer
+            .flush()
+            .await
+            .map_err(|e| ClientError::Io { source: e })?;
+
+        Ok(())
     }
 
     async fn handle_disconnect(&mut self) {
@@ -300,7 +331,7 @@ impl ClientActor {
                             result: Some(val),
                             error: None,
                             ..
-                        } => serde_json::from_value::<bool>(val.clone()).unwrap_or(false),
+                        } => val.as_bool().unwrap_or(false),
                         _ => false,
                     };
                     if tx.send(Ok(result)).is_err() {
