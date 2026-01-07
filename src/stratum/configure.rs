@@ -1,5 +1,18 @@
 use super::*;
 
+/// Response from mining.configure method
+#[derive(Debug, Default, Clone, PartialEq, Deserialize)]
+pub struct ConfigureResponse {
+    #[serde(rename = "version-rolling", default)]
+    pub version_rolling: bool,
+
+    #[serde(rename = "version-rolling.mask", default)]
+    pub version_rolling_mask: Option<Version>,
+
+    #[serde(rename = "minimum-difficulty", default)]
+    pub minimum_difficulty: bool,
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct Configure {
     pub extensions: Vec<String>,

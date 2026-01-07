@@ -22,4 +22,13 @@ pub enum ClientError {
 
     #[snafu(display("Client not connected"))]
     NotConnected,
+
+    #[snafu(display("{method} rejected: {reason}"))]
+    Rejected { method: String, reason: String },
+
+    #[snafu(display("Unhandled response for {method}"))]
+    UnhandledResponse { method: String },
+
+    #[snafu(display("Server returned false for submit"))]
+    SubmitFalse,
 }

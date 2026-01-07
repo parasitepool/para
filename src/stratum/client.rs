@@ -1,16 +1,19 @@
 use {
     super::*,
     actor::{ClientActor, ClientMessage},
+    futures::StreamExt,
+    parking_lot::RwLock,
     std::{
-        collections::BTreeMap,
+        collections::HashMap,
         sync::Arc,
         time::{Duration, Instant},
     },
     tokio::{
-        io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter},
+        io::{AsyncWriteExt, BufWriter},
         net::TcpStream,
         sync::{broadcast, mpsc, oneshot},
     },
+    tokio_util::codec::{FramedRead, LinesCodec},
     tracing::{debug, error, warn},
 };
 
@@ -21,7 +24,7 @@ mod error;
 
 pub type Result<T = (), E = ClientError> = std::result::Result<T, E>;
 
-const CHANNEL_BUFFER_SIZE: usize = 32;
+const CHANNEL_BUFFER_SIZE: usize = 256;
 
 #[derive(Debug, Clone)]
 pub struct ClientConfig {
@@ -32,20 +35,58 @@ pub struct ClientConfig {
     pub timeout: Duration,
 }
 
+#[derive(Debug, Default)]
+pub(crate) struct ClientState {
+    pub(crate) enonce1: Option<Extranonce>,
+    pub(crate) enonce2_size: Option<usize>,
+    pub(crate) difficulty: Option<Difficulty>,
+    pub(crate) version_mask: Option<Version>,
+}
+
+impl ClientState {
+    fn clear(&mut self) {
+        self.enonce1 = None;
+        self.enonce2_size = None;
+        self.difficulty = None;
+        self.version_mask = None;
+    }
+}
+
+pub struct SubmitHandle {
+    rx: oneshot::Receiver<Result<bool>>,
+}
+
+impl SubmitHandle {
+    pub async fn wait(self) -> Result<bool> {
+        self.rx.await.map_err(|_| ClientError::NotConnected)?
+    }
+
+    pub fn try_recv(&mut self) -> Option<Result<bool>> {
+        match self.rx.try_recv() {
+            Ok(result) => Some(result),
+            Err(oneshot::error::TryRecvError::Empty) => None,
+            Err(oneshot::error::TryRecvError::Closed) => Some(Err(ClientError::NotConnected)),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Client {
     config: Arc<ClientConfig>,
     tx: mpsc::Sender<ClientMessage>,
     events: broadcast::Sender<Event>,
+    state: Arc<RwLock<ClientState>>,
 }
 
 impl Client {
+    #[must_use]
     pub fn new(config: ClientConfig) -> Self {
         let (tx, rx) = mpsc::channel(CHANNEL_BUFFER_SIZE);
         let (event_tx, _event_rx) = broadcast::channel(CHANNEL_BUFFER_SIZE);
 
         let config = Arc::new(config);
-        let actor = ClientActor::new(config.clone(), rx, event_tx.clone());
+        let state = Arc::new(RwLock::new(ClientState::default()));
+        let actor = ClientActor::new(config.clone(), rx, event_tx.clone(), state.clone());
 
         tokio::spawn(async move {
             actor.run().await;
@@ -55,7 +96,28 @@ impl Client {
             config,
             tx,
             events: event_tx,
+            state,
         }
+    }
+
+    pub fn enonce1(&self) -> Option<Extranonce> {
+        self.state.read().enonce1.clone()
+    }
+
+    pub fn enonce2_size(&self) -> Option<usize> {
+        self.state.read().enonce2_size
+    }
+
+    pub fn difficulty(&self) -> Option<Difficulty> {
+        self.state.read().difficulty
+    }
+
+    pub fn version_mask(&self) -> Option<Version> {
+        self.state.read().version_mask
+    }
+
+    pub fn is_subscribed(&self) -> bool {
+        self.state.read().enonce1.is_some()
     }
 
     pub async fn connect(&self) -> Result<broadcast::Receiver<Event>> {
@@ -71,19 +133,20 @@ impl Client {
         Ok(self.events.subscribe())
     }
 
-    pub async fn disconnect(&self) -> Result {
+    pub async fn disconnect(&self) {
         let (respond_to, rx) = oneshot::channel();
 
-        let _ = self.tx.send(ClientMessage::Disconnect { respond_to }).await;
+        self.tx
+            .send(ClientMessage::Disconnect { respond_to })
+            .await
+            .ok();
 
-        let _ = rx.await;
-
-        Ok(())
+        rx.await.ok();
     }
 
     async fn send_request(
         &self,
-        method: String,
+        method: &str,
         params: Value,
     ) -> Result<(oneshot::Receiver<Result<(Message, usize)>>, Instant)> {
         let (respond_to, rx) = oneshot::channel();
@@ -91,7 +154,7 @@ impl Client {
 
         self.tx
             .send(ClientMessage::Request {
-                method,
+                method: method.to_owned(),
                 params,
                 respond_to,
             })
@@ -128,19 +191,12 @@ impl Client {
             Message::Response {
                 reject_reason: Some(reason),
                 ..
-            } => Err(ClientError::Stratum {
-                response: StratumErrorResponse {
-                    error_code: -100,
-                    message: format!("{method} rejected: {reason}"),
-                    traceback: None,
-                },
+            } => Err(ClientError::Rejected {
+                method: method.to_owned(),
+                reason,
             }),
-            _ => Err(ClientError::Stratum {
-                response: StratumErrorResponse {
-                    error_code: -101,
-                    message: format!("Unhandled {method} response"),
-                    traceback: None,
-                },
+            _ => Err(ClientError::UnhandledResponse {
+                method: method.to_owned(),
             }),
         }
     }
@@ -149,10 +205,10 @@ impl Client {
         &self,
         extensions: Vec<String>,
         version_rolling_mask: Option<Version>,
-    ) -> Result<(Value, Duration, usize)> {
+    ) -> Result<(ConfigureResponse, Duration, usize)> {
         let (rx, instant) = self
             .send_request(
-                "mining.configure".to_string(),
+                "mining.configure",
                 serde_json::to_value(Configure {
                     extensions,
                     minimum_difficulty_value: None,
@@ -166,7 +222,14 @@ impl Client {
         let (message, bytes_read, duration) = self.await_response(rx, instant).await?;
         let result = self.handle_response(message, "mining.configure")?;
 
-        Ok((result, duration, bytes_read))
+        let response: ConfigureResponse =
+            serde_json::from_value(result).context(error::SerializationSnafu)?;
+
+        if let Some(mask) = response.version_rolling_mask {
+            self.state.write().version_mask = Some(mask);
+        }
+
+        Ok((response, duration, bytes_read))
     }
 
     pub async fn subscribe(&self) -> Result<(SubscribeResult, Duration, usize)> {
@@ -179,7 +242,7 @@ impl Client {
     ) -> Result<(SubscribeResult, Duration, usize)> {
         let (rx, instant) = self
             .send_request(
-                "mining.subscribe".to_string(),
+                "mining.subscribe",
                 serde_json::to_value(Subscribe {
                     user_agent: self.config.user_agent.clone(),
                     enonce1,
@@ -191,17 +254,22 @@ impl Client {
         let (message, bytes_read, duration) = self.await_response(rx, instant).await?;
         let result = self.handle_response(message, "mining.subscribe")?;
 
-        Ok((
-            serde_json::from_value(result).context(error::SerializationSnafu)?,
-            duration,
-            bytes_read,
-        ))
+        let subscribe_result: SubscribeResult =
+            serde_json::from_value(result).context(error::SerializationSnafu)?;
+
+        {
+            let mut state = self.state.write();
+            state.enonce1 = Some(subscribe_result.enonce1.clone());
+            state.enonce2_size = Some(subscribe_result.enonce2_size);
+        }
+
+        Ok((subscribe_result, duration, bytes_read))
     }
 
     pub async fn authorize(&self) -> Result<(Duration, usize)> {
         let (rx, instant) = self
             .send_request(
-                "mining.authorize".to_string(),
+                "mining.authorize",
                 serde_json::to_value(Authorize {
                     username: self.config.username.clone(),
                     password: self.config.password.clone().or(Some("x".to_string())),
@@ -228,37 +296,17 @@ impl Client {
         enonce2: Extranonce,
         ntime: Ntime,
         nonce: Nonce,
+        version_bits: Option<Version>,
     ) -> Result<Submit> {
-        let submit = Submit {
-            username: self.config.username.clone(),
+        self.submit_with_username(
+            self.config.username.clone(),
             job_id,
             enonce2,
             ntime,
             nonce,
-            version_bits: None,
-        };
-
-        let (rx, instant) = self
-            .send_request(
-                "mining.submit".to_string(),
-                serde_json::to_value(&submit).context(error::SerializationSnafu)?,
-            )
-            .await?;
-
-        let (message, _, _) = self.await_response(rx, instant).await?;
-        let result = self.handle_response(message, "mining.submit")?;
-
-        if !serde_json::from_value::<bool>(result).context(error::SerializationSnafu)? {
-            return Err(ClientError::Stratum {
-                response: StratumErrorResponse {
-                    error_code: -102,
-                    message: "Server returned false for submit".to_string(),
-                    traceback: None,
-                },
-            });
-        }
-
-        Ok(submit)
+            version_bits,
+        )
+        .await
     }
 
     pub async fn submit_with_username(
@@ -268,6 +316,7 @@ impl Client {
         enonce2: Extranonce,
         ntime: Ntime,
         nonce: Nonce,
+        version_bits: Option<Version>,
     ) -> Result<Submit> {
         let submit = Submit {
             username,
@@ -275,12 +324,12 @@ impl Client {
             enonce2,
             ntime,
             nonce,
-            version_bits: None,
+            version_bits,
         };
 
         let (rx, instant) = self
             .send_request(
-                "mining.submit".to_string(),
+                "mining.submit",
                 serde_json::to_value(&submit).context(error::SerializationSnafu)?,
             )
             .await?;
@@ -289,16 +338,60 @@ impl Client {
         let result = self.handle_response(message, "mining.submit")?;
 
         if !serde_json::from_value::<bool>(result).context(error::SerializationSnafu)? {
-            return Err(ClientError::Stratum {
-                response: StratumErrorResponse {
-                    error_code: -102,
-                    message: "Server returned false for submit".to_string(),
-                    traceback: None,
-                },
-            });
+            return Err(ClientError::SubmitFalse);
         }
 
         Ok(submit)
+    }
+
+    /// Submit share without waiting for response.
+    /// Returns a handle to optionally track the result.
+    pub async fn submit_async(
+        &self,
+        job_id: JobId,
+        enonce2: Extranonce,
+        ntime: Ntime,
+        nonce: Nonce,
+        version_bits: Option<Version>,
+    ) -> Result<SubmitHandle> {
+        self.submit_async_with_username(
+            self.config.username.clone(),
+            job_id,
+            enonce2,
+            ntime,
+            nonce,
+            version_bits,
+        )
+        .await
+    }
+
+    /// Submit share with custom username without waiting for response.
+    pub async fn submit_async_with_username(
+        &self,
+        username: Username,
+        job_id: JobId,
+        enonce2: Extranonce,
+        ntime: Ntime,
+        nonce: Nonce,
+        version_bits: Option<Version>,
+    ) -> Result<SubmitHandle> {
+        let submit = Submit {
+            username,
+            job_id,
+            enonce2,
+            ntime,
+            nonce,
+            version_bits,
+        };
+
+        let (respond_to, rx) = oneshot::channel();
+
+        self.tx
+            .send(ClientMessage::SubmitAsync { submit, respond_to })
+            .await
+            .map_err(|_| ClientError::NotConnected)?;
+
+        Ok(SubmitHandle { rx })
     }
 }
 

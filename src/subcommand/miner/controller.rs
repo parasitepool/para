@@ -89,7 +89,7 @@ impl Controller {
         controller.root_cancel.cancel();
         drop(controller.notify_tx);
         while controller.hashers.join_next().await.is_some() {}
-        controller.client.disconnect().await?;
+        controller.client.disconnect().await;
 
         Ok(controller.shares)
     }
@@ -144,7 +144,7 @@ impl Controller {
 
                         self.shares.push(share);
 
-                        match self.client.submit(job_id, enonce2, header.time.into(), header.nonce.into()).await {
+                        match self.client.submit(job_id, enonce2, header.time.into(), header.nonce.into(), None).await {
                             Err(err) => warn!("Failed to submit share for job {job_id}: {err}"),
                             Ok(_) => info!("Share for job {job_id} submitted successfully"),
                         }

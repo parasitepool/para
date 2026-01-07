@@ -101,6 +101,7 @@ async fn stratum_state_machine() {
                     Extranonce::random(8),
                     Ntime::from(0),
                     Nonce::from(0),
+                    None,
                 )
                 .await,
             StratumError::Unauthorized,
@@ -141,6 +142,7 @@ async fn stratum_state_machine() {
                     Extranonce::random(8),
                     Ntime::from(0),
                     Nonce::from(0),
+                    None,
                 )
                 .await,
             StratumError::Unauthorized,
@@ -175,6 +177,7 @@ async fn stratum_state_machine() {
                     Extranonce::random(8),
                     Ntime::from(0),
                     Nonce::from(0),
+                    None,
                 )
                 .await,
             StratumError::Unauthorized,
@@ -227,6 +230,7 @@ async fn stratum_state_machine() {
                 enonce2_for_state_check,
                 ntime_check,
                 nonce_check,
+                None,
             )
             .await
             .unwrap();
@@ -238,7 +242,7 @@ async fn stratum_state_machine() {
         let enonce2 = Extranonce::random(enonce2_size);
         let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, difficulty);
         client
-            .submit(notify.job_id, enonce2, ntime, nonce)
+            .submit(notify.job_id, enonce2, ntime, nonce, None)
             .await
             .unwrap();
     }
@@ -269,7 +273,7 @@ async fn stratum_state_machine() {
         let enonce2 = Extranonce::random(enonce2_size);
         let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, difficulty);
         client
-            .submit(notify.job_id, enonce2, ntime, nonce)
+            .submit(notify.job_id, enonce2, ntime, nonce, None)
             .await
             .unwrap();
 
@@ -284,6 +288,7 @@ async fn stratum_state_machine() {
                     Extranonce::random(enonce2_size),
                     ntime,
                     nonce,
+                    None,
                 )
                 .await,
             StratumError::Unauthorized,
@@ -304,7 +309,7 @@ async fn stratum_state_machine() {
             new_difficulty,
         );
         client
-            .submit(new_notify.job_id, new_enonce2, new_ntime, new_nonce)
+            .submit(new_notify.job_id, new_enonce2, new_ntime, new_nonce, None)
             .await
             .unwrap();
     }
@@ -324,11 +329,11 @@ async fn stratum_state_machine() {
         let enonce2 = Extranonce::random(subscribe_result.enonce2_size);
         let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, difficulty);
         client
-            .submit(notify.job_id, enonce2, ntime, nonce)
+            .submit(notify.job_id, enonce2, ntime, nonce, None)
             .await
             .unwrap();
 
-        client.disconnect().await.unwrap();
+        client.disconnect().await;
         enonce1
     };
 
@@ -357,7 +362,7 @@ async fn stratum_state_machine() {
         let enonce2 = Extranonce::random(subscribe_result.enonce2_size);
         let (ntime, nonce) = solve_share(&notify, &original_enonce1, &enonce2, difficulty);
         client
-            .submit(notify.job_id, enonce2, ntime, nonce)
+            .submit(notify.job_id, enonce2, ntime, nonce, None)
             .await
             .unwrap();
     }
@@ -576,7 +581,10 @@ async fn vardiff_adjusts_difficulty() {
         let enonce2 = Extranonce::random(subscribe.enonce2_size);
         let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, initial_difficulty);
 
-        match client.submit(notify.job_id, enonce2, ntime, nonce).await {
+        match client
+            .submit(notify.job_id, enonce2, ntime, nonce, None)
+            .await
+        {
             Ok(_) => accepted_shares += 1,
             Err(ClientError::Stratum { response })
                 if response.error_code == StratumError::Duplicate as i32 =>
@@ -646,14 +654,16 @@ async fn share_validation() {
     let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, difficulty);
     assert!(
         client
-            .submit(notify.job_id, enonce2.clone(), ntime, nonce)
+            .submit(notify.job_id, enonce2.clone(), ntime, nonce, None)
             .await
             .is_ok()
     );
 
     // Duplicate rejected
     assert_stratum_error(
-        client.submit(notify.job_id, enonce2, ntime, nonce).await,
+        client
+            .submit(notify.job_id, enonce2, ntime, nonce, None)
+            .await,
         StratumError::Duplicate,
     );
 
@@ -665,6 +675,7 @@ async fn share_validation() {
                 Extranonce::random(enonce2_size - 1),
                 ntime,
                 nonce,
+                None,
             )
             .await,
         StratumError::InvalidNonce2Length,
@@ -678,6 +689,7 @@ async fn share_validation() {
                 Extranonce::random(enonce2_size + 1),
                 ntime,
                 nonce,
+                None,
             )
             .await,
         StratumError::InvalidNonce2Length,
@@ -691,6 +703,7 @@ async fn share_validation() {
                 Extranonce::random(enonce2_size),
                 ntime,
                 nonce,
+                None,
             )
             .await,
         StratumError::Stale,
@@ -704,6 +717,7 @@ async fn share_validation() {
                 Extranonce::random(enonce2_size),
                 notify.ntime,
                 Nonce::from(0),
+                None,
             )
             .await,
         StratumError::AboveTarget,
@@ -718,6 +732,7 @@ async fn share_validation() {
                 Extranonce::random(enonce2_size),
                 notify.ntime,
                 Nonce::from(0),
+                None,
             )
             .await,
         StratumError::WorkerMismatch,
@@ -732,6 +747,7 @@ async fn share_validation() {
                 Extranonce::random(enonce2_size),
                 Ntime::from(job_ntime - 1),
                 Nonce::from(0),
+                None,
             )
             .await,
         StratumError::NtimeOutOfRange,
@@ -745,6 +761,7 @@ async fn share_validation() {
                 Extranonce::random(enonce2_size),
                 Ntime::from(job_ntime + 7001),
                 Nonce::from(0),
+                None,
             )
             .await,
         StratumError::NtimeOutOfRange,
@@ -760,7 +777,7 @@ async fn share_validation() {
 
     assert_stratum_error(
         client
-            .submit(old_job_id, fresh_enonce2, old_ntime, old_nonce)
+            .submit(old_job_id, fresh_enonce2, old_ntime, old_nonce, None)
             .await,
         StratumError::Stale,
     );
@@ -802,7 +819,7 @@ async fn bouncer() {
         let enonce2 = Extranonce::random(enonce2_size);
         let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, difficulty);
         client
-            .submit(notify.job_id, enonce2, ntime, nonce)
+            .submit(notify.job_id, enonce2, ntime, nonce, None)
             .await
             .unwrap();
 
@@ -814,6 +831,7 @@ async fn bouncer() {
                 Extranonce::random(enonce2_size),
                 ntime,
                 nonce,
+                None,
             )
             .await;
 
@@ -848,6 +866,7 @@ async fn bouncer() {
                     Extranonce::random(enonce2_size),
                     initial_notify.ntime,
                     Nonce::from(0),
+                    None,
                 )
                 .await;
 

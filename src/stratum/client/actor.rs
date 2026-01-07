@@ -1,4 +1,4 @@
-use super::*;
+use {super::*, crate::MAX_MESSAGE_SIZE, parking_lot::RwLock};
 
 struct ConnectionState {
     writer: BufWriter<tokio::net::tcp::OwnedWriteHalf>,
@@ -28,6 +28,10 @@ pub(super) enum ClientMessage {
         params: Value,
         respond_to: oneshot::Sender<Result<(Message, usize)>>,
     },
+    SubmitAsync {
+        submit: Submit,
+        respond_to: oneshot::Sender<Result<bool>>,
+    },
     Disconnect {
         respond_to: oneshot::Sender<()>,
     },
@@ -37,8 +41,10 @@ pub(super) struct ClientActor {
     config: Arc<ClientConfig>,
     rx: mpsc::Receiver<ClientMessage>,
     events: broadcast::Sender<Event>,
+    state: Arc<RwLock<ClientState>>,
     id_counter: u64,
-    pending: BTreeMap<Id, oneshot::Sender<Result<(Message, usize)>>>,
+    pending: HashMap<Id, oneshot::Sender<Result<(Message, usize)>>>,
+    pending_submits: HashMap<Id, oneshot::Sender<Result<bool>>>,
     connection: Option<ConnectionState>,
 }
 
@@ -47,13 +53,16 @@ impl ClientActor {
         config: Arc<ClientConfig>,
         rx: mpsc::Receiver<ClientMessage>,
         events: broadcast::Sender<Event>,
+        state: Arc<RwLock<ClientState>>,
     ) -> Self {
         Self {
             config,
             rx,
             events,
+            state,
             id_counter: 0,
-            pending: BTreeMap::new(),
+            pending: HashMap::new(),
+            pending_submits: HashMap::new(),
             connection: None,
         }
     }
@@ -67,7 +76,7 @@ impl ClientActor {
                     match msg {
                         ClientMessage::Connect { respond_to } => {
                             let result = self.handle_connect(incoming_tx.clone()).await;
-                            let _ = respond_to.send(result);
+                            respond_to.send(result).ok();
                         }
                         ClientMessage::Request { method, params, respond_to } => {
                             let id = self.next_id();
@@ -77,13 +86,24 @@ impl ClientActor {
                                     self.pending.insert(id, respond_to);
                                 }
                                 Err(err) => {
-                                    let _ = respond_to.send(Err(err));
+                                    respond_to.send(Err(err)).ok();
+                                }
+                            }
+                        }
+                        ClientMessage::SubmitAsync { submit, respond_to } => {
+                            let id = self.next_id();
+                            match self.handle_submit_request(id.clone(), &submit).await {
+                                Ok(_) => {
+                                    self.pending_submits.insert(id, respond_to);
+                                }
+                                Err(err) => {
+                                    respond_to.send(Err(err)).ok();
                                 }
                             }
                         }
                         ClientMessage::Disconnect { respond_to } => {
                             self.handle_disconnect().await;
-                            let _ = respond_to.send(());
+                            respond_to.send(()).ok();
                         }
                     }
                 }
@@ -118,11 +138,17 @@ impl ClientActor {
         .map_err(|source| ClientError::Timeout { source })?
         .map_err(|source| ClientError::Io { source })?;
 
+        stream
+            .set_nodelay(true)
+            .map_err(|source| ClientError::Io { source })?;
+
         let (reader, writer) = stream.into_split();
         let writer = BufWriter::new(writer);
+        let framed_reader =
+            FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_MESSAGE_SIZE));
 
         let reader_handle = tokio::spawn(async move {
-            Self::reader_task(BufReader::new(reader), incoming_tx).await;
+            Self::reader_task(framed_reader, incoming_tx).await;
         });
 
         self.connection = Some(ConnectionState {
@@ -158,18 +184,54 @@ impl ClientActor {
         Ok(())
     }
 
+    async fn handle_submit_request(&mut self, id: Id, submit: &Submit) -> Result {
+        let connection = self.connection.as_mut().ok_or(ClientError::NotConnected)?;
+
+        let msg = Message::Request {
+            id,
+            method: "mining.submit".to_owned(),
+            params: serde_json::to_value(submit)
+                .map_err(|e| ClientError::Serialization { source: e })?,
+        };
+
+        let frame = serde_json::to_string(&msg)
+            .map_err(|e| ClientError::Serialization { source: e })?
+            + "\n";
+
+        connection
+            .writer
+            .write_all(frame.as_bytes())
+            .await
+            .map_err(|e| ClientError::Io { source: e })?;
+
+        connection
+            .writer
+            .flush()
+            .await
+            .map_err(|e| ClientError::Io { source: e })?;
+
+        Ok(())
+    }
+
     async fn handle_disconnect(&mut self) {
         if let Some(connection) = self.connection.take() {
             connection.reader_handle.abort();
             debug!("Disconnected");
         }
 
+        self.state.write().clear();
+
         let pending = std::mem::take(&mut self.pending);
         for (_, tx) in pending {
-            let _ = tx.send(Err(ClientError::NotConnected));
+            tx.send(Err(ClientError::NotConnected)).ok();
         }
 
-        let _ = self.events.send(Event::Disconnected);
+        let pending_submits = std::mem::take(&mut self.pending_submits);
+        for (_, tx) in pending_submits {
+            tx.send(Err(ClientError::NotConnected)).ok();
+        }
+
+        self.events.send(Event::Disconnected).ok();
     }
 
     async fn handle_incoming(&mut self, msg: IncomingMessage) {
@@ -179,8 +241,18 @@ impl ClientActor {
                 message,
                 bytes_read,
             } => {
-                if let Some(tx) = self.pending.remove(&id) {
-                    let _ = tx.send(Ok((message, bytes_read)));
+                if let Some(tx) = self.pending_submits.remove(&id) {
+                    let result = match &message {
+                        Message::Response {
+                            result: Some(val),
+                            error: None,
+                            ..
+                        } => serde_json::from_value::<bool>(val.clone()).unwrap_or(false),
+                        _ => false,
+                    };
+                    tx.send(Ok(result)).ok();
+                } else if let Some(tx) = self.pending.remove(&id) {
+                    tx.send(Ok((message, bytes_read))).ok();
                 } else {
                     warn!("Unmatched response ID={:?}", id);
                 }
@@ -188,15 +260,15 @@ impl ClientActor {
             IncomingMessage::Notification { method, params } => match method.as_str() {
                 "mining.notify" => match serde_json::from_value::<Notify>(params) {
                     Ok(notify) => {
-                        let _ = self.events.send(Event::Notify(notify));
+                        self.events.send(Event::Notify(notify)).ok();
                     }
                     Err(e) => warn!("Failed to parse mining.notify: {}", e),
                 },
                 "mining.set_difficulty" => match serde_json::from_value::<SetDifficulty>(params) {
                     Ok(set_diff) => {
-                        let _ = self
-                            .events
-                            .send(Event::SetDifficulty(set_diff.difficulty()));
+                        let difficulty = set_diff.difficulty();
+                        self.state.write().difficulty = Some(difficulty);
+                        self.events.send(Event::SetDifficulty(difficulty)).ok();
                     }
                     Err(e) => warn!("Failed to parse mining.set_difficulty: {}", e),
                 },
@@ -213,28 +285,25 @@ impl ClientActor {
     }
 
     async fn reader_task(
-        mut reader: BufReader<tokio::net::tcp::OwnedReadHalf>,
+        mut reader: FramedRead<tokio::net::tcp::OwnedReadHalf, LinesCodec>,
         incoming_tx: mpsc::Sender<IncomingMessage>,
     ) {
-        let mut line = String::new();
-
-        loop {
-            line.clear();
-
-            let bytes_read = match reader.read_line(&mut line).await {
-                Ok(0) => {
-                    let _ = incoming_tx.send(IncomingMessage::Disconnected).await;
-                    break;
-                }
-                Ok(n) => n,
+        while let Some(result) = reader.next().await {
+            let line = match result {
+                Ok(line) => line,
                 Err(e) => {
                     error!("Read error: {e}");
-                    let _ = incoming_tx
-                        .send(IncomingMessage::Error(ClientError::Io { source: e }))
-                        .await;
+                    incoming_tx
+                        .send(IncomingMessage::Error(ClientError::Io {
+                            source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
+                        }))
+                        .await
+                        .ok();
                     break;
                 }
             };
+
+            let bytes_read = line.len() + 1;
 
             let msg: Message = match serde_json::from_str(&line) {
                 Ok(msg) => msg,
@@ -246,26 +315,30 @@ impl ClientActor {
 
             match &msg {
                 Message::Response { id, .. } => {
-                    let _ = incoming_tx
+                    incoming_tx
                         .send(IncomingMessage::Response {
                             id: id.clone(),
                             message: msg,
                             bytes_read,
                         })
-                        .await;
+                        .await
+                        .ok();
                 }
                 Message::Notification { method, params } => {
-                    let _ = incoming_tx
+                    incoming_tx
                         .send(IncomingMessage::Notification {
                             method: method.clone(),
                             params: params.clone(),
                         })
-                        .await;
+                        .await
+                        .ok();
                 }
                 _ => {
                     warn!("Unexpected message type: {:?}", msg);
                 }
             }
         }
+
+        incoming_tx.send(IncomingMessage::Disconnected).await.ok();
     }
 }
