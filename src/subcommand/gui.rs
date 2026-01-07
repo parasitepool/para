@@ -20,10 +20,10 @@ use {
 // Embed the logo at compile time
 const LOGO_SVG: &[u8] = include_bytes!("../../static/parasite.svg");
 
-/// Maximum number of data points to keep in history (5 minutes at 1 second intervals)
-const HISTORY_SIZE: usize = 300;
+/// Maximum number of data points to keep in history (5 minutes at 2 second intervals = 150 points)
+const HISTORY_SIZE: usize = 150;
 /// How often to poll for updates
-const POLL_INTERVAL_MS: u64 = 1000;
+const POLL_INTERVAL_MS: u64 = 2000;
 
 // Theme colors
 const BG_DARK: Color = Color::from_rgb(0.02, 0.02, 0.03);
@@ -183,6 +183,7 @@ impl ParaGui {
                         }
                         self.sps_history.push_back(stats.sps_1m);
 
+                        // Clear caches to trigger redraw
                         self.hash_rate_cache.clear();
                         self.sps_cache.clear();
 
@@ -373,7 +374,6 @@ impl ParaGui {
             &self.hash_rate_cache,
             ACCENT_CYAN,
         );
-
         let sps_chart = self.view_chart(
             "Shares Per Second",
             &self.sps_history,
@@ -402,7 +402,7 @@ impl ParaGui {
             color,
         })
         .width(Length::Fill)
-        .height(Length::Fixed(160.0))
+        .height(Length::Fixed(180.0))
         .into();
 
         container(
@@ -860,6 +860,24 @@ impl<'a> LineChart<'a> {
     }
 }
 
+fn format_chart_value(value: f64) -> String {
+    if value >= 1e15 {
+        format!("{:.1} PH/s", value / 1e15)
+    } else if value >= 1e12 {
+        format!("{:.1} TH/s", value / 1e12)
+    } else if value >= 1e9 {
+        format!("{:.1} GH/s", value / 1e9)
+    } else if value >= 1e6 {
+        format!("{:.2} MH/s", value / 1e6)
+    } else if value >= 1e3 {
+        format!("{:.2} KH/s", value / 1e3)
+    } else if value >= 1.0 {
+        format!("{:.1}", value)
+    } else {
+        format!("{:.2}", value)
+    }
+}
+
 fn fetch_stats(endpoint: String) -> Task<Message> {
     Task::perform(
         async move {
@@ -979,7 +997,7 @@ fn fetch_single_miner(ip_str: String) -> Task<Message> {
 /// Fallback for NerdAxe/AxeOS devices that asic-rs doesn't recognize
 async fn fetch_axeos_miner(ip: IpAddr) -> Result<MinerInfo, String> {
     let url = format!("http://{}/api/system/info", ip);
-    
+
     let response = reqwest::Client::new()
         .get(&url)
         .timeout(Duration::from_secs(5))
@@ -1076,24 +1094,6 @@ fn parse_hash_rate(s: &str) -> f64 {
         _ => 1.0,
     };
     num * mult
-}
-
-fn format_chart_value(value: f64) -> String {
-    if value >= 1e15 {
-        format!("{:.1} PH/s", value / 1e15)
-    } else if value >= 1e12 {
-        format!("{:.1} TH/s", value / 1e12)
-    } else if value >= 1e9 {
-        format!("{:.1} GH/s", value / 1e9)
-    } else if value >= 1e6 {
-        format!("{:.2} MH/s", value / 1e6)
-    } else if value >= 1e3 {
-        format!("{:.2} KH/s", value / 1e3)
-    } else if value >= 1.0 {
-        format!("{:.1}", value)
-    } else {
-        format!("{:.2}", value)
-    }
 }
 
 fn format_number(n: u64) -> String {
