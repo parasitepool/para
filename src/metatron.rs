@@ -174,14 +174,8 @@ impl Metatron {
         self.started.elapsed()
     }
 
-    pub(crate) fn get_user(&self, address: &Address) -> Option<Arc<User>> {
-        self.users.get(address).map(|entry| entry.value().clone())
-    }
-
-    pub(crate) fn iter_users(&self) -> impl Iterator<Item = (Address, Arc<User>)> + '_ {
-        self.users
-            .iter()
-            .map(|entry| (entry.key().clone(), entry.value().clone()))
+    pub(crate) fn users(&self) -> &DashMap<Address, Arc<User>> {
+        &self.users
     }
 }
 

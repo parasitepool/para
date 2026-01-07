@@ -75,15 +75,16 @@ async fn stats(State(metatron): State<Arc<Metatron>>) -> Json<Stats> {
 async fn users(State(metatron): State<Arc<Metatron>>) -> Json<Vec<UserSummary>> {
     Json(
         metatron
-            .iter_users()
-            .map(|(address, user)| UserSummary {
-                address: address.to_string(),
-                hash_rate: user.hash_rate_1m(),
-                shares_per_second: user.sps_1m(),
-                workers: user.worker_count(),
-                accepted: user.accepted(),
-                rejected: user.rejected(),
-                best_ever: user.best_ever(),
+            .users()
+            .iter()
+            .map(|entry| UserSummary {
+                address: entry.key().to_string(),
+                hash_rate: entry.value().hash_rate_1m(),
+                shares_per_second: entry.value().sps_1m(),
+                workers: entry.value().worker_count(),
+                accepted: entry.value().accepted(),
+                rejected: entry.value().rejected(),
+                best_ever: entry.value().best_ever(),
             })
             .collect(),
     )
@@ -96,7 +97,8 @@ async fn user(
     let address = address.assume_checked();
 
     let user = metatron
-        .get_user(&address)
+        .users()
+        .get(&address)
         .ok_or_not_found(|| format!("User {address}"))?;
 
     Ok(Json(UserDetail {
