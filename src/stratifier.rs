@@ -26,6 +26,7 @@ pub(crate) struct Stratifier<R, W> {
     state: State,
     address: Option<Address>,
     workername: Option<String>,
+    authorized_username: Option<Username>,
     authorized: Option<SystemTime>,
     version_mask: Option<Version>,
     enonce1: Option<Extranonce>,
@@ -55,6 +56,8 @@ where
             config.start_diff(),
             config.vardiff_period(),
             config.vardiff_window(),
+            config.min_diff(),
+            config.max_diff(),
         );
 
         let bouncer = Bouncer::new(config.disable_bouncer());
@@ -74,6 +77,7 @@ where
             state: State::Init,
             address: None,
             workername: None,
+            authorized_username: None,
             authorized: None,
             version_mask: None,
             enonce1: None,
@@ -345,6 +349,8 @@ where
                 self.config.start_diff(),
                 self.config.vardiff_period(),
                 self.config.vardiff_window(),
+                self.config.min_diff(),
+                self.config.max_diff(),
             );
             self.authorized = None;
             self.address = None;
@@ -361,10 +367,10 @@ where
                     requested_enonce1
                 );
 
-                Extranonce::random(ENONCE1_SIZE)
+                self.metatron.next_enonce1()
             }
         } else {
-            Extranonce::random(ENONCE1_SIZE)
+            self.metatron.next_enonce1()
         };
 
         let subscriptions = vec![
@@ -440,6 +446,7 @@ where
 
         self.address = Some(address);
         self.workername = Some(authorize.username.workername().to_string());
+        self.authorized_username = Some(authorize.username);
         self.authorized = Some(SystemTime::now());
         self.bouncer.authorize();
 
@@ -467,6 +474,33 @@ where
     }
 
     async fn submit(&mut self, id: Id, submit: Submit) -> Result<Consequence> {
+        if let Some(ref authorized) = self.authorized_username
+            && submit.username.as_str() != authorized.as_str()
+        {
+            self.send_error(
+                id,
+                StratumError::WorkerMismatch,
+                Some(json!({
+                    "authorized": authorized.as_str(),
+                    "submitted": submit.username.as_str(),
+                })),
+            )
+            .await?;
+
+            self.emit_share(
+                &submit,
+                None,
+                0.0,
+                BlockHash::all_zeros(),
+                Some(StratumError::WorkerMismatch),
+            );
+
+            let consequence = self.bouncer.reject();
+            self.handle_consequence(consequence).await;
+
+            return Ok(consequence);
+        }
+
         let Some(job) = self.jobs.get(&submit.job_id) else {
             self.send_error(id, StratumError::Stale, None).await?;
             self.emit_share(
@@ -508,6 +542,34 @@ where
                 0.0,
                 BlockHash::all_zeros(),
                 Some(StratumError::InvalidNonce2Length),
+            );
+
+            let consequence = self.bouncer.reject();
+            self.handle_consequence(consequence).await;
+
+            return Ok(consequence);
+        }
+
+        let job_ntime = job.ntime().0;
+        let submit_ntime = submit.ntime.0;
+        if submit_ntime < job_ntime || submit_ntime > job_ntime + MAX_NTIME_OFFSET {
+            self.send_error(
+                id,
+                StratumError::NtimeOutOfRange,
+                Some(json!({
+                    "job_ntime": job_ntime,
+                    "submit_ntime": submit_ntime,
+                    "max_ntime": job_ntime + MAX_NTIME_OFFSET,
+                })),
+            )
+            .await?;
+
+            self.emit_share(
+                &submit,
+                Some(&job),
+                0.0,
+                BlockHash::all_zeros(),
+                Some(StratumError::NtimeOutOfRange),
             );
 
             let consequence = self.bouncer.reject();

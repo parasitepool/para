@@ -260,6 +260,46 @@ impl Client {
 
         Ok(submit)
     }
+
+    pub async fn submit_with_username(
+        &self,
+        username: Username,
+        job_id: JobId,
+        enonce2: Extranonce,
+        ntime: Ntime,
+        nonce: Nonce,
+    ) -> Result<Submit> {
+        let submit = Submit {
+            username,
+            job_id,
+            enonce2,
+            ntime,
+            nonce,
+            version_bits: None,
+        };
+
+        let (rx, instant) = self
+            .send_request(
+                "mining.submit".to_string(),
+                serde_json::to_value(&submit).context(error::SerializationSnafu)?,
+            )
+            .await?;
+
+        let (message, _, _) = self.await_response(rx, instant).await?;
+        let result = self.handle_response(message, "mining.submit")?;
+
+        if !serde_json::from_value::<bool>(result).context(error::SerializationSnafu)? {
+            return Err(ClientError::Stratum {
+                response: StratumErrorResponse {
+                    error_code: -102,
+                    message: "Server returned false for submit".to_string(),
+                    traceback: None,
+                },
+            });
+        }
+
+        Ok(submit)
+    }
 }
 
 #[cfg(test)]

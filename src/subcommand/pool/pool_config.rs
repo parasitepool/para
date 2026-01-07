@@ -52,6 +52,10 @@ pub(crate) struct PoolConfig {
         default_value = "1"
     )]
     start_diff: Difficulty,
+    #[arg(long, help = "Minimum difficulty for vardiff.")]
+    min_diff: Option<Difficulty>,
+    #[arg(long, help = "Maximum difficulty for vardiff.")]
+    max_diff: Option<Difficulty>,
     #[arg(
         long,
         help = "Target <VARDIFF_PERIOD> seconds between share submissions.",
@@ -203,6 +207,14 @@ impl PoolConfig {
         self.start_diff
     }
 
+    pub(crate) fn min_diff(&self) -> Option<Difficulty> {
+        self.min_diff
+    }
+
+    pub(crate) fn max_diff(&self) -> Option<Difficulty> {
+        self.max_diff
+    }
+
     pub(crate) fn update_interval(&self) -> Duration {
         Duration::from_secs(self.update_interval)
     }
@@ -245,5 +257,36 @@ impl PoolConfig {
 
     pub(crate) fn disable_bouncer(&self) -> bool {
         self.disable_bouncer
+    }
+
+    pub(crate) fn validate(&self) -> Result<()> {
+        if let Some(min) = self.min_diff {
+            ensure!(
+                self.start_diff >= min,
+                "start_diff ({}) must be >= min_diff ({})",
+                self.start_diff,
+                min
+            );
+        }
+
+        if let Some(max) = self.max_diff {
+            ensure!(
+                self.start_diff <= max,
+                "start_diff ({}) must be <= max_diff ({})",
+                self.start_diff,
+                max
+            );
+        }
+
+        if let (Some(min), Some(max)) = (self.min_diff, self.max_diff) {
+            ensure!(
+                min <= max,
+                "min_diff ({}) must be <= max_diff ({})",
+                min,
+                max
+            );
+        }
+
+        Ok(())
     }
 }
