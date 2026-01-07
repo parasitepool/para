@@ -1,4 +1,4 @@
-use {super::*, crate::MAX_MESSAGE_SIZE, parking_lot::RwLock};
+use {super::*, crate::MAX_MESSAGE_SIZE, parking_lot::RwLock, std::time::Instant};
 
 struct ConnectionState {
     writer: BufWriter<tokio::net::tcp::OwnedWriteHalf>,
@@ -18,6 +18,11 @@ enum IncomingMessage {
     Disconnected,
     Error(ClientError),
 }
+
+const MAX_PENDING_REQUESTS: usize = 1024;
+
+type PendingRequest = (oneshot::Sender<Result<(Message, usize)>>, Instant);
+type PendingSubmit = (oneshot::Sender<Result<bool>>, Instant);
 
 pub(super) enum ClientMessage {
     Connect {
@@ -43,8 +48,8 @@ pub(super) struct ClientActor {
     events: broadcast::Sender<Event>,
     state: Arc<RwLock<ClientState>>,
     id_counter: u64,
-    pending: HashMap<Id, oneshot::Sender<Result<(Message, usize)>>>,
-    pending_submits: HashMap<Id, oneshot::Sender<Result<bool>>>,
+    pending: HashMap<Id, PendingRequest>,
+    pending_submits: HashMap<Id, PendingSubmit>,
     connection: Option<ConnectionState>,
 }
 
@@ -79,11 +84,19 @@ impl ClientActor {
                             respond_to.send(result).ok();
                         }
                         ClientMessage::Request { method, params, respond_to } => {
+                            self.evict_expired_pending();
+
+                            if self.pending.len() >= MAX_PENDING_REQUESTS {
+                                respond_to.send(Err(ClientError::TooManyPendingRequests)).ok();
+                                continue;
+                            }
+
                             let id = self.next_id();
+                            let deadline = Instant::now() + self.config.timeout;
 
                             match self.handle_request(id.clone(), method, params).await {
                                 Ok(_) => {
-                                    self.pending.insert(id, respond_to);
+                                    self.pending.insert(id, (respond_to, deadline));
                                 }
                                 Err(err) => {
                                     respond_to.send(Err(err)).ok();
@@ -91,10 +104,19 @@ impl ClientActor {
                             }
                         }
                         ClientMessage::SubmitAsync { submit, respond_to } => {
+                            self.evict_expired_pending();
+
+                            if self.pending_submits.len() >= MAX_PENDING_REQUESTS {
+                                respond_to.send(Err(ClientError::TooManyPendingRequests)).ok();
+                                continue;
+                            }
+
                             let id = self.next_id();
+                            let deadline = Instant::now() + self.config.timeout;
+
                             match self.handle_submit_request(id.clone(), &submit).await {
                                 Ok(_) => {
-                                    self.pending_submits.insert(id, respond_to);
+                                    self.pending_submits.insert(id, (respond_to, deadline));
                                 }
                                 Err(err) => {
                                     respond_to.send(Err(err)).ok();
@@ -123,6 +145,36 @@ impl ClientActor {
         let id = self.id_counter;
         self.id_counter += 1;
         Id::Number(id)
+    }
+
+    fn evict_expired_pending(&mut self) {
+        let now = Instant::now();
+
+        let expired_ids: Vec<_> = self
+            .pending
+            .iter()
+            .filter(|(_, (_, deadline))| now > *deadline)
+            .map(|(id, _)| id.clone())
+            .collect();
+
+        for id in expired_ids {
+            if let Some((tx, _)) = self.pending.remove(&id) {
+                tx.send(Err(ClientError::RequestExpired)).ok();
+            }
+        }
+
+        let expired_submit_ids: Vec<_> = self
+            .pending_submits
+            .iter()
+            .filter(|(_, (_, deadline))| now > *deadline)
+            .map(|(id, _)| id.clone())
+            .collect();
+
+        for id in expired_submit_ids {
+            if let Some((tx, _)) = self.pending_submits.remove(&id) {
+                tx.send(Err(ClientError::RequestExpired)).ok();
+            }
+        }
     }
 
     async fn handle_connect(&mut self, incoming_tx: mpsc::Sender<IncomingMessage>) -> Result {
@@ -160,12 +212,10 @@ impl ClientActor {
         Ok(())
     }
 
-    async fn handle_request(&mut self, id: Id, method: String, params: Value) -> Result {
+    async fn send_message(&mut self, msg: &Message) -> Result {
         let connection = self.connection.as_mut().ok_or(ClientError::NotConnected)?;
 
-        let msg = Message::Request { id, method, params };
-
-        let frame = serde_json::to_string(&msg)
+        let frame = serde_json::to_string(msg)
             .map_err(|e| ClientError::Serialization { source: e })?
             + "\n";
 
@@ -184,33 +234,19 @@ impl ClientActor {
         Ok(())
     }
 
-    async fn handle_submit_request(&mut self, id: Id, submit: &Submit) -> Result {
-        let connection = self.connection.as_mut().ok_or(ClientError::NotConnected)?;
+    async fn handle_request(&mut self, id: Id, method: String, params: Value) -> Result {
+        let msg = Message::Request { id, method, params };
+        self.send_message(&msg).await
+    }
 
+    async fn handle_submit_request(&mut self, id: Id, submit: &Submit) -> Result {
         let msg = Message::Request {
             id,
             method: "mining.submit".to_owned(),
             params: serde_json::to_value(submit)
                 .map_err(|e| ClientError::Serialization { source: e })?,
         };
-
-        let frame = serde_json::to_string(&msg)
-            .map_err(|e| ClientError::Serialization { source: e })?
-            + "\n";
-
-        connection
-            .writer
-            .write_all(frame.as_bytes())
-            .await
-            .map_err(|e| ClientError::Io { source: e })?;
-
-        connection
-            .writer
-            .flush()
-            .await
-            .map_err(|e| ClientError::Io { source: e })?;
-
-        Ok(())
+        self.send_message(&msg).await
     }
 
     async fn handle_disconnect(&mut self) {
@@ -222,12 +258,12 @@ impl ClientActor {
         self.state.write().clear();
 
         let pending = std::mem::take(&mut self.pending);
-        for (_, tx) in pending {
+        for (_, (tx, _)) in pending {
             tx.send(Err(ClientError::NotConnected)).ok();
         }
 
         let pending_submits = std::mem::take(&mut self.pending_submits);
-        for (_, tx) in pending_submits {
+        for (_, (tx, _)) in pending_submits {
             tx.send(Err(ClientError::NotConnected)).ok();
         }
 
@@ -241,7 +277,7 @@ impl ClientActor {
                 message,
                 bytes_read,
             } => {
-                if let Some(tx) = self.pending_submits.remove(&id) {
+                if let Some((tx, _)) = self.pending_submits.remove(&id) {
                     let result = match &message {
                         Message::Response {
                             result: Some(val),
@@ -251,7 +287,7 @@ impl ClientActor {
                         _ => false,
                     };
                     tx.send(Ok(result)).ok();
-                } else if let Some(tx) = self.pending.remove(&id) {
+                } else if let Some((tx, _)) = self.pending.remove(&id) {
                     tx.send(Ok((message, bytes_read))).ok();
                 } else {
                     warn!("Unmatched response ID={:?}", id);

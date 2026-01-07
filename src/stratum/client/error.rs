@@ -31,4 +31,10 @@ pub enum ClientError {
 
     #[snafu(display("Server returned false for submit"))]
     SubmitFalse,
+
+    #[snafu(display("Request expired without response"))]
+    RequestExpired,
+
+    #[snafu(display("Too many pending requests"))]
+    TooManyPendingRequests,
 }

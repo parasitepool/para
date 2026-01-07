@@ -35,12 +35,12 @@ pub struct ClientConfig {
     pub timeout: Duration,
 }
 
-#[derive(Debug, Default)]
-pub(crate) struct ClientState {
-    pub(crate) enonce1: Option<Extranonce>,
-    pub(crate) enonce2_size: Option<usize>,
-    pub(crate) difficulty: Option<Difficulty>,
-    pub(crate) version_mask: Option<Version>,
+#[derive(Debug, Default, Clone)]
+pub struct ClientState {
+    pub enonce1: Option<Extranonce>,
+    pub enonce2_size: Option<usize>,
+    pub difficulty: Option<Difficulty>,
+    pub version_mask: Option<Version>,
 }
 
 impl ClientState {
@@ -100,24 +100,8 @@ impl Client {
         }
     }
 
-    pub fn enonce1(&self) -> Option<Extranonce> {
-        self.state.read().enonce1.clone()
-    }
-
-    pub fn enonce2_size(&self) -> Option<usize> {
-        self.state.read().enonce2_size
-    }
-
-    pub fn difficulty(&self) -> Option<Difficulty> {
-        self.state.read().difficulty
-    }
-
-    pub fn version_mask(&self) -> Option<Version> {
-        self.state.read().version_mask
-    }
-
-    pub fn is_subscribed(&self) -> bool {
-        self.state.read().enonce1.is_some()
+    pub fn state(&self) -> ClientState {
+        self.state.read().clone()
     }
 
     pub async fn connect(&self) -> Result<broadcast::Receiver<Event>> {
@@ -344,8 +328,6 @@ impl Client {
         Ok(submit)
     }
 
-    /// Submit share without waiting for response.
-    /// Returns a handle to optionally track the result.
     pub async fn submit_async(
         &self,
         job_id: JobId,
@@ -365,7 +347,6 @@ impl Client {
         .await
     }
 
-    /// Submit share with custom username without waiting for response.
     pub async fn submit_async_with_username(
         &self,
         username: Username,
@@ -514,5 +495,55 @@ mod tests {
             "Expected NotConnected, got: {:?}",
             err
         );
+    }
+
+    #[tokio::test]
+    async fn submit_handle_wait_returns_result() {
+        let (tx, rx) = oneshot::channel();
+        let mut handle = SubmitHandle { rx };
+
+        assert!(handle.try_recv().is_none(), "Should be empty before send");
+
+        tx.send(Ok(true)).unwrap();
+
+        let result = handle.wait().await;
+        assert!(matches!(result, Ok(true)));
+    }
+
+    #[tokio::test]
+    async fn submit_handle_try_recv_returns_result() {
+        let (tx, rx) = oneshot::channel();
+        let mut handle = SubmitHandle { rx };
+
+        assert!(handle.try_recv().is_none(), "Should be empty before send");
+
+        tx.send(Ok(false)).unwrap();
+
+        let result = handle.try_recv();
+        assert!(matches!(result, Some(Ok(false))));
+    }
+
+    #[tokio::test]
+    async fn submit_handle_closed_channel_returns_not_connected() {
+        let (tx, rx) = oneshot::channel::<Result<bool>>();
+        let mut handle = SubmitHandle { rx };
+
+        drop(tx);
+
+        assert!(matches!(
+            handle.try_recv(),
+            Some(Err(ClientError::NotConnected))
+        ));
+    }
+
+    #[tokio::test]
+    async fn submit_handle_wait_closed_channel_returns_not_connected() {
+        let (tx, rx) = oneshot::channel::<Result<bool>>();
+        let handle = SubmitHandle { rx };
+
+        drop(tx);
+
+        let result = handle.wait().await;
+        assert!(matches!(result, Err(ClientError::NotConnected)));
     }
 }
