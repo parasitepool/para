@@ -1,23 +1,5 @@
 use super::*;
-
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct StatusResponse {
-    pub upstream: UpstreamStatus,
-    pub downstream: DownstreamStatus,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct UpstreamStatus {
-    pub url: String,
-    pub connected: bool,
-    pub username: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct DownstreamStatus {
-    pub address: String,
-    pub port: u16,
-}
+use para::api::proxy::StatusResponse;
 
 pub(crate) struct TestProxy {
     proxy_handle: Child,
@@ -63,7 +45,6 @@ impl TestProxy {
         .integration_test(true)
         .spawn();
 
-        // Wait for API server to be ready
         for attempt in 0.. {
             match TcpStream::connect(format!("127.0.0.1:{api_port}")) {
                 Ok(_) => break,
@@ -123,15 +104,9 @@ impl Drop for TestProxy {
                     _ => break,
                 }
             }
-
-            let _ = self.proxy_handle.kill();
-            let _ = self.proxy_handle.wait();
         }
 
-        #[cfg(not(unix))]
-        {
-            let _ = self.proxy_handle.kill();
-            let _ = self.proxy_handle.wait();
-        }
+        let _ = self.proxy_handle.kill();
+        let _ = self.proxy_handle.wait();
     }
 }

@@ -114,7 +114,7 @@ use {
     zmq::Zmq,
 };
 
-mod api;
+pub mod api;
 mod arguments;
 mod block_template;
 mod chain;
@@ -122,7 +122,7 @@ pub mod ckpool;
 mod coinbase_builder;
 mod decay;
 mod generator;
-mod hash_rate;
+pub mod hash_rate;
 mod http_server;
 mod job;
 mod jobs;
