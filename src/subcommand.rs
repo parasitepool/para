@@ -3,7 +3,7 @@ use super::*;
 pub mod miner;
 mod ping;
 pub(crate) mod pool;
-pub(crate) mod proxy;
+mod proxy;
 pub mod server;
 pub mod sync;
 pub mod template;

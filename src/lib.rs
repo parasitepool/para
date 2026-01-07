@@ -77,7 +77,7 @@ use {
         str::FromStr,
         sync::{
             Arc, LazyLock,
-            atomic::{AtomicU64, Ordering},
+            atomic::{AtomicBool, AtomicU64, Ordering},
         },
         thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},

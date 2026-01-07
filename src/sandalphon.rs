@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use super::*;
 
 pub(crate) struct Sandalphon {
     upstream_url: String,
