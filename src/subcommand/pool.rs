@@ -166,7 +166,7 @@ mod tests {
             config.zmq_block_notifications().to_string(),
             "tcp://127.0.0.1:28332".to_string()
         );
-        assert_eq!(config.extranonce2_size(), 8);
+        assert_eq!(config.enonce2_size(), 8);
     }
 
     #[test]
@@ -328,22 +328,22 @@ mod tests {
     #[test]
     fn extranonce2_size_default() {
         let config = parse_pool_config("para pool");
-        assert_eq!(config.extranonce2_size(), 8);
+        assert_eq!(config.enonce2_size(), 8);
     }
 
     #[test]
     fn extranonce2_size_override() {
         let config = parse_pool_config("para pool --extranonce2-size 4");
-        assert_eq!(config.extranonce2_size(), 4);
+        assert_eq!(config.enonce2_size(), 4);
     }
 
     #[test]
     fn extranonce2_size_boundaries() {
         let config = parse_pool_config("para pool --extranonce2-size 2");
-        assert_eq!(config.extranonce2_size(), 2);
+        assert_eq!(config.enonce2_size(), 2);
 
         let config = parse_pool_config("para pool --extranonce2-size 8");
-        assert_eq!(config.extranonce2_size(), 8);
+        assert_eq!(config.enonce2_size(), 8);
     }
 
     #[test]

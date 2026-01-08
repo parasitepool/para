@@ -82,17 +82,36 @@ mod tests {
             .assume_checked();
 
         let workbase = Arc::new(Workbase::new((*template).clone()));
-        Arc::new(
-            Job::new(
-                address,
-                Extranonce::random(ENONCE1_SIZE),
-                8,
-                None,
-                workbase,
-                id,
-            )
-            .unwrap(),
-        )
+        let template = workbase.template();
+        let enonce1 = Extranonce::random(ENONCE1_SIZE);
+
+        let (_coinbase_tx, coinb1, coinb2) = CoinbaseBuilder::new(
+                        address.clone(),
+                        enonce1.clone(),
+                        8,
+                        template.height,
+                        template.coinbase_value,
+                        template.default_witness_commitment.clone(),
+                    )
+                    .with_aux(template.coinbaseaux.clone())
+                    .with_timestamp(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()) // TODO
+                    .with_pool_sig("|parasite|".into())
+                    .build()
+                    .unwrap(); // TODO
+
+        Arc::new(Job {
+            job_id: id,
+            prevhash: workbase.template().previous_block_hash.into(),
+            coinb1,
+            coinb2,
+            merkle_branches: workbase.merkle_branches().to_vec(),
+            version: template.version,
+            nbits: template.bits,
+            ntime: template.current_time,
+            enonce1: enonce1.clone(),
+            version_mask: None,
+            workbase,
+        })
     }
 
     #[track_caller]

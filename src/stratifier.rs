@@ -13,14 +13,14 @@ pub(crate) enum State {
     Working,
 }
 
-pub(crate) struct Stratifier<R, W> {
+pub(crate) struct Stratifier<R, W, S> {
     config: Arc<PoolConfig>,
     metatron: Arc<Metatron>,
     share_tx: mpsc::Sender<Share>,
     socket_addr: SocketAddr,
     reader: FramedRead<R, LinesCodec>,
     writer: FramedWrite<W, LinesCodec>,
-    workbase_receiver: watch::Receiver<Arc<Workbase>>,
+    workbase_receiver: watch::Receiver<Arc<Workbase<S>>>,
     cancel_token: CancellationToken,
     jobs: Jobs,
     state: State,
@@ -36,10 +36,11 @@ pub(crate) struct Stratifier<R, W> {
     dropped_by_bouncer: bool,
 }
 
-impl<R, W> Stratifier<R, W>
+impl<R, W, S> Stratifier<R, W, S>
 where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
+    S: Source,
 {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
@@ -49,7 +50,7 @@ where
         socket_addr: SocketAddr,
         reader: R,
         writer: W,
-        workbase_receiver: watch::Receiver<Arc<Workbase>>,
+        workbase_receiver: watch::Receiver<Arc<Workbase<BlockTemplate>>>,
         cancel_token: CancellationToken,
     ) -> Self {
         let vardiff = Vardiff::new(
@@ -217,24 +218,44 @@ where
 
                 if let (Some(address), Some(enonce1)) = (&self.address, &self.enonce1) {
                     let workbase = self.workbase_receiver.borrow().clone();
-                    if let Ok(new_job) = Job::new(
+                    let template = workbase.template();
+
+                    let (_coinbase_tx, coinb1, coinb2) = CoinbaseBuilder::new(
                         address.clone(),
                         enonce1.clone(),
-                        self.config.extranonce2_size(),
-                        self.version_mask,
+                        self.config.enonce2_size(),
+                        template.height,
+                        template.coinbase_value,
+                        template.default_witness_commitment.clone(),
+                    )
+                    .with_aux(template.coinbaseaux.clone())
+                    .with_timestamp(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()) // TODO
+                    .with_pool_sig("|parasite|".into())
+                    .build()
+                    .unwrap(); // TODO
+
+                    let new_job = Arc::new(Job {
+                        job_id: self.jobs.next_id(),
+                        prevhash: workbase.template().previous_block_hash.into(),
+                        coinb1,
+                        coinb2,
+                        merkle_branches: workbase.merkle_branches().to_vec(),
+                        version: template.version,
+                        nbits: template.bits,
+                        ntime: template.current_time,
+                        enonce1: enonce1.clone(),
+                        version_mask: self.version_mask,
                         workbase,
-                        self.jobs.next_id(),
-                    ) {
-                        let new_job = Arc::new(new_job);
-                        let clean_jobs = self.jobs.upsert(new_job.clone());
-                        if let Ok(notify) = new_job.notify(clean_jobs) {
-                            let _ = self
-                                .send(Message::Notification {
-                                    method: "mining.notify".into(),
-                                    params: json!(notify),
-                                })
-                                .await;
-                        }
+                    });
+
+                    let clean_jobs = self.jobs.upsert(new_job.clone());
+                    if let Ok(notify) = new_job.notify(clean_jobs) {
+                        let _ = self
+                            .send(Message::Notification {
+                                method: "mining.notify".into(),
+                                params: json!(notify),
+                            })
+                            .await;
                     }
                 }
             }
@@ -269,20 +290,41 @@ where
         }
     }
 
-    async fn workbase_update(&mut self, workbase: Arc<Workbase>) -> Result {
+    async fn workbase_update(&mut self, workbase: Arc<Workbase<BlockTemplate>>) -> Result {
         let (address, enonce1) = match (&self.address, &self.enonce1) {
             (Some(address), Some(enonce1)) => (address.clone(), enonce1.clone()),
             _ => return Ok(()),
         };
 
-        let new_job = Arc::new(Job::new(
-            address,
-            enonce1,
-            self.config.extranonce2_size(),
-            self.version_mask,
+        let template = workbase.template();
+
+        let (_coinbase_tx, coinb1, coinb2) = CoinbaseBuilder::new(
+                        address.clone(),
+                        enonce1.clone(),
+                        self.config.enonce2_size(),
+                        template.height,
+                        template.coinbase_value,
+                        template.default_witness_commitment.clone(),
+                    )
+                    .with_aux(template.coinbaseaux.clone())
+                    .with_timestamp(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()) // TODO
+                    .with_pool_sig("|parasite|".into())
+                    .build()
+                    .unwrap(); // TODO
+
+        let new_job = Arc::new(Job {
+            job_id: self.jobs.next_id(),
+            prevhash: workbase.template().previous_block_hash.into(),
+            coinb1,
+            coinb2,
+            merkle_branches: workbase.merkle_branches().to_vec(),
+            version: template.version,
+            nbits: template.bits,
+            ntime: template.current_time,
+            enonce1: enonce1.clone(),
+            version_mask: self.version_mask,
             workbase,
-            self.jobs.next_id(),
-        )?);
+        });
 
         let clean_jobs = self.jobs.upsert(new_job.clone());
 
@@ -384,7 +426,7 @@ where
         let result = SubscribeResult {
             subscriptions,
             enonce1: enonce1.clone(),
-            enonce2_size: self.config.extranonce2_size(),
+            enonce2_size: self.config.enonce2_size(),
         };
 
         self.send(Message::Response {
@@ -427,14 +469,36 @@ where
             }
         };
 
-        let job = Arc::new(Job::new(
-            address.clone(),
-            enonce1.clone(),
-            self.config.extranonce2_size(),
-            self.version_mask,
-            self.workbase_receiver.borrow().clone(),
-            self.jobs.next_id(),
-        )?);
+        let workbase = self.workbase_receiver.borrow().clone();
+        let template = workbase.template();
+
+        let (_coinbase_tx, coinb1, coinb2) = CoinbaseBuilder::new(
+                        address.clone(),
+                        enonce1.clone(),
+                        self.config.enonce2_size(),
+                        template.height,
+                        template.coinbase_value,
+                        template.default_witness_commitment.clone(),
+                    )
+                    .with_aux(template.coinbaseaux.clone())
+                    .with_timestamp(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()) // TODO
+                    .with_pool_sig("|parasite|".into())
+                    .build()
+                    .unwrap(); // TODO
+
+        let job = Arc::new(Job {
+            job_id: self.jobs.next_id(),
+            prevhash: workbase.template().previous_block_hash.into(),
+            coinb1,
+            coinb2,
+            merkle_branches: workbase.merkle_branches().to_vec(),
+            version: template.version,
+            nbits: template.bits,
+            ntime: template.current_time,
+            enonce1: enonce1.clone(),
+            version_mask: self.version_mask,
+            workbase,
+        });
 
         self.send(Message::Response {
             id,
@@ -517,7 +581,7 @@ where
             return Ok(consequence);
         };
 
-        let expected_extranonce2_size = self.config.extranonce2_size();
+        let expected_extranonce2_size = self.config.enonce2_size();
         if submit.enonce2.len() != expected_extranonce2_size {
             warn!(
                 "Invalid extranonce2 length from {}: got {} bytes, expected {}",
@@ -550,7 +614,7 @@ where
             return Ok(consequence);
         }
 
-        let job_ntime = job.ntime().0;
+        let job_ntime = job.ntime.0;
         let submit_ntime = submit.ntime.0;
         if submit_ntime < job_ntime || submit_ntime > job_ntime + MAX_NTIME_OFFSET {
             self.send_error(
@@ -609,22 +673,22 @@ where
                 "miner set disallowed version bits: {disallowed}"
             );
 
-            (job.version() & !version_mask) | (version_bits & version_mask)
+            (job.version & !version_mask) | (version_bits & version_mask)
         } else {
-            job.version()
+            job.version
         };
 
-        let nbits = job.nbits();
+        let nbits = job.nbits;
 
         let header = Header {
             version: version.into(),
-            prev_blockhash: job.prevhash().into(),
+            prev_blockhash: job.prevhash.clone().into(),
             merkle_root: stratum::merkle_root(
                 &job.coinb1,
                 &job.coinb2,
                 &job.enonce1,
                 &submit.enonce2,
-                job.workbase.merkle_branches(),
+                &job.merkle_branches,
             )?
             .into(),
             time: submit.ntime.into(),
@@ -676,7 +740,7 @@ where
             let block = Block { header, txdata };
 
             if job.workbase.template().height > 16 {
-                assert!(block.bip34_block_height().is_ok());
+                assert!(block.bip34_block_height().is_ok()); // TODO
             }
 
             info!("Submitting potential block solve");
@@ -705,7 +769,7 @@ where
 
             self.bouncer.accept();
 
-            let network_diff = Difficulty::from(job.nbits());
+            let network_diff = Difficulty::from(job.nbits);
 
             debug!(
                 "Share accepted from {} | diff={} dsps={:.4} shares_since_change={}",
@@ -753,7 +817,7 @@ where
     fn emit_share(
         &self,
         submit: &Submit,
-        job: Option<&Job>,
+        job: Option<&Job<S>>,
         pool_diff: f64,
         hash: BlockHash,
         reject_reason: Option<StratumError>,
@@ -838,7 +902,7 @@ where
     }
 }
 
-impl<R, W> Drop for Stratifier<R, W> {
+impl<R, W, S> Drop for Stratifier<R, W, S> {
     fn drop(&mut self) {
         if !self.dropped_by_bouncer
             && let (Some(enonce1), Some(_authorized)) = (self.enonce1.take(), self.authorized)

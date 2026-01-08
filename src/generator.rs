@@ -17,7 +17,7 @@ impl Generator {
         })
     }
 
-    pub(crate) async fn spawn(&mut self) -> Result<watch::Receiver<Arc<Workbase>>> {
+    pub(crate) async fn spawn(&mut self) -> Result<watch::Receiver<Arc<Workbase<BlockTemplate>>>> {
         let rpc = self.bitcoin_rpc_client.clone();
         let cancel = self.cancel.clone();
         let config = self.config.clone();

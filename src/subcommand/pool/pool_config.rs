@@ -251,7 +251,7 @@ impl PoolConfig {
         }
     }
 
-    pub(crate) fn extranonce2_size(&self) -> usize {
+    pub(crate) fn enonce2_size(&self) -> usize {
         self.extranonce2_size as usize
     }
 

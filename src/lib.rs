@@ -62,6 +62,7 @@ use {
     session::SessionSnapshot,
     share::Share,
     snafu::Snafu,
+    source::Source,
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
     std::{
         collections::{BTreeMap, HashMap, HashSet},
@@ -132,6 +133,7 @@ mod nexus;
 mod session;
 mod share;
 mod signal;
+mod source;
 mod stratifier;
 pub mod stratum;
 pub mod subcommand;
