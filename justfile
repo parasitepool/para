@@ -38,6 +38,9 @@ coverage:
 test-without-ckpool:
   cargo test --all -- --skip ckpool
 
+gui:
+  cargo hot --features debug -- gui
+
 miner stratum_endpoint='127.0.0.1:42069': 
   cargo run --release -- miner \
     {{stratum_endpoint}} \
