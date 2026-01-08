@@ -1,14 +1,14 @@
 use {super::*, crate::job::Job};
 
 #[derive(Debug)]
-pub(crate) struct Jobs {
-    latest: Option<Arc<Job>>,
+pub(crate) struct Jobs<S: Source> {
+    latest: Option<Arc<Job<S>>>,
     next_id: JobId,
     seen: LruCache<BlockHash, ()>,
-    valid: HashMap<JobId, Arc<Job>>,
+    valid: HashMap<JobId, Arc<Job<S>>>,
 }
 
-impl Jobs {
+impl<S: Source> Jobs<S> {
     pub(crate) fn new() -> Self {
         Self {
             next_id: JobId::new(0),
@@ -24,25 +24,19 @@ impl Jobs {
         id
     }
 
-    pub(crate) fn get(&self, id: &JobId) -> Option<Arc<Job>> {
+    pub(crate) fn get(&self, id: &JobId) -> Option<Arc<Job<S>>> {
         self.valid.get(id).cloned()
     }
 
-    pub(crate) fn upsert(&mut self, job: Arc<Job>) -> bool {
-        let is_same_height = self
-            .latest
-            .as_ref()
-            .map(|previous_job| {
-                previous_job.workbase.template().height == job.workbase.template().height
-            })
-            .unwrap_or(false);
+    pub(crate) fn latest_workbase(&self) -> Option<&Arc<S>> {
+        self.latest.as_ref().map(|job| &job.workbase)
+    }
 
-        if is_same_height {
-            self.insert(job);
-            false
-        } else {
+    pub(crate) fn insert_with_clean(&mut self, job: Arc<Job<S>>, clean_jobs: bool) {
+        if clean_jobs {
             self.insert_and_clean(job);
-            true
+        } else {
+            self.insert(job);
         }
     }
 
@@ -50,12 +44,12 @@ impl Jobs {
         self.seen.put(block_hash, ()).is_some()
     }
 
-    fn insert(&mut self, job: Arc<Job>) {
+    fn insert(&mut self, job: Arc<Job<S>>) {
         self.latest = Some(job.clone());
         self.valid.insert(job.job_id, job);
     }
 
-    fn insert_and_clean(&mut self, job: Arc<Job>) {
+    fn insert_and_clean(&mut self, job: Arc<Job<S>>) {
         self.latest = Some(job.clone());
         self.seen.clear();
         self.valid.clear();
@@ -67,6 +61,8 @@ impl Jobs {
 mod tests {
     use super::*;
 
+    type PoolWorkbase = Workbase<BlockTemplate>;
+
     fn create_template(block_height: u64) -> Arc<BlockTemplate> {
         let template = BlockTemplate {
             height: block_height,
@@ -76,46 +72,19 @@ mod tests {
         Arc::new(template)
     }
 
-    fn create_job(id: JobId, template: Arc<BlockTemplate>) -> Arc<Job> {
+    fn create_job(id: JobId, template: Arc<BlockTemplate>) -> Arc<Job<PoolWorkbase>> {
         let address = Address::from_str("tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc")
             .unwrap()
             .assume_checked();
 
-        let workbase = Arc::new(Workbase::new((*template).clone()));
-        let template = workbase.template();
+        let workbase = Arc::new(Workbase::<BlockTemplate>::new((*template).clone()));
         let enonce1 = Extranonce::random(ENONCE1_SIZE);
 
-        let (_coinbase_tx, coinb1, coinb2) = CoinbaseBuilder::new(
-                        address.clone(),
-                        enonce1.clone(),
-                        8,
-                        template.height,
-                        template.coinbase_value,
-                        template.default_witness_commitment.clone(),
-                    )
-                    .with_aux(template.coinbaseaux.clone())
-                    .with_timestamp(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()) // TODO
-                    .with_pool_sig("|parasite|".into())
-                    .build()
-                    .unwrap(); // TODO
-
-        Arc::new(Job {
-            job_id: id,
-            prevhash: workbase.template().previous_block_hash.into(),
-            coinb1,
-            coinb2,
-            merkle_branches: workbase.merkle_branches().to_vec(),
-            version: template.version,
-            nbits: template.bits,
-            ntime: template.current_time,
-            enonce1: enonce1.clone(),
-            version_mask: None,
-            workbase,
-        })
+        Arc::new(workbase.create_job(&enonce1, 8, Some(&address), id, None))
     }
 
     #[track_caller]
-    fn assert_invariants(jobs: &Jobs) {
+    fn assert_invariants(jobs: &Jobs<PoolWorkbase>) {
         assert_eq!(
             jobs.latest.is_some(),
             !jobs.valid.is_empty(),
@@ -139,7 +108,7 @@ mod tests {
 
     #[test]
     fn next_id_monotonic_and_wraps() {
-        let mut jobs = Jobs::new();
+        let mut jobs: Jobs<PoolWorkbase> = Jobs::new();
         let a = jobs.next_id();
         let b = jobs.next_id();
         assert_ne!(a, b);
@@ -151,20 +120,24 @@ mod tests {
     }
 
     #[test]
-    fn upsert_same_height_does_not_clean() {
-        let mut jobs = Jobs::new();
+    fn insert_same_height_does_not_clean() {
+        let mut jobs: Jobs<PoolWorkbase> = Jobs::new();
 
         let id_1 = jobs.next_id();
         let job_1 = create_job(id_1, create_template(100));
 
-        let clean_jobs = jobs.upsert(job_1.clone());
+        let workbase_1 = job_1.workbase.clone();
+        let clean_jobs = workbase_1.clean_jobs(jobs.latest_workbase().map(|w| w.as_ref()));
+        jobs.insert_with_clean(job_1.clone(), clean_jobs);
         assert!(clean_jobs);
         assert_invariants(&jobs);
 
         let id_2 = jobs.next_id();
         let job_2 = create_job(id_2, create_template(100));
 
-        let clean_jobs = jobs.upsert(job_2.clone());
+        let workbase_2 = job_2.workbase.clone();
+        let clean_jobs = workbase_2.clean_jobs(jobs.latest_workbase().map(|w| w.as_ref()));
+        jobs.insert_with_clean(job_2.clone(), clean_jobs);
         assert!(!clean_jobs);
         assert_invariants(&jobs);
 
@@ -179,12 +152,15 @@ mod tests {
     }
 
     #[test]
-    fn upsert_new_height_cleans_and_clears_seen() {
-        let mut jobs = Jobs::new();
+    fn insert_new_height_cleans_and_clears_seen() {
+        let mut jobs: Jobs<PoolWorkbase> = Jobs::new();
 
         let id_1 = jobs.next_id();
         let job_1 = create_job(id_1, create_template(100));
-        assert!(jobs.upsert(job_1.clone()));
+        let workbase_1 = job_1.workbase.clone();
+        let clean_jobs = workbase_1.clean_jobs(jobs.latest_workbase().map(|w| w.as_ref()));
+        jobs.insert_with_clean(job_1.clone(), clean_jobs);
+        assert!(clean_jobs);
 
         let blockhash = BlockHash::from_byte_array([7u8; 32]);
         assert!(!jobs.is_duplicate(blockhash));
@@ -192,7 +168,9 @@ mod tests {
 
         let id_2 = jobs.next_id();
         let job_2 = create_job(id_2, create_template(101));
-        let clean_jobs = jobs.upsert(job_2.clone());
+        let workbase_2 = job_2.workbase.clone();
+        let clean_jobs = workbase_2.clean_jobs(jobs.latest_workbase().map(|w| w.as_ref()));
+        jobs.insert_with_clean(job_2.clone(), clean_jobs);
         assert!(clean_jobs);
 
         assert_invariants(&jobs);
@@ -210,7 +188,7 @@ mod tests {
 
     #[test]
     fn duplicate_lru() {
-        let mut jobs = Jobs::new();
+        let mut jobs: Jobs<PoolWorkbase> = Jobs::new();
         let h1 = BlockHash::from_byte_array([1u8; 32]);
         let h2 = BlockHash::from_byte_array([2u8; 32]);
 

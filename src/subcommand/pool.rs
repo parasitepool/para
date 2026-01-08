@@ -84,7 +84,7 @@ impl Pool {
                     let conn_cancel_token = cancel_token.child_token();
 
                     connection_tasks.spawn(async move {
-                        let mut stratifier = Stratifier::new(
+                        let mut stratifier: Stratifier<_, _, Workbase<BlockTemplate>> = Stratifier::new(
                             config,
                             metatron,
                             share_tx,

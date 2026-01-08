@@ -12,7 +12,7 @@ pub(crate) struct Job<S: Source> {
     pub(crate) ntime: Ntime,
     pub(crate) enonce1: Extranonce,
     pub(crate) version_mask: Option<Version>,
-    pub(crate) workbase: Arc<Workbase<S>>,
+    pub(crate) workbase: Arc<S>,
 }
 
 impl<S: Source> Job<S> {

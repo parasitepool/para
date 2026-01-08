@@ -2,7 +2,7 @@ use super::*;
 
 #[derive(Clone, Debug)]
 pub(crate) struct Workbase<S> {
-    inner: S,
+    source: S,
     merkle_branches: Vec<MerkleNode>,
 }
 
@@ -17,26 +17,27 @@ impl Workbase<BlockTemplate> {
         let merkle_branches =
             stratum::merkle_branches(template.transactions.iter().map(|tx| tx.txid).collect());
         Self {
-            inner: template,
+            source: template,
             merkle_branches,
         }
     }
     pub(crate) fn template(&self) -> &BlockTemplate {
-        &self.inner
+        &self.source
     }
 }
 
+#[allow(dead_code)]
 impl Workbase<Notify> {
     pub(crate) fn new(notify: Notify) -> Self {
         Self {
             merkle_branches: notify.merkle_branches.clone(),
-            inner: notify,
+            source: notify,
         }
     }
     pub(crate) fn notify(&self) -> &Notify {
-        &self.inner
+        &self.source
     }
     pub(crate) fn clean_jobs(&self) -> bool {
-        self.inner.clean_jobs
+        self.source.clean_jobs
     }
 }
