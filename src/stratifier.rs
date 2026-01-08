@@ -224,10 +224,7 @@ impl<W: Workbase> Stratifier<W> {
                         self.version_mask,
                     ));
 
-                    let clean_jobs =
-                        workbase.clean_jobs(self.jobs.latest_workbase().map(|w| w.as_ref()));
-
-                    self.jobs.insert_with_clean(new_job.clone(), clean_jobs);
+                    let clean_jobs = self.jobs.insert(new_job.clone());
 
                     if let Ok(notify) = new_job.notify(clean_jobs) {
                         let _ = self
@@ -284,8 +281,7 @@ impl<W: Workbase> Stratifier<W> {
             self.version_mask,
         ));
 
-        let clean_jobs = workbase.clean_jobs(self.jobs.latest_workbase().map(|w| w.as_ref()));
-        self.jobs.insert_with_clean(new_job.clone(), clean_jobs);
+        let clean_jobs = self.jobs.insert(new_job.clone());
 
         debug!("Template updated sending NOTIFY");
 
@@ -462,8 +458,7 @@ impl<W: Workbase> Stratifier<W> {
 
         debug!("Sending NOTIFY");
 
-        let clean_jobs = workbase.clean_jobs(self.jobs.latest_workbase().map(|w| w.as_ref()));
-        self.jobs.insert_with_clean(job.clone(), clean_jobs);
+        let clean_jobs = self.jobs.insert(job.clone());
 
         self.send(Message::Notification {
             method: "mining.notify".into(),
