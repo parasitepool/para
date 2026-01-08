@@ -15,13 +15,13 @@ pub(crate) trait Workbase: Clone + Send + Sync + 'static {
         address: Option<&Address>,
         job_id: JobId,
         version_mask: Option<Version>,
-    ) -> Job<Self>
+    ) -> Result<Job<Self>>
     where
         Self: Sized;
 
     fn clean_jobs(&self, prev: Option<&Self>) -> bool;
 
-    fn build_block(&self, job: &Job<Self>, submit: &Submit, header: Header) -> Option<Block>
+    fn build_block(&self, job: &Job<Self>, submit: &Submit, header: Header) -> Result<Block>
     where
         Self: Sized;
 }
@@ -58,8 +58,13 @@ impl Workbase for BlockTemplate {
         address: Option<&Address>,
         job_id: JobId,
         version_mask: Option<Version>,
-    ) -> Job<Self> {
-        let address = address.expect("pool mode requires address");
+    ) -> Result<Job<Self>> {
+        let address = address.ok_or_else(|| anyhow!("pool mode requires address"))?;
+
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .context("system time before UNIX epoch")?
+            .as_secs();
 
         let (_coinbase_tx, coinb1, coinb2) = CoinbaseBuilder::new(
             address.clone(),
@@ -70,40 +75,35 @@ impl Workbase for BlockTemplate {
             self.default_witness_commitment.clone(),
         )
         .with_aux(self.coinbaseaux.clone())
-        .with_timestamp(
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap() // TODO
-                .as_secs(),
-        )
+        .with_timestamp(timestamp)
         .with_pool_sig("|parasite|".into())
         .build()
-        .expect("coinbase build failed"); // TODO
+        .context("failed to build coinbase")?;
 
-        Job {
+        Ok(Job {
             job_id,
             coinb1,
             coinb2,
             enonce1: enonce1.clone(),
             version_mask,
             workbase: self.clone(),
-        }
+        })
     }
 
     fn clean_jobs(&self, prev: Option<&Self>) -> bool {
         prev.map(|prev| prev.height != self.height).unwrap_or(true)
     }
 
-    fn build_block(&self, job: &Job<Self>, submit: &Submit, header: Header) -> Option<Block> {
+    fn build_block(&self, job: &Job<Self>, submit: &Submit, header: Header) -> Result<Block> {
         let coinbase_bin = hex::decode(format!(
             "{}{}{}{}",
             job.coinb1, job.enonce1, submit.enonce2, job.coinb2,
         ))
-        .expect("hex decode failed"); // TODO
+        .context("failed to decode coinbase hex")?;
 
         let mut cursor = bitcoin::io::Cursor::new(&coinbase_bin);
         let coinbase_tx = Transaction::consensus_decode_from_finite_reader(&mut cursor)
-            .expect("coinbase decode failed"); // TODO
+            .context("failed to decode coinbase transaction")?;
 
         let txdata = std::iter::once(coinbase_tx)
             .chain(self.transactions.iter().map(|tx| tx.transaction.clone()))
@@ -112,10 +112,13 @@ impl Workbase for BlockTemplate {
         let block = Block { header, txdata };
 
         if self.height > 16 {
-            assert!(block.bip34_block_height().is_ok()); // TODO
+            ensure!(
+                block.bip34_block_height().is_ok(),
+                "block has invalid BIP34 height encoding"
+            );
         }
 
-        Some(block)
+        Ok(block)
     }
 }
 
@@ -151,22 +154,22 @@ impl Workbase for Notify {
         _address: Option<&Address>,
         job_id: JobId,
         version_mask: Option<Version>,
-    ) -> Job<Self> {
-        Job {
+    ) -> Result<Job<Self>> {
+        Ok(Job {
             job_id,
             coinb1: self.coinb1.clone(),
             coinb2: self.coinb2.clone(),
             enonce1: enonce1.clone(),
             version_mask,
             workbase: self.clone(),
-        }
+        })
     }
 
     fn clean_jobs(&self, _prev: Option<&Self>) -> bool {
         self.clean_jobs
     }
 
-    fn build_block(&self, _job: &Job<Self>, _submit: &Submit, _header: Header) -> Option<Block> {
-        None
+    fn build_block(&self, _job: &Job<Self>, _submit: &Submit, _header: Header) -> Result<Block> {
+        bail!("proxy mode does not build blocks")
     }
 }

@@ -216,23 +216,29 @@ impl<W: Workbase> Stratifier<W> {
                 if let (Some(address), Some(enonce1)) = (&self.address, &self.enonce1) {
                     let workbase = self.workbase_rx.borrow().clone();
 
-                    let new_job = Arc::new(workbase.create_job(
+                    match workbase.create_job(
                         enonce1,
                         self.config.enonce2_size(),
                         Some(address),
                         self.jobs.next_id(),
                         self.version_mask,
-                    ));
+                    ) {
+                        Ok(job) => {
+                            let new_job = Arc::new(job);
+                            let clean_jobs = self.jobs.insert(new_job.clone());
 
-                    let clean_jobs = self.jobs.insert(new_job.clone());
-
-                    if let Ok(notify) = new_job.notify(clean_jobs) {
-                        let _ = self
-                            .send(Message::Notification {
-                                method: "mining.notify".into(),
-                                params: json!(notify),
-                            })
-                            .await;
+                            if let Ok(notify) = new_job.notify(clean_jobs) {
+                                let _ = self
+                                    .send(Message::Notification {
+                                        method: "mining.notify".into(),
+                                        params: json!(notify),
+                                    })
+                                    .await;
+                            }
+                        }
+                        Err(err) => {
+                            warn!("Failed to create job: {err}");
+                        }
                     }
                 }
             }
@@ -273,13 +279,17 @@ impl<W: Workbase> Stratifier<W> {
             _ => return Ok(()),
         };
 
-        let new_job = Arc::new(workbase.create_job(
-            &enonce1,
-            self.config.enonce2_size(),
-            Some(address),
-            self.jobs.next_id(),
-            self.version_mask,
-        ));
+        let new_job = Arc::new(
+            workbase
+                .create_job(
+                    &enonce1,
+                    self.config.enonce2_size(),
+                    Some(address),
+                    self.jobs.next_id(),
+                    self.version_mask,
+                )
+                .context("failed to create job for template update")?,
+        );
 
         let clean_jobs = self.jobs.insert(new_job.clone());
 
@@ -426,13 +436,17 @@ impl<W: Workbase> Stratifier<W> {
 
         let workbase = self.workbase_rx.borrow().clone();
 
-        let job = Arc::new(workbase.create_job(
-            &enonce1,
-            self.config.enonce2_size(),
-            Some(&address),
-            self.jobs.next_id(),
-            self.version_mask,
-        ));
+        let job = Arc::new(
+            workbase
+                .create_job(
+                    &enonce1,
+                    self.config.enonce2_size(),
+                    Some(&address),
+                    self.jobs.next_id(),
+                    self.version_mask,
+                )
+                .context("failed to create job for authorize")?,
+        );
 
         self.send(Message::Response {
             id,
@@ -651,15 +665,20 @@ impl<W: Workbase> Stratifier<W> {
         if let Ok(blockhash) = header.validate_pow(Target::from_compact(nbits.into())) {
             info!("Block with hash {blockhash} meets network difficulty");
 
-            if let Some(block) = job.workbase.build_block(&job, &submit, header) {
-                info!("Submitting potential block solve");
+            match job.workbase.build_block(&job, &submit, header) {
+                Ok(block) => {
+                    info!("Submitting potential block solve");
 
-                match self.config.bitcoin_rpc_client()?.submit_block(&block) {
-                    Ok(_) => {
-                        info!("SUCCESSFULLY mined block {}", block.block_hash());
-                        self.metatron.add_block();
+                    match self.config.bitcoin_rpc_client()?.submit_block(&block) {
+                        Ok(_) => {
+                            info!("SUCCESSFULLY mined block {}", block.block_hash());
+                            self.metatron.add_block();
+                        }
+                        Err(err) => error!("Failed to submit block: {err}"),
                     }
-                    Err(err) => error!("Failed to submit block: {err}"),
+                }
+                Err(err) => {
+                    warn!("Failed to build block: {err}");
                 }
             }
         }

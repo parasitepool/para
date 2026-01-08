@@ -1,4 +1,4 @@
-use {super::*, crate::job::Job};
+use super::*;
 
 #[derive(Debug)]
 pub(crate) struct Jobs<W: Workbase> {
@@ -60,7 +60,11 @@ mod tests {
 
         fn create_test_job(workbase: &Arc<Self>, job_id: JobId) -> Arc<Job<Self>> {
             let enonce1 = Extranonce::random(ENONCE1_SIZE);
-            Arc::new(workbase.create_job(&enonce1, 8, Self::test_address().as_ref(), job_id, None))
+            Arc::new(
+                workbase
+                    .create_job(&enonce1, 8, Self::test_address().as_ref(), job_id, None)
+                    .unwrap(),
+            )
         }
     }
 
@@ -254,13 +258,15 @@ mod tests {
         let job_id = JobId::new(42);
         let version_mask = Some(Version::from_str("1fffe000").unwrap());
 
-        let job = workbase.create_job(
-            &enonce1,
-            8,
-            W::test_address().as_ref(),
-            job_id,
-            version_mask,
-        );
+        let job = workbase
+            .create_job(
+                &enonce1,
+                8,
+                W::test_address().as_ref(),
+                job_id,
+                version_mask,
+            )
+            .unwrap();
 
         assert_eq!(job.job_id, job_id);
         assert_eq!(job.enonce1, enonce1);
@@ -318,16 +324,22 @@ mod tests {
         let job_id = JobId::new(42);
 
         let enonce1 = Extranonce::random(ENONCE1_SIZE);
-        let job1 =
-            Arc::new(workbase1.create_job(&enonce1, 8, W::test_address().as_ref(), job_id, None));
+        let job1 = Arc::new(
+            workbase1
+                .create_job(&enonce1, 8, W::test_address().as_ref(), job_id, None)
+                .unwrap(),
+        );
 
         jobs.insert(job1.clone());
         assert_eq!(jobs.valid.len(), 1);
 
         let workbase2 = W::workbase_same_group(100);
         let enonce2 = Extranonce::random(ENONCE1_SIZE);
-        let job2 =
-            Arc::new(workbase2.create_job(&enonce2, 8, W::test_address().as_ref(), job_id, None));
+        let job2 = Arc::new(
+            workbase2
+                .create_job(&enonce2, 8, W::test_address().as_ref(), job_id, None)
+                .unwrap(),
+        );
 
         jobs.insert(job2.clone());
 
