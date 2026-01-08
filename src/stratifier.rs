@@ -492,7 +492,7 @@ impl<W: Workbase> Stratifier<W> {
 
             self.emit_share(
                 &submit,
-                0,
+                None,
                 0.0,
                 BlockHash::all_zeros(),
                 Some(StratumError::WorkerMismatch),
@@ -508,7 +508,7 @@ impl<W: Workbase> Stratifier<W> {
             self.send_error(id, StratumError::Stale, None).await?;
             self.emit_share(
                 &submit,
-                0,
+                None,
                 0.0,
                 BlockHash::all_zeros(),
                 Some(StratumError::Stale),
@@ -541,7 +541,7 @@ impl<W: Workbase> Stratifier<W> {
 
             self.emit_share(
                 &submit,
-                0,
+                job.height(),
                 0.0,
                 BlockHash::all_zeros(),
                 Some(StratumError::InvalidNonce2Length),
@@ -553,7 +553,7 @@ impl<W: Workbase> Stratifier<W> {
             return Ok(consequence);
         }
 
-        let job_ntime = job.ntime.0;
+        let job_ntime = job.ntime().0;
         let submit_ntime = submit.ntime.0;
         if submit_ntime < job_ntime || submit_ntime > job_ntime + MAX_NTIME_OFFSET {
             self.send_error(
@@ -569,7 +569,7 @@ impl<W: Workbase> Stratifier<W> {
 
             self.emit_share(
                 &submit,
-                0,
+                job.height(),
                 0.0,
                 BlockHash::all_zeros(),
                 Some(StratumError::NtimeOutOfRange),
@@ -592,7 +592,7 @@ impl<W: Workbase> Stratifier<W> {
 
                 self.emit_share(
                     &submit,
-                    0,
+                    job.height(),
                     0.0,
                     BlockHash::all_zeros(),
                     Some(StratumError::InvalidVersionMask),
@@ -612,22 +612,22 @@ impl<W: Workbase> Stratifier<W> {
                 "miner set disallowed version bits: {disallowed}"
             );
 
-            (job.version & !version_mask) | (version_bits & version_mask)
+            (job.version() & !version_mask) | (version_bits & version_mask)
         } else {
-            job.version
+            job.version()
         };
 
-        let nbits = job.nbits;
+        let nbits = job.nbits();
 
         let header = Header {
             version: version.into(),
-            prev_blockhash: job.prevhash.clone().into(),
+            prev_blockhash: job.prevhash().into(),
             merkle_root: stratum::merkle_root(
                 &job.coinb1,
                 &job.coinb2,
                 &job.enonce1,
                 &submit.enonce2,
-                &job.merkle_branches,
+                job.merkle_branches(),
             )?
             .into(),
             time: submit.ntime.into(),
@@ -639,7 +639,13 @@ impl<W: Workbase> Stratifier<W> {
 
         if self.jobs.is_duplicate(hash) {
             self.send_error(id, StratumError::Duplicate, None).await?;
-            self.emit_share(&submit, 0, 0.0, hash, Some(StratumError::Duplicate));
+            self.emit_share(
+                &submit,
+                job.height(),
+                0.0,
+                hash,
+                Some(StratumError::Duplicate),
+            );
             let consequence = self.bouncer.reject();
 
             self.handle_consequence(consequence).await;
@@ -674,11 +680,11 @@ impl<W: Workbase> Stratifier<W> {
             })
             .await?;
 
-            self.emit_share(&submit, 0, current_diff.as_f64(), hash, None);
+            self.emit_share(&submit, job.height(), current_diff.as_f64(), hash, None);
 
             self.bouncer.accept();
 
-            let network_diff = Difficulty::from(job.nbits);
+            let network_diff = Difficulty::from(job.nbits());
 
             debug!(
                 "Share accepted from {} | diff={} dsps={:.4} shares_since_change={}",
@@ -709,7 +715,13 @@ impl<W: Workbase> Stratifier<W> {
         }
 
         self.send_error(id, StratumError::AboveTarget, None).await?;
-        self.emit_share(&submit, 0, 0.0, hash, Some(StratumError::AboveTarget));
+        self.emit_share(
+            &submit,
+            job.height(),
+            0.0,
+            hash,
+            Some(StratumError::AboveTarget),
+        );
 
         let consequence = self.bouncer.reject();
         self.handle_consequence(consequence).await;
@@ -720,7 +732,7 @@ impl<W: Workbase> Stratifier<W> {
     fn emit_share(
         &self,
         submit: &Submit,
-        height: u64,
+        height: Option<u64>,
         pool_diff: f64,
         hash: BlockHash,
         reject_reason: Option<StratumError>,

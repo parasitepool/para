@@ -93,9 +93,12 @@ fn get_block_template_blocking(
         "rules": rules,
     });
 
-    let template = bitcoin_rpc_client.call::<BlockTemplate>("getblocktemplate", &[params])?;
+    let gbt = bitcoin_rpc_client
+        .call::<block_template::GetBlockTemplate>("getblocktemplate", &[params])?;
 
-    info!("New block template for height {}", template.height);
+    let block_template = BlockTemplate::from(gbt);
 
-    Ok(template)
+    info!("New block template for height {}", block_template.height);
+
+    Ok(block_template)
 }

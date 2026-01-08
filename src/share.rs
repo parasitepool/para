@@ -3,7 +3,7 @@ use super::*;
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub(crate) struct Share {
-    pub(crate) height: u64,
+    pub(crate) height: Option<u64>,
     pub(crate) job_id: JobId,
     pub(crate) workername: String,
     pub(crate) address: Address,
@@ -26,7 +26,7 @@ pub(crate) struct Share {
 impl Share {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        height: u64,
+        height: Option<u64>,
         job_id: JobId,
         workername: String,
         address: Address,

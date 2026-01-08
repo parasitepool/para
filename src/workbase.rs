@@ -1,7 +1,12 @@
 use super::*;
 
 pub(crate) trait Workbase: Clone + Send + Sync + 'static {
-    fn merkle_branches(&self) -> Vec<MerkleNode>;
+    fn merkle_branches(&self) -> &[MerkleNode];
+    fn prevhash(&self) -> PrevHash;
+    fn version(&self) -> Version;
+    fn nbits(&self) -> Nbits;
+    fn ntime(&self) -> Ntime;
+    fn height(&self) -> Option<u64>;
 
     fn create_job(
         self: &Arc<Self>,
@@ -22,8 +27,28 @@ pub(crate) trait Workbase: Clone + Send + Sync + 'static {
 }
 
 impl Workbase for BlockTemplate {
-    fn merkle_branches(&self) -> Vec<MerkleNode> {
-        stratum::merkle_branches(self.transactions.iter().map(|tx| tx.txid).collect())
+    fn merkle_branches(&self) -> &[MerkleNode] {
+        &self.merkle_branches
+    }
+
+    fn prevhash(&self) -> PrevHash {
+        self.previous_block_hash.into()
+    }
+
+    fn version(&self) -> Version {
+        self.version
+    }
+
+    fn nbits(&self) -> Nbits {
+        self.bits
+    }
+
+    fn ntime(&self) -> Ntime {
+        self.current_time
+    }
+
+    fn height(&self) -> Option<u64> {
+        Some(self.height)
     }
 
     fn create_job(
@@ -48,22 +73,17 @@ impl Workbase for BlockTemplate {
         .with_timestamp(
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .unwrap() // TODO
                 .as_secs(),
         )
         .with_pool_sig("|parasite|".into())
         .build()
-        .expect("coinbase build failed");
+        .expect("coinbase build failed"); // TODO
 
         Job {
             job_id,
-            prevhash: self.previous_block_hash.into(),
             coinb1,
             coinb2,
-            merkle_branches: self.merkle_branches(),
-            version: self.version,
-            nbits: self.bits,
-            ntime: self.current_time,
             enonce1: enonce1.clone(),
             version_mask,
             workbase: self.clone(),
@@ -79,11 +99,11 @@ impl Workbase for BlockTemplate {
             "{}{}{}{}",
             job.coinb1, job.enonce1, submit.enonce2, job.coinb2,
         ))
-        .expect("hex decode failed");
+        .expect("hex decode failed"); // TODO
 
         let mut cursor = bitcoin::io::Cursor::new(&coinbase_bin);
         let coinbase_tx = Transaction::consensus_decode_from_finite_reader(&mut cursor)
-            .expect("coinbase decode failed");
+            .expect("coinbase decode failed"); // TODO
 
         let txdata = std::iter::once(coinbase_tx)
             .chain(self.transactions.iter().map(|tx| tx.transaction.clone()))
@@ -92,7 +112,7 @@ impl Workbase for BlockTemplate {
         let block = Block { header, txdata };
 
         if self.height > 16 {
-            assert!(block.bip34_block_height().is_ok());
+            assert!(block.bip34_block_height().is_ok()); // TODO
         }
 
         Some(block)
@@ -100,8 +120,28 @@ impl Workbase for BlockTemplate {
 }
 
 impl Workbase for Notify {
-    fn merkle_branches(&self) -> Vec<MerkleNode> {
-        self.merkle_branches.clone()
+    fn merkle_branches(&self) -> &[MerkleNode] {
+        &self.merkle_branches
+    }
+
+    fn prevhash(&self) -> PrevHash {
+        self.prevhash.clone()
+    }
+
+    fn version(&self) -> Version {
+        self.version
+    }
+
+    fn nbits(&self) -> Nbits {
+        self.nbits
+    }
+
+    fn ntime(&self) -> Ntime {
+        self.ntime
+    }
+
+    fn height(&self) -> Option<u64> {
+        None
     }
 
     fn create_job(
@@ -114,13 +154,8 @@ impl Workbase for Notify {
     ) -> Job<Self> {
         Job {
             job_id,
-            prevhash: self.prevhash.clone(),
             coinb1: self.coinb1.clone(),
             coinb2: self.coinb2.clone(),
-            merkle_branches: self.merkle_branches(),
-            version: self.version,
-            nbits: self.nbits,
-            ntime: self.ntime,
             enonce1: enonce1.clone(),
             version_mask,
             workbase: self.clone(),

@@ -299,13 +299,13 @@ mod tests {
         let notify = job.notify(true).unwrap();
 
         assert_eq!(notify.job_id, job.job_id);
-        assert_eq!(notify.prevhash, job.prevhash);
+        assert_eq!(notify.prevhash, job.prevhash());
         assert_eq!(notify.coinb1, job.coinb1);
         assert_eq!(notify.coinb2, job.coinb2);
-        assert_eq!(notify.merkle_branches, job.merkle_branches);
-        assert_eq!(notify.version, job.version);
-        assert_eq!(notify.nbits, job.nbits);
-        assert_eq!(notify.ntime, job.ntime);
+        assert_eq!(notify.merkle_branches, job.merkle_branches());
+        assert_eq!(notify.version, job.version());
+        assert_eq!(notify.nbits, job.nbits());
+        assert_eq!(notify.ntime, job.ntime());
         assert!(notify.clean_jobs);
     }
 
