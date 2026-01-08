@@ -1,6 +1,6 @@
 use super::*;
 
-pub(crate) struct Sandalphon {
+pub(crate) struct Nexus {
     upstream_url: String,
     upstream_username: String,
     downstream_address: String,
@@ -8,7 +8,7 @@ pub(crate) struct Sandalphon {
     connected: AtomicBool,
 }
 
-impl Sandalphon {
+impl Nexus {
     pub(crate) fn new(
         upstream_url: String,
         upstream_username: String,

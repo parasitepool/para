@@ -65,14 +65,14 @@ impl Proxy {
 
         info!("Authorized with upstream as {}", config.username());
 
-        let sandalphon = Arc::new(Sandalphon::new(
+        let nexus = Arc::new(Nexus::new(
             config.upstream().to_string(),
             config.username().to_string(),
             config.address(),
             config.port(),
         ));
 
-        sandalphon.set_connected(true);
+        nexus.set_connected(true);
 
         let api_handle = if let Some(api_port) = config.api_port() {
             let http_config = http_server::HttpConfig {
@@ -87,7 +87,7 @@ impl Proxy {
 
             Some(http_server::spawn(
                 http_config,
-                api::proxy::router(sandalphon.clone()),
+                api::proxy::router(nexus.clone()),
                 cancel_token.clone(),
             )?)
         } else {
@@ -112,12 +112,12 @@ impl Proxy {
                         }
                         Ok(stratum::Event::Disconnected) => {
                             warn!("Disconnected from upstream");
-                            sandalphon.set_connected(false);
+                            nexus.set_connected(false);
                             break;
                         }
                         Err(e) => {
                             error!("Upstream event error: {}", e);
-                            sandalphon.set_connected(false);
+                            nexus.set_connected(false);
                             break;
                         }
                     }

@@ -9,18 +9,18 @@ pub struct Status {
     pub connected: bool,
 }
 
-pub(crate) fn router(sandalphon: Arc<Sandalphon>) -> Router {
+pub(crate) fn router(nexus: Arc<Nexus>) -> Router {
     Router::new()
         .route("/api/status", get(get_status))
-        .with_state(sandalphon)
+        .with_state(nexus)
 }
 
-async fn get_status(State(sandalphon): State<Arc<Sandalphon>>) -> Json<Status> {
+async fn get_status(State(nexus): State<Arc<Nexus>>) -> Json<Status> {
     Json(Status {
-        upstream_url: sandalphon.upstream_url().to_string(),
-        upstream_username: sandalphon.upstream_username().to_string(),
-        downstream_address: sandalphon.downstream_address().to_string(),
-        downstream_port: sandalphon.downstream_port(),
-        connected: sandalphon.is_connected(),
+        upstream_url: nexus.upstream_url().to_string(),
+        upstream_username: nexus.upstream_username().to_string(),
+        downstream_address: nexus.downstream_address().to_string(),
+        downstream_port: nexus.downstream_port(),
+        connected: nexus.is_connected(),
     })
 }
