@@ -100,3 +100,38 @@ impl Source for Workbase<BlockTemplate> {
         Some(block)
     }
 }
+
+impl Source for Workbase<Notify> {
+    fn create_job(
+        self: &Arc<Self>,
+        enonce1: &Extranonce,
+        _enonce2_size: usize,
+        _address: Option<&Address>,
+        job_id: JobId,
+        version_mask: Option<Version>,
+    ) -> Job<Self> {
+        let notify = self.notify();
+
+        Job {
+            job_id,
+            prevhash: notify.prevhash.clone(),
+            coinb1: notify.coinb1.clone(),
+            coinb2: notify.coinb2.clone(),
+            merkle_branches: self.merkle_branches().to_vec(),
+            version: notify.version,
+            nbits: notify.nbits,
+            ntime: notify.ntime,
+            enonce1: enonce1.clone(),
+            version_mask,
+            workbase: self.clone(),
+        }
+    }
+
+    fn clean_jobs(&self, _prev: Option<&Self>) -> bool {
+        self.notify().clean_jobs
+    }
+
+    fn build_block(&self, _job: &Job<Self>, _submit: &Submit, _header: Header) -> Option<Block> {
+        None
+    }
+}

@@ -26,8 +26,8 @@ impl Workbase<BlockTemplate> {
     }
 }
 
-#[allow(dead_code)]
 impl Workbase<Notify> {
+    #[allow(dead_code)]
     pub(crate) fn new(notify: Notify) -> Self {
         Self {
             merkle_branches: notify.merkle_branches.clone(),
@@ -36,8 +36,5 @@ impl Workbase<Notify> {
     }
     pub(crate) fn notify(&self) -> &Notify {
         &self.source
-    }
-    pub(crate) fn clean_jobs(&self) -> bool {
-        self.source.clean_jobs
     }
 }
