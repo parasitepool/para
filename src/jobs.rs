@@ -301,6 +301,111 @@ mod tests {
         assert!(notify.clean_jobs);
     }
 
+    fn check_empty_jobs_get_returns_none<W: TestWorkbaseFactory>() {
+        let jobs: Jobs<W> = Jobs::new();
+
+        assert!(jobs.get(&JobId::new(0)).is_none());
+        assert!(jobs.get(&JobId::new(1)).is_none());
+        assert!(jobs.get(&JobId::new(u64::MAX)).is_none());
+        assert!(jobs.latest.is_none());
+        assert!(jobs.valid.is_empty());
+    }
+
+    fn check_insert_same_job_id_replaces<W: TestWorkbaseFactory>() {
+        let mut jobs: Jobs<W> = Jobs::new();
+
+        let workbase1 = W::workbase_that_cleans(100);
+        let job_id = JobId::new(42);
+
+        let enonce1 = Extranonce::random(ENONCE1_SIZE);
+        let job1 =
+            Arc::new(workbase1.create_job(&enonce1, 8, W::test_address().as_ref(), job_id, None));
+
+        jobs.insert(job1.clone());
+        assert_eq!(jobs.valid.len(), 1);
+
+        let workbase2 = W::workbase_same_group(100);
+        let enonce2 = Extranonce::random(ENONCE1_SIZE);
+        let job2 =
+            Arc::new(workbase2.create_job(&enonce2, 8, W::test_address().as_ref(), job_id, None));
+
+        jobs.insert(job2.clone());
+
+        assert_eq!(jobs.valid.len(), 1);
+
+        let retrieved = jobs.get(&job_id).unwrap();
+        assert!(Arc::ptr_eq(&retrieved, &job2));
+        assert!(!Arc::ptr_eq(&retrieved, &job1));
+    }
+
+    fn check_lru_eviction<W: TestWorkbaseFactory>() {
+        let mut jobs: Jobs<W> = Jobs::new();
+
+        for i in 0..LRU_CACHE_SIZE {
+            let mut bytes = [0u8; 32];
+            bytes[0] = (i & 0xff) as u8;
+            bytes[1] = ((i >> 8) & 0xff) as u8;
+            let hash = BlockHash::from_byte_array(bytes);
+            assert!(
+                !jobs.is_duplicate(hash),
+                "hash {i} should not be duplicate on first insert"
+            );
+        }
+
+        let new_hash = BlockHash::from_byte_array([255u8; 32]);
+        assert!(
+            !jobs.is_duplicate(new_hash),
+            "new hash should not be duplicate"
+        );
+
+        let oldest_hash = BlockHash::from_byte_array([0u8; 32]);
+        assert!(
+            !jobs.is_duplicate(oldest_hash),
+            "oldest hash should have been evicted and not be duplicate"
+        );
+    }
+
+    fn check_multiple_jobs_accumulation<W: TestWorkbaseFactory>() {
+        let mut jobs: Jobs<W> = Jobs::new();
+
+        let workbase_first = W::workbase_that_cleans(100);
+        let first_id = jobs.next_id();
+        let first_job = W::create_test_job(&workbase_first, first_id);
+        let clean = jobs.insert(first_job);
+        assert!(clean, "first insert should clean");
+
+        let mut job_ids = vec![first_id];
+        for _ in 0..4 {
+            let workbase = W::workbase_same_group(100);
+            let id = jobs.next_id();
+            job_ids.push(id);
+            let job = W::create_test_job(&workbase, id);
+
+            let clean = jobs.insert(job);
+            assert!(!clean, "same group should not clean");
+        }
+
+        assert_eq!(jobs.valid.len(), 5);
+        for id in &job_ids {
+            assert!(jobs.get(id).is_some(), "job {id:?} should exist");
+        }
+
+        assert_eq!(jobs.latest.as_ref().unwrap().job_id, job_ids[4]);
+
+        let workbase_new = W::workbase_that_cleans(101);
+        let new_id = jobs.next_id();
+        let new_job = W::create_test_job(&workbase_new, new_id);
+
+        let clean = jobs.insert(new_job);
+        assert!(clean, "new height should clean");
+
+        assert_eq!(jobs.valid.len(), 1);
+        for id in &job_ids {
+            assert!(jobs.get(id).is_none(), "old job {id:?} should be cleaned");
+        }
+        assert!(jobs.get(&new_id).is_some());
+    }
+
     #[test]
     fn next_id_monotonic_and_wraps() {
         check_next_id_monotonic_and_wraps::<BlockTemplate>();
@@ -359,5 +464,29 @@ mod tests {
     fn job_notify_roundtrip() {
         check_job_notify_roundtrip::<BlockTemplate>();
         check_job_notify_roundtrip::<Notify>();
+    }
+
+    #[test]
+    fn empty_jobs_get_returns_none() {
+        check_empty_jobs_get_returns_none::<BlockTemplate>();
+        check_empty_jobs_get_returns_none::<Notify>();
+    }
+
+    #[test]
+    fn insert_same_job_id_replaces() {
+        check_insert_same_job_id_replaces::<BlockTemplate>();
+        check_insert_same_job_id_replaces::<Notify>();
+    }
+
+    #[test]
+    fn lru_eviction() {
+        check_lru_eviction::<BlockTemplate>();
+        check_lru_eviction::<Notify>();
+    }
+
+    #[test]
+    fn multiple_jobs_accumulation() {
+        check_multiple_jobs_accumulation::<BlockTemplate>();
+        check_multiple_jobs_accumulation::<Notify>();
     }
 }
