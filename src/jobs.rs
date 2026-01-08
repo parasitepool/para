@@ -1,14 +1,14 @@
 use {super::*, crate::job::Job};
 
 #[derive(Debug)]
-pub(crate) struct Jobs<S: Source> {
-    latest: Option<Arc<Job<S>>>,
+pub(crate) struct Jobs<W: Workbase> {
+    latest: Option<Arc<Job<W>>>,
     next_id: JobId,
     seen: LruCache<BlockHash, ()>,
-    valid: HashMap<JobId, Arc<Job<S>>>,
+    valid: HashMap<JobId, Arc<Job<W>>>,
 }
 
-impl<S: Source> Jobs<S> {
+impl<W: Workbase> Jobs<W> {
     pub(crate) fn new() -> Self {
         Self {
             next_id: JobId::new(0),
@@ -24,15 +24,15 @@ impl<S: Source> Jobs<S> {
         id
     }
 
-    pub(crate) fn get(&self, id: &JobId) -> Option<Arc<Job<S>>> {
+    pub(crate) fn get(&self, id: &JobId) -> Option<Arc<Job<W>>> {
         self.valid.get(id).cloned()
     }
 
-    pub(crate) fn latest_workbase(&self) -> Option<&Arc<S>> {
+    pub(crate) fn latest_workbase(&self) -> Option<&Arc<W>> {
         self.latest.as_ref().map(|job| &job.workbase)
     }
 
-    pub(crate) fn insert_with_clean(&mut self, job: Arc<Job<S>>, clean_jobs: bool) {
+    pub(crate) fn insert_with_clean(&mut self, job: Arc<Job<W>>, clean_jobs: bool) {
         if clean_jobs {
             self.insert_and_clean(job);
         } else {
@@ -44,12 +44,12 @@ impl<S: Source> Jobs<S> {
         self.seen.put(block_hash, ()).is_some()
     }
 
-    fn insert(&mut self, job: Arc<Job<S>>) {
+    fn insert(&mut self, job: Arc<Job<W>>) {
         self.latest = Some(job.clone());
         self.valid.insert(job.job_id, job);
     }
 
-    fn insert_and_clean(&mut self, job: Arc<Job<S>>) {
+    fn insert_and_clean(&mut self, job: Arc<Job<W>>) {
         self.latest = Some(job.clone());
         self.seen.clear();
         self.valid.clear();
@@ -62,11 +62,9 @@ mod tests {
     use super::*;
     use bitcoin::block;
 
-    trait TestWorkbaseFactory: Source + Sized {
+    trait TestWorkbaseFactory: Workbase + Sized {
         fn workbase_that_cleans(seq: u64) -> Arc<Self>;
-
         fn workbase_same_group(seq: u64) -> Arc<Self>;
-
         fn test_address() -> Option<Address>;
 
         fn create_test_job(workbase: &Arc<Self>, job_id: JobId) -> Arc<Job<Self>> {
@@ -75,19 +73,19 @@ mod tests {
         }
     }
 
-    impl TestWorkbaseFactory for Workbase<BlockTemplate> {
+    impl TestWorkbaseFactory for BlockTemplate {
         fn workbase_that_cleans(seq: u64) -> Arc<Self> {
-            Arc::new(Workbase::<BlockTemplate>::new(BlockTemplate {
+            Arc::new(BlockTemplate {
                 height: seq,
                 ..Default::default()
-            }))
+            })
         }
 
         fn workbase_same_group(seq: u64) -> Arc<Self> {
-            Arc::new(Workbase::<BlockTemplate>::new(BlockTemplate {
+            Arc::new(BlockTemplate {
                 height: seq,
                 ..Default::default()
-            }))
+            })
         }
 
         fn test_address() -> Option<Address> {
@@ -99,13 +97,13 @@ mod tests {
         }
     }
 
-    impl TestWorkbaseFactory for Workbase<Notify> {
+    impl TestWorkbaseFactory for Notify {
         fn workbase_that_cleans(_seq: u64) -> Arc<Self> {
-            Arc::new(Workbase::<Notify>::new(sample_notify(true)))
+            Arc::new(sample_notify(true))
         }
 
         fn workbase_same_group(_seq: u64) -> Arc<Self> {
-            Arc::new(Workbase::<Notify>::new(sample_notify(false)))
+            Arc::new(sample_notify(false))
         }
 
         fn test_address() -> Option<Address> {
@@ -130,7 +128,7 @@ mod tests {
     }
 
     #[track_caller]
-    fn assert_invariants<S: Source>(jobs: &Jobs<S>) {
+    fn assert_invariants<W: Workbase>(jobs: &Jobs<W>) {
         assert_eq!(
             jobs.latest.is_some(),
             !jobs.valid.is_empty(),
@@ -142,8 +140,8 @@ mod tests {
         }
     }
 
-    fn check_next_id_monotonic_and_wraps<S: TestWorkbaseFactory>() {
-        let mut jobs: Jobs<S> = Jobs::new();
+    fn check_next_id_monotonic_and_wraps<W: TestWorkbaseFactory>() {
+        let mut jobs: Jobs<W> = Jobs::new();
         let a = jobs.next_id();
         let b = jobs.next_id();
         assert_ne!(a, b);
@@ -154,21 +152,21 @@ mod tests {
         assert_eq!(jobs.next_id(), JobId::new(0));
     }
 
-    fn check_insert_same_group_does_not_clean<S: TestWorkbaseFactory>() {
-        let mut jobs: Jobs<S> = Jobs::new();
+    fn check_insert_same_group_does_not_clean<W: TestWorkbaseFactory>() {
+        let mut jobs: Jobs<W> = Jobs::new();
 
-        let workbase_1 = S::workbase_that_cleans(100);
+        let workbase_1 = W::workbase_that_cleans(100);
         let id_1 = jobs.next_id();
-        let job_1 = S::create_test_job(&workbase_1, id_1);
+        let job_1 = W::create_test_job(&workbase_1, id_1);
 
         let clean_jobs = workbase_1.clean_jobs(jobs.latest_workbase().map(|w| w.as_ref()));
         jobs.insert_with_clean(job_1.clone(), clean_jobs);
         assert!(clean_jobs, "first insert should clean");
         assert_invariants(&jobs);
 
-        let workbase_2 = S::workbase_same_group(100);
+        let workbase_2 = W::workbase_same_group(100);
         let id_2 = jobs.next_id();
-        let job_2 = S::create_test_job(&workbase_2, id_2);
+        let job_2 = W::create_test_job(&workbase_2, id_2);
 
         let clean_jobs = workbase_2.clean_jobs(jobs.latest_workbase().map(|w| w.as_ref()));
         jobs.insert_with_clean(job_2.clone(), clean_jobs);
@@ -181,12 +179,12 @@ mod tests {
         assert_eq!(jobs.valid.len(), 2);
     }
 
-    fn check_insert_new_work_cleans_and_clears_seen<S: TestWorkbaseFactory>() {
-        let mut jobs: Jobs<S> = Jobs::new();
+    fn check_insert_new_work_cleans_and_clears_seen<W: TestWorkbaseFactory>() {
+        let mut jobs: Jobs<W> = Jobs::new();
 
-        let workbase_1 = S::workbase_that_cleans(100);
+        let workbase_1 = W::workbase_that_cleans(100);
         let id_1 = jobs.next_id();
-        let job_1 = S::create_test_job(&workbase_1, id_1);
+        let job_1 = W::create_test_job(&workbase_1, id_1);
 
         let clean_jobs = workbase_1.clean_jobs(jobs.latest_workbase().map(|w| w.as_ref()));
         jobs.insert_with_clean(job_1.clone(), clean_jobs);
@@ -196,9 +194,9 @@ mod tests {
         assert!(!jobs.is_duplicate(blockhash));
         assert!(jobs.is_duplicate(blockhash));
 
-        let workbase_2 = S::workbase_that_cleans(101);
+        let workbase_2 = W::workbase_that_cleans(101);
         let id_2 = jobs.next_id();
-        let job_2 = S::create_test_job(&workbase_2, id_2);
+        let job_2 = W::create_test_job(&workbase_2, id_2);
 
         let clean_jobs = workbase_2.clean_jobs(jobs.latest_workbase().map(|w| w.as_ref()));
         jobs.insert_with_clean(job_2.clone(), clean_jobs);
@@ -217,8 +215,8 @@ mod tests {
         assert!(jobs.is_duplicate(blockhash));
     }
 
-    fn check_duplicate_lru<S: TestWorkbaseFactory>() {
-        let mut jobs: Jobs<S> = Jobs::new();
+    fn check_duplicate_lru<W: TestWorkbaseFactory>() {
+        let mut jobs: Jobs<W> = Jobs::new();
         let h1 = BlockHash::from_byte_array([1u8; 32]);
         let h2 = BlockHash::from_byte_array([2u8; 32]);
 
@@ -229,12 +227,12 @@ mod tests {
         assert!(jobs.is_duplicate(h2));
     }
 
-    fn check_get_returns_valid_job<S: TestWorkbaseFactory>() {
-        let mut jobs: Jobs<S> = Jobs::new();
+    fn check_get_returns_valid_job<W: TestWorkbaseFactory>() {
+        let mut jobs: Jobs<W> = Jobs::new();
 
-        let workbase = S::workbase_that_cleans(100);
+        let workbase = W::workbase_that_cleans(100);
         let id = jobs.next_id();
-        let job = S::create_test_job(&workbase, id);
+        let job = W::create_test_job(&workbase, id);
 
         let clean_jobs = workbase.clean_jobs(jobs.latest_workbase().map(|w| w.as_ref()));
         jobs.insert_with_clean(job.clone(), clean_jobs);
@@ -243,14 +241,14 @@ mod tests {
         assert!(jobs.get(&JobId::new(999)).is_none());
     }
 
-    fn check_latest_workbase<S: TestWorkbaseFactory>() {
-        let mut jobs: Jobs<S> = Jobs::new();
+    fn check_latest_workbase<W: TestWorkbaseFactory>() {
+        let mut jobs: Jobs<W> = Jobs::new();
 
         assert!(jobs.latest_workbase().is_none());
 
-        let workbase = S::workbase_that_cleans(100);
+        let workbase = W::workbase_that_cleans(100);
         let id = jobs.next_id();
-        let job = S::create_test_job(&workbase, id);
+        let job = W::create_test_job(&workbase, id);
 
         let clean_jobs = workbase.clean_jobs(jobs.latest_workbase().map(|w| w.as_ref()));
         jobs.insert_with_clean(job, clean_jobs);
@@ -258,8 +256,8 @@ mod tests {
         assert!(jobs.latest_workbase().is_some());
     }
 
-    fn check_create_job_assigns_fields<S: TestWorkbaseFactory>() {
-        let workbase = S::workbase_that_cleans(100);
+    fn check_create_job_assigns_fields<W: TestWorkbaseFactory>() {
+        let workbase = W::workbase_that_cleans(100);
         let enonce1 = Extranonce::random(4);
         let job_id = JobId::new(42);
         let version_mask = Some(Version::from_str("1fffe000").unwrap());
@@ -267,7 +265,7 @@ mod tests {
         let job = workbase.create_job(
             &enonce1,
             8,
-            S::test_address().as_ref(),
+            W::test_address().as_ref(),
             job_id,
             version_mask,
         );
@@ -278,25 +276,25 @@ mod tests {
         assert!(Arc::ptr_eq(&job.workbase, &workbase));
     }
 
-    fn check_clean_jobs_returns_true_for_new_work<S: TestWorkbaseFactory>() {
-        let workbase1 = S::workbase_that_cleans(100);
-        let workbase2 = S::workbase_that_cleans(101);
+    fn check_clean_jobs_returns_true_for_new_work<W: TestWorkbaseFactory>() {
+        let workbase1 = W::workbase_that_cleans(100);
+        let workbase2 = W::workbase_that_cleans(101);
 
         assert!(workbase1.clean_jobs(None));
         assert!(workbase2.clean_jobs(Some(workbase1.as_ref())));
     }
 
-    fn check_clean_jobs_returns_false_for_same_group<S: TestWorkbaseFactory>() {
-        let workbase1 = S::workbase_that_cleans(100);
-        let workbase2 = S::workbase_same_group(100);
+    fn check_clean_jobs_returns_false_for_same_group<W: TestWorkbaseFactory>() {
+        let workbase1 = W::workbase_that_cleans(100);
+        let workbase2 = W::workbase_same_group(100);
 
         assert!(workbase1.clean_jobs(None));
         assert!(!workbase2.clean_jobs(Some(workbase1.as_ref())));
     }
 
-    fn check_job_notify_roundtrip<S: TestWorkbaseFactory>() {
-        let workbase = S::workbase_that_cleans(100);
-        let job = S::create_test_job(&workbase, JobId::new(1));
+    fn check_job_notify_roundtrip<W: TestWorkbaseFactory>() {
+        let workbase = W::workbase_that_cleans(100);
+        let job = W::create_test_job(&workbase, JobId::new(1));
 
         let notify = job.notify(true).unwrap();
 
@@ -313,61 +311,61 @@ mod tests {
 
     #[test]
     fn next_id_monotonic_and_wraps() {
-        check_next_id_monotonic_and_wraps::<Workbase<BlockTemplate>>();
-        check_next_id_monotonic_and_wraps::<Workbase<Notify>>();
+        check_next_id_monotonic_and_wraps::<BlockTemplate>();
+        check_next_id_monotonic_and_wraps::<Notify>();
     }
 
     #[test]
     fn insert_same_group_does_not_clean() {
-        check_insert_same_group_does_not_clean::<Workbase<BlockTemplate>>();
-        check_insert_same_group_does_not_clean::<Workbase<Notify>>();
+        check_insert_same_group_does_not_clean::<BlockTemplate>();
+        check_insert_same_group_does_not_clean::<Notify>();
     }
 
     #[test]
     fn insert_new_work_cleans_and_clears_seen() {
-        check_insert_new_work_cleans_and_clears_seen::<Workbase<BlockTemplate>>();
-        check_insert_new_work_cleans_and_clears_seen::<Workbase<Notify>>();
+        check_insert_new_work_cleans_and_clears_seen::<BlockTemplate>();
+        check_insert_new_work_cleans_and_clears_seen::<Notify>();
     }
 
     #[test]
     fn duplicate_lru() {
-        check_duplicate_lru::<Workbase<BlockTemplate>>();
-        check_duplicate_lru::<Workbase<Notify>>();
+        check_duplicate_lru::<BlockTemplate>();
+        check_duplicate_lru::<Notify>();
     }
 
     #[test]
     fn get_returns_valid_job() {
-        check_get_returns_valid_job::<Workbase<BlockTemplate>>();
-        check_get_returns_valid_job::<Workbase<Notify>>();
+        check_get_returns_valid_job::<BlockTemplate>();
+        check_get_returns_valid_job::<Notify>();
     }
 
     #[test]
     fn latest_workbase() {
-        check_latest_workbase::<Workbase<BlockTemplate>>();
-        check_latest_workbase::<Workbase<Notify>>();
+        check_latest_workbase::<BlockTemplate>();
+        check_latest_workbase::<Notify>();
     }
 
     #[test]
     fn create_job_assigns_fields() {
-        check_create_job_assigns_fields::<Workbase<BlockTemplate>>();
-        check_create_job_assigns_fields::<Workbase<Notify>>();
+        check_create_job_assigns_fields::<BlockTemplate>();
+        check_create_job_assigns_fields::<Notify>();
     }
 
     #[test]
     fn clean_jobs_returns_true_for_new_work() {
-        check_clean_jobs_returns_true_for_new_work::<Workbase<BlockTemplate>>();
-        check_clean_jobs_returns_true_for_new_work::<Workbase<Notify>>();
+        check_clean_jobs_returns_true_for_new_work::<BlockTemplate>();
+        check_clean_jobs_returns_true_for_new_work::<Notify>();
     }
 
     #[test]
     fn clean_jobs_returns_false_for_same_group() {
-        check_clean_jobs_returns_false_for_same_group::<Workbase<BlockTemplate>>();
-        check_clean_jobs_returns_false_for_same_group::<Workbase<Notify>>();
+        check_clean_jobs_returns_false_for_same_group::<BlockTemplate>();
+        check_clean_jobs_returns_false_for_same_group::<Notify>();
     }
 
     #[test]
     fn job_notify_roundtrip() {
-        check_job_notify_roundtrip::<Workbase<BlockTemplate>>();
-        check_job_notify_roundtrip::<Workbase<Notify>>();
+        check_job_notify_roundtrip::<BlockTemplate>();
+        check_job_notify_roundtrip::<Notify>();
     }
 }

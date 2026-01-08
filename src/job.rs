@@ -1,7 +1,7 @@
 use super::*;
 
 #[derive(Debug)]
-pub(crate) struct Job<S: Source> {
+pub(crate) struct Job<W: Workbase> {
     pub(crate) job_id: JobId,
     pub(crate) prevhash: PrevHash,
     pub(crate) coinb1: String,
@@ -12,10 +12,10 @@ pub(crate) struct Job<S: Source> {
     pub(crate) ntime: Ntime,
     pub(crate) enonce1: Extranonce,
     pub(crate) version_mask: Option<Version>,
-    pub(crate) workbase: Arc<S>,
+    pub(crate) workbase: Arc<W>,
 }
 
-impl<S: Source> Job<S> {
+impl<W: Workbase> Job<W> {
     pub(crate) fn notify(&self, clean_jobs: bool) -> Result<Notify> {
         Ok(Notify {
             job_id: self.job_id,

@@ -62,7 +62,6 @@ use {
     session::SessionSnapshot,
     share::Share,
     snafu::Snafu,
-    source::Source,
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
     std::{
         collections::{BTreeMap, HashMap, HashSet},
@@ -92,9 +91,11 @@ use {
     subcommand::{pool::pool_config::PoolConfig, server::account::Account},
     sysinfo::{Disks, System},
     throbber::{StatusLine, spawn_throbber},
+    tokio::net::{
+        TcpListener, TcpStream,
+        tcp::{OwnedReadHalf, OwnedWriteHalf},
+    },
     tokio::{
-        io::{AsyncRead, AsyncWrite},
-        net::TcpListener,
         runtime::Runtime,
         sync::{Mutex, mpsc, watch},
         task::{self, JoinHandle, JoinSet},
@@ -133,7 +134,6 @@ mod nexus;
 mod session;
 mod share;
 mod signal;
-mod source;
 mod stratifier;
 pub mod stratum;
 pub mod subcommand;

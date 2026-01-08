@@ -13,16 +13,16 @@ pub(crate) enum State {
     Working,
 }
 
-pub(crate) struct Stratifier<R, W, S: Source> {
+pub(crate) struct Stratifier<W: Workbase> {
     config: Arc<PoolConfig>,
     metatron: Arc<Metatron>,
     share_tx: mpsc::Sender<Share>,
     socket_addr: SocketAddr,
-    reader: FramedRead<R, LinesCodec>,
-    writer: FramedWrite<W, LinesCodec>,
-    workbase_receiver: watch::Receiver<Arc<S>>,
+    reader: FramedRead<OwnedReadHalf, LinesCodec>,
+    writer: FramedWrite<OwnedWriteHalf, LinesCodec>,
+    workbase_rx: watch::Receiver<Arc<W>>,
     cancel_token: CancellationToken,
-    jobs: Jobs<S>,
+    jobs: Jobs<W>,
     state: State,
     address: Option<Address>,
     workername: Option<String>,
@@ -36,23 +36,20 @@ pub(crate) struct Stratifier<R, W, S: Source> {
     dropped_by_bouncer: bool,
 }
 
-impl<R, W, S> Stratifier<R, W, S>
-where
-    R: AsyncRead + Unpin,
-    W: AsyncWrite + Unpin,
-    S: Source,
-{
-    #[allow(clippy::too_many_arguments)]
+impl<W: Workbase> Stratifier<W> {
     pub(crate) fn new(
         config: Arc<PoolConfig>,
         metatron: Arc<Metatron>,
         share_tx: mpsc::Sender<Share>,
         socket_addr: SocketAddr,
-        reader: R,
-        writer: W,
-        workbase_receiver: watch::Receiver<Arc<S>>,
+        tcp_stream: TcpStream,
+        workbase_rx: watch::Receiver<Arc<W>>,
         cancel_token: CancellationToken,
     ) -> Self {
+        let _ = tcp_stream.set_nodelay(true);
+
+        let (reader, writer) = tcp_stream.into_split();
+
         let vardiff = Vardiff::new(
             config.start_diff(),
             config.vardiff_period(),
@@ -72,7 +69,7 @@ where
             socket_addr,
             reader: FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_MESSAGE_SIZE)),
             writer: FramedWrite::new(writer, LinesCodec::new()),
-            workbase_receiver,
+            workbase_rx,
             cancel_token,
             jobs: Jobs::new(),
             state: State::Init,
@@ -90,7 +87,7 @@ where
     }
 
     pub(crate) async fn serve(&mut self) -> Result {
-        let mut workbase_receiver = self.workbase_receiver.clone();
+        let mut workbase_rx = self.workbase_rx.clone();
         let cancel_token = self.cancel_token.clone();
         let mut idle_check = tokio::time::interval(self.bouncer.check_interval());
 
@@ -182,18 +179,18 @@ where
                     }
                 }
 
-                changed = workbase_receiver.changed() => {
+                changed = workbase_rx.changed() => {
                     if changed.is_err() {
                         warn!("Template receiver dropped, closing connection with {}", self.socket_addr);
                         break;
                     }
 
                     if self.state != State::Working {
-                        let _ = workbase_receiver.borrow_and_update();
+                        let _ = workbase_rx.borrow_and_update();
                         continue;
                     };
 
-                    let workbase = workbase_receiver.borrow_and_update().clone();
+                    let workbase = workbase_rx.borrow_and_update().clone();
                     self.workbase_update(workbase).await?;
                 }
             }
@@ -217,7 +214,7 @@ where
                 );
 
                 if let (Some(address), Some(enonce1)) = (&self.address, &self.enonce1) {
-                    let workbase = self.workbase_receiver.borrow().clone();
+                    let workbase = self.workbase_rx.borrow().clone();
 
                     let new_job = Arc::new(workbase.create_job(
                         enonce1,
@@ -273,7 +270,7 @@ where
         }
     }
 
-    async fn workbase_update(&mut self, workbase: Arc<S>) -> Result {
+    async fn workbase_update(&mut self, workbase: Arc<W>) -> Result {
         let (address, enonce1) = match (&self.address, &self.enonce1) {
             (Some(address), Some(enonce1)) => (address, enonce1.clone()),
             _ => return Ok(()),
@@ -348,7 +345,7 @@ where
     async fn subscribe(&mut self, id: Id, subscribe: Subscribe) -> Result {
         if matches!(self.state, State::Subscribed | State::Working) {
             info!("Client {} resubscribing", self.socket_addr);
-            self.jobs = Jobs::<S>::new();
+            self.jobs = Jobs::<W>::new();
             self.vardiff = Vardiff::new(
                 self.config.start_diff(),
                 self.config.vardiff_period(),
@@ -431,7 +428,7 @@ where
             }
         };
 
-        let workbase = self.workbase_receiver.borrow().clone();
+        let workbase = self.workbase_rx.borrow().clone();
 
         let job = Arc::new(workbase.create_job(
             &enonce1,
@@ -804,7 +801,7 @@ where
     }
 }
 
-impl<R, W, S: Source> Drop for Stratifier<R, W, S> {
+impl<W: Workbase> Drop for Stratifier<W> {
     fn drop(&mut self) {
         if !self.dropped_by_bouncer
             && let (Some(enonce1), Some(_authorized)) = (self.enonce1.take(), self.authorized)

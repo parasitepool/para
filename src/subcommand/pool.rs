@@ -17,18 +17,17 @@ impl Pool {
         self.config.validate()?;
 
         let config = Arc::new(self.config.clone());
-        let metatron = Arc::new(Metatron::new());
-        let (share_tx, share_rx) = mpsc::channel(SHARE_CHANNEL_CAPACITY);
-        let address = config.address();
-        let port = config.port();
 
         let mut generator =
             Generator::new(config.clone()).context("failed to connect to Bitcoin Core RPC")?;
 
-        let workbase_receiver = generator
+        let workbase_rx = generator
             .spawn()
             .await
             .context("failed to subscribe to ZMQ block notifications")?;
+
+        let address = config.address();
+        let port = config.port();
 
         let listener = TcpListener::bind((address.clone(), port))
             .await
@@ -36,6 +35,8 @@ impl Pool {
 
         info!("Listening on {address}:{port}");
 
+        let metatron = Arc::new(Metatron::new());
+        let (share_tx, share_rx) = mpsc::channel(SHARE_CHANNEL_CAPACITY);
         let metatron_handle = {
             let metatron = metatron.clone();
             let cancel = cancel_token.clone();
@@ -66,32 +67,27 @@ impl Pool {
             spawn_throbber(metatron.clone());
         }
 
-        let mut connection_tasks = JoinSet::new();
+        let mut stratifier_tasks = JoinSet::new();
 
         loop {
             tokio::select! {
                 Ok((stream, worker)) = listener.accept() => {
-                    stream.set_nodelay(true)?;
-
                     info!("Accepted connection from {worker}");
 
-                    let (reader, writer) = stream.into_split();
-
-                    let workbase_receiver = workbase_receiver.clone();
+                    let workbase_rx = workbase_rx.clone();
                     let config = config.clone();
                     let metatron = metatron.clone();
                     let share_tx = share_tx.clone();
                     let conn_cancel_token = cancel_token.child_token();
 
-                    connection_tasks.spawn(async move {
-                        let mut stratifier: Stratifier<_, _, Workbase<BlockTemplate>> = Stratifier::new(
+                    stratifier_tasks.spawn(async move {
+                        let mut stratifier: Stratifier<BlockTemplate> = Stratifier::new(
                             config,
                             metatron,
                             share_tx,
                             worker,
-                            reader,
-                            writer,
-                            workbase_receiver,
+                            stream,
+                            workbase_rx,
                             conn_cancel_token,
                         );
 
@@ -110,10 +106,10 @@ impl Pool {
 
         info!(
             "Waiting for {} active connections to close...",
-            connection_tasks.len()
+            stratifier_tasks.len()
         );
 
-        while connection_tasks.join_next().await.is_some() {}
+        while stratifier_tasks.join_next().await.is_some() {}
 
         info!("All connections closed");
 
