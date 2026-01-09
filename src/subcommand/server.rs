@@ -148,6 +148,7 @@ impl Modify for SecurityAddon {
         payouts::payouts_range,
         payouts::user_payout_range,
         payouts::update_payout_status,
+        payouts::payouts_simulate,
         // Sync endpoints
         sync_routes::sync_batch,
         // Status endpoints
@@ -165,6 +166,7 @@ impl Modify for SecurityAddon {
         database::Payout,
         database::PendingPayout,
         database::FailedPayout,
+        database::SimulatedPayout,
         database::UpdatePayoutStatusRequest,
         // Server schemas
         Payment,
