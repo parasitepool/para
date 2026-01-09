@@ -3,16 +3,16 @@ use super::*;
 pub(crate) struct Generator {
     bitcoin_rpc_client: Arc<bitcoincore_rpc::Client>,
     cancel: CancellationToken,
-    config: Arc<PoolConfig>,
+    settings: Arc<Settings>,
     handle: Option<JoinHandle<()>>,
 }
 
 impl Generator {
-    pub(crate) fn new(config: Arc<PoolConfig>) -> Result<Self> {
+    pub(crate) fn new(settings: Arc<Settings>) -> Result<Self> {
         Ok(Self {
-            bitcoin_rpc_client: Arc::new(config.bitcoin_rpc_client()?),
+            bitcoin_rpc_client: Arc::new(settings.bitcoin_rpc_client()?),
             cancel: CancellationToken::new(),
-            config: config.clone(),
+            settings,
             handle: None,
         })
     }
@@ -20,24 +20,24 @@ impl Generator {
     pub(crate) async fn spawn(&mut self) -> Result<watch::Receiver<Arc<BlockTemplate>>> {
         let rpc = self.bitcoin_rpc_client.clone();
         let cancel = self.cancel.clone();
-        let config = self.config.clone();
+        let settings = self.settings.clone();
 
-        let initial = get_block_template_blocking(&rpc, &config)?;
+        let initial = get_block_template_blocking(&rpc, &settings)?;
         let (tx, rx) = watch::channel(Arc::new(initial));
 
-        let mut subscription = Zmq::connect(config.clone()).await?;
+        let mut subscription = Zmq::connect(settings.clone()).await?;
 
         let handle = tokio::spawn({
             info!("Spawning generator task");
 
-            let mut ticker = interval(config.update_interval());
+            let mut ticker = interval(settings.update_interval());
             ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
             let fetch_and_push = move || {
                 let rpc = rpc.clone();
-                let config = config.clone();
+                let settings = settings.clone();
                 let tx = tx.clone();
-                task::spawn_blocking(move || match get_block_template_blocking(&rpc, &config) {
+                task::spawn_blocking(move || match get_block_template_blocking(&rpc, &settings) {
                     Ok(template) => {
                         tx.send_replace(Arc::new(template));
                     }
@@ -81,10 +81,10 @@ impl Generator {
 
 fn get_block_template_blocking(
     bitcoin_rpc_client: &bitcoincore_rpc::Client,
-    config: &PoolConfig,
+    settings: &Settings,
 ) -> Result<BlockTemplate> {
     let mut rules = vec!["segwit"];
-    if config.chain().network() == Network::Signet {
+    if settings.chain().network() == Network::Signet {
         rules.push("signet");
     }
 

@@ -1,44 +1,43 @@
 use {
     super::*,
-    crate::http_server,
-    proxy_config::ProxyConfig,
+    crate::{
+        http_server,
+        settings::{ProxyOptions, Settings},
+    },
     stratum::{Client, ClientConfig},
 };
-
-mod proxy_config;
 
 #[derive(Parser, Debug)]
 pub(crate) struct Proxy {
     #[command(flatten)]
-    pub(crate) config: ProxyConfig,
+    pub(crate) options: ProxyOptions,
 }
 
 impl Proxy {
     pub(crate) async fn run(&self, cancel_token: CancellationToken) -> Result {
-        let config = Arc::new(self.config.clone());
+        let settings = Settings::from_proxy_options(self.options.clone());
+        let settings = Arc::new(settings);
 
-        let upstream_addr = resolve_stratum_endpoint(config.upstream())
+        let upstream = settings.upstream().context("proxy configuration error")?;
+        let username = settings
+            .upstream_username()
+            .context("proxy configuration error")?;
+
+        let upstream_addr = resolve_stratum_endpoint(upstream)
             .await
-            .with_context(|| {
-                format!(
-                    "failed to resolve upstream endpoint `{}`",
-                    config.upstream()
-                )
-            })?;
+            .with_context(|| format!("failed to resolve upstream endpoint `{upstream}`"))?;
 
         info!(
             "Connecting to upstream {} ({}) as {}",
-            config.upstream(),
-            upstream_addr,
-            config.username()
+            upstream, upstream_addr, username
         );
 
         let client_config = ClientConfig {
             address: upstream_addr.to_string(),
-            username: config.username(),
+            username: username.clone(),
             user_agent: USER_AGENT.into(),
-            password: config.password(),
-            timeout: config.timeout(),
+            password: settings.upstream_password().map(String::from),
+            timeout: settings.timeout(),
         };
 
         let client = Client::new(client_config);
@@ -63,27 +62,27 @@ impl Proxy {
             .await
             .context("failed to authorize with upstream")?;
 
-        info!("Authorized with upstream as {}", config.username());
+        info!("Authorized with upstream as {}", username);
 
         let nexus = Arc::new(Nexus::new(
-            config.upstream().to_string(),
-            config.username().to_string(),
-            config.address(),
-            config.port(),
+            upstream.to_string(),
+            username.to_string(),
+            settings.address().to_string(),
+            settings.port(),
         ));
 
         nexus.set_connected(true);
 
-        let api_handle = if let Some(api_port) = config.api_port() {
+        let api_handle = if let Some(api_port) = settings.api_port() {
             let http_config = http_server::HttpConfig {
-                address: config.address(),
+                address: settings.address().to_string(),
                 port: api_port,
                 acme_domains: vec![],
                 acme_contacts: vec![],
                 acme_cache: PathBuf::new(),
             };
 
-            info!("Starting HTTP API on {}:{}", config.address(), api_port);
+            info!("Starting HTTP API on {}:{}", settings.address(), api_port);
 
             Some(http_server::spawn(
                 http_config,
@@ -96,8 +95,8 @@ impl Proxy {
 
         info!(
             "Proxy ready. Listening for downstream miners on {}:{}",
-            config.address(),
-            config.port()
+            settings.address(),
+            settings.port()
         );
 
         loop {
@@ -138,78 +137,5 @@ impl Proxy {
         }
 
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::arguments::Arguments;
-
-    fn parse_proxy_config(args: &str) -> ProxyConfig {
-        match Arguments::try_parse_from(args.split_whitespace()) {
-            Ok(arguments) => match arguments.subcommand {
-                Subcommand::Proxy(proxy) => proxy.config,
-                subcommand => panic!("unexpected subcommand: {subcommand:?}"),
-            },
-            Err(err) => panic!("error parsing arguments: {err}"),
-        }
-    }
-
-    #[test]
-    fn defaults_are_sane() {
-        let config = parse_proxy_config("para proxy pool.example.com:3333 --username bc1qtest");
-
-        assert_eq!(config.upstream(), "pool.example.com:3333");
-        assert_eq!(config.username().to_string(), "bc1qtest");
-        assert_eq!(config.password(), None);
-        assert_eq!(config.address(), "0.0.0.0");
-        assert_eq!(config.port(), 42069);
-        assert_eq!(config.api_port(), None);
-        assert_eq!(config.timeout(), Duration::from_secs(30));
-    }
-
-    #[test]
-    fn override_address_and_port() {
-        let config = parse_proxy_config(
-            "para proxy pool.example.com:3333 --username bc1qtest --address 127.0.0.1 --port 9999",
-        );
-
-        assert_eq!(config.address(), "127.0.0.1");
-        assert_eq!(config.port(), 9999);
-    }
-
-    #[test]
-    fn override_api_port() {
-        let config = parse_proxy_config(
-            "para proxy pool.example.com:3333 --username bc1qtest --api-port 8080",
-        );
-
-        assert_eq!(config.api_port(), Some(8080));
-    }
-
-    #[test]
-    fn override_timeout() {
-        let config =
-            parse_proxy_config("para proxy pool.example.com:3333 --username bc1qtest --timeout 60");
-
-        assert_eq!(config.timeout(), Duration::from_secs(60));
-    }
-
-    #[test]
-    fn password_override() {
-        let config = parse_proxy_config(
-            "para proxy pool.example.com:3333 --username bc1qtest --password secret",
-        );
-
-        assert_eq!(config.password(), Some("secret".to_string()));
-    }
-
-    #[test]
-    fn username_with_worker() {
-        let config =
-            parse_proxy_config("para proxy pool.example.com:3333 --username bc1qtest.worker1");
-
-        assert_eq!(config.username().to_string(), "bc1qtest.worker1");
     }
 }

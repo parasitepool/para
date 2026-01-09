@@ -60,6 +60,7 @@ use {
     serde_json::json,
     serde_with::{DeserializeFromStr, SerializeDisplay},
     session::SessionSnapshot,
+    settings::Settings,
     share::Share,
     snafu::Snafu,
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
@@ -88,7 +89,7 @@ use {
         Notify, Ntime, PrevHash, SetDifficulty, StratumError, Submit, Subscribe, SubscribeResult,
         Username, Version,
     },
-    subcommand::{pool::pool_config::PoolConfig, server::account::Account},
+    subcommand::server::account::Account,
     sysinfo::{Disks, System},
     throbber::{StatusLine, spawn_throbber},
     tokio::net::{
@@ -132,6 +133,7 @@ mod jobs;
 mod metatron;
 mod nexus;
 mod session;
+pub mod settings;
 mod share;
 mod signal;
 mod stratifier;

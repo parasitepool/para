@@ -14,7 +14,7 @@ pub(crate) enum State {
 }
 
 pub(crate) struct Stratifier<W: Workbase> {
-    config: Arc<PoolConfig>,
+    settings: Arc<Settings>,
     metatron: Arc<Metatron>,
     share_tx: mpsc::Sender<Share>,
     socket_addr: SocketAddr,
@@ -38,7 +38,7 @@ pub(crate) struct Stratifier<W: Workbase> {
 
 impl<W: Workbase> Stratifier<W> {
     pub(crate) fn new(
-        config: Arc<PoolConfig>,
+        settings: Arc<Settings>,
         metatron: Arc<Metatron>,
         share_tx: mpsc::Sender<Share>,
         socket_addr: SocketAddr,
@@ -51,19 +51,19 @@ impl<W: Workbase> Stratifier<W> {
         let (reader, writer) = tcp_stream.into_split();
 
         let vardiff = Vardiff::new(
-            config.start_diff(),
-            config.vardiff_period(),
-            config.vardiff_window(),
-            config.min_diff(),
-            config.max_diff(),
+            settings.start_diff(),
+            settings.vardiff_period(),
+            settings.vardiff_window(),
+            settings.min_diff(),
+            settings.max_diff(),
         );
 
-        let bouncer = Bouncer::new(config.disable_bouncer());
+        let bouncer = Bouncer::new(settings.disable_bouncer());
 
         metatron.add_connection();
 
         Self {
-            config,
+            settings,
             metatron,
             share_tx,
             socket_addr,
@@ -218,7 +218,7 @@ impl<W: Workbase> Stratifier<W> {
 
                     match workbase.create_job(
                         enonce1,
-                        self.config.enonce2_size(),
+                        self.settings.extranonce2_size(),
                         Some(address),
                         self.jobs.next_id(),
                         self.version_mask,
@@ -283,7 +283,7 @@ impl<W: Workbase> Stratifier<W> {
             workbase
                 .create_job(
                     &enonce1,
-                    self.config.enonce2_size(),
+                    self.settings.extranonce2_size(),
                     Some(address),
                     self.jobs.next_id(),
                     self.version_mask,
@@ -306,7 +306,7 @@ impl<W: Workbase> Stratifier<W> {
 
     async fn configure(&mut self, id: Id, configure: Configure) -> Result {
         if configure.version_rolling_mask.is_some() {
-            let version_mask = self.config.version_mask();
+            let version_mask = self.settings.version_mask();
             debug!(
                 "Configuring version rolling for {} with version mask {version_mask}",
                 self.socket_addr
@@ -315,7 +315,7 @@ impl<W: Workbase> Stratifier<W> {
             let message = Message::Response {
                 id,
                 result: Some(
-                    json!({"version-rolling": true, "version-rolling.mask": self.config.version_mask()}),
+                    json!({"version-rolling": true, "version-rolling.mask": self.settings.version_mask()}),
                 ),
                 error: None,
                 reject_reason: None,
@@ -353,11 +353,11 @@ impl<W: Workbase> Stratifier<W> {
             info!("Client {} resubscribing", self.socket_addr);
             self.jobs = Jobs::<W>::new();
             self.vardiff = Vardiff::new(
-                self.config.start_diff(),
-                self.config.vardiff_period(),
-                self.config.vardiff_window(),
-                self.config.min_diff(),
-                self.config.max_diff(),
+                self.settings.start_diff(),
+                self.settings.vardiff_period(),
+                self.settings.vardiff_window(),
+                self.settings.min_diff(),
+                self.settings.max_diff(),
             );
             self.authorized = None;
             self.address = None;
@@ -391,7 +391,7 @@ impl<W: Workbase> Stratifier<W> {
         let result = SubscribeResult {
             subscriptions,
             enonce1: enonce1.clone(),
-            enonce2_size: self.config.enonce2_size(),
+            enonce2_size: self.settings.extranonce2_size(),
         };
 
         self.send(Message::Response {
@@ -417,7 +417,7 @@ impl<W: Workbase> Stratifier<W> {
 
         let address = match authorize
             .username
-            .parse_with_network(self.config.chain().network())
+            .parse_with_network(self.settings.chain().network())
         {
             Ok(parsed) => parsed,
             Err(e) => {
@@ -440,7 +440,7 @@ impl<W: Workbase> Stratifier<W> {
             workbase
                 .create_job(
                     &enonce1,
-                    self.config.enonce2_size(),
+                    self.settings.extranonce2_size(),
                     Some(&address),
                     self.jobs.next_id(),
                     self.version_mask,
@@ -529,7 +529,7 @@ impl<W: Workbase> Stratifier<W> {
             return Ok(consequence);
         };
 
-        let expected_extranonce2_size = self.config.enonce2_size();
+        let expected_extranonce2_size = self.settings.extranonce2_size();
         if submit.enonce2.len() != expected_extranonce2_size {
             warn!(
                 "Invalid extranonce2 length from {}: got {} bytes, expected {}",
@@ -669,7 +669,7 @@ impl<W: Workbase> Stratifier<W> {
                 Ok(block) => {
                     info!("Submitting potential block solve");
 
-                    match self.config.bitcoin_rpc_client()?.submit_block(&block) {
+                    match self.settings.bitcoin_rpc_client()?.submit_block(&block) {
                         Ok(_) => {
                             info!("SUCCESSFULLY mined block {}", block.block_hash());
                             self.metatron.add_block();
@@ -715,7 +715,7 @@ impl<W: Workbase> Stratifier<W> {
                     new_diff,
                     self.socket_addr,
                     self.vardiff.dsps(),
-                    self.config.vardiff_period().as_secs_f64()
+                    self.settings.vardiff_period().as_secs_f64()
                 );
 
                 self.send(Message::Notification {
