@@ -1,6 +1,8 @@
+use std::ops::Not;
 use {
     super::*,
     crate::api::{PoolStats, UserDetail, UserSummary, WorkerSummary},
+    crate::record_sink::{BlockFoundEvent, Event, ShareEvent},
 };
 
 pub(crate) struct Metatron {
@@ -14,8 +16,8 @@ pub(crate) struct Metatron {
 
 impl Metatron {
     pub(crate) fn new() -> Self {
-        let seed = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
+        let seed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
 
@@ -38,10 +40,10 @@ impl Metatron {
     pub(crate) async fn run(
         self: Arc<Self>,
         mut rx: mpsc::Receiver<Share>,
-        sink: Option<mpsc::Sender<Share>>,
+        sink: Option<mpsc::Sender<Event>>,
         cancel: CancellationToken,
     ) {
-        let mut cleanup_interval = tokio::time::interval(Duration::from_secs(60));
+        let mut cleanup_interval = interval(Duration::from_secs(60));
 
         loop {
             tokio::select! {
@@ -77,7 +79,7 @@ impl Metatron {
         );
     }
 
-    fn process_share(&self, share: &Share, sink: &Option<mpsc::Sender<Share>>) {
+    fn process_share(&self, share: &Share, sink: &Option<mpsc::Sender<Event>>) {
         let worker = self.get_or_create_worker(share.address.clone(), &share.workername);
 
         if share.result {
@@ -86,10 +88,24 @@ impl Metatron {
             worker.record_rejected();
         }
 
-        if let Some(tx) = sink
-            && tx.try_send(share.clone()).is_err()
-        {
-            warn!("Share sink full, dropping event");
+        if let Some(tx) = sink {
+            let event = Event::Share(ShareEvent {
+                timestamp: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs() as i64,
+                address: share.address.to_string(),
+                workername: share.workername.clone(),
+                pool_diff: share.pool_diff,
+                share_diff: share.share_diff,
+                result: share.result,
+                blockheight: Some(share.height as i32),
+                reject_reason: share.result.not().then(|| "validation failed".to_string()),
+            });
+
+            if tx.try_send(event).is_err() {
+                warn!("Event sink full, dropping event");
+            }
         }
     }
 
@@ -117,6 +133,40 @@ impl Metatron {
 
     pub(crate) fn add_block(&self) {
         self.blocks.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record a block found event and send to sink
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn _record_block_found(
+        &self,
+        blockheight: i32,
+        blockhash: &str,
+        address: &Address,
+        workername: &str,
+        diff: f64,
+        coinbase_value: Option<i64>,
+        sink: &Option<mpsc::Sender<Event>>,
+    ) {
+        self.add_block();
+
+        if let Some(tx) = sink {
+            let event = Event::BlockFound(BlockFoundEvent {
+                timestamp: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs() as i64,
+                blockheight,
+                blockhash: blockhash.to_string(),
+                address: address.to_string(),
+                workername: workername.to_string(),
+                diff,
+                coinbase_value,
+            });
+
+            if tx.try_send(event).is_err() {
+                warn!("Event sink full, dropping block found event");
+            }
+        }
     }
 
     pub(crate) fn add_connection(&self) {
@@ -347,7 +397,7 @@ mod tests {
     #[test]
     fn next_enonce1_is_unique() {
         let metatron = Metatron::new();
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = HashSet::new();
         for _ in 0..1000 {
             let enonce = metatron.next_enonce1();
             assert!(seen.insert(enonce), "duplicate enonce1 generated");

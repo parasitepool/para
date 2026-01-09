@@ -135,7 +135,7 @@ bitcoind:
   #!/usr/bin/env bash
   ./bitcoin/build/bin/bitcoind \
     -datadir=copr \
-    -signet 
+    -signet
 
 mine:
   ./bin/mine

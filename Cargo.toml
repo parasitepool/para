@@ -33,6 +33,7 @@ swagger-ui = ["dep:utoipa-swagger-ui"]
 
 [dependencies]
 anyhow.workspace = true
+async-trait = "0.1.89"
 axum = { version = "0.8.3", features = ["http2"] }
 axum-server = "0.7.3"
 backon = "1.6.0"
