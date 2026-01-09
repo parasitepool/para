@@ -2478,6 +2478,7 @@ name = "para"
 version = "0.5.3"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum",
  "axum-server",
  "backon",

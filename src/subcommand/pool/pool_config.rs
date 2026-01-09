@@ -83,6 +83,17 @@ pub(crate) struct PoolConfig {
     extranonce2_size: u8,
     #[arg(long, help = "Disable bouncer.")]
     disable_bouncer: bool,
+
+    #[arg(
+        long,
+        help = "Connect to Postgres at <DATABASE_URL> for event storage."
+    )]
+    database_url: Option<String>,
+    #[arg(
+        long,
+        help = "Write events to <EVENTS_FILE> (.json or .csv extension)."
+    )]
+    events_file: Option<PathBuf>,
 }
 
 impl PoolConfig {
@@ -257,6 +268,14 @@ impl PoolConfig {
 
     pub(crate) fn disable_bouncer(&self) -> bool {
         self.disable_bouncer
+    }
+
+    pub(crate) fn database_url(&self) -> Option<String> {
+        self.database_url.clone()
+    }
+
+    pub(crate) fn events_file(&self) -> Option<PathBuf> {
+        self.events_file.clone()
     }
 
     pub(crate) fn validate(&self) -> Result<()> {

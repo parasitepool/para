@@ -1,10 +1,15 @@
 use {
     super::*,
-    crate::{api, http_server},
+    crate::{
+        api, http_server,
+        record_sink::{self, DatabaseSink, Event, FileFormat, FileSink, MultiSink, RecordSink},
+    },
     pool_config::PoolConfig,
 };
 
 pub(crate) mod pool_config;
+
+const EVENT_CHANNEL_CAPACITY: usize = 10_000;
 
 #[derive(Parser, Debug)]
 pub(crate) struct Pool {
@@ -21,6 +26,12 @@ impl Pool {
         let (share_tx, share_rx) = mpsc::channel(SHARE_CHANNEL_CAPACITY);
         let address = config.address();
         let port = config.port();
+
+        let event_sink = self.setup_event_sink(&config).await?;
+        let event_tx = event_sink.map(|(tx, handle)| {
+            tokio::spawn(handle);
+            tx
+        });
 
         let mut generator =
             Generator::new(config.clone()).context("failed to connect to Bitcoin Core RPC")?;
@@ -40,7 +51,7 @@ impl Pool {
             let metatron = metatron.clone();
             let cancel = cancel_token.clone();
             tokio::spawn(async move {
-                metatron.run(share_rx, None, cancel).await;
+                metatron.run(share_rx, event_tx, cancel).await;
             })
         };
 
@@ -128,6 +139,59 @@ impl Pool {
         }
 
         Ok(())
+    }
+
+    async fn setup_event_sink(
+        &self,
+        config: &PoolConfig,
+    ) -> Result<Option<(mpsc::Sender<Event>, JoinHandle<()>)>> {
+        let mut sinks: Vec<Box<dyn RecordSink>> = Vec::new();
+
+        if let Some(db_url) = config.database_url() {
+            match DatabaseSink::connect(&db_url).await {
+                Ok(db_sink) => {
+                    info!("Database sink connected to {}", db_url);
+                    sinks.push(Box::new(db_sink));
+                }
+                Err(e) => {
+                    warn!("Failed to connect database sink: {e}");
+                }
+            }
+        }
+
+        if let Some(events_file) = config.events_file() {
+            let format = if events_file.extension().is_some_and(|e| e == "csv") {
+                FileFormat::Csv
+            } else {
+                FileFormat::JsonLines
+            };
+
+            match FileSink::new(events_file.clone(), format) {
+                Ok(file_sink) => {
+                    info!("File sink writing to {}", events_file.display());
+                    sinks.push(Box::new(file_sink));
+                }
+                Err(e) => {
+                    warn!("Failed to create file sink: {e}");
+                }
+            }
+        }
+
+        if sinks.is_empty() {
+            return Ok(None);
+        }
+
+        let sink: Arc<dyn RecordSink> = if sinks.len() == 1 {
+            Arc::from(sinks.remove(0))
+        } else {
+            Arc::new(MultiSink::new(sinks))
+        };
+
+        let (tx, rx) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
+        let cancel = CancellationToken::new();
+        let handle = record_sink::spawn_sink_consumer(rx, sink, cancel);
+
+        Ok(Some((tx, handle)))
     }
 }
 
