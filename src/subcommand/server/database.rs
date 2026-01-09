@@ -32,6 +32,14 @@ pub struct PendingPayout {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, ToSchema)]
+pub struct SimulatedPayout {
+    pub ln_address: String,
+    pub btc_address: String,
+    pub amount_sats: i64,
+    pub percentage: f64,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, ToSchema)]
 pub struct FailedPayout {
     pub btc_address: String,
     pub amount_sats: i64,
@@ -593,6 +601,86 @@ impl Database {
             });
         }
 
+        result.sort_by(|a, b| b.amount_sats.cmp(&a.amount_sats));
+
+        Ok(result)
+    }
+
+    pub async fn get_simulated_payouts(&self, total_reward: i64) -> Result<Vec<SimulatedPayout>> {
+        #[derive(sqlx::FromRow)]
+        struct PayoutRow {
+            username: String,
+            ln_address: String,
+            amount: i64,
+            percentage: f64,
+        }
+
+        let rows = sqlx::query_as::<_, PayoutRow>(
+            "
+            WITH eligible_accounts AS (
+                SELECT
+                    a.id as account_id,
+                    a.username,
+                    COALESCE(a.lnurl, '') as lnurl,
+                    a.total_diff,
+                    COALESCE(SUM(p.diff_paid), 0) as already_paid_diff
+                FROM accounts a
+                LEFT JOIN payouts p ON p.account_id = a.id
+                    AND p.status != 'cancelled'
+                GROUP BY a.id, a.username, a.lnurl, a.total_diff
+            ),
+            payable_accounts AS (
+                SELECT
+                    account_id,
+                    username,
+                    lnurl,
+                    total_diff - already_paid_diff as unpaid_diff
+                FROM eligible_accounts
+                WHERE total_diff - already_paid_diff > 0
+            ),
+            total_unpaid AS (
+                SELECT SUM(unpaid_diff) as total_diff
+                FROM payable_accounts
+            )
+            SELECT
+                pa.username,
+                pa.lnurl as ln_address,
+                CASE
+                    WHEN tu.total_diff > 0
+                    THEN FLOOR((pa.unpaid_diff::NUMERIC / tu.total_diff::NUMERIC) * $1)::BIGINT
+                    ELSE 0
+                END as amount,
+                CASE
+                    WHEN tu.total_diff > 0
+                    THEN ROUND((pa.unpaid_diff::NUMERIC / tu.total_diff::NUMERIC), 8)::FLOAT8
+                    ELSE 0
+                END as percentage
+            FROM payable_accounts pa
+            CROSS JOIN total_unpaid tu
+            WHERE tu.total_diff > 0
+            ORDER BY pa.unpaid_diff DESC
+            ",
+        )
+        .bind(total_reward)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))?;
+
+        let mut grouped: HashMap<String, SimulatedPayout> = HashMap::new();
+        for row in rows {
+            let entry = grouped
+                .entry(row.ln_address.clone())
+                .or_insert_with(|| SimulatedPayout {
+                    ln_address: row.ln_address.clone(),
+                    btc_address: row.username.clone(),
+                    amount_sats: 0,
+                    percentage: 0.0,
+                });
+            entry.amount_sats += row.amount;
+            entry.percentage += row.percentage;
+        }
+
+        let mut result: Vec<SimulatedPayout> = grouped.into_values().collect();
         result.sort_by(|a, b| b.amount_sats.cmp(&a.amount_sats));
 
         Ok(result)
