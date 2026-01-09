@@ -72,10 +72,10 @@ impl Default for Settings {
 }
 
 impl Settings {
-    pub(crate) fn from_pool_options(options: PoolOptions) -> Self {
+    pub(crate) fn from_pool_options(options: PoolOptions) -> Result<Self> {
         let chain = options.chain.unwrap_or(Chain::Mainnet);
 
-        Self {
+        let settings = Self {
             address: options.address.unwrap_or_else(|| "0.0.0.0".into()),
             port: options.port.unwrap_or(42069),
             api_port: options.api_port,
@@ -111,11 +111,14 @@ impl Settings {
                 .unwrap_or_else(|| "tcp://127.0.0.1:28332".parse().unwrap()),
             extranonce2_size: options.extranonce2_size.unwrap_or(8),
             disable_bouncer: options.disable_bouncer,
-        }
+        };
+
+        settings.validate()?;
+        Ok(settings)
     }
 
-    pub(crate) fn from_proxy_options(options: ProxyOptions) -> Self {
-        Self {
+    pub(crate) fn from_proxy_options(options: ProxyOptions) -> Result<Self> {
+        let settings = Self {
             address: options.address.unwrap_or_else(|| "0.0.0.0".into()),
             port: options.port.unwrap_or(42069),
             api_port: options.api_port,
@@ -124,7 +127,10 @@ impl Settings {
             upstream_password: options.password,
             timeout: Duration::from_secs(options.timeout.unwrap_or(30)),
             ..Default::default()
-        }
+        };
+
+        settings.validate()?;
+        Ok(settings)
     }
 
     pub(crate) fn bitcoin_rpc_url(&self) -> String {
@@ -227,7 +233,7 @@ impl Settings {
         }
     }
 
-    pub(crate) fn validate(&self) -> Result<()> {
+    fn validate(&self) -> Result<()> {
         if let Some(min) = self.min_diff {
             ensure!(
                 self.start_diff >= min,
@@ -371,7 +377,7 @@ mod tests {
     #[test]
     fn pool_defaults_are_sane() {
         let options = parse_pool_options("para pool");
-        let settings = Settings::from_pool_options(options);
+        let settings = Settings::from_pool_options(options).unwrap();
 
         assert_eq!(settings.address, "0.0.0.0");
         assert_eq!(settings.port, 42069);
@@ -396,7 +402,7 @@ mod tests {
     #[test]
     fn pool_override_address_and_port() {
         let options = parse_pool_options("para pool --address 127.0.0.1 --port 9999");
-        let settings = Settings::from_pool_options(options);
+        let settings = Settings::from_pool_options(options).unwrap();
 
         assert_eq!(settings.address, "127.0.0.1");
         assert_eq!(settings.port, 9999);
@@ -405,7 +411,7 @@ mod tests {
     #[test]
     fn pool_override_chain_changes_default_rpc_port() {
         let options = parse_pool_options("para pool --chain signet");
-        let settings = Settings::from_pool_options(options);
+        let settings = Settings::from_pool_options(options).unwrap();
 
         assert_eq!(settings.chain, Chain::Signet);
         assert_eq!(settings.bitcoin_rpc_port, settings.chain.default_rpc_port());
@@ -414,7 +420,7 @@ mod tests {
     #[test]
     fn pool_explicit_bitcoin_rpc_port_wins() {
         let options = parse_pool_options("para pool --chain regtest --bitcoin-rpc-port 4242");
-        let settings = Settings::from_pool_options(options);
+        let settings = Settings::from_pool_options(options).unwrap();
 
         assert_eq!(settings.chain, Chain::Regtest);
         assert_eq!(settings.bitcoin_rpc_port, 4242);
@@ -424,7 +430,7 @@ mod tests {
     #[test]
     fn pool_override_version_mask() {
         let options = parse_pool_options("para pool --version-mask 00fff000");
-        let settings = Settings::from_pool_options(options);
+        let settings = Settings::from_pool_options(options).unwrap();
 
         assert_eq!(
             settings.version_mask,
@@ -439,7 +445,7 @@ mod tests {
                 --bitcoin-rpc-username alice --bitcoin-rpc-password secret \
                 --bitcoin-rpc-cookie-file /dev/null/.cookie",
         );
-        let settings = Settings::from_pool_options(options);
+        let settings = Settings::from_pool_options(options).unwrap();
 
         match settings.bitcoin_credentials().unwrap() {
             Auth::UserPass(username, password) => {
@@ -457,7 +463,7 @@ mod tests {
                 --bitcoin-rpc-username onlyuser \
                 --bitcoin-rpc-cookie-file /tmp/test.cookie",
         );
-        let settings = Settings::from_pool_options(options);
+        let settings = Settings::from_pool_options(options).unwrap();
 
         match settings.bitcoin_credentials().unwrap() {
             Auth::CookieFile(path) => assert_eq!(path, PathBuf::from("/tmp/test.cookie")),
@@ -469,7 +475,7 @@ mod tests {
     fn pool_credentials_cookiefile_when_no_creds() {
         let options =
             parse_pool_options("para pool --bitcoin-rpc-cookie-file /var/lib/bitcoind/.cookie");
-        let settings = Settings::from_pool_options(options);
+        let settings = Settings::from_pool_options(options).unwrap();
 
         match settings.bitcoin_credentials().unwrap() {
             Auth::CookieFile(path) => assert_eq!(path, PathBuf::from("/var/lib/bitcoind/.cookie")),
@@ -480,7 +486,7 @@ mod tests {
     #[test]
     fn pool_cookie_file_from_explicit_cookie_path() {
         let options = parse_pool_options("para pool --bitcoin-rpc-cookie-file /x/y/.cookie");
-        let settings = Settings::from_pool_options(options);
+        let settings = Settings::from_pool_options(options).unwrap();
 
         assert_eq!(
             settings.cookie_file().unwrap(),
@@ -492,7 +498,7 @@ mod tests {
     fn pool_cookie_file_from_bitcoin_data_dir_and_chain() {
         let options =
             parse_pool_options("para pool --bitcoin-data-dir /data/bitcoin --chain regtest");
-        let settings = Settings::from_pool_options(options);
+        let settings = Settings::from_pool_options(options).unwrap();
 
         assert_eq!(
             settings.cookie_file().unwrap(),
@@ -501,7 +507,7 @@ mod tests {
 
         let options =
             parse_pool_options("para pool --bitcoin-data-dir /data/bitcoin --chain signet");
-        let settings = Settings::from_pool_options(options);
+        let settings = Settings::from_pool_options(options).unwrap();
 
         assert_eq!(
             settings.cookie_file().unwrap(),
@@ -510,7 +516,7 @@ mod tests {
 
         let options =
             parse_pool_options("para pool --bitcoin-data-dir /data/bitcoin --chain mainnet");
-        let settings = Settings::from_pool_options(options);
+        let settings = Settings::from_pool_options(options).unwrap();
 
         assert_eq!(
             settings.cookie_file().unwrap(),
@@ -521,7 +527,7 @@ mod tests {
     #[test]
     fn pool_rpc_url_reflects_port_choice() {
         let options = parse_pool_options("para pool --bitcoin-rpc-port 12345");
-        let settings = Settings::from_pool_options(options);
+        let settings = Settings::from_pool_options(options).unwrap();
 
         assert_eq!(settings.bitcoin_rpc_url(), "127.0.0.1:12345/");
     }
@@ -529,7 +535,7 @@ mod tests {
     #[test]
     fn pool_zmq_block_notifications() {
         let options = parse_pool_options("para pool --zmq-block-notifications tcp://127.0.0.1:69");
-        let settings = Settings::from_pool_options(options);
+        let settings = Settings::from_pool_options(options).unwrap();
 
         assert_eq!(
             settings.zmq_block_notifications,
@@ -540,70 +546,70 @@ mod tests {
     #[test]
     fn pool_start_diff() {
         let options = parse_pool_options("para pool --start-diff 0.00001");
-        let settings = Settings::from_pool_options(options);
+        let settings = Settings::from_pool_options(options).unwrap();
         assert_eq!(settings.start_diff, Difficulty::from(0.00001));
 
         let options = parse_pool_options("para pool --start-diff 111");
-        let settings = Settings::from_pool_options(options);
+        let settings = Settings::from_pool_options(options).unwrap();
         assert_eq!(settings.start_diff, Difficulty::from(111));
 
         let options = parse_pool_options("para pool");
-        let settings = Settings::from_pool_options(options);
+        let settings = Settings::from_pool_options(options).unwrap();
         assert_eq!(settings.start_diff, Difficulty::from(1));
     }
 
     #[test]
     fn pool_vardiff_period() {
         let options = parse_pool_options("para pool --vardiff-period 10.0");
-        let settings = Settings::from_pool_options(options);
+        let settings = Settings::from_pool_options(options).unwrap();
         assert_eq!(settings.vardiff_period, Duration::from_secs(10));
 
         let options = parse_pool_options("para pool --vardiff-period 0.5");
-        let settings = Settings::from_pool_options(options);
+        let settings = Settings::from_pool_options(options).unwrap();
         assert_eq!(settings.vardiff_period, Duration::from_millis(500));
 
         let options = parse_pool_options("para pool");
-        let settings = Settings::from_pool_options(options);
+        let settings = Settings::from_pool_options(options).unwrap();
         assert_eq!(settings.vardiff_period, Duration::from_secs(5));
     }
 
     #[test]
     fn pool_vardiff_window() {
         let options = parse_pool_options("para pool --vardiff-window 60");
-        let settings = Settings::from_pool_options(options);
+        let settings = Settings::from_pool_options(options).unwrap();
         assert_eq!(settings.vardiff_window, Duration::from_secs(60));
 
         let options = parse_pool_options("para pool --vardiff-window 600.5");
-        let settings = Settings::from_pool_options(options);
+        let settings = Settings::from_pool_options(options).unwrap();
         assert_eq!(settings.vardiff_window, Duration::from_secs_f64(600.5));
 
         let options = parse_pool_options("para pool");
-        let settings = Settings::from_pool_options(options);
+        let settings = Settings::from_pool_options(options).unwrap();
         assert_eq!(settings.vardiff_window, Duration::from_secs(300));
     }
 
     #[test]
     fn pool_extranonce2_size_default() {
         let options = parse_pool_options("para pool");
-        let settings = Settings::from_pool_options(options);
+        let settings = Settings::from_pool_options(options).unwrap();
         assert_eq!(settings.extranonce2_size, 8);
     }
 
     #[test]
     fn pool_extranonce2_size_override() {
         let options = parse_pool_options("para pool --extranonce2-size 4");
-        let settings = Settings::from_pool_options(options);
+        let settings = Settings::from_pool_options(options).unwrap();
         assert_eq!(settings.extranonce2_size, 4);
     }
 
     #[test]
     fn pool_extranonce2_size_boundaries() {
         let options = parse_pool_options("para pool --extranonce2-size 2");
-        let settings = Settings::from_pool_options(options);
+        let settings = Settings::from_pool_options(options).unwrap();
         assert_eq!(settings.extranonce2_size, 2);
 
         let options = parse_pool_options("para pool --extranonce2-size 8");
-        let settings = Settings::from_pool_options(options);
+        let settings = Settings::from_pool_options(options).unwrap();
         assert_eq!(settings.extranonce2_size, 8);
     }
 
@@ -622,21 +628,21 @@ mod tests {
     #[test]
     fn pool_min_diff_parsing() {
         let options = parse_pool_options("para pool --min-diff 0.001");
-        let settings = Settings::from_pool_options(options);
+        let settings = Settings::from_pool_options(options).unwrap();
         assert_eq!(settings.min_diff, Some(Difficulty::from(0.001)));
     }
 
     #[test]
     fn pool_max_diff_parsing() {
         let options = parse_pool_options("para pool --max-diff 1000");
-        let settings = Settings::from_pool_options(options);
+        let settings = Settings::from_pool_options(options).unwrap();
         assert_eq!(settings.max_diff, Some(Difficulty::from(1000)));
     }
 
     #[test]
     fn pool_min_max_diff_not_set_by_default() {
         let options = parse_pool_options("para pool");
-        let settings = Settings::from_pool_options(options);
+        let settings = Settings::from_pool_options(options).unwrap();
         assert_eq!(settings.min_diff, None);
         assert_eq!(settings.max_diff, None);
     }
@@ -644,35 +650,31 @@ mod tests {
     #[test]
     fn pool_valid_min_max_diff_config() {
         let options = parse_pool_options("para pool --start-diff 10 --min-diff 1 --max-diff 100");
-        let settings = Settings::from_pool_options(options);
-        assert!(settings.validate().is_ok());
+        assert!(Settings::from_pool_options(options).is_ok());
     }
 
     #[test]
     fn pool_start_diff_below_min_diff_fails() {
         let options = parse_pool_options("para pool --start-diff 1 --min-diff 10");
-        let settings = Settings::from_pool_options(options);
-        assert!(settings.validate().is_err());
+        assert!(Settings::from_pool_options(options).is_err());
     }
 
     #[test]
     fn pool_start_diff_above_max_diff_fails() {
         let options = parse_pool_options("para pool --start-diff 100 --max-diff 10");
-        let settings = Settings::from_pool_options(options);
-        assert!(settings.validate().is_err());
+        assert!(Settings::from_pool_options(options).is_err());
     }
 
     #[test]
     fn pool_min_diff_above_max_diff_fails() {
         let options = parse_pool_options("para pool --start-diff 50 --min-diff 100 --max-diff 10");
-        let settings = Settings::from_pool_options(options);
-        assert!(settings.validate().is_err());
+        assert!(Settings::from_pool_options(options).is_err());
     }
 
     #[test]
     fn proxy_defaults_are_sane() {
         let options = parse_proxy_options("para proxy pool.example.com:3333 --username bc1qtest");
-        let settings = Settings::from_proxy_options(options);
+        let settings = Settings::from_proxy_options(options).unwrap();
 
         assert_eq!(settings.upstream, Some("pool.example.com:3333".into()));
         assert_eq!(
@@ -691,7 +693,7 @@ mod tests {
         let options = parse_proxy_options(
             "para proxy pool.example.com:3333 --username bc1qtest --address 127.0.0.1 --port 9999",
         );
-        let settings = Settings::from_proxy_options(options);
+        let settings = Settings::from_proxy_options(options).unwrap();
 
         assert_eq!(settings.address, "127.0.0.1");
         assert_eq!(settings.port, 9999);
@@ -702,7 +704,7 @@ mod tests {
         let options = parse_proxy_options(
             "para proxy pool.example.com:3333 --username bc1qtest --api-port 8080",
         );
-        let settings = Settings::from_proxy_options(options);
+        let settings = Settings::from_proxy_options(options).unwrap();
 
         assert_eq!(settings.api_port, Some(8080));
     }
@@ -712,7 +714,7 @@ mod tests {
         let options = parse_proxy_options(
             "para proxy pool.example.com:3333 --username bc1qtest --timeout 60",
         );
-        let settings = Settings::from_proxy_options(options);
+        let settings = Settings::from_proxy_options(options).unwrap();
 
         assert_eq!(settings.timeout, Duration::from_secs(60));
     }
@@ -722,7 +724,7 @@ mod tests {
         let options = parse_proxy_options(
             "para proxy pool.example.com:3333 --username bc1qtest --password secret",
         );
-        let settings = Settings::from_proxy_options(options);
+        let settings = Settings::from_proxy_options(options).unwrap();
 
         assert_eq!(settings.upstream_password, Some("secret".to_string()));
     }
@@ -731,7 +733,7 @@ mod tests {
     fn proxy_username_with_worker() {
         let options =
             parse_proxy_options("para proxy pool.example.com:3333 --username bc1qtest.worker1");
-        let settings = Settings::from_proxy_options(options);
+        let settings = Settings::from_proxy_options(options).unwrap();
 
         assert_eq!(
             settings.upstream_username.as_ref().map(|u| u.to_string()),

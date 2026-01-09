@@ -15,8 +15,10 @@ pub(crate) struct Proxy {
 
 impl Proxy {
     pub(crate) async fn run(&self, cancel_token: CancellationToken) -> Result {
-        let settings = Settings::from_proxy_options(self.options.clone());
-        let settings = Arc::new(settings);
+        let settings = Arc::new(
+            Settings::from_proxy_options(self.options.clone())
+                .context("failed to create settings")?,
+        );
 
         let upstream = settings.upstream().context("proxy configuration error")?;
         let username = settings

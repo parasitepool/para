@@ -14,10 +14,10 @@ pub(crate) struct Pool {
 
 impl Pool {
     pub(crate) async fn run(&self, cancel_token: CancellationToken) -> Result {
-        let settings = Settings::from_pool_options(self.options.clone());
-        settings.validate()?;
-
-        let settings = Arc::new(settings);
+        let settings = Arc::new(
+            Settings::from_pool_options(self.options.clone())
+                .context("failed to create settings")?,
+        );
 
         let mut generator =
             Generator::new(settings.clone()).context("failed to connect to Bitcoin Core RPC")?;
