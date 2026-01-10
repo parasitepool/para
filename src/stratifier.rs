@@ -15,6 +15,7 @@ pub(crate) enum State {
 
 pub(crate) struct Stratifier<W: Workbase> {
     settings: Arc<Settings>,
+    mode: Mode,
     metatron: Arc<Metatron>,
     share_tx: mpsc::Sender<Share>,
     socket_addr: SocketAddr,
@@ -37,8 +38,10 @@ pub(crate) struct Stratifier<W: Workbase> {
 }
 
 impl<W: Workbase> Stratifier<W> {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         settings: Arc<Settings>,
+        mode: Mode,
         metatron: Arc<Metatron>,
         share_tx: mpsc::Sender<Share>,
         socket_addr: SocketAddr,
@@ -64,6 +67,7 @@ impl<W: Workbase> Stratifier<W> {
 
         Self {
             settings,
+            mode,
             metatron,
             share_tx,
             socket_addr,
@@ -364,20 +368,28 @@ impl<W: Workbase> Stratifier<W> {
             self.workername = None;
         }
 
-        let enonce1 = if let Some(ref requested_enonce1) = subscribe.enonce1 {
-            if let Some(session) = self.metatron.take_session(requested_enonce1) {
-                info!("Resuming session for enonce1 {}", session.enonce1);
-                session.enonce1
-            } else {
-                debug!(
-                    "Session resume failed for enonce1 {}, issuing new enonce1",
-                    requested_enonce1
-                );
-
-                self.metatron.next_enonce1()
+        let (enonce1, enonce2_size) = match self.mode {
+            Mode::Pool => {
+                let enonce1 = if let Some(ref requested_enonce1) = subscribe.enonce1 {
+                    if let Some(session) = self.metatron.take_session(requested_enonce1) {
+                        info!("Resuming session for enonce1 {}", session.enonce1);
+                        session.enonce1
+                    } else {
+                        debug!(
+                            "Session resume failed for enonce1 {}, issuing new enonce1",
+                            requested_enonce1
+                        );
+                        self.metatron.next_enonce1()
+                    }
+                } else {
+                    self.metatron.next_enonce1()
+                };
+                (enonce1, self.settings.extranonce2_size())
             }
-        } else {
-            self.metatron.next_enonce1()
+            Mode::Proxy {
+                ref enonce1,
+                enonce2_size,
+            } => (enonce1.clone(), enonce2_size),
         };
 
         let subscriptions = vec![
@@ -391,7 +403,7 @@ impl<W: Workbase> Stratifier<W> {
         let result = SubscribeResult {
             subscriptions,
             enonce1: enonce1.clone(),
-            enonce2_size: self.settings.extranonce2_size(),
+            enonce2_size,
         };
 
         self.send(Message::Response {
@@ -502,7 +514,7 @@ impl<W: Workbase> Stratifier<W> {
             self.emit_share(
                 &submit,
                 None,
-                0.0,
+                None,
                 BlockHash::all_zeros(),
                 Some(StratumError::WorkerMismatch),
             );
@@ -518,7 +530,7 @@ impl<W: Workbase> Stratifier<W> {
             self.emit_share(
                 &submit,
                 None,
-                0.0,
+                None,
                 BlockHash::all_zeros(),
                 Some(StratumError::Stale),
             );
@@ -551,7 +563,7 @@ impl<W: Workbase> Stratifier<W> {
             self.emit_share(
                 &submit,
                 job.height(),
-                0.0,
+                None,
                 BlockHash::all_zeros(),
                 Some(StratumError::InvalidNonce2Length),
             );
@@ -579,7 +591,7 @@ impl<W: Workbase> Stratifier<W> {
             self.emit_share(
                 &submit,
                 job.height(),
-                0.0,
+                None,
                 BlockHash::all_zeros(),
                 Some(StratumError::NtimeOutOfRange),
             );
@@ -602,7 +614,7 @@ impl<W: Workbase> Stratifier<W> {
                 self.emit_share(
                     &submit,
                     job.height(),
-                    0.0,
+                    None,
                     BlockHash::all_zeros(),
                     Some(StratumError::InvalidVersionMask),
                 );
@@ -651,7 +663,7 @@ impl<W: Workbase> Stratifier<W> {
             self.emit_share(
                 &submit,
                 job.height(),
-                0.0,
+                None,
                 hash,
                 Some(StratumError::Duplicate),
             );
@@ -694,7 +706,7 @@ impl<W: Workbase> Stratifier<W> {
             })
             .await?;
 
-            self.emit_share(&submit, job.height(), current_diff.as_f64(), hash, None);
+            self.emit_share(&submit, job.height(), Some(current_diff), hash, None);
 
             self.bouncer.accept();
 
@@ -732,7 +744,7 @@ impl<W: Workbase> Stratifier<W> {
         self.emit_share(
             &submit,
             job.height(),
-            0.0,
+            Some(current_diff),
             hash,
             Some(StratumError::AboveTarget),
         );
@@ -747,7 +759,7 @@ impl<W: Workbase> Stratifier<W> {
         &self,
         submit: &Submit,
         height: Option<u64>,
-        pool_diff: f64,
+        pool_diff: Option<Difficulty>,
         hash: BlockHash,
         reject_reason: Option<StratumError>,
     ) {
@@ -763,7 +775,7 @@ impl<W: Workbase> Stratifier<W> {
             self.socket_addr,
             self.user_agent.clone(),
             enonce1,
-            submit.enonce2.to_string(),
+            submit.enonce2.clone(),
             submit.nonce,
             submit.ntime,
             submit.version_bits,
@@ -829,7 +841,8 @@ impl<W: Workbase> Stratifier<W> {
 
 impl<W: Workbase> Drop for Stratifier<W> {
     fn drop(&mut self) {
-        if !self.dropped_by_bouncer
+        if self.mode == Mode::Pool
+            && !self.dropped_by_bouncer
             && let (Some(enonce1), Some(_authorized)) = (self.enonce1.take(), self.authorized)
         {
             let session = SessionSnapshot::new(enonce1);
@@ -839,7 +852,7 @@ impl<W: Workbase> Drop for Stratifier<W> {
         self.metatron.sub_connection();
 
         info!(
-            "Stratifier {} closed (remaining: {})",
+            "Shutting down stratifier for {} (remaining: {})",
             self.socket_addr,
             self.metatron.total_connections()
         );

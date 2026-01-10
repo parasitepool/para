@@ -126,6 +126,12 @@ impl Settings {
             upstream_username: Some(options.username),
             upstream_password: options.password,
             timeout: Duration::from_secs(options.timeout.unwrap_or(30)),
+            chain: options.chain.unwrap_or_default(),
+            start_diff: options.start_diff.unwrap_or_else(|| Difficulty::from(1.0)),
+            min_diff: options.min_diff,
+            max_diff: options.max_diff,
+            vardiff_period: Duration::from_secs_f64(options.vardiff_period.unwrap_or(5.0)),
+            vardiff_window: Duration::from_secs_f64(options.vardiff_window.unwrap_or(300.0)),
             ..Default::default()
         };
 
@@ -288,8 +294,8 @@ impl Settings {
             .context("upstream username not configured (required for proxy mode)")
     }
 
-    pub(crate) fn upstream_password(&self) -> Option<&str> {
-        self.upstream_password.as_deref()
+    pub(crate) fn upstream_password(&self) -> Option<String> {
+        self.upstream_password.clone()
     }
 
     pub(crate) fn timeout(&self) -> Duration {

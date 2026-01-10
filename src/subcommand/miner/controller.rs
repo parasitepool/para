@@ -81,7 +81,11 @@ impl Controller {
         controller.spawn_hashers();
 
         if !integration_test() && !logs_enabled() {
-            spawn_throbber(controller.metrics.clone());
+            spawn_throbber(
+                controller.metrics.clone(),
+                cancel_token.clone(),
+                &mut controller.hashers,
+            );
         }
 
         controller.event_loop(events, cancel_token).await?;

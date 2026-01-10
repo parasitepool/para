@@ -5,7 +5,10 @@ pub(crate) struct ProxyOptions {
     #[arg(help = "Upstream stratum pool <HOST:PORT>.")]
     pub(crate) upstream: String,
 
-    #[arg(long, help = "Username/address for upstream authentication.")]
+    #[arg(long = "chain", help = "Run on <CHAIN>.")]
+    pub(crate) chain: Option<Chain>,
+
+    #[arg(long, help = "Username for upstream authentication.")]
     pub(crate) username: Username,
 
     #[arg(long, help = "Password for upstream authentication.")]
@@ -22,4 +25,25 @@ pub(crate) struct ProxyOptions {
 
     #[arg(long, help = "Upstream connection timeout in seconds.")]
     pub(crate) timeout: Option<u64>,
+
+    #[arg(long, help = "Give <START_DIFF> to new clients.")]
+    pub(crate) start_diff: Option<Difficulty>,
+
+    #[arg(long, help = "Minimum difficulty for vardiff.")]
+    pub(crate) min_diff: Option<Difficulty>,
+
+    #[arg(long, help = "Maximum difficulty for vardiff.")]
+    pub(crate) max_diff: Option<Difficulty>,
+
+    #[arg(
+        long,
+        help = "Target <VARDIFF_PERIOD> seconds between share submissions."
+    )]
+    pub(crate) vardiff_period: Option<f64>,
+
+    #[arg(
+        long,
+        help = "Average the share submission rate over <VARDIFF_WINDOW> seconds."
+    )]
+    pub(crate) vardiff_window: Option<f64>,
 }

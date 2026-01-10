@@ -17,6 +17,7 @@ pub(crate) fn calculate_time_bias(elapsed: Duration, window: Duration) -> f64 {
     exponential_saturation(elapsed.as_secs_f64() / window.as_secs_f64())
 }
 
+// TODO: should this be generic over f64 or Difficulty or HashRate or etc.
 #[derive(Debug, Clone)]
 pub(crate) struct DecayingAverage {
     value: f64,

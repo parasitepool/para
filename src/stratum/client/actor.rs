@@ -1,4 +1,4 @@
-use {super::*, crate::MAX_MESSAGE_SIZE, serde::Serialize, std::time::Instant};
+use {super::*, crate::MAX_MESSAGE_SIZE, SubmitOutcome, serde::Serialize, std::time::Instant};
 
 struct ConnectionState {
     writer: BufWriter<tokio::net::tcp::OwnedWriteHalf>,
@@ -29,7 +29,7 @@ enum IncomingMessage {
 const MAX_PENDING_REQUESTS: usize = 1024;
 
 type PendingRequest = (oneshot::Sender<Result<(Message, usize)>>, Instant);
-type PendingSubmit = (oneshot::Sender<Result<bool>>, Instant);
+type PendingSubmit = (oneshot::Sender<Result<SubmitOutcome>>, Instant);
 
 pub(super) enum ClientMessage {
     Connect {
@@ -42,7 +42,7 @@ pub(super) enum ClientMessage {
     },
     SubmitAsync {
         submit: Submit,
-        respond_to: oneshot::Sender<Result<bool>>,
+        respond_to: oneshot::Sender<Result<SubmitOutcome>>,
     },
     Disconnect {
         respond_to: oneshot::Sender<()>,
@@ -326,15 +326,27 @@ impl ClientActor {
                 bytes_read,
             } => {
                 if let Some((tx, _)) = self.pending_submits.remove(&id) {
-                    let result = match &message {
+                    let outcome = match &message {
                         Message::Response {
                             result: Some(val),
                             error: None,
+                            reject_reason: None,
                             ..
-                        } => val.as_bool().unwrap_or(false),
-                        _ => false,
+                        } if val.as_bool() == Some(true) => SubmitOutcome::Accepted,
+                        Message::Response {
+                            reject_reason,
+                            error,
+                            ..
+                        } => {
+                            // Extract rejection reason from reject_reason or error
+                            let reason = reject_reason
+                                .clone()
+                                .or_else(|| error.as_ref().map(|e| e.to_string()));
+                            SubmitOutcome::Rejected { reason }
+                        }
+                        _ => SubmitOutcome::Rejected { reason: None },
                     };
-                    if tx.send(Ok(result)).is_err() {
+                    if tx.send(Ok(outcome)).is_err() {
                         debug!("Submit result dropped: caller gave up");
                     }
                 } else if let Some((tx, _)) = self.pending.remove(&id) {

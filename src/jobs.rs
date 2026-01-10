@@ -54,8 +54,8 @@ mod tests {
     use bitcoin::block;
 
     trait TestWorkbaseFactory: Workbase + Sized {
-        fn workbase_that_cleans(seq: u64) -> Arc<Self>;
-        fn workbase_same_group(seq: u64) -> Arc<Self>;
+        fn workbase_that_cleans(seq: u64, job_id: JobId) -> Arc<Self>;
+        fn workbase_same_group(seq: u64, job_id: JobId) -> Arc<Self>;
         fn test_address() -> Option<Address>;
 
         fn create_test_job(workbase: &Arc<Self>, job_id: JobId) -> Arc<Job<Self>> {
@@ -69,14 +69,14 @@ mod tests {
     }
 
     impl TestWorkbaseFactory for BlockTemplate {
-        fn workbase_that_cleans(seq: u64) -> Arc<Self> {
+        fn workbase_that_cleans(seq: u64, _job_id: JobId) -> Arc<Self> {
             Arc::new(BlockTemplate {
                 height: seq,
                 ..Default::default()
             })
         }
 
-        fn workbase_same_group(seq: u64) -> Arc<Self> {
+        fn workbase_same_group(seq: u64, _job_id: JobId) -> Arc<Self> {
             Arc::new(BlockTemplate {
                 height: seq,
                 ..Default::default()
@@ -93,12 +93,12 @@ mod tests {
     }
 
     impl TestWorkbaseFactory for Notify {
-        fn workbase_that_cleans(_seq: u64) -> Arc<Self> {
-            Arc::new(sample_notify(true))
+        fn workbase_that_cleans(_seq: u64, job_id: JobId) -> Arc<Self> {
+            Arc::new(sample_notify(true, job_id))
         }
 
-        fn workbase_same_group(_seq: u64) -> Arc<Self> {
-            Arc::new(sample_notify(false))
+        fn workbase_same_group(_seq: u64, job_id: JobId) -> Arc<Self> {
+            Arc::new(sample_notify(false, job_id))
         }
 
         fn test_address() -> Option<Address> {
@@ -106,9 +106,9 @@ mod tests {
         }
     }
 
-    fn sample_notify(clean_jobs: bool) -> Notify {
+    fn sample_notify(clean_jobs: bool, job_id: JobId) -> Notify {
         Notify {
-            job_id: "bf".parse().unwrap(),
+            job_id,
             prevhash: "4d16b6f85af6e2198f44ae2a6de67f78487ae5611b77c6c0440b921e00000000"
                 .parse()
                 .unwrap(),
@@ -150,16 +150,16 @@ mod tests {
     fn check_insert_same_group_does_not_clean<W: TestWorkbaseFactory>() {
         let mut jobs: Jobs<W> = Jobs::new();
 
-        let workbase_1 = W::workbase_that_cleans(100);
         let id_1 = jobs.next_id();
+        let workbase_1 = W::workbase_that_cleans(100, id_1);
         let job_1 = W::create_test_job(&workbase_1, id_1);
 
         let clean_jobs = jobs.insert(job_1.clone());
         assert!(clean_jobs, "first insert should clean");
         assert_invariants(&jobs);
 
-        let workbase_2 = W::workbase_same_group(100);
         let id_2 = jobs.next_id();
+        let workbase_2 = W::workbase_same_group(100, id_2);
         let job_2 = W::create_test_job(&workbase_2, id_2);
 
         let clean_jobs = jobs.insert(job_2.clone());
@@ -175,8 +175,8 @@ mod tests {
     fn check_insert_new_work_cleans_and_clears_seen<W: TestWorkbaseFactory>() {
         let mut jobs: Jobs<W> = Jobs::new();
 
-        let workbase_1 = W::workbase_that_cleans(100);
         let id_1 = jobs.next_id();
+        let workbase_1 = W::workbase_that_cleans(100, id_1);
         let job_1 = W::create_test_job(&workbase_1, id_1);
 
         let clean_jobs = jobs.insert(job_1.clone());
@@ -186,8 +186,8 @@ mod tests {
         assert!(!jobs.is_duplicate(blockhash));
         assert!(jobs.is_duplicate(blockhash));
 
-        let workbase_2 = W::workbase_that_cleans(101);
         let id_2 = jobs.next_id();
+        let workbase_2 = W::workbase_that_cleans(101, id_2);
         let job_2 = W::create_test_job(&workbase_2, id_2);
 
         let clean_jobs = jobs.insert(job_2.clone());
@@ -221,8 +221,8 @@ mod tests {
     fn check_get_returns_valid_job<W: TestWorkbaseFactory>() {
         let mut jobs: Jobs<W> = Jobs::new();
 
-        let workbase = W::workbase_that_cleans(100);
         let id = jobs.next_id();
+        let workbase = W::workbase_that_cleans(100, id);
         let job = W::create_test_job(&workbase, id);
 
         jobs.insert(job.clone());
@@ -234,15 +234,15 @@ mod tests {
     fn check_insert_returns_clean_jobs<W: TestWorkbaseFactory>() {
         let mut jobs: Jobs<W> = Jobs::new();
 
-        let workbase = W::workbase_that_cleans(100);
         let id = jobs.next_id();
+        let workbase = W::workbase_that_cleans(100, id);
         let job = W::create_test_job(&workbase, id);
 
         let clean = jobs.insert(job);
         assert!(clean, "first insert should return true for clean_jobs");
 
-        let workbase2 = W::workbase_same_group(100);
         let id2 = jobs.next_id();
+        let workbase2 = W::workbase_same_group(100, id2);
         let job2 = W::create_test_job(&workbase2, id2);
 
         let clean = jobs.insert(job2);
@@ -253,9 +253,9 @@ mod tests {
     }
 
     fn check_create_job_assigns_fields<W: TestWorkbaseFactory>() {
-        let workbase = W::workbase_that_cleans(100);
         let enonce1 = Extranonce::random(4);
         let job_id = JobId::new(42);
+        let workbase = W::workbase_that_cleans(100, job_id);
         let version_mask = Some(Version::from_str("1fffe000").unwrap());
 
         let job = workbase
@@ -275,24 +275,25 @@ mod tests {
     }
 
     fn check_clean_jobs_returns_true_for_new_work<W: TestWorkbaseFactory>() {
-        let workbase1 = W::workbase_that_cleans(100);
-        let workbase2 = W::workbase_that_cleans(101);
+        let workbase1 = W::workbase_that_cleans(100, JobId::new(1));
+        let workbase2 = W::workbase_that_cleans(101, JobId::new(2));
 
         assert!(workbase1.clean_jobs(None));
         assert!(workbase2.clean_jobs(Some(workbase1.as_ref())));
     }
 
     fn check_clean_jobs_returns_false_for_same_group<W: TestWorkbaseFactory>() {
-        let workbase1 = W::workbase_that_cleans(100);
-        let workbase2 = W::workbase_same_group(100);
+        let workbase1 = W::workbase_that_cleans(100, JobId::new(1));
+        let workbase2 = W::workbase_same_group(100, JobId::new(2));
 
         assert!(workbase1.clean_jobs(None));
         assert!(!workbase2.clean_jobs(Some(workbase1.as_ref())));
     }
 
     fn check_job_notify_roundtrip<W: TestWorkbaseFactory>() {
-        let workbase = W::workbase_that_cleans(100);
-        let job = W::create_test_job(&workbase, JobId::new(1));
+        let job_id = JobId::new(1);
+        let workbase = W::workbase_that_cleans(100, job_id);
+        let job = W::create_test_job(&workbase, job_id);
 
         let notify = job.notify(true).unwrap();
 
@@ -320,8 +321,8 @@ mod tests {
     fn check_insert_same_job_id_replaces<W: TestWorkbaseFactory>() {
         let mut jobs: Jobs<W> = Jobs::new();
 
-        let workbase1 = W::workbase_that_cleans(100);
         let job_id = JobId::new(42);
+        let workbase1 = W::workbase_that_cleans(100, job_id);
 
         let enonce1 = Extranonce::random(ENONCE1_SIZE);
         let job1 = Arc::new(
@@ -333,7 +334,7 @@ mod tests {
         jobs.insert(job1.clone());
         assert_eq!(jobs.valid.len(), 1);
 
-        let workbase2 = W::workbase_same_group(100);
+        let workbase2 = W::workbase_same_group(100, job_id);
         let enonce2 = Extranonce::random(ENONCE1_SIZE);
         let job2 = Arc::new(
             workbase2
@@ -380,16 +381,16 @@ mod tests {
     fn check_multiple_jobs_accumulation<W: TestWorkbaseFactory>() {
         let mut jobs: Jobs<W> = Jobs::new();
 
-        let workbase_first = W::workbase_that_cleans(100);
         let first_id = jobs.next_id();
+        let workbase_first = W::workbase_that_cleans(100, first_id);
         let first_job = W::create_test_job(&workbase_first, first_id);
         let clean = jobs.insert(first_job);
         assert!(clean, "first insert should clean");
 
         let mut job_ids = vec![first_id];
         for _ in 0..4 {
-            let workbase = W::workbase_same_group(100);
             let id = jobs.next_id();
+            let workbase = W::workbase_same_group(100, id);
             job_ids.push(id);
             let job = W::create_test_job(&workbase, id);
 
@@ -404,8 +405,8 @@ mod tests {
 
         assert_eq!(jobs.latest.as_ref().unwrap().job_id, job_ids[4]);
 
-        let workbase_new = W::workbase_that_cleans(101);
         let new_id = jobs.next_id();
+        let workbase_new = W::workbase_that_cleans(101, new_id);
         let new_job = W::create_test_job(&workbase_new, new_id);
 
         let clean = jobs.insert(new_job);

@@ -2,11 +2,12 @@ use super::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Status {
-    pub upstream_url: String,
-    pub upstream_username: String,
-    pub downstream_address: String,
-    pub downstream_port: u16,
+    pub upstream: String,
+    pub upstream_difficulty: f64,
+    pub upstream_username: Username,
     pub connected: bool,
+    pub enonce1: Extranonce,
+    pub enonce2_size: usize,
 }
 
 pub(crate) fn router(nexus: Arc<Nexus>) -> Router {
@@ -17,10 +18,11 @@ pub(crate) fn router(nexus: Arc<Nexus>) -> Router {
 
 async fn get_status(State(nexus): State<Arc<Nexus>>) -> Json<Status> {
     Json(Status {
-        upstream_url: nexus.upstream_url().to_string(),
-        upstream_username: nexus.upstream_username().to_string(),
-        downstream_address: nexus.downstream_address().to_string(),
-        downstream_port: nexus.downstream_port(),
+        upstream: nexus.upstream().to_string(),
+        upstream_difficulty: nexus.upstream_difficulty().await.as_f64(),
+        upstream_username: nexus.username().clone(),
         connected: nexus.is_connected(),
+        enonce1: nexus.enonce1().clone(),
+        enonce2_size: nexus.enonce2_size(),
     })
 }

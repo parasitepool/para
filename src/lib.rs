@@ -37,12 +37,13 @@ use {
         sink::SinkExt,
         stream::{FuturesUnordered, StreamExt},
     },
-    generator::Generator,
+    generator::spawn_generator,
     hash_rate::HashRate,
     job::Job,
     jobs::Jobs,
     lru::LruCache,
     metatron::Metatron,
+    mode::Mode,
     nexus::Nexus,
     reqwest::Url,
     rust_embed::RustEmbed,
@@ -131,6 +132,7 @@ mod http_server;
 mod job;
 mod jobs;
 mod metatron;
+mod mode;
 mod nexus;
 mod session;
 pub mod settings;

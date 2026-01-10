@@ -45,22 +45,22 @@ miner stratum_endpoint='127.0.0.1:42069':
     --password x \
     --cpu-cores 2
 
-miner-signet: 
-  cargo run --release -- miner \
-    127.0.0.1:42069 \
-    --username tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.tick \
-    --password x \
-    --cpu-cores 2 \
-    --throttle 500K
-
 ping host='parasite.wtf':
   cargo run ping {{host}}:42069
 
 ping-auth host='parasite.wtf' username='bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg6dzw5nk24r45dzasde25r3.tick' password='x':
   cargo run ping --username {{username}} --password {{password}} {{host}}:42069
 
+miner-signet port='42069': 
+  RUST_LOG=info cargo run --release -- miner \
+    127.0.0.1:{{port}} \
+    --username tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.tick \
+    --password x \
+    --cpu-cores 2 \
+    --throttle 500K
+
 pool: 
-  cargo run -- pool \
+  RUST_LOG=info cargo run -- pool \
     --api-port 8080 \
     --chain signet \
     --address 0.0.0.0 \
@@ -71,6 +71,19 @@ pool:
     --vardiff-window 10 \
     --vardiff-period 1 \
     --zmq-block-notifications tcp://127.0.0.1:28332
+
+proxy: 
+  RUST_LOG=info cargo run -- proxy \
+    --chain signet \
+    --api-port 8081 \
+    --address 0.0.0.0 \
+    --port 42070 \
+    --username tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.proxy \
+    --password x \
+    --start-diff 0.00001 \
+    --vardiff-window 10 \
+    --vardiff-period 1 \
+    localhost:42069 
 
 pool-mainnet: 
   cargo run -- pool \

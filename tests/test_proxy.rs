@@ -64,6 +64,7 @@ impl TestProxy {
         }
     }
 
+    #[allow(unused)]
     pub(crate) fn stratum_endpoint(&self) -> String {
         format!("127.0.0.1:{}", self.proxy_port)
     }

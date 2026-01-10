@@ -5,9 +5,9 @@ use super::*;
 #[timeout(90000)]
 async fn proxy_connects_to_upstream() {
     let pool = TestPool::spawn();
-    let upstream_endpoint = pool.stratum_endpoint();
+    let upstream = pool.stratum_endpoint();
 
-    let proxy = TestProxy::spawn(&upstream_endpoint, &signet_username().to_string());
+    let proxy = TestProxy::spawn(&upstream, &signet_username().to_string());
 
     tokio::time::sleep(Duration::from_millis(500)).await;
 
@@ -16,28 +16,13 @@ async fn proxy_connects_to_upstream() {
         .await
         .expect("Failed to get proxy status");
 
-    assert!(status.connected, "Proxy should be connected to upstream");
-
-    assert_eq!(
-        status.upstream_url, upstream_endpoint,
-        "Upstream URL should match"
-    );
+    assert_eq!(status.upstream, upstream, "Upstream URL should match");
 
     assert_eq!(
         status.upstream_username,
-        signet_username().to_string(),
+        signet_username(),
         "Username should match"
     );
 
-    assert_eq!(status.downstream_address, "127.0.0.1");
-    assert_eq!(
-        status.downstream_port,
-        proxy
-            .stratum_endpoint()
-            .split(':')
-            .next_back()
-            .unwrap()
-            .parse::<u16>()
-            .unwrap()
-    );
+    assert!(status.connected, "Proxy should be connected to upstream");
 }

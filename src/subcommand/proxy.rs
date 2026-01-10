@@ -1,10 +1,10 @@
 use {
     super::*,
     crate::{
-        http_server,
+        api, http_server,
         settings::{ProxyOptions, Settings},
     },
-    stratum::{Client, ClientConfig},
+    stratum::Notify,
 };
 
 #[derive(Parser, Debug)]
@@ -15,114 +15,91 @@ pub(crate) struct Proxy {
 
 impl Proxy {
     pub(crate) async fn run(&self, cancel_token: CancellationToken) -> Result {
+        let mut tasks = JoinSet::new();
+
         let settings = Arc::new(
             Settings::from_proxy_options(self.options.clone())
                 .context("failed to create settings")?,
         );
 
-        let upstream = settings.upstream().context("proxy configuration error")?;
-        let username = settings
-            .upstream_username()
-            .context("proxy configuration error")?;
+        let (nexus, events) = Nexus::connect(settings.clone()).await?;
+        let nexus = Arc::new(nexus);
 
-        let upstream_addr = resolve_stratum_endpoint(upstream)
-            .await
-            .with_context(|| format!("failed to resolve upstream endpoint `{upstream}`"))?;
-
-        info!(
-            "Connecting to upstream {} ({}) as {}",
-            upstream, upstream_addr, username
-        );
-
-        let client_config = ClientConfig {
-            address: upstream_addr.to_string(),
-            username: username.clone(),
-            user_agent: USER_AGENT.into(),
-            password: settings.upstream_password().map(String::from),
-            timeout: settings.timeout(),
+        let mode = Mode::Proxy {
+            enonce1: nexus.enonce1().clone(),
+            enonce2_size: nexus.enonce2_size(),
         };
 
-        let client = Client::new(client_config);
-
-        let mut events = client
-            .connect()
+        let (workbase_rx, sink_tx) = nexus
+            .clone()
+            .spawn(events, cancel_token.clone(), &mut tasks)
             .await
-            .context("failed to connect to upstream")?;
+            .context("failed to start upstream event loop")?;
 
-        let (subscribe_result, _, _) = client
-            .subscribe()
+        let metatron = Arc::new(Metatron::new());
+        let share_tx = metatron
+            .clone()
+            .spawn(Some(sink_tx), cancel_token.clone(), &mut tasks);
+
+        http_server::spawn(
+            &settings,
+            api::proxy::router(nexus.clone()),
+            cancel_token.clone(),
+            &mut tasks,
+        )?;
+
+        let address = settings.address();
+        let port = settings.port();
+        let listener = TcpListener::bind((address, port))
             .await
-            .context("failed to subscribe to upstream")?;
+            .with_context(|| format!("failed to bind to {address}:{port}"))?;
 
-        info!(
-            "Subscribed to upstream: enonce1={}, enonce2_size={}",
-            subscribe_result.enonce1, subscribe_result.enonce2_size
-        );
+        info!("Stratum server listening for downstream miners on {address}:{port}");
 
-        client
-            .authorize()
-            .await
-            .context("failed to authorize with upstream")?;
-
-        info!("Authorized with upstream as {}", username);
-
-        let nexus = Arc::new(Nexus::new(
-            upstream.to_string(),
-            username.to_string(),
-            settings.address().to_string(),
-            settings.port(),
-        ));
-
-        nexus.set_connected(true);
-
-        let api_handle = if let Some(api_port) = settings.api_port() {
-            let http_config = http_server::HttpConfig {
-                address: settings.address().to_string(),
-                port: api_port,
-                acme_domains: vec![],
-                acme_contacts: vec![],
-                acme_cache: PathBuf::new(),
-            };
-
-            info!("Starting HTTP API on {}:{}", settings.address(), api_port);
-
-            Some(http_server::spawn(
-                http_config,
-                api::proxy::router(nexus.clone()),
-                cancel_token.clone(),
-            )?)
-        } else {
-            None
-        };
-
-        info!(
-            "Proxy ready. Listening for downstream miners on {}:{}",
-            settings.address(),
-            settings.port()
-        );
+        if !integration_test() && !logs_enabled() {
+            spawn_throbber(metatron.clone(), cancel_token.clone(), &mut tasks);
+        }
 
         loop {
             tokio::select! {
-                event = events.recv() => {
-                    match event {
-                        Ok(stratum::Event::Notify(notify)) => {
-                            debug!("Received notify: job_id={}, clean_jobs={}", notify.job_id, notify.clean_jobs);
+                Ok((stream, addr)) = listener.accept() => {
+                    info!("Spawning stratifier task for {addr}");
+
+                    let workbase_rx = workbase_rx.clone();
+                    let settings = settings.clone();
+                    let metatron = metatron.clone();
+                    let share_tx = share_tx.clone();
+                    let mode = mode.clone();
+                    let conn_cancel_token = cancel_token.child_token();
+
+                    tasks.spawn(async move {
+                        let mut stratifier: Stratifier<Notify> = Stratifier::new(
+                            settings,
+                            mode,
+                            metatron,
+                            share_tx,
+                            addr,
+                            stream,
+                            workbase_rx,
+                            conn_cancel_token,
+                        );
+
+                        if let Err(err) = stratifier.serve().await {
+                            error!("Stratifier error for {addr}: {err}");
                         }
-                        Ok(stratum::Event::SetDifficulty(diff)) => {
-                            debug!("Received set_difficulty: {}", diff);
-                        }
-                        Ok(stratum::Event::Disconnected) => {
-                            warn!("Disconnected from upstream");
-                            nexus.set_connected(false);
-                            break;
-                        }
-                        Err(e) => {
-                            error!("Upstream event error: {}", e);
-                            nexus.set_connected(false);
-                            break;
-                        }
-                    }
+                    });
                 }
+
+                _ = async {
+                    while nexus.is_connected() {
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                    }
+                } => {
+                    warn!("Upstream connection lost, shutting down");
+                    cancel_token.cancel();
+                    break;
+                }
+
                 _ = cancel_token.cancelled() => {
                     info!("Shutting down proxy");
                     break;
@@ -130,13 +107,9 @@ impl Proxy {
             }
         }
 
-        client.disconnect().await;
-        info!("Disconnected from upstream");
-
-        if let Some(handle) = api_handle {
-            let _ = handle.await;
-            info!("HTTP API server stopped");
-        }
+        info!("Waiting for {} tasks to complete...", tasks.len());
+        while tasks.join_next().await.is_some() {}
+        info!("All proxy tasks stopped");
 
         Ok(())
     }

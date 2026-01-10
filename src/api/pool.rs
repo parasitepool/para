@@ -10,7 +10,7 @@ pub struct Stats {
     pub accepted: u64,
     pub rejected: u64,
     pub blocks: u64,
-    pub best_ever: f64,
+    pub best_ever: Option<Difficulty>,
     pub last_share: Option<u64>,
     pub uptime_secs: u64,
 }
@@ -23,7 +23,7 @@ pub struct UserSummary {
     pub workers: usize,
     pub accepted: u64,
     pub rejected: u64,
-    pub best_ever: f64,
+    pub best_ever: Option<Difficulty>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,7 +33,7 @@ pub struct UserDetail {
     pub shares_per_second: f64,
     pub accepted: u64,
     pub rejected: u64,
-    pub best_ever: f64,
+    pub best_ever: Option<Difficulty>,
     pub authorized: u64,
     pub workers: Vec<WorkerSummary>,
 }
@@ -45,7 +45,7 @@ pub struct WorkerSummary {
     pub shares_per_second: f64,
     pub accepted: u64,
     pub rejected: u64,
-    pub best_ever: f64,
+    pub best_ever: Option<Difficulty>,
 }
 
 pub(crate) fn router(metatron: Arc<Metatron>) -> Router {
