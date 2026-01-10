@@ -29,8 +29,12 @@ impl Drop for Throbber {
     }
 }
 
-pub(crate) fn spawn_throbber<T: StatusLine>(source: Arc<T>) {
-    tokio::spawn(async move {
+pub(crate) fn spawn_throbber<T: StatusLine>(
+    source: Arc<T>,
+    cancel: CancellationToken,
+    tasks: &mut JoinSet<()>,
+) {
+    tasks.spawn(async move {
         let frames = ["⣷", "⣯", "⣟", "⡿", "⢿", "⣻", "⣽", "⣾"];
         let mut frame = 0;
         let mut ticker = interval(Duration::from_millis(200));
@@ -39,13 +43,16 @@ pub(crate) fn spawn_throbber<T: StatusLine>(source: Arc<T>) {
         let anchor = Throbber::new().expect("tty");
 
         loop {
-            ticker.tick().await;
+            tokio::select! {
+                _ = cancel.cancelled() => break,
+                _ = ticker.tick() => {
+                    let throbber = frames[frame % frames.len()];
+                    frame = frame.wrapping_add(1);
 
-            let throbber = frames[frame % frames.len()];
-            frame = frame.wrapping_add(1);
-
-            let line = format!(" {throbber}  {}", source.status_line());
-            let _ = anchor.redraw(&line);
+                    let line = format!(" {throbber}  {}", source.status_line());
+                    let _ = anchor.redraw(&line);
+                }
+            }
         }
     });
 }

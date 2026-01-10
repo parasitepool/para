@@ -37,12 +37,14 @@ use {
         sink::SinkExt,
         stream::{FuturesUnordered, StreamExt},
     },
-    generator::Generator,
+    generator::spawn_generator,
     hash_rate::HashRate,
     job::Job,
     jobs::Jobs,
     lru::LruCache,
     metatron::Metatron,
+    mode::Mode,
+    nexus::Nexus,
     reqwest::Url,
     rust_embed::RustEmbed,
     rustls_acme::{
@@ -59,6 +61,7 @@ use {
     serde_json::json,
     serde_with::{DeserializeFromStr, SerializeDisplay},
     session::SessionSnapshot,
+    settings::Settings,
     share::Share,
     snafu::Snafu,
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
@@ -76,7 +79,7 @@ use {
         str::FromStr,
         sync::{
             Arc, LazyLock,
-            atomic::{AtomicU64, Ordering},
+            atomic::{AtomicBool, AtomicU64, Ordering},
         },
         thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -87,12 +90,14 @@ use {
         Notify, Ntime, PrevHash, SetDifficulty, StratumError, Submit, Subscribe, SubscribeResult,
         Username, Version,
     },
-    subcommand::{pool::pool_config::PoolConfig, server::account::Account},
+    subcommand::server::account::Account,
     sysinfo::{Disks, System},
     throbber::{StatusLine, spawn_throbber},
+    tokio::net::{
+        TcpListener, TcpStream,
+        tcp::{OwnedReadHalf, OwnedWriteHalf},
+    },
     tokio::{
-        io::{AsyncRead, AsyncWrite},
-        net::TcpListener,
         runtime::Runtime,
         sync::{Mutex, mpsc, watch},
         task::{self, JoinHandle, JoinSet},
@@ -114,7 +119,7 @@ use {
     zmq::Zmq,
 };
 
-mod api;
+pub mod api;
 mod arguments;
 mod block_template;
 mod chain;
@@ -122,12 +127,15 @@ pub mod ckpool;
 mod coinbase_builder;
 mod decay;
 mod generator;
-mod hash_rate;
+pub mod hash_rate;
 mod http_server;
 mod job;
 mod jobs;
 mod metatron;
+mod mode;
+mod nexus;
 mod session;
+pub mod settings;
 mod share;
 mod signal;
 mod stratifier;

@@ -5,8 +5,8 @@ pub struct Zmq {
 }
 
 impl Zmq {
-    pub async fn connect(config: Arc<PoolConfig>) -> Result<Self> {
-        let endpoint = config.zmq_block_notifications().to_string();
+    pub async fn connect(settings: Arc<Settings>) -> Result<Self> {
+        let endpoint = settings.zmq_block_notifications().to_string();
 
         info!("Subscribing to hashblock on ZMQ endpoint {endpoint}");
 

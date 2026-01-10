@@ -13,20 +13,43 @@ pub struct HttpConfig {
 }
 
 pub fn spawn(
-    config: HttpConfig,
+    settings: &Settings,
     router: Router,
     cancel_token: CancellationToken,
-) -> Result<JoinHandle<io::Result<()>>> {
+    tasks: &mut JoinSet<()>,
+) -> Result<()> {
+    let Some(port) = settings.api_port() else {
+        return Ok(());
+    };
+
+    info!("Spawning http server task");
+
+    let config = HttpConfig {
+        address: settings.address().to_string(),
+        port,
+        acme_domains: settings.acme_domains().to_vec(),
+        acme_contacts: settings.acme_contacts().to_vec(),
+        acme_cache: settings.acme_cache_path(),
+    };
+
     let handle = Handle::new();
 
     let shutdown_handle = handle.clone();
-    tokio::spawn(async move {
+    tasks.spawn(async move {
         cancel_token.cancelled().await;
-        info!("Received shutdown signal, stopping HTTP server...");
+        info!("Shutting down http server");
         shutdown_handle.shutdown();
     });
 
-    spawn_with_handle(config, router, handle)
+    let (listener, tls_enabled) = bind_listener(&config)?;
+
+    tasks.spawn(async move {
+        if let Err(e) = serve(listener, router, handle, tls_enabled, config).await {
+            error!("HTTP server error: {e}");
+        }
+    });
+
+    Ok(())
 }
 
 pub fn spawn_with_handle(
@@ -34,23 +57,31 @@ pub fn spawn_with_handle(
     router: Router,
     handle: Handle,
 ) -> Result<JoinHandle<io::Result<()>>> {
-    let address = config.address.clone();
-    let port = config.port;
-    let acme_domains = config.acme_domains.clone();
-    let acme_contacts = config.acme_contacts.clone();
-    let acme_cache = config.acme_cache.clone();
+    let (listener, tls_enabled) = bind_listener(&config)?;
 
-    let addr = (address.as_str(), port)
+    Ok(tokio::spawn(async move {
+        serve(listener, router, handle, tls_enabled, config).await
+    }))
+}
+
+fn bind_listener(config: &HttpConfig) -> Result<(std::net::TcpListener, bool)> {
+    let addr = (config.address.as_str(), config.port)
         .to_socket_addrs()?
         .next()
-        .ok_or_else(|| anyhow!("failed to resolve address {}:{}", address, port))?;
+        .ok_or_else(|| {
+            anyhow!(
+                "failed to resolve address {}:{}",
+                config.address,
+                config.port
+            )
+        })?;
 
     let listener = std::net::TcpListener::bind(addr)
         .with_context(|| format!("failed to bind HTTP server to {addr}"))?;
 
     listener.set_nonblocking(true)?;
 
-    let tls_enabled = !acme_domains.is_empty() && !acme_contacts.is_empty();
+    let tls_enabled = !config.acme_domains.is_empty() && !config.acme_contacts.is_empty();
 
     if tls_enabled {
         info!("HTTPS server listening on https://{addr}");
@@ -58,25 +89,35 @@ pub fn spawn_with_handle(
         info!("HTTP server listening on http://{addr}");
     }
 
-    Ok(tokio::spawn(async move {
-        if tls_enabled {
-            info!(
-                "Getting certificate for {} using contact email {}",
-                acme_domains[0], acme_contacts[0]
-            );
+    Ok((listener, tls_enabled))
+}
 
-            axum_server::from_tcp(listener)
-                .handle(handle)
-                .acceptor(acceptor(acme_domains, acme_contacts, acme_cache).unwrap())
-                .serve(router.into_make_service())
-                .await
-        } else {
-            axum_server::from_tcp(listener)
-                .handle(handle)
-                .serve(router.into_make_service())
-                .await
-        }
-    }))
+async fn serve(
+    listener: std::net::TcpListener,
+    router: Router,
+    handle: Handle,
+    tls_enabled: bool,
+    config: HttpConfig,
+) -> io::Result<()> {
+    if tls_enabled {
+        info!(
+            "Getting certificate for {} using contact email {}",
+            config.acme_domains[0], config.acme_contacts[0]
+        );
+
+        axum_server::from_tcp(listener)
+            .handle(handle)
+            .acceptor(
+                acceptor(config.acme_domains, config.acme_contacts, config.acme_cache).unwrap(),
+            )
+            .serve(router.into_make_service())
+            .await
+    } else {
+        axum_server::from_tcp(listener)
+            .handle(handle)
+            .serve(router.into_make_service())
+            .await
+    }
 }
 
 fn acceptor(

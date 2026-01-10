@@ -52,7 +52,7 @@ use {
     harness::bitcoind::Bitcoind,
     ntest::timeout,
     para::{
-        USER_AGENT,
+        USER_AGENT, api,
         stratum::{
             self, ClientError, Difficulty, Extranonce, JobId, Nonce, Notify, Ntime, StratumError,
             Username, Version,
@@ -80,6 +80,7 @@ use {
     tempfile::tempdir,
     test_ckpool::TestCkpool,
     test_pool::TestPool,
+    test_proxy::TestProxy,
 };
 
 mod command_builder;
@@ -87,6 +88,8 @@ mod command_builder;
 mod test_ckpool;
 #[cfg(target_os = "linux")]
 mod test_pool;
+#[cfg(target_os = "linux")]
+mod test_proxy;
 #[cfg(target_os = "linux")]
 mod test_psql;
 mod test_server;
@@ -101,6 +104,8 @@ mod payouts;
 mod ping;
 #[cfg(target_os = "linux")]
 mod pool;
+#[cfg(target_os = "linux")]
+mod proxy;
 mod server;
 #[cfg(target_os = "linux")]
 mod server_with_db;

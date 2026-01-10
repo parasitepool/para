@@ -13,16 +13,17 @@ pub(crate) enum State {
     Working,
 }
 
-pub(crate) struct Stratifier<R, W> {
-    config: Arc<PoolConfig>,
+pub(crate) struct Stratifier<W: Workbase> {
+    settings: Arc<Settings>,
+    mode: Mode,
     metatron: Arc<Metatron>,
     share_tx: mpsc::Sender<Share>,
     socket_addr: SocketAddr,
-    reader: FramedRead<R, LinesCodec>,
-    writer: FramedWrite<W, LinesCodec>,
-    workbase_receiver: watch::Receiver<Arc<Workbase>>,
+    reader: FramedRead<OwnedReadHalf, LinesCodec>,
+    writer: FramedWrite<OwnedWriteHalf, LinesCodec>,
+    workbase_rx: watch::Receiver<Arc<W>>,
     cancel_token: CancellationToken,
-    jobs: Jobs,
+    jobs: Jobs<W>,
     state: State,
     address: Option<Address>,
     workername: Option<String>,
@@ -36,42 +37,43 @@ pub(crate) struct Stratifier<R, W> {
     dropped_by_bouncer: bool,
 }
 
-impl<R, W> Stratifier<R, W>
-where
-    R: AsyncRead + Unpin,
-    W: AsyncWrite + Unpin,
-{
+impl<W: Workbase> Stratifier<W> {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        config: Arc<PoolConfig>,
+        settings: Arc<Settings>,
+        mode: Mode,
         metatron: Arc<Metatron>,
         share_tx: mpsc::Sender<Share>,
         socket_addr: SocketAddr,
-        reader: R,
-        writer: W,
-        workbase_receiver: watch::Receiver<Arc<Workbase>>,
+        tcp_stream: TcpStream,
+        workbase_rx: watch::Receiver<Arc<W>>,
         cancel_token: CancellationToken,
     ) -> Self {
+        let _ = tcp_stream.set_nodelay(true);
+
+        let (reader, writer) = tcp_stream.into_split();
+
         let vardiff = Vardiff::new(
-            config.start_diff(),
-            config.vardiff_period(),
-            config.vardiff_window(),
-            config.min_diff(),
-            config.max_diff(),
+            settings.start_diff(),
+            settings.vardiff_period(),
+            settings.vardiff_window(),
+            settings.min_diff(),
+            settings.max_diff(),
         );
 
-        let bouncer = Bouncer::new(config.disable_bouncer());
+        let bouncer = Bouncer::new(settings.disable_bouncer());
 
         metatron.add_connection();
 
         Self {
-            config,
+            settings,
+            mode,
             metatron,
             share_tx,
             socket_addr,
             reader: FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_MESSAGE_SIZE)),
             writer: FramedWrite::new(writer, LinesCodec::new()),
-            workbase_receiver,
+            workbase_rx,
             cancel_token,
             jobs: Jobs::new(),
             state: State::Init,
@@ -89,7 +91,7 @@ where
     }
 
     pub(crate) async fn serve(&mut self) -> Result {
-        let mut workbase_receiver = self.workbase_receiver.clone();
+        let mut workbase_rx = self.workbase_rx.clone();
         let cancel_token = self.cancel_token.clone();
         let mut idle_check = tokio::time::interval(self.bouncer.check_interval());
 
@@ -181,18 +183,18 @@ where
                     }
                 }
 
-                changed = workbase_receiver.changed() => {
+                changed = workbase_rx.changed() => {
                     if changed.is_err() {
                         warn!("Template receiver dropped, closing connection with {}", self.socket_addr);
                         break;
                     }
 
                     if self.state != State::Working {
-                        let _ = workbase_receiver.borrow_and_update();
+                        let _ = workbase_rx.borrow_and_update();
                         continue;
                     };
 
-                    let workbase = workbase_receiver.borrow_and_update().clone();
+                    let workbase = workbase_rx.borrow_and_update().clone();
                     self.workbase_update(workbase).await?;
                 }
             }
@@ -216,24 +218,30 @@ where
                 );
 
                 if let (Some(address), Some(enonce1)) = (&self.address, &self.enonce1) {
-                    let workbase = self.workbase_receiver.borrow().clone();
-                    if let Ok(new_job) = Job::new(
-                        address.clone(),
-                        enonce1.clone(),
-                        self.config.extranonce2_size(),
-                        self.version_mask,
-                        workbase,
+                    let workbase = self.workbase_rx.borrow().clone();
+
+                    match workbase.create_job(
+                        enonce1,
+                        self.settings.extranonce2_size(),
+                        Some(address),
                         self.jobs.next_id(),
+                        self.version_mask,
                     ) {
-                        let new_job = Arc::new(new_job);
-                        let clean_jobs = self.jobs.upsert(new_job.clone());
-                        if let Ok(notify) = new_job.notify(clean_jobs) {
-                            let _ = self
-                                .send(Message::Notification {
-                                    method: "mining.notify".into(),
-                                    params: json!(notify),
-                                })
-                                .await;
+                        Ok(job) => {
+                            let new_job = Arc::new(job);
+                            let clean_jobs = self.jobs.insert(new_job.clone());
+
+                            if let Ok(notify) = new_job.notify(clean_jobs) {
+                                let _ = self
+                                    .send(Message::Notification {
+                                        method: "mining.notify".into(),
+                                        params: json!(notify),
+                                    })
+                                    .await;
+                            }
+                        }
+                        Err(err) => {
+                            warn!("Failed to create job: {err}");
                         }
                     }
                 }
@@ -269,22 +277,25 @@ where
         }
     }
 
-    async fn workbase_update(&mut self, workbase: Arc<Workbase>) -> Result {
+    async fn workbase_update(&mut self, workbase: Arc<W>) -> Result {
         let (address, enonce1) = match (&self.address, &self.enonce1) {
-            (Some(address), Some(enonce1)) => (address.clone(), enonce1.clone()),
+            (Some(address), Some(enonce1)) => (address, enonce1.clone()),
             _ => return Ok(()),
         };
 
-        let new_job = Arc::new(Job::new(
-            address,
-            enonce1,
-            self.config.extranonce2_size(),
-            self.version_mask,
-            workbase,
-            self.jobs.next_id(),
-        )?);
+        let new_job = Arc::new(
+            workbase
+                .create_job(
+                    &enonce1,
+                    self.settings.extranonce2_size(),
+                    Some(address),
+                    self.jobs.next_id(),
+                    self.version_mask,
+                )
+                .context("failed to create job for template update")?,
+        );
 
-        let clean_jobs = self.jobs.upsert(new_job.clone());
+        let clean_jobs = self.jobs.insert(new_job.clone());
 
         debug!("Template updated sending NOTIFY");
 
@@ -299,7 +310,7 @@ where
 
     async fn configure(&mut self, id: Id, configure: Configure) -> Result {
         if configure.version_rolling_mask.is_some() {
-            let version_mask = self.config.version_mask();
+            let version_mask = self.settings.version_mask();
             debug!(
                 "Configuring version rolling for {} with version mask {version_mask}",
                 self.socket_addr
@@ -308,7 +319,7 @@ where
             let message = Message::Response {
                 id,
                 result: Some(
-                    json!({"version-rolling": true, "version-rolling.mask": self.config.version_mask()}),
+                    json!({"version-rolling": true, "version-rolling.mask": self.settings.version_mask()}),
                 ),
                 error: None,
                 reject_reason: None,
@@ -344,33 +355,41 @@ where
     async fn subscribe(&mut self, id: Id, subscribe: Subscribe) -> Result {
         if matches!(self.state, State::Subscribed | State::Working) {
             info!("Client {} resubscribing", self.socket_addr);
-            self.jobs = Jobs::new();
+            self.jobs = Jobs::<W>::new();
             self.vardiff = Vardiff::new(
-                self.config.start_diff(),
-                self.config.vardiff_period(),
-                self.config.vardiff_window(),
-                self.config.min_diff(),
-                self.config.max_diff(),
+                self.settings.start_diff(),
+                self.settings.vardiff_period(),
+                self.settings.vardiff_window(),
+                self.settings.min_diff(),
+                self.settings.max_diff(),
             );
             self.authorized = None;
             self.address = None;
             self.workername = None;
         }
 
-        let enonce1 = if let Some(ref requested_enonce1) = subscribe.enonce1 {
-            if let Some(session) = self.metatron.take_session(requested_enonce1) {
-                info!("Resuming session for enonce1 {}", session.enonce1);
-                session.enonce1
-            } else {
-                debug!(
-                    "Session resume failed for enonce1 {}, issuing new enonce1",
-                    requested_enonce1
-                );
-
-                self.metatron.next_enonce1()
+        let (enonce1, enonce2_size) = match self.mode {
+            Mode::Pool => {
+                let enonce1 = if let Some(ref requested_enonce1) = subscribe.enonce1 {
+                    if let Some(session) = self.metatron.take_session(requested_enonce1) {
+                        info!("Resuming session for enonce1 {}", session.enonce1);
+                        session.enonce1
+                    } else {
+                        debug!(
+                            "Session resume failed for enonce1 {}, issuing new enonce1",
+                            requested_enonce1
+                        );
+                        self.metatron.next_enonce1()
+                    }
+                } else {
+                    self.metatron.next_enonce1()
+                };
+                (enonce1, self.settings.extranonce2_size())
             }
-        } else {
-            self.metatron.next_enonce1()
+            Mode::Proxy {
+                ref enonce1,
+                enonce2_size,
+            } => (enonce1.clone(), enonce2_size),
         };
 
         let subscriptions = vec![
@@ -384,7 +403,7 @@ where
         let result = SubscribeResult {
             subscriptions,
             enonce1: enonce1.clone(),
-            enonce2_size: self.config.extranonce2_size(),
+            enonce2_size,
         };
 
         self.send(Message::Response {
@@ -410,7 +429,7 @@ where
 
         let address = match authorize
             .username
-            .parse_with_network(self.config.chain().network())
+            .parse_with_network(self.settings.chain().network())
         {
             Ok(parsed) => parsed,
             Err(e) => {
@@ -427,14 +446,19 @@ where
             }
         };
 
-        let job = Arc::new(Job::new(
-            address.clone(),
-            enonce1.clone(),
-            self.config.extranonce2_size(),
-            self.version_mask,
-            self.workbase_receiver.borrow().clone(),
-            self.jobs.next_id(),
-        )?);
+        let workbase = self.workbase_rx.borrow().clone();
+
+        let job = Arc::new(
+            workbase
+                .create_job(
+                    &enonce1,
+                    self.settings.extranonce2_size(),
+                    Some(&address),
+                    self.jobs.next_id(),
+                    self.version_mask,
+                )
+                .context("failed to create job for authorize")?,
+        );
 
         self.send(Message::Response {
             id,
@@ -460,7 +484,7 @@ where
 
         debug!("Sending NOTIFY");
 
-        let clean_jobs = self.jobs.upsert(job.clone());
+        let clean_jobs = self.jobs.insert(job.clone());
 
         self.send(Message::Notification {
             method: "mining.notify".into(),
@@ -490,7 +514,7 @@ where
             self.emit_share(
                 &submit,
                 None,
-                0.0,
+                None,
                 BlockHash::all_zeros(),
                 Some(StratumError::WorkerMismatch),
             );
@@ -506,7 +530,7 @@ where
             self.emit_share(
                 &submit,
                 None,
-                0.0,
+                None,
                 BlockHash::all_zeros(),
                 Some(StratumError::Stale),
             );
@@ -517,7 +541,7 @@ where
             return Ok(consequence);
         };
 
-        let expected_extranonce2_size = self.config.extranonce2_size();
+        let expected_extranonce2_size = self.settings.extranonce2_size();
         if submit.enonce2.len() != expected_extranonce2_size {
             warn!(
                 "Invalid extranonce2 length from {}: got {} bytes, expected {}",
@@ -538,8 +562,8 @@ where
 
             self.emit_share(
                 &submit,
-                Some(&job),
-                0.0,
+                job.height(),
+                None,
                 BlockHash::all_zeros(),
                 Some(StratumError::InvalidNonce2Length),
             );
@@ -566,8 +590,8 @@ where
 
             self.emit_share(
                 &submit,
-                Some(&job),
-                0.0,
+                job.height(),
+                None,
                 BlockHash::all_zeros(),
                 Some(StratumError::NtimeOutOfRange),
             );
@@ -589,8 +613,8 @@ where
 
                 self.emit_share(
                     &submit,
-                    Some(&job),
-                    0.0,
+                    job.height(),
+                    None,
                     BlockHash::all_zeros(),
                     Some(StratumError::InvalidVersionMask),
                 );
@@ -624,7 +648,7 @@ where
                 &job.coinb2,
                 &job.enonce1,
                 &submit.enonce2,
-                job.workbase.merkle_branches(),
+                job.merkle_branches(),
             )?
             .into(),
             time: submit.ntime.into(),
@@ -638,8 +662,8 @@ where
             self.send_error(id, StratumError::Duplicate, None).await?;
             self.emit_share(
                 &submit,
-                Some(&job),
-                0.0,
+                job.height(),
+                None,
                 hash,
                 Some(StratumError::Duplicate),
             );
@@ -653,40 +677,21 @@ where
         if let Ok(blockhash) = header.validate_pow(Target::from_compact(nbits.into())) {
             info!("Block with hash {blockhash} meets network difficulty");
 
-            let coinbase_bin = hex::decode(format!(
-                "{}{}{}{}",
-                job.coinb1, job.enonce1, submit.enonce2, job.coinb2,
-            ))?;
+            match job.workbase.build_block(&job, &submit, header) {
+                Ok(block) => {
+                    info!("Submitting potential block solve");
 
-            let mut cursor = bitcoin::io::Cursor::new(&coinbase_bin);
-            let coinbase_tx =
-                bitcoin::Transaction::consensus_decode_from_finite_reader(&mut cursor)?;
-
-            let txdata = std::iter::once(coinbase_tx)
-                .chain(
-                    job.workbase
-                        .template()
-                        .transactions
-                        .iter()
-                        .map(|tx| tx.transaction.clone())
-                        .collect::<Vec<Transaction>>(),
-                )
-                .collect();
-
-            let block = Block { header, txdata };
-
-            if job.workbase.template().height > 16 {
-                assert!(block.bip34_block_height().is_ok());
-            }
-
-            info!("Submitting potential block solve");
-
-            match self.config.bitcoin_rpc_client()?.submit_block(&block) {
-                Ok(_) => {
-                    info!("SUCCESSFULLY mined block {}", block.block_hash());
-                    self.metatron.add_block();
+                    match self.settings.bitcoin_rpc_client()?.submit_block(&block) {
+                        Ok(_) => {
+                            info!("SUCCESSFULLY mined block {}", block.block_hash());
+                            self.metatron.add_block();
+                        }
+                        Err(err) => error!("Failed to submit block: {err}"),
+                    }
                 }
-                Err(err) => error!("Failed to submit block: {err}"),
+                Err(err) => {
+                    warn!("Failed to build block: {err}");
+                }
             }
         }
 
@@ -701,7 +706,7 @@ where
             })
             .await?;
 
-            self.emit_share(&submit, Some(&job), current_diff.as_f64(), hash, None);
+            self.emit_share(&submit, job.height(), Some(current_diff), hash, None);
 
             self.bouncer.accept();
 
@@ -722,7 +727,7 @@ where
                     new_diff,
                     self.socket_addr,
                     self.vardiff.dsps(),
-                    self.config.vardiff_period().as_secs_f64()
+                    self.settings.vardiff_period().as_secs_f64()
                 );
 
                 self.send(Message::Notification {
@@ -738,8 +743,8 @@ where
         self.send_error(id, StratumError::AboveTarget, None).await?;
         self.emit_share(
             &submit,
-            Some(&job),
-            0.0,
+            job.height(),
+            Some(current_diff),
             hash,
             Some(StratumError::AboveTarget),
         );
@@ -753,18 +758,14 @@ where
     fn emit_share(
         &self,
         submit: &Submit,
-        job: Option<&Job>,
-        pool_diff: f64,
+        height: Option<u64>,
+        pool_diff: Option<Difficulty>,
         hash: BlockHash,
         reject_reason: Option<StratumError>,
     ) {
         let (address, workername, enonce1) = self
             .worker_info()
             .expect("emit_share called before authorize");
-
-        let height = job
-            .map(|job| job.workbase.template().height)
-            .unwrap_or_else(|| self.workbase_receiver.borrow().template().height);
 
         let event = Share::new(
             height,
@@ -774,7 +775,7 @@ where
             self.socket_addr,
             self.user_agent.clone(),
             enonce1,
-            submit.enonce2.to_string(),
+            submit.enonce2.clone(),
             submit.nonce,
             submit.ntime,
             submit.version_bits,
@@ -838,9 +839,10 @@ where
     }
 }
 
-impl<R, W> Drop for Stratifier<R, W> {
+impl<W: Workbase> Drop for Stratifier<W> {
     fn drop(&mut self) {
-        if !self.dropped_by_bouncer
+        if self.mode == Mode::Pool
+            && !self.dropped_by_bouncer
             && let (Some(enonce1), Some(_authorized)) = (self.enonce1.take(), self.authorized)
         {
             let session = SessionSnapshot::new(enonce1);
@@ -850,7 +852,7 @@ impl<R, W> Drop for Stratifier<R, W> {
         self.metatron.sub_connection();
 
         info!(
-            "Stratifier {} closed (remaining: {})",
+            "Shutting down stratifier for {} (remaining: {})",
             self.socket_addr,
             self.metatron.total_connections()
         );
