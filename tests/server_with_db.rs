@@ -703,3 +703,222 @@ async fn aggregator_blockheight_returns_minimum() {
 
     assert_eq!(blockheight, 800000);
 }
+
+#[tokio::test]
+async fn test_payouts_simulate_basic() {
+    let mut server = TestServer::spawn_with_db_args("--admin-token testtoken").await;
+    setup_test_schema(server.database_url().unwrap())
+        .await
+        .unwrap();
+
+    insert_test_account_with_diff(
+        server.database_url().unwrap(),
+        "user1",
+        Some("user1@ln.test"),
+        1000,
+    )
+    .await
+    .unwrap();
+
+    insert_test_account_with_diff(
+        server.database_url().unwrap(),
+        "user2",
+        Some("user2@ln.test"),
+        3000,
+    )
+    .await
+    .unwrap();
+
+    server.admin_token = Some("testtoken".into());
+    let payouts: Vec<SimulatedPayout> = server
+        .get_json_async_raw("/payouts/simulate")
+        .await
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(payouts.len(), 2);
+
+    let total_amount: i64 = payouts.iter().map(|p| p.amount_sats).sum();
+    assert!(total_amount <= 312_500_000);
+
+    let user2_payout = payouts.iter().find(|p| p.btc_address == "user2").unwrap();
+    let user1_payout = payouts.iter().find(|p| p.btc_address == "user1").unwrap();
+    assert!(user2_payout.amount_sats > user1_payout.amount_sats);
+    assert!((user2_payout.percentage - 0.75).abs() < 0.01);
+    assert!((user1_payout.percentage - 0.25).abs() < 0.01);
+}
+
+#[tokio::test]
+async fn test_payouts_simulate_excludes_already_paid() {
+    let mut server = TestServer::spawn_with_db_args("--admin-token testtoken").await;
+    setup_test_schema(server.database_url().unwrap())
+        .await
+        .unwrap();
+
+    insert_test_account_with_diff(
+        server.database_url().unwrap(),
+        "user1",
+        Some("user1@ln.test"),
+        1000,
+    )
+    .await
+    .unwrap();
+
+    insert_test_payout(
+        server.database_url().unwrap(),
+        "user1",
+        50000,
+        500,
+        "success",
+    )
+    .await
+    .unwrap();
+
+    insert_test_account_with_diff(
+        server.database_url().unwrap(),
+        "user2",
+        Some("user2@ln.test"),
+        1000,
+    )
+    .await
+    .unwrap();
+
+    server.admin_token = Some("testtoken".into());
+    let payouts: Vec<SimulatedPayout> = server
+        .get_json_async_raw("/payouts/simulate")
+        .await
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(payouts.len(), 2);
+
+    let user1_payout = payouts.iter().find(|p| p.btc_address == "user1").unwrap();
+    let user2_payout = payouts.iter().find(|p| p.btc_address == "user2").unwrap();
+
+    assert!(user2_payout.amount_sats > user1_payout.amount_sats);
+}
+
+#[tokio::test]
+async fn test_payouts_simulate_empty_when_fully_paid() {
+    let mut server = TestServer::spawn_with_db_args("--admin-token testtoken").await;
+    setup_test_schema(server.database_url().unwrap())
+        .await
+        .unwrap();
+
+    insert_test_account_with_diff(
+        server.database_url().unwrap(),
+        "user1",
+        Some("user1@ln.test"),
+        1000,
+    )
+    .await
+    .unwrap();
+
+    insert_test_payout(
+        server.database_url().unwrap(),
+        "user1",
+        50000,
+        1000,
+        "success",
+    )
+    .await
+    .unwrap();
+
+    server.admin_token = Some("testtoken".into());
+    let payouts: Vec<SimulatedPayout> = server
+        .get_json_async_raw("/payouts/simulate")
+        .await
+        .json()
+        .await
+        .unwrap();
+
+    assert!(payouts.is_empty());
+}
+
+#[tokio::test]
+async fn test_payouts_simulate_empty_database() {
+    let mut server = TestServer::spawn_with_db_args("--admin-token testtoken").await;
+    setup_test_schema(server.database_url().unwrap())
+        .await
+        .unwrap();
+
+    server.admin_token = Some("testtoken".into());
+    let payouts: Vec<SimulatedPayout> = server
+        .get_json_async_raw("/payouts/simulate")
+        .await
+        .json()
+        .await
+        .unwrap();
+
+    assert!(payouts.is_empty());
+}
+
+#[tokio::test]
+async fn test_payouts_simulate_requires_auth() {
+    let server = TestServer::spawn_with_db_args("--admin-token testtoken").await;
+    setup_test_schema(server.database_url().unwrap())
+        .await
+        .unwrap();
+
+    let res = server.get_json_async_raw("/payouts/simulate").await;
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn test_payouts_simulate_groups_by_lnurl() {
+    let mut server = TestServer::spawn_with_db_args("--admin-token testtoken").await;
+    setup_test_schema(server.database_url().unwrap())
+        .await
+        .unwrap();
+
+    insert_test_account_with_diff(
+        server.database_url().unwrap(),
+        "user1",
+        Some("shared@ln.test"),
+        1000,
+    )
+    .await
+    .unwrap();
+
+    insert_test_account_with_diff(
+        server.database_url().unwrap(),
+        "user2",
+        Some("shared@ln.test"),
+        1000,
+    )
+    .await
+    .unwrap();
+
+    insert_test_account_with_diff(
+        server.database_url().unwrap(),
+        "user3",
+        Some("other@ln.test"),
+        2000,
+    )
+    .await
+    .unwrap();
+
+    server.admin_token = Some("testtoken".into());
+    let payouts: Vec<SimulatedPayout> = server
+        .get_json_async_raw("/payouts/simulate")
+        .await
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(payouts.len(), 2);
+
+    let shared_payout = payouts
+        .iter()
+        .find(|p| p.ln_address == "shared@ln.test")
+        .unwrap();
+    let other_payout = payouts
+        .iter()
+        .find(|p| p.ln_address == "other@ln.test")
+        .unwrap();
+
+    assert!((shared_payout.percentage - 0.5).abs() < 0.01);
+    assert!((other_payout.percentage - 0.5).abs() < 0.01);
+}
