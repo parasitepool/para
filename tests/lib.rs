@@ -169,6 +169,7 @@ fn solve_share(
     }
 }
 
+#[cfg(target_os = "linux")]
 async fn wait_for_notify(events: &mut stratum::EventReceiver) -> (stratum::Notify, Difficulty) {
     let mut difficulty = Difficulty::from(1);
     timeout(Duration::from_secs(10), async {
@@ -184,6 +185,7 @@ async fn wait_for_notify(events: &mut stratum::EventReceiver) -> (stratum::Notif
     .expect("Timeout waiting for notify")
 }
 
+#[cfg(target_os = "linux")]
 async fn wait_for_new_block(
     events: &mut stratum::EventReceiver,
     old_job_id: JobId,
@@ -200,6 +202,7 @@ async fn wait_for_new_block(
     .expect("Timeout waiting for new block")
 }
 
+#[cfg(target_os = "linux")]
 fn assert_stratum_error<T: std::fmt::Debug>(
     result: Result<T, ClientError>,
     expected: StratumError,
