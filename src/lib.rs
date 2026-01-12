@@ -1,6 +1,7 @@
 use {
     anyhow::{Context, Error, anyhow, bail, ensure},
     arguments::Arguments,
+    argus::Argus,
     axum::{
         Extension, Json, Router,
         extract::{DefaultBodyLimit, FromRequestParts},
@@ -121,6 +122,7 @@ use {
 
 pub mod api;
 mod arguments;
+mod argus;
 mod block_template;
 mod chain;
 pub mod ckpool;

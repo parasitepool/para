@@ -1,4 +1,8 @@
-use {super::*, api::proxy::Status};
+use {
+    super::*,
+    api::proxy::Status,
+    para::{USER_AGENT, stratum},
+};
 
 pub(crate) struct TestProxy {
     proxy_handle: Child,
@@ -7,15 +11,7 @@ pub(crate) struct TestProxy {
 }
 
 impl TestProxy {
-    pub(crate) fn spawn(upstream_endpoint: &str, username: &str) -> Self {
-        Self::spawn_with_args(upstream_endpoint, username, "")
-    }
-
-    pub(crate) fn spawn_with_args(
-        upstream_endpoint: &str,
-        username: &str,
-        args: impl ToArgs,
-    ) -> Self {
+    pub(crate) fn spawn_with_args(upstream: &str, username: &str, args: impl ToArgs) -> Self {
         let (proxy_port, api_port) = (
             TcpListener::bind("127.0.0.1:0")
                 .unwrap()
@@ -30,7 +26,9 @@ impl TestProxy {
         );
 
         let proxy_handle = CommandBuilder::new(format!(
-            "proxy {upstream_endpoint} \
+            "proxy \
+                --chain signet \
+                --upstream {upstream} \
                 --username {username} \
                 --address 127.0.0.1 \
                 --port {proxy_port} \
@@ -64,9 +62,24 @@ impl TestProxy {
         }
     }
 
-    #[allow(unused)]
     pub(crate) fn stratum_endpoint(&self) -> String {
         format!("127.0.0.1:{}", self.proxy_port)
+    }
+
+    pub(crate) fn stratum_client(&self) -> stratum::Client {
+        self.stratum_client_for_username(&signet_username().to_string())
+    }
+
+    pub(crate) fn stratum_client_for_username(&self, username: &str) -> stratum::Client {
+        let config = stratum::ClientConfig {
+            address: self.stratum_endpoint(),
+            username: Username::new(username),
+            user_agent: USER_AGENT.into(),
+            password: None,
+            timeout: Duration::from_secs(5),
+        };
+
+        stratum::Client::new(config)
     }
 
     pub(crate) fn api_endpoint(&self) -> String {
@@ -75,7 +88,7 @@ impl TestProxy {
 
     pub(crate) async fn get_status(&self) -> reqwest::Result<Status> {
         let client = reqwest::Client::new();
-        let url = format!("{}/api/status", self.api_endpoint());
+        let url = format!("{}/proxy/status", self.api_endpoint());
         client.get(&url).send().await?.json().await
     }
 }

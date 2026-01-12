@@ -41,9 +41,14 @@ impl Proxy {
             .clone()
             .spawn(Some(sink_tx), cancel_token.clone(), &mut tasks);
 
+        let argus = Arc::new(Argus {
+            nexus: nexus.clone(),
+            metatron: metatron.clone(),
+        });
+
         http_server::spawn(
             &settings,
-            api::proxy::router(nexus.clone()),
+            api::proxy::router(argus.clone()),
             cancel_token.clone(),
             &mut tasks,
         )?;
@@ -57,7 +62,7 @@ impl Proxy {
         info!("Stratum server listening for downstream miners on {address}:{port}");
 
         if !integration_test() && !logs_enabled() {
-            spawn_throbber(metatron.clone(), cancel_token.clone(), &mut tasks);
+            spawn_throbber(argus, cancel_token.clone(), &mut tasks);
         }
 
         loop {

@@ -2,10 +2,10 @@ use super::*;
 
 #[derive(Clone, Debug, Parser)]
 pub(crate) struct ProxyOptions {
-    #[arg(help = "Upstream stratum pool <HOST:PORT>.")]
+    #[arg(long, help = "Upstream stratum pool <HOST:PORT>.")]
     pub(crate) upstream: String,
 
-    #[arg(long = "chain", help = "Run on <CHAIN>.")]
+    #[arg(long, help = "Run on <CHAIN>.")]
     pub(crate) chain: Option<Chain>,
 
     #[arg(long, help = "Username for upstream authentication.")]

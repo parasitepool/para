@@ -169,6 +169,52 @@ fn solve_share(
     }
 }
 
+async fn wait_for_notify(events: &mut stratum::EventReceiver) -> (stratum::Notify, Difficulty) {
+    let mut difficulty = Difficulty::from(1);
+    timeout(Duration::from_secs(10), async {
+        loop {
+            match events.recv().await.unwrap() {
+                stratum::Event::SetDifficulty(diff) => difficulty = diff,
+                stratum::Event::Notify(notify) => return (notify, difficulty),
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("Timeout waiting for notify")
+}
+
+async fn wait_for_new_block(
+    events: &mut stratum::EventReceiver,
+    old_job_id: JobId,
+) -> stratum::Notify {
+    timeout(Duration::from_secs(10), async {
+        loop {
+            match events.recv().await.unwrap() {
+                stratum::Event::Notify(n) if n.job_id != old_job_id && n.clean_jobs => return n,
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("Timeout waiting for new block")
+}
+
+fn assert_stratum_error<T: std::fmt::Debug>(
+    result: Result<T, ClientError>,
+    expected: StratumError,
+) {
+    assert!(
+        matches!(
+            &result,
+            Err(ClientError::Stratum { response }) if response.error_code == expected as i32
+        ),
+        "Expected {:?}, got {:?}",
+        expected,
+        result
+    );
+}
+
 pub(crate) fn address(n: u32) -> Address {
     match n {
         0 => "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",

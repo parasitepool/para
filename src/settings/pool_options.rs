@@ -44,7 +44,7 @@ pub(crate) struct PoolOptions {
     #[arg(long, help = "Block template update interval in seconds.")]
     pub(crate) update_interval: Option<u64>,
 
-    #[arg(long = "chain", help = "Run on <CHAIN>.")]
+    #[arg(long, help = "Run on <CHAIN>.")]
     pub(crate) chain: Option<Chain>,
 
     #[arg(long, alias = "datadir", help = "Store data in <DATA_DIR>.")]

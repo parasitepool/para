@@ -679,7 +679,8 @@ mod tests {
 
     #[test]
     fn proxy_defaults_are_sane() {
-        let options = parse_proxy_options("para proxy pool.example.com:3333 --username bc1qtest");
+        let options =
+            parse_proxy_options("para proxy --upstream pool.example.com:3333 --username bc1qtest");
         let settings = Settings::from_proxy_options(options).unwrap();
 
         assert_eq!(settings.upstream, Some("pool.example.com:3333".into()));
@@ -697,7 +698,7 @@ mod tests {
     #[test]
     fn proxy_override_address_and_port() {
         let options = parse_proxy_options(
-            "para proxy pool.example.com:3333 --username bc1qtest --address 127.0.0.1 --port 9999",
+            "para proxy --upstream pool.example.com:3333 --username bc1qtest --address 127.0.0.1 --port 9999",
         );
         let settings = Settings::from_proxy_options(options).unwrap();
 
@@ -708,7 +709,7 @@ mod tests {
     #[test]
     fn proxy_override_api_port() {
         let options = parse_proxy_options(
-            "para proxy pool.example.com:3333 --username bc1qtest --api-port 8080",
+            "para proxy --upstream pool.example.com:3333 --username bc1qtest --api-port 8080",
         );
         let settings = Settings::from_proxy_options(options).unwrap();
 
@@ -718,7 +719,7 @@ mod tests {
     #[test]
     fn proxy_override_timeout() {
         let options = parse_proxy_options(
-            "para proxy pool.example.com:3333 --username bc1qtest --timeout 60",
+            "para proxy --upstream pool.example.com:3333 --username bc1qtest --timeout 60",
         );
         let settings = Settings::from_proxy_options(options).unwrap();
 
@@ -728,7 +729,7 @@ mod tests {
     #[test]
     fn proxy_password_override() {
         let options = parse_proxy_options(
-            "para proxy pool.example.com:3333 --username bc1qtest --password secret",
+            "para proxy --upstream pool.example.com:3333 --username bc1qtest --password secret",
         );
         let settings = Settings::from_proxy_options(options).unwrap();
 
@@ -737,8 +738,9 @@ mod tests {
 
     #[test]
     fn proxy_username_with_worker() {
-        let options =
-            parse_proxy_options("para proxy pool.example.com:3333 --username bc1qtest.worker1");
+        let options = parse_proxy_options(
+            "para proxy --upstream pool.example.com:3333 --username bc1qtest.worker1",
+        );
         let settings = Settings::from_proxy_options(options).unwrap();
 
         assert_eq!(

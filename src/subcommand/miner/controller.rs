@@ -12,7 +12,7 @@ pub(crate) struct Controller {
     notify_rx: watch::Receiver<Option<(Notify, CancellationToken)>>,
     mode: Mode,
     pool_difficulty: Arc<Mutex<Difficulty>>,
-    root_cancel: CancellationToken,
+    cancel: CancellationToken,
     share_tx: mpsc::Sender<(JobId, Header, Extranonce)>,
     share_rx: mpsc::Receiver<(JobId, Header, Extranonce)>,
     shares: Vec<Share>,
@@ -70,7 +70,7 @@ impl Controller {
             notify_tx,
             mode,
             pool_difficulty: Arc::new(Mutex::new(Difficulty::default())),
-            root_cancel: CancellationToken::new(),
+            cancel: cancel_token.clone(),
             share_rx,
             share_tx,
             shares: Vec::new(),
@@ -90,7 +90,7 @@ impl Controller {
 
         controller.event_loop(events, cancel_token).await?;
 
-        controller.root_cancel.cancel();
+        controller.cancel.cancel();
         drop(controller.notify_tx);
         while controller.hashers.join_next().await.is_some() {}
         controller.client.disconnect().await;
@@ -137,7 +137,7 @@ impl Controller {
                 },
                 maybe = self.share_rx.recv() => match maybe {
                     Some((job_id, header, enonce2)) => {
-                        info!("Valid share found: blockhash={} nonce={}", header.block_hash(), header.nonce);
+                        info!("Valid share found with difficulty={}", Difficulty::from(header.block_hash()));
 
                         let share = Share {
                             enonce1: self.enonce1.clone(),
@@ -296,7 +296,7 @@ impl Controller {
         if let Some(cancel) = &self.hasher_cancel {
             cancel.cancel();
         }
-        let cancel = self.root_cancel.child_token();
+        let cancel = self.cancel.child_token();
         self.hasher_cancel = Some(cancel.clone());
         cancel
     }

@@ -1,12 +1,12 @@
 use super::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Stats {
-    pub hash_rate_1m: HashRate,
-    pub sps_1m: f64,
+pub struct Status {
     pub users: usize,
     pub workers: usize,
     pub connections: u64,
+    pub hashrate_1m: HashRate,
+    pub sps_1m: f64,
     pub accepted: u64,
     pub rejected: u64,
     pub blocks: u64,
@@ -16,33 +16,22 @@ pub struct Stats {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UserSummary {
-    pub address: String,
-    pub hash_rate: HashRate,
-    pub shares_per_second: f64,
-    pub workers: usize,
-    pub accepted: u64,
-    pub rejected: u64,
-    pub best_ever: Option<Difficulty>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserDetail {
     pub address: String,
     pub hash_rate: HashRate,
-    pub shares_per_second: f64,
+    pub sps_1m: f64,
     pub accepted: u64,
     pub rejected: u64,
     pub best_ever: Option<Difficulty>,
     pub authorized: u64,
-    pub workers: Vec<WorkerSummary>,
+    pub workers: Vec<WorkerDetail>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorkerSummary {
+pub struct WorkerDetail {
     pub name: String,
-    pub hash_rate: HashRate,
-    pub shares_per_second: f64,
+    pub hashrate_1m: HashRate,
+    pub sps_1m: f64,
     pub accepted: u64,
     pub rejected: u64,
     pub best_ever: Option<Difficulty>,
@@ -50,15 +39,15 @@ pub struct WorkerSummary {
 
 pub(crate) fn router(metatron: Arc<Metatron>) -> Router {
     Router::new()
-        .route("/api/stats", get(stats))
-        .route("/api/users", get(users))
-        .route("/api/users/{address}", get(user))
+        .route("/pool/status", get(status))
+        .route("/pool/users", get(users))
+        .route("/pool/users/{address}", get(user))
         .with_state(metatron)
 }
 
-async fn stats(State(metatron): State<Arc<Metatron>>) -> Json<Stats> {
-    Json(Stats {
-        hash_rate_1m: metatron.hash_rate_1m(),
+async fn status(State(metatron): State<Arc<Metatron>>) -> Json<Status> {
+    Json(Status {
+        hashrate_1m: metatron.hash_rate_1m(),
         sps_1m: metatron.sps_1m(),
         users: metatron.total_users(),
         workers: metatron.total_workers(),
@@ -72,20 +61,12 @@ async fn stats(State(metatron): State<Arc<Metatron>>) -> Json<Stats> {
     })
 }
 
-async fn users(State(metatron): State<Arc<Metatron>>) -> Json<Vec<UserSummary>> {
+async fn users(State(metatron): State<Arc<Metatron>>) -> Json<Vec<String>> {
     Json(
         metatron
             .users()
             .iter()
-            .map(|entry| UserSummary {
-                address: entry.key().to_string(),
-                hash_rate: entry.value().hash_rate_1m(),
-                shares_per_second: entry.value().sps_1m(),
-                workers: entry.value().worker_count(),
-                accepted: entry.value().accepted(),
-                rejected: entry.value().rejected(),
-                best_ever: entry.value().best_ever(),
-            })
+            .map(|entry| entry.key().to_string())
             .collect(),
     )
 }
@@ -104,17 +85,17 @@ async fn user(
     Ok(Json(UserDetail {
         address: user.address.to_string(),
         hash_rate: user.hash_rate_1m(),
-        shares_per_second: user.sps_1m(),
+        sps_1m: user.sps_1m(),
         accepted: user.accepted(),
         rejected: user.rejected(),
         best_ever: user.best_ever(),
         authorized: user.authorized,
         workers: user
             .workers()
-            .map(|worker| WorkerSummary {
+            .map(|worker| WorkerDetail {
                 name: worker.workername().to_string(),
-                hash_rate: worker.hash_rate_1m(),
-                shares_per_second: worker.sps_1m(),
+                hashrate_1m: worker.hash_rate_1m(),
+                sps_1m: worker.sps_1m(),
                 accepted: worker.accepted(),
                 rejected: worker.rejected(),
                 best_ever: worker.best_ever(),

@@ -6,11 +6,13 @@ use {
 
 pub(crate) struct Nexus {
     client: Client,
-    upstream: String,
     enonce1: Extranonce,
     enonce2_size: usize,
     connected: Arc<AtomicBool>,
-    upstream_difficulty: Arc<RwLock<Difficulty>>,
+    upstream: String,
+    upstream_diff: Arc<RwLock<Difficulty>>,
+    upstream_accepted: Arc<AtomicU64>,
+    upstream_rejected: Arc<AtomicU64>,
 }
 
 impl Nexus {
@@ -52,11 +54,13 @@ impl Nexus {
         Ok((
             Self {
                 client,
-                upstream: upstream.to_string(),
                 enonce1: subscribe_result.enonce1,
                 enonce2_size: subscribe_result.enonce2_size,
                 connected: Arc::new(AtomicBool::new(false)),
-                upstream_difficulty: Arc::new(RwLock::new(Difficulty::from(1))),
+                upstream: upstream.to_string(),
+                upstream_diff: Arc::new(RwLock::new(Difficulty::from(1))),
+                upstream_accepted: Arc::new(AtomicU64::new(0)),
+                upstream_rejected: Arc::new(AtomicU64::new(0)),
             },
             events,
         ))
@@ -87,7 +91,7 @@ impl Nexus {
             match events.recv().await {
                 Ok(Event::SetDifficulty(diff)) => {
                     info!("Received initial difficulty: {}", diff);
-                    *self.upstream_difficulty.write().await = diff;
+                    *self.upstream_diff.write().await = diff;
                     initial_difficulty = Some(diff);
                 }
                 Ok(Event::Notify(notify)) => {
@@ -118,7 +122,7 @@ impl Nexus {
         let (share_tx, mut share_rx) = mpsc::channel::<Share>(SHARE_CHANNEL_CAPACITY);
 
         let connected = self.connected.clone();
-        let upstream_difficulty = self.upstream_difficulty.clone();
+        let upstream_difficulty = self.upstream_diff.clone();
 
         let nexus = self;
         tasks.spawn(async move {
@@ -177,7 +181,7 @@ impl Nexus {
             return;
         }
 
-        let upstream_diff = *self.upstream_difficulty.read().await;
+        let upstream_diff = *self.upstream_diff.read().await;
         if share.share_diff < upstream_diff {
             debug!(
                 "Share below upstream difficulty: share_diff={} < upstream_diff={}",
@@ -196,19 +200,26 @@ impl Nexus {
         let ntime = share.ntime;
         let nonce = share.nonce;
         let version_bits = share.version_bits;
+        let accepted = self.upstream_accepted.clone();
+        let rejected = self.upstream_rejected.clone();
 
-        // Fire and forget - spawn task to submit and log result
-        // TODO: this should track rejected and also notify downstream miners if smth wrong
         tokio::spawn(async move {
             match client
                 .submit_async(job_id, share.enonce2, ntime, nonce, version_bits)
                 .await
             {
                 Ok(handle) => match handle.wait().await {
-                    Ok(SubmitOutcome::Accepted) => info!("Upstream accepted share"),
+                    Ok(SubmitOutcome::Accepted) => {
+                        accepted.fetch_add(1, Ordering::Relaxed);
+                        info!("Upstream accepted share");
+                    }
                     Ok(SubmitOutcome::Rejected { reason }) => {
-                        let reason_str = reason.as_deref().unwrap_or("unknown");
-                        warn!("Upstream rejected share: {}", reason_str);
+                        rejected.fetch_add(1, Ordering::Relaxed);
+
+                        warn!(
+                            "Upstream rejected share: {}",
+                            reason.as_deref().unwrap_or("unknown")
+                        );
                     }
                     Err(e) => warn!("Upstream submit error: {e}"),
                 },
@@ -228,7 +239,7 @@ impl Nexus {
     }
 
     pub(crate) async fn upstream_difficulty(&self) -> Difficulty {
-        *self.upstream_difficulty.read().await
+        *self.upstream_diff.read().await
     }
 
     pub(crate) fn is_connected(&self) -> bool {
@@ -241,5 +252,13 @@ impl Nexus {
 
     pub(crate) fn username(&self) -> &Username {
         &self.client.config.username
+    }
+
+    pub(crate) fn upstream_accepted(&self) -> u64 {
+        self.upstream_accepted.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn upstream_rejected(&self) -> u64 {
+        self.upstream_rejected.load(Ordering::Relaxed)
     }
 }

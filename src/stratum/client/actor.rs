@@ -338,7 +338,6 @@ impl ClientActor {
                             error,
                             ..
                         } => {
-                            // Extract rejection reason from reject_reason or error
                             let reason = reject_reason
                                 .clone()
                                 .or_else(|| error.as_ref().map(|e| e.to_string()));

@@ -180,7 +180,7 @@ impl StatusLine for Metatron {
     fn status_line(&self) -> String {
         format!(
             "sps={:.2}  hash_rate={}  connections={}  users={}  workers={}  accepted={}  rejected={}  blocks={}  uptime={}s",
-            self.sps_1m() + 0.0,
+            self.sps_1m(),
             self.hash_rate_1m(),
             self.total_connections(),
             self.total_users(),

@@ -10,19 +10,19 @@ pub struct Status {
     pub enonce2_size: usize,
 }
 
-pub(crate) fn router(nexus: Arc<Nexus>) -> Router {
+pub(crate) fn router(argus: Arc<Argus>) -> Router {
     Router::new()
-        .route("/api/status", get(get_status))
-        .with_state(nexus)
+        .route("/proxy/status", get(status))
+        .with_state(argus)
 }
 
-async fn get_status(State(nexus): State<Arc<Nexus>>) -> Json<Status> {
+async fn status(State(argus): State<Arc<Argus>>) -> Json<Status> {
     Json(Status {
-        upstream: nexus.upstream().to_string(),
-        upstream_difficulty: nexus.upstream_difficulty().await.as_f64(),
-        upstream_username: nexus.username().clone(),
-        connected: nexus.is_connected(),
-        enonce1: nexus.enonce1().clone(),
-        enonce2_size: nexus.enonce2_size(),
+        upstream: argus.nexus.upstream().to_string(),
+        upstream_difficulty: argus.nexus.upstream_difficulty().await.as_f64(),
+        upstream_username: argus.nexus.username().clone(),
+        connected: argus.nexus.is_connected(),
+        enonce1: argus.nexus.enonce1().clone(),
+        enonce2_size: argus.nexus.enonce2_size(),
     })
 }
