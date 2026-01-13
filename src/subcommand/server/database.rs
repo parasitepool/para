@@ -609,7 +609,7 @@ impl Database {
     pub async fn get_simulated_payouts(
         &self,
         total_reward: i64,
-        finder_username: &str,
+        block_winner: &str,
     ) -> Result<Vec<SimulatedPayout>> {
         if total_reward <= 100_000_000 {
             // 1 BTC of coinbase value is reserved for miner who found the block
@@ -671,7 +671,7 @@ impl Database {
             ",
         )
         .bind(total_reward)
-        .bind(finder_username)
+        .bind(block_winner)
         .fetch_all(&self.pool)
         .await
         .map_err(|err| anyhow!(err))?;
