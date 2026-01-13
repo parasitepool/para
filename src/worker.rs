@@ -3,7 +3,7 @@ use {super::*, parking_lot::Mutex};
 struct Stats {
     dsps_1m: DecayingAverage,
     sps_1m: DecayingAverage,
-    best_ever: f64,
+    best_ever: Option<Difficulty>,
     last_share: Option<Instant>,
 }
 
@@ -21,7 +21,7 @@ impl Worker {
             stats: Mutex::new(Stats {
                 dsps_1m: DecayingAverage::new(Duration::from_secs(60)),
                 sps_1m: DecayingAverage::new(Duration::from_secs(60)),
-                best_ever: 0.0,
+                best_ever: None,
                 last_share: None,
             }),
             accepted: AtomicU64::new(0),
@@ -29,14 +29,14 @@ impl Worker {
         }
     }
 
-    pub(crate) fn record_accepted(&self, pool_diff: f64, share_diff: f64) {
+    pub(crate) fn record_accepted(&self, pool_diff: Difficulty, share_diff: Difficulty) {
         let now = Instant::now();
         let mut stats = self.stats.lock();
-        stats.dsps_1m.record(pool_diff, now);
+        stats.dsps_1m.record(pool_diff.as_f64(), now);
         stats.sps_1m.record(1.0, now);
         stats.last_share = Some(now);
-        if share_diff > stats.best_ever {
-            stats.best_ever = share_diff;
+        if stats.best_ever.is_none_or(|best| share_diff > best) {
+            stats.best_ever = Some(share_diff);
         }
         drop(stats);
         self.accepted.fetch_add(1, Ordering::Relaxed);
@@ -66,7 +66,7 @@ impl Worker {
         self.rejected.load(Ordering::Relaxed)
     }
 
-    pub(crate) fn best_ever(&self) -> f64 {
+    pub(crate) fn best_ever(&self) -> Option<Difficulty> {
         self.stats.lock().best_ever
     }
 

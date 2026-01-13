@@ -168,15 +168,9 @@ impl Drop for TestPool {
                     _ => break,
                 }
             }
-
-            let _ = self.pool_handle.kill();
-            let _ = self.pool_handle.wait();
         }
 
-        #[cfg(not(unix))]
-        {
-            let _ = self.pool_handle.kill();
-            let _ = self.pool_handle.wait();
-        }
+        let _ = self.pool_handle.kill();
+        let _ = self.pool_handle.wait();
     }
 }
