@@ -1,18 +1,5 @@
 use super::*;
 
-/// Compute expected enonce1_varlen based on ckpool's auto-selection logic.
-fn expected_enonce1_varlen(upstream_nonce2_len: usize) -> usize {
-    if upstream_nonce2_len > 7 {
-        4
-    } else if upstream_nonce2_len > 5 {
-        2
-    } else if upstream_nonce2_len > 3 {
-        1
-    } else {
-        panic!("upstream_nonce2_len too small: {}", upstream_nonce2_len);
-    }
-}
-
 #[tokio::test]
 #[serial(bitcoind)]
 #[timeout(90000)]
@@ -49,23 +36,14 @@ async fn proxy() {
         .await
         .expect("Failed to subscribe through proxy");
 
-    // Compute expected enonce1_varlen based on ckpool's auto-selection
-    let enonce1_varlen = expected_enonce1_varlen(status.enonce2_size);
-
-    // Downstream enonce1 = upstream enonce1 + enonce1_var
     assert_eq!(
-        subscribe_result.enonce1.len(),
-        status.enonce1.len() + enonce1_varlen,
-        "Downstream enonce1 should be upstream enonce1 + {} bytes for enonce1_var",
-        enonce1_varlen
+        subscribe_result.enonce2_size, status.enonce2_size,
+        "Proxy should relay upstream's enonce2_size"
     );
 
-    // Downstream enonce2_size = upstream enonce2_size - enonce1_varlen
     assert_eq!(
-        subscribe_result.enonce2_size,
-        status.enonce2_size - enonce1_varlen,
-        "Downstream enonce2_size should be upstream - {}",
-        enonce1_varlen
+        subscribe_result.enonce1, status.enonce1,
+        "Proxy should relay upstream's enonce1"
     );
 
     client.authorize().await.expect("Failed to authorize");
@@ -132,94 +110,4 @@ fn mine_through_proxy() {
         serde_json::from_str::<Vec<Share>>(&String::from_utf8_lossy(&stdout.stdout)).unwrap();
 
     assert_eq!(output.len(), 1, "Should find exactly one share");
-}
-
-#[tokio::test]
-#[serial(bitcoind)]
-#[timeout(90000)]
-async fn proxy_enonce2_split_gives_unique_work() {
-    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
-    let upstream = pool.stratum_endpoint();
-
-    let proxy = TestProxy::spawn_with_args(
-        &upstream,
-        &signet_username().to_string(),
-        "--start-diff 0.00001",
-    );
-
-    let status = proxy
-        .get_status()
-        .await
-        .expect("Failed to get proxy status");
-
-    // Connect first miner
-    let client1 = proxy.stratum_client();
-    let mut events1 = client1.connect().await.expect("Failed to connect miner 1");
-
-    let (subscribe1, _, _) = client1
-        .subscribe()
-        .await
-        .expect("Failed to subscribe miner 1");
-
-    // Connect second miner
-    let client2 = proxy.stratum_client();
-    let mut events2 = client2.connect().await.expect("Failed to connect miner 2");
-
-    let (subscribe2, _, _) = client2
-        .subscribe()
-        .await
-        .expect("Failed to subscribe miner 2");
-
-    // Verify enonce1 values are different (each miner gets unique work)
-    assert_ne!(
-        subscribe1.enonce1, subscribe2.enonce1,
-        "Miners should receive different enonce1 values for unique work"
-    );
-
-    // Compute expected enonce1_varlen based on ckpool's auto-selection
-    let enonce1_varlen = expected_enonce1_varlen(status.enonce2_size);
-
-    // Verify enonce2_size is reduced by enonce1_varlen
-    assert_eq!(
-        subscribe1.enonce2_size,
-        status.enonce2_size - enonce1_varlen,
-        "Downstream enonce2_size should be upstream - {}",
-        enonce1_varlen
-    );
-    assert_eq!(
-        subscribe2.enonce2_size,
-        status.enonce2_size - enonce1_varlen,
-        "Both miners should have same enonce2_size"
-    );
-
-    // Verify the enonce1 has the expected structure:
-    // downstream_enonce1 = upstream_enonce1 (const) + enonce1_var
-    assert_eq!(
-        subscribe1.enonce1.len(),
-        status.enonce1.len() + enonce1_varlen,
-        "Downstream enonce1 should be upstream enonce1 + {} bytes for enonce1_var",
-        enonce1_varlen
-    );
-
-    // Both miners should be able to authorize and submit valid shares
-    client1.authorize().await.expect("Miner 1 authorize failed");
-    client2.authorize().await.expect("Miner 2 authorize failed");
-
-    let (notify1, difficulty1) = wait_for_notify(&mut events1).await;
-    let (notify2, difficulty2) = wait_for_notify(&mut events2).await;
-
-    // Solve and submit shares for both miners
-    let enonce2_1 = Extranonce::random(subscribe1.enonce2_size);
-    let (ntime1, nonce1) = solve_share(&notify1, &subscribe1.enonce1, &enonce2_1, difficulty1);
-    client1
-        .submit(notify1.job_id, enonce2_1, ntime1, nonce1, None)
-        .await
-        .expect("Miner 1 share should be accepted");
-
-    let enonce2_2 = Extranonce::random(subscribe2.enonce2_size);
-    let (ntime2, nonce2) = solve_share(&notify2, &subscribe2.enonce1, &enonce2_2, difficulty2);
-    client2
-        .submit(notify2.job_id, enonce2_2, ntime2, nonce2, None)
-        .await
-        .expect("Miner 2 share should be accepted");
 }
