@@ -606,7 +606,15 @@ impl Database {
         Ok(result)
     }
 
-    pub async fn get_simulated_payouts(&self, total_reward: i64) -> Result<Vec<SimulatedPayout>> {
+    pub async fn get_simulated_payouts(
+        &self,
+        total_reward: i64,
+        finder_username: &str,
+    ) -> Result<Vec<SimulatedPayout>> {
+        if total_reward <= 100_000_000 {
+            // 1 BTC of coinbase value is reserved for miner who found the block
+            return Ok(Vec::new());
+        }
         #[derive(sqlx::FromRow)]
         struct PayoutRow {
             username: String,
@@ -637,6 +645,7 @@ impl Database {
                     total_diff - already_paid_diff as unpaid_diff
                 FROM eligible_accounts
                 WHERE total_diff - already_paid_diff > 0
+                    AND username != COALESCE($2, '')
             ),
             total_unpaid AS (
                 SELECT SUM(unpaid_diff) as total_diff
@@ -662,6 +671,7 @@ impl Database {
             ",
         )
         .bind(total_reward)
+        .bind(finder_username)
         .fetch_all(&self.pool)
         .await
         .map_err(|err| anyhow!(err))?;

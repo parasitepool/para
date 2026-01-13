@@ -98,8 +98,16 @@ pub(crate) async fn payouts_simulate(
         .get("coinbase_value")
         .and_then(|v| v.parse().ok())
         .unwrap_or(312_500_000); // 3.125 BTC, current coinbase value
+    let finder_username = params
+        .get("coinbase_value")
+        .map_or("", |user| user.as_str());
 
-    Ok(Json(database.get_simulated_payouts(total_reward).await?).into_response())
+    Ok(Json(
+        database
+            .get_simulated_payouts(total_reward, finder_username)
+            .await?,
+    )
+    .into_response())
 }
 
 /// Get payouts for a specific block height
