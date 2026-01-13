@@ -1,28 +1,27 @@
 use super::*;
 
 pub(crate) struct Metatron {
-    enonce1_counter: AtomicU64,
     blocks: AtomicU64,
     started: Instant,
     connections: AtomicU64,
     users: DashMap<Address, Arc<User>>,
     sessions: DashMap<Extranonce, SessionSnapshot>,
+    enonce1: Option<Extranonce>,
+    enonce2_size: usize,
+    counter: AtomicU64,
 }
 
 impl Metatron {
-    pub(crate) fn new() -> Self {
-        let seed = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-
+    pub(crate) fn new(enonce1: Option<Extranonce>, enonce2_size: usize) -> Self {
         Self {
-            enonce1_counter: AtomicU64::new(seed),
             blocks: AtomicU64::new(0),
             started: Instant::now(),
             connections: AtomicU64::new(0),
             users: DashMap::new(),
             sessions: DashMap::new(),
+            enonce1,
+            enonce2_size,
+            counter: AtomicU64::new(seed()),
         }
     }
 
@@ -67,12 +66,6 @@ impl Metatron {
         share_tx
     }
 
-    pub(crate) fn next_enonce1(&self) -> Extranonce {
-        let value = self.enonce1_counter.fetch_add(1, Ordering::Relaxed);
-        let bytes = value.to_le_bytes();
-        Extranonce::from_bytes(&bytes[..ENONCE1_SIZE])
-    }
-
     fn process_share(&self, share: &Share, sink: &Option<mpsc::Sender<Share>>) {
         let worker = self.get_or_create_worker(share.address.clone(), &share.workername);
 
@@ -83,10 +76,42 @@ impl Metatron {
             worker.record_rejected();
         }
 
-        if let Some(tx) = sink
-            && tx.try_send(share.clone()).is_err()
-        {
-            warn!("Share sink full, dropping event");
+        if let Some(tx) = sink {
+            let share = self.reconstruct_enonces_for_upstream(share.clone()); // TODO
+            if tx.try_send(share).is_err() {
+                warn!("Share sink full, dropping event");
+            }
+        }
+    }
+
+    pub fn next_enonce1(&self) -> Extranonce {
+        if let Some(ref enonce1) = self.enonce1 {
+            let val = self.counter.fetch_add(1, Ordering::Relaxed);
+            let mut bytes = enonce1.as_bytes().to_vec();
+            bytes.extend_from_slice(&val.to_le_bytes()[..ENONCE1_EXTENSION_SIZE]);
+            Extranonce::from_bytes(&bytes)
+        } else {
+            let value = self.counter.fetch_add(1, Ordering::Relaxed);
+            let bytes = value.to_le_bytes();
+            Extranonce::from_bytes(&bytes[..ENONCE1_SIZE])
+        }
+    }
+
+    pub(crate) fn enonce2_size(&self) -> usize {
+        self.enonce2_size
+    }
+
+    pub fn reconstruct_enonces_for_upstream(&self, share: Share) -> Share {
+        let upstream_enonce1_size = self.enonce1.clone().unwrap().len(); // TODO
+        let upstream_enonce1 = &share.enonce1.as_bytes()[..upstream_enonce1_size];
+        let extension = &share.enonce1.as_bytes()[upstream_enonce1_size..];
+        let mut upstream_enonce2 = extension.to_vec();
+        upstream_enonce2.extend_from_slice(share.enonce2.as_bytes());
+
+        Share {
+            enonce1: Extranonce::from_bytes(upstream_enonce1),
+            enonce2: Extranonce::from_bytes(&upstream_enonce2),
+            ..share
         }
     }
 
@@ -206,7 +231,7 @@ mod tests {
 
     #[test]
     fn new_metatron_starts_at_zero() {
-        let metatron = Metatron::new();
+        let metatron = Metatron::new(None, 8);
         assert_eq!(metatron.total_connections(), 0);
         assert_eq!(metatron.accepted(), 0);
         assert_eq!(metatron.rejected(), 0);
@@ -217,7 +242,7 @@ mod tests {
 
     #[test]
     fn connection_count_increments_and_decrements() {
-        let metatron = Metatron::new();
+        let metatron = Metatron::new(None, 8);
         assert_eq!(metatron.total_connections(), 0);
 
         metatron.add_connection();
@@ -230,7 +255,7 @@ mod tests {
 
     #[test]
     fn get_or_create_worker_creates_user_and_worker() {
-        let metatron = Metatron::new();
+        let metatron = Metatron::new(None, 8);
         let addr = test_address();
 
         let worker = metatron.get_or_create_worker(addr.clone(), "rig1");
@@ -246,7 +271,7 @@ mod tests {
 
     #[test]
     fn rejected_count_increments() {
-        let metatron = Metatron::new();
+        let metatron = Metatron::new(None, 8);
         let addr = test_address();
         let worker = metatron.get_or_create_worker(addr, "rig1");
         worker.record_rejected();
@@ -256,14 +281,13 @@ mod tests {
 
     #[test]
     fn block_count_increments() {
-        let metatron = Metatron::new();
+        let metatron = Metatron::new(None, 8);
         metatron.add_block();
         assert_eq!(metatron.total_blocks(), 1);
     }
-
     #[test]
     fn next_enonce1_is_sequential() {
-        let metatron = Metatron::new();
+        let metatron = Metatron::new(None, 8);
         let e1 = metatron.next_enonce1();
         let e2 = metatron.next_enonce1();
         let e3 = metatron.next_enonce1();
@@ -278,13 +302,13 @@ mod tests {
 
     #[test]
     fn next_enonce1_has_correct_size() {
-        let metatron = Metatron::new();
+        let metatron = Metatron::new(None, 8);
         assert_eq!(metatron.next_enonce1().len(), ENONCE1_SIZE);
     }
 
     #[test]
     fn next_enonce1_is_unique() {
-        let metatron = Metatron::new();
+        let metatron = Metatron::new(None, 8);
         let mut seen = std::collections::HashSet::new();
         for _ in 0..1000 {
             let enonce = metatron.next_enonce1();

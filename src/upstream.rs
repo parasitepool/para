@@ -41,21 +41,21 @@ impl Upstream {
             .await
             .context("failed to connect to upstream")?;
 
-        let (subscribe_result, _, _) = client
+        let (subscribe, _, _) = client
             .subscribe()
             .await
             .context("failed to subscribe to upstream")?;
 
         info!(
             "Subscribed to upstream: enonce1={}, enonce2_size={}",
-            subscribe_result.enonce1, subscribe_result.enonce2_size
+            subscribe.enonce1, subscribe.enonce2_size
         );
 
         Ok((
             Self {
                 client,
-                enonce1: subscribe_result.enonce1,
-                enonce2_size: subscribe_result.enonce2_size,
+                enonce1: subscribe.enonce1,
+                enonce2_size: subscribe.enonce2_size,
                 connected: Arc::new(AtomicBool::new(false)),
                 endpoint: upstream.to_string(),
                 difficulty: Arc::new(RwLock::new(Difficulty::from(1))),
@@ -203,9 +203,11 @@ impl Upstream {
         let accepted = self.accepted.clone();
         let rejected = self.rejected.clone();
 
+        // let enonce2 = self.proxy_enonce.reconstruct_upstream_enonce2(&share.enonce1, &share.enonce2);
+
         tokio::spawn(async move {
             match client
-                .submit_async(job_id, share.enonce2, ntime, nonce, version_bits)
+                .submit_async(job_id, share.enonce2, ntime, nonce, version_bits) // TODO
                 .await
             {
                 Ok(handle) => match handle.wait().await {

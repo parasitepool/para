@@ -15,7 +15,6 @@ pub(crate) enum State {
 
 pub(crate) struct Stratifier<W: Workbase> {
     settings: Arc<Settings>,
-    mode: Mode,
     metatron: Arc<Metatron>,
     share_tx: mpsc::Sender<Share>,
     socket_addr: SocketAddr,
@@ -41,7 +40,6 @@ impl<W: Workbase> Stratifier<W> {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         settings: Arc<Settings>,
-        mode: Mode,
         metatron: Arc<Metatron>,
         share_tx: mpsc::Sender<Share>,
         socket_addr: SocketAddr,
@@ -67,7 +65,6 @@ impl<W: Workbase> Stratifier<W> {
 
         Self {
             settings,
-            mode,
             metatron,
             share_tx,
             socket_addr,
@@ -368,28 +365,17 @@ impl<W: Workbase> Stratifier<W> {
             self.workername = None;
         }
 
-        let (enonce1, enonce2_size) = match self.mode {
-            Mode::Pool => {
-                let enonce1 = if let Some(ref requested_enonce1) = subscribe.enonce1 {
-                    if let Some(session) = self.metatron.take_session(requested_enonce1) {
-                        info!("Resuming session for enonce1 {}", session.enonce1);
-                        session.enonce1
-                    } else {
-                        debug!(
-                            "Session resume failed for enonce1 {}, issuing new enonce1",
-                            requested_enonce1
-                        );
-                        self.metatron.next_enonce1()
-                    }
-                } else {
-                    self.metatron.next_enonce1()
-                };
-                (enonce1, self.settings.extranonce2_size())
-            }
-            Mode::Proxy {
-                ref enonce1,
-                enonce2_size,
-            } => (enonce1.clone(), enonce2_size),
+        let (enonce1, enonce2_size) = if let Some(ref requested_enonce1) = subscribe.enonce1 {
+            let enonce1 = if let Some(session) = self.metatron.take_session(requested_enonce1) {
+                info!("Resuming session for enonce1 {}", session.enonce1);
+                session.enonce1
+            } else {
+                self.metatron.next_enonce1()
+            };
+
+            (enonce1, self.metatron.enonce2_size())
+        } else {
+            (self.metatron.next_enonce1(), self.metatron.enonce2_size())
         };
 
         let subscriptions = vec![
@@ -541,7 +527,8 @@ impl<W: Workbase> Stratifier<W> {
             return Ok(consequence);
         };
 
-        let expected_extranonce2_size = self.settings.extranonce2_size();
+        let expected_extranonce2_size = self.metatron.enonce2_size();
+
         if submit.enonce2.len() != expected_extranonce2_size {
             warn!(
                 "Invalid extranonce2 length from {}: got {} bytes, expected {}",
@@ -841,12 +828,10 @@ impl<W: Workbase> Stratifier<W> {
 
 impl<W: Workbase> Drop for Stratifier<W> {
     fn drop(&mut self) {
-        if self.mode == Mode::Pool
-            && !self.dropped_by_bouncer
+        if !self.dropped_by_bouncer
             && let (Some(enonce1), Some(_authorized)) = (self.enonce1.take(), self.authorized)
         {
-            let session = SessionSnapshot::new(enonce1);
-            self.metatron.store_session(session);
+            self.metatron.store_session(SessionSnapshot::new(enonce1));
         }
 
         self.metatron.sub_connection();

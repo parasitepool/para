@@ -25,7 +25,7 @@ impl Pool {
             .await
             .context("failed to subscribe to ZMQ block notifications")?;
 
-        let metatron = Arc::new(Metatron::new());
+        let metatron = Arc::new(Metatron::new(None, settings.extranonce2_size()));
         let share_tx = metatron
             .clone()
             .spawn(None, cancel_token.clone(), &mut tasks);
@@ -63,8 +63,7 @@ impl Pool {
 
                     tasks.spawn(async move {
                         let mut stratifier: Stratifier<BlockTemplate> = Stratifier::new(
-                            settings,
-                            Mode::Pool,
+                            settings.clone(),
                             metatron,
                             share_tx,
                             addr,
