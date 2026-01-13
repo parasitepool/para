@@ -34,16 +34,22 @@ pub struct ClientConfig {
     pub timeout: Duration,
 }
 
+#[derive(Debug, Clone)]
+pub enum SubmitOutcome {
+    Accepted,
+    Rejected { reason: Option<String> },
+}
+
 pub struct SubmitHandle {
-    rx: oneshot::Receiver<Result<bool>>,
+    rx: oneshot::Receiver<Result<SubmitOutcome>>,
 }
 
 impl SubmitHandle {
-    pub async fn wait(self) -> Result<bool> {
+    pub async fn wait(self) -> Result<SubmitOutcome> {
         self.rx.await.map_err(|_| ClientError::NotConnected)?
     }
 
-    pub fn try_recv(&mut self) -> Option<Result<bool>> {
+    pub fn try_recv(&mut self) -> Option<Result<SubmitOutcome>> {
         match self.rx.try_recv() {
             Ok(result) => Some(result),
             Err(oneshot::error::TryRecvError::Empty) => None,
@@ -84,7 +90,7 @@ impl EventReceiver {
 
 #[derive(Clone)]
 pub struct Client {
-    config: Arc<ClientConfig>,
+    pub config: Arc<ClientConfig>,
     tx: mpsc::Sender<ClientMessage>,
     events: broadcast::Sender<Event>,
 }
@@ -502,34 +508,40 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn submit_handle_wait_returns_result() {
+    async fn submit_handle_wait_returns_accepted() {
         let (tx, rx) = oneshot::channel();
         let mut handle = SubmitHandle { rx };
 
         assert!(handle.try_recv().is_none(), "Should be empty before send");
 
-        tx.send(Ok(true)).unwrap();
+        tx.send(Ok(SubmitOutcome::Accepted)).unwrap();
 
         let result = handle.wait().await;
-        assert!(matches!(result, Ok(true)));
+        assert!(matches!(result, Ok(SubmitOutcome::Accepted)));
     }
 
     #[tokio::test]
-    async fn submit_handle_try_recv_returns_result() {
+    async fn submit_handle_try_recv_returns_rejected() {
         let (tx, rx) = oneshot::channel();
         let mut handle = SubmitHandle { rx };
 
         assert!(handle.try_recv().is_none(), "Should be empty before send");
 
-        tx.send(Ok(false)).unwrap();
+        tx.send(Ok(SubmitOutcome::Rejected {
+            reason: Some("Stale".into()),
+        }))
+        .unwrap();
 
         let result = handle.try_recv();
-        assert!(matches!(result, Some(Ok(false))));
+        assert!(matches!(
+            result,
+            Some(Ok(SubmitOutcome::Rejected { reason: Some(_) }))
+        ));
     }
 
     #[tokio::test]
     async fn submit_handle_closed_channel_returns_not_connected() {
-        let (tx, rx) = oneshot::channel::<Result<bool>>();
+        let (tx, rx) = oneshot::channel::<Result<SubmitOutcome>>();
         let mut handle = SubmitHandle { rx };
 
         drop(tx);
@@ -542,7 +554,7 @@ mod tests {
 
     #[tokio::test]
     async fn submit_handle_wait_closed_channel_returns_not_connected() {
-        let (tx, rx) = oneshot::channel::<Result<bool>>();
+        let (tx, rx) = oneshot::channel::<Result<SubmitOutcome>>();
         let handle = SubmitHandle { rx };
 
         drop(tx);

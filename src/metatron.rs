@@ -1,7 +1,4 @@
-use {
-    super::*,
-    crate::api::{PoolStats, UserDetail, UserSummary, WorkerSummary},
-};
+use super::*;
 
 pub(crate) struct Metatron {
     enonce1_counter: AtomicU64,
@@ -29,59 +26,59 @@ impl Metatron {
         }
     }
 
+    pub(crate) fn spawn(
+        self: Arc<Self>,
+        sink: Option<mpsc::Sender<Share>>,
+        cancel: CancellationToken,
+        tasks: &mut JoinSet<()>,
+    ) -> mpsc::Sender<Share> {
+        info!("Spawning metatron task");
+        let (share_tx, mut share_rx) = mpsc::channel(SHARE_CHANNEL_CAPACITY);
+
+        tasks.spawn(async move {
+            let mut cleanup_interval = tokio::time::interval(Duration::from_secs(60));
+
+            loop {
+                tokio::select! {
+                    biased;
+
+                    _ = cancel.cancelled() => {
+                        info!("Shutting down metatron, draining {} pending shares", share_rx.len());
+
+                        while let Ok(share) = share_rx.try_recv() {
+                            self.process_share(&share, &sink);
+                        }
+
+                        break;
+                    }
+
+                    _ = cleanup_interval.tick() => {
+                        self.sessions
+                            .retain(|_, session| !session.is_expired(SESSION_TTL));
+                    }
+
+                    Some(share) = share_rx.recv() => {
+                        self.process_share(&share, &sink);
+                    }
+                }
+            }
+        });
+
+        share_tx
+    }
+
     pub(crate) fn next_enonce1(&self) -> Extranonce {
         let value = self.enonce1_counter.fetch_add(1, Ordering::Relaxed);
         let bytes = value.to_le_bytes();
         Extranonce::from_bytes(&bytes[..ENONCE1_SIZE])
     }
 
-    pub(crate) async fn run(
-        self: Arc<Self>,
-        mut rx: mpsc::Receiver<Share>,
-        sink: Option<mpsc::Sender<Share>>,
-        cancel: CancellationToken,
-    ) {
-        let mut cleanup_interval = tokio::time::interval(Duration::from_secs(60));
-
-        loop {
-            tokio::select! {
-                biased;
-
-                _ = cancel.cancelled() => {
-                    info!("Metatron shutting down, draining {} pending shares", rx.len());
-
-                    while let Ok(share) = rx.try_recv() {
-                        self.process_share(&share, &sink);
-                    }
-
-                    break;
-                }
-
-                _ = cleanup_interval.tick() => {
-                    self.sessions
-                        .retain(|_, session| !session.is_expired(SESSION_TTL));
-                }
-
-                Some(share) = rx.recv() => {
-                    self.process_share(&share, &sink);
-                }
-            }
-        }
-
-        info!(
-            "Metatron stopped: {} users, {} workers, {} accepted, {} rejected",
-            self.total_users(),
-            self.total_workers(),
-            self.accepted(),
-            self.rejected()
-        );
-    }
-
     fn process_share(&self, share: &Share, sink: &Option<mpsc::Sender<Share>>) {
         let worker = self.get_or_create_worker(share.address.clone(), &share.workername);
 
         if share.result {
-            worker.record_accepted(share.pool_diff, share.share_diff);
+            let pool_diff = share.pool_diff.expect("accepted share must have pool_diff");
+            worker.record_accepted(pool_diff, share.share_diff);
         } else {
             worker.record_rejected();
         }
@@ -166,75 +163,16 @@ impl Metatron {
         self.users.iter().filter_map(|user| user.last_share()).max()
     }
 
-    pub(crate) fn best_ever(&self) -> f64 {
-        self.users
-            .iter()
-            .map(|user| user.best_ever())
-            .fold(0.0, f64::max)
+    pub(crate) fn best_ever(&self) -> Option<Difficulty> {
+        self.users.iter().filter_map(|user| user.best_ever()).max()
     }
 
     pub(crate) fn uptime(&self) -> Duration {
         self.started.elapsed()
     }
 
-    pub(crate) fn stats(&self) -> PoolStats {
-        PoolStats {
-            hash_rate_1m: self.hash_rate_1m(),
-            sps_1m: self.sps_1m(),
-            users: self.total_users(),
-            workers: self.total_workers(),
-            connections: self.total_connections(),
-            accepted: self.accepted(),
-            rejected: self.rejected(),
-            blocks: self.total_blocks(),
-            best_ever: self.best_ever(),
-            last_share: self.last_share().map(|time| time.elapsed().as_secs()),
-            uptime_secs: self.uptime().as_secs(),
-        }
-    }
-
-    pub(crate) fn users(&self) -> Vec<UserSummary> {
-        self.users
-            .iter()
-            .map(|entry| {
-                let user = entry.value();
-                UserSummary {
-                    address: entry.key().to_string(),
-                    hash_rate: user.hash_rate_1m(),
-                    shares_per_second: user.sps_1m(),
-                    workers: user.worker_count(),
-                    accepted: user.accepted(),
-                    rejected: user.rejected(),
-                    best_ever: user.best_ever(),
-                }
-            })
-            .collect()
-    }
-
-    pub(crate) fn user(&self, address: &Address) -> Option<UserDetail> {
-        self.users.get(address).map(|entry| {
-            let user = entry.value();
-            UserDetail {
-                address: user.address.to_string(),
-                hash_rate: user.hash_rate_1m(),
-                shares_per_second: user.sps_1m(),
-                accepted: user.accepted(),
-                rejected: user.rejected(),
-                best_ever: user.best_ever(),
-                authorized: user.authorized,
-                workers: user
-                    .workers()
-                    .map(|worker| WorkerSummary {
-                        name: worker.workername().to_string(),
-                        hash_rate: worker.hash_rate_1m(),
-                        shares_per_second: worker.sps_1m(),
-                        accepted: worker.accepted(),
-                        rejected: worker.rejected(),
-                        best_ever: worker.best_ever(),
-                    })
-                    .collect(),
-            }
-        })
+    pub(crate) fn users(&self) -> &DashMap<Address, Arc<User>> {
+        &self.users
     }
 }
 
@@ -242,7 +180,7 @@ impl StatusLine for Metatron {
     fn status_line(&self) -> String {
         format!(
             "sps={:.2}  hash_rate={}  connections={}  users={}  workers={}  accepted={}  rejected={}  blocks={}  uptime={}s",
-            self.sps_1m() + 0.0,
+            self.sps_1m(),
             self.hash_rate_1m(),
             self.total_connections(),
             self.total_users(),

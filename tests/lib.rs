@@ -52,7 +52,7 @@ use {
     harness::bitcoind::Bitcoind,
     ntest::timeout,
     para::{
-        USER_AGENT,
+        USER_AGENT, api,
         stratum::{
             self, ClientError, Difficulty, Extranonce, JobId, Nonce, Notify, Ntime, StratumError,
             Username, Version,
@@ -80,6 +80,7 @@ use {
     tempfile::tempdir,
     test_ckpool::TestCkpool,
     test_pool::TestPool,
+    test_proxy::TestProxy,
 };
 
 mod command_builder;
@@ -87,6 +88,8 @@ mod command_builder;
 mod test_ckpool;
 #[cfg(target_os = "linux")]
 mod test_pool;
+#[cfg(target_os = "linux")]
+mod test_proxy;
 #[cfg(target_os = "linux")]
 mod test_psql;
 mod test_server;
@@ -101,6 +104,8 @@ mod payouts;
 mod ping;
 #[cfg(target_os = "linux")]
 mod pool;
+#[cfg(target_os = "linux")]
+mod proxy;
 mod server;
 #[cfg(target_os = "linux")]
 mod server_with_db;
@@ -162,6 +167,55 @@ fn solve_share(
             );
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+async fn wait_for_notify(events: &mut stratum::EventReceiver) -> (stratum::Notify, Difficulty) {
+    let mut difficulty = Difficulty::from(1);
+    timeout(Duration::from_secs(10), async {
+        loop {
+            match events.recv().await.unwrap() {
+                stratum::Event::SetDifficulty(diff) => difficulty = diff,
+                stratum::Event::Notify(notify) => return (notify, difficulty),
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("Timeout waiting for notify")
+}
+
+#[cfg(target_os = "linux")]
+async fn wait_for_new_block(
+    events: &mut stratum::EventReceiver,
+    old_job_id: JobId,
+) -> stratum::Notify {
+    timeout(Duration::from_secs(10), async {
+        loop {
+            match events.recv().await.unwrap() {
+                stratum::Event::Notify(n) if n.job_id != old_job_id && n.clean_jobs => return n,
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("Timeout waiting for new block")
+}
+
+#[cfg(target_os = "linux")]
+fn assert_stratum_error<T: std::fmt::Debug>(
+    result: Result<T, ClientError>,
+    expected: StratumError,
+) {
+    assert!(
+        matches!(
+            &result,
+            Err(ClientError::Stratum { response }) if response.error_code == expected as i32
+        ),
+        "Expected {:?}, got {:?}",
+        expected,
+        result
+    );
 }
 
 pub(crate) fn address(n: u32) -> Address {

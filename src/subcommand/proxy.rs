@@ -2,52 +2,67 @@ use {
     super::*,
     crate::{
         api, http_server,
-        settings::{PoolOptions, Settings},
+        settings::{ProxyOptions, Settings},
     },
+    stratum::Notify,
 };
 
 #[derive(Parser, Debug)]
-pub(crate) struct Pool {
+pub(crate) struct Proxy {
     #[command(flatten)]
-    pub(crate) options: PoolOptions,
+    pub(crate) options: ProxyOptions,
 }
 
-impl Pool {
+impl Proxy {
     pub(crate) async fn run(&self, cancel_token: CancellationToken) -> Result {
         let mut tasks = JoinSet::new();
 
         let settings = Arc::new(
-            Settings::from_pool_options(self.options.clone())
+            Settings::from_proxy_options(self.options.clone())
                 .context("failed to create settings")?,
         );
 
-        let workbase_rx = spawn_generator(settings.clone(), cancel_token.clone(), &mut tasks)
+        let (upstream, events) = Upstream::connect(settings.clone()).await?;
+        let upstream = Arc::new(upstream);
+
+        let mode = Mode::Proxy {
+            enonce1: upstream.enonce1().clone(),
+            enonce2_size: upstream.enonce2_size(),
+        };
+
+        let (workbase_rx, sink_tx) = upstream
+            .clone()
+            .spawn(events, cancel_token.clone(), &mut tasks)
             .await
-            .context("failed to subscribe to ZMQ block notifications")?;
+            .context("failed to start upstream event loop")?;
 
         let metatron = Arc::new(Metatron::new());
         let share_tx = metatron
             .clone()
-            .spawn(None, cancel_token.clone(), &mut tasks);
+            .spawn(Some(sink_tx), cancel_token.clone(), &mut tasks);
+
+        let metrics = Arc::new(Metrics {
+            upstream: upstream.clone(),
+            metatron: metatron.clone(),
+        });
 
         http_server::spawn(
             &settings,
-            api::pool::router(metatron.clone()),
+            api::proxy::router(metrics.clone()),
             cancel_token.clone(),
             &mut tasks,
         )?;
 
         let address = settings.address();
         let port = settings.port();
-
         let listener = TcpListener::bind((address, port))
             .await
             .with_context(|| format!("failed to bind to {address}:{port}"))?;
 
-        info!("Stratum server listening on {address}:{port}");
+        info!("Stratum server listening for downstream miners on {address}:{port}");
 
         if !integration_test() && !logs_enabled() {
-            spawn_throbber(metatron.clone(), cancel_token.clone(), &mut tasks);
+            spawn_throbber(metrics, cancel_token.clone(), &mut tasks);
         }
 
         loop {
@@ -59,12 +74,13 @@ impl Pool {
                     let settings = settings.clone();
                     let metatron = metatron.clone();
                     let share_tx = share_tx.clone();
+                    let mode = mode.clone();
                     let conn_cancel_token = cancel_token.child_token();
 
                     tasks.spawn(async move {
-                        let mut stratifier: Stratifier<BlockTemplate> = Stratifier::new(
+                        let mut stratifier: Stratifier<Notify> = Stratifier::new(
                             settings,
-                            Mode::Pool,
+                            mode,
                             metatron,
                             share_tx,
                             addr,
@@ -74,12 +90,23 @@ impl Pool {
                         );
 
                         if let Err(err) = stratifier.serve().await {
-                            error!("Stratifier error: {err}")
+                            error!("Stratifier error for {addr}: {err}");
                         }
                     });
                 }
+
+                _ = async {
+                    while upstream.is_connected() {
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                    }
+                } => {
+                    warn!("Upstream connection lost, shutting down");
+                    cancel_token.cancel();
+                    break;
+                }
+
                 _ = cancel_token.cancelled() => {
-                    info!("Shutting down stratum server");
+                    info!("Shutting down proxy");
                     break;
                 }
             }
@@ -87,7 +114,7 @@ impl Pool {
 
         info!("Waiting for {} tasks to complete...", tasks.len());
         while tasks.join_next().await.is_some() {}
-        info!("All pool tasks stopped");
+        info!("All proxy tasks stopped");
 
         Ok(())
     }
