@@ -2,7 +2,7 @@ use super::*;
 
 #[derive(Clone, Debug, Parser)]
 pub(crate) struct ProxyOptions {
-    #[arg(long, help = "Upstream stratum pool <HOST:PORT>.")]
+    #[arg(long, help = "Upstream stratum endpoint <HOST:PORT>.")]
     pub(crate) upstream: String,
 
     #[arg(long, help = "Run on <CHAIN>.")]

@@ -77,7 +77,7 @@ impl Metatron {
         let worker = self.get_or_create_worker(share.address.clone(), &share.workername);
 
         if share.result {
-            let pool_diff = share.pool_diff.expect("accepted share must have pool_diff"); // TODO
+            let pool_diff = share.pool_diff.expect("accepted share must have pool_diff");
             worker.record_accepted(pool_diff, share.share_diff);
         } else {
             worker.record_rejected();

@@ -1,7 +1,6 @@
 use {
     anyhow::{Context, Error, anyhow, bail, ensure},
     arguments::Arguments,
-    argus::Argus,
     axum::{
         Extension, Json, Router,
         extract::{DefaultBodyLimit, FromRequestParts},
@@ -44,8 +43,8 @@ use {
     jobs::Jobs,
     lru::LruCache,
     metatron::Metatron,
+    metrics::Metrics,
     mode::Mode,
-    nexus::Nexus,
     reqwest::Url,
     rust_embed::RustEmbed,
     rustls_acme::{
@@ -111,6 +110,7 @@ use {
     tracing::{debug, error, info, warn},
     tracing_appender::non_blocking,
     tracing_subscriber::EnvFilter,
+    upstream::Upstream,
     user::User,
     utoipa::{OpenApi, ToSchema},
     vardiff::Vardiff,
@@ -122,7 +122,6 @@ use {
 
 pub mod api;
 mod arguments;
-mod argus;
 mod block_template;
 mod chain;
 pub mod ckpool;
@@ -134,8 +133,8 @@ mod http_server;
 mod job;
 mod jobs;
 mod metatron;
+mod metrics;
 mod mode;
-mod nexus;
 mod session;
 pub mod settings;
 mod share;
@@ -144,6 +143,7 @@ mod stratifier;
 pub mod stratum;
 pub mod subcommand;
 mod throbber;
+mod upstream;
 mod user;
 mod vardiff;
 mod workbase;

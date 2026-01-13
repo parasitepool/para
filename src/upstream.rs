@@ -4,18 +4,18 @@ use {
     tokio::sync::RwLock,
 };
 
-pub(crate) struct Nexus {
+pub(crate) struct Upstream {
     client: Client,
     enonce1: Extranonce,
     enonce2_size: usize,
     connected: Arc<AtomicBool>,
-    upstream: String,
-    upstream_diff: Arc<RwLock<Difficulty>>,
-    upstream_accepted: Arc<AtomicU64>,
-    upstream_rejected: Arc<AtomicU64>,
+    endpoint: String,
+    difficulty: Arc<RwLock<Difficulty>>,
+    accepted: Arc<AtomicU64>,
+    rejected: Arc<AtomicU64>,
 }
 
-impl Nexus {
+impl Upstream {
     pub(crate) async fn connect(settings: Arc<Settings>) -> Result<(Self, EventReceiver)> {
         let username = settings.upstream_username()?;
         let upstream = settings.upstream()?;
@@ -57,10 +57,10 @@ impl Nexus {
                 enonce1: subscribe_result.enonce1,
                 enonce2_size: subscribe_result.enonce2_size,
                 connected: Arc::new(AtomicBool::new(false)),
-                upstream: upstream.to_string(),
-                upstream_diff: Arc::new(RwLock::new(Difficulty::from(1))),
-                upstream_accepted: Arc::new(AtomicU64::new(0)),
-                upstream_rejected: Arc::new(AtomicU64::new(0)),
+                endpoint: upstream.to_string(),
+                difficulty: Arc::new(RwLock::new(Difficulty::from(1))),
+                accepted: Arc::new(AtomicU64::new(0)),
+                rejected: Arc::new(AtomicU64::new(0)),
             },
             events,
         ))
@@ -91,7 +91,7 @@ impl Nexus {
             match events.recv().await {
                 Ok(Event::SetDifficulty(diff)) => {
                     info!("Received initial difficulty: {}", diff);
-                    *self.upstream_diff.write().await = diff;
+                    *self.difficulty.write().await = diff;
                     initial_difficulty = Some(diff);
                 }
                 Ok(Event::Notify(notify)) => {
@@ -122,19 +122,19 @@ impl Nexus {
         let (share_tx, mut share_rx) = mpsc::channel::<Share>(SHARE_CHANNEL_CAPACITY);
 
         let connected = self.connected.clone();
-        let upstream_difficulty = self.upstream_diff.clone();
+        let upstream_difficulty = self.difficulty.clone();
 
-        let nexus = self;
+        let upstream = self;
         tasks.spawn(async move {
             loop {
                 tokio::select! {
                     biased;
 
                     _ = cancel.cancelled() => {
-                        info!("Shutting down nexus, draining {} pending shares", share_rx.len());
+                        info!("Shutting down upstream, draining {} pending shares", share_rx.len());
 
                         while let Ok(share) = share_rx.try_recv() {
-                            nexus.submit_share(share).await;
+                            upstream.submit_share(share).await;
                         }
 
                         break;
@@ -167,7 +167,7 @@ impl Nexus {
                     }
 
                     Some(share) = share_rx.recv() => {
-                        nexus.submit_share(share).await;
+                        upstream.submit_share(share).await;
                     }
                 }
             }
@@ -181,7 +181,7 @@ impl Nexus {
             return;
         }
 
-        let upstream_diff = *self.upstream_diff.read().await;
+        let upstream_diff = *self.difficulty.read().await;
         if share.share_diff < upstream_diff {
             debug!(
                 "Share below upstream difficulty: share_diff={} < upstream_diff={}",
@@ -200,8 +200,8 @@ impl Nexus {
         let ntime = share.ntime;
         let nonce = share.nonce;
         let version_bits = share.version_bits;
-        let accepted = self.upstream_accepted.clone();
-        let rejected = self.upstream_rejected.clone();
+        let accepted = self.accepted.clone();
+        let rejected = self.rejected.clone();
 
         tokio::spawn(async move {
             match client
@@ -239,7 +239,7 @@ impl Nexus {
     }
 
     pub(crate) async fn upstream_difficulty(&self) -> Difficulty {
-        *self.upstream_diff.read().await
+        *self.difficulty.read().await
     }
 
     pub(crate) fn is_connected(&self) -> bool {
@@ -247,7 +247,7 @@ impl Nexus {
     }
 
     pub(crate) fn upstream(&self) -> &str {
-        &self.upstream
+        &self.endpoint
     }
 
     pub(crate) fn username(&self) -> &Username {
@@ -255,10 +255,10 @@ impl Nexus {
     }
 
     pub(crate) fn upstream_accepted(&self) -> u64 {
-        self.upstream_accepted.load(Ordering::Relaxed)
+        self.accepted.load(Ordering::Relaxed)
     }
 
     pub(crate) fn upstream_rejected(&self) -> u64 {
-        self.upstream_rejected.load(Ordering::Relaxed)
+        self.rejected.load(Ordering::Relaxed)
     }
 }

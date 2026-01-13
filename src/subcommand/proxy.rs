@@ -22,15 +22,15 @@ impl Proxy {
                 .context("failed to create settings")?,
         );
 
-        let (nexus, events) = Nexus::connect(settings.clone()).await?;
-        let nexus = Arc::new(nexus);
+        let (upstream, events) = Upstream::connect(settings.clone()).await?;
+        let upstream = Arc::new(upstream);
 
         let mode = Mode::Proxy {
-            enonce1: nexus.enonce1().clone(),
-            enonce2_size: nexus.enonce2_size(),
+            enonce1: upstream.enonce1().clone(),
+            enonce2_size: upstream.enonce2_size(),
         };
 
-        let (workbase_rx, sink_tx) = nexus
+        let (workbase_rx, sink_tx) = upstream
             .clone()
             .spawn(events, cancel_token.clone(), &mut tasks)
             .await
@@ -41,14 +41,14 @@ impl Proxy {
             .clone()
             .spawn(Some(sink_tx), cancel_token.clone(), &mut tasks);
 
-        let argus = Arc::new(Argus {
-            nexus: nexus.clone(),
+        let metrics = Arc::new(Metrics {
+            upstream: upstream.clone(),
             metatron: metatron.clone(),
         });
 
         http_server::spawn(
             &settings,
-            api::proxy::router(argus.clone()),
+            api::proxy::router(metrics.clone()),
             cancel_token.clone(),
             &mut tasks,
         )?;
@@ -62,7 +62,7 @@ impl Proxy {
         info!("Stratum server listening for downstream miners on {address}:{port}");
 
         if !integration_test() && !logs_enabled() {
-            spawn_throbber(argus, cancel_token.clone(), &mut tasks);
+            spawn_throbber(metrics, cancel_token.clone(), &mut tasks);
         }
 
         loop {
@@ -96,7 +96,7 @@ impl Proxy {
                 }
 
                 _ = async {
-                    while nexus.is_connected() {
+                    while upstream.is_connected() {
                         tokio::time::sleep(Duration::from_secs(1)).await;
                     }
                 } => {

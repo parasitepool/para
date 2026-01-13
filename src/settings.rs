@@ -11,7 +11,7 @@ pub(crate) struct Settings {
     address: String,
     port: u16,
     api_port: Option<u16>,
-    upstream: Option<String>,
+    upstream_endpoint: Option<String>,
     upstream_username: Option<Username>,
     upstream_password: Option<String>,
     timeout: Duration,
@@ -43,7 +43,7 @@ impl Default for Settings {
             address: "0.0.0.0".into(),
             port: 42069,
             api_port: None,
-            upstream: None,
+            upstream_endpoint: None,
             upstream_username: None,
             upstream_password: None,
             timeout: Duration::from_secs(30),
@@ -79,7 +79,7 @@ impl Settings {
             address: options.address.unwrap_or_else(|| "0.0.0.0".into()),
             port: options.port.unwrap_or(42069),
             api_port: options.api_port,
-            upstream: None,
+            upstream_endpoint: None,
             upstream_username: None,
             upstream_password: None,
             timeout: Duration::from_secs(30),
@@ -122,7 +122,7 @@ impl Settings {
             address: options.address.unwrap_or_else(|| "0.0.0.0".into()),
             port: options.port.unwrap_or(42069),
             api_port: options.api_port,
-            upstream: Some(options.upstream),
+            upstream_endpoint: Some(options.upstream),
             upstream_username: Some(options.username),
             upstream_password: options.password,
             timeout: Duration::from_secs(options.timeout.unwrap_or(30)),
@@ -283,7 +283,7 @@ impl Settings {
     }
 
     pub(crate) fn upstream(&self) -> Result<&str> {
-        self.upstream
+        self.upstream_endpoint
             .as_deref()
             .context("upstream not configured (required for proxy mode)")
     }
@@ -683,7 +683,10 @@ mod tests {
             parse_proxy_options("para proxy --upstream pool.example.com:3333 --username bc1qtest");
         let settings = Settings::from_proxy_options(options).unwrap();
 
-        assert_eq!(settings.upstream, Some("pool.example.com:3333".into()));
+        assert_eq!(
+            settings.upstream_endpoint,
+            Some("pool.example.com:3333".into())
+        );
         assert_eq!(
             settings.upstream_username.as_ref().map(|u| u.to_string()),
             Some("bc1qtest".into())
