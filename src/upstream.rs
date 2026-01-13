@@ -203,8 +203,6 @@ impl Upstream {
         let accepted = self.accepted.clone();
         let rejected = self.rejected.clone();
 
-        // let enonce2 = self.proxy_enonce.reconstruct_upstream_enonce2(&share.enonce1, &share.enonce2);
-
         tokio::spawn(async move {
             match client
                 .submit_async(job_id, share.enonce2, ntime, nonce, version_bits) // TODO

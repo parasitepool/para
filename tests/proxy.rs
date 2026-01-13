@@ -31,19 +31,19 @@ async fn proxy() {
     let client = proxy.stratum_client();
     let mut events = client.connect().await.expect("Failed to connect to proxy");
 
-    let (subscribe_result, _, _) = client
+    let (subscribe, _, _) = client
         .subscribe()
         .await
         .expect("Failed to subscribe through proxy");
 
     assert_eq!(
-        subscribe_result.enonce2_size, status.enonce2_size,
-        "Proxy should relay upstream's enonce2_size"
+        subscribe.enonce1, status.enonce1,
+        "Proxy should relay upstream's enonce1"
     );
 
     assert_eq!(
-        subscribe_result.enonce1, status.enonce1,
-        "Proxy should relay upstream's enonce1"
+        subscribe.enonce2_size, status.enonce2_size,
+        "Proxy should relay upstream's enonce2_size"
     );
 
     client.authorize().await.expect("Failed to authorize");
@@ -57,15 +57,15 @@ async fn proxy() {
         "Difficulty should match configured start_diff"
     );
 
-    let enonce2 = Extranonce::random(subscribe_result.enonce2_size);
-    let (ntime, nonce) = solve_share(&notify, &subscribe_result.enonce1, &enonce2, difficulty);
+    let enonce2 = Extranonce::random(subscribe.enonce2_size);
+    let (ntime, nonce) = solve_share(&notify, &subscribe.enonce1, &enonce2, difficulty);
 
     client
         .submit(notify.job_id, enonce2, ntime, nonce, None)
         .await
         .expect("Valid share should be accepted by proxy");
 
-    let bad_enonce2 = Extranonce::random(subscribe_result.enonce2_size);
+    let bad_enonce2 = Extranonce::random(subscribe.enonce2_size);
     let result = client
         .submit(
             notify.job_id,
