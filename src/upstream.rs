@@ -205,7 +205,7 @@ impl Upstream {
 
         tokio::spawn(async move {
             match client
-                .submit_async(job_id, share.enonce2, ntime, nonce, version_bits) // TODO
+                .submit_async(job_id, share.enonce2, ntime, nonce, version_bits)
                 .await
             {
                 Ok(handle) => match handle.wait().await {
