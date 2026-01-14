@@ -122,7 +122,7 @@ impl<W: Workbase> Stratifier<W> {
                         "mining.authorize" => {
                             debug!("AUTHORIZE from {} with {params}", self.socket_addr);
 
-                            if !self.state.can_authorize() {
+                            if !self.state.is_subscribed() {
                                 self.send_error(
                                     id.clone(),
                                     StratumError::MethodNotAllowed,
@@ -143,7 +143,7 @@ impl<W: Workbase> Stratifier<W> {
                         "mining.submit" => {
                             debug!("SUBMIT from {} with params {params}", self.socket_addr);
 
-                            if !self.state.can_submit() {
+                            if !self.state.is_working() {
                                 self.send_error(id.clone(), StratumError::Unauthorized, None)
                                     .await?;
                                 continue;

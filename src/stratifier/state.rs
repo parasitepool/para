@@ -128,20 +128,11 @@ impl State {
         matches!(self, State::Fresh { .. })
     }
 
-    #[allow(dead_code)]
     pub(crate) fn is_subscribed(&self) -> bool {
         matches!(self, State::Subscribed { .. })
     }
 
     pub(crate) fn is_working(&self) -> bool {
-        matches!(self, State::Working { .. })
-    }
-
-    pub(crate) fn can_authorize(&self) -> bool {
-        matches!(self, State::Subscribed { .. })
-    }
-
-    pub(crate) fn can_submit(&self) -> bool {
         matches!(self, State::Working { .. })
     }
 }
@@ -185,8 +176,6 @@ mod tests {
         assert!(state.is_fresh());
         assert!(!state.is_subscribed());
         assert!(!state.is_working());
-        assert!(!state.can_authorize());
-        assert!(!state.can_submit());
         assert!(state.version_mask().is_none());
         assert!(state.enonce1().is_none());
     }
@@ -212,8 +201,6 @@ mod tests {
         assert!(!state.is_fresh());
         assert!(state.is_subscribed());
         assert!(!state.is_working());
-        assert!(state.can_authorize());
-        assert!(!state.can_submit());
         assert_eq!(state.enonce1(), Some(&enonce1));
         assert_eq!(state.user_agent(), Some("test/1.0"));
     }
@@ -239,8 +226,7 @@ mod tests {
 
         assert!(result.is_ok());
         assert!(state.is_working());
-        assert!(state.can_submit());
-        assert!(!state.can_authorize());
+        assert!(!state.is_subscribed());
         assert_eq!(state.address(), Some(&test_address()));
         assert_eq!(state.workername(), Some("worker1"));
     }
@@ -286,8 +272,6 @@ mod tests {
 
         assert!(state.is_subscribed());
         assert!(!state.is_working());
-        assert!(state.can_authorize());
-        assert!(!state.can_submit());
         assert_eq!(state.enonce1(), Some(&new_enonce1));
         assert!(state.address().is_none());
     }
