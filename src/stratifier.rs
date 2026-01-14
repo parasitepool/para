@@ -343,8 +343,7 @@ impl<W: Workbase> Stratifier<W> {
     }
 
     async fn subscribe(&mut self, id: Id, subscribe: Subscribe) -> Result {
-        // Handle resubscription: reset jobs and vardiff
-        if !self.state.is_fresh() {
+        if !self.state.not_subscribed() {
             info!("Client {} resubscribing", self.socket_addr);
             self.jobs = Jobs::<W>::new();
             self.vardiff = Vardiff::new(
@@ -357,9 +356,9 @@ impl<W: Workbase> Stratifier<W> {
         }
 
         let (enonce1, enonce2_size) = if let Some(ref requested_enonce1) = subscribe.enonce1 {
-            let enonce1 = if let Some(snapshot) = self.metatron.take_session(requested_enonce1) {
-                info!("Resuming session for enonce1 {}", snapshot.enonce1);
-                snapshot.enonce1
+            let enonce1 = if let Some(session) = self.metatron.take_session(requested_enonce1) {
+                info!("Resuming session for enonce1 {}", session.enonce1);
+                session.enonce1
             } else {
                 self.metatron.next_enonce1()
             };

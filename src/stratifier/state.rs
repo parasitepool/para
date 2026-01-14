@@ -123,7 +123,7 @@ impl State {
         }
     }
 
-    pub(crate) fn is_fresh(&self) -> bool {
+    pub(crate) fn not_subscribed(&self) -> bool {
         matches!(self, State::Init | State::Configured { .. })
     }
 
@@ -171,7 +171,7 @@ mod tests {
         let state = State::new();
 
         assert!(matches!(state, State::Init));
-        assert!(state.is_fresh());
+        assert!(state.not_subscribed());
         assert!(!state.is_subscribed());
         assert!(!state.is_working());
         assert!(state.version_mask().is_none());
@@ -186,7 +186,7 @@ mod tests {
         assert!(state.configure(mask).is_ok());
 
         assert!(matches!(state, State::Configured { .. }));
-        assert!(state.is_fresh());
+        assert!(state.not_subscribed());
         assert_eq!(state.version_mask(), Some(mask));
     }
 
@@ -234,7 +234,7 @@ mod tests {
 
         state.subscribe(enonce1.clone(), "test/1.0".into());
 
-        assert!(!state.is_fresh());
+        assert!(!state.not_subscribed());
         assert!(state.is_subscribed());
         assert!(!state.is_working());
         assert_eq!(state.enonce1(), Some(&enonce1));
@@ -268,13 +268,13 @@ mod tests {
     }
 
     #[test]
-    fn authorize_in_fresh_fails() {
+    fn authorize_in_init_fails() {
         let mut state = State::new();
 
         let result = state.authorize(test_address(), "worker1".into(), test_username());
 
         assert!(result.is_err());
-        assert!(state.is_fresh());
+        assert!(state.not_subscribed());
     }
 
     #[test]
