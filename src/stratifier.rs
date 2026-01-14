@@ -445,10 +445,9 @@ impl<W: Workbase> Stratifier<W> {
 
         let workername = authorize.username.workername().to_string();
 
-        // Transition state to Working // TODO
         self.state
             .authorize(address, workername, authorize.username)
-            .expect("authorize called when state.can_authorize() was true");
+            .map_err(|e| anyhow!("state.authorize failed: {e}"))?;
 
         self.bouncer.authorize();
 
@@ -493,7 +492,7 @@ impl<W: Workbase> Stratifier<W> {
                 None,
                 BlockHash::all_zeros(),
                 Some(StratumError::WorkerMismatch),
-            );
+            )?;
 
             let consequence = self.bouncer.reject();
             self.handle_consequence(consequence).await;
@@ -509,7 +508,7 @@ impl<W: Workbase> Stratifier<W> {
                 None,
                 BlockHash::all_zeros(),
                 Some(StratumError::Stale),
-            );
+            )?;
 
             let consequence = self.bouncer.reject();
             self.handle_consequence(consequence).await;
@@ -543,7 +542,7 @@ impl<W: Workbase> Stratifier<W> {
                 None,
                 BlockHash::all_zeros(),
                 Some(StratumError::InvalidNonce2Length),
-            );
+            )?;
 
             let consequence = self.bouncer.reject();
             self.handle_consequence(consequence).await;
@@ -571,7 +570,7 @@ impl<W: Workbase> Stratifier<W> {
                 None,
                 BlockHash::all_zeros(),
                 Some(StratumError::NtimeOutOfRange),
-            );
+            )?;
 
             let consequence = self.bouncer.reject();
             self.handle_consequence(consequence).await;
@@ -594,7 +593,7 @@ impl<W: Workbase> Stratifier<W> {
                     None,
                     BlockHash::all_zeros(),
                     Some(StratumError::InvalidVersionMask),
-                );
+                )?;
                 let consequence = self.bouncer.reject();
                 self.handle_consequence(consequence).await;
 
@@ -643,7 +642,7 @@ impl<W: Workbase> Stratifier<W> {
                 None,
                 hash,
                 Some(StratumError::Duplicate),
-            );
+            )?;
             let consequence = self.bouncer.reject();
 
             self.handle_consequence(consequence).await;
@@ -683,7 +682,7 @@ impl<W: Workbase> Stratifier<W> {
             })
             .await?;
 
-            self.emit_share(&submit, job.height(), Some(current_diff), hash, None);
+            self.emit_share(&submit, job.height(), Some(current_diff), hash, None)?;
 
             self.bouncer.accept();
 
@@ -724,7 +723,7 @@ impl<W: Workbase> Stratifier<W> {
             Some(current_diff),
             hash,
             Some(StratumError::AboveTarget),
-        );
+        )?;
 
         let consequence = self.bouncer.reject();
         self.handle_consequence(consequence).await;
@@ -739,23 +738,16 @@ impl<W: Workbase> Stratifier<W> {
         pool_diff: Option<Difficulty>,
         hash: BlockHash,
         reject_reason: Option<StratumError>,
-    ) {
-        // In Working state, all these are guaranteed to be present TODO
-        let address = self
-            .state
-            .address()
-            .expect("emit_share called before authorize")
-            .clone();
+    ) -> Result<()> {
+        let address = self.state.address().context("missing address")?.clone();
+
         let workername = self
             .state
             .workername()
-            .expect("emit_share called before authorize")
+            .context("missing workername")?
             .to_string();
-        let enonce1 = self
-            .state
-            .enonce1()
-            .expect("emit_share called before authorize")
-            .clone();
+
+        let enonce1 = self.state.enonce1().context("missing enonce1")?.clone();
 
         let event = Share::new(
             height,
@@ -777,6 +769,8 @@ impl<W: Workbase> Stratifier<W> {
         if self.share_tx.try_send(event).is_err() {
             error!("Share channel full, dropping share");
         }
+
+        Ok(())
     }
 
     async fn read_message(&mut self) -> Result<Option<Message>> {
