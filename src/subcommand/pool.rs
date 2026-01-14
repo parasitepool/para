@@ -64,10 +64,10 @@ impl Pool {
 
                     tasks.spawn(async move {
                         let mut stratifier: Stratifier<BlockTemplate> = Stratifier::new(
+                            addr,
                             settings.clone(),
                             metatron,
                             share_tx,
-                            addr,
                             stream,
                             workbase_rx,
                             conn_cancel_token,

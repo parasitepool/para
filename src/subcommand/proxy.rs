@@ -75,10 +75,10 @@ impl Proxy {
 
                     tasks.spawn(async move {
                         let mut stratifier: Stratifier<Notify> = Stratifier::new(
+                            addr,
                             settings,
                             metatron,
                             share_tx,
-                            addr,
                             stream,
                             workbase_rx,
                             conn_cancel_token,

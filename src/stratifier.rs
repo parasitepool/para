@@ -1,36 +1,26 @@
 use {
     super::*,
     bouncer::{Bouncer, Consequence},
+    state::State,
 };
 
-mod bouncer;
+pub(crate) use session::SessionSnapshot;
 
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum State {
-    Init,
-    Configured,
-    Subscribed,
-    Working,
-}
+mod bouncer;
+mod session;
+mod state;
 
 pub(crate) struct Stratifier<W: Workbase> {
+    state: State,
+    socket_addr: SocketAddr,
     settings: Arc<Settings>,
     metatron: Arc<Metatron>,
     share_tx: mpsc::Sender<Share>,
-    socket_addr: SocketAddr,
     reader: FramedRead<OwnedReadHalf, LinesCodec>,
     writer: FramedWrite<OwnedWriteHalf, LinesCodec>,
     workbase_rx: watch::Receiver<Arc<W>>,
     cancel_token: CancellationToken,
     jobs: Jobs<W>,
-    state: State,
-    address: Option<Address>,
-    workername: Option<String>,
-    authorized_username: Option<Username>,
-    authorized: Option<SystemTime>,
-    version_mask: Option<Version>,
-    enonce1: Option<Extranonce>,
-    user_agent: Option<String>,
     vardiff: Vardiff,
     bouncer: Bouncer,
     dropped_by_bouncer: bool,
@@ -39,10 +29,10 @@ pub(crate) struct Stratifier<W: Workbase> {
 impl<W: Workbase> Stratifier<W> {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
+        socket_addr: SocketAddr,
         settings: Arc<Settings>,
         metatron: Arc<Metatron>,
         share_tx: mpsc::Sender<Share>,
-        socket_addr: SocketAddr,
         tcp_stream: TcpStream,
         workbase_rx: watch::Receiver<Arc<W>>,
         cancel_token: CancellationToken,
@@ -64,23 +54,16 @@ impl<W: Workbase> Stratifier<W> {
         metatron.add_connection();
 
         Self {
+            state: State::new(),
+            socket_addr,
             settings,
             metatron,
             share_tx,
-            socket_addr,
             reader: FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_MESSAGE_SIZE)),
             writer: FramedWrite::new(writer, LinesCodec::new()),
             workbase_rx,
             cancel_token,
             jobs: Jobs::new(),
-            state: State::Init,
-            address: None,
-            workername: None,
-            authorized_username: None,
-            authorized: None,
-            version_mask: None,
-            enonce1: None,
-            user_agent: None,
             vardiff,
             bouncer,
             dropped_by_bouncer: false,
@@ -139,13 +122,13 @@ impl<W: Workbase> Stratifier<W> {
                         "mining.authorize" => {
                             debug!("AUTHORIZE from {} with {params}", self.socket_addr);
 
-                            if self.state != State::Subscribed {
+                            if !self.state.can_authorize() {
                                 self.send_error(
                                     id.clone(),
                                     StratumError::MethodNotAllowed,
                                     Some(serde_json::json!({
                                         "method": "mining.authorize",
-                                        "current_state": format!("{:?}", self.state)
+                                        "current_state": self.state.to_string()
                                     })),
                                 )
                                 .await?;
@@ -160,7 +143,7 @@ impl<W: Workbase> Stratifier<W> {
                         "mining.submit" => {
                             debug!("SUBMIT from {} with params {params}", self.socket_addr);
 
-                            if self.state != State::Working {
+                            if !self.state.can_submit() {
                                 self.send_error(id.clone(), StratumError::Unauthorized, None)
                                     .await?;
                                 continue;
@@ -186,7 +169,7 @@ impl<W: Workbase> Stratifier<W> {
                         break;
                     }
 
-                    if self.state != State::Working {
+                    if !self.state.is_working() {
                         let _ = workbase_rx.borrow_and_update();
                         continue;
                     };
@@ -214,7 +197,8 @@ impl<W: Workbase> Stratifier<W> {
                         .unwrap_or(0)
                 );
 
-                if let (Some(address), Some(enonce1)) = (&self.address, &self.enonce1) {
+                if let (Some(address), Some(enonce1)) = (self.state.address(), self.state.enonce1())
+                {
                     let workbase = self.workbase_rx.borrow().clone();
 
                     match workbase.create_job(
@@ -222,7 +206,7 @@ impl<W: Workbase> Stratifier<W> {
                         self.metatron.enonce2_size(),
                         Some(address),
                         self.jobs.next_id(),
-                        self.version_mask,
+                        self.state.version_mask(),
                     ) {
                         Ok(job) => {
                             let new_job = Arc::new(job);
@@ -275,7 +259,7 @@ impl<W: Workbase> Stratifier<W> {
     }
 
     async fn workbase_update(&mut self, workbase: Arc<W>) -> Result {
-        let (address, enonce1) = match (&self.address, &self.enonce1) {
+        let (address, enonce1) = match (self.state.address(), self.state.enonce1()) {
             (Some(address), Some(enonce1)) => (address, enonce1.clone()),
             _ => return Ok(()),
         };
@@ -287,7 +271,7 @@ impl<W: Workbase> Stratifier<W> {
                     self.metatron.enonce2_size(),
                     Some(address),
                     self.jobs.next_id(),
-                    self.version_mask,
+                    self.state.version_mask(),
                 )
                 .context("failed to create job for template update")?,
         );
@@ -323,11 +307,7 @@ impl<W: Workbase> Stratifier<W> {
             };
 
             self.send(message).await?;
-            self.version_mask = Some(version_mask);
-
-            if self.state == State::Init {
-                self.state = State::Configured;
-            }
+            self.state.configure(version_mask);
         } else {
             warn!("Unsupported extension {:?}", configure);
 
@@ -350,7 +330,8 @@ impl<W: Workbase> Stratifier<W> {
     }
 
     async fn subscribe(&mut self, id: Id, subscribe: Subscribe) -> Result {
-        if matches!(self.state, State::Subscribed | State::Working) {
+        // Handle resubscription: reset jobs and vardiff
+        if !self.state.is_fresh() {
             info!("Client {} resubscribing", self.socket_addr);
             self.jobs = Jobs::<W>::new();
             self.vardiff = Vardiff::new(
@@ -360,15 +341,12 @@ impl<W: Workbase> Stratifier<W> {
                 self.settings.min_diff(),
                 self.settings.max_diff(),
             );
-            self.authorized = None;
-            self.address = None;
-            self.workername = None;
         }
 
         let (enonce1, enonce2_size) = if let Some(ref requested_enonce1) = subscribe.enonce1 {
-            let enonce1 = if let Some(session) = self.metatron.take_session(requested_enonce1) {
-                info!("Resuming session for enonce1 {}", session.enonce1);
-                session.enonce1
+            let enonce1 = if let Some(snapshot) = self.metatron.take_session(requested_enonce1) {
+                info!("Resuming session for enonce1 {}", snapshot.enonce1);
+                snapshot.enonce1
             } else {
                 self.metatron.next_enonce1()
             };
@@ -400,17 +378,16 @@ impl<W: Workbase> Stratifier<W> {
         })
         .await?;
 
-        self.enonce1 = Some(enonce1.clone());
-        self.user_agent = Some(subscribe.user_agent);
-        self.state = State::Subscribed;
+        self.state.subscribe(enonce1, subscribe.user_agent);
 
         Ok(())
     }
 
     async fn authorize(&mut self, id: Id, authorize: Authorize) -> Result {
         let enonce1 = self
-            .enonce1
-            .clone()
+            .state
+            .enonce1()
+            .cloned()
             .ok_or_else(|| anyhow!("missing enonce1 do SUBSCRIBE first"))?;
 
         let address = match authorize
@@ -441,7 +418,7 @@ impl<W: Workbase> Stratifier<W> {
                     self.metatron.enonce2_size(),
                     Some(&address),
                     self.jobs.next_id(),
-                    self.version_mask,
+                    self.state.version_mask(),
                 )
                 .context("failed to create job for authorize")?,
         );
@@ -454,10 +431,13 @@ impl<W: Workbase> Stratifier<W> {
         })
         .await?;
 
-        self.address = Some(address);
-        self.workername = Some(authorize.username.workername().to_string());
-        self.authorized_username = Some(authorize.username);
-        self.authorized = Some(SystemTime::now());
+        let workername = authorize.username.workername().to_string();
+
+        // Transition state to Working
+        self.state
+            .authorize(address, workername, authorize.username)
+            .expect("authorize called when state.can_authorize() was true");
+
         self.bouncer.authorize();
 
         debug!("Sending SET DIFFICULTY");
@@ -478,13 +458,11 @@ impl<W: Workbase> Stratifier<W> {
         })
         .await?;
 
-        self.state = State::Working;
-
         Ok(())
     }
 
     async fn submit(&mut self, id: Id, submit: Submit) -> Result<Consequence> {
-        if let Some(ref authorized) = self.authorized_username
+        if let Some(authorized) = self.state.authorized_username()
             && submit.username.as_str() != authorized.as_str()
         {
             self.send_error(
@@ -750,9 +728,22 @@ impl<W: Workbase> Stratifier<W> {
         hash: BlockHash,
         reject_reason: Option<StratumError>,
     ) {
-        let (address, workername, enonce1) = self
-            .worker_info()
-            .expect("emit_share called before authorize");
+        // In Working state, all these are guaranteed to be present
+        let address = self
+            .state
+            .address()
+            .expect("emit_share called before authorize")
+            .clone();
+        let workername = self
+            .state
+            .workername()
+            .expect("emit_share called before authorize")
+            .to_string();
+        let enonce1 = self
+            .state
+            .enonce1()
+            .expect("emit_share called before authorize")
+            .clone();
 
         let event = Share::new(
             height,
@@ -760,7 +751,7 @@ impl<W: Workbase> Stratifier<W> {
             workername,
             address,
             self.socket_addr,
-            self.user_agent.clone(),
+            self.state.user_agent().map(String::from),
             enonce1,
             submit.enonce2.clone(),
             submit.nonce,
@@ -773,15 +764,6 @@ impl<W: Workbase> Stratifier<W> {
 
         if self.share_tx.try_send(event).is_err() {
             error!("Share channel full, dropping share");
-        }
-    }
-
-    fn worker_info(&self) -> Option<(Address, String, Extranonce)> {
-        match (&self.address, &self.workername, &self.enonce1) {
-            (Some(address), Some(worker), Some(enonce1)) => {
-                Some((address.clone(), worker.clone(), enonce1.clone()))
-            }
-            _ => None,
         }
     }
 
@@ -828,10 +810,13 @@ impl<W: Workbase> Stratifier<W> {
 
 impl<W: Workbase> Drop for Stratifier<W> {
     fn drop(&mut self) {
+        // Only store session for resumption if we were in Working state and not dropped by bouncer
         if !self.dropped_by_bouncer
-            && let (Some(enonce1), Some(_authorized)) = (self.enonce1.take(), self.authorized)
+            && self.state.is_working()
+            && let Some(enonce1) = self.state.enonce1()
         {
-            self.metatron.store_session(SessionSnapshot::new(enonce1));
+            self.metatron
+                .store_session(SessionSnapshot::new(enonce1.clone()));
         }
 
         self.metatron.sub_connection();
