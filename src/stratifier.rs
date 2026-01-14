@@ -433,7 +433,7 @@ impl<W: Workbase> Stratifier<W> {
 
         let workername = authorize.username.workername().to_string();
 
-        // Transition state to Working
+        // Transition state to Working // TODO
         self.state
             .authorize(address, workername, authorize.username)
             .expect("authorize called when state.can_authorize() was true");
@@ -810,7 +810,6 @@ impl<W: Workbase> Stratifier<W> {
 
 impl<W: Workbase> Drop for Stratifier<W> {
     fn drop(&mut self) {
-        // Only store session for resumption if we were in Working state and not dropped by bouncer
         if !self.dropped_by_bouncer
             && self.state.is_working()
             && let Some(enonce1) = self.state.enonce1()

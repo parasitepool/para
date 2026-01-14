@@ -55,7 +55,7 @@ impl State {
         address: Address,
         workername: String,
         authorized_username: Username,
-    ) -> std::result::Result<(), StratumError> {
+    ) -> Result<(), StratumError> {
         match self {
             State::Subscribed {
                 enonce1,
