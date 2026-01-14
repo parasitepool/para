@@ -37,7 +37,8 @@ use {
     crate::{
         sync::BATCH_COUNTER,
         test_psql::{
-            create_test_block, create_test_shares, insert_test_account, insert_test_block,
+            create_test_block, create_test_shares, insert_test_account,
+            insert_test_account_with_diff, insert_test_block, insert_test_payout,
             insert_test_remote_shares, insert_test_shares, setup_test_schema,
         },
     },
@@ -61,7 +62,7 @@ use {
             miner::Share,
             server::{
                 account::{Account, AccountUpdate},
-                database::{Database, HighestDiff, Payout},
+                database::{Database, HighestDiff, Payout, SimulatedPayout},
             },
             sync::{ShareBatch, Sync, SyncResponse},
         },

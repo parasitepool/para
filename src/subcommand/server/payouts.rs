@@ -1,12 +1,13 @@
 use super::*;
 use crate::subcommand::server::database::{
-    FailedPayout, Payout, PendingPayout, Split, UpdatePayoutStatusRequest,
+    FailedPayout, Payout, PendingPayout, SimulatedPayout, Split, UpdatePayoutStatusRequest,
 };
 
 pub(crate) fn payouts_router(config: Arc<ServerConfig>, database: Database) -> Router {
     let mut router = Router::new()
         .route("/payouts", get(payouts_all))
         .route("/payouts/failed", get(payouts_failed))
+        .route("/payouts/simulate", get(payouts_simulate))
         .route("/payouts/{blockheight}", get(payouts))
         .route("/payouts/update", post(update_payout_status))
         .route(
@@ -74,6 +75,39 @@ pub(crate) async fn payouts_failed(
     Extension(database): Extension<Database>,
 ) -> ServerResult<Response> {
     Ok(Json(database.get_failed_payouts().await?).into_response())
+}
+
+/// Simulate payouts as if a block was found now
+#[utoipa::path(
+    get,
+    path = "/payouts/simulate",
+    security(("admin_token" = [])),
+    params(
+        ("coinbase_value" = Option<i64>, Query, description = "Coinbase value in sats (default: 312500000 for 3.125 BTC)")
+    ),
+    responses(
+        (status = 200, description = "Simulated payouts", body = Vec<SimulatedPayout>),
+    ),
+    tag = "payouts"
+)]
+pub(crate) async fn payouts_simulate(
+    Extension(database): Extension<Database>,
+    Query(params): Query<HashMap<String, String>>,
+) -> ServerResult<Response> {
+    let total_reward: i64 = params
+        .get("coinbase_value")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(312_500_000); // 3.125 BTC, current coinbase value
+    let finder_username = params
+        .get("coinbase_value")
+        .map_or("", |user| user.as_str());
+
+    Ok(Json(
+        database
+            .get_simulated_payouts(total_reward, finder_username)
+            .await?,
+    )
+    .into_response())
 }
 
 /// Get payouts for a specific block height
