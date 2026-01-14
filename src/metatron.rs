@@ -13,6 +13,12 @@ pub(crate) struct Metatron {
 
 impl Metatron {
     pub(crate) fn new(enonce1: Option<Extranonce>, enonce2_size: usize) -> Self {
+        let enonce2_size = if enonce1.is_some() {
+            enonce2_size - ENONCE1_EXTENSION_SIZE // TODO
+        } else {
+            enonce2_size
+        };
+
         Self {
             blocks: AtomicU64::new(0),
             started: Instant::now(),
