@@ -2,8 +2,10 @@ use super::*;
 
 #[derive(Debug, Clone)]
 pub(crate) enum State {
-    Fresh {
-        version_mask: Option<Version>,
+    Init,
+
+    Configured {
+        version_mask: Version,
     },
 
     Subscribed {
@@ -24,20 +26,16 @@ pub(crate) enum State {
 
 impl State {
     pub(crate) fn new() -> Self {
-        State::Fresh { version_mask: None }
+        State::Init
     }
 
-    pub(crate) fn configure(&mut self, version_mask: Version) {
+    pub(crate) fn configure(&mut self, version_mask: Version) -> Result<(), StratumError> {
         match self {
-            State::Fresh {
-                version_mask: vm, ..
-            } => *vm = Some(version_mask),
-            State::Subscribed {
-                version_mask: vm, ..
-            } => *vm = Some(version_mask),
-            State::Working {
-                version_mask: vm, ..
-            } => *vm = Some(version_mask),
+            State::Init | State::Configured { .. } => {
+                *self = State::Configured { version_mask };
+                Ok(())
+            }
+            _ => Err(StratumError::MethodNotAllowed),
         }
     }
 
@@ -78,7 +76,8 @@ impl State {
 
     pub(crate) fn version_mask(&self) -> Option<Version> {
         match self {
-            State::Fresh { version_mask } => *version_mask,
+            State::Init => None,
+            State::Configured { version_mask } => Some(*version_mask),
             State::Subscribed { version_mask, .. } => *version_mask,
             State::Working { version_mask, .. } => *version_mask,
         }
@@ -86,7 +85,7 @@ impl State {
 
     pub(crate) fn enonce1(&self) -> Option<&Extranonce> {
         match self {
-            State::Fresh { .. } => None,
+            State::Init | State::Configured { .. } => None,
             State::Subscribed { enonce1, .. } => Some(enonce1),
             State::Working { enonce1, .. } => Some(enonce1),
         }
@@ -94,7 +93,7 @@ impl State {
 
     pub(crate) fn user_agent(&self) -> Option<&str> {
         match self {
-            State::Fresh { .. } => None,
+            State::Init | State::Configured { .. } => None,
             State::Subscribed { user_agent, .. } => Some(user_agent),
             State::Working { user_agent, .. } => Some(user_agent),
         }
@@ -125,7 +124,7 @@ impl State {
     }
 
     pub(crate) fn is_fresh(&self) -> bool {
-        matches!(self, State::Fresh { .. })
+        matches!(self, State::Init | State::Configured { .. })
     }
 
     pub(crate) fn is_subscribed(&self) -> bool {
@@ -140,10 +139,8 @@ impl State {
 impl Display for State {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
-            State::Fresh { version_mask: None } => write!(f, "Init"),
-            State::Fresh {
-                version_mask: Some(_),
-            } => write!(f, "Configured"),
+            State::Init => write!(f, "Init"),
+            State::Configured { .. } => write!(f, "Configured"),
             State::Subscribed { .. } => write!(f, "Subscribed"),
             State::Working { .. } => write!(f, "Working"),
         }
@@ -170,9 +167,10 @@ mod tests {
     }
 
     #[test]
-    fn new_state_is_fresh() {
+    fn new_state_is_init() {
         let state = State::new();
 
+        assert!(matches!(state, State::Init));
         assert!(state.is_fresh());
         assert!(!state.is_subscribed());
         assert!(!state.is_working());
@@ -181,14 +179,52 @@ mod tests {
     }
 
     #[test]
-    fn configure_sets_version_mask_in_fresh() {
+    fn configure_transitions_init_to_configured() {
         let mut state = State::new();
         let mask = Version::from(0x1fffe000);
 
-        state.configure(mask);
+        assert!(state.configure(mask).is_ok());
 
+        assert!(matches!(state, State::Configured { .. }));
         assert!(state.is_fresh());
         assert_eq!(state.version_mask(), Some(mask));
+    }
+
+    #[test]
+    fn configure_is_idempotent_in_configured() {
+        let mut state = State::new();
+        let mask1 = Version::from(0x1fffe000);
+        let mask2 = Version::from(0x0ffff000);
+
+        state.configure(mask1).unwrap();
+        assert!(state.configure(mask2).is_ok());
+
+        assert_eq!(state.version_mask(), Some(mask2));
+    }
+
+    #[test]
+    fn configure_fails_in_subscribed() {
+        let mut state = State::new();
+
+        state.subscribe(test_enonce1(), "test/1.0".into());
+        let result = state.configure(Version::from(0x1fffe000));
+
+        assert!(result.is_err());
+        assert!(state.is_subscribed());
+    }
+
+    #[test]
+    fn configure_fails_in_working() {
+        let mut state = State::new();
+
+        state.subscribe(test_enonce1(), "test/1.0".into());
+        state
+            .authorize(test_address(), "worker1".into(), test_username())
+            .unwrap();
+        let result = state.configure(Version::from(0x1fffe000));
+
+        assert!(result.is_err());
+        assert!(state.is_working());
     }
 
     #[test]
@@ -210,7 +246,7 @@ mod tests {
         let mut state = State::new();
         let mask = Version::from(0x1fffe000);
 
-        state.configure(mask);
+        state.configure(mask).unwrap();
         state.subscribe(test_enonce1(), "test/1.0".into());
 
         assert!(state.is_subscribed());
@@ -277,26 +313,24 @@ mod tests {
     }
 
     #[test]
-    fn configure_works_in_all_states() {
+    fn configure_only_works_in_init_and_configured() {
         let mut state = State::new();
         let mask1 = Version::from(0x1fffe000);
         let mask2 = Version::from(0x0ffff000);
 
-        // Fresh
-        state.configure(mask1);
+        assert!(state.configure(mask1).is_ok());
         assert_eq!(state.version_mask(), Some(mask1));
 
-        // Subscribed
-        state.subscribe(test_enonce1(), "test/1.0".into());
-        state.configure(mask2);
+        assert!(state.configure(mask2).is_ok());
         assert_eq!(state.version_mask(), Some(mask2));
 
-        // Working
+        state.subscribe(test_enonce1(), "test/1.0".into());
+        assert!(state.configure(mask1).is_err());
+
         state
             .authorize(test_address(), "worker1".into(), test_username())
             .unwrap();
-        state.configure(mask1);
-        assert_eq!(state.version_mask(), Some(mask1));
+        assert!(state.configure(mask1).is_err());
     }
 
     #[test]
@@ -304,7 +338,7 @@ mod tests {
         let mut state = State::new();
         assert_eq!(state.to_string(), "Init");
 
-        state.configure(Version::from(0x1fffe000));
+        state.configure(Version::from(0x1fffe000)).unwrap();
         assert_eq!(state.to_string(), "Configured");
 
         state.subscribe(test_enonce1(), "test/1.0".into());

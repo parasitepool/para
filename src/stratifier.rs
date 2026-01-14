@@ -292,6 +292,20 @@ impl<W: Workbase> Stratifier<W> {
     async fn configure(&mut self, id: Id, configure: Configure) -> Result {
         if configure.version_rolling_mask.is_some() {
             let version_mask = self.settings.version_mask();
+
+            if let Err(err) = self.state.configure(version_mask) {
+                self.send_error(
+                    id,
+                    err,
+                    Some(serde_json::json!({
+                        "method": "mining.configure",
+                        "current_state": self.state.to_string()
+                    })),
+                )
+                .await?;
+                return Ok(());
+            }
+
             debug!(
                 "Configuring version rolling for {} with version mask {version_mask}",
                 self.socket_addr
@@ -307,7 +321,6 @@ impl<W: Workbase> Stratifier<W> {
             };
 
             self.send(message).await?;
-            self.state.configure(version_mask);
         } else {
             warn!("Unsupported extension {:?}", configure);
 
