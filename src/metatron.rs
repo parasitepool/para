@@ -23,7 +23,7 @@ impl Metatron {
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
-                    .as_secs(),
+                    .as_millis() as u64,
             ),
         }
     }
@@ -96,9 +96,12 @@ impl Metatron {
                 Extranonce::from_bytes(&bytes[..pool.enonce1_size()])
             }
             Extranonces::Proxy(proxy) => {
-                let mut bytes = proxy.upstream_enonce1().as_bytes().to_vec();
-                bytes.extend_from_slice(&counter.to_le_bytes()[..ENONCE1_EXTENSION_SIZE]);
-                Extranonce::from_bytes(&bytes)
+                let upstream = proxy.upstream_enonce1().as_bytes();
+                let mut bytes = [0u8; MAX_ENONCE_SIZE + ENONCE1_EXTENSION_SIZE];
+                bytes[..upstream.len()].copy_from_slice(upstream);
+                bytes[upstream.len()..upstream.len() + ENONCE1_EXTENSION_SIZE]
+                    .copy_from_slice(&counter.to_le_bytes()[..ENONCE1_EXTENSION_SIZE]);
+                Extranonce::from_bytes(&bytes[..upstream.len() + ENONCE1_EXTENSION_SIZE])
             }
         }
     }
