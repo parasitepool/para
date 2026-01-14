@@ -180,6 +180,28 @@ fn mine_through_proxy() {
     assert_eq!(output.len(), 1, "Should find exactly one share");
 }
 
+#[test]
+#[serial(bitcoind)]
+#[timeout(90000)]
+fn proxy_rejects_incompatible_upstream_enonce2_size() {
+    let pool = TestPool::spawn_with_args("--start-diff 0.00001 --enonce2-size 2");
+
+    let stderr = TestProxy::spawn_expect_failure(
+        &pool.stratum_endpoint(),
+        &signet_username().to_string(),
+        "--start-diff 0.00001",
+    );
+
+    assert!(
+        stderr.contains("upstream extranonce configuration incompatible with proxy mode")
+            || stderr.contains("too small to carve out")
+            || stderr.contains("miner enonce2 space")
+            || stderr.contains("below minimum"),
+        "Expected error about incompatible enonce configuration, got: {}",
+        stderr
+    );
+}
+
 #[tokio::test]
 #[serial(bitcoind)]
 #[timeout(90000)]
