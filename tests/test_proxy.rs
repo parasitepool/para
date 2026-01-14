@@ -10,37 +10,51 @@ pub(crate) struct TestProxy {
     api_port: u16,
 }
 
+fn allocate_ports() -> (u16, u16) {
+    (
+        TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port(),
+        TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port(),
+    )
+}
+
+fn build_proxy_command(
+    upstream: &str,
+    username: &str,
+    proxy_port: u16,
+    api_port: u16,
+    args: impl ToArgs,
+) -> CommandBuilder {
+    CommandBuilder::new(format!(
+        "proxy \
+            --chain signet \
+            --upstream {upstream} \
+            --username {username} \
+            --address 127.0.0.1 \
+            --port {proxy_port} \
+            --api-port {api_port} \
+            {}",
+        args.to_args().join(" ")
+    ))
+    .capture_stderr(true)
+    .capture_stdout(true)
+    .env("RUST_LOG", "info")
+    .integration_test(true)
+}
+
 impl TestProxy {
     pub(crate) fn spawn_with_args(upstream: &str, username: &str, args: impl ToArgs) -> Self {
-        let (proxy_port, api_port) = (
-            TcpListener::bind("127.0.0.1:0")
-                .unwrap()
-                .local_addr()
-                .unwrap()
-                .port(),
-            TcpListener::bind("127.0.0.1:0")
-                .unwrap()
-                .local_addr()
-                .unwrap()
-                .port(),
-        );
+        let (proxy_port, api_port) = allocate_ports();
 
-        let proxy_handle = CommandBuilder::new(format!(
-            "proxy \
-                --chain signet \
-                --upstream {upstream} \
-                --username {username} \
-                --address 127.0.0.1 \
-                --port {proxy_port} \
-                --api-port {api_port} \
-                {}",
-            args.to_args().join(" ")
-        ))
-        .capture_stderr(true)
-        .capture_stdout(true)
-        .env("RUST_LOG", "info")
-        .integration_test(true)
-        .spawn();
+        let proxy_handle =
+            build_proxy_command(upstream, username, proxy_port, api_port, args).spawn();
 
         for attempt in 0.. {
             match TcpStream::connect(format!("127.0.0.1:{api_port}")) {
@@ -60,6 +74,26 @@ impl TestProxy {
             proxy_port,
             api_port,
         }
+    }
+
+    pub(crate) fn spawn_expect_failure(
+        upstream: &str,
+        username: &str,
+        args: impl ToArgs,
+    ) -> String {
+        let (proxy_port, api_port) = allocate_ports();
+
+        let output = build_proxy_command(upstream, username, proxy_port, api_port, args)
+            .spawn()
+            .wait_with_output()
+            .expect("Failed to wait for proxy process");
+
+        assert!(
+            !output.status.success(),
+            "Expected proxy to fail but it succeeded"
+        );
+
+        String::from_utf8_lossy(&output.stderr).to_string()
     }
 
     pub(crate) fn stratum_endpoint(&self) -> String {

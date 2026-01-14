@@ -33,6 +33,7 @@ use {
     coinbase_builder::CoinbaseBuilder,
     dashmap::DashMap,
     decay::{DecayingAverage, calculate_time_bias},
+    extranonces::{Extranonces, PoolExtranonces, ProxyExtranonces},
     futures::{
         sink::SinkExt,
         stream::{FuturesUnordered, StreamExt},
@@ -44,7 +45,6 @@ use {
     lru::LruCache,
     metatron::Metatron,
     metrics::Metrics,
-    mode::Mode,
     reqwest::Url,
     rust_embed::RustEmbed,
     rustls_acme::{
@@ -61,7 +61,7 @@ use {
     serde_json::json,
     serde_with::{DeserializeFromStr, SerializeDisplay},
     session::SessionSnapshot,
-    settings::Settings,
+    settings::{PoolOptions, ProxyOptions, Settings},
     share::Share,
     snafu::Snafu,
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
@@ -127,6 +127,7 @@ mod chain;
 pub mod ckpool;
 mod coinbase_builder;
 mod decay;
+mod extranonces;
 mod generator;
 pub mod hash_rate;
 mod http_server;
@@ -134,7 +135,6 @@ mod job;
 mod jobs;
 mod metatron;
 mod metrics;
-mod mode;
 mod session;
 pub mod settings;
 mod share;
@@ -152,7 +152,10 @@ mod zmq;
 
 pub const COIN_VALUE: u64 = 100_000_000;
 pub const USER_AGENT: &str = "para/0.5.2";
+pub const MIN_ENONCE_SIZE: usize = 2;
+pub const MAX_ENONCE_SIZE: usize = 8;
 pub const ENONCE1_SIZE: usize = 4;
+pub const ENONCE1_EXTENSION_SIZE: usize = 2;
 pub const MAX_MESSAGE_SIZE: usize = 32 * 1024;
 pub const SHARE_CHANNEL_CAPACITY: usize = 100_000;
 pub const SUBSCRIPTION_ID: &str = "deadbeef";

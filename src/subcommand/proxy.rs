@@ -1,10 +1,6 @@
 use {
     super::*,
-    crate::{
-        api, http_server,
-        settings::{ProxyOptions, Settings},
-    },
-    stratum::Notify,
+    crate::{api, http_server},
 };
 
 #[derive(Parser, Debug)]
@@ -23,12 +19,8 @@ impl Proxy {
         );
 
         let (upstream, events) = Upstream::connect(settings.clone()).await?;
-        let upstream = Arc::new(upstream);
 
-        let mode = Mode::Proxy {
-            enonce1: upstream.enonce1().clone(),
-            enonce2_size: upstream.enonce2_size(),
-        };
+        let upstream = Arc::new(upstream);
 
         let (workbase_rx, sink_tx) = upstream
             .clone()
@@ -36,7 +28,12 @@ impl Proxy {
             .await
             .context("failed to start upstream event loop")?;
 
-        let metatron = Arc::new(Metatron::new());
+        let extranonces = Extranonces::Proxy(
+            ProxyExtranonces::new(upstream.enonce1().clone(), upstream.enonce2_size())
+                .context("upstream extranonce configuration incompatible with proxy mode")?,
+        );
+        let metatron = Arc::new(Metatron::new(extranonces));
+
         let share_tx = metatron
             .clone()
             .spawn(Some(sink_tx), cancel_token.clone(), &mut tasks);
@@ -74,13 +71,11 @@ impl Proxy {
                     let settings = settings.clone();
                     let metatron = metatron.clone();
                     let share_tx = share_tx.clone();
-                    let mode = mode.clone();
                     let conn_cancel_token = cancel_token.child_token();
 
                     tasks.spawn(async move {
                         let mut stratifier: Stratifier<Notify> = Stratifier::new(
                             settings,
-                            mode,
                             metatron,
                             share_tx,
                             addr,

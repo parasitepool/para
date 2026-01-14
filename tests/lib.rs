@@ -53,7 +53,7 @@ use {
     harness::bitcoind::Bitcoind,
     ntest::timeout,
     para::{
-        USER_AGENT, api,
+        ENONCE1_EXTENSION_SIZE, USER_AGENT, api,
         stratum::{
             self, ClientError, Difficulty, Extranonce, JobId, Nonce, Notify, Ntime, StratumError,
             Username, Version,

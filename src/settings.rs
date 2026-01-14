@@ -33,7 +33,8 @@ pub(crate) struct Settings {
     vardiff_period: Duration,
     vardiff_window: Duration,
     zmq_block_notifications: Endpoint,
-    extranonce2_size: u8,
+    enonce1_size: usize,
+    enonce2_size: usize,
     disable_bouncer: bool,
 }
 
@@ -65,7 +66,8 @@ impl Default for Settings {
             vardiff_period: Duration::from_secs(5),
             vardiff_window: Duration::from_secs(300),
             zmq_block_notifications: "tcp://127.0.0.1:28332".parse().unwrap(),
-            extranonce2_size: 8,
+            enonce1_size: ENONCE1_SIZE,
+            enonce2_size: MAX_ENONCE_SIZE,
             disable_bouncer: false,
         }
     }
@@ -109,7 +111,8 @@ impl Settings {
             zmq_block_notifications: options
                 .zmq_block_notifications
                 .unwrap_or_else(|| "tcp://127.0.0.1:28332".parse().unwrap()),
-            extranonce2_size: options.extranonce2_size.unwrap_or(8),
+            enonce1_size: options.enonce1_size.unwrap_or(ENONCE1_SIZE),
+            enonce2_size: options.enonce2_size.unwrap_or(MAX_ENONCE_SIZE),
             disable_bouncer: options.disable_bouncer,
         };
 
@@ -267,6 +270,34 @@ impl Settings {
             );
         }
 
+        ensure!(
+            self.enonce1_size >= MIN_ENONCE_SIZE,
+            "enonce1_size ({}) must be >= {}",
+            self.enonce1_size,
+            MIN_ENONCE_SIZE
+        );
+
+        ensure!(
+            self.enonce1_size <= MAX_ENONCE_SIZE,
+            "enonce1_size ({}) must be <= {}",
+            self.enonce1_size,
+            MAX_ENONCE_SIZE
+        );
+
+        ensure!(
+            self.enonce2_size >= MIN_ENONCE_SIZE,
+            "enonce2_size ({}) must be >= {}",
+            self.enonce2_size,
+            MIN_ENONCE_SIZE
+        );
+
+        ensure!(
+            self.enonce2_size <= MAX_ENONCE_SIZE,
+            "enonce2_size ({}) must be <= {}",
+            self.enonce2_size,
+            MAX_ENONCE_SIZE
+        );
+
         Ok(())
     }
 
@@ -346,8 +377,12 @@ impl Settings {
         &self.zmq_block_notifications
     }
 
-    pub(crate) fn extranonce2_size(&self) -> usize {
-        self.extranonce2_size as usize
+    pub(crate) fn enonce1_size(&self) -> usize {
+        self.enonce1_size
+    }
+
+    pub(crate) fn enonce2_size(&self) -> usize {
+        self.enonce2_size
     }
 
     pub(crate) fn disable_bouncer(&self) -> bool {
@@ -402,7 +437,8 @@ mod tests {
             settings.zmq_block_notifications.to_string(),
             "tcp://127.0.0.1:28332".to_string()
         );
-        assert_eq!(settings.extranonce2_size, 8);
+        assert_eq!(settings.enonce1_size, ENONCE1_SIZE);
+        assert_eq!(settings.enonce2_size, MAX_ENONCE_SIZE);
     }
 
     #[test]
@@ -595,40 +631,81 @@ mod tests {
     }
 
     #[test]
-    fn pool_extranonce2_size_default() {
+    fn pool_enonce1_size_default() {
         let options = parse_pool_options("para pool");
         let settings = Settings::from_pool_options(options).unwrap();
-        assert_eq!(settings.extranonce2_size, 8);
+        assert_eq!(settings.enonce1_size, ENONCE1_SIZE);
     }
 
     #[test]
-    fn pool_extranonce2_size_override() {
-        let options = parse_pool_options("para pool --extranonce2-size 4");
+    fn pool_enonce1_size_override() {
+        let options = parse_pool_options("para pool --enonce1-size 6");
         let settings = Settings::from_pool_options(options).unwrap();
-        assert_eq!(settings.extranonce2_size, 4);
+        assert_eq!(settings.enonce1_size, 6);
     }
 
     #[test]
-    fn pool_extranonce2_size_boundaries() {
-        let options = parse_pool_options("para pool --extranonce2-size 2");
+    fn pool_enonce1_size_boundaries() {
+        let options = parse_pool_options("para pool --enonce1-size 2");
         let settings = Settings::from_pool_options(options).unwrap();
-        assert_eq!(settings.extranonce2_size, 2);
+        assert_eq!(settings.enonce1_size, 2);
 
-        let options = parse_pool_options("para pool --extranonce2-size 8");
+        let options = parse_pool_options("para pool --enonce1-size 8");
         let settings = Settings::from_pool_options(options).unwrap();
-        assert_eq!(settings.extranonce2_size, 8);
+        assert_eq!(settings.enonce1_size, 8);
     }
 
     #[test]
-    #[should_panic(expected = "error parsing arguments")]
-    fn pool_extranonce2_size_too_small() {
-        parse_pool_options("para pool --extranonce2-size 1");
+    fn pool_enonce1_size_too_small() {
+        let options = parse_pool_options("para pool --enonce1-size 1");
+        let err = Settings::from_pool_options(options).unwrap_err();
+        assert!(err.to_string().contains("enonce1_size (1) must be >="));
     }
 
     #[test]
-    #[should_panic(expected = "error parsing arguments")]
-    fn pool_extranonce2_size_too_large() {
-        parse_pool_options("para pool --extranonce2-size 9");
+    fn pool_enonce1_size_too_large() {
+        let options = parse_pool_options("para pool --enonce1-size 9");
+        let err = Settings::from_pool_options(options).unwrap_err();
+        assert!(err.to_string().contains("enonce1_size (9) must be <="));
+    }
+
+    #[test]
+    fn pool_enonce2_size_default() {
+        let options = parse_pool_options("para pool");
+        let settings = Settings::from_pool_options(options).unwrap();
+        assert_eq!(settings.enonce2_size, MAX_ENONCE_SIZE);
+    }
+
+    #[test]
+    fn pool_enonce2_size_override() {
+        let options = parse_pool_options("para pool --enonce2-size 4");
+        let settings = Settings::from_pool_options(options).unwrap();
+        assert_eq!(settings.enonce2_size, 4);
+    }
+
+    #[test]
+    fn pool_enonce2_size_boundaries() {
+        let options = parse_pool_options("para pool --enonce2-size 2");
+        let settings = Settings::from_pool_options(options).unwrap();
+        assert_eq!(settings.enonce2_size, 2);
+
+        let options = parse_pool_options("para pool --enonce2-size 8");
+        let settings = Settings::from_pool_options(options).unwrap();
+        assert_eq!(settings.enonce2_size, 8);
+    }
+
+    #[test]
+    fn pool_enonce2_size_too_small() {
+        let options = parse_pool_options("para pool --enonce2-size 1");
+        let err = Settings::from_pool_options(options).unwrap_err();
+        assert!(err.to_string().contains("enonce2_size (1) must be >="));
+    }
+
+    #[test]
+    fn pool_enonce2_size_too_large() {
+        let options = parse_pool_options("para pool --enonce2-size 9");
+        let err = Settings::from_pool_options(options).unwrap_err();
+        assert!(err.to_string().contains("enonce2_size (9) must be <="));
     }
 
     #[test]

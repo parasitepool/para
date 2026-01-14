@@ -41,21 +41,21 @@ impl Upstream {
             .await
             .context("failed to connect to upstream")?;
 
-        let (subscribe_result, _, _) = client
+        let (subscribe, _, _) = client
             .subscribe()
             .await
             .context("failed to subscribe to upstream")?;
 
         info!(
             "Subscribed to upstream: enonce1={}, enonce2_size={}",
-            subscribe_result.enonce1, subscribe_result.enonce2_size
+            subscribe.enonce1, subscribe.enonce2_size
         );
 
         Ok((
             Self {
                 client,
-                enonce1: subscribe_result.enonce1,
-                enonce2_size: subscribe_result.enonce2_size,
+                enonce1: subscribe.enonce1,
+                enonce2_size: subscribe.enonce2_size,
                 connected: Arc::new(AtomicBool::new(false)),
                 endpoint: upstream.to_string(),
                 difficulty: Arc::new(RwLock::new(Difficulty::from(1))),
