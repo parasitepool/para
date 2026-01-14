@@ -1,9 +1,6 @@
 use {
     super::*,
-    crate::{
-        api, http_server,
-        settings::{PoolOptions, Settings},
-    },
+    crate::{api, http_server},
 };
 
 #[derive(Parser, Debug)]
@@ -25,7 +22,11 @@ impl Pool {
             .await
             .context("failed to subscribe to ZMQ block notifications")?;
 
-        let metatron = Arc::new(Metatron::new(None, settings.extranonce2_size()));
+        let extranonces = Extranonces::Pool(
+            PoolExtranonces::new(settings.enonce1_size(), settings.enonce2_size())
+                .context("invalid extranonce configuration")?,
+        );
+        let metatron = Arc::new(Metatron::new(extranonces));
         let share_tx = metatron
             .clone()
             .spawn(None, cancel_token.clone(), &mut tasks);

@@ -219,7 +219,7 @@ impl<W: Workbase> Stratifier<W> {
 
                     match workbase.create_job(
                         enonce1,
-                        self.settings.extranonce2_size(),
+                        self.settings.enonce2_size(),
                         Some(address),
                         self.jobs.next_id(),
                         self.version_mask,
@@ -284,7 +284,7 @@ impl<W: Workbase> Stratifier<W> {
             workbase
                 .create_job(
                     &enonce1,
-                    self.settings.extranonce2_size(),
+                    self.settings.enonce2_size(),
                     Some(address),
                     self.jobs.next_id(),
                     self.version_mask,
@@ -438,7 +438,7 @@ impl<W: Workbase> Stratifier<W> {
             workbase
                 .create_job(
                     &enonce1,
-                    self.settings.extranonce2_size(),
+                    self.settings.enonce2_size(),
                     Some(&address),
                     self.jobs.next_id(),
                     self.version_mask,

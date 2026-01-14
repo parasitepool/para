@@ -33,6 +33,7 @@ use {
     coinbase_builder::CoinbaseBuilder,
     dashmap::DashMap,
     decay::{DecayingAverage, calculate_time_bias},
+    extranonces::{Extranonces, PoolExtranonces, ProxyExtranonces},
     futures::{
         sink::SinkExt,
         stream::{FuturesUnordered, StreamExt},
@@ -60,7 +61,7 @@ use {
     serde_json::json,
     serde_with::{DeserializeFromStr, SerializeDisplay},
     session::SessionSnapshot,
-    settings::Settings,
+    settings::{PoolOptions, ProxyOptions, Settings},
     share::Share,
     snafu::Snafu,
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
@@ -126,6 +127,7 @@ mod chain;
 pub mod ckpool;
 mod coinbase_builder;
 mod decay;
+mod extranonces;
 mod generator;
 pub mod hash_rate;
 mod http_server;
@@ -150,6 +152,8 @@ mod zmq;
 
 pub const COIN_VALUE: u64 = 100_000_000;
 pub const USER_AGENT: &str = "para/0.5.2";
+pub const MIN_ENONCE_SIZE: usize = 2;
+pub const MAX_ENONCE_SIZE: usize = 8;
 pub const ENONCE1_SIZE: usize = 4;
 pub const ENONCE1_EXTENSION_SIZE: usize = 2;
 pub const MAX_MESSAGE_SIZE: usize = 32 * 1024;
@@ -164,13 +168,6 @@ type Result<T = (), E = Error> = std::result::Result<T, E>;
 
 fn target_as_block_hash(target: bitcoin::Target) -> BlockHash {
     BlockHash::from_raw_hash(Hash::from_byte_array(target.to_le_bytes()))
-}
-
-fn seed() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
 }
 
 async fn resolve_stratum_endpoint(stratum_endpoint: &str) -> Result<SocketAddr> {

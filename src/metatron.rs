@@ -6,28 +6,25 @@ pub(crate) struct Metatron {
     connections: AtomicU64,
     users: DashMap<Address, Arc<User>>,
     sessions: DashMap<Extranonce, SessionSnapshot>,
-    enonce1: Option<Extranonce>,
-    enonce2_size: usize,
+    extranonces: Extranonces,
     counter: AtomicU64,
 }
 
 impl Metatron {
-    pub(crate) fn new(enonce1: Option<Extranonce>, enonce2_size: usize) -> Self {
-        let enonce2_size = if enonce1.is_some() {
-            enonce2_size - ENONCE1_EXTENSION_SIZE // TODO
-        } else {
-            enonce2_size
-        };
-
+    pub(crate) fn new(extranonces: Extranonces) -> Self {
         Self {
             blocks: AtomicU64::new(0),
             started: Instant::now(),
             connections: AtomicU64::new(0),
             users: DashMap::new(),
             sessions: DashMap::new(),
-            enonce1,
-            enonce2_size,
-            counter: AtomicU64::new(seed()),
+            extranonces,
+            counter: AtomicU64::new(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+            ),
         }
     }
 
@@ -51,7 +48,7 @@ impl Metatron {
                         info!("Shutting down metatron, draining {} pending shares", share_rx.len());
 
                         while let Ok(share) = share_rx.try_recv() {
-                            self.process_share(&share, &sink);
+                            self.process_share(share, &sink);
                         }
 
                         break;
@@ -63,7 +60,7 @@ impl Metatron {
                     }
 
                     Some(share) = share_rx.recv() => {
-                        self.process_share(&share, &sink);
+                        self.process_share(share, &sink);
                     }
                 }
             }
@@ -72,7 +69,7 @@ impl Metatron {
         share_tx
     }
 
-    fn process_share(&self, share: &Share, sink: &Option<mpsc::Sender<Share>>) {
+    fn process_share(&self, share: Share, sink: &Option<mpsc::Sender<Share>>) {
         let worker = self.get_or_create_worker(share.address.clone(), &share.workername);
 
         if share.result {
@@ -83,41 +80,54 @@ impl Metatron {
         }
 
         if let Some(tx) = sink {
-            let share = self.reconstruct_enonces_for_upstream(share.clone()); // TODO
+            let share = self.reconstruct_enonces_for_upstream(share);
             if tx.try_send(share).is_err() {
                 warn!("Share sink full, dropping event");
             }
         }
     }
 
-    pub fn next_enonce1(&self) -> Extranonce {
-        if let Some(ref enonce1) = self.enonce1 {
-            let val = self.counter.fetch_add(1, Ordering::Relaxed);
-            let mut bytes = enonce1.as_bytes().to_vec();
-            bytes.extend_from_slice(&val.to_le_bytes()[..ENONCE1_EXTENSION_SIZE]);
-            Extranonce::from_bytes(&bytes)
-        } else {
-            let value = self.counter.fetch_add(1, Ordering::Relaxed);
-            let bytes = value.to_le_bytes();
-            Extranonce::from_bytes(&bytes[..ENONCE1_SIZE])
+    pub(crate) fn next_enonce1(&self) -> Extranonce {
+        let counter = self.counter.fetch_add(1, Ordering::Relaxed);
+
+        match &self.extranonces {
+            Extranonces::Pool(pool) => {
+                let bytes = counter.to_le_bytes();
+                Extranonce::from_bytes(&bytes[..pool.enonce1_size()])
+            }
+            Extranonces::Proxy(proxy) => {
+                let mut bytes = proxy.upstream_enonce1().as_bytes().to_vec();
+                bytes.extend_from_slice(&counter.to_le_bytes()[..ENONCE1_EXTENSION_SIZE]);
+                Extranonce::from_bytes(&bytes)
+            }
         }
     }
 
     pub(crate) fn enonce2_size(&self) -> usize {
-        self.enonce2_size
+        self.extranonces.enonce2_size()
     }
 
-    pub fn reconstruct_enonces_for_upstream(&self, share: Share) -> Share {
-        let upstream_enonce1_size = self.enonce1.clone().unwrap().len(); // TODO
-        let upstream_enonce1 = &share.enonce1.as_bytes()[..upstream_enonce1_size];
-        let extension = &share.enonce1.as_bytes()[upstream_enonce1_size..];
-        let mut upstream_enonce2 = extension.to_vec();
-        upstream_enonce2.extend_from_slice(share.enonce2.as_bytes());
+    fn reconstruct_enonces_for_upstream(&self, share: Share) -> Share {
+        match &self.extranonces {
+            Extranonces::Pool(_) => share,
+            Extranonces::Proxy(proxy) => {
+                let upstream_enonce1_size = proxy.upstream_enonce1().len();
+                let share_enonce1 = share.enonce1.as_bytes();
+                let share_enonce2 = share.enonce2.as_bytes();
+                let extension = &share_enonce1[upstream_enonce1_size..];
 
-        Share {
-            enonce1: Extranonce::from_bytes(upstream_enonce1),
-            enonce2: Extranonce::from_bytes(&upstream_enonce2),
-            ..share
+                let mut upstream_enonce2 =
+                    Vec::with_capacity(extension.len() + share_enonce2.len());
+
+                upstream_enonce2.extend_from_slice(extension);
+                upstream_enonce2.extend_from_slice(share_enonce2);
+
+                Share {
+                    enonce1: Extranonce::from_bytes(&share_enonce1[..upstream_enonce1_size]),
+                    enonce2: Extranonce::from_bytes(&upstream_enonce2),
+                    ..share
+                }
+            }
         }
     }
 
@@ -228,6 +238,30 @@ impl StatusLine for Metatron {
 mod tests {
     use super::*;
 
+    fn test_share(enonce1: Extranonce, enonce2: Extranonce) -> Share {
+        Share::new(
+            Some(100),
+            JobId::from(1),
+            "worker".to_string(),
+            test_address(),
+            "127.0.0.1:1234".parse().unwrap(),
+            None,
+            enonce1,
+            enonce2,
+            Nonce::from(0),
+            Ntime::from(0),
+            None,
+            Some(Difficulty::from(1.0)),
+            BlockHash::all_zeros(),
+            None,
+        )
+    }
+
+    fn proxy_extranonces() -> Extranonces {
+        let upstream_enonce1 = Extranonce::from_bytes(&[0xde, 0xad, 0xbe, 0xef]);
+        Extranonces::Proxy(ProxyExtranonces::new(upstream_enonce1, 8).unwrap())
+    }
+
     fn test_address() -> Address {
         "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc"
             .parse::<Address<bitcoin::address::NetworkUnchecked>>()
@@ -235,9 +269,13 @@ mod tests {
             .assume_checked()
     }
 
+    fn pool_extranonces() -> Extranonces {
+        Extranonces::Pool(PoolExtranonces::new(ENONCE1_SIZE, 8).unwrap())
+    }
+
     #[test]
     fn new_metatron_starts_at_zero() {
-        let metatron = Metatron::new(None, 8);
+        let metatron = Metatron::new(pool_extranonces());
         assert_eq!(metatron.total_connections(), 0);
         assert_eq!(metatron.accepted(), 0);
         assert_eq!(metatron.rejected(), 0);
@@ -248,7 +286,7 @@ mod tests {
 
     #[test]
     fn connection_count_increments_and_decrements() {
-        let metatron = Metatron::new(None, 8);
+        let metatron = Metatron::new(pool_extranonces());
         assert_eq!(metatron.total_connections(), 0);
 
         metatron.add_connection();
@@ -261,7 +299,7 @@ mod tests {
 
     #[test]
     fn get_or_create_worker_creates_user_and_worker() {
-        let metatron = Metatron::new(None, 8);
+        let metatron = Metatron::new(pool_extranonces());
         let addr = test_address();
 
         let worker = metatron.get_or_create_worker(addr.clone(), "rig1");
@@ -277,7 +315,7 @@ mod tests {
 
     #[test]
     fn rejected_count_increments() {
-        let metatron = Metatron::new(None, 8);
+        let metatron = Metatron::new(pool_extranonces());
         let addr = test_address();
         let worker = metatron.get_or_create_worker(addr, "rig1");
         worker.record_rejected();
@@ -287,13 +325,14 @@ mod tests {
 
     #[test]
     fn block_count_increments() {
-        let metatron = Metatron::new(None, 8);
+        let metatron = Metatron::new(pool_extranonces());
         metatron.add_block();
         assert_eq!(metatron.total_blocks(), 1);
     }
+
     #[test]
     fn next_enonce1_is_sequential() {
-        let metatron = Metatron::new(None, 8);
+        let metatron = Metatron::new(pool_extranonces());
         let e1 = metatron.next_enonce1();
         let e2 = metatron.next_enonce1();
         let e3 = metatron.next_enonce1();
@@ -308,17 +347,79 @@ mod tests {
 
     #[test]
     fn next_enonce1_has_correct_size() {
-        let metatron = Metatron::new(None, 8);
+        let metatron = Metatron::new(pool_extranonces());
         assert_eq!(metatron.next_enonce1().len(), ENONCE1_SIZE);
     }
 
     #[test]
     fn next_enonce1_is_unique() {
-        let metatron = Metatron::new(None, 8);
+        let metatron = Metatron::new(pool_extranonces());
         let mut seen = std::collections::HashSet::new();
         for _ in 0..1000 {
             let enonce = metatron.next_enonce1();
             assert!(seen.insert(enonce), "duplicate enonce1 generated");
         }
+    }
+
+    #[test]
+    fn proxy_mode_next_enonce1_extends_upstream() {
+        let upstream_enonce1 = Extranonce::from_bytes(&[0xde, 0xad, 0xbe, 0xef]);
+        let extranonces =
+            Extranonces::Proxy(ProxyExtranonces::new(upstream_enonce1.clone(), 8).unwrap());
+        let metatron = Metatron::new(extranonces);
+
+        let e1 = metatron.next_enonce1();
+
+        assert_eq!(e1.len(), 6);
+        assert_eq!(&e1.as_bytes()[..4], upstream_enonce1.as_bytes());
+    }
+
+    #[test]
+    fn proxy_mode_enonce2_size_reduced() {
+        let metatron = Metatron::new(proxy_extranonces());
+        assert_eq!(metatron.enonce2_size(), 6);
+    }
+
+    #[test]
+    fn proxy_mode_next_enonce1_is_sequential() {
+        let metatron = Metatron::new(proxy_extranonces());
+
+        let e1 = metatron.next_enonce1();
+        let e2 = metatron.next_enonce1();
+
+        let ext1 = u16::from_le_bytes(e1.as_bytes()[4..6].try_into().unwrap());
+        let ext2 = u16::from_le_bytes(e2.as_bytes()[4..6].try_into().unwrap());
+        assert_eq!(ext2, ext1 + 1);
+    }
+
+    #[test]
+    fn pool_mode_reconstruct_returns_unchanged() {
+        let metatron = Metatron::new(pool_extranonces());
+
+        let enonce1 = Extranonce::from_bytes(&[0x01, 0x02, 0x03, 0x04]);
+        let enonce2 = Extranonce::from_bytes(&[0xaa, 0xbb, 0xcc, 0xdd]);
+
+        let share = test_share(enonce1.clone(), enonce2.clone());
+        let result = metatron.reconstruct_enonces_for_upstream(share);
+
+        assert_eq!(result.enonce1, enonce1);
+        assert_eq!(result.enonce2, enonce2);
+    }
+
+    #[test]
+    fn proxy_mode_reconstruct_splits_enonces() {
+        let metatron = Metatron::new(proxy_extranonces());
+
+        let extended_enonce1 = Extranonce::from_bytes(&[0xde, 0xad, 0xbe, 0xef, 0x01, 0x02]);
+        let miner_enonce2 = Extranonce::from_bytes(&[0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]);
+
+        let share = test_share(extended_enonce1, miner_enonce2);
+        let result = metatron.reconstruct_enonces_for_upstream(share);
+
+        assert_eq!(result.enonce1.as_bytes(), &[0xde, 0xad, 0xbe, 0xef]);
+        assert_eq!(
+            result.enonce2.as_bytes(),
+            &[0x01, 0x02, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]
+        );
     }
 }

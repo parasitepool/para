@@ -77,12 +77,11 @@ pub(crate) struct PoolOptions {
     #[arg(long, help = "Subscribe to <ZMQ_BLOCK_NOTIFICATIONS>.")]
     pub(crate) zmq_block_notifications: Option<Endpoint>,
 
-    #[arg(
-        long,
-        help = "Set extranonce2 size in bytes (2-8).",
-        value_parser = clap::value_parser!(u8).range(2..=8)
-    )]
-    pub(crate) extranonce2_size: Option<u8>,
+    #[arg(long, help = "Set enonce1 size in bytes (2-8).")]
+    pub(crate) enonce1_size: Option<usize>,
+
+    #[arg(long, help = "Set enonce2 size in bytes (2-8).")]
+    pub(crate) enonce2_size: Option<usize>,
 
     #[arg(long, help = "Disable bouncer.")]
     pub(crate) disable_bouncer: bool,

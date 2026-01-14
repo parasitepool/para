@@ -1,10 +1,6 @@
 use {
     super::*,
-    crate::{
-        api, http_server,
-        settings::{ProxyOptions, Settings},
-    },
-    stratum::Notify,
+    crate::{api, http_server},
 };
 
 #[derive(Parser, Debug)]
@@ -32,10 +28,11 @@ impl Proxy {
             .await
             .context("failed to start upstream event loop")?;
 
-        let metatron = Arc::new(Metatron::new(
-            Some(upstream.enonce1().clone()),
-            upstream.enonce2_size(),
-        ));
+        let extranonces = Extranonces::Proxy(
+            ProxyExtranonces::new(upstream.enonce1().clone(), upstream.enonce2_size())
+                .context("upstream extranonce configuration incompatible with proxy mode")?,
+        );
+        let metatron = Arc::new(Metatron::new(extranonces));
 
         let share_tx = metatron
             .clone()

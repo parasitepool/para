@@ -36,14 +36,23 @@ async fn proxy() {
         .await
         .expect("Failed to subscribe through proxy");
 
+    let upstream_enonce1 = status.enonce1.as_bytes();
+    let extended_enonce1 = subscribe.enonce1.as_bytes();
     assert_eq!(
-        subscribe.enonce1, status.enonce1,
-        "Proxy should relay upstream's enonce1"
+        &extended_enonce1[..upstream_enonce1.len()],
+        upstream_enonce1,
+        "Extended enonce1 should start with upstream enonce1"
+    );
+    assert_eq!(
+        extended_enonce1.len(),
+        upstream_enonce1.len() + ENONCE1_EXTENSION_SIZE,
+        "Extended enonce1 should be upstream + extension bytes"
     );
 
     assert_eq!(
-        subscribe.enonce2_size, status.enonce2_size,
-        "Proxy should relay upstream's enonce2_size"
+        subscribe.enonce2_size,
+        status.enonce2_size - ENONCE1_EXTENSION_SIZE,
+        "Miner enonce2_size should be upstream minus extension"
     );
 
     client.authorize().await.expect("Failed to authorize");
