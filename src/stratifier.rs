@@ -728,7 +728,7 @@ impl<W: Workbase> Stratifier<W> {
         hash: BlockHash,
         reject_reason: Option<StratumError>,
     ) {
-        // In Working state, all these are guaranteed to be present
+        // In Working state, all these are guaranteed to be present TODO
         let address = self
             .state
             .address()
