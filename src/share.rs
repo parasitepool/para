@@ -15,8 +15,8 @@ pub(crate) struct Share {
     pub(crate) ntime: Ntime,
     pub(crate) version_bits: Option<Version>,
     pub(crate) pool_diff: Difficulty,
-    pub(crate) share_diff: Difficulty,
-    pub(crate) blockhash: BlockHash,
+    pub(crate) share_diff: Option<Difficulty>,
+    pub(crate) blockhash: Option<BlockHash>,
     pub(crate) result: bool,
     pub(crate) reject_reason: Option<StratumError>,
     pub(crate) timestamp: Instant,
@@ -38,7 +38,7 @@ impl Share {
         ntime: Ntime,
         version_bits: Option<Version>,
         pool_diff: Difficulty,
-        blockhash: BlockHash,
+        blockhash: Option<BlockHash>,
         reject_reason: Option<StratumError>,
     ) -> Self {
         Self {
@@ -54,7 +54,7 @@ impl Share {
             ntime,
             version_bits,
             pool_diff,
-            share_diff: Difficulty::from(blockhash),
+            share_diff: blockhash.map(Difficulty::from),
             blockhash,
             result: reject_reason.is_none(),
             reject_reason,

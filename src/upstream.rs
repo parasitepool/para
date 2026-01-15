@@ -181,18 +181,23 @@ impl Upstream {
             return;
         }
 
+        let Some(share_diff) = share.share_diff else {
+            error!("accepted share missing share_diff");
+            return;
+        };
+
         let upstream_diff = *self.difficulty.read().await;
-        if share.share_diff < upstream_diff {
+        if share_diff < upstream_diff {
             debug!(
                 "Share below upstream difficulty: share_diff={} < upstream_diff={}",
-                share.share_diff, upstream_diff
+                share_diff, upstream_diff
             );
             return;
         }
 
         debug!(
             "Submitting share to upstream: job_id={}, share_diff={}, upstream_diff={}",
-            share.job_id, share.share_diff, upstream_diff
+            share.job_id, share_diff, upstream_diff
         );
 
         let client = self.client.clone();

@@ -73,7 +73,11 @@ impl Metatron {
         let worker = self.get_or_create_worker(share.address.clone(), &share.workername);
 
         if share.result {
-            worker.record_accepted(share.pool_diff, share.share_diff);
+            if let Some(share_diff) = share.share_diff {
+                worker.record_accepted(share.pool_diff, share_diff);
+            } else {
+                error!("accepted share missing share_diff");
+            }
         } else {
             worker.record_rejected();
         }
@@ -253,7 +257,7 @@ mod tests {
             Ntime::from(0),
             None,
             Difficulty::from(1.0),
-            BlockHash::all_zeros(),
+            Some(BlockHash::all_zeros()),
             None,
         )
     }
