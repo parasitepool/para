@@ -2,6 +2,7 @@ use {
     super::*,
     bouncer::{Bouncer, Consequence},
     state::State,
+    upstream::UpstreamSubmit,
 };
 
 pub(crate) use session::SessionSnapshot;
@@ -15,7 +16,7 @@ pub(crate) struct Stratifier<W: Workbase> {
     socket_addr: SocketAddr,
     settings: Arc<Settings>,
     metatron: Arc<Metatron>,
-    share_tx: mpsc::Sender<Share>,
+    upstream_tx: Option<mpsc::Sender<UpstreamSubmit>>,
     reader: FramedRead<OwnedReadHalf, LinesCodec>,
     writer: FramedWrite<OwnedWriteHalf, LinesCodec>,
     workbase_rx: watch::Receiver<Arc<W>>,
@@ -32,7 +33,7 @@ impl<W: Workbase> Stratifier<W> {
         socket_addr: SocketAddr,
         settings: Arc<Settings>,
         metatron: Arc<Metatron>,
-        share_tx: mpsc::Sender<Share>,
+        upstream_tx: Option<mpsc::Sender<UpstreamSubmit>>,
         tcp_stream: TcpStream,
         workbase_rx: watch::Receiver<Arc<W>>,
         cancel_token: CancellationToken,
@@ -58,7 +59,7 @@ impl<W: Workbase> Stratifier<W> {
             socket_addr,
             settings,
             metatron,
-            share_tx,
+            upstream_tx,
             reader: FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_MESSAGE_SIZE)),
             writer: FramedWrite::new(writer, LinesCodec::new()),
             workbase_rx,
@@ -193,7 +194,7 @@ impl<W: Workbase> Stratifier<W> {
                     self.bouncer.consecutive_rejects(),
                     self.bouncer
                         .reject_duration()
-                        .map(|d| d.as_secs())
+                        .map(|duration| duration.as_secs())
                         .unwrap_or(0)
                 );
 
@@ -486,8 +487,6 @@ impl<W: Workbase> Stratifier<W> {
             )
             .await?;
 
-            self.emit_share(&submit, None, None, Some(StratumError::WorkerMismatch))?;
-
             let consequence = self.bouncer.reject();
             self.handle_consequence(consequence).await;
 
@@ -496,7 +495,6 @@ impl<W: Workbase> Stratifier<W> {
 
         let Some(job) = self.jobs.get(&submit.job_id) else {
             self.send_error(id, StratumError::Stale, None).await?;
-            self.emit_share(&submit, None, None, Some(StratumError::Stale))?;
 
             let consequence = self.bouncer.reject();
             self.handle_consequence(consequence).await;
@@ -524,13 +522,6 @@ impl<W: Workbase> Stratifier<W> {
             )
             .await?;
 
-            self.emit_share(
-                &submit,
-                job.height(),
-                None,
-                Some(StratumError::InvalidNonce2Length),
-            )?;
-
             let consequence = self.bouncer.reject();
             self.handle_consequence(consequence).await;
 
@@ -551,13 +542,6 @@ impl<W: Workbase> Stratifier<W> {
             )
             .await?;
 
-            self.emit_share(
-                &submit,
-                job.height(),
-                None,
-                Some(StratumError::NtimeOutOfRange),
-            )?;
-
             let consequence = self.bouncer.reject();
             self.handle_consequence(consequence).await;
 
@@ -573,12 +557,6 @@ impl<W: Workbase> Stratifier<W> {
                 )
                 .await?;
 
-                self.emit_share(
-                    &submit,
-                    job.height(),
-                    None,
-                    Some(StratumError::InvalidVersionMask),
-                )?;
                 let consequence = self.bouncer.reject();
                 self.handle_consequence(consequence).await;
 
@@ -621,12 +599,6 @@ impl<W: Workbase> Stratifier<W> {
 
         if self.jobs.is_duplicate(hash) {
             self.send_error(id, StratumError::Duplicate, None).await?;
-            self.emit_share(
-                &submit,
-                job.height(),
-                Some(hash),
-                Some(StratumError::Duplicate),
-            )?;
             let consequence = self.bouncer.reject();
 
             self.handle_consequence(consequence).await;
@@ -666,7 +638,9 @@ impl<W: Workbase> Stratifier<W> {
             })
             .await?;
 
-            self.emit_share(&submit, job.height(), Some(hash), None)?;
+            let share_diff = Difficulty::from(hash);
+            self.record_accepted_share(share_diff);
+            self.submit_to_upstream(&submit, share_diff);
 
             self.bouncer.accept();
 
@@ -701,12 +675,6 @@ impl<W: Workbase> Stratifier<W> {
         }
 
         self.send_error(id, StratumError::AboveTarget, None).await?;
-        self.emit_share(
-            &submit,
-            job.height(),
-            Some(hash),
-            Some(StratumError::AboveTarget),
-        )?;
 
         let consequence = self.bouncer.reject();
         self.handle_consequence(consequence).await;
@@ -714,43 +682,50 @@ impl<W: Workbase> Stratifier<W> {
         Ok(consequence)
     }
 
-    fn emit_share(
-        &self,
-        submit: &Submit,
-        height: Option<u64>,
-        blockhash: Option<BlockHash>,
-        reject_reason: Option<StratumError>,
-    ) -> Result<()> {
-        let address = self.state.address().context("missing address")?.clone();
-        let workername = self
-            .state
-            .workername()
-            .context("missing workername")?
-            .to_string();
-        let enonce1 = self.state.enonce1().context("missing enonce1")?.clone();
+    /// Record accepted share statistics directly via Metatron.
+    /// Only creates worker entry for valid accepted shares.
+    fn record_accepted_share(&self, share_diff: Difficulty) {
+        let Some((address, workername, _)) = self.state.working_data() else {
+            error!("record_accepted_share called outside working state");
+            return;
+        };
 
-        let event = Share::new(
-            height,
-            submit.job_id,
-            workername,
-            address,
-            self.socket_addr,
-            self.state.user_agent().map(String::from),
-            enonce1,
-            submit.enonce2.clone(),
-            submit.nonce,
-            submit.ntime,
-            submit.version_bits,
-            self.vardiff.current_diff(),
-            blockhash,
-            reject_reason,
-        );
+        let worker = self
+            .metatron
+            .get_or_create_worker(address.clone(), workername);
+        worker.record_accepted(self.vardiff.current_diff(), share_diff);
+    }
 
-        if self.share_tx.try_send(event).is_err() {
-            error!("Share channel full, dropping share");
+    /// Submit accepted share to upstream pool (proxy mode only).
+    fn submit_to_upstream(&self, submit: &Submit, share_diff: Difficulty) {
+        let Some(ref tx) = self.upstream_tx else {
+            return;
+        };
+
+        let Some((_, _, enonce1)) = self.state.working_data() else {
+            error!("submit_to_upstream called outside working state");
+            return;
+        };
+
+        let enonce2 = match self.metatron.extranonces() {
+            Extranonces::Pool(_) => submit.enonce2.clone(),
+            Extranonces::Proxy(proxy) => {
+                proxy.reconstruct_enonce2_for_upstream(enonce1, &submit.enonce2)
+            }
+        };
+
+        let upstream_submit = UpstreamSubmit {
+            job_id: submit.job_id,
+            enonce2,
+            nonce: submit.nonce,
+            ntime: submit.ntime,
+            version_bits: submit.version_bits,
+            share_diff,
+        };
+
+        if tx.try_send(upstream_submit).is_err() {
+            warn!("Upstream channel full, dropping share submission");
         }
-
-        Ok(())
     }
 
     async fn read_message(&mut self) -> Result<Option<Message>> {

@@ -26,10 +26,9 @@ impl Pool {
             PoolExtranonces::new(settings.enonce1_size(), settings.enonce2_size())
                 .context("invalid extranonce configuration")?,
         );
+
         let metatron = Arc::new(Metatron::new(extranonces));
-        let share_tx = metatron
-            .clone()
-            .spawn(None, cancel_token.clone(), &mut tasks);
+        metatron.clone().spawn(cancel_token.clone(), &mut tasks);
 
         http_server::spawn(
             &settings,
@@ -59,7 +58,6 @@ impl Pool {
                     let workbase_rx = workbase_rx.clone();
                     let settings = settings.clone();
                     let metatron = metatron.clone();
-                    let share_tx = share_tx.clone();
                     let conn_cancel_token = cancel_token.child_token();
 
                     tasks.spawn(async move {
@@ -67,7 +65,7 @@ impl Pool {
                             addr,
                             settings.clone(),
                             metatron,
-                            share_tx,
+                            None, // No upstream in pool mode
                             stream,
                             workbase_rx,
                             conn_cancel_token,

@@ -120,6 +120,23 @@ impl ProxyExtranonces {
     pub(crate) fn miner_enonce2_size(&self) -> usize {
         self.miner_enonce2_size
     }
+
+    /// Combines the extension bytes from miner's enonce1 with their enonce2
+    /// to produce the enonce2 expected by upstream.
+    pub(crate) fn reconstruct_enonce2_for_upstream(
+        &self,
+        miner_enonce1: &Extranonce,
+        miner_enonce2: &Extranonce,
+    ) -> Extranonce {
+        let upstream_enonce1_size = self.upstream_enonce1.len();
+        let extension = &miner_enonce1.as_bytes()[upstream_enonce1_size..];
+
+        let mut upstream_enonce2 = Vec::with_capacity(extension.len() + miner_enonce2.len());
+        upstream_enonce2.extend_from_slice(extension);
+        upstream_enonce2.extend_from_slice(miner_enonce2.as_bytes());
+
+        Extranonce::from_bytes(&upstream_enonce2)
+    }
 }
 
 impl Extranonces {
@@ -274,5 +291,24 @@ mod tests {
         let e = Extranonces::Proxy(proxy);
         assert_eq!(e.enonce1_size(), 6);
         assert_eq!(e.enonce2_size(), 6);
+    }
+
+    #[test]
+    fn proxy_reconstruct_enonce2_for_upstream() {
+        let proxy = ProxyExtranonces::new(test_upstream_enonce1(), 8).unwrap();
+
+        // Miner's extended enonce1: upstream prefix + 2-byte extension
+        let miner_enonce1 = Extranonce::from_bytes(&[0xde, 0xad, 0xbe, 0xef, 0x01, 0x02]);
+        // Miner's enonce2 (6 bytes for this config)
+        let miner_enonce2 = Extranonce::from_bytes(&[0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]);
+
+        let upstream_enonce2 =
+            proxy.reconstruct_enonce2_for_upstream(&miner_enonce1, &miner_enonce2);
+
+        // Should be extension bytes (0x01, 0x02) + miner's enonce2
+        assert_eq!(
+            upstream_enonce2.as_bytes(),
+            &[0x01, 0x02, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]
+        );
     }
 }

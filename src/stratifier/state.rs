@@ -10,12 +10,14 @@ pub(crate) enum State {
 
     Subscribed {
         enonce1: Extranonce,
+        #[allow(dead_code)]
         user_agent: String,
         version_mask: Option<Version>,
     },
 
     Working {
         enonce1: Extranonce,
+        #[allow(dead_code)]
         user_agent: String,
         version_mask: Option<Version>,
         address: Address,
@@ -91,6 +93,7 @@ impl State {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn user_agent(&self) -> Option<&str> {
         match self {
             State::Init | State::Configured { .. } => None,
@@ -106,6 +109,7 @@ impl State {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn workername(&self) -> Option<&str> {
         match self {
             State::Working { workername, .. } => Some(workername),
@@ -133,6 +137,20 @@ impl State {
 
     pub(crate) fn is_working(&self) -> bool {
         matches!(self, State::Working { .. })
+    }
+
+    /// Returns working state data if in Working state, None otherwise.
+    /// Use this to get all the data needed for share processing in one call.
+    pub(crate) fn working_data(&self) -> Option<(&Address, &str, &Extranonce)> {
+        match self {
+            State::Working {
+                address,
+                workername,
+                enonce1,
+                ..
+            } => Some((address, workername, enonce1)),
+            _ => None,
+        }
     }
 }
 

@@ -31,6 +31,7 @@ impl<W: Workbase> Job<W> {
         self.workbase.ntime()
     }
 
+    #[allow(dead_code)]
     pub(crate) fn height(&self) -> Option<u64> {
         self.workbase.height()
     }

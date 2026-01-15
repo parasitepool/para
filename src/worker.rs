@@ -42,6 +42,7 @@ impl Worker {
         self.accepted.fetch_add(1, Ordering::Relaxed);
     }
 
+    #[allow(dead_code)]
     pub(crate) fn record_rejected(&self) {
         self.rejected.fetch_add(1, Ordering::Relaxed);
     }

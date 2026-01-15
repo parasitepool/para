@@ -1,5 +1,6 @@
 use super::*;
 
+#[allow(dead_code)]
 pub(crate) trait Workbase: Clone + Send + Sync + 'static {
     fn merkle_branches(&self) -> &[MerkleNode];
     fn prevhash(&self) -> PrevHash;

@@ -4,6 +4,17 @@ use {
     tokio::sync::RwLock,
 };
 
+/// Minimal share data for upstream pool submission (proxy mode only).
+/// Contains only the fields needed to submit to the upstream pool.
+pub(crate) struct UpstreamSubmit {
+    pub(crate) job_id: JobId,
+    pub(crate) enonce2: Extranonce,
+    pub(crate) nonce: Nonce,
+    pub(crate) ntime: Ntime,
+    pub(crate) version_bits: Option<Version>,
+    pub(crate) share_diff: Difficulty,
+}
+
 pub(crate) struct Upstream {
     client: Client,
     enonce1: Extranonce,
@@ -71,7 +82,7 @@ impl Upstream {
         mut events: EventReceiver,
         cancel: CancellationToken,
         tasks: &mut JoinSet<()>,
-    ) -> Result<(watch::Receiver<Arc<Notify>>, mpsc::Sender<Share>)> {
+    ) -> Result<(watch::Receiver<Arc<Notify>>, mpsc::Sender<UpstreamSubmit>)> {
         self.client
             .authorize()
             .await
@@ -119,7 +130,7 @@ impl Upstream {
         let first_notify = first_notify.expect("checked above");
 
         let (workbase_tx, workbase_rx) = watch::channel(Arc::new(first_notify));
-        let (share_tx, mut share_rx) = mpsc::channel::<Share>(SHARE_CHANNEL_CAPACITY);
+        let (submit_tx, mut submit_rx) = mpsc::channel::<UpstreamSubmit>(SHARE_CHANNEL_CAPACITY);
 
         let connected = self.connected.clone();
         let upstream_difficulty = self.difficulty.clone();
@@ -131,10 +142,10 @@ impl Upstream {
                     biased;
 
                     _ = cancel.cancelled() => {
-                        info!("Shutting down upstream, draining {} pending shares", share_rx.len());
+                        info!("Shutting down upstream, draining {} pending submissions", submit_rx.len());
 
-                        while let Ok(share) = share_rx.try_recv() {
-                            upstream.submit_share(share).await;
+                        while let Ok(submit) = submit_rx.try_recv() {
+                            upstream.submit_share(submit).await;
                         }
 
                         break;
@@ -166,51 +177,44 @@ impl Upstream {
                         }
                     }
 
-                    Some(share) = share_rx.recv() => {
-                        upstream.submit_share(share).await;
+                    Some(submit) = submit_rx.recv() => {
+                        upstream.submit_share(submit).await;
                     }
                 }
             }
         });
 
-        Ok((workbase_rx, share_tx))
+        Ok((workbase_rx, submit_tx))
     }
 
-    async fn submit_share(&self, share: Share) {
-        if !share.result {
-            return;
-        }
-
-        let Some(share_diff) = share.share_diff else {
-            error!("accepted share missing share_diff");
-            return;
-        };
-
+    async fn submit_share(&self, submit: UpstreamSubmit) {
         let upstream_diff = *self.difficulty.read().await;
-        if share_diff < upstream_diff {
+        if submit.share_diff < upstream_diff {
             debug!(
                 "Share below upstream difficulty: share_diff={} < upstream_diff={}",
-                share_diff, upstream_diff
+                submit.share_diff, upstream_diff
             );
             return;
         }
 
         debug!(
             "Submitting share to upstream: job_id={}, share_diff={}, upstream_diff={}",
-            share.job_id, share_diff, upstream_diff
+            submit.job_id, submit.share_diff, upstream_diff
         );
 
         let client = self.client.clone();
-        let job_id = share.job_id;
-        let ntime = share.ntime;
-        let nonce = share.nonce;
-        let version_bits = share.version_bits;
         let accepted = self.accepted.clone();
         let rejected = self.rejected.clone();
 
         tokio::spawn(async move {
             match client
-                .submit_async(job_id, share.enonce2, ntime, nonce, version_bits)
+                .submit_async(
+                    submit.job_id,
+                    submit.enonce2,
+                    submit.ntime,
+                    submit.nonce,
+                    submit.version_bits,
+                )
                 .await
             {
                 Ok(handle) => match handle.wait().await {
