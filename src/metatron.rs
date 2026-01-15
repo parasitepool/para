@@ -73,8 +73,11 @@ impl Metatron {
         let worker = self.get_or_create_worker(share.address.clone(), &share.workername);
 
         if share.result {
-            let pool_diff = share.pool_diff.expect("accepted share must have pool_diff");
-            worker.record_accepted(pool_diff, share.share_diff);
+            if let Some(share_diff) = share.share_diff {
+                worker.record_accepted(share.pool_diff, share_diff);
+            } else {
+                error!("accepted share missing share_diff");
+            }
         } else {
             worker.record_rejected();
         }
@@ -138,8 +141,7 @@ impl Metatron {
         let user = self
             .users
             .entry(address.clone())
-            .or_insert_with(|| Arc::new(User::new(address)))
-            .clone();
+            .or_insert_with(|| Arc::new(User::new(address)));
 
         user.get_or_create_worker(workername)
     }
@@ -254,8 +256,8 @@ mod tests {
             Nonce::from(0),
             Ntime::from(0),
             None,
-            Some(Difficulty::from(1.0)),
-            BlockHash::all_zeros(),
+            Difficulty::from(1.0),
+            Some(BlockHash::all_zeros()),
             None,
         )
     }
