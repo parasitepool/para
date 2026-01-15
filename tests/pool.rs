@@ -109,14 +109,16 @@ async fn stratum_state_machine() {
         let (subscribe, _, _) = client.subscribe().await.unwrap();
         assert_eq!(subscribe.subscriptions.len(), 2);
 
-        // configure in Subscribed -> allowed
-        client
-            .configure(
-                vec!["version-rolling".into()],
-                Some(Version::from_str("1fffe000").unwrap()),
-            )
-            .await
-            .unwrap();
+        // configure in Subscribed -> MethodNotAllowed
+        assert_stratum_error(
+            client
+                .configure(
+                    vec!["version-rolling".into()],
+                    Some(Version::from_str("1fffe000").unwrap()),
+                )
+                .await,
+            StratumError::MethodNotAllowed,
+        );
 
         // subscribe again (resubscription in Subscribed) -> allowed
         client.subscribe().await.unwrap();
@@ -153,23 +155,15 @@ async fn stratum_state_machine() {
         assert_eq!(notify.job_id, JobId::from(0));
         assert!(notify.clean_jobs);
 
-        // configure in Working -> allowed
-        client
-            .configure(
-                vec!["version-rolling".into()],
-                Some(Version::from_str("1fffe000").unwrap()),
-            )
-            .await
-            .unwrap();
-
-        // configure with unsupported extension in Working -> error but stays in Working
-        assert!(
+        // configure in Working -> MethodNotAllowed
+        assert_stratum_error(
             client
-                .configure(vec!["unknown-extension".into()], None)
-                .await
-                .unwrap_err()
-                .to_string()
-                .contains("Unsupported extension")
+                .configure(
+                    vec!["version-rolling".into()],
+                    Some(Version::from_str("1fffe000").unwrap()),
+                )
+                .await,
+            StratumError::MethodNotAllowed,
         );
 
         // Verify we're still in Working state by submitting a share

@@ -60,7 +60,6 @@ use {
     },
     serde_json::json,
     serde_with::{DeserializeFromStr, SerializeDisplay},
-    session::SessionSnapshot,
     settings::{PoolOptions, ProxyOptions, Settings},
     share::Share,
     snafu::Snafu,
@@ -84,7 +83,7 @@ use {
         thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     },
-    stratifier::Stratifier,
+    stratifier::{SessionSnapshot, Stratifier},
     stratum::{
         Authorize, Configure, Difficulty, Extranonce, Id, JobId, MerkleNode, Message, Nbits, Nonce,
         Notify, Ntime, PrevHash, SetDifficulty, StratumError, Submit, Subscribe, SubscribeResult,
@@ -135,7 +134,6 @@ mod job;
 mod jobs;
 mod metatron;
 mod metrics;
-mod session;
 pub mod settings;
 mod share;
 mod signal;
