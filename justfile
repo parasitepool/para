@@ -65,7 +65,7 @@ proxy:
     --upstream localhost:42069 
 
 miner port='42069': 
-  cargo run --release -- miner \
+  RUST_LOG=info cargo run --release -- miner \
     127.0.0.1:{{port}} \
     --username tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.tick \
     --password x \

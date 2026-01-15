@@ -493,6 +493,16 @@ impl<W: Workbase> Stratifier<W> {
             return Ok(consequence);
         }
 
+        //TODO
+        let Some((address, workername, _)) = self.state.working_data() else {
+            error!("record_accepted_share called outside working state");
+            return Ok(Consequence::None); // TODO
+        };
+
+        let worker = self
+            .metatron
+            .get_or_create_worker(address.clone(), workername);
+
         let Some(job) = self.jobs.get(&submit.job_id) else {
             self.send_error(id, StratumError::Stale, None).await?;
 
@@ -522,6 +532,7 @@ impl<W: Workbase> Stratifier<W> {
             )
             .await?;
 
+            worker.record_rejected();
             let consequence = self.bouncer.reject();
             self.handle_consequence(consequence).await;
 
@@ -542,6 +553,8 @@ impl<W: Workbase> Stratifier<W> {
             )
             .await?;
 
+            worker.record_rejected();
+
             let consequence = self.bouncer.reject();
             self.handle_consequence(consequence).await;
 
@@ -557,6 +570,7 @@ impl<W: Workbase> Stratifier<W> {
                 )
                 .await?;
 
+                worker.record_rejected();
                 let consequence = self.bouncer.reject();
                 self.handle_consequence(consequence).await;
 
@@ -599,8 +613,10 @@ impl<W: Workbase> Stratifier<W> {
 
         if self.jobs.is_duplicate(hash) {
             self.send_error(id, StratumError::Duplicate, None).await?;
-            let consequence = self.bouncer.reject();
 
+            worker.record_rejected();
+
+            let consequence = self.bouncer.reject();
             self.handle_consequence(consequence).await;
 
             return Ok(consequence);
@@ -639,7 +655,8 @@ impl<W: Workbase> Stratifier<W> {
             .await?;
 
             let share_diff = Difficulty::from(hash);
-            self.record_accepted_share(share_diff);
+
+            worker.record_accepted(self.vardiff.current_diff(), share_diff);
             self.submit_to_upstream(&submit, share_diff);
 
             self.bouncer.accept();
@@ -676,22 +693,12 @@ impl<W: Workbase> Stratifier<W> {
 
         self.send_error(id, StratumError::AboveTarget, None).await?;
 
+        worker.record_rejected();
+
         let consequence = self.bouncer.reject();
         self.handle_consequence(consequence).await;
 
         Ok(consequence)
-    }
-
-    fn record_accepted_share(&self, share_diff: Difficulty) {
-        let Some((address, workername, _)) = self.state.working_data() else {
-            error!("record_accepted_share called outside working state");
-            return;
-        };
-
-        let worker = self
-            .metatron
-            .get_or_create_worker(address.clone(), workername);
-        worker.record_accepted(self.vardiff.current_diff(), share_diff);
     }
 
     fn submit_to_upstream(&self, submit: &Submit, share_diff: Difficulty) {
