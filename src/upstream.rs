@@ -4,8 +4,6 @@ use {
     tokio::sync::RwLock,
 };
 
-/// Minimal share data for upstream pool submission (proxy mode only).
-/// Contains only the fields needed to submit to the upstream pool.
 pub(crate) struct UpstreamSubmit {
     pub(crate) job_id: JobId,
     pub(crate) enonce2: Extranonce,

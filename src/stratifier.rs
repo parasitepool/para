@@ -682,8 +682,6 @@ impl<W: Workbase> Stratifier<W> {
         Ok(consequence)
     }
 
-    /// Record accepted share statistics directly via Metatron.
-    /// Only creates worker entry for valid accepted shares.
     fn record_accepted_share(&self, share_diff: Difficulty) {
         let Some((address, workername, _)) = self.state.working_data() else {
             error!("record_accepted_share called outside working state");
@@ -696,7 +694,6 @@ impl<W: Workbase> Stratifier<W> {
         worker.record_accepted(self.vardiff.current_diff(), share_diff);
     }
 
-    /// Submit accepted share to upstream pool (proxy mode only).
     fn submit_to_upstream(&self, submit: &Submit, share_diff: Difficulty) {
         let Some(ref tx) = self.upstream_tx else {
             return;

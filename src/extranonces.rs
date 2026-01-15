@@ -121,8 +121,6 @@ impl ProxyExtranonces {
         self.miner_enonce2_size
     }
 
-    /// Combines the extension bytes from miner's enonce1 with their enonce2
-    /// to produce the enonce2 expected by upstream.
     pub(crate) fn reconstruct_enonce2_for_upstream(
         &self,
         miner_enonce1: &Extranonce,
@@ -296,16 +294,12 @@ mod tests {
     #[test]
     fn proxy_reconstruct_enonce2_for_upstream() {
         let proxy = ProxyExtranonces::new(test_upstream_enonce1(), 8).unwrap();
-
-        // Miner's extended enonce1: upstream prefix + 2-byte extension
         let miner_enonce1 = Extranonce::from_bytes(&[0xde, 0xad, 0xbe, 0xef, 0x01, 0x02]);
-        // Miner's enonce2 (6 bytes for this config)
         let miner_enonce2 = Extranonce::from_bytes(&[0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]);
 
         let upstream_enonce2 =
             proxy.reconstruct_enonce2_for_upstream(&miner_enonce1, &miner_enonce2);
 
-        // Should be extension bytes (0x01, 0x02) + miner's enonce2
         assert_eq!(
             upstream_enonce2.as_bytes(),
             &[0x01, 0x02, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]
