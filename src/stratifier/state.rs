@@ -139,8 +139,6 @@ impl State {
         matches!(self, State::Working { .. })
     }
 
-    /// Returns working state data if in Working state, None otherwise.
-    /// Use this to get all the data needed for share processing in one call.
     pub(crate) fn working_data(&self) -> Option<(&Address, &str, &Extranonce)> {
         match self {
             State::Working {
