@@ -489,7 +489,6 @@ impl<W: Workbase> Stratifier<W> {
             self.emit_share(
                 &submit,
                 None,
-                None,
                 BlockHash::all_zeros(),
                 Some(StratumError::WorkerMismatch),
             )?;
@@ -504,7 +503,6 @@ impl<W: Workbase> Stratifier<W> {
             self.send_error(id, StratumError::Stale, None).await?;
             self.emit_share(
                 &submit,
-                None,
                 None,
                 BlockHash::all_zeros(),
                 Some(StratumError::Stale),
@@ -539,7 +537,6 @@ impl<W: Workbase> Stratifier<W> {
             self.emit_share(
                 &submit,
                 job.height(),
-                None,
                 BlockHash::all_zeros(),
                 Some(StratumError::InvalidNonce2Length),
             )?;
@@ -567,7 +564,6 @@ impl<W: Workbase> Stratifier<W> {
             self.emit_share(
                 &submit,
                 job.height(),
-                None,
                 BlockHash::all_zeros(),
                 Some(StratumError::NtimeOutOfRange),
             )?;
@@ -590,7 +586,6 @@ impl<W: Workbase> Stratifier<W> {
                 self.emit_share(
                     &submit,
                     job.height(),
-                    None,
                     BlockHash::all_zeros(),
                     Some(StratumError::InvalidVersionMask),
                 )?;
@@ -636,13 +631,7 @@ impl<W: Workbase> Stratifier<W> {
 
         if self.jobs.is_duplicate(hash) {
             self.send_error(id, StratumError::Duplicate, None).await?;
-            self.emit_share(
-                &submit,
-                job.height(),
-                None,
-                hash,
-                Some(StratumError::Duplicate),
-            )?;
+            self.emit_share(&submit, job.height(), hash, Some(StratumError::Duplicate))?;
             let consequence = self.bouncer.reject();
 
             self.handle_consequence(consequence).await;
@@ -682,7 +671,7 @@ impl<W: Workbase> Stratifier<W> {
             })
             .await?;
 
-            self.emit_share(&submit, job.height(), Some(current_diff), hash, None)?;
+            self.emit_share(&submit, job.height(), hash, None)?;
 
             self.bouncer.accept();
 
@@ -717,13 +706,7 @@ impl<W: Workbase> Stratifier<W> {
         }
 
         self.send_error(id, StratumError::AboveTarget, None).await?;
-        self.emit_share(
-            &submit,
-            job.height(),
-            Some(current_diff),
-            hash,
-            Some(StratumError::AboveTarget),
-        )?;
+        self.emit_share(&submit, job.height(), hash, Some(StratumError::AboveTarget))?;
 
         let consequence = self.bouncer.reject();
         self.handle_consequence(consequence).await;
@@ -735,18 +718,15 @@ impl<W: Workbase> Stratifier<W> {
         &self,
         submit: &Submit,
         height: Option<u64>,
-        pool_diff: Option<Difficulty>,
-        hash: BlockHash,
+        blockhash: BlockHash,
         reject_reason: Option<StratumError>,
     ) -> Result<()> {
         let address = self.state.address().context("missing address")?.clone();
-
         let workername = self
             .state
             .workername()
             .context("missing workername")?
             .to_string();
-
         let enonce1 = self.state.enonce1().context("missing enonce1")?.clone();
 
         let event = Share::new(
@@ -761,8 +741,8 @@ impl<W: Workbase> Stratifier<W> {
             submit.nonce,
             submit.ntime,
             submit.version_bits,
-            pool_diff,
-            hash,
+            self.vardiff.current_diff(),
+            blockhash,
             reject_reason,
         );
 
