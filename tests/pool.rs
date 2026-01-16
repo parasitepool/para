@@ -747,7 +747,6 @@ async fn share_validation() {
     pool.mine_block();
     tokio::time::sleep(Duration::from_secs(2)).await;
 
-    // Capture baseline after mine_block since miner adds shares with same username
     let baseline = pool.get_status().await.unwrap();
     let user_baseline = pool.get_user(&user_address).await.unwrap();
 
