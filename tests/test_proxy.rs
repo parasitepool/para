@@ -1,6 +1,6 @@
 use {
     super::*,
-    api::ProxyStatus,
+    api::{ProxyStatus, UserDetail},
     para::{USER_AGENT, stratum},
 };
 
@@ -121,9 +121,21 @@ impl TestProxy {
     }
 
     pub(crate) async fn get_status(&self) -> reqwest::Result<ProxyStatus> {
-        let client = reqwest::Client::new();
-        let url = format!("{}/proxy/status", self.api_endpoint());
-        client.get(&url).send().await?.json().await
+        reqwest::Client::new()
+            .get(format!("{}/proxy/status", self.api_endpoint()))
+            .send()
+            .await?
+            .json()
+            .await
+    }
+
+    pub(crate) async fn get_user(&self, address: &str) -> reqwest::Result<UserDetail> {
+        reqwest::Client::new()
+            .get(format!("{}/proxy/users/{}", self.api_endpoint(), address))
+            .send()
+            .await?
+            .json()
+            .await
     }
 }
 

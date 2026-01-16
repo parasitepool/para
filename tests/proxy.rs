@@ -6,12 +6,10 @@ use super::*;
 async fn proxy() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001");
     let upstream = pool.stratum_endpoint();
+    let username = signet_username();
 
-    let proxy = TestProxy::spawn_with_args(
-        &upstream,
-        &signet_username().to_string(),
-        "--start-diff 0.00001",
-    );
+    let proxy =
+        TestProxy::spawn_with_args(&upstream, &username.to_string(), "--start-diff 0.00001");
 
     let status = proxy
         .get_status()
@@ -23,16 +21,17 @@ async fn proxy() {
         "Upstream URL should match"
     );
 
-    assert_eq!(
-        status.upstream_username,
-        signet_username(),
-        "Username should match"
-    );
+    assert_eq!(status.upstream_username, username, "Username should match");
 
     assert!(
         status.upstream_connected,
         "Proxy should be connected to upstream"
     );
+
+    assert_eq!(status.accepted, 0);
+    assert_eq!(status.rejected, 0);
+    assert_eq!(status.upstream_accepted, 0);
+    assert_eq!(status.upstream_rejected, 0);
 
     let client = proxy.stratum_client();
     let mut events = client.connect().await.expect("Failed to connect to proxy");
@@ -80,6 +79,25 @@ async fn proxy() {
         .await
         .expect("Valid share should be accepted by proxy");
 
+    let status = proxy.get_status().await.unwrap();
+    assert_eq!(status.accepted, 1);
+    assert_eq!(status.rejected, 0);
+    assert_eq!(status.upstream_accepted, 1);
+    assert_eq!(status.upstream_rejected, 0);
+
+    let user = proxy
+        .get_user(
+            &username
+                .parse_address()
+                .unwrap()
+                .assume_checked()
+                .to_string(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(user.accepted, 1);
+    assert_eq!(user.rejected, 0);
+
     let bad_enonce2 = Extranonce::random(subscribe.enonce2_size);
     let result = client
         .submit(
@@ -92,6 +110,12 @@ async fn proxy() {
         .await;
 
     assert_stratum_error(result, StratumError::AboveTarget);
+
+    let status = proxy.get_status().await.unwrap();
+    assert_eq!(status.accepted, 1);
+    assert_eq!(status.rejected, 1);
+    assert_eq!(status.upstream_accepted, 1);
+    assert_eq!(status.upstream_rejected, 0);
 
     assert_stratum_error(
         client
@@ -106,6 +130,10 @@ async fn proxy() {
         StratumError::InvalidNonce2Length,
     );
 
+    let status = proxy.get_status().await.unwrap();
+    assert_eq!(status.accepted, 1);
+    assert_eq!(status.rejected, 2);
+
     assert_stratum_error(
         client
             .submit(
@@ -118,6 +146,23 @@ async fn proxy() {
             .await,
         StratumError::InvalidNonce2Length,
     );
+
+    let status = proxy.get_status().await.unwrap();
+    assert_eq!(status.accepted, 1);
+    assert_eq!(status.rejected, 3);
+
+    let user = proxy
+        .get_user(
+            &username
+                .parse_address()
+                .unwrap()
+                .assume_checked()
+                .to_string(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(user.accepted, 1);
+    assert_eq!(user.rejected, 3);
 
     client.disconnect().await;
     drop(events);
@@ -151,6 +196,25 @@ async fn proxy() {
         .submit(notify2.job_id, enonce2_resumed, ntime2, nonce2, None)
         .await
         .expect("Share with resumed session should be accepted");
+
+    let status = proxy.get_status().await.unwrap();
+    assert_eq!(status.accepted, 2);
+    assert_eq!(status.rejected, 3);
+    assert_eq!(status.upstream_accepted, 2);
+    assert_eq!(status.upstream_rejected, 0);
+
+    let user = proxy
+        .get_user(
+            &username
+                .parse_address()
+                .unwrap()
+                .assume_checked()
+                .to_string(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(user.accepted, 2);
+    assert_eq!(user.rejected, 3);
 }
 
 #[test]
