@@ -1,0 +1,54 @@
+<div style="display: block;">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
+        <div style="margin: 2px 10px 5px;">
+            Simulate Payouts<br>
+            <br>
+            Coinbase Value: {{ self.display_coinbase_value() }}<br>
+            %% if !self.finder_username.is_empty() {
+            Block Finder: {{ self.finder_username }}<br>
+            %% }
+            Total Payouts: {{ self.display_count() }}<br>
+            Total Amount: {{ self.display_total() }}
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+            <a href="{{ self.json_url() }}" download="simulated_payouts.json">Download JSON</a>
+            <a href="{{ self.csv_url() }}" download="simulated_payouts.csv">Download CSV</a>
+        </div>
+    </div>
+    <div style="margin-bottom: 20px;">
+        <form method="get" action="/payouts/simulate" style="display: flex; gap: 10px; align-items: flex-end;">
+            <div>
+                <label for="coinbase_value">Coinbase Value (sats):</label><br>
+                <input type="number" id="coinbase_value" name="coinbase_value" value="{{ self.coinbase_value }}" style="width: 200px;">
+            </div>
+            <div>
+                <label for="finder_username">Block Finder (username):</label><br>
+                <input type="text" id="finder_username" name="finder_username" value="{{ self.finder_username }}" style="width: 200px;">
+            </div>
+            <button type="submit">Simulate</button>
+        </form>
+    </div>
+    <div>
+        %% if !self.payouts.is_empty() {
+        <h3>Simulated Payments</h3>
+        <table border="1" cellpadding="5" cellspacing="0" style="width: 100%;">
+            <tr>
+                <th>Lightning Address</th>
+                <th>Bitcoin Address</th>
+                <th>Amount</th>
+                <th>Percentage</th>
+            </tr>
+            %% for payout in &self.payouts {
+            <tr>
+                <td>{{ payout.ln_address }}</td>
+                <td>{{ payout.btc_address }}</td>
+                <td>{{ crate::subcommand::server::templates::simulate_payouts::format_sats(payout.amount_sats) }}</td>
+                <td>{{ format!("{:.6}%", payout.percentage * 100.0) }}</td>
+            </tr>
+            %% }
+        </table>
+        %% } else {
+        <p>No payouts to display. The coinbase value may be too small (must be > 1 BTC).</p>
+        %% }
+    </div>
+</div>
