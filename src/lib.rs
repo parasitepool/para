@@ -61,7 +61,6 @@ use {
     serde_json::json,
     serde_with::{DeserializeFromStr, SerializeDisplay},
     settings::{PoolOptions, ProxyOptions, Settings},
-    share::Share,
     snafu::Snafu,
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
     std::{
@@ -135,7 +134,7 @@ mod jobs;
 mod metatron;
 mod metrics;
 pub mod settings;
-mod share;
+
 mod signal;
 mod stratifier;
 pub mod stratum;

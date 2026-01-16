@@ -9,7 +9,7 @@ pub(crate) struct PoolExtranonces {
 #[derive(Debug)]
 pub(crate) struct ProxyExtranonces {
     upstream_enonce1: Extranonce,
-    miner_enonce2_size: usize,
+    downstream_enonce2_size: usize,
 }
 
 #[derive(Debug)]
@@ -77,7 +77,7 @@ impl ProxyExtranonces {
             MAX_ENONCE_SIZE
         );
 
-        let miner_enonce2_size = upstream_enonce2_size
+        let downstream_enonce2_size = upstream_enonce2_size
             .checked_sub(ENONCE1_EXTENSION_SIZE)
             .ok_or_else(|| {
                 anyhow!(
@@ -88,23 +88,23 @@ impl ProxyExtranonces {
             })?;
 
         ensure!(
-            miner_enonce2_size >= MIN_ENONCE_SIZE,
+            downstream_enonce2_size >= MIN_ENONCE_SIZE,
             "miner enonce2 space {} below minimum {} (upstream enonce2_size {} - extension {})",
-            miner_enonce2_size,
+            downstream_enonce2_size,
             MIN_ENONCE_SIZE,
             upstream_enonce2_size,
             ENONCE1_EXTENSION_SIZE
         );
         ensure!(
-            miner_enonce2_size <= MAX_ENONCE_SIZE,
+            downstream_enonce2_size <= MAX_ENONCE_SIZE,
             "miner enonce2 space {} exceeds maximum {}",
-            miner_enonce2_size,
+            downstream_enonce2_size,
             MAX_ENONCE_SIZE
         );
 
         Ok(Self {
             upstream_enonce1,
-            miner_enonce2_size,
+            downstream_enonce2_size,
         })
     }
 
@@ -117,8 +117,23 @@ impl ProxyExtranonces {
         self.upstream_enonce1.len() + ENONCE1_EXTENSION_SIZE
     }
 
-    pub(crate) fn miner_enonce2_size(&self) -> usize {
-        self.miner_enonce2_size
+    pub(crate) fn downstream_enonce2_size(&self) -> usize {
+        self.downstream_enonce2_size
+    }
+
+    pub(crate) fn reconstruct_enonce2_for_upstream(
+        &self,
+        miner_enonce1: &Extranonce,
+        miner_enonce2: &Extranonce,
+    ) -> Extranonce {
+        let upstream_enonce1_size = self.upstream_enonce1.len();
+        let extension = &miner_enonce1.as_bytes()[upstream_enonce1_size..];
+
+        let mut upstream_enonce2 = Vec::with_capacity(extension.len() + miner_enonce2.len());
+        upstream_enonce2.extend_from_slice(extension);
+        upstream_enonce2.extend_from_slice(miner_enonce2.as_bytes());
+
+        Extranonce::from_bytes(&upstream_enonce2)
     }
 }
 
@@ -134,7 +149,7 @@ impl Extranonces {
     pub(crate) fn enonce2_size(&self) -> usize {
         match self {
             Extranonces::Pool(p) => p.enonce2_size(),
-            Extranonces::Proxy(p) => p.miner_enonce2_size(),
+            Extranonces::Proxy(p) => p.downstream_enonce2_size(),
         }
     }
 }
@@ -236,7 +251,7 @@ mod tests {
     #[test]
     fn proxy_accepts_valid_config() {
         let p = ProxyExtranonces::new(test_upstream_enonce1(), 8).unwrap();
-        assert_eq!(p.miner_enonce2_size(), 6);
+        assert_eq!(p.downstream_enonce2_size(), 6);
         assert_eq!(p.extended_enonce1_size(), 6);
         assert_eq!(p.upstream_enonce1().as_bytes(), &[0xde, 0xad, 0xbe, 0xef]);
     }
@@ -244,13 +259,13 @@ mod tests {
     #[test]
     fn proxy_accepts_boundary_minimum() {
         let p = ProxyExtranonces::new(test_upstream_enonce1(), 4).unwrap();
-        assert_eq!(p.miner_enonce2_size(), 2);
+        assert_eq!(p.downstream_enonce2_size(), 2);
     }
 
     #[test]
     fn proxy_accepts_boundary_maximum() {
         let p = ProxyExtranonces::new(test_upstream_enonce1(), 10).unwrap();
-        assert_eq!(p.miner_enonce2_size(), 8);
+        assert_eq!(p.downstream_enonce2_size(), 8);
     }
 
     #[test]
@@ -274,5 +289,20 @@ mod tests {
         let e = Extranonces::Proxy(proxy);
         assert_eq!(e.enonce1_size(), 6);
         assert_eq!(e.enonce2_size(), 6);
+    }
+
+    #[test]
+    fn proxy_reconstruct_enonce2_for_upstream() {
+        let proxy = ProxyExtranonces::new(test_upstream_enonce1(), 8).unwrap();
+        let miner_enonce1 = Extranonce::from_bytes(&[0xde, 0xad, 0xbe, 0xef, 0x01, 0x02]);
+        let miner_enonce2 = Extranonce::from_bytes(&[0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]);
+
+        let upstream_enonce2 =
+            proxy.reconstruct_enonce2_for_upstream(&miner_enonce1, &miner_enonce2);
+
+        assert_eq!(
+            upstream_enonce2.as_bytes(),
+            &[0x01, 0x02, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]
+        );
     }
 }

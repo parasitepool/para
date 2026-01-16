@@ -31,10 +31,6 @@ impl<W: Workbase> Job<W> {
         self.workbase.ntime()
     }
 
-    pub(crate) fn height(&self) -> Option<u64> {
-        self.workbase.height()
-    }
-
     pub(crate) fn notify(&self, clean_jobs: bool) -> Result<Notify> {
         Ok(Notify {
             job_id: self.job_id,

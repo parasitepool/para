@@ -1,27 +1,29 @@
 use super::*;
 
 #[derive(Debug, Clone)]
+pub(crate) struct Session {
+    pub(crate) enonce1: Extranonce,
+    #[allow(dead_code)]
+    pub(crate) user_agent: String,
+    pub(crate) version_mask: Option<Version>,
+    pub(crate) username: Username,
+    pub(crate) address: Address,
+    pub(crate) workername: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct Subscription {
+    pub(crate) enonce1: Extranonce,
+    pub(crate) user_agent: String,
+    pub(crate) version_mask: Option<Version>,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) enum State {
     Init,
-
-    Configured {
-        version_mask: Version,
-    },
-
-    Subscribed {
-        enonce1: Extranonce,
-        user_agent: String,
-        version_mask: Option<Version>,
-    },
-
-    Working {
-        enonce1: Extranonce,
-        user_agent: String,
-        version_mask: Option<Version>,
-        address: Address,
-        workername: String,
-        authorized_username: Username,
-    },
+    Configured { version_mask: Version },
+    Subscribed(Subscription),
+    Working(Arc<Session>),
 }
 
 impl State {
@@ -29,48 +31,53 @@ impl State {
         State::Init
     }
 
-    pub(crate) fn configure(&mut self, version_mask: Version) -> Result<(), StratumError> {
+    pub(crate) fn configure(&mut self, version_mask: Version) -> bool {
         match self {
             State::Init | State::Configured { .. } => {
                 *self = State::Configured { version_mask };
-                Ok(())
+                true
             }
-            _ => Err(StratumError::MethodNotAllowed),
+            _ => false,
         }
     }
 
-    pub(crate) fn subscribe(&mut self, enonce1: Extranonce, user_agent: String) {
-        let version_mask = self.version_mask();
-        *self = State::Subscribed {
-            enonce1,
-            user_agent,
-            version_mask,
-        };
+    pub(crate) fn can_subscribe(&self) -> bool {
+        matches!(self, State::Init | State::Configured { .. })
+    }
+
+    pub(crate) fn subscribe(&mut self, enonce1: Extranonce, user_agent: String) -> bool {
+        if self.can_subscribe() {
+            let version_mask = self.version_mask();
+            *self = State::Subscribed(Subscription {
+                enonce1,
+                user_agent,
+                version_mask,
+            });
+            true
+        } else {
+            false
+        }
     }
 
     pub(crate) fn authorize(
         &mut self,
         address: Address,
         workername: String,
-        authorized_username: Username,
-    ) -> Result<(), StratumError> {
+        username: Username,
+    ) -> bool {
         match self {
-            State::Subscribed {
-                enonce1,
-                user_agent,
-                version_mask,
-            } => {
-                *self = State::Working {
-                    enonce1: enonce1.clone(),
-                    user_agent: user_agent.clone(),
-                    version_mask: *version_mask,
+            State::Subscribed(subscription) => {
+                *self = State::Working(Arc::new(Session {
+                    enonce1: subscription.enonce1.clone(),
+                    user_agent: subscription.user_agent.clone(),
+                    version_mask: subscription.version_mask,
+                    username,
                     address,
                     workername,
-                    authorized_username,
-                };
-                Ok(())
+                }));
+                true
             }
-            _ => Err(StratumError::MethodNotAllowed),
+            _ => false,
         }
     }
 
@@ -78,61 +85,23 @@ impl State {
         match self {
             State::Init => None,
             State::Configured { version_mask } => Some(*version_mask),
-            State::Subscribed { version_mask, .. } => *version_mask,
-            State::Working { version_mask, .. } => *version_mask,
+            State::Subscribed(subscription) => subscription.version_mask,
+            State::Working(session) => session.version_mask,
         }
     }
 
-    pub(crate) fn enonce1(&self) -> Option<&Extranonce> {
+    pub(crate) fn subscribed(&self) -> Option<Subscription> {
         match self {
-            State::Init | State::Configured { .. } => None,
-            State::Subscribed { enonce1, .. } => Some(enonce1),
-            State::Working { enonce1, .. } => Some(enonce1),
-        }
-    }
-
-    pub(crate) fn user_agent(&self) -> Option<&str> {
-        match self {
-            State::Init | State::Configured { .. } => None,
-            State::Subscribed { user_agent, .. } => Some(user_agent),
-            State::Working { user_agent, .. } => Some(user_agent),
-        }
-    }
-
-    pub(crate) fn address(&self) -> Option<&Address> {
-        match self {
-            State::Working { address, .. } => Some(address),
+            State::Subscribed(subscription) => Some(subscription.clone()),
             _ => None,
         }
     }
 
-    pub(crate) fn workername(&self) -> Option<&str> {
+    pub(crate) fn working(&self) -> Option<Arc<Session>> {
         match self {
-            State::Working { workername, .. } => Some(workername),
+            State::Working(session) => Some(session.clone()),
             _ => None,
         }
-    }
-
-    pub(crate) fn authorized_username(&self) -> Option<&Username> {
-        match self {
-            State::Working {
-                authorized_username,
-                ..
-            } => Some(authorized_username),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn not_subscribed(&self) -> bool {
-        matches!(self, State::Init | State::Configured { .. })
-    }
-
-    pub(crate) fn is_subscribed(&self) -> bool {
-        matches!(self, State::Subscribed { .. })
-    }
-
-    pub(crate) fn is_working(&self) -> bool {
-        matches!(self, State::Working { .. })
     }
 }
 
@@ -171,11 +140,10 @@ mod tests {
         let state = State::new();
 
         assert!(matches!(state, State::Init));
-        assert!(state.not_subscribed());
-        assert!(!state.is_subscribed());
-        assert!(!state.is_working());
+        assert!(state.can_subscribe());
+        assert!(state.subscribed().is_none());
+        assert!(state.working().is_none());
         assert!(state.version_mask().is_none());
-        assert!(state.enonce1().is_none());
     }
 
     #[test]
@@ -183,10 +151,10 @@ mod tests {
         let mut state = State::new();
         let mask = Version::from(0x1fffe000);
 
-        assert!(state.configure(mask).is_ok());
+        assert!(state.configure(mask));
 
         assert!(matches!(state, State::Configured { .. }));
-        assert!(state.not_subscribed());
+        assert!(state.can_subscribe());
         assert_eq!(state.version_mask(), Some(mask));
     }
 
@@ -196,8 +164,8 @@ mod tests {
         let mask1 = Version::from(0x1fffe000);
         let mask2 = Version::from(0x0ffff000);
 
-        state.configure(mask1).unwrap();
-        assert!(state.configure(mask2).is_ok());
+        assert!(state.configure(mask1));
+        assert!(state.configure(mask2));
 
         assert_eq!(state.version_mask(), Some(mask2));
     }
@@ -206,110 +174,58 @@ mod tests {
     fn configure_fails_in_subscribed() {
         let mut state = State::new();
 
-        state.subscribe(test_enonce1(), "test/1.0".into());
-        let result = state.configure(Version::from(0x1fffe000));
+        assert!(state.subscribe(test_enonce1(), "test/1.0".into()));
+        assert!(!state.configure(Version::from(0x1fffe000)));
 
-        assert!(result.is_err());
-        assert!(state.is_subscribed());
+        assert!(state.subscribed().is_some());
     }
 
     #[test]
     fn configure_fails_in_working() {
         let mut state = State::new();
 
-        state.subscribe(test_enonce1(), "test/1.0".into());
-        state
-            .authorize(test_address(), "worker1".into(), test_username())
-            .unwrap();
-        let result = state.configure(Version::from(0x1fffe000));
+        assert!(state.subscribe(test_enonce1(), "test/1.0".into()));
+        assert!(state.authorize(test_address(), "worker1".into(), test_username()));
 
-        assert!(result.is_err());
-        assert!(state.is_working());
-    }
+        assert!(state.subscribed().is_none());
 
-    #[test]
-    fn subscribe_transitions_to_subscribed() {
-        let mut state = State::new();
-        let enonce1 = test_enonce1();
-
-        state.subscribe(enonce1.clone(), "test/1.0".into());
-
-        assert!(!state.not_subscribed());
-        assert!(state.is_subscribed());
-        assert!(!state.is_working());
-        assert_eq!(state.enonce1(), Some(&enonce1));
-        assert_eq!(state.user_agent(), Some("test/1.0"));
-    }
-
-    #[test]
-    fn subscribe_preserves_version_mask() {
-        let mut state = State::new();
-        let mask = Version::from(0x1fffe000);
-
-        state.configure(mask).unwrap();
-        state.subscribe(test_enonce1(), "test/1.0".into());
-
-        assert!(state.is_subscribed());
-        assert_eq!(state.version_mask(), Some(mask));
-    }
-
-    #[test]
-    fn authorize_in_subscribed_transitions_to_working() {
-        let mut state = State::new();
-
-        state.subscribe(test_enonce1(), "test/1.0".into());
-        let result = state.authorize(test_address(), "worker1".into(), test_username());
-
-        assert!(result.is_ok());
-        assert!(state.is_working());
-        assert!(!state.is_subscribed());
-        assert_eq!(state.address(), Some(&test_address()));
-        assert_eq!(state.workername(), Some("worker1"));
+        let session = state.working().unwrap();
+        assert_eq!(session.address, test_address());
+        assert_eq!(session.workername, "worker1");
     }
 
     #[test]
     fn authorize_in_init_fails() {
         let mut state = State::new();
 
-        let result = state.authorize(test_address(), "worker1".into(), test_username());
-
-        assert!(result.is_err());
-        assert!(state.not_subscribed());
+        assert!(!state.authorize(test_address(), "worker1".into(), test_username()));
+        assert!(state.can_subscribe());
     }
 
     #[test]
     fn authorize_in_working_fails() {
         let mut state = State::new();
 
-        state.subscribe(test_enonce1(), "test/1.0".into());
-        state
-            .authorize(test_address(), "worker1".into(), test_username())
-            .unwrap();
+        assert!(state.subscribe(test_enonce1(), "test/1.0".into()));
 
-        let result = state.authorize(test_address(), "worker2".into(), test_username());
-
-        assert!(result.is_err());
-        assert!(state.is_working());
+        assert!(state.authorize(test_address(), "worker1".into(), test_username()));
+        assert!(!state.authorize(test_address(), "worker2".into(), test_username()));
+        assert!(state.working().is_some());
     }
 
     #[test]
-    fn resubscribe_from_working_resets_to_subscribed() {
+    fn resubscribe_from_working_is_rejected() {
         let mut state = State::new();
 
-        state.subscribe(test_enonce1(), "test/1.0".into());
-        state
-            .authorize(test_address(), "worker1".into(), test_username())
-            .unwrap();
+        assert!(state.subscribe(test_enonce1(), "test/1.0".into()));
+        assert!(state.authorize(test_address(), "worker1".into(), test_username()));
 
-        assert!(state.is_working());
+        assert!(state.working().is_some());
 
         let new_enonce1: Extranonce = "cafebabe".parse().unwrap();
-        state.subscribe(new_enonce1.clone(), "test/2.0".into());
+        assert!(!state.subscribe(new_enonce1.clone(), "test/2.0".into()));
 
-        assert!(state.is_subscribed());
-        assert!(!state.is_working());
-        assert_eq!(state.enonce1(), Some(&new_enonce1));
-        assert!(state.address().is_none());
+        assert!(state.working().is_some());
     }
 
     #[test]
@@ -318,19 +234,17 @@ mod tests {
         let mask1 = Version::from(0x1fffe000);
         let mask2 = Version::from(0x0ffff000);
 
-        assert!(state.configure(mask1).is_ok());
+        assert!(state.configure(mask1));
         assert_eq!(state.version_mask(), Some(mask1));
 
-        assert!(state.configure(mask2).is_ok());
+        assert!(state.configure(mask2));
         assert_eq!(state.version_mask(), Some(mask2));
 
-        state.subscribe(test_enonce1(), "test/1.0".into());
-        assert!(state.configure(mask1).is_err());
+        assert!(state.subscribe(test_enonce1(), "test/1.0".into()));
+        assert!(!state.configure(mask1));
 
-        state
-            .authorize(test_address(), "worker1".into(), test_username())
-            .unwrap();
-        assert!(state.configure(mask1).is_err());
+        assert!(state.authorize(test_address(), "worker1".into(), test_username()));
+        assert!(!state.configure(mask1));
     }
 
     #[test]
@@ -338,15 +252,13 @@ mod tests {
         let mut state = State::new();
         assert_eq!(state.to_string(), "Init");
 
-        state.configure(Version::from(0x1fffe000)).unwrap();
+        assert!(state.configure(Version::from(0x1fffe000)));
         assert_eq!(state.to_string(), "Configured");
 
-        state.subscribe(test_enonce1(), "test/1.0".into());
+        assert!(state.subscribe(test_enonce1(), "test/1.0".into()));
         assert_eq!(state.to_string(), "Subscribed");
 
-        state
-            .authorize(test_address(), "worker1".into(), test_username())
-            .unwrap();
+        assert!(state.authorize(test_address(), "worker1".into(), test_username()));
         assert_eq!(state.to_string(), "Working");
     }
 }
