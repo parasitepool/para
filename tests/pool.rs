@@ -214,6 +214,7 @@ async fn stratum_state_machine() {
 
         let (notify, difficulty) = wait_for_notify(&mut events).await;
 
+        // Confirm Working state by submitting valid share
         let enonce2 = Extranonce::random(enonce2_size);
         let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, difficulty);
         client
