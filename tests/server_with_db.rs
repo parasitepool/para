@@ -731,7 +731,7 @@ async fn test_payouts_simulate_basic() {
 
     server.admin_token = Some("testtoken".into());
     let payouts: Vec<SimulatedPayout> = server
-        .get_json_async_raw("/payouts/simulate")
+        .get_json_async_raw("/payouts/simulate?format=json")
         .await
         .json()
         .await
@@ -786,7 +786,7 @@ async fn test_payouts_simulate_excludes_already_paid() {
 
     server.admin_token = Some("testtoken".into());
     let payouts: Vec<SimulatedPayout> = server
-        .get_json_async_raw("/payouts/simulate")
+        .get_json_async_raw("/payouts/simulate?format=json")
         .await
         .json()
         .await
@@ -828,7 +828,7 @@ async fn test_payouts_simulate_empty_when_fully_paid() {
 
     server.admin_token = Some("testtoken".into());
     let payouts: Vec<SimulatedPayout> = server
-        .get_json_async_raw("/payouts/simulate")
+        .get_json_async_raw("/payouts/simulate?format=json")
         .await
         .json()
         .await
@@ -846,7 +846,7 @@ async fn test_payouts_simulate_empty_database() {
 
     server.admin_token = Some("testtoken".into());
     let payouts: Vec<SimulatedPayout> = server
-        .get_json_async_raw("/payouts/simulate")
+        .get_json_async_raw("/payouts/simulate?format=json")
         .await
         .json()
         .await
@@ -862,7 +862,9 @@ async fn test_payouts_simulate_requires_auth() {
         .await
         .unwrap();
 
-    let res = server.get_json_async_raw("/payouts/simulate").await;
+    let res = server
+        .get_json_async_raw("/payouts/simulate?format=json")
+        .await;
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
@@ -902,7 +904,7 @@ async fn test_payouts_simulate_groups_by_lnurl() {
 
     server.admin_token = Some("testtoken".into());
     let payouts: Vec<SimulatedPayout> = server
-        .get_json_async_raw("/payouts/simulate")
+        .get_json_async_raw("/payouts/simulate?format=json")
         .await
         .json()
         .await
