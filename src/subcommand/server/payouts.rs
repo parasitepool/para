@@ -85,7 +85,7 @@ pub(crate) async fn payouts_failed(
     security(("admin_token" = [])),
     params(
         ("coinbase_value" = Option<i64>, Query, description = "Coinbase value in sats (default: 312500000 for 3.125 BTC)"),
-        ("finder_username" = Option<String>, Query, description = "Username of the block finder to exclude from payouts"),
+        ("winner_address" = Option<String>, Query, description = "Username of the block winner to exclude from payouts"),
         ("format" = Option<String>, Query, description = "Response format: 'json', 'csv', or HTML (default)")
     ),
     responses(
@@ -102,12 +102,12 @@ pub(crate) async fn payouts_simulate(
         .get("coinbase_value")
         .and_then(|v| v.parse().ok())
         .unwrap_or(312_500_000); // 3.125 BTC, current coinbase value
-    let finder_username = params
-        .get("finder_username")
+    let winner_address = params
+        .get("winner_address")
         .map_or("", |user| user.as_str());
 
     let payouts = database
-        .get_simulated_payouts(coinbase_value, finder_username)
+        .get_simulated_payouts(coinbase_value, winner_address)
         .await?;
 
     let format = params.get("format").map(|f| f.as_str()).unwrap_or("html");
@@ -128,7 +128,7 @@ pub(crate) async fn payouts_simulate(
         _ => Ok(SimulatePayoutsHtml {
             payouts,
             coinbase_value,
-            finder_username: finder_username.to_string(),
+            winner_address: winner_address.to_string(),
         }
         .page(config.domain())
         .into_response()),

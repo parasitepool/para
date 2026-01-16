@@ -5,7 +5,7 @@ use crate::subcommand::server::database::SimulatedPayout;
 pub struct SimulatePayoutsHtml {
     pub payouts: Vec<SimulatedPayout>,
     pub coinbase_value: i64,
-    pub finder_username: String,
+    pub winner_address: String,
 }
 
 impl PageContent for SimulatePayoutsHtml {
@@ -28,29 +28,29 @@ impl SimulatePayoutsHtml {
     }
 
     pub fn json_url(&self) -> String {
-        if self.finder_username.is_empty() {
+        if self.winner_address.is_empty() {
             format!(
                 "/payouts/simulate?format=json&coinbase_value={}",
                 self.coinbase_value
             )
         } else {
             format!(
-                "/payouts/simulate?format=json&coinbase_value={}&finder_username={}",
-                self.coinbase_value, self.finder_username
+                "/payouts/simulate?format=json&coinbase_value={}&winner_address={}",
+                self.coinbase_value, self.winner_address
             )
         }
     }
 
     pub fn csv_url(&self) -> String {
-        if self.finder_username.is_empty() {
+        if self.winner_address.is_empty() {
             format!(
                 "/payouts/simulate?format=csv&coinbase_value={}",
                 self.coinbase_value
             )
         } else {
             format!(
-                "/payouts/simulate?format=csv&coinbase_value={}&finder_username={}",
-                self.coinbase_value, self.finder_username
+                "/payouts/simulate?format=csv&coinbase_value={}&winner_address={}",
+                self.coinbase_value, self.winner_address
             )
         }
     }

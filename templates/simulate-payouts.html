@@ -4,8 +4,8 @@
             Simulate Payouts<br>
             <br>
             Coinbase Value: {{ self.display_coinbase_value() }}<br>
-            %% if !self.finder_username.is_empty() {
-            Block Finder: {{ self.finder_username }}<br>
+            %% if !self.winner_address.is_empty() {
+            Block Finder: {{ self.winner_address }}<br>
             %% }
             Total Payouts: {{ self.display_count() }}<br>
             Total Amount: {{ self.display_total() }}
@@ -22,8 +22,8 @@
                 <input type="number" id="coinbase_value" name="coinbase_value" value="{{ self.coinbase_value }}" style="width: 200px;">
             </div>
             <div>
-                <label for="finder_username">Block Finder (username):</label><br>
-                <input type="text" id="finder_username" name="finder_username" value="{{ self.finder_username }}" style="width: 200px;">
+                <label for="winner_address">Block Finder (username):</label><br>
+                <input type="text" id="winner_address" name="winner_address" value="{{ self.winner_address }}" style="width: 200px;">
             </div>
             <button type="submit">Simulate</button>
         </form>
