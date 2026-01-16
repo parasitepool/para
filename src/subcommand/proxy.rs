@@ -22,7 +22,7 @@ impl Proxy {
 
         let upstream = Arc::new(upstream);
 
-        let (workbase_rx, sink_tx) = upstream
+        let workbase_rx = upstream
             .clone()
             .spawn(events, cancel_token.clone(), &mut tasks)
             .await
@@ -33,10 +33,7 @@ impl Proxy {
                 .context("upstream extranonce configuration incompatible with proxy mode")?,
         );
         let metatron = Arc::new(Metatron::new(extranonces));
-
-        let share_tx = metatron
-            .clone()
-            .spawn(Some(sink_tx), cancel_token.clone(), &mut tasks);
+        metatron.clone().spawn(cancel_token.clone(), &mut tasks);
 
         let metrics = Arc::new(Metrics {
             upstream: upstream.clone(),
@@ -70,7 +67,7 @@ impl Proxy {
                     let workbase_rx = workbase_rx.clone();
                     let settings = settings.clone();
                     let metatron = metatron.clone();
-                    let share_tx = share_tx.clone();
+                    let upstream = upstream.clone();
                     let conn_cancel_token = cancel_token.child_token();
 
                     tasks.spawn(async move {
@@ -78,7 +75,7 @@ impl Proxy {
                             addr,
                             settings,
                             metatron,
-                            share_tx,
+                            Some(upstream),
                             stream,
                             workbase_rx,
                             conn_cancel_token,
