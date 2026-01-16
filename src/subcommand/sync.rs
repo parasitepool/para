@@ -557,7 +557,7 @@ impl Database {
         &self,
         blockheight: i32,
         total_reward: i64,
-        finder_username: Option<&str>,
+        winner_address: Option<&str>,
     ) -> Result {
         let prev_blockheight = sqlx::query_scalar::<_, Option<i32>>(
             "SELECT MAX(blockheight) FROM blocks WHERE blockheight < $1",
@@ -642,7 +642,7 @@ impl Database {
             .bind(blockheight)
             .bind(prev_blockheight)
             .bind(total_reward)
-            .bind(finder_username.unwrap_or(""))
+            .bind(winner_address.unwrap_or(""))
             .execute(&self.pool)
             .await
             .map_err(|e| anyhow!("Failed to populate payouts: {e}"))?;
