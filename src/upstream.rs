@@ -167,8 +167,8 @@ impl Upstream {
                                 connected.store(false, Ordering::SeqCst);
                                 break;
                             }
-                            Err(e) => {
-                                error!("Upstream event error: {}", e);
+                            Err(err) => {
+                                error!("Upstream event error: {}", err);
                                 connected.store(false, Ordering::SeqCst);
                                 break;
                             }

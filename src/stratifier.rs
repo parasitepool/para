@@ -1,7 +1,7 @@
 use {
     super::*,
     bouncer::{Bouncer, Consequence},
-    state::State,
+    state::{Session, State},
     upstream::UpstreamSubmit,
 };
 
@@ -123,7 +123,7 @@ impl<W: Workbase> Stratifier<W> {
                         "mining.authorize" => {
                             debug!("AUTHORIZE from {} with {params}", self.socket_addr);
 
-                            if !self.state.is_subscribed() {
+                            let Some(subscription) = self.state.subscribed() else {
                                 self.send_error(
                                     id.clone(),
                                     StratumError::MethodNotAllowed,
@@ -134,26 +134,30 @@ impl<W: Workbase> Stratifier<W> {
                                 )
                                 .await?;
                                 continue;
-                            }
+                            };
 
                             let authorize = serde_json::from_value::<Authorize>(params)
                                 .context(format!("failed to deserialize {method}"))?;
 
-                            self.authorize(id, authorize).await?
+                            self.authorize(id, authorize, subscription.enonce1).await?
                         }
                         "mining.submit" => {
                             debug!("SUBMIT from {} with params {params}", self.socket_addr);
 
-                            if !self.state.is_working() {
+                            let Some(session) = self.state.working() else {
                                 self.send_error(id.clone(), StratumError::Unauthorized, None)
                                     .await?;
                                 continue;
-                            }
+                            };
 
                             let submit = serde_json::from_value::<Submit>(params)
                                 .context(format!("failed to deserialize {method}"))?;
 
-                            if self.submit(id, submit).await? == Consequence::Drop {
+                            if self
+                                .submit(id, submit, session)
+                                .await?
+                                == Consequence::Drop
+                            {
                                 self.dropped_by_bouncer = true;
                                 break;
                             }
@@ -170,13 +174,14 @@ impl<W: Workbase> Stratifier<W> {
                         break;
                     }
 
-                    if !self.state.is_working() {
+                    if let Some(session)= self.state.working() {
+                        let workbase = workbase_rx.borrow_and_update().clone();
+                        self.workbase_update(workbase, session).await?;
+                    } else {
                         let _ = workbase_rx.borrow_and_update();
                         continue;
                     };
 
-                    let workbase = workbase_rx.borrow_and_update().clone();
-                    self.workbase_update(workbase).await?;
                 }
             }
         }
@@ -184,7 +189,12 @@ impl<W: Workbase> Stratifier<W> {
         Ok(())
     }
 
-    async fn handle_consequence(&mut self, consequence: Consequence) {
+    async fn handle_consequence(
+        &mut self,
+        consequence: Consequence,
+        address: &Address,
+        enonce1: &Extranonce,
+    ) {
         match consequence {
             Consequence::None => {}
             Consequence::Warn => {
@@ -198,33 +208,30 @@ impl<W: Workbase> Stratifier<W> {
                         .unwrap_or(0)
                 );
 
-                if let (Some(address), Some(enonce1)) = (self.state.address(), self.state.enonce1())
-                {
-                    let workbase = self.workbase_rx.borrow().clone();
+                let workbase = self.workbase_rx.borrow().clone();
 
-                    match workbase.create_job(
-                        enonce1,
-                        self.metatron.enonce2_size(),
-                        Some(address),
-                        self.jobs.next_id(),
-                        self.state.version_mask(),
-                    ) {
-                        Ok(job) => {
-                            let new_job = Arc::new(job);
-                            let clean_jobs = self.jobs.insert(new_job.clone());
+                match workbase.create_job(
+                    enonce1,
+                    self.metatron.enonce2_size(),
+                    Some(address),
+                    self.jobs.next_id(),
+                    self.state.version_mask(),
+                ) {
+                    Ok(job) => {
+                        let new_job = Arc::new(job);
+                        let clean_jobs = self.jobs.insert(new_job.clone());
 
-                            if let Ok(notify) = new_job.notify(clean_jobs) {
-                                let _ = self
-                                    .send(Message::Notification {
-                                        method: "mining.notify".into(),
-                                        params: json!(notify),
-                                    })
-                                    .await;
-                            }
+                        if let Ok(notify) = new_job.notify(clean_jobs) {
+                            let _ = self
+                                .send(Message::Notification {
+                                    method: "mining.notify".into(),
+                                    params: json!(notify),
+                                })
+                                .await;
                         }
-                        Err(err) => {
-                            warn!("Failed to create job: {err}");
-                        }
+                    }
+                    Err(err) => {
+                        warn!("Failed to create job: {err}");
                     }
                 }
             }
@@ -259,18 +266,13 @@ impl<W: Workbase> Stratifier<W> {
         }
     }
 
-    async fn workbase_update(&mut self, workbase: Arc<W>) -> Result {
-        let (address, enonce1) = match (self.state.address(), self.state.enonce1()) {
-            (Some(address), Some(enonce1)) => (address, enonce1.clone()),
-            _ => return Ok(()),
-        };
-
+    async fn workbase_update(&mut self, workbase: Arc<W>, session: Arc<Session>) -> Result {
         let new_job = Arc::new(
             workbase
                 .create_job(
-                    &enonce1,
+                    &session.enonce1,
                     self.metatron.enonce2_size(),
-                    Some(address),
+                    Some(&session.address),
                     self.jobs.next_id(),
                     self.state.version_mask(),
                 )
@@ -294,16 +296,17 @@ impl<W: Workbase> Stratifier<W> {
         if configure.version_rolling_mask.is_some() {
             let version_mask = self.settings.version_mask();
 
-            if let Err(err) = self.state.configure(version_mask) {
+            if !self.state.configure(version_mask) {
                 self.send_error(
                     id,
-                    err,
+                    StratumError::MethodNotAllowed,
                     Some(serde_json::json!({
                         "method": "mining.configure",
                         "current_state": self.state.to_string()
                     })),
                 )
                 .await?;
+
                 return Ok(());
             }
 
@@ -396,13 +399,7 @@ impl<W: Workbase> Stratifier<W> {
         Ok(())
     }
 
-    async fn authorize(&mut self, id: Id, authorize: Authorize) -> Result {
-        let enonce1 = self
-            .state
-            .enonce1()
-            .cloned()
-            .ok_or_else(|| anyhow!("missing enonce1 do SUBSCRIBE first"))?;
-
+    async fn authorize(&mut self, id: Id, authorize: Authorize, enonce1: Extranonce) -> Result {
         let address = match authorize
             .username
             .parse_with_network(self.settings.chain().network())
@@ -418,6 +415,7 @@ impl<W: Workbase> Stratifier<W> {
                     })),
                 )
                 .await?;
+
                 return Ok(());
             }
         };
@@ -437,7 +435,7 @@ impl<W: Workbase> Stratifier<W> {
         );
 
         self.send(Message::Response {
-            id,
+            id: id.clone(),
             result: Some(json!(true)),
             error: None,
             reject_reason: None,
@@ -445,10 +443,23 @@ impl<W: Workbase> Stratifier<W> {
         .await?;
 
         let workername = authorize.username.workername().to_string();
-
-        self.state
+        // TODO
+        if !self
+            .state
             .authorize(address, workername, authorize.username)
-            .map_err(|e| anyhow!("state.authorize failed: {e}"))?;
+        {
+            self.send_error(
+                id.clone(),
+                StratumError::MethodNotAllowed,
+                Some(serde_json::json!({
+                    "method": "mining.authorize",
+                    "current_state": self.state.to_string()
+                })),
+            )
+            .await?;
+
+            return Ok(());
+        }
 
         self.bouncer.authorize();
 
@@ -473,41 +484,44 @@ impl<W: Workbase> Stratifier<W> {
         Ok(())
     }
 
-    async fn submit(&mut self, id: Id, submit: Submit) -> Result<Consequence> {
-        if let Some(authorized) = self.state.authorized_username()
-            && submit.username.as_str() != authorized.as_str()
-        {
+    async fn submit(
+        &mut self,
+        id: Id,
+        submit: Submit,
+        session: Arc<Session>,
+    ) -> Result<Consequence> {
+        let worker = self
+            .metatron
+            .get_or_create_worker(session.address.clone(), &session.workername);
+
+        if submit.username != session.username {
             self.send_error(
                 id,
                 StratumError::WorkerMismatch,
                 Some(json!({
-                    "authorized": authorized.as_str(),
+                    "authorized": session.username.as_str(),
                     "submitted": submit.username.as_str(),
                 })),
             )
             .await?;
 
+            worker.record_rejected();
+
             let consequence = self.bouncer.reject();
-            self.handle_consequence(consequence).await;
+            self.handle_consequence(consequence, &session.address, &session.enonce1)
+                .await;
 
             return Ok(consequence);
         }
 
-        //TODO
-        let Some((address, workername, _)) = self.state.working_data() else {
-            error!("record_accepted_share called outside working state");
-            return Ok(Consequence::None); // TODO
-        };
-
-        let worker = self
-            .metatron
-            .get_or_create_worker(address.clone(), workername);
-
         let Some(job) = self.jobs.get(&submit.job_id) else {
             self.send_error(id, StratumError::Stale, None).await?;
 
+            worker.record_rejected();
+
             let consequence = self.bouncer.reject();
-            self.handle_consequence(consequence).await;
+            self.handle_consequence(consequence, &session.address, &session.enonce1)
+                .await;
 
             return Ok(consequence);
         };
@@ -533,8 +547,10 @@ impl<W: Workbase> Stratifier<W> {
             .await?;
 
             worker.record_rejected();
+
             let consequence = self.bouncer.reject();
-            self.handle_consequence(consequence).await;
+            self.handle_consequence(consequence, &session.address, &session.enonce1)
+                .await;
 
             return Ok(consequence);
         }
@@ -556,7 +572,8 @@ impl<W: Workbase> Stratifier<W> {
             worker.record_rejected();
 
             let consequence = self.bouncer.reject();
-            self.handle_consequence(consequence).await;
+            self.handle_consequence(consequence, &session.address, &session.enonce1)
+                .await;
 
             return Ok(consequence);
         }
@@ -571,8 +588,10 @@ impl<W: Workbase> Stratifier<W> {
                 .await?;
 
                 worker.record_rejected();
+
                 let consequence = self.bouncer.reject();
-                self.handle_consequence(consequence).await;
+                self.handle_consequence(consequence, &session.address, &session.enonce1)
+                    .await;
 
                 return Ok(consequence);
             };
@@ -617,7 +636,8 @@ impl<W: Workbase> Stratifier<W> {
             worker.record_rejected();
 
             let consequence = self.bouncer.reject();
-            self.handle_consequence(consequence).await;
+            self.handle_consequence(consequence, &session.address, &session.enonce1)
+                .await;
 
             return Ok(consequence);
         }
@@ -656,8 +676,9 @@ impl<W: Workbase> Stratifier<W> {
 
             let share_diff = Difficulty::from(hash);
 
-            worker.record_accepted(self.vardiff.current_diff(), share_diff);
-            self.submit_to_upstream(&submit, share_diff);
+            worker.record_accepted(current_diff, share_diff);
+
+            self.submit_to_upstream(&submit, share_diff, &session.enonce1);
 
             self.bouncer.accept();
 
@@ -696,18 +717,14 @@ impl<W: Workbase> Stratifier<W> {
         worker.record_rejected();
 
         let consequence = self.bouncer.reject();
-        self.handle_consequence(consequence).await;
+        self.handle_consequence(consequence, &session.address, &session.enonce1)
+            .await;
 
         Ok(consequence)
     }
 
-    fn submit_to_upstream(&self, submit: &Submit, share_diff: Difficulty) {
+    fn submit_to_upstream(&self, submit: &Submit, share_diff: Difficulty, enonce1: &Extranonce) {
         let Some(ref tx) = self.upstream_tx else {
-            return;
-        };
-
-        let Some((_, _, enonce1)) = self.state.working_data() else {
-            error!("submit_to_upstream called outside working state");
             return;
         };
 
@@ -776,11 +793,10 @@ impl<W: Workbase> Stratifier<W> {
 impl<W: Workbase> Drop for Stratifier<W> {
     fn drop(&mut self) {
         if !self.dropped_by_bouncer
-            && self.state.is_working()
-            && let Some(enonce1) = self.state.enonce1()
+            && let Some(session) = self.state.working()
         {
             self.metatron
-                .store_session(SessionSnapshot::new(enonce1.clone()));
+                .store_session(SessionSnapshot::new(session.enonce1.clone())); // TODO
         }
 
         self.metatron.sub_connection();
