@@ -55,15 +55,3 @@ impl SimulatePayoutsHtml {
         }
     }
 }
-
-pub fn format_sats(sats: i64) -> String {
-    if sats >= 100_000_000 {
-        format!("{:.3} BTC", sats as f64 / 100_000_000.0)
-    } else if sats >= 1_000_000 {
-        format!("{:.2}M sats", sats as f64 / 1_000_000.0)
-    } else if sats >= 1_000 {
-        format!("{:.2}K sats", sats as f64 / 1_000.0)
-    } else {
-        format!("{} sats", sats)
-    }
-}
