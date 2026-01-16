@@ -80,7 +80,7 @@ impl Upstream {
         mut events: EventReceiver,
         cancel: CancellationToken,
         tasks: &mut JoinSet<()>,
-    ) -> Result<(watch::Receiver<Arc<Notify>>, mpsc::Sender<UpstreamSubmit>)> {
+    ) -> Result<watch::Receiver<Arc<Notify>>> {
         self.client
             .authorize()
             .await
@@ -128,24 +128,16 @@ impl Upstream {
         let first_notify = first_notify.expect("checked above");
 
         let (workbase_tx, workbase_rx) = watch::channel(Arc::new(first_notify));
-        let (submit_tx, mut submit_rx) = mpsc::channel::<UpstreamSubmit>(SHARE_CHANNEL_CAPACITY);
 
         let connected = self.connected.clone();
         let upstream_difficulty = self.difficulty.clone();
 
-        let upstream = self;
         tasks.spawn(async move {
             loop {
                 tokio::select! {
                     biased;
 
                     _ = cancel.cancelled() => {
-                        info!("Shutting down upstream, draining {} pending submissions", submit_rx.len());
-
-                        while let Ok(submit) = submit_rx.try_recv() {
-                            upstream.submit_share(submit).await;
-                        }
-
                         break;
                     }
 
@@ -174,18 +166,14 @@ impl Upstream {
                             }
                         }
                     }
-
-                    Some(submit) = submit_rx.recv() => {
-                        upstream.submit_share(submit).await;
-                    }
                 }
             }
         });
 
-        Ok((workbase_rx, submit_tx))
+        Ok(workbase_rx)
     }
 
-    async fn submit_share(&self, submit: UpstreamSubmit) {
+    pub(crate) async fn submit_share(&self, submit: UpstreamSubmit) {
         let upstream_diff = *self.difficulty.read().await;
         if submit.share_diff < upstream_diff {
             debug!(

@@ -65,7 +65,7 @@ impl Pool {
                             addr,
                             settings.clone(),
                             metatron,
-                            None, // No upstream in pool mode
+                            None,
                             stream,
                             workbase_rx,
                             conn_cancel_token,

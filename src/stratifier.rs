@@ -16,7 +16,7 @@ pub(crate) struct Stratifier<W: Workbase> {
     socket_addr: SocketAddr,
     settings: Arc<Settings>,
     metatron: Arc<Metatron>,
-    upstream_tx: Option<mpsc::Sender<UpstreamSubmit>>,
+    upstream: Option<Arc<Upstream>>,
     reader: FramedRead<OwnedReadHalf, LinesCodec>,
     writer: FramedWrite<OwnedWriteHalf, LinesCodec>,
     workbase_rx: watch::Receiver<Arc<W>>,
@@ -33,7 +33,7 @@ impl<W: Workbase> Stratifier<W> {
         socket_addr: SocketAddr,
         settings: Arc<Settings>,
         metatron: Arc<Metatron>,
-        upstream_tx: Option<mpsc::Sender<UpstreamSubmit>>,
+        upstream: Option<Arc<Upstream>>,
         tcp_stream: TcpStream,
         workbase_rx: watch::Receiver<Arc<W>>,
         cancel_token: CancellationToken,
@@ -59,7 +59,7 @@ impl<W: Workbase> Stratifier<W> {
             socket_addr,
             settings,
             metatron,
-            upstream_tx,
+            upstream,
             reader: FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_MESSAGE_SIZE)),
             writer: FramedWrite::new(writer, LinesCodec::new()),
             workbase_rx,
@@ -147,6 +147,7 @@ impl<W: Workbase> Stratifier<W> {
                             let Some(session) = self.state.working() else {
                                 self.send_error(id.clone(), StratumError::Unauthorized, None)
                                     .await?;
+
                                 continue;
                             };
 
@@ -347,21 +348,23 @@ impl<W: Workbase> Stratifier<W> {
     }
 
     async fn subscribe(&mut self, id: Id, subscribe: Subscribe) -> Result {
-        if !self.state.not_subscribed() {
-            info!("Client {} resubscribing", self.socket_addr);
-            self.jobs = Jobs::<W>::new();
-            self.vardiff = Vardiff::new(
-                self.settings.start_diff(),
-                self.settings.vardiff_period(),
-                self.settings.vardiff_window(),
-                self.settings.min_diff(),
-                self.settings.max_diff(),
-            );
+        if !self.state.can_subscribe() {
+            self.send_error(
+                id,
+                StratumError::MethodNotAllowed,
+                Some(serde_json::json!({
+                    "method": "mining.subscribe",
+                    "current_state": self.state.to_string()
+                })),
+            )
+            .await?;
+
+            return Ok(());
         }
 
         let (enonce1, enonce2_size) = if let Some(ref requested_enonce1) = subscribe.enonce1 {
             let enonce1 = if let Some(session) = self.metatron.take_session(requested_enonce1) {
-                info!("Resuming session for enonce1 {}", session.enonce1);
+                info!("Resuming session with enonce1 {}", session.enonce1);
                 session.enonce1
             } else {
                 self.metatron.next_enonce1()
@@ -371,6 +374,20 @@ impl<W: Workbase> Stratifier<W> {
         } else {
             (self.metatron.next_enonce1(), self.metatron.enonce2_size())
         };
+
+        if !self.state.subscribe(enonce1.clone(), subscribe.user_agent) {
+            self.send_error(
+                id,
+                StratumError::MethodNotAllowed,
+                Some(serde_json::json!({
+                    "method": "mining.subscribe",
+                    "current_state": self.state.to_string()
+                })),
+            )
+            .await?;
+
+            return Ok(());
+        }
 
         let subscriptions = vec![
             (
@@ -387,14 +404,12 @@ impl<W: Workbase> Stratifier<W> {
         };
 
         self.send(Message::Response {
-            id,
+            id: id.clone(),
             result: Some(json!(result)),
             error: None,
             reject_reason: None,
         })
         .await?;
-
-        self.state.subscribe(enonce1, subscribe.user_agent);
 
         Ok(())
     }
@@ -420,6 +435,25 @@ impl<W: Workbase> Stratifier<W> {
             }
         };
 
+        let workername = authorize.username.workername().to_string();
+
+        if !self
+            .state
+            .authorize(address.clone(), workername, authorize.username)
+        {
+            self.send_error(
+                id.clone(),
+                StratumError::MethodNotAllowed,
+                Some(serde_json::json!({
+                    "method": "mining.authorize",
+                    "current_state": self.state.to_string()
+                })),
+            )
+            .await?;
+
+            return Ok(());
+        }
+
         let workbase = self.workbase_rx.borrow().clone();
 
         let job = Arc::new(
@@ -441,25 +475,6 @@ impl<W: Workbase> Stratifier<W> {
             reject_reason: None,
         })
         .await?;
-
-        let workername = authorize.username.workername().to_string();
-        // TODO
-        if !self
-            .state
-            .authorize(address, workername, authorize.username)
-        {
-            self.send_error(
-                id.clone(),
-                StratumError::MethodNotAllowed,
-                Some(serde_json::json!({
-                    "method": "mining.authorize",
-                    "current_state": self.state.to_string()
-                })),
-            )
-            .await?;
-
-            return Ok(());
-        }
 
         self.bouncer.authorize();
 
@@ -678,7 +693,8 @@ impl<W: Workbase> Stratifier<W> {
 
             worker.record_accepted(current_diff, share_diff);
 
-            self.submit_to_upstream(&submit, share_diff, &session.enonce1);
+            self.submit_to_upstream(&submit, share_diff, &session.enonce1)
+                .await;
 
             self.bouncer.accept();
 
@@ -723,8 +739,13 @@ impl<W: Workbase> Stratifier<W> {
         Ok(consequence)
     }
 
-    fn submit_to_upstream(&self, submit: &Submit, share_diff: Difficulty, enonce1: &Extranonce) {
-        let Some(ref tx) = self.upstream_tx else {
+    async fn submit_to_upstream(
+        &self,
+        submit: &Submit,
+        share_diff: Difficulty,
+        enonce1: &Extranonce,
+    ) {
+        let Some(ref upstream) = self.upstream else {
             return;
         };
 
@@ -744,9 +765,7 @@ impl<W: Workbase> Stratifier<W> {
             share_diff,
         };
 
-        if tx.try_send(upstream_submit).is_err() {
-            warn!("Upstream channel full, dropping share submission");
-        }
+        upstream.submit_share(upstream_submit).await;
     }
 
     async fn read_message(&mut self) -> Result<Option<Message>> {

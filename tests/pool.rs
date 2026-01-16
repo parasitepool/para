@@ -120,8 +120,8 @@ async fn stratum_state_machine() {
             StratumError::MethodNotAllowed,
         );
 
-        // subscribe again (resubscription in Subscribed) -> allowed
-        client.subscribe().await.unwrap();
+        // subscribe again (resubscription in Subscribed) -> MethodNotAllowed
+        assert_stratum_error(client.subscribe().await, StratumError::MethodNotAllowed);
 
         // submit in Subscribed -> Unauthorized
         assert_stratum_error(
@@ -198,7 +198,6 @@ async fn stratum_state_machine() {
         let client = pool.stratum_client().await;
         let mut events = client.connect().await.unwrap();
 
-        // Configure version rolling first
         client
             .configure(
                 vec!["version-rolling".into()],
@@ -215,7 +214,6 @@ async fn stratum_state_machine() {
 
         let (notify, difficulty) = wait_for_notify(&mut events).await;
 
-        // Submit a valid share (confirms Working state)
         let enonce2 = Extranonce::random(enonce2_size);
         let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, difficulty);
         client
@@ -223,41 +221,8 @@ async fn stratum_state_machine() {
             .await
             .unwrap();
 
-        // Resubscribe on same connection -> goes back to Subscribed state
-        let (new_subscribe_result, _, _) = client.subscribe().await.unwrap();
-
-        // Submit should fail with Unauthorized (not in Working state anymore)
-        assert_stratum_error(
-            client
-                .submit(
-                    notify.job_id,
-                    Extranonce::random(enonce2_size),
-                    ntime,
-                    nonce,
-                    None,
-                )
-                .await,
-            StratumError::Unauthorized,
-        );
-
-        // Must re-authorize after resubscription
-        client.authorize().await.unwrap();
-
-        // Wait for new job
-        let (new_notify, new_difficulty) = wait_for_notify(&mut events).await;
-
-        // New job ID should work
-        let new_enonce2 = Extranonce::random(enonce2_size);
-        let (new_ntime, new_nonce) = solve_share(
-            &new_notify,
-            &new_subscribe_result.enonce1,
-            &new_enonce2,
-            new_difficulty,
-        );
-        client
-            .submit(new_notify.job_id, new_enonce2, new_ntime, new_nonce, None)
-            .await
-            .unwrap();
+        // Resubscribe on same connection -> MethodNotAllowed
+        assert_stratum_error(client.subscribe().await, StratumError::MethodNotAllowed);
     }
 
     // Successful session resume preserves enonce1
