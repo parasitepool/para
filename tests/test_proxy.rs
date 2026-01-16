@@ -1,6 +1,6 @@
 use {
     super::*,
-    api::proxy::Status,
+    api::ProxyStatus,
     para::{USER_AGENT, stratum},
 };
 
@@ -120,7 +120,7 @@ impl TestProxy {
         format!("http://127.0.0.1:{}", self.api_port)
     }
 
-    pub(crate) async fn get_status(&self) -> reqwest::Result<Status> {
+    pub(crate) async fn get_status(&self) -> reqwest::Result<ProxyStatus> {
         let client = reqwest::Client::new();
         let url = format!("{}/proxy/status", self.api_endpoint());
         client.get(&url).send().await?.json().await

@@ -6,3 +6,62 @@ use {
 
 pub mod pool;
 pub mod proxy;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PoolStatus {
+    pub users: usize,
+    pub workers: usize,
+    pub connections: u64,
+    pub sps_1m: f64,
+    pub hashrate_1m: HashRate,
+    pub accepted: u64,
+    pub rejected: u64,
+    pub blocks: u64,
+    pub best_ever: Option<Difficulty>,
+    pub last_share: Option<u64>,
+    pub uptime_secs: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProxyStatus {
+    pub users: usize,
+    pub workers: usize,
+    pub connections: u64,
+    pub sps_1m: f64,
+    pub hashrate_1m: HashRate,
+    pub accepted: u64,
+    pub rejected: u64,
+    pub best_ever: Option<Difficulty>,
+    pub last_share: Option<u64>,
+    pub uptime_secs: u64,
+    pub upstream_endpoint: String,
+    pub upstream_connected: bool,
+    pub upstream_difficulty: f64,
+    pub upstream_username: Username,
+    pub upstream_enonce1: Extranonce,
+    pub upstream_enonce2_size: usize,
+    pub upstream_accepted: u64,
+    pub upstream_rejected: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserDetail {
+    pub address: String,
+    pub hashrate_1m: HashRate,
+    pub sps_1m: f64,
+    pub accepted: u64,
+    pub rejected: u64,
+    pub best_ever: Option<Difficulty>,
+    pub authorized: u64,
+    pub workers: Vec<WorkerDetail>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkerDetail {
+    pub name: String,
+    pub sps_1m: f64,
+    pub hashrate_1m: HashRate,
+    pub accepted: u64,
+    pub rejected: u64,
+    pub best_ever: Option<Difficulty>,
+}

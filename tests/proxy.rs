@@ -18,7 +18,10 @@ async fn proxy() {
         .await
         .expect("Failed to get proxy status");
 
-    assert_eq!(status.upstream, upstream, "Upstream URL should match");
+    assert_eq!(
+        status.upstream_endpoint, upstream,
+        "Upstream URL should match"
+    );
 
     assert_eq!(
         status.upstream_username,
@@ -26,7 +29,10 @@ async fn proxy() {
         "Username should match"
     );
 
-    assert!(status.connected, "Proxy should be connected to upstream");
+    assert!(
+        status.upstream_connected,
+        "Proxy should be connected to upstream"
+    );
 
     let client = proxy.stratum_client();
     let mut events = client.connect().await.expect("Failed to connect to proxy");
@@ -36,7 +42,7 @@ async fn proxy() {
         .await
         .expect("Failed to subscribe through proxy");
 
-    let upstream_enonce1 = status.enonce1.as_bytes();
+    let upstream_enonce1 = status.upstream_enonce1.as_bytes();
     let extended_enonce1 = subscribe.enonce1.as_bytes();
     assert_eq!(
         &extended_enonce1[..upstream_enonce1.len()],
@@ -51,7 +57,7 @@ async fn proxy() {
 
     assert_eq!(
         subscribe.enonce2_size,
-        status.enonce2_size - ENONCE1_EXTENSION_SIZE,
+        status.upstream_enonce2_size - ENONCE1_EXTENSION_SIZE,
         "Miner enonce2_size should be upstream minus extension"
     );
 
@@ -221,11 +227,14 @@ async fn proxy_with_non_default_enonce_sizes() {
         .expect("Failed to get proxy status");
 
     assert_eq!(
-        status.enonce1.len(),
+        status.upstream_enonce1.len(),
         6,
         "Upstream enonce1 should be 6 bytes"
     );
-    assert_eq!(status.enonce2_size, 4, "Upstream enonce2 should be 4 bytes");
+    assert_eq!(
+        status.upstream_enonce2_size, 4,
+        "Upstream enonce2 should be 4 bytes"
+    );
 
     let client = proxy.stratum_client();
     let mut events = client.connect().await.expect("Failed to connect to proxy");
