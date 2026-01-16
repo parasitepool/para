@@ -739,16 +739,17 @@ async fn share_validation() {
     assert_eq!(user.accepted, 1);
     assert_eq!(user.rejected, 8);
 
-    // Stale after new block - capture baseline before mine_block adds shares
-    let baseline = pool.get_status().await.unwrap();
-    let user_baseline = pool.get_user(&user_address).await.unwrap();
-
+    // Stale after new block
     let old_job_id = notify.job_id;
     let fresh_enonce2 = Extranonce::random(enonce2_size);
     let (old_ntime, old_nonce) = solve_share(&notify, &enonce1, &fresh_enonce2, difficulty);
 
     pool.mine_block();
     tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Capture baseline after mine_block since miner adds shares with same username
+    let baseline = pool.get_status().await.unwrap();
+    let user_baseline = pool.get_user(&user_address).await.unwrap();
 
     assert_stratum_error(
         client
