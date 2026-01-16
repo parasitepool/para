@@ -1,13 +1,11 @@
 use super::*;
 
-#[allow(dead_code)]
 pub(crate) trait Workbase: Clone + Send + Sync + 'static {
     fn merkle_branches(&self) -> &[MerkleNode];
     fn prevhash(&self) -> PrevHash;
     fn version(&self) -> Version;
     fn nbits(&self) -> Nbits;
     fn ntime(&self) -> Ntime;
-    fn height(&self) -> Option<u64>;
 
     fn create_job(
         self: &Arc<Self>,
@@ -46,10 +44,6 @@ impl Workbase for BlockTemplate {
 
     fn ntime(&self) -> Ntime {
         self.current_time
-    }
-
-    fn height(&self) -> Option<u64> {
-        Some(self.height)
     }
 
     fn create_job(
@@ -142,10 +136,6 @@ impl Workbase for Notify {
 
     fn ntime(&self) -> Ntime {
         self.ntime
-    }
-
-    fn height(&self) -> Option<u64> {
-        None
     }
 
     fn create_job(
