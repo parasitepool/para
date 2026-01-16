@@ -550,6 +550,17 @@ async fn vardiff_adjusts_difficulty() {
 #[timeout(90000)]
 async fn share_validation() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001 --disable-bouncer");
+
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(status.users, 0);
+    assert_eq!(status.workers, 0);
+    assert_eq!(status.connections, 0);
+    assert_eq!(status.blocks, 0);
+    assert_eq!(status.accepted, 0);
+    assert_eq!(status.rejected, 0);
+    assert!(status.best_ever.is_none());
+    assert!(status.last_share.is_none());
+
     let client = pool.stratum_client().await;
     let mut events = client.connect().await.unwrap();
 
@@ -567,10 +578,6 @@ async fn share_validation() {
         .assume_checked()
         .to_string();
 
-    let status = pool.get_status().await.unwrap();
-    assert_eq!(status.accepted, 0);
-    assert_eq!(status.rejected, 0);
-
     // Valid share accepted
     let enonce2 = Extranonce::random(enonce2_size);
     let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, difficulty);
@@ -580,12 +587,23 @@ async fn share_validation() {
         .unwrap();
 
     let status = pool.get_status().await.unwrap();
+    assert_eq!(status.users, 1);
+    assert_eq!(status.workers, 1);
+    assert_eq!(status.connections, 1);
     assert_eq!(status.accepted, 1);
     assert_eq!(status.rejected, 0);
+    assert!(status.best_ever.is_some());
+    assert!(status.last_share.is_some());
 
     let user = pool.get_user(&user_address).await.unwrap();
+    assert_eq!(user.address, user_address);
     assert_eq!(user.accepted, 1);
     assert_eq!(user.rejected, 0);
+    assert!(user.best_ever.is_some());
+    assert_eq!(user.workers.len(), 1);
+    assert_eq!(user.workers[0].accepted, 1);
+    assert_eq!(user.workers[0].rejected, 0);
+    assert!(user.workers[0].best_ever.is_some());
 
     // Duplicate rejected
     assert_stratum_error(
@@ -602,6 +620,8 @@ async fn share_validation() {
     let user = pool.get_user(&user_address).await.unwrap();
     assert_eq!(user.accepted, 1);
     assert_eq!(user.rejected, 1);
+    assert_eq!(user.workers[0].accepted, 1);
+    assert_eq!(user.workers[0].rejected, 1);
 
     // Invalid enonce2 length (too short)
     assert_stratum_error(
@@ -759,9 +779,14 @@ async fn share_validation() {
 
     let status = pool.get_status().await.unwrap();
     assert_eq!(status.rejected, baseline.rejected + 1);
+    assert_eq!(status.blocks, 1);
 
     let user = pool.get_user(&user_address).await.unwrap();
     assert_eq!(user.rejected, user_baseline.rejected + 1);
+    assert_eq!(
+        user.workers[0].rejected,
+        user_baseline.workers[0].rejected + 1
+    );
 }
 
 #[tokio::test]
