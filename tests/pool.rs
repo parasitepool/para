@@ -550,6 +550,17 @@ async fn vardiff_adjusts_difficulty() {
 #[timeout(90000)]
 async fn share_validation() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001 --disable-bouncer");
+
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(status.users, 0);
+    assert_eq!(status.workers, 0);
+    assert_eq!(status.connections, 0);
+    assert_eq!(status.blocks, 0);
+    assert_eq!(status.accepted, 0);
+    assert_eq!(status.rejected, 0);
+    assert!(status.best_ever.is_none());
+    assert!(status.last_share.is_none());
+
     let client = pool.stratum_client().await;
     let mut events = client.connect().await.unwrap();
 
@@ -560,16 +571,39 @@ async fn share_validation() {
     client.authorize().await.unwrap();
 
     let (notify, difficulty) = wait_for_notify(&mut events).await;
+    let username = signet_username();
+    let user_address = username
+        .parse_address()
+        .unwrap()
+        .assume_checked()
+        .to_string();
 
     // Valid share accepted
     let enonce2 = Extranonce::random(enonce2_size);
     let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, difficulty);
-    assert!(
-        client
-            .submit(notify.job_id, enonce2.clone(), ntime, nonce, None)
-            .await
-            .is_ok()
-    );
+    client
+        .submit(notify.job_id, enonce2.clone(), ntime, nonce, None)
+        .await
+        .unwrap();
+
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(status.users, 1);
+    assert_eq!(status.workers, 1);
+    assert_eq!(status.connections, 1);
+    assert_eq!(status.accepted, 1);
+    assert_eq!(status.rejected, 0);
+    assert!(status.best_ever.is_some());
+    assert!(status.last_share.is_some());
+
+    let user = pool.get_user(&user_address).await.unwrap();
+    assert_eq!(user.address, user_address);
+    assert_eq!(user.accepted, 1);
+    assert_eq!(user.rejected, 0);
+    assert!(user.best_ever.is_some());
+    assert_eq!(user.workers.len(), 1);
+    assert_eq!(user.workers[0].accepted, 1);
+    assert_eq!(user.workers[0].rejected, 0);
+    assert!(user.workers[0].best_ever.is_some());
 
     // Duplicate rejected
     assert_stratum_error(
@@ -578,6 +612,16 @@ async fn share_validation() {
             .await,
         StratumError::Duplicate,
     );
+
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(status.accepted, 1);
+    assert_eq!(status.rejected, 1);
+
+    let user = pool.get_user(&user_address).await.unwrap();
+    assert_eq!(user.accepted, 1);
+    assert_eq!(user.rejected, 1);
+    assert_eq!(user.workers[0].accepted, 1);
+    assert_eq!(user.workers[0].rejected, 1);
 
     // Invalid enonce2 length (too short)
     assert_stratum_error(
@@ -593,6 +637,10 @@ async fn share_validation() {
         StratumError::InvalidNonce2Length,
     );
 
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(status.accepted, 1);
+    assert_eq!(status.rejected, 2);
+
     // Invalid enonce2 length (too long)
     assert_stratum_error(
         client
@@ -606,6 +654,10 @@ async fn share_validation() {
             .await,
         StratumError::InvalidNonce2Length,
     );
+
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(status.accepted, 1);
+    assert_eq!(status.rejected, 3);
 
     // Invalid job id (stale)
     assert_stratum_error(
@@ -621,6 +673,10 @@ async fn share_validation() {
         StratumError::Stale,
     );
 
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(status.accepted, 1);
+    assert_eq!(status.rejected, 4);
+
     // Share above target
     assert_stratum_error(
         client
@@ -634,6 +690,10 @@ async fn share_validation() {
             .await,
         StratumError::AboveTarget,
     );
+
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(status.accepted, 1);
+    assert_eq!(status.rejected, 5);
 
     // Worker mismatch rejected
     assert_stratum_error(
@@ -650,6 +710,14 @@ async fn share_validation() {
         StratumError::WorkerMismatch,
     );
 
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(status.accepted, 1);
+    assert_eq!(status.rejected, 6);
+
+    let user = pool.get_user(&user_address).await.unwrap();
+    assert_eq!(user.accepted, 1);
+    assert_eq!(user.rejected, 6);
+
     // Ntime before job's ntime rejected
     let job_ntime: u32 = notify.ntime.into();
     assert_stratum_error(
@@ -665,6 +733,10 @@ async fn share_validation() {
         StratumError::NtimeOutOfRange,
     );
 
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(status.accepted, 1);
+    assert_eq!(status.rejected, 7);
+
     // Ntime too far in future rejected (> 7000 seconds)
     assert_stratum_error(
         client
@@ -679,6 +751,14 @@ async fn share_validation() {
         StratumError::NtimeOutOfRange,
     );
 
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(status.accepted, 1);
+    assert_eq!(status.rejected, 8);
+
+    let user = pool.get_user(&user_address).await.unwrap();
+    assert_eq!(user.accepted, 1);
+    assert_eq!(user.rejected, 8);
+
     // Stale after new block
     let old_job_id = notify.job_id;
     let fresh_enonce2 = Extranonce::random(enonce2_size);
@@ -687,11 +767,25 @@ async fn share_validation() {
     pool.mine_block();
     tokio::time::sleep(Duration::from_secs(2)).await;
 
+    let baseline = pool.get_status().await.unwrap();
+    let user_baseline = pool.get_user(&user_address).await.unwrap();
+
     assert_stratum_error(
         client
             .submit(old_job_id, fresh_enonce2, old_ntime, old_nonce, None)
             .await,
         StratumError::Stale,
+    );
+
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(status.rejected, baseline.rejected + 1);
+    assert_eq!(status.blocks, 1);
+
+    let user = pool.get_user(&user_address).await.unwrap();
+    assert_eq!(user.rejected, user_baseline.rejected + 1);
+    assert_eq!(
+        user.workers[0].rejected,
+        user_baseline.workers[0].rejected + 1
     );
 }
 

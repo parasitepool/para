@@ -233,7 +233,7 @@ impl Upstream {
         self.enonce2_size
     }
 
-    pub(crate) async fn upstream_difficulty(&self) -> Difficulty {
+    pub(crate) async fn difficulty(&self) -> Difficulty {
         *self.difficulty.read().await
     }
 
@@ -241,7 +241,7 @@ impl Upstream {
         self.connected.load(Ordering::Relaxed)
     }
 
-    pub(crate) fn upstream(&self) -> &str {
+    pub(crate) fn endpoint(&self) -> &str {
         &self.endpoint
     }
 
@@ -249,11 +249,11 @@ impl Upstream {
         &self.client.config.username
     }
 
-    pub(crate) fn upstream_accepted(&self) -> u64 {
+    pub(crate) fn accepted(&self) -> u64 {
         self.accepted.load(Ordering::Relaxed)
     }
 
-    pub(crate) fn upstream_rejected(&self) -> u64 {
+    pub(crate) fn rejected(&self) -> u64 {
         self.rejected.load(Ordering::Relaxed)
     }
 }

@@ -1,42 +1,5 @@
 use super::*;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Status {
-    pub users: usize,
-    pub workers: usize,
-    pub connections: u64,
-    pub hashrate_1m: HashRate,
-    pub sps_1m: f64,
-    pub accepted: u64,
-    pub rejected: u64,
-    pub blocks: u64,
-    pub best_ever: Option<Difficulty>,
-    pub last_share: Option<u64>,
-    pub uptime_secs: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UserDetail {
-    pub address: String,
-    pub hash_rate: HashRate,
-    pub sps_1m: f64,
-    pub accepted: u64,
-    pub rejected: u64,
-    pub best_ever: Option<Difficulty>,
-    pub authorized: u64,
-    pub workers: Vec<WorkerDetail>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorkerDetail {
-    pub name: String,
-    pub hashrate_1m: HashRate,
-    pub sps_1m: f64,
-    pub accepted: u64,
-    pub rejected: u64,
-    pub best_ever: Option<Difficulty>,
-}
-
 pub(crate) fn router(metatron: Arc<Metatron>) -> Router {
     Router::new()
         .route("/pool/status", get(status))
@@ -45,8 +8,8 @@ pub(crate) fn router(metatron: Arc<Metatron>) -> Router {
         .with_state(metatron)
 }
 
-async fn status(State(metatron): State<Arc<Metatron>>) -> Json<Status> {
-    Json(Status {
+async fn status(State(metatron): State<Arc<Metatron>>) -> Json<PoolStatus> {
+    Json(PoolStatus {
         hashrate_1m: metatron.hash_rate_1m(),
         sps_1m: metatron.sps_1m(),
         users: metatron.total_users(),
@@ -84,7 +47,7 @@ async fn user(
 
     Ok(Json(UserDetail {
         address: user.address.to_string(),
-        hash_rate: user.hash_rate_1m(),
+        hashrate_1m: user.hash_rate_1m(),
         sps_1m: user.sps_1m(),
         accepted: user.accepted(),
         rejected: user.rejected(),

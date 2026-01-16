@@ -6,27 +6,38 @@ use super::*;
 async fn proxy() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001");
     let upstream = pool.stratum_endpoint();
+    let username = signet_username();
 
-    let proxy = TestProxy::spawn_with_args(
-        &upstream,
-        &signet_username().to_string(),
-        "--start-diff 0.00001",
-    );
+    let proxy =
+        TestProxy::spawn_with_args(&upstream, &username.to_string(), "--start-diff 0.00001");
 
     let status = proxy
         .get_status()
         .await
         .expect("Failed to get proxy status");
 
-    assert_eq!(status.upstream, upstream, "Upstream URL should match");
-
     assert_eq!(
-        status.upstream_username,
-        signet_username(),
-        "Username should match"
+        status.upstream_endpoint, upstream,
+        "Upstream URL should match"
     );
 
-    assert!(status.connected, "Proxy should be connected to upstream");
+    assert_eq!(status.upstream_username, username, "Username should match");
+
+    assert!(
+        status.upstream_connected,
+        "Proxy should be connected to upstream"
+    );
+
+    assert_eq!(status.users, 0);
+    assert_eq!(status.workers, 0);
+    assert_eq!(status.connections, 0);
+    assert_eq!(status.accepted, 0);
+    assert_eq!(status.rejected, 0);
+    assert_eq!(status.upstream_accepted, 0);
+    assert_eq!(status.upstream_rejected, 0);
+    assert!((status.upstream_difficulty - 0.00001).abs() < 1e-9);
+    assert!(status.best_ever.is_none());
+    assert!(status.last_share.is_none());
 
     let client = proxy.stratum_client();
     let mut events = client.connect().await.expect("Failed to connect to proxy");
@@ -36,7 +47,7 @@ async fn proxy() {
         .await
         .expect("Failed to subscribe through proxy");
 
-    let upstream_enonce1 = status.enonce1.as_bytes();
+    let upstream_enonce1 = status.upstream_enonce1.as_bytes();
     let extended_enonce1 = subscribe.enonce1.as_bytes();
     assert_eq!(
         &extended_enonce1[..upstream_enonce1.len()],
@@ -51,7 +62,7 @@ async fn proxy() {
 
     assert_eq!(
         subscribe.enonce2_size,
-        status.enonce2_size - ENONCE1_EXTENSION_SIZE,
+        status.upstream_enonce2_size - ENONCE1_EXTENSION_SIZE,
         "Miner enonce2_size should be upstream minus extension"
     );
 
@@ -74,6 +85,33 @@ async fn proxy() {
         .await
         .expect("Valid share should be accepted by proxy");
 
+    let user_address = username
+        .parse_address()
+        .unwrap()
+        .assume_checked()
+        .to_string();
+
+    let status = proxy.get_status().await.unwrap();
+    assert_eq!(status.users, 1);
+    assert_eq!(status.workers, 1);
+    assert_eq!(status.connections, 1);
+    assert_eq!(status.accepted, 1);
+    assert_eq!(status.rejected, 0);
+    assert_eq!(status.upstream_accepted, 1);
+    assert_eq!(status.upstream_rejected, 0);
+    assert!(status.best_ever.is_some());
+    assert!(status.last_share.is_some());
+
+    let user = proxy.get_user(&user_address).await.unwrap();
+    assert_eq!(user.address, user_address);
+    assert_eq!(user.accepted, 1);
+    assert_eq!(user.rejected, 0);
+    assert!(user.best_ever.is_some());
+    assert_eq!(user.workers.len(), 1);
+    assert_eq!(user.workers[0].accepted, 1);
+    assert_eq!(user.workers[0].rejected, 0);
+    assert!(user.workers[0].best_ever.is_some());
+
     let bad_enonce2 = Extranonce::random(subscribe.enonce2_size);
     let result = client
         .submit(
@@ -86,6 +124,12 @@ async fn proxy() {
         .await;
 
     assert_stratum_error(result, StratumError::AboveTarget);
+
+    let status = proxy.get_status().await.unwrap();
+    assert_eq!(status.accepted, 1);
+    assert_eq!(status.rejected, 1);
+    assert_eq!(status.upstream_accepted, 1);
+    assert_eq!(status.upstream_rejected, 0);
 
     assert_stratum_error(
         client
@@ -100,6 +144,10 @@ async fn proxy() {
         StratumError::InvalidNonce2Length,
     );
 
+    let status = proxy.get_status().await.unwrap();
+    assert_eq!(status.accepted, 1);
+    assert_eq!(status.rejected, 2);
+
     assert_stratum_error(
         client
             .submit(
@@ -112,6 +160,16 @@ async fn proxy() {
             .await,
         StratumError::InvalidNonce2Length,
     );
+
+    let status = proxy.get_status().await.unwrap();
+    assert_eq!(status.accepted, 1);
+    assert_eq!(status.rejected, 3);
+
+    let user = proxy.get_user(&user_address).await.unwrap();
+    assert_eq!(user.accepted, 1);
+    assert_eq!(user.rejected, 3);
+    assert_eq!(user.workers[0].accepted, 1);
+    assert_eq!(user.workers[0].rejected, 3);
 
     client.disconnect().await;
     drop(events);
@@ -145,6 +203,18 @@ async fn proxy() {
         .submit(notify2.job_id, enonce2_resumed, ntime2, nonce2, None)
         .await
         .expect("Share with resumed session should be accepted");
+
+    let status = proxy.get_status().await.unwrap();
+    assert_eq!(status.accepted, 2);
+    assert_eq!(status.rejected, 3);
+    assert_eq!(status.upstream_accepted, 2);
+    assert_eq!(status.upstream_rejected, 0);
+
+    let user = proxy.get_user(&user_address).await.unwrap();
+    assert_eq!(user.accepted, 2);
+    assert_eq!(user.rejected, 3);
+    assert_eq!(user.workers[0].accepted, 2);
+    assert_eq!(user.workers[0].rejected, 3);
 }
 
 #[test]
@@ -221,11 +291,14 @@ async fn proxy_with_non_default_enonce_sizes() {
         .expect("Failed to get proxy status");
 
     assert_eq!(
-        status.enonce1.len(),
+        status.upstream_enonce1.len(),
         6,
         "Upstream enonce1 should be 6 bytes"
     );
-    assert_eq!(status.enonce2_size, 4, "Upstream enonce2 should be 4 bytes");
+    assert_eq!(
+        status.upstream_enonce2_size, 4,
+        "Upstream enonce2 should be 4 bytes"
+    );
 
     let client = proxy.stratum_client();
     let mut events = client.connect().await.expect("Failed to connect to proxy");
