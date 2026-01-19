@@ -59,8 +59,8 @@ impl Controller {
                         None
                     }
                 }
-                Err(e) => {
-                    warn!("Failed to configure version rolling: {e}");
+                Err(err) => {
+                    warn!("Failed to configure version rolling: {err}");
                     None
                 }
             }
@@ -252,7 +252,7 @@ impl Controller {
                             enonce2
                         };
 
-                        let merkle_rool = stratum::merkle_root(
+                        let merkle_root = stratum::merkle_root(
                             &notify.coinb1,
                             &notify.coinb2,
                             &enonce1,
@@ -264,7 +264,7 @@ impl Controller {
                         let header = Header {
                             version: notify.version.into(),
                             prev_blockhash: notify.prevhash.clone().into(),
-                            merkle_root: merkle_rool.into(),
+                            merkle_root: merkle_root.into(),
                             time: notify.ntime.into(),
                             bits: notify.nbits.into(),
                             nonce: 0,

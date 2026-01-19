@@ -12,9 +12,9 @@ pub(crate) enum HasherError {
 pub(crate) struct Hasher {
     pub(crate) enonce2: Extranonce,
     pub(crate) header: Header,
-    pub(crate) version: Version,
     pub(crate) job_id: JobId,
     pub(crate) pool_target: Target,
+    pub(crate) version: Version,
     pub(crate) version_mask: Option<Version>,
 }
 
@@ -29,7 +29,7 @@ impl Hasher {
 
         let mut rng = rand::rng();
 
-        let mut current_version_bits: Option<Version> = None;
+        let mut current_version_bits = None;
 
         loop {
             if cancel.is_cancelled() {

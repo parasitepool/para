@@ -873,12 +873,11 @@ async fn share_validation() {
             .unwrap();
 
         // Disallowed version_bits (outside mask) -> InvalidVersionMask
-        let enonce2_bad = Extranonce::random(enonce2_size);
         assert_stratum_error(
             client
                 .submit(
                     notify.job_id,
-                    enonce2_bad,
+                    Extranonce::random(enonce2_size),
                     notify.ntime,
                     Nonce::from(0),
                     Some(Version::from_str("e0000000").unwrap()),
