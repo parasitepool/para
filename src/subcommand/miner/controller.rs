@@ -37,21 +37,21 @@ impl Controller {
             .context("failed to connect to stratum server")?;
 
         let version_mask = if disable_version_rolling {
-            info!("Version rolling disabled by flag");
+            info!("Version rolling disabled");
             None
         } else {
             match client
                 .configure(
                     vec!["version-rolling".to_string()],
-                    Some(Version::from_str("ffffffff").expect("valid hex")),
+                    Some(Version::from_str("ffffffff")?),
                 )
                 .await
             {
-                Ok((response, duration, _)) => {
+                Ok((response, _, _)) => {
                     if response.version_rolling {
                         info!(
-                            "Version rolling enabled: mask={:?} (negotiated in {:?})",
-                            response.version_rolling_mask, duration
+                            "Version rolling enabled: mask={:?}",
+                            response.version_rolling_mask
                         );
                         response.version_rolling_mask
                     } else {
@@ -252,19 +252,19 @@ impl Controller {
                             enonce2
                         };
 
-                        let merkle = stratum::merkle_root(
+                        let merkle_rool = stratum::merkle_root(
                             &notify.coinb1,
                             &notify.coinb2,
                             &enonce1,
                             &enonce2,
                             &notify.merkle_branches,
                         )
-                        .expect("merkle");
+                        .expect("merkle root should calculate");
 
                         let header = Header {
                             version: notify.version.into(),
                             prev_blockhash: notify.prevhash.clone().into(),
-                            merkle_root: merkle.into(),
+                            merkle_root: merkle_rool.into(),
                             time: notify.ntime.into(),
                             bits: notify.nbits.into(),
                             nonce: 0,
