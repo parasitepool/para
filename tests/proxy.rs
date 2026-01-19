@@ -334,7 +334,7 @@ async fn proxy_with_non_default_enonce_sizes() {
 #[tokio::test]
 #[serial(bitcoind)]
 #[timeout(90000)]
-async fn proxy_version_rolling() {
+async fn proxy_allows_version_rolling() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001");
 
     let proxy = TestProxy::spawn_with_args(
@@ -343,10 +343,8 @@ async fn proxy_version_rolling() {
         "--start-diff 0.00001",
     );
 
-    // Verify upstream_version_mask is set in proxy status
-    let status = proxy.get_status().await.unwrap();
     assert_eq!(
-        status.upstream_version_mask,
+        proxy.get_status().await.unwrap().upstream_version_mask,
         Some(Version::from_str("1fffe000").unwrap()),
         "Upstream version mask should match pool's configured mask"
     );
@@ -375,6 +373,7 @@ async fn proxy_version_rolling() {
         &output_with_version_rolling.stdout,
     ))
     .unwrap();
+
     let shares: Vec<Share> =
         serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).unwrap();
 
@@ -385,6 +384,7 @@ async fn proxy_version_rolling() {
         shares_with_version_rolling[0].version_bits.is_some(),
         "Miner with version rolling should have version_bits set"
     );
+
     assert!(
         shares[0].version_bits.is_none(),
         "Miner without version rolling should not have version_bits set"

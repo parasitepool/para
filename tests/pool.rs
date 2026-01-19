@@ -873,7 +873,6 @@ async fn share_validation() {
             .unwrap();
 
         // Disallowed version_bits (outside mask) -> InvalidVersionMask
-        // Note: We don't need to solve a valid share here since it will be rejected before hash check
         let enonce2_bad = Extranonce::random(enonce2_size);
         assert_stratum_error(
             client
