@@ -155,10 +155,9 @@ fn solve_share_with_version_bits(
     )
     .unwrap();
 
-    let base_version: Version = notify.version;
     let version = match (version_bits, version_mask) {
-        (Some(vb), Some(mask)) => (base_version & !mask) | (vb & mask),
-        _ => base_version,
+        (Some(version_bits), Some(mask)) => (notify.version & !mask) | (version_bits & mask),
+        _ => notify.version,
     };
 
     let mut header = Header {

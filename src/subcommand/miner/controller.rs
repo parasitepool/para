@@ -273,7 +273,7 @@ impl Controller {
                         let pool_target = { pool_difficulty.lock().await.to_target() };
 
                         let mut hasher = Hasher {
-                            base_version: notify.version,
+                            version: notify.version,
                             header,
                             pool_target,
                             enonce2: enonce2.clone(),

@@ -12,7 +12,7 @@ pub(crate) enum HasherError {
 pub(crate) struct Hasher {
     pub(crate) enonce2: Extranonce,
     pub(crate) header: Header,
-    pub(crate) base_version: Version,
+    pub(crate) version: Version,
     pub(crate) job_id: JobId,
     pub(crate) pool_target: Target,
     pub(crate) version_mask: Option<Version>,
@@ -44,8 +44,7 @@ impl Hasher {
                 let version_bits = random_bits & mask;
                 current_version_bits = Some(version_bits);
 
-                let base = self.base_version;
-                self.header.version = ((base & !mask) | version_bits).into();
+                self.header.version = ((self.version & !mask) | version_bits).into();
             }
 
             let t0 = Instant::now();
@@ -166,10 +165,10 @@ mod tests {
     #[test]
     fn hasher_hashes_with_very_low_leading_zeros() {
         let target = shift(1);
-        let hdr = header(None, None);
+        let header = header(None, None);
         let mut hasher = Hasher {
-            base_version: hdr.version.into(),
-            header: hdr,
+            version: header.version.into(),
+            header,
             pool_target: target,
             enonce2: "0000000000".parse().unwrap(),
             job_id: "bf".parse().unwrap(),
@@ -185,10 +184,10 @@ mod tests {
     #[test]
     fn hasher_nonce_space_exhausted() {
         let target = Target::from_be_bytes([0u8; 32]);
-        let hdr = header(None, Some(u32::MAX - 100));
+        let header = header(None, Some(u32::MAX - 100));
         let mut hasher = Hasher {
-            base_version: hdr.version.into(),
-            header: hdr,
+            version: header.version.into(),
+            header,
             pool_target: target,
             enonce2: "0000000000".parse().unwrap(),
             job_id: "bf".parse().unwrap(),
@@ -250,10 +249,10 @@ mod tests {
 
         for zeros in leading_zeros {
             let target = shift(zeros);
-            let hdr = header(None, None);
+            let header = header(None, None);
             let mut hasher = Hasher {
-                base_version: hdr.version.into(),
-                header: hdr,
+                version: header.version.into(),
+                header,
                 pool_target: target,
                 enonce2: "0000000000".parse().unwrap(),
                 job_id: JobId::new(0),
@@ -274,10 +273,10 @@ mod tests {
     #[test]
     fn test_parallel_mining_easy_target() {
         let target = shift(1);
-        let hdr = header(None, None);
+        let header = header(None, None);
         let mut hasher = Hasher {
-            base_version: hdr.version.into(),
-            header: hdr,
+            version: header.version.into(),
+            header,
             pool_target: target,
             enonce2: "0000000000".parse().unwrap(),
             job_id: JobId::new(0),
@@ -301,10 +300,10 @@ mod tests {
     #[test]
     fn test_parallel_mining_cancellation() {
         let target = shift(30);
-        let hdr = header(None, None);
+        let header = header(None, None);
         let mut hasher = Hasher {
-            base_version: hdr.version.into(),
-            header: hdr,
+            version: header.version.into(),
+            header,
             pool_target: target,
             enonce2: "0000000000".parse().unwrap(),
             job_id: JobId::new(1),
@@ -323,13 +322,12 @@ mod tests {
     #[test]
     fn test_version_rolling_applies_mask() {
         let target = shift(1);
-        let hdr = header(None, None);
-        let base_version = hdr.version;
+        let header = header(None, None);
         let mask = Version::from_str("1fffe000").unwrap();
 
         let mut hasher = Hasher {
-            base_version: base_version.into(),
-            header: hdr,
+            version: header.version.into(),
+            header,
             pool_target: target,
             enonce2: "0000000000".parse().unwrap(),
             job_id: JobId::new(0),
@@ -345,8 +343,8 @@ mod tests {
             "Solution should meet target"
         );
 
-        if let Some(vb) = version_bits {
-            let disallowed = vb & !mask;
+        if let Some(version_bits) = version_bits {
+            let disallowed = version_bits & !mask;
             assert_eq!(
                 disallowed,
                 Version::from(0),
