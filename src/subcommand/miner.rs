@@ -3,7 +3,7 @@ use {
     controller::Controller,
     hasher::Hasher,
     metrics::Metrics,
-    stratum::{Client, ClientConfig, Version},
+    stratum::{Client, ClientConfig},
 };
 
 mod controller;
@@ -36,7 +36,7 @@ pub(crate) struct Miner {
     cpu_cores: Option<usize>,
     #[arg(long, help = "Hash rate to <THROTTLE> to.")]
     throttle: Option<HashRate>,
-    #[arg(long, help = "Disable version rolling (ASICBoost).")]
+    #[arg(long, help = "Disable version rolling.")]
     disable_version_rolling: bool,
 }
 
