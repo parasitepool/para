@@ -40,6 +40,7 @@ pub struct ProxyStatus {
     pub upstream_username: Username,
     pub upstream_enonce1: Extranonce,
     pub upstream_enonce2_size: usize,
+    pub upstream_version_mask: Option<Version>,
     pub upstream_accepted: u64,
     pub upstream_rejected: u64,
 }

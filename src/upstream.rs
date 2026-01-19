@@ -22,6 +22,7 @@ pub(crate) struct Upstream {
     difficulty: Arc<RwLock<Difficulty>>,
     accepted: Arc<AtomicU64>,
     rejected: Arc<AtomicU64>,
+    version_mask: Option<Version>,
 }
 
 impl Upstream {
@@ -50,6 +51,30 @@ impl Upstream {
             .await
             .context("failed to connect to upstream")?;
 
+        let version_mask = match client
+            .configure(
+                vec!["version-rolling".to_string()],
+                Some(Version::from_str("1fffe000").expect("valid hex")),
+            )
+            .await
+        {
+            Ok((response, _, _)) if response.version_rolling => {
+                info!(
+                    "Upstream supports version rolling: mask={:?}",
+                    response.version_rolling_mask
+                );
+                response.version_rolling_mask
+            }
+            Ok(_) => {
+                info!("Upstream does not support version rolling");
+                None
+            }
+            Err(e) => {
+                warn!("Failed to negotiate version rolling with upstream: {e}");
+                None
+            }
+        };
+
         let (subscribe, _, _) = client
             .subscribe()
             .await
@@ -70,6 +95,7 @@ impl Upstream {
                 difficulty: Arc::new(RwLock::new(Difficulty::from(1))),
                 accepted: Arc::new(AtomicU64::new(0)),
                 rejected: Arc::new(AtomicU64::new(0)),
+                version_mask,
             },
             events,
         ))
@@ -255,5 +281,9 @@ impl Upstream {
 
     pub(crate) fn rejected(&self) -> u64 {
         self.rejected.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn version_mask(&self) -> Option<Version> {
+        self.version_mask
     }
 }

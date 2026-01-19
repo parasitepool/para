@@ -294,39 +294,7 @@ impl<W: Workbase> Stratifier<W> {
     }
 
     async fn configure(&mut self, id: Id, configure: Configure) -> Result {
-        if configure.version_rolling_mask.is_some() {
-            let version_mask = self.settings.version_mask();
-
-            if !self.state.configure(version_mask) {
-                self.send_error(
-                    id,
-                    StratumError::MethodNotAllowed,
-                    Some(serde_json::json!({
-                        "method": "mining.configure",
-                        "current_state": self.state.to_string()
-                    })),
-                )
-                .await?;
-
-                return Ok(());
-            }
-
-            debug!(
-                "Configuring version rolling for {} with version mask {version_mask}",
-                self.socket_addr
-            );
-
-            let message = Message::Response {
-                id,
-                result: Some(
-                    json!({"version-rolling": true, "version-rolling.mask": self.settings.version_mask()}),
-                ),
-                error: None,
-                reject_reason: None,
-            };
-
-            self.send(message).await?;
-        } else {
+        if configure.version_rolling_mask.is_none() {
             warn!("Unsupported extension {:?}", configure);
 
             let message = Message::Response {
@@ -342,7 +310,66 @@ impl<W: Workbase> Stratifier<W> {
             };
 
             self.send(message).await?;
+            return Ok(());
         }
+
+        let version_mask = if let Some(ref upstream) = self.upstream {
+            match upstream.version_mask() {
+                Some(mask) => {
+                    debug!(
+                        "Version rolling enabled for {} (proxy mode, upstream mask={})",
+                        self.socket_addr, mask
+                    );
+                    mask
+                }
+                None => {
+                    debug!(
+                        "Version rolling disabled for {} (upstream does not support it)",
+                        self.socket_addr
+                    );
+
+                    let message = Message::Response {
+                        id,
+                        result: Some(json!({"version-rolling": false})),
+                        error: None,
+                        reject_reason: None,
+                    };
+
+                    self.send(message).await?;
+                    return Ok(());
+                }
+            }
+        } else {
+            self.settings.version_mask()
+        };
+
+        if !self.state.configure(version_mask) {
+            self.send_error(
+                id,
+                StratumError::MethodNotAllowed,
+                Some(serde_json::json!({
+                    "method": "mining.configure",
+                    "current_state": self.state.to_string()
+                })),
+            )
+            .await?;
+
+            return Ok(());
+        }
+
+        debug!(
+            "Configuring version rolling for {} with version mask {version_mask}",
+            self.socket_addr
+        );
+
+        let message = Message::Response {
+            id,
+            result: Some(json!({"version-rolling": true, "version-rolling.mask": version_mask})),
+            error: None,
+            reject_reason: None,
+        };
+
+        self.send(message).await?;
 
         Ok(())
     }
@@ -593,36 +620,51 @@ impl<W: Workbase> Stratifier<W> {
             return Ok(consequence);
         }
 
-        let version = if let Some(version_bits) = submit.version_bits {
-            let Some(version_mask) = job.version_mask else {
-                self.send_error(
-                    id,
-                    StratumError::InvalidVersionMask,
-                    Some(serde_json::json!({"reason": "Version rolling not negotiated"})),
-                )
-                .await?;
+        let version = match submit.version_bits {
+            Some(version_bits) if version_bits != Version::from(0) => {
+                let Some(version_mask) = job.version_mask else {
+                    self.send_error(
+                        id,
+                        StratumError::InvalidVersionMask,
+                        Some(serde_json::json!({"reason": "Version rolling not negotiated"})),
+                    )
+                    .await?;
 
-                worker.record_rejected();
+                    worker.record_rejected();
 
-                let consequence = self.bouncer.reject();
-                self.handle_consequence(consequence, &session.address, &session.enonce1)
-                    .await;
+                    let consequence = self.bouncer.reject();
+                    self.handle_consequence(consequence, &session.address, &session.enonce1)
+                        .await;
 
-                return Ok(consequence);
-            };
+                    return Ok(consequence);
+                };
 
-            assert!(version_bits != Version::from(0));
+                let disallowed = version_bits & !version_mask;
 
-            let disallowed = version_bits & !version_mask;
+                if disallowed != Version::from(0) {
+                    self.send_error(
+                        id,
+                        StratumError::InvalidVersionMask,
+                        Some(serde_json::json!({
+                            "reason": "Disallowed version bits set",
+                            "disallowed": disallowed.to_string(),
+                            "mask": version_mask.to_string()
+                        })),
+                    )
+                    .await?;
 
-            ensure!(
-                disallowed == Version::from(0),
-                "miner set disallowed version bits: {disallowed}"
-            );
+                    worker.record_rejected();
 
-            (job.version() & !version_mask) | (version_bits & version_mask)
-        } else {
-            job.version()
+                    let consequence = self.bouncer.reject();
+                    self.handle_consequence(consequence, &session.address, &session.enonce1)
+                        .await;
+
+                    return Ok(consequence);
+                }
+
+                (job.version() & !version_mask) | (version_bits & version_mask)
+            }
+            _ => job.version(),
         };
 
         let nbits = job.nbits();

@@ -13,11 +13,12 @@ pub(crate) struct Controller {
     mode: Mode,
     pool_difficulty: Arc<Mutex<Difficulty>>,
     cancel: CancellationToken,
-    share_tx: mpsc::Sender<(JobId, Header, Extranonce)>,
-    share_rx: mpsc::Receiver<(JobId, Header, Extranonce)>,
+    share_tx: mpsc::Sender<(JobId, Header, Extranonce, Option<Version>)>,
+    share_rx: mpsc::Receiver<(JobId, Header, Extranonce, Option<Version>)>,
     shares: Vec<Share>,
     throttle: f64,
     username: Username,
+    version_mask: Option<Version>,
 }
 
 impl Controller {
@@ -27,12 +28,43 @@ impl Controller {
         cpu_cores: usize,
         throttle: Option<HashRate>,
         mode: Mode,
+        disable_version_rolling: bool,
         cancel_token: CancellationToken,
     ) -> Result<Vec<Share>> {
         let events = client
             .connect()
             .await
             .context("failed to connect to stratum server")?;
+
+        let version_mask = if disable_version_rolling {
+            info!("Version rolling disabled by flag");
+            None
+        } else {
+            match client
+                .configure(
+                    vec!["version-rolling".to_string()],
+                    Some(Version::from_str("ffffffff").expect("valid hex")),
+                )
+                .await
+            {
+                Ok((response, duration, _)) => {
+                    if response.version_rolling {
+                        info!(
+                            "Version rolling enabled: mask={:?} (negotiated in {:?})",
+                            response.version_rolling_mask, duration
+                        );
+                        response.version_rolling_mask
+                    } else {
+                        info!("Server does not support version rolling");
+                        None
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to configure version rolling: {e}");
+                    None
+                }
+            }
+        };
 
         let (subscribe, _, _) = client
             .subscribe()
@@ -76,6 +108,7 @@ impl Controller {
             shares: Vec::new(),
             throttle,
             username,
+            version_mask,
         };
 
         controller.spawn_hashers();
@@ -136,8 +169,12 @@ impl Controller {
                     }
                 },
                 maybe = self.share_rx.recv() => match maybe {
-                    Some((job_id, header, enonce2)) => {
-                        info!("Valid share found with difficulty={}", Difficulty::from(header.block_hash()));
+                    Some((job_id, header, enonce2, version_bits)) => {
+                        info!(
+                            "Valid share found with difficulty={} version_bits={:?}",
+                            Difficulty::from(header.block_hash()),
+                            version_bits
+                        );
 
                         let share = Share {
                             enonce1: self.enonce1.clone(),
@@ -146,12 +183,12 @@ impl Controller {
                             nonce: header.nonce.into(),
                             ntime: header.time.into(),
                             username: self.username.clone(),
-                            version_bits: None,
+                            version_bits,
                         };
 
                         self.shares.push(share);
 
-                        match self.client.submit(job_id, enonce2, header.time.into(), header.nonce.into(), None).await {
+                        match self.client.submit(job_id, enonce2, header.time.into(), header.nonce.into(), version_bits).await {
                             Err(err) => warn!("Failed to submit share for job {job_id}: {err}"),
                             Ok(_) => info!("Share for job {job_id} submitted successfully"),
                         }
@@ -190,6 +227,7 @@ impl Controller {
             let pool_difficulty = self.pool_difficulty.clone();
             let metrics = self.metrics.clone();
             let throttle = self.throttle;
+            let version_mask = self.version_mask;
 
             info!("Starting hasher for core {core_id}",);
             self.hashers.spawn(async move {
@@ -235,10 +273,12 @@ impl Controller {
                         let pool_target = { pool_difficulty.lock().await.to_target() };
 
                         let mut hasher = Hasher {
+                            base_version: notify.version,
                             header,
                             pool_target,
                             enonce2: enonce2.clone(),
                             job_id: notify.job_id,
+                            version_mask,
                         };
 
                         let cancel_clone = cancel.clone();

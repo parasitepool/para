@@ -759,6 +759,26 @@ async fn share_validation() {
     assert_eq!(user.accepted, 1);
     assert_eq!(user.rejected, 8);
 
+    // Version bits submitted without negotiation -> InvalidVersionMask
+    let enonce2_vr = Extranonce::random(enonce2_size);
+    let (ntime_vr, nonce_vr) = solve_share(&notify, &enonce1, &enonce2_vr, difficulty);
+    assert_stratum_error(
+        client
+            .submit(
+                notify.job_id,
+                enonce2_vr,
+                ntime_vr,
+                nonce_vr,
+                Some(Version::from_str("00100000").unwrap()),
+            )
+            .await,
+        StratumError::InvalidVersionMask,
+    );
+
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(status.accepted, 1);
+    assert_eq!(status.rejected, 9);
+
     // Stale after new block
     let old_job_id = notify.job_id;
     let fresh_enonce2 = Extranonce::random(enonce2_size);
@@ -787,6 +807,87 @@ async fn share_validation() {
         user.workers[0].rejected,
         user_baseline.workers[0].rejected + 1
     );
+
+    // Version rolling validation (new connection with configure)
+    {
+        let client = pool.stratum_client().await;
+        let mut events = client.connect().await.unwrap();
+
+        let (configure_response, _, _) = client
+            .configure(
+                vec!["version-rolling".into()],
+                Some(Version::from_str("1fffe000").unwrap()),
+            )
+            .await
+            .unwrap();
+
+        assert!(configure_response.version_rolling);
+        assert_eq!(
+            configure_response.version_rolling_mask,
+            Some(Version::from_str("1fffe000").unwrap())
+        );
+
+        let (subscribe, _, _) = client.subscribe().await.unwrap();
+        let enonce1 = subscribe.enonce1;
+        let enonce2_size = subscribe.enonce2_size;
+
+        client.authorize().await.unwrap();
+
+        let (notify, difficulty) = wait_for_notify(&mut events).await;
+        let version_mask = Version::from_str("1fffe000").unwrap();
+
+        // Valid version_bits within mask -> accepted
+        let version_bits_valid = Version::from_str("00100000").unwrap();
+        let enonce2_valid = Extranonce::random(enonce2_size);
+        let (ntime_valid, nonce_valid) = solve_share_with_version_bits(
+            &notify,
+            &enonce1,
+            &enonce2_valid,
+            difficulty,
+            Some(version_bits_valid),
+            Some(version_mask),
+        );
+        client
+            .submit(
+                notify.job_id,
+                enonce2_valid,
+                ntime_valid,
+                nonce_valid,
+                Some(version_bits_valid),
+            )
+            .await
+            .unwrap();
+
+        // Zero version_bits -> accepted (treated as no modification)
+        let enonce2_zero = Extranonce::random(enonce2_size);
+        let (ntime_zero, nonce_zero) = solve_share(&notify, &enonce1, &enonce2_zero, difficulty);
+        client
+            .submit(
+                notify.job_id,
+                enonce2_zero,
+                ntime_zero,
+                nonce_zero,
+                Some(Version::from(0)),
+            )
+            .await
+            .unwrap();
+
+        // Disallowed version_bits (outside mask) -> InvalidVersionMask
+        // Note: We don't need to solve a valid share here since it will be rejected before hash check
+        let enonce2_bad = Extranonce::random(enonce2_size);
+        assert_stratum_error(
+            client
+                .submit(
+                    notify.job_id,
+                    enonce2_bad,
+                    notify.ntime,
+                    Nonce::from(0),
+                    Some(Version::from_str("e0000000").unwrap()),
+                )
+                .await,
+            StratumError::InvalidVersionMask,
+        );
+    }
 }
 
 #[tokio::test]
