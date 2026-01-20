@@ -120,7 +120,9 @@ impl<W: Workbase> Stratifier<W> {
                             let subscribe = serde_json::from_value::<Subscribe>(params)
                                 .context(format!("failed to deserialize {method}"))?;
 
-                            self.subscribe(id, subscribe).await?
+                            let consequence = self.subscribe(id, subscribe).await?;
+
+                            self.handle_protocol_consequence(consequence).await;
                         }
                         "mining.authorize" => {
                             debug!("AUTHORIZE from {} with {params}", self.socket_addr);
@@ -135,15 +137,19 @@ impl<W: Workbase> Stratifier<W> {
                                     })),
                                 )
                                 .await?;
+
                                 let consequence = self.bouncer.reject();
                                 self.handle_protocol_consequence(consequence).await;
+
                                 continue;
                             };
 
                             let authorize = serde_json::from_value::<Authorize>(params)
                                 .context(format!("failed to deserialize {method}"))?;
 
-                            self.authorize(id, authorize, subscription.enonce1).await?
+                            let consequence = self.authorize(id, authorize, subscription.enonce1).await?;
+
+                            self.handle_protocol_consequence(consequence).await;
                         }
                         "mining.submit" => {
                             debug!("SUBMIT from {} with params {params}", self.socket_addr);
@@ -151,8 +157,10 @@ impl<W: Workbase> Stratifier<W> {
                             let Some(session) = self.state.working() else {
                                 self.send_error(id.clone(), StratumError::Unauthorized, None)
                                     .await?;
+
                                 let consequence = self.bouncer.reject();
                                 self.handle_protocol_consequence(consequence).await;
+
                                 continue;
                             };
 
@@ -423,7 +431,7 @@ impl<W: Workbase> Stratifier<W> {
         Ok(())
     }
 
-    async fn subscribe(&mut self, id: Id, subscribe: Subscribe) -> Result {
+    async fn subscribe(&mut self, id: Id, subscribe: Subscribe) -> Result<Consequence> {
         if !self.state.can_subscribe() {
             self.send_error(
                 id,
@@ -434,9 +442,8 @@ impl<W: Workbase> Stratifier<W> {
                 })),
             )
             .await?;
-            let consequence = self.bouncer.reject();
-            self.handle_protocol_consequence(consequence).await;
-            return Ok(());
+
+            return Ok(self.bouncer.reject());
         }
 
         let (enonce1, enonce2_size) = if let Some(ref requested_enonce1) = subscribe.enonce1 {
@@ -462,10 +469,8 @@ impl<W: Workbase> Stratifier<W> {
                 })),
             )
             .await?;
-            let consequence = self.bouncer.reject();
-            self.handle_protocol_consequence(consequence).await;
 
-            return Ok(());
+            return Ok(self.bouncer.reject());
         }
 
         self.bouncer.accept();
@@ -492,10 +497,15 @@ impl<W: Workbase> Stratifier<W> {
         })
         .await?;
 
-        Ok(())
+        Ok(Consequence::None)
     }
 
-    async fn authorize(&mut self, id: Id, authorize: Authorize, enonce1: Extranonce) -> Result {
+    async fn authorize(
+        &mut self,
+        id: Id,
+        authorize: Authorize,
+        enonce1: Extranonce,
+    ) -> Result<Consequence> {
         let address = match authorize
             .username
             .parse_with_network(self.settings.chain().network())
@@ -511,10 +521,8 @@ impl<W: Workbase> Stratifier<W> {
                     })),
                 )
                 .await?;
-                let consequence = self.bouncer.reject();
-                self.handle_protocol_consequence(consequence).await;
 
-                return Ok(());
+                return Ok(self.bouncer.reject());
             }
         };
 
@@ -533,10 +541,8 @@ impl<W: Workbase> Stratifier<W> {
                 })),
             )
             .await?;
-            let consequence = self.bouncer.reject();
-            self.handle_protocol_consequence(consequence).await;
 
-            return Ok(());
+            return Ok(self.bouncer.reject());
         }
 
         let workbase = self.workbase_rx.borrow().clone();
@@ -581,7 +587,7 @@ impl<W: Workbase> Stratifier<W> {
         })
         .await?;
 
-        Ok(())
+        Ok(Consequence::None)
     }
 
     async fn submit(
