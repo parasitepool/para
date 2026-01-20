@@ -1,6 +1,6 @@
 use {
     super::*,
-    stratum::{Client, ClientConfig, Event, EventReceiver, SubmitOutcome},
+    stratum::{Client, ClientError, Event, EventReceiver},
     tokio::sync::RwLock,
 };
 
@@ -38,13 +38,13 @@ impl Upstream {
             upstream, upstream_addr, username
         );
 
-        let client = Client::new(ClientConfig {
-            address: upstream_addr.to_string(),
-            username: username.clone(),
-            user_agent: USER_AGENT.into(),
-            password: settings.upstream_password(),
-            timeout: settings.timeout(),
-        });
+        let client = Client::new(
+            upstream_addr.to_string(),
+            username.clone(),
+            settings.upstream_password(),
+            USER_AGENT.into(),
+            settings.timeout(),
+        );
 
         let events = client
             .connect()
@@ -113,8 +113,9 @@ impl Upstream {
             .context("failed to authorize with upstream")?;
 
         info!(
-            "Authorized with upstream as {}",
-            self.client.config.username
+            "Authorized to upstream {} with {}",
+            self.client.address(),
+            self.client.username()
         );
 
         self.connected.store(true, Ordering::SeqCst);
@@ -220,7 +221,7 @@ impl Upstream {
 
         tokio::spawn(async move {
             match client
-                .submit_async(
+                .submit(
                     submit.job_id,
                     submit.enonce2,
                     submit.ntime,
@@ -229,23 +230,20 @@ impl Upstream {
                 )
                 .await
             {
-                Ok(handle) => match handle.wait().await {
-                    Ok(SubmitOutcome::Accepted) => {
-                        accepted.fetch_add(1, Ordering::Relaxed);
-                        info!("Upstream accepted share");
-                    }
-                    Ok(SubmitOutcome::Rejected { reason }) => {
-                        rejected.fetch_add(1, Ordering::Relaxed);
-
-                        warn!(
-                            "Upstream rejected share: {}",
-                            reason.as_deref().unwrap_or("unknown")
-                        );
-                    }
-                    Err(e) => warn!("Upstream submit error: {e}"),
-                },
+                Ok(_) => {
+                    accepted.fetch_add(1, Ordering::Relaxed);
+                    info!("Upstream accepted share");
+                }
+                Err(ClientError::SubmitFalse) => {
+                    rejected.fetch_add(1, Ordering::Relaxed);
+                    warn!("Upstream rejected share: submit=false");
+                }
+                Err(ClientError::Rejected { reason, .. }) => {
+                    rejected.fetch_add(1, Ordering::Relaxed);
+                    warn!("Upstream rejected share: {}", reason);
+                }
                 Err(e) => {
-                    warn!("Failed to submit share to upstream: {e}");
+                    warn!("Upstream submit error: {e}");
                 }
             }
         });
@@ -272,7 +270,7 @@ impl Upstream {
     }
 
     pub(crate) fn username(&self) -> &Username {
-        &self.client.config.username
+        self.client.username()
     }
 
     pub(crate) fn accepted(&self) -> u64 {

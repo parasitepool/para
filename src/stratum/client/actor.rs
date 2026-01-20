@@ -1,15 +1,8 @@
-use {super::*, crate::MAX_MESSAGE_SIZE, SubmitOutcome, serde::Serialize, std::time::Instant};
+use {super::*, crate::MAX_MESSAGE_SIZE, std::time::Instant};
 
 struct ConnectionState {
     writer: BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     reader_handle: tokio::task::JoinHandle<()>,
-}
-
-#[derive(Serialize)]
-struct SubmitRequest<'a> {
-    id: Id,
-    method: &'static str,
-    params: &'a Submit,
 }
 
 enum IncomingMessage {
@@ -29,7 +22,6 @@ enum IncomingMessage {
 const MAX_PENDING_REQUESTS: usize = 1024;
 
 type PendingRequest = (oneshot::Sender<Result<(Message, usize)>>, Instant);
-type PendingSubmit = (oneshot::Sender<Result<SubmitOutcome>>, Instant);
 
 pub(super) enum ClientMessage {
     Connect {
@@ -40,38 +32,32 @@ pub(super) enum ClientMessage {
         params: Value,
         respond_to: oneshot::Sender<Result<(Message, usize)>>,
     },
-    SubmitAsync {
-        submit: Submit,
-        respond_to: oneshot::Sender<Result<SubmitOutcome>>,
-    },
     Disconnect {
         respond_to: oneshot::Sender<()>,
     },
 }
 
 pub(super) struct ClientActor {
-    config: Arc<ClientConfig>,
+    inner: Arc<Config>,
     rx: mpsc::Receiver<ClientMessage>,
     events: broadcast::Sender<Event>,
     id_counter: u64,
     pending: HashMap<Id, PendingRequest>,
-    pending_submits: HashMap<Id, PendingSubmit>,
     connection: Option<ConnectionState>,
 }
 
 impl ClientActor {
     pub(super) fn new(
-        config: Arc<ClientConfig>,
+        inner: Arc<Config>,
         rx: mpsc::Receiver<ClientMessage>,
         events: broadcast::Sender<Event>,
     ) -> Self {
         Self {
-            config,
+            inner,
             rx,
             events,
             id_counter: 0,
             pending: HashMap::new(),
-            pending_submits: HashMap::new(),
             connection: None,
         }
     }
@@ -105,7 +91,7 @@ impl ClientActor {
                             }
 
                             let id = self.next_id();
-                            let deadline = Instant::now() + self.config.timeout;
+                            let deadline = Instant::now() + self.inner.timeout;
 
                             match self.handle_request(id.clone(), method, params).await {
                                 Ok(_) => {
@@ -114,30 +100,6 @@ impl ClientActor {
                                 Err(err) => {
                                     if respond_to.send(Err(err)).is_err() {
                                         debug!("Request error response dropped: caller gave up");
-                                    }
-                                }
-                            }
-                        }
-                        ClientMessage::SubmitAsync { submit, respond_to } => {
-                            self.evict_expired_pending();
-
-                            if self.pending_submits.len() >= MAX_PENDING_REQUESTS {
-                                if respond_to.send(Err(ClientError::TooManyPendingRequests)).is_err() {
-                                    debug!("TooManyPendingRequests response dropped: caller gave up");
-                                }
-                                continue;
-                            }
-
-                            let id = self.next_id();
-                            let deadline = Instant::now() + self.config.timeout;
-
-                            match self.handle_submit_request(id.clone(), &submit).await {
-                                Ok(_) => {
-                                    self.pending_submits.insert(id, (respond_to, deadline));
-                                }
-                                Err(err) => {
-                                    if respond_to.send(Err(err)).is_err() {
-                                        debug!("Submit error response dropped: caller gave up");
                                     }
                                 }
                             }
@@ -182,21 +144,6 @@ impl ClientActor {
                 debug!("RequestExpired response dropped: caller gave up");
             }
         }
-
-        let expired_submit_ids = self
-            .pending_submits
-            .iter()
-            .filter(|(_, (_, deadline))| now > *deadline)
-            .map(|(id, _)| id.clone())
-            .collect::<Vec<_>>();
-
-        for id in expired_submit_ids {
-            if let Some((tx, _)) = self.pending_submits.remove(&id)
-                && tx.send(Err(ClientError::RequestExpired)).is_err()
-            {
-                debug!("RequestExpired response dropped: caller gave up");
-            }
-        }
     }
 
     async fn handle_connect(&mut self, incoming_tx: mpsc::Sender<IncomingMessage>) -> Result {
@@ -204,13 +151,11 @@ impl ClientActor {
             self.handle_disconnect().await;
         }
 
-        let stream = tokio::time::timeout(
-            self.config.timeout,
-            TcpStream::connect(&self.config.address),
-        )
-        .await
-        .map_err(|source| ClientError::Timeout { source })?
-        .map_err(|source| ClientError::Io { source })?;
+        let stream =
+            tokio::time::timeout(self.inner.timeout, TcpStream::connect(&self.inner.address))
+                .await
+                .map_err(|source| ClientError::Timeout { source })?
+                .map_err(|source| ClientError::Io { source })?;
 
         stream
             .set_nodelay(true)
@@ -230,7 +175,7 @@ impl ClientActor {
             reader_handle,
         });
 
-        debug!("Connected to {}", self.config.address);
+        debug!("Connected to {}", self.inner.address);
         Ok(())
     }
 
@@ -265,34 +210,6 @@ impl ClientActor {
         self.send_message(&msg).await
     }
 
-    async fn handle_submit_request(&mut self, id: Id, submit: &Submit) -> Result {
-        let connection = self.connection.as_mut().ok_or(ClientError::NotConnected)?;
-
-        let request = SubmitRequest {
-            id,
-            method: "mining.submit",
-            params: submit,
-        };
-
-        let frame = serde_json::to_string(&request)
-            .map_err(|e| ClientError::Serialization { source: e })?
-            + "\n";
-
-        connection
-            .writer
-            .write_all(frame.as_bytes())
-            .await
-            .map_err(|e| ClientError::Io { source: e })?;
-
-        connection
-            .writer
-            .flush()
-            .await
-            .map_err(|e| ClientError::Io { source: e })?;
-
-        Ok(())
-    }
-
     async fn handle_disconnect(&mut self) {
         if let Some(connection) = self.connection.take() {
             connection.reader_handle.abort();
@@ -301,13 +218,6 @@ impl ClientActor {
 
         let pending = std::mem::take(&mut self.pending);
         for (_, (tx, _)) in pending {
-            if tx.send(Err(ClientError::NotConnected)).is_err() {
-                debug!("NotConnected response dropped: caller gave up");
-            }
-        }
-
-        let pending_submits = std::mem::take(&mut self.pending_submits);
-        for (_, (tx, _)) in pending_submits {
             if tx.send(Err(ClientError::NotConnected)).is_err() {
                 debug!("NotConnected response dropped: caller gave up");
             }
@@ -325,30 +235,7 @@ impl ClientActor {
                 message,
                 bytes_read,
             } => {
-                if let Some((tx, _)) = self.pending_submits.remove(&id) {
-                    let outcome = match &message {
-                        Message::Response {
-                            result: Some(val),
-                            error: None,
-                            reject_reason: None,
-                            ..
-                        } if val.as_bool() == Some(true) => SubmitOutcome::Accepted,
-                        Message::Response {
-                            reject_reason,
-                            error,
-                            ..
-                        } => {
-                            let reason = reject_reason
-                                .clone()
-                                .or_else(|| error.as_ref().map(|e| e.to_string()));
-                            SubmitOutcome::Rejected { reason }
-                        }
-                        _ => SubmitOutcome::Rejected { reason: None },
-                    };
-                    if tx.send(Ok(outcome)).is_err() {
-                        debug!("Submit result dropped: caller gave up");
-                    }
-                } else if let Some((tx, _)) = self.pending.remove(&id) {
+                if let Some((tx, _)) = self.pending.remove(&id) {
                     if tx.send(Ok((message, bytes_read))).is_err() {
                         debug!("Response dropped: caller gave up");
                     }
