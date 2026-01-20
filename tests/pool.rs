@@ -1004,3 +1004,66 @@ async fn bouncer() {
 
     tokio::join!(auth_timeout_test, idle_timeout_test, reject_escalation_test);
 }
+
+#[tokio::test]
+#[serial(bitcoind)]
+#[timeout(90000)]
+async fn bouncer_auth_failure() {
+    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
+
+    let client = pool.stratum_client_for_username("invalid.user").await;
+    client.connect().await.unwrap();
+    client.subscribe().await.unwrap();
+
+    // First failed attempt
+    assert_stratum_error(client.authorize().await, StratumError::Unauthorized);
+
+    // Second failed attempt - should receive error then disconnect
+    assert_stratum_error(client.authorize().await, StratumError::Unauthorized);
+
+    // Connection should be dropped
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(
+        client.authorize().await.is_err(),
+        "Expected connection to be dropped after 2 failed auth attempts"
+    );
+}
+
+#[tokio::test]
+#[serial(bitcoind)]
+#[timeout(90000)]
+async fn bouncer_configure_spam() {
+    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
+
+    let client = pool.stratum_client().await;
+    client.connect().await.unwrap();
+
+    // Spam configure with unsupported extension
+    // In test mode, drop_threshold is 3 seconds.
+    // We'll spam for 4 seconds.
+
+    let start = std::time::Instant::now();
+    let mut dropped = false;
+
+    while start.elapsed() < Duration::from_secs(10) {
+        match client.configure(vec!["unknown".into()], None).await {
+            Ok(_) => {
+                // Keep spamming
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(ClientError::NotConnected) | Err(ClientError::Io { .. }) => {
+                dropped = true;
+                break;
+            }
+            Err(_) => {
+                // Expected error (UnsupportedExtension), keep spamming
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }
+    }
+
+    assert!(
+        dropped,
+        "Connection should be dropped after repeated configure failures (bouncer escalation)"
+    );
+}

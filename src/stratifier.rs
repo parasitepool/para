@@ -24,7 +24,6 @@ pub(crate) struct Stratifier<W: Workbase> {
     jobs: Jobs<W>,
     vardiff: Vardiff,
     bouncer: Bouncer,
-    dropped_by_bouncer: bool,
 }
 
 impl<W: Workbase> Stratifier<W> {
@@ -67,7 +66,6 @@ impl<W: Workbase> Stratifier<W> {
             jobs: Jobs::new(),
             vardiff,
             bouncer,
-            dropped_by_bouncer: false,
         }
     }
 
@@ -77,6 +75,10 @@ impl<W: Workbase> Stratifier<W> {
         let mut idle_check = tokio::time::interval(self.bouncer.check_interval());
 
         loop {
+            if matches!(self.state, State::Dropped) {
+                break;
+            }
+
             tokio::select! {
                 _ = cancel_token.cancelled() => {
                     info!("Disconnecting from {}", self.socket_addr);
@@ -89,7 +91,7 @@ impl<W: Workbase> Stratifier<W> {
                             self.socket_addr,
                             self.bouncer.last_interaction_since().as_secs()
                         );
-                        self.dropped_by_bouncer = true;
+                        self.state.drop_connection();
                         break
                     }
                 }
@@ -159,7 +161,7 @@ impl<W: Workbase> Stratifier<W> {
                                 .await?
                                 == Consequence::Drop
                             {
-                                self.dropped_by_bouncer = true;
+                                self.state.drop_connection();
                                 break;
                             }
                         }
@@ -263,6 +265,7 @@ impl<W: Workbase> Stratifier<W> {
                         .map(|d| d.as_secs())
                         .unwrap_or(0)
                 );
+                self.state.drop_connection();
             }
         }
     }
@@ -354,8 +357,14 @@ impl<W: Workbase> Stratifier<W> {
             )
             .await?;
 
+            if self.bouncer.reject() == Consequence::Drop {
+                self.state.drop_connection();
+            }
+
             return Ok(());
         }
+
+        self.bouncer.accept();
 
         debug!(
             "Configuring version rolling for {} with version mask {version_mask}",
@@ -386,6 +395,10 @@ impl<W: Workbase> Stratifier<W> {
             )
             .await?;
 
+            if self.bouncer.reject() == Consequence::Drop {
+                self.state.drop_connection();
+            }
+
             return Ok(());
         }
 
@@ -413,8 +426,14 @@ impl<W: Workbase> Stratifier<W> {
             )
             .await?;
 
+            if self.bouncer.reject() == Consequence::Drop {
+                self.state.drop_connection();
+            }
+
             return Ok(());
         }
+
+        self.bouncer.accept();
 
         let subscriptions = vec![
             (
@@ -458,6 +477,12 @@ impl<W: Workbase> Stratifier<W> {
                 )
                 .await?;
 
+                if self.bouncer.reject() == Consequence::Drop
+                    || self.bouncer.check_strict(2) == Consequence::Drop
+                {
+                    self.state.drop_connection();
+                }
+
                 return Ok(());
             }
         };
@@ -477,6 +502,12 @@ impl<W: Workbase> Stratifier<W> {
                 })),
             )
             .await?;
+
+            if self.bouncer.reject() == Consequence::Drop
+                || self.bouncer.check_strict(2) == Consequence::Drop
+            {
+                self.state.drop_connection();
+            }
 
             return Ok(());
         }
@@ -864,11 +895,9 @@ impl<W: Workbase> Stratifier<W> {
 
 impl<W: Workbase> Drop for Stratifier<W> {
     fn drop(&mut self) {
-        if !self.dropped_by_bouncer
-            && let Some(session) = self.state.working()
-        {
+        if let Some(session) = self.state.working() {
             self.metatron
-                .store_session(SessionSnapshot::new(session.enonce1.clone())); // TODO
+                .store_session(SessionSnapshot::new(session.enonce1.clone()));
         }
 
         self.metatron.sub_connection();

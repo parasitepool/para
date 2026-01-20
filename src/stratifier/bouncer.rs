@@ -109,6 +109,14 @@ impl Bouncer {
         }
     }
 
+    pub(crate) fn check_strict(&self, limit: u32) -> Consequence {
+        if self.consecutive_rejects >= limit {
+            Consequence::Drop
+        } else {
+            Consequence::None
+        }
+    }
+
     pub(crate) fn accept(&mut self) {
         self.first_reject = None;
         self.consecutive_rejects = 0;
@@ -242,4 +250,17 @@ mod tests {
 
         assert_eq!(bouncer.idle_check(), Consequence::Drop);
     }
+}
+
+#[test]
+fn reject_strict_drops_on_limit() {
+    let mut bouncer = Bouncer::new(false);
+
+    bouncer.reject();
+    assert_eq!(bouncer.consecutive_rejects(), 1);
+    assert_eq!(bouncer.check_strict(2), Consequence::None);
+
+    bouncer.reject();
+    assert_eq!(bouncer.consecutive_rejects(), 2);
+    assert_eq!(bouncer.check_strict(2), Consequence::Drop);
 }
