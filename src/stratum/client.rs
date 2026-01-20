@@ -4,6 +4,7 @@ use {
     futures::StreamExt,
     std::{
         collections::HashMap,
+        sync::Arc,
         time::{Duration, Instant},
     },
     tokio::{
@@ -56,13 +57,17 @@ impl EventReceiver {
 
 #[derive(Clone)]
 pub struct Client {
-    pub address: String,
-    pub username: Username,
+    config: Arc<Config>,
+    tx: mpsc::Sender<ClientMessage>,
+    events: broadcast::Sender<Event>,
+}
+
+struct Config {
+    address: String,
+    username: Username,
     password: Option<String>,
     user_agent: String,
     timeout: Duration,
-    tx: mpsc::Sender<ClientMessage>,
-    events: broadcast::Sender<Event>,
 }
 
 impl Client {
@@ -75,23 +80,31 @@ impl Client {
         timeout: Duration,
     ) -> Self {
         let (tx, rx) = mpsc::channel(CHANNEL_BUFFER_SIZE);
-        let (event_tx, _event_rx) = broadcast::channel(CHANNEL_BUFFER_SIZE);
+        let (events, _) = broadcast::channel(CHANNEL_BUFFER_SIZE);
 
-        let actor = ClientActor::new(address.clone(), timeout, rx, event_tx.clone());
-
-        tokio::spawn(async move {
-            actor.run().await;
-        });
-
-        Self {
+        let config = Arc::new(Config {
             address,
             username,
             password,
             user_agent,
             timeout,
-            tx,
-            events: event_tx,
-        }
+        });
+
+        let actor = ClientActor::new(config.clone(), rx, events.clone());
+
+        tokio::spawn(async move {
+            actor.run().await;
+        });
+
+        Self { config, tx, events }
+    }
+
+    pub fn username(&self) -> &Username {
+        &self.config.username
+    }
+
+    pub fn address(&self) -> &str {
+        &self.config.address
     }
 
     pub async fn connect(&self) -> Result<EventReceiver> {
@@ -152,7 +165,7 @@ impl Client {
         rx: oneshot::Receiver<Result<(Message, usize)>>,
         instant: Instant,
     ) -> Result<(Message, usize, Duration)> {
-        let (message, bytes_read) = tokio::time::timeout(self.timeout, rx)
+        let (message, bytes_read) = tokio::time::timeout(self.config.timeout, rx)
             .await
             .map_err(|source| ClientError::Timeout { source })?
             .map_err(|e| ClientError::ChannelRecv { source: e })??;
@@ -223,7 +236,7 @@ impl Client {
             .send_request(
                 "mining.subscribe",
                 serde_json::to_value(Subscribe {
-                    user_agent: self.user_agent.clone(),
+                    user_agent: self.config.user_agent.clone(),
                     enonce1,
                 })
                 .context(error::SerializationSnafu)?,
@@ -244,8 +257,8 @@ impl Client {
             .send_request(
                 "mining.authorize",
                 serde_json::to_value(Authorize {
-                    username: self.username.clone(),
-                    password: self.password.clone().or(Some("x".to_string())),
+                    username: self.config.username.clone(),
+                    password: self.config.password.clone().or(Some("x".to_string())),
                 })
                 .context(error::SerializationSnafu)?,
             )
@@ -272,7 +285,7 @@ impl Client {
         version_bits: Option<Version>,
     ) -> Result<Submit> {
         self.submit_with_username(
-            self.username.clone(),
+            self.config.username.clone(),
             job_id,
             enonce2,
             ntime,

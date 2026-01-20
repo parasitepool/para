@@ -38,8 +38,7 @@ pub(super) enum ClientMessage {
 }
 
 pub(super) struct ClientActor {
-    address: String,
-    timeout: Duration,
+    inner: Arc<Config>,
     rx: mpsc::Receiver<ClientMessage>,
     events: broadcast::Sender<Event>,
     id_counter: u64,
@@ -49,14 +48,12 @@ pub(super) struct ClientActor {
 
 impl ClientActor {
     pub(super) fn new(
-        address: String,
-        timeout: Duration,
+        inner: Arc<Config>,
         rx: mpsc::Receiver<ClientMessage>,
         events: broadcast::Sender<Event>,
     ) -> Self {
         Self {
-            address,
-            timeout,
+            inner,
             rx,
             events,
             id_counter: 0,
@@ -94,7 +91,7 @@ impl ClientActor {
                             }
 
                             let id = self.next_id();
-                            let deadline = Instant::now() + self.timeout;
+                            let deadline = Instant::now() + self.inner.timeout;
 
                             match self.handle_request(id.clone(), method, params).await {
                                 Ok(_) => {
@@ -154,10 +151,11 @@ impl ClientActor {
             self.handle_disconnect().await;
         }
 
-        let stream = tokio::time::timeout(self.timeout, TcpStream::connect(&self.address))
-            .await
-            .map_err(|source| ClientError::Timeout { source })?
-            .map_err(|source| ClientError::Io { source })?;
+        let stream =
+            tokio::time::timeout(self.inner.timeout, TcpStream::connect(&self.inner.address))
+                .await
+                .map_err(|source| ClientError::Timeout { source })?
+                .map_err(|source| ClientError::Io { source })?;
 
         stream
             .set_nodelay(true)
@@ -177,7 +175,7 @@ impl ClientActor {
             reader_handle,
         });
 
-        debug!("Connected to {}", self.address);
+        debug!("Connected to {}", self.inner.address);
         Ok(())
     }
 

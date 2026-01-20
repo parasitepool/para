@@ -114,7 +114,8 @@ impl Upstream {
 
         info!(
             "Authorized to upstream {} with {}",
-            self.client.address, self.client.username
+            self.client.address(),
+            self.client.username()
         );
 
         self.connected.store(true, Ordering::SeqCst);
@@ -269,7 +270,7 @@ impl Upstream {
     }
 
     pub(crate) fn username(&self) -> &Username {
-        &self.client.username
+        self.client.username()
     }
 
     pub(crate) fn accepted(&self) -> u64 {
