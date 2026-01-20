@@ -1,6 +1,6 @@
 use {
     super::*,
-    stratum::{Client, ClientConfig, Event, EventReceiver, SubmitOutcome},
+    stratum::{Client, ClientConfig, ClientError, Event, EventReceiver},
     tokio::sync::RwLock,
 };
 
@@ -220,7 +220,7 @@ impl Upstream {
 
         tokio::spawn(async move {
             match client
-                .submit_async(
+                .submit(
                     submit.job_id,
                     submit.enonce2,
                     submit.ntime,
@@ -229,23 +229,20 @@ impl Upstream {
                 )
                 .await
             {
-                Ok(handle) => match handle.wait().await {
-                    Ok(SubmitOutcome::Accepted) => {
-                        accepted.fetch_add(1, Ordering::Relaxed);
-                        info!("Upstream accepted share");
-                    }
-                    Ok(SubmitOutcome::Rejected { reason }) => {
-                        rejected.fetch_add(1, Ordering::Relaxed);
-
-                        warn!(
-                            "Upstream rejected share: {}",
-                            reason.as_deref().unwrap_or("unknown")
-                        );
-                    }
-                    Err(e) => warn!("Upstream submit error: {e}"),
-                },
+                Ok(_) => {
+                    accepted.fetch_add(1, Ordering::Relaxed);
+                    info!("Upstream accepted share");
+                }
+                Err(ClientError::SubmitFalse) => {
+                    rejected.fetch_add(1, Ordering::Relaxed);
+                    warn!("Upstream rejected share: submit=false");
+                }
+                Err(ClientError::Rejected { reason, .. }) => {
+                    rejected.fetch_add(1, Ordering::Relaxed);
+                    warn!("Upstream rejected share: {}", reason);
+                }
                 Err(e) => {
-                    warn!("Failed to submit share to upstream: {e}");
+                    warn!("Upstream submit error: {e}");
                 }
             }
         });

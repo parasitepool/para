@@ -34,30 +34,6 @@ pub struct ClientConfig {
     pub timeout: Duration,
 }
 
-#[derive(Debug, Clone)]
-pub enum SubmitOutcome {
-    Accepted,
-    Rejected { reason: Option<String> },
-}
-
-pub struct SubmitHandle {
-    rx: oneshot::Receiver<Result<SubmitOutcome>>,
-}
-
-impl SubmitHandle {
-    pub async fn wait(self) -> Result<SubmitOutcome> {
-        self.rx.await.map_err(|_| ClientError::NotConnected)?
-    }
-
-    pub fn try_recv(&mut self) -> Option<Result<SubmitOutcome>> {
-        match self.rx.try_recv() {
-            Ok(result) => Some(result),
-            Err(oneshot::error::TryRecvError::Empty) => None,
-            Err(oneshot::error::TryRecvError::Closed) => Some(Err(ClientError::NotConnected)),
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct EventReceiver {
     rx: broadcast::Receiver<Event>,
@@ -337,53 +313,6 @@ impl Client {
 
         Ok(submit)
     }
-
-    pub async fn submit_async(
-        &self,
-        job_id: JobId,
-        enonce2: Extranonce,
-        ntime: Ntime,
-        nonce: Nonce,
-        version_bits: Option<Version>,
-    ) -> Result<SubmitHandle> {
-        self.submit_async_with_username(
-            self.config.username.clone(),
-            job_id,
-            enonce2,
-            ntime,
-            nonce,
-            version_bits,
-        )
-        .await
-    }
-
-    pub async fn submit_async_with_username(
-        &self,
-        username: Username,
-        job_id: JobId,
-        enonce2: Extranonce,
-        ntime: Ntime,
-        nonce: Nonce,
-        version_bits: Option<Version>,
-    ) -> Result<SubmitHandle> {
-        let submit = Submit {
-            username,
-            job_id,
-            enonce2,
-            ntime,
-            nonce,
-            version_bits,
-        };
-
-        let (respond_to, rx) = oneshot::channel();
-
-        self.tx
-            .send(ClientMessage::SubmitAsync { submit, respond_to })
-            .await
-            .map_err(|_| ClientError::NotConnected)?;
-
-        Ok(SubmitHandle { rx })
-    }
 }
 
 #[cfg(test)]
@@ -505,61 +434,5 @@ mod tests {
             "Expected NotConnected, got: {:?}",
             err
         );
-    }
-
-    #[tokio::test]
-    async fn submit_handle_wait_returns_accepted() {
-        let (tx, rx) = oneshot::channel();
-        let mut handle = SubmitHandle { rx };
-
-        assert!(handle.try_recv().is_none(), "Should be empty before send");
-
-        tx.send(Ok(SubmitOutcome::Accepted)).unwrap();
-
-        let result = handle.wait().await;
-        assert!(matches!(result, Ok(SubmitOutcome::Accepted)));
-    }
-
-    #[tokio::test]
-    async fn submit_handle_try_recv_returns_rejected() {
-        let (tx, rx) = oneshot::channel();
-        let mut handle = SubmitHandle { rx };
-
-        assert!(handle.try_recv().is_none(), "Should be empty before send");
-
-        tx.send(Ok(SubmitOutcome::Rejected {
-            reason: Some("Stale".into()),
-        }))
-        .unwrap();
-
-        let result = handle.try_recv();
-        assert!(matches!(
-            result,
-            Some(Ok(SubmitOutcome::Rejected { reason: Some(_) }))
-        ));
-    }
-
-    #[tokio::test]
-    async fn submit_handle_closed_channel_returns_not_connected() {
-        let (tx, rx) = oneshot::channel::<Result<SubmitOutcome>>();
-        let mut handle = SubmitHandle { rx };
-
-        drop(tx);
-
-        assert!(matches!(
-            handle.try_recv(),
-            Some(Err(ClientError::NotConnected))
-        ));
-    }
-
-    #[tokio::test]
-    async fn submit_handle_wait_closed_channel_returns_not_connected() {
-        let (tx, rx) = oneshot::channel::<Result<SubmitOutcome>>();
-        let handle = SubmitHandle { rx };
-
-        drop(tx);
-
-        let result = handle.wait().await;
-        assert!(matches!(result, Err(ClientError::NotConnected)));
     }
 }
