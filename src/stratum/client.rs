@@ -25,39 +25,6 @@ pub type Result<T = (), E = ClientError> = std::result::Result<T, E>;
 
 const CHANNEL_BUFFER_SIZE: usize = 256;
 
-#[derive(Debug, Clone)]
-pub struct ClientConfig {
-    pub address: String,
-    pub username: Username,
-    pub user_agent: String,
-    pub password: Option<String>,
-    pub timeout: Duration,
-}
-
-#[derive(Debug, Clone)]
-pub enum SubmitOutcome {
-    Accepted,
-    Rejected { reason: Option<String> },
-}
-
-pub struct SubmitHandle {
-    rx: oneshot::Receiver<Result<SubmitOutcome>>,
-}
-
-impl SubmitHandle {
-    pub async fn wait(self) -> Result<SubmitOutcome> {
-        self.rx.await.map_err(|_| ClientError::NotConnected)?
-    }
-
-    pub fn try_recv(&mut self) -> Option<Result<SubmitOutcome>> {
-        match self.rx.try_recv() {
-            Ok(result) => Some(result),
-            Err(oneshot::error::TryRecvError::Empty) => None,
-            Err(oneshot::error::TryRecvError::Closed) => Some(Err(ClientError::NotConnected)),
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct EventReceiver {
     rx: broadcast::Receiver<Event>,
@@ -90,29 +57,54 @@ impl EventReceiver {
 
 #[derive(Clone)]
 pub struct Client {
-    pub config: Arc<ClientConfig>,
+    config: Arc<Config>,
     tx: mpsc::Sender<ClientMessage>,
     events: broadcast::Sender<Event>,
 }
 
+struct Config {
+    address: String,
+    username: Username,
+    password: Option<String>,
+    user_agent: String,
+    timeout: Duration,
+}
+
 impl Client {
     #[must_use]
-    pub fn new(config: ClientConfig) -> Self {
+    pub fn new(
+        address: String,
+        username: Username,
+        password: Option<String>,
+        user_agent: String,
+        timeout: Duration,
+    ) -> Self {
         let (tx, rx) = mpsc::channel(CHANNEL_BUFFER_SIZE);
-        let (event_tx, _event_rx) = broadcast::channel(CHANNEL_BUFFER_SIZE);
+        let (events, _) = broadcast::channel(CHANNEL_BUFFER_SIZE);
 
-        let config = Arc::new(config);
-        let actor = ClientActor::new(config.clone(), rx, event_tx.clone());
+        let config = Arc::new(Config {
+            address,
+            username,
+            password,
+            user_agent,
+            timeout,
+        });
+
+        let actor = ClientActor::new(config.clone(), rx, events.clone());
 
         tokio::spawn(async move {
             actor.run().await;
         });
 
-        Self {
-            config,
-            tx,
-            events: event_tx,
-        }
+        Self { config, tx, events }
+    }
+
+    pub fn username(&self) -> &Username {
+        &self.config.username
+    }
+
+    pub fn address(&self) -> &str {
+        &self.config.address
     }
 
     pub async fn connect(&self) -> Result<EventReceiver> {
@@ -337,53 +329,6 @@ impl Client {
 
         Ok(submit)
     }
-
-    pub async fn submit_async(
-        &self,
-        job_id: JobId,
-        enonce2: Extranonce,
-        ntime: Ntime,
-        nonce: Nonce,
-        version_bits: Option<Version>,
-    ) -> Result<SubmitHandle> {
-        self.submit_async_with_username(
-            self.config.username.clone(),
-            job_id,
-            enonce2,
-            ntime,
-            nonce,
-            version_bits,
-        )
-        .await
-    }
-
-    pub async fn submit_async_with_username(
-        &self,
-        username: Username,
-        job_id: JobId,
-        enonce2: Extranonce,
-        ntime: Ntime,
-        nonce: Nonce,
-        version_bits: Option<Version>,
-    ) -> Result<SubmitHandle> {
-        let submit = Submit {
-            username,
-            job_id,
-            enonce2,
-            ntime,
-            nonce,
-            version_bits,
-        };
-
-        let (respond_to, rx) = oneshot::channel();
-
-        self.tx
-            .send(ClientMessage::SubmitAsync { submit, respond_to })
-            .await
-            .map_err(|_| ClientError::NotConnected)?;
-
-        Ok(SubmitHandle { rx })
-    }
 }
 
 #[cfg(test)]
@@ -426,15 +371,13 @@ mod tests {
     async fn request_timeout() {
         let addr = mock_server(false).await;
 
-        let config = ClientConfig {
-            address: addr.to_string(),
-            username: "test".into(),
-            user_agent: "test".into(),
-            password: None,
-            timeout: Duration::from_millis(200),
-        };
-
-        let client = Client::new(config);
+        let client = Client::new(
+            addr.to_string(),
+            "test".into(),
+            None,
+            "test".into(),
+            Duration::from_millis(200),
+        );
         client.connect().await.unwrap();
 
         let err = client.subscribe().await.unwrap_err();
@@ -447,15 +390,13 @@ mod tests {
 
     #[tokio::test]
     async fn connection_timeout() {
-        let config = ClientConfig {
-            address: "10.255.255.1:9999".into(),
-            username: "test".into(),
-            user_agent: "test".into(),
-            password: None,
-            timeout: Duration::from_millis(200),
-        };
-
-        let client = Client::new(config);
+        let client = Client::new(
+            "10.255.255.1:9999".into(),
+            "test".into(),
+            None,
+            "test".into(),
+            Duration::from_millis(200),
+        );
         let err = client.connect().await.unwrap_err();
         assert!(
             matches!(err, ClientError::Timeout { .. }),
@@ -466,15 +407,13 @@ mod tests {
 
     #[tokio::test]
     async fn request_fails_fast() {
-        let config = ClientConfig {
-            address: "127.0.0.1:9999".into(),
-            username: "test".into(),
-            user_agent: "test".into(),
-            password: None,
-            timeout: Duration::from_secs(1),
-        };
-
-        let client = Client::new(config);
+        let client = Client::new(
+            "127.0.0.1:9999".into(),
+            "test".into(),
+            None,
+            "test".into(),
+            Duration::from_secs(1),
+        );
 
         let err = client.subscribe().await.unwrap_err();
         assert!(
@@ -488,15 +427,13 @@ mod tests {
     async fn detect_connection_drop() {
         let addr = mock_server(true).await;
 
-        let config = ClientConfig {
-            address: addr.to_string(),
-            username: "test".into(),
-            user_agent: "test".into(),
-            password: None,
-            timeout: Duration::from_secs(5),
-        };
-
-        let client = Client::new(config);
+        let client = Client::new(
+            addr.to_string(),
+            "test".into(),
+            None,
+            "test".into(),
+            Duration::from_secs(5),
+        );
         client.connect().await.unwrap();
 
         let err = client.subscribe().await.unwrap_err();
@@ -505,61 +442,5 @@ mod tests {
             "Expected NotConnected, got: {:?}",
             err
         );
-    }
-
-    #[tokio::test]
-    async fn submit_handle_wait_returns_accepted() {
-        let (tx, rx) = oneshot::channel();
-        let mut handle = SubmitHandle { rx };
-
-        assert!(handle.try_recv().is_none(), "Should be empty before send");
-
-        tx.send(Ok(SubmitOutcome::Accepted)).unwrap();
-
-        let result = handle.wait().await;
-        assert!(matches!(result, Ok(SubmitOutcome::Accepted)));
-    }
-
-    #[tokio::test]
-    async fn submit_handle_try_recv_returns_rejected() {
-        let (tx, rx) = oneshot::channel();
-        let mut handle = SubmitHandle { rx };
-
-        assert!(handle.try_recv().is_none(), "Should be empty before send");
-
-        tx.send(Ok(SubmitOutcome::Rejected {
-            reason: Some("Stale".into()),
-        }))
-        .unwrap();
-
-        let result = handle.try_recv();
-        assert!(matches!(
-            result,
-            Some(Ok(SubmitOutcome::Rejected { reason: Some(_) }))
-        ));
-    }
-
-    #[tokio::test]
-    async fn submit_handle_closed_channel_returns_not_connected() {
-        let (tx, rx) = oneshot::channel::<Result<SubmitOutcome>>();
-        let mut handle = SubmitHandle { rx };
-
-        drop(tx);
-
-        assert!(matches!(
-            handle.try_recv(),
-            Some(Err(ClientError::NotConnected))
-        ));
-    }
-
-    #[tokio::test]
-    async fn submit_handle_wait_closed_channel_returns_not_connected() {
-        let (tx, rx) = oneshot::channel::<Result<SubmitOutcome>>();
-        let handle = SubmitHandle { rx };
-
-        drop(tx);
-
-        let result = handle.wait().await;
-        assert!(matches!(result, Err(ClientError::NotConnected)));
     }
 }

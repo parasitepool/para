@@ -1,8 +1,7 @@
 use {
     super::*,
     crate::stratum::{
-        Client, ClientConfig, Difficulty, Event, MerkleNode, Notify, SubscribeResult, Username,
-        merkle_root,
+        Client, Difficulty, Event, MerkleNode, Notify, SubscribeResult, Username, merkle_root,
     },
 };
 
@@ -67,15 +66,13 @@ impl Template {
                 )
             })?;
 
-        let config = ClientConfig {
-            address: address.to_string(),
-            username: self.username.clone(),
-            user_agent: USER_AGENT.into(),
-            password: self.password.clone(),
-            timeout: Duration::from_secs(5),
-        };
-
-        let client = Client::new(config);
+        let client = Client::new(
+            address.to_string(),
+            self.username.clone(),
+            self.password.clone(),
+            USER_AGENT.into(),
+            Duration::from_secs(5),
+        );
         let mut events = client
             .connect()
             .await
