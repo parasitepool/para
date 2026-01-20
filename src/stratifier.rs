@@ -24,7 +24,6 @@ pub(crate) struct Stratifier<W: Workbase> {
     jobs: Jobs<W>,
     vardiff: Vardiff,
     bouncer: Bouncer,
-    dropped_by_bouncer: bool,
 }
 
 impl<W: Workbase> Stratifier<W> {
@@ -67,7 +66,6 @@ impl<W: Workbase> Stratifier<W> {
             jobs: Jobs::new(),
             vardiff,
             bouncer,
-            dropped_by_bouncer: false,
         }
     }
 
@@ -77,6 +75,10 @@ impl<W: Workbase> Stratifier<W> {
         let mut idle_check = tokio::time::interval(self.bouncer.check_interval());
 
         loop {
+            if matches!(self.state, State::Dropped) {
+                break;
+            }
+
             tokio::select! {
                 _ = cancel_token.cancelled() => {
                     info!("Disconnecting from {}", self.socket_addr);
@@ -89,7 +91,7 @@ impl<W: Workbase> Stratifier<W> {
                             self.socket_addr,
                             self.bouncer.last_interaction_since().as_secs()
                         );
-                        self.dropped_by_bouncer = true;
+                        self.state.drop();
                         break
                     }
                 }
@@ -118,7 +120,9 @@ impl<W: Workbase> Stratifier<W> {
                             let subscribe = serde_json::from_value::<Subscribe>(params)
                                 .context(format!("failed to deserialize {method}"))?;
 
-                            self.subscribe(id, subscribe).await?
+                            let consequence = self.subscribe(id, subscribe).await?;
+
+                            self.handle_protocol_consequence(consequence).await;
                         }
                         "mining.authorize" => {
                             debug!("AUTHORIZE from {} with {params}", self.socket_addr);
@@ -133,13 +137,19 @@ impl<W: Workbase> Stratifier<W> {
                                     })),
                                 )
                                 .await?;
+
+                                let consequence = self.bouncer.reject();
+                                self.handle_protocol_consequence(consequence).await;
+
                                 continue;
                             };
 
                             let authorize = serde_json::from_value::<Authorize>(params)
                                 .context(format!("failed to deserialize {method}"))?;
 
-                            self.authorize(id, authorize, subscription.enonce1).await?
+                            let consequence = self.authorize(id, authorize, subscription.enonce1).await?;
+
+                            self.handle_protocol_consequence(consequence).await;
                         }
                         "mining.submit" => {
                             debug!("SUBMIT from {} with params {params}", self.socket_addr);
@@ -148,20 +158,20 @@ impl<W: Workbase> Stratifier<W> {
                                 self.send_error(id.clone(), StratumError::Unauthorized, None)
                                     .await?;
 
+                                let consequence = self.bouncer.reject();
+                                self.handle_protocol_consequence(consequence).await;
+
                                 continue;
                             };
 
                             let submit = serde_json::from_value::<Submit>(params)
                                 .context(format!("failed to deserialize {method}"))?;
 
-                            if self
-                                .submit(id, submit, session)
-                                .await?
-                                == Consequence::Drop
-                            {
-                                self.dropped_by_bouncer = true;
-                                break;
-                            }
+                            let consequence = self
+                                .submit(id, submit, session.clone())
+                                .await?;
+
+                            self.handle_submit_consequence(consequence, &session.address, &session.enonce1).await;
                         }
                         method => {
                             warn!("UNKNOWN method {method} with {params} from {}", self.socket_addr);
@@ -190,7 +200,7 @@ impl<W: Workbase> Stratifier<W> {
         Ok(())
     }
 
-    async fn handle_consequence(
+    async fn handle_submit_consequence(
         &mut self,
         consequence: Consequence,
         address: &Address,
@@ -263,6 +273,53 @@ impl<W: Workbase> Stratifier<W> {
                         .map(|d| d.as_secs())
                         .unwrap_or(0)
                 );
+                self.state.drop();
+            }
+        }
+    }
+
+    async fn handle_protocol_consequence(&mut self, consequence: Consequence) {
+        match consequence {
+            Consequence::None => {}
+            Consequence::Warn => {
+                info!(
+                    "Warning {} - {} consecutive rejects for {}s",
+                    self.socket_addr,
+                    self.bouncer.consecutive_rejects(),
+                    self.bouncer
+                        .reject_duration()
+                        .map(|duration| duration.as_secs())
+                        .unwrap_or(0)
+                );
+            }
+            Consequence::Reconnect => {
+                info!(
+                    "Suggesting reconnect to {} - {} consecutive rejects for {}s",
+                    self.socket_addr,
+                    self.bouncer.consecutive_rejects(),
+                    self.bouncer
+                        .reject_duration()
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0)
+                );
+                let _ = self
+                    .send(Message::Notification {
+                        method: "client.reconnect".into(),
+                        params: json!([]),
+                    })
+                    .await;
+            }
+            Consequence::Drop => {
+                warn!(
+                    "Dropping {} - {} consecutive rejects for {}s",
+                    self.socket_addr,
+                    self.bouncer.consecutive_rejects(),
+                    self.bouncer
+                        .reject_duration()
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0)
+                );
+                self.state.drop();
             }
         }
     }
@@ -374,7 +431,7 @@ impl<W: Workbase> Stratifier<W> {
         Ok(())
     }
 
-    async fn subscribe(&mut self, id: Id, subscribe: Subscribe) -> Result {
+    async fn subscribe(&mut self, id: Id, subscribe: Subscribe) -> Result<Consequence> {
         if !self.state.can_subscribe() {
             self.send_error(
                 id,
@@ -386,7 +443,7 @@ impl<W: Workbase> Stratifier<W> {
             )
             .await?;
 
-            return Ok(());
+            return Ok(self.bouncer.reject());
         }
 
         let (enonce1, enonce2_size) = if let Some(ref requested_enonce1) = subscribe.enonce1 {
@@ -413,8 +470,10 @@ impl<W: Workbase> Stratifier<W> {
             )
             .await?;
 
-            return Ok(());
+            return Ok(self.bouncer.reject());
         }
+
+        self.bouncer.accept();
 
         let subscriptions = vec![
             (
@@ -438,10 +497,15 @@ impl<W: Workbase> Stratifier<W> {
         })
         .await?;
 
-        Ok(())
+        Ok(Consequence::None)
     }
 
-    async fn authorize(&mut self, id: Id, authorize: Authorize, enonce1: Extranonce) -> Result {
+    async fn authorize(
+        &mut self,
+        id: Id,
+        authorize: Authorize,
+        enonce1: Extranonce,
+    ) -> Result<Consequence> {
         let address = match authorize
             .username
             .parse_with_network(self.settings.chain().network())
@@ -458,7 +522,7 @@ impl<W: Workbase> Stratifier<W> {
                 )
                 .await?;
 
-                return Ok(());
+                return Ok(self.bouncer.reject());
             }
         };
 
@@ -478,7 +542,7 @@ impl<W: Workbase> Stratifier<W> {
             )
             .await?;
 
-            return Ok(());
+            return Ok(self.bouncer.reject());
         }
 
         let workbase = self.workbase_rx.borrow().clone();
@@ -504,6 +568,7 @@ impl<W: Workbase> Stratifier<W> {
         .await?;
 
         self.bouncer.authorize();
+        self.bouncer.accept();
 
         debug!("Sending SET DIFFICULTY");
 
@@ -523,7 +588,7 @@ impl<W: Workbase> Stratifier<W> {
         })
         .await?;
 
-        Ok(())
+        Ok(Consequence::None)
     }
 
     async fn submit(
@@ -549,11 +614,7 @@ impl<W: Workbase> Stratifier<W> {
 
             worker.record_rejected();
 
-            let consequence = self.bouncer.reject();
-            self.handle_consequence(consequence, &session.address, &session.enonce1)
-                .await;
-
-            return Ok(consequence);
+            return Ok(self.bouncer.reject());
         }
 
         let Some(job) = self.jobs.get(&submit.job_id) else {
@@ -561,11 +622,7 @@ impl<W: Workbase> Stratifier<W> {
 
             worker.record_rejected();
 
-            let consequence = self.bouncer.reject();
-            self.handle_consequence(consequence, &session.address, &session.enonce1)
-                .await;
-
-            return Ok(consequence);
+            return Ok(self.bouncer.reject());
         };
 
         let expected_extranonce2_size = self.metatron.enonce2_size();
@@ -590,11 +647,7 @@ impl<W: Workbase> Stratifier<W> {
 
             worker.record_rejected();
 
-            let consequence = self.bouncer.reject();
-            self.handle_consequence(consequence, &session.address, &session.enonce1)
-                .await;
-
-            return Ok(consequence);
+            return Ok(self.bouncer.reject());
         }
 
         let job_ntime = job.ntime().0;
@@ -613,11 +666,7 @@ impl<W: Workbase> Stratifier<W> {
 
             worker.record_rejected();
 
-            let consequence = self.bouncer.reject();
-            self.handle_consequence(consequence, &session.address, &session.enonce1)
-                .await;
-
-            return Ok(consequence);
+            return Ok(self.bouncer.reject());
         }
 
         let version = match submit.version_bits {
@@ -632,11 +681,7 @@ impl<W: Workbase> Stratifier<W> {
 
                     worker.record_rejected();
 
-                    let consequence = self.bouncer.reject();
-                    self.handle_consequence(consequence, &session.address, &session.enonce1)
-                        .await;
-
-                    return Ok(consequence);
+                    return Ok(self.bouncer.reject());
                 };
 
                 let disallowed = version_bits & !version_mask;
@@ -655,11 +700,7 @@ impl<W: Workbase> Stratifier<W> {
 
                     worker.record_rejected();
 
-                    let consequence = self.bouncer.reject();
-                    self.handle_consequence(consequence, &session.address, &session.enonce1)
-                        .await;
-
-                    return Ok(consequence);
+                    return Ok(self.bouncer.reject());
                 }
 
                 let job_version = job.version();
@@ -703,11 +744,7 @@ impl<W: Workbase> Stratifier<W> {
 
             worker.record_rejected();
 
-            let consequence = self.bouncer.reject();
-            self.handle_consequence(consequence, &session.address, &session.enonce1)
-                .await;
-
-            return Ok(consequence);
+            return Ok(self.bouncer.reject());
         }
 
         if let Ok(blockhash) = header.validate_pow(Target::from_compact(nbits.into())) {
@@ -785,11 +822,7 @@ impl<W: Workbase> Stratifier<W> {
 
         worker.record_rejected();
 
-        let consequence = self.bouncer.reject();
-        self.handle_consequence(consequence, &session.address, &session.enonce1)
-            .await;
-
-        Ok(consequence)
+        Ok(self.bouncer.reject())
     }
 
     async fn submit_to_upstream(
@@ -864,11 +897,9 @@ impl<W: Workbase> Stratifier<W> {
 
 impl<W: Workbase> Drop for Stratifier<W> {
     fn drop(&mut self) {
-        if !self.dropped_by_bouncer
-            && let Some(session) = self.state.working()
-        {
+        if let Some(session) = self.state.working() {
             self.metatron
-                .store_session(SessionSnapshot::new(session.enonce1.clone())); // TODO
+                .store_session(SessionSnapshot::new(session.enonce1.clone()));
         }
 
         self.metatron.sub_connection();

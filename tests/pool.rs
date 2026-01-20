@@ -905,7 +905,7 @@ async fn bouncer() {
         let result = client.authorize().await;
         assert!(
             result.is_err(),
-            "Expected connection to be dropped after AUTH_TIMEOUT"
+            "auth_timeout: Expected connection to be dropped after AUTH_TIMEOUT"
         );
     };
 
@@ -942,7 +942,7 @@ async fn bouncer() {
 
         assert!(
             result.is_err(),
-            "Expected connection to be dropped after IDLE_TIMEOUT"
+            "idle_timeout: Expected connection to be dropped after IDLE_TIMEOUT"
         );
     };
 
@@ -992,15 +992,210 @@ async fn bouncer() {
             }
 
             if elapsed > Duration::from_secs(10) {
-                panic!("Connection still alive after 10s - expected drop at DROP_THRESHOLD (3s)");
+                panic!(
+                    "reject_escalation: Connection still alive after 10s - expected drop at DROP_THRESHOLD (3s)"
+                );
             }
         }
 
         assert!(
             fresh_job_received,
-            "Expected fresh job notification at WARN_THRESHOLD"
+            "reject_escalation: Expected fresh job notification at WARN_THRESHOLD"
         );
     };
 
-    tokio::join!(auth_timeout_test, idle_timeout_test, reject_escalation_test);
+    let auth_failure_test = async {
+        let client = pool.stratum_client_for_username("invalid.user").await;
+        client.connect().await.unwrap();
+        client.subscribe().await.unwrap();
+
+        let start = std::time::Instant::now();
+        let mut dropped = false;
+
+        while start.elapsed() < Duration::from_secs(10) {
+            match client.authorize().await {
+                Ok(_) => panic!("auth_failure: Expected unauthorized response"),
+                Err(ClientError::NotConnected) | Err(ClientError::Io { .. }) => {
+                    dropped = true;
+                    break;
+                }
+                Err(err) => {
+                    assert!(
+                        matches!(
+                            err,
+                            ClientError::Stratum { ref response }
+                                if response.error_code == StratumError::Unauthorized as i32
+                        ),
+                        "auth_failure: Expected Unauthorized, got {err:?}"
+                    );
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            }
+        }
+
+        assert!(
+            dropped,
+            "auth_failure: Expected connection to be dropped after auth failures and bouncer escalation"
+        );
+    };
+
+    let authorize_before_subscribe_test = async {
+        let client = pool.stratum_client().await;
+        client.connect().await.unwrap();
+
+        let start = std::time::Instant::now();
+        let mut dropped = false;
+
+        while start.elapsed() < Duration::from_secs(10) {
+            match client.authorize().await {
+                Ok(_) => panic!("auth_before_subscribe: Expected MethodNotAllowed response"),
+                Err(ClientError::NotConnected) | Err(ClientError::Io { .. }) => {
+                    dropped = true;
+                    break;
+                }
+                Err(err) => {
+                    assert!(
+                        matches!(
+                            err,
+                            ClientError::Stratum { ref response }
+                                if response.error_code == StratumError::MethodNotAllowed as i32
+                        ),
+                        "auth_before_subscribe: Expected MethodNotAllowed, got {err:?}"
+                    );
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            }
+        }
+
+        assert!(
+            dropped,
+            "auth_before_subscribe: Expected connection to be dropped after repeated authorize-before-subscribe attempts"
+        );
+    };
+
+    let submit_before_authorize_test = async {
+        let client = pool.stratum_client().await;
+        client.connect().await.unwrap();
+        client.subscribe().await.unwrap();
+
+        let start = std::time::Instant::now();
+        let mut dropped = false;
+
+        while start.elapsed() < Duration::from_secs(10) {
+            match client
+                .submit(
+                    JobId::new(0),
+                    Extranonce::random(8),
+                    Ntime::from(0),
+                    Nonce::from(0),
+                    None,
+                )
+                .await
+            {
+                Ok(_) => panic!("submit_before_authorize: Expected unauthorized response"),
+                Err(ClientError::NotConnected) | Err(ClientError::Io { .. }) => {
+                    dropped = true;
+                    break;
+                }
+                Err(err) => {
+                    assert!(
+                        matches!(
+                            err,
+                            ClientError::Stratum { ref response }
+                                if response.error_code == StratumError::Unauthorized as i32
+                        ),
+                        "submit_before_authorize: Expected Unauthorized, got {err:?}"
+                    );
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            }
+        }
+
+        assert!(
+            dropped,
+            "submit_before_authorize: Expected connection to be dropped after repeated submit-before-authorize attempts"
+        );
+    };
+
+    let duplicate_subscribe_test = async {
+        let client = pool.stratum_client().await;
+        client.connect().await.unwrap();
+        client.subscribe().await.unwrap();
+
+        let start = std::time::Instant::now();
+        let mut dropped = false;
+
+        while start.elapsed() < Duration::from_secs(10) {
+            match client.subscribe().await {
+                Ok(_) => panic!("duplicate_subscribe: Expected MethodNotAllowed response"),
+                Err(ClientError::NotConnected) | Err(ClientError::Io { .. }) => {
+                    dropped = true;
+                    break;
+                }
+                Err(err) => {
+                    assert!(
+                        matches!(
+                            err,
+                            ClientError::Stratum { ref response }
+                                if response.error_code == StratumError::MethodNotAllowed as i32
+                        ),
+                        "duplicate_subscribe: Expected MethodNotAllowed, got {err:?}"
+                    );
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            }
+        }
+
+        assert!(
+            dropped,
+            "duplicate_subscribe: Expected connection to be dropped after repeated subscribe attempts"
+        );
+    };
+
+    let duplicate_authorize_test = async {
+        let client = pool.stratum_client().await;
+        client.connect().await.unwrap();
+        client.subscribe().await.unwrap();
+        client.authorize().await.unwrap();
+
+        let start = std::time::Instant::now();
+        let mut dropped = false;
+
+        while start.elapsed() < Duration::from_secs(10) {
+            match client.authorize().await {
+                Ok(_) => panic!("duplicate_authorize: Expected MethodNotAllowed response"),
+                Err(ClientError::NotConnected) | Err(ClientError::Io { .. }) => {
+                    dropped = true;
+                    break;
+                }
+                Err(err) => {
+                    assert!(
+                        matches!(
+                            err,
+                            ClientError::Stratum { ref response }
+                                if response.error_code == StratumError::MethodNotAllowed as i32
+                        ),
+                        "duplicate_authorize: Expected MethodNotAllowed, got {err:?}"
+                    );
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            }
+        }
+
+        assert!(
+            dropped,
+            "duplicate_authorize: Expected connection to be dropped after repeated authorize attempts"
+        );
+    };
+
+    tokio::join!(
+        auth_timeout_test,
+        idle_timeout_test,
+        reject_escalation_test,
+        auth_failure_test,
+        authorize_before_subscribe_test,
+        submit_before_authorize_test,
+        duplicate_subscribe_test,
+        duplicate_authorize_test
+    );
 }
