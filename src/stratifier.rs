@@ -662,7 +662,18 @@ impl<W: Workbase> Stratifier<W> {
                     return Ok(consequence);
                 }
 
-                (job.version() & !version_mask) | (version_bits & version_mask)
+                let job_version = job.version();
+                let overlap = job_version & version_mask;
+                if overlap != Version::from(0) {
+                    warn!(
+                        %job_version,
+                        %version_mask,
+                        %overlap,
+                        "Job version has bits in version rolling mask region"
+                    );
+                }
+
+                (job_version & !version_mask) | (version_bits & version_mask)
             }
             _ => job.version(),
         };
