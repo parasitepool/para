@@ -354,14 +354,8 @@ impl<W: Workbase> Stratifier<W> {
             )
             .await?;
 
-            if self.bouncer.reject() == Consequence::Drop {
-                self.state.drop();
-            }
-
             return Ok(());
         }
-
-        self.bouncer.accept();
 
         debug!(
             "Configuring version rolling for {} with version mask {version_mask}",
@@ -391,10 +385,6 @@ impl<W: Workbase> Stratifier<W> {
                 })),
             )
             .await?;
-
-            if self.bouncer.reject() == Consequence::Drop {
-                self.state.drop();
-            }
 
             return Ok(());
         }
