@@ -36,6 +36,8 @@ pub(crate) struct Miner {
     cpu_cores: Option<usize>,
     #[arg(long, help = "Hash rate to <THROTTLE> to.")]
     throttle: Option<HashRate>,
+    #[arg(long, help = "Disable version rolling.")]
+    disable_version_rolling: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -94,6 +96,7 @@ impl Miner {
             cpu_cores,
             self.throttle,
             self.mode,
+            self.disable_version_rolling,
             cancel_token,
         )
         .await?;

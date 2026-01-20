@@ -1,4 +1,4 @@
-use super::*;
+use {super::*, rand::Rng};
 
 #[derive(Debug, Snafu)]
 pub(crate) enum HasherError {
@@ -14,6 +14,8 @@ pub(crate) struct Hasher {
     pub(crate) header: Header,
     pub(crate) job_id: JobId,
     pub(crate) pool_target: Target,
+    pub(crate) version: Version,
+    pub(crate) version_mask: Option<Version>,
 }
 
 impl Hasher {
@@ -22,8 +24,12 @@ impl Hasher {
         cancel: CancellationToken,
         metrics: Arc<Metrics>,
         throttle: f64,
-    ) -> Result<(JobId, Header, Extranonce), HasherError> {
+    ) -> Result<(JobId, Header, Extranonce, Option<Version>), HasherError> {
         const BATCH: u64 = 10_000;
+
+        let mut rng = rand::rng();
+
+        let mut current_version_bits = None;
 
         loop {
             if cancel.is_cancelled() {
@@ -33,6 +39,14 @@ impl Hasher {
                 .fail();
             }
 
+            if let Some(mask) = self.version_mask {
+                let random_bits = Version::from(rng.random::<i32>());
+                let version_bits = random_bits & mask;
+                current_version_bits = Some(version_bits);
+
+                self.header.version = ((self.version & !mask) | version_bits).into();
+            }
+
             let t0 = Instant::now();
 
             for _ in 0..BATCH {
@@ -40,12 +54,21 @@ impl Hasher {
 
                 if self.pool_target.is_met_by(hash) {
                     metrics.add_share();
-                    return Ok((self.job_id, self.header, self.enonce2.clone()));
+                    return Ok((
+                        self.job_id,
+                        self.header,
+                        self.enonce2.clone(),
+                        current_version_bits,
+                    ));
                 }
 
                 if let Some(next_nonce) = self.header.nonce.checked_add(1) {
                     self.header.nonce = next_nonce;
                 } else {
+                    if self.version_mask.is_some() {
+                        self.header.nonce = 0;
+                        break;
+                    }
                     return NonceSpaceExhaustedSnafu {
                         nonce: self.header.nonce,
                     }
@@ -142,14 +165,17 @@ mod tests {
     #[test]
     fn hasher_hashes_with_very_low_leading_zeros() {
         let target = shift(1);
+        let header = header(None, None);
         let mut hasher = Hasher {
-            header: header(None, None),
+            version: header.version.into(),
+            header,
             pool_target: target,
             enonce2: "0000000000".parse().unwrap(),
             job_id: "bf".parse().unwrap(),
+            version_mask: None,
         };
 
-        let (_, header, _) = hasher
+        let (_, header, _, _) = hasher
             .hash(CancellationToken::new(), Arc::new(Metrics::new()), f64::MAX)
             .unwrap();
         assert!(target.is_met_by(header.block_hash()));
@@ -158,11 +184,14 @@ mod tests {
     #[test]
     fn hasher_nonce_space_exhausted() {
         let target = Target::from_be_bytes([0u8; 32]);
+        let header = header(None, Some(u32::MAX - 100));
         let mut hasher = Hasher {
-            header: header(None, Some(u32::MAX - 100)),
+            version: header.version.into(),
+            header,
             pool_target: target,
             enonce2: "0000000000".parse().unwrap(),
             job_id: "bf".parse().unwrap(),
+            version_mask: None,
         };
 
         let result = hasher.hash(CancellationToken::new(), Arc::new(Metrics::new()), f64::MAX);
@@ -220,17 +249,20 @@ mod tests {
 
         for zeros in leading_zeros {
             let target = shift(zeros);
+            let header = header(None, None);
             let mut hasher = Hasher {
-                header: header(None, None),
+                version: header.version.into(),
+                header,
                 pool_target: target,
                 enonce2: "0000000000".parse().unwrap(),
                 job_id: JobId::new(0),
+                version_mask: None,
             };
 
             let result = hasher.hash(CancellationToken::new(), Arc::new(Metrics::new()), f64::MAX);
             assert!(result.is_ok(), "Failed at {zeros} leading zeros");
 
-            let (_, header, _) = result.unwrap();
+            let (_, header, _, _) = result.unwrap();
             assert!(
                 target.is_met_by(header.block_hash()),
                 "Invalid PoW at {zeros} leading zeros"
@@ -241,11 +273,14 @@ mod tests {
     #[test]
     fn test_parallel_mining_easy_target() {
         let target = shift(1);
+        let header = header(None, None);
         let mut hasher = Hasher {
-            header: header(None, None),
+            version: header.version.into(),
+            header,
             pool_target: target,
             enonce2: "0000000000".parse().unwrap(),
             job_id: JobId::new(0),
+            version_mask: None,
         };
 
         let result = hasher.hash(CancellationToken::new(), Arc::new(Metrics::new()), f64::MAX);
@@ -255,7 +290,7 @@ mod tests {
             "Mining should find solution for easy target"
         );
 
-        let (_, header, _) = result.unwrap();
+        let (_, header, _, _) = result.unwrap();
         assert!(
             target.is_met_by(header.block_hash()),
             "Solution should meet target"
@@ -265,11 +300,14 @@ mod tests {
     #[test]
     fn test_parallel_mining_cancellation() {
         let target = shift(30);
+        let header = header(None, None);
         let mut hasher = Hasher {
-            header: header(None, None),
+            version: header.version.into(),
+            header,
             pool_target: target,
             enonce2: "0000000000".parse().unwrap(),
             job_id: JobId::new(1),
+            version_mask: None,
         };
 
         let cancel_token = CancellationToken::new();
@@ -279,5 +317,39 @@ mod tests {
         let result = hasher.hash(cancel_token, Arc::new(Metrics::new()), f64::MAX);
         assert!(result.is_err(), "Should be cancelled");
         assert!(result.unwrap_err().to_string().contains("cancelled"));
+    }
+
+    #[test]
+    fn test_version_rolling_applies_mask() {
+        let target = shift(1);
+        let header = header(None, None);
+        let mask = Version::from_str("1fffe000").unwrap();
+
+        let mut hasher = Hasher {
+            version: header.version.into(),
+            header,
+            pool_target: target,
+            enonce2: "0000000000".parse().unwrap(),
+            job_id: JobId::new(0),
+            version_mask: Some(mask),
+        };
+
+        let result = hasher.hash(CancellationToken::new(), Arc::new(Metrics::new()), f64::MAX);
+        assert!(result.is_ok(), "Mining with version rolling should succeed");
+
+        let (_, header, _, version_bits) = result.unwrap();
+        assert!(
+            target.is_met_by(header.block_hash()),
+            "Solution should meet target"
+        );
+
+        if let Some(version_bits) = version_bits {
+            let disallowed = version_bits & !mask;
+            assert_eq!(
+                disallowed,
+                Version::from(0),
+                "version_bits should only contain bits within the mask"
+            );
+        }
     }
 }

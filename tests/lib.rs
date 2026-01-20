@@ -134,6 +134,18 @@ fn solve_share(
     enonce2: &Extranonce,
     difficulty: stratum::Difficulty,
 ) -> (Ntime, Nonce) {
+    solve_share_with_version_bits(notify, enonce1, enonce2, difficulty, None, None)
+}
+
+#[cfg(target_os = "linux")]
+fn solve_share_with_version_bits(
+    notify: &stratum::Notify,
+    enonce1: &Extranonce,
+    enonce2: &Extranonce,
+    difficulty: stratum::Difficulty,
+    version_bits: Option<Version>,
+    version_mask: Option<Version>,
+) -> (Ntime, Nonce) {
     let merkle_root = stratum::merkle_root(
         &notify.coinb1,
         &notify.coinb2,
@@ -143,8 +155,13 @@ fn solve_share(
     )
     .unwrap();
 
+    let version = match (version_bits, version_mask) {
+        (Some(version_bits), Some(mask)) => (notify.version & !mask) | (version_bits & mask),
+        _ => notify.version,
+    };
+
     let mut header = Header {
-        version: notify.version.into(),
+        version: version.into(),
         prev_blockhash: notify.prevhash.clone().into(),
         merkle_root: merkle_root.into(),
         time: notify.ntime.into(),

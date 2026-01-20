@@ -330,3 +330,63 @@ async fn proxy_with_non_default_enonce_sizes() {
         .await
         .expect("Valid share should be accepted - job must use correct enonce2_size");
 }
+
+#[tokio::test]
+#[serial(bitcoind)]
+#[timeout(90000)]
+async fn proxy_allows_version_rolling() {
+    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
+
+    let proxy = TestProxy::spawn_with_args(
+        &pool.stratum_endpoint(),
+        &signet_username().to_string(),
+        "--start-diff 0.00001",
+    );
+
+    assert_eq!(
+        proxy.get_status().await.unwrap().upstream_version_mask,
+        Some(Version::from_str("1fffe000").unwrap()),
+        "Upstream version mask should match pool's configured mask"
+    );
+
+    let miner_with_version_rolling = CommandBuilder::new(format!(
+        "miner {} --mode share-found --username {} --cpu-cores 1",
+        proxy.stratum_endpoint(),
+        signet_username()
+    ))
+    .spawn();
+
+    let miner = CommandBuilder::new(format!(
+        "miner {} --mode share-found --username {} --cpu-cores 1 --disable-version-rolling",
+        proxy.stratum_endpoint(),
+        signet_username()
+    ))
+    .spawn();
+
+    let output_with_version_rolling = miner_with_version_rolling.wait_with_output().unwrap();
+    let output = miner.wait_with_output().unwrap();
+
+    assert_eq!(output_with_version_rolling.status.code(), Some(0));
+    assert_eq!(output.status.code(), Some(0));
+
+    let shares_with_version_rolling: Vec<Share> = serde_json::from_str(&String::from_utf8_lossy(
+        &output_with_version_rolling.stdout,
+    ))
+    .unwrap();
+
+    let shares: Vec<Share> =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).unwrap();
+
+    assert_eq!(shares_with_version_rolling.len(), 1);
+    assert_eq!(shares.len(), 1);
+
+    assert!(
+        shares_with_version_rolling[0].version_bits.is_some(),
+        "Miner with version rolling should have version_bits set"
+    );
+
+    assert!(
+        shares[0].version_bits.is_none(),
+        "Miner without version rolling should not have version_bits set"
+    );
+}
