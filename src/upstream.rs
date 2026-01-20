@@ -112,7 +112,10 @@ impl Upstream {
             .await
             .context("failed to authorize with upstream")?;
 
-        info!("Authorized with upstream as {}", self.client.username);
+        info!(
+            "Authorized to upstream {} with {}",
+            self.client.address, self.client.username
+        );
 
         self.connected.store(true, Ordering::SeqCst);
 

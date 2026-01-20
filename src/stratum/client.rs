@@ -56,8 +56,7 @@ impl EventReceiver {
 
 #[derive(Clone)]
 pub struct Client {
-    #[allow(dead_code)]
-    address: String,
+    pub address: String,
     pub username: Username,
     password: Option<String>,
     user_agent: String,
