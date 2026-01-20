@@ -32,7 +32,7 @@ impl State {
         State::Init
     }
 
-    pub(crate) fn drop_connection(&mut self) {
+    pub(crate) fn drop(&mut self) {
         *self = State::Dropped;
     }
 
