@@ -568,6 +568,7 @@ impl<W: Workbase> Stratifier<W> {
         .await?;
 
         self.bouncer.authorize();
+        self.bouncer.accept();
 
         debug!("Sending SET DIFFICULTY");
 
