@@ -1,6 +1,6 @@
 use {
     super::*,
-    stratum::{Client, ClientConfig, ClientError, Event, EventReceiver},
+    stratum::{Client, ClientError, Event, EventReceiver},
     tokio::sync::RwLock,
 };
 
@@ -38,13 +38,13 @@ impl Upstream {
             upstream, upstream_addr, username
         );
 
-        let client = Client::new(ClientConfig {
-            address: upstream_addr.to_string(),
-            username: username.clone(),
-            user_agent: USER_AGENT.into(),
-            password: settings.upstream_password(),
-            timeout: settings.timeout(),
-        });
+        let client = Client::new(
+            upstream_addr.to_string(),
+            username.clone(),
+            settings.upstream_password(),
+            USER_AGENT.into(),
+            settings.timeout(),
+        );
 
         let events = client
             .connect()
@@ -112,10 +112,7 @@ impl Upstream {
             .await
             .context("failed to authorize with upstream")?;
 
-        info!(
-            "Authorized with upstream as {}",
-            self.client.config.username
-        );
+        info!("Authorized with upstream as {}", self.client.username);
 
         self.connected.store(true, Ordering::SeqCst);
 
@@ -269,7 +266,7 @@ impl Upstream {
     }
 
     pub(crate) fn username(&self) -> &Username {
-        &self.client.config.username
+        &self.client.username
     }
 
     pub(crate) fn accepted(&self) -> u64 {

@@ -4,7 +4,6 @@ use {
     futures::StreamExt,
     std::{
         collections::HashMap,
-        sync::Arc,
         time::{Duration, Instant},
     },
     tokio::{
@@ -24,15 +23,6 @@ mod error;
 pub type Result<T = (), E = ClientError> = std::result::Result<T, E>;
 
 const CHANNEL_BUFFER_SIZE: usize = 256;
-
-#[derive(Debug, Clone)]
-pub struct ClientConfig {
-    pub address: String,
-    pub username: Username,
-    pub user_agent: String,
-    pub password: Option<String>,
-    pub timeout: Duration,
-}
 
 #[derive(Debug)]
 pub struct EventReceiver {
@@ -66,26 +56,40 @@ impl EventReceiver {
 
 #[derive(Clone)]
 pub struct Client {
-    pub config: Arc<ClientConfig>,
+    #[allow(dead_code)]
+    address: String,
+    pub username: Username,
+    password: Option<String>,
+    user_agent: String,
+    timeout: Duration,
     tx: mpsc::Sender<ClientMessage>,
     events: broadcast::Sender<Event>,
 }
 
 impl Client {
     #[must_use]
-    pub fn new(config: ClientConfig) -> Self {
+    pub fn new(
+        address: String,
+        username: Username,
+        password: Option<String>,
+        user_agent: String,
+        timeout: Duration,
+    ) -> Self {
         let (tx, rx) = mpsc::channel(CHANNEL_BUFFER_SIZE);
         let (event_tx, _event_rx) = broadcast::channel(CHANNEL_BUFFER_SIZE);
 
-        let config = Arc::new(config);
-        let actor = ClientActor::new(config.clone(), rx, event_tx.clone());
+        let actor = ClientActor::new(address.clone(), timeout, rx, event_tx.clone());
 
         tokio::spawn(async move {
             actor.run().await;
         });
 
         Self {
-            config,
+            address,
+            username,
+            password,
+            user_agent,
+            timeout,
             tx,
             events: event_tx,
         }
@@ -149,7 +153,7 @@ impl Client {
         rx: oneshot::Receiver<Result<(Message, usize)>>,
         instant: Instant,
     ) -> Result<(Message, usize, Duration)> {
-        let (message, bytes_read) = tokio::time::timeout(self.config.timeout, rx)
+        let (message, bytes_read) = tokio::time::timeout(self.timeout, rx)
             .await
             .map_err(|source| ClientError::Timeout { source })?
             .map_err(|e| ClientError::ChannelRecv { source: e })??;
@@ -220,7 +224,7 @@ impl Client {
             .send_request(
                 "mining.subscribe",
                 serde_json::to_value(Subscribe {
-                    user_agent: self.config.user_agent.clone(),
+                    user_agent: self.user_agent.clone(),
                     enonce1,
                 })
                 .context(error::SerializationSnafu)?,
@@ -241,8 +245,8 @@ impl Client {
             .send_request(
                 "mining.authorize",
                 serde_json::to_value(Authorize {
-                    username: self.config.username.clone(),
-                    password: self.config.password.clone().or(Some("x".to_string())),
+                    username: self.username.clone(),
+                    password: self.password.clone().or(Some("x".to_string())),
                 })
                 .context(error::SerializationSnafu)?,
             )
@@ -269,7 +273,7 @@ impl Client {
         version_bits: Option<Version>,
     ) -> Result<Submit> {
         self.submit_with_username(
-            self.config.username.clone(),
+            self.username.clone(),
             job_id,
             enonce2,
             ntime,
@@ -355,15 +359,13 @@ mod tests {
     async fn request_timeout() {
         let addr = mock_server(false).await;
 
-        let config = ClientConfig {
-            address: addr.to_string(),
-            username: "test".into(),
-            user_agent: "test".into(),
-            password: None,
-            timeout: Duration::from_millis(200),
-        };
-
-        let client = Client::new(config);
+        let client = Client::new(
+            addr.to_string(),
+            "test".into(),
+            None,
+            "test".into(),
+            Duration::from_millis(200),
+        );
         client.connect().await.unwrap();
 
         let err = client.subscribe().await.unwrap_err();
@@ -376,15 +378,13 @@ mod tests {
 
     #[tokio::test]
     async fn connection_timeout() {
-        let config = ClientConfig {
-            address: "10.255.255.1:9999".into(),
-            username: "test".into(),
-            user_agent: "test".into(),
-            password: None,
-            timeout: Duration::from_millis(200),
-        };
-
-        let client = Client::new(config);
+        let client = Client::new(
+            "10.255.255.1:9999".into(),
+            "test".into(),
+            None,
+            "test".into(),
+            Duration::from_millis(200),
+        );
         let err = client.connect().await.unwrap_err();
         assert!(
             matches!(err, ClientError::Timeout { .. }),
@@ -395,15 +395,13 @@ mod tests {
 
     #[tokio::test]
     async fn request_fails_fast() {
-        let config = ClientConfig {
-            address: "127.0.0.1:9999".into(),
-            username: "test".into(),
-            user_agent: "test".into(),
-            password: None,
-            timeout: Duration::from_secs(1),
-        };
-
-        let client = Client::new(config);
+        let client = Client::new(
+            "127.0.0.1:9999".into(),
+            "test".into(),
+            None,
+            "test".into(),
+            Duration::from_secs(1),
+        );
 
         let err = client.subscribe().await.unwrap_err();
         assert!(
@@ -417,15 +415,13 @@ mod tests {
     async fn detect_connection_drop() {
         let addr = mock_server(true).await;
 
-        let config = ClientConfig {
-            address: addr.to_string(),
-            username: "test".into(),
-            user_agent: "test".into(),
-            password: None,
-            timeout: Duration::from_secs(5),
-        };
-
-        let client = Client::new(config);
+        let client = Client::new(
+            addr.to_string(),
+            "test".into(),
+            None,
+            "test".into(),
+            Duration::from_secs(5),
+        );
         client.connect().await.unwrap();
 
         let err = client.subscribe().await.unwrap_err();
