@@ -135,6 +135,8 @@ impl<W: Workbase> Stratifier<W> {
                                     })),
                                 )
                                 .await?;
+                                let consequence = self.bouncer.reject();
+                                self.handle_protocol_consequence(consequence).await;
                                 continue;
                             };
 
@@ -149,7 +151,8 @@ impl<W: Workbase> Stratifier<W> {
                             let Some(session) = self.state.working() else {
                                 self.send_error(id.clone(), StratumError::Unauthorized, None)
                                     .await?;
-
+                                let consequence = self.bouncer.reject();
+                                self.handle_protocol_consequence(consequence).await;
                                 continue;
                             };
 
@@ -234,6 +237,52 @@ impl<W: Workbase> Stratifier<W> {
                         warn!("Failed to create job: {err}");
                     }
                 }
+            }
+            Consequence::Reconnect => {
+                info!(
+                    "Suggesting reconnect to {} - {} consecutive rejects for {}s",
+                    self.socket_addr,
+                    self.bouncer.consecutive_rejects(),
+                    self.bouncer
+                        .reject_duration()
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0)
+                );
+                let _ = self
+                    .send(Message::Notification {
+                        method: "client.reconnect".into(),
+                        params: json!([]),
+                    })
+                    .await;
+            }
+            Consequence::Drop => {
+                warn!(
+                    "Dropping {} - {} consecutive rejects for {}s",
+                    self.socket_addr,
+                    self.bouncer.consecutive_rejects(),
+                    self.bouncer
+                        .reject_duration()
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0)
+                );
+                self.state.drop();
+            }
+        }
+    }
+
+    async fn handle_protocol_consequence(&mut self, consequence: Consequence) {
+        match consequence {
+            Consequence::None => {}
+            Consequence::Warn => {
+                info!(
+                    "Warning {} - {} consecutive rejects for {}s",
+                    self.socket_addr,
+                    self.bouncer.consecutive_rejects(),
+                    self.bouncer
+                        .reject_duration()
+                        .map(|duration| duration.as_secs())
+                        .unwrap_or(0)
+                );
             }
             Consequence::Reconnect => {
                 info!(
@@ -385,7 +434,8 @@ impl<W: Workbase> Stratifier<W> {
                 })),
             )
             .await?;
-
+            let consequence = self.bouncer.reject();
+            self.handle_protocol_consequence(consequence).await;
             return Ok(());
         }
 
@@ -412,10 +462,8 @@ impl<W: Workbase> Stratifier<W> {
                 })),
             )
             .await?;
-
-            if self.bouncer.reject() == Consequence::Drop {
-                self.state.drop();
-            }
+            let consequence = self.bouncer.reject();
+            self.handle_protocol_consequence(consequence).await;
 
             return Ok(());
         }
@@ -463,10 +511,8 @@ impl<W: Workbase> Stratifier<W> {
                     })),
                 )
                 .await?;
-
-                if self.bouncer.reject() == Consequence::Drop {
-                    self.state.drop();
-                }
+                let consequence = self.bouncer.reject();
+                self.handle_protocol_consequence(consequence).await;
 
                 return Ok(());
             }
@@ -487,10 +533,8 @@ impl<W: Workbase> Stratifier<W> {
                 })),
             )
             .await?;
-
-            if self.bouncer.reject() == Consequence::Drop {
-                self.state.drop();
-            }
+            let consequence = self.bouncer.reject();
+            self.handle_protocol_consequence(consequence).await;
 
             return Ok(());
         }

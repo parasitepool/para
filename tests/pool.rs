@@ -1015,16 +1015,71 @@ async fn bouncer_auth_failure() {
     client.connect().await.unwrap();
     client.subscribe().await.unwrap();
 
-    // First failed attempt
-    assert_stratum_error(client.authorize().await, StratumError::Unauthorized);
+    let start = std::time::Instant::now();
+    let mut dropped = false;
 
-    // Second failed attempt - should receive error then disconnect
-    assert_stratum_error(client.authorize().await, StratumError::Unauthorized);
+    while start.elapsed() < Duration::from_secs(10) {
+        match client.authorize().await {
+            Ok(_) => panic!("Expected unauthorized response"),
+            Err(ClientError::NotConnected) | Err(ClientError::Io { .. }) => {
+                dropped = true;
+                break;
+            }
+            Err(err) => {
+                assert!(
+                    matches!(
+                        err,
+                        ClientError::Stratum { ref response }
+                            if response.error_code == StratumError::Unauthorized as i32
+                    ),
+                    "Expected Unauthorized, got {err:?}"
+                );
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }
+    }
 
-    // Connection should be dropped
-    tokio::time::sleep(Duration::from_millis(100)).await;
     assert!(
-        client.authorize().await.is_err(),
-        "Expected connection to be dropped after 2 failed auth attempts"
+        dropped,
+        "Expected connection to be dropped after auth failures and bouncer escalation"
+    );
+}
+
+#[tokio::test]
+#[serial(bitcoind)]
+#[timeout(90000)]
+async fn bouncer_authorize_before_subscribe() {
+    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
+
+    let client = pool.stratum_client().await;
+    client.connect().await.unwrap();
+
+    let start = std::time::Instant::now();
+    let mut dropped = false;
+
+    while start.elapsed() < Duration::from_secs(10) {
+        match client.authorize().await {
+            Ok(_) => panic!("Expected MethodNotAllowed response"),
+            Err(ClientError::NotConnected) | Err(ClientError::Io { .. }) => {
+                dropped = true;
+                break;
+            }
+            Err(err) => {
+                assert!(
+                    matches!(
+                        err,
+                        ClientError::Stratum { ref response }
+                            if response.error_code == StratumError::MethodNotAllowed as i32
+                    ),
+                    "Expected MethodNotAllowed, got {err:?}"
+                );
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }
+    }
+
+    assert!(
+        dropped,
+        "Expected connection to be dropped after repeated authorize-before-subscribe attempts"
     );
 }
