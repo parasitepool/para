@@ -1,5 +1,5 @@
 use {
-    crate::api::{PoolStats, UserSummary},
+    crate::api::{PoolStatus, UserDetail},
     anyhow::Result,
     clap::Parser,
     iced::{
@@ -93,8 +93,8 @@ impl Gui {
 #[derive(Debug, Clone)]
 enum Message {
     Tick,
-    StatsReceived(Result<PoolStats, String>),
-    UsersReceived(Result<Vec<UserSummary>, String>),
+    StatsReceived(Result<PoolStatus, String>),
+    UsersReceived(Result<Vec<UserDetail>, String>),
     TabSelected(ActiveTab),
     ScanMiners,
     MinersDiscovered(Result<Vec<MinerInfo>, String>),
@@ -105,8 +105,8 @@ enum Message {
 
 struct ParaGui {
     endpoint: String,
-    stats: Option<PoolStats>,
-    users: Vec<UserSummary>,
+    stats: Option<PoolStatus>,
+    users: Vec<UserDetail>,
     connected: bool,
     error: Option<String>,
     hash_rate_history: VecDeque<f64>,
@@ -176,7 +176,7 @@ impl ParaGui {
                             self.hash_rate_history.pop_front();
                         }
                         self.hash_rate_history
-                            .push_back(parse_hash_rate(&stats.hash_rate_1m.to_string()));
+                            .push_back(parse_hash_rate(&stats.hashrate_1m.to_string()));
 
                         if self.sps_history.len() >= HISTORY_SIZE {
                             self.sps_history.pop_front();
@@ -338,10 +338,10 @@ impl ParaGui {
             .into()
     }
 
-    fn view_dashboard_content(&self, stats: &PoolStats) -> Element<'_, Message> {
+    fn view_dashboard_content(&self, stats: &PoolStatus) -> Element<'_, Message> {
         // Stats rows (all at top)
         let stats_row_1 = row![
-            stat_card("Hash Rate", stats.hash_rate_1m.to_string(), ACCENT_CYAN),
+            stat_card("Hash Rate", stats.hashrate_1m.to_string(), ACCENT_CYAN),
             stat_card("Shares/sec", format!("{:.2}", stats.sps_1m), ACCENT_ORANGE),
             stat_card("Users", stats.users.to_string(), TEXT_PRIMARY),
             stat_card("Workers", stats.workers.to_string(), TEXT_PRIMARY),
@@ -353,7 +353,7 @@ impl ParaGui {
         let stats_row_2 = row![
             stat_card("Accepted", format_number(stats.accepted), TEXT_PRIMARY),
             stat_card("Rejected", format_number(stats.rejected), TEXT_PRIMARY),
-            stat_card("Best Ever", format!("{:.4}", stats.best_ever), TEXT_PRIMARY),
+            stat_card("Best Ever", format!("{:.4}", stats.best_ever.unwrap()), TEXT_PRIMARY),
             stat_card(
                 "Last Share",
                 stats
@@ -881,10 +881,10 @@ fn format_chart_value(value: f64) -> String {
 fn fetch_stats(endpoint: String) -> Task<Message> {
     Task::perform(
         async move {
-            let url = format!("{}/api/stats", endpoint);
+            let url = format!("{}/pool/status", endpoint);
             let response = reqwest::get(&url).await.map_err(|e| e.to_string())?;
             response
-                .json::<PoolStats>()
+                .json::<PoolStatus>()
                 .await
                 .map_err(|e| e.to_string())
         },
@@ -899,10 +899,7 @@ fn scan_miners() -> Task<Message> {
 
             // Scan common local network subnets
             let subnets = [
-                "192.168.0.0/24",
-                "192.168.1.0/24",
                 "192.168.4.0/24",
-                "10.0.0.0/24",
             ];
 
             let mut all_miners = Vec::new();
@@ -963,7 +960,7 @@ fn fetch_single_miner(ip_str: String) -> Task<Message> {
                 let data = miner.get_data().await;
 
                 let hashrate_str = data
-                    .hashrate
+                    .hashratue
                     .map(|h| h.to_string())
                     .unwrap_or_else(|| "N/A".to_string());
 
@@ -1064,10 +1061,10 @@ fn format_hashrate_gh(gh: f64) -> String {
 fn fetch_users(endpoint: String) -> Task<Message> {
     Task::perform(
         async move {
-            let url = format!("{}/api/users", endpoint);
+            let url = format!("{}/pool/users", endpoint);
             let response = reqwest::get(&url).await.map_err(|e| e.to_string())?;
             response
-                .json::<Vec<UserSummary>>()
+                .json::<Vec<UserDetail>>()
                 .await
                 .map_err(|e| e.to_string())
         },
