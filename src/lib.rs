@@ -133,6 +133,7 @@ mod job;
 mod jobs;
 mod metatron;
 mod metrics;
+mod record_sink;
 pub mod settings;
 
 mod signal;

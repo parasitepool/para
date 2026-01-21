@@ -85,4 +85,15 @@ pub(crate) struct PoolOptions {
 
     #[arg(long, help = "Disable bouncer.")]
     pub(crate) disable_bouncer: bool,
+
+    #[arg(
+        long,
+        help = "Connect to Postgres at <DATABASE_URL> for event storage."
+    )]
+    pub(crate) database_url: Option<String>,
+    #[arg(
+        long,
+        help = "Write events to <EVENTS_FILE> (.json or .csv extension)."
+    )]
+    pub(crate) events_file: Option<PathBuf>,
 }

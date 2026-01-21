@@ -1,3 +1,4 @@
+use crate::record_sink::build_record_sink;
 use {
     super::*,
     crate::{api, http_server},
@@ -47,6 +48,27 @@ impl Proxy {
             &mut tasks,
         )?;
 
+        let event_tx = if let Some((tx, handle, sink_cancel)) =
+            build_record_sink(&settings)
+                .await
+                .context("failed to build record sink")?
+        {
+            tasks.spawn(async move {
+                let _ = handle.await;
+            });
+            // Store sink cancellation token to cancel when main cancel_token is triggered
+            tasks.spawn({
+                let cancel_token = cancel_token.clone();
+                async move {
+                    cancel_token.cancelled().await;
+                    sink_cancel.cancel();
+                }
+            });
+            Some(tx)
+        } else {
+            None
+        };
+
         let address = settings.address();
         let port = settings.port();
         let listener = TcpListener::bind((address, port))
@@ -69,6 +91,7 @@ impl Proxy {
                     let metatron = metatron.clone();
                     let upstream = upstream.clone();
                     let conn_cancel_token = cancel_token.child_token();
+                    let event_tx = event_tx.clone();
 
                     tasks.spawn(async move {
                         let mut stratifier: Stratifier<Notify> = Stratifier::new(
@@ -79,6 +102,7 @@ impl Proxy {
                             stream,
                             workbase_rx,
                             conn_cancel_token,
+                            event_tx,
                         );
 
                         if let Err(err) = stratifier.serve().await {
