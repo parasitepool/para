@@ -390,3 +390,98 @@ async fn proxy_allows_version_rolling() {
         "Miner without version rolling should not have version_bits set"
     );
 }
+
+#[tokio::test]
+#[serial(bitcoind)]
+#[timeout(120000)]
+async fn proxy_relays_job_updates_and_new_blocks() {
+    let pool = TestPool::spawn_with_args("--start-diff 0.00001 --update-interval 1");
+    let upstream = pool.stratum_endpoint();
+    let username = signet_username();
+
+    let proxy =
+        TestProxy::spawn_with_args(&upstream, &username.to_string(), "--start-diff 0.00001");
+
+    let address = username
+        .parse_address()
+        .unwrap()
+        .assume_checked()
+        .to_string();
+
+    let client_a = proxy.stratum_client_for_username(&format!("{address}.relay_a"));
+    let client_b = proxy.stratum_client_for_username(&format!("{address}.relay_b"));
+
+    let mut events_a = client_a.connect().await.expect("Failed to connect A");
+    let mut events_b = client_b.connect().await.expect("Failed to connect B");
+
+    client_a.subscribe().await.expect("Failed to subscribe A");
+    client_b.subscribe().await.expect("Failed to subscribe B");
+
+    client_a.authorize().await.expect("Failed to authorize A");
+    client_b.authorize().await.expect("Failed to authorize B");
+
+    let (notify_a, _) = wait_for_notify(&mut events_a).await;
+    let (notify_b, _) = wait_for_notify(&mut events_b).await;
+
+    assert!(notify_a.clean_jobs, "Initial job should be clean_jobs=true");
+    assert!(notify_b.clean_jobs, "Initial job should be clean_jobs=true");
+
+    let updated_a = wait_for_job_update(&mut events_a, notify_a.job_id).await;
+    let updated_b = wait_for_job_update(&mut events_b, notify_b.job_id).await;
+
+    assert!(!updated_a.clean_jobs);
+    assert!(!updated_b.clean_jobs);
+
+    pool.mine_block();
+
+    let new_block_a = wait_for_new_block(&mut events_a, updated_a.job_id).await;
+    let new_block_b = wait_for_new_block(&mut events_b, updated_b.job_id).await;
+
+    assert!(new_block_a.clean_jobs);
+    assert!(new_block_b.clean_jobs);
+    assert_eq!(new_block_a.job_id, new_block_b.job_id);
+
+    let client_c = proxy.stratum_client_for_username(&format!("{address}.relay_c"));
+    let mut events_c = client_c.connect().await.expect("Failed to connect C");
+    client_c.subscribe().await.expect("Failed to subscribe C");
+    client_c.authorize().await.expect("Failed to authorize C");
+
+    let (notify_c, _) = wait_for_notify(&mut events_c).await;
+    assert_eq!(notify_c.job_id, new_block_a.job_id);
+}
+
+#[tokio::test]
+#[serial(bitcoind)]
+#[timeout(120000)]
+async fn proxy_exits_on_upstream_disconnect() {
+    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
+
+    let proxy = TestProxy::spawn_with_args(
+        &pool.stratum_endpoint(),
+        signet_username().as_str(),
+        "--start-diff 0.00001",
+    );
+
+    let client = proxy.stratum_client();
+    let mut events = client.connect().await.expect("Failed to connect to proxy");
+
+    let (subscribe, _, _) = client.subscribe().await.expect("Failed to subscribe");
+    client.authorize().await.expect("Failed to authorize");
+    let (notify, difficulty) = wait_for_notify(&mut events).await;
+
+    let status = proxy.get_status().await.expect("Failed to read status");
+    assert!(status.upstream_connected);
+
+    drop(pool);
+
+    let enonce2 = Extranonce::random(subscribe.enonce2_size);
+    let (ntime, nonce) = solve_share(&notify, &subscribe.enonce1, &enonce2, difficulty);
+
+    assert!(
+        client
+            .submit(notify.job_id, enonce2, ntime, nonce, None)
+            .await
+            .is_err(),
+        "Miner should be disconnected after upstream loss"
+    );
+}
