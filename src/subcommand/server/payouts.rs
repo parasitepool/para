@@ -1,12 +1,14 @@
 use super::*;
 use crate::subcommand::server::database::{
-    FailedPayout, Payout, PendingPayout, Split, UpdatePayoutStatusRequest,
+    FailedPayout, Payout, PendingPayout, SimulatedPayout, Split, UpdatePayoutStatusRequest,
 };
+use crate::subcommand::server::templates::simulate_payouts::SimulatePayoutsHtml;
 
 pub(crate) fn payouts_router(config: Arc<ServerConfig>, database: Database) -> Router {
     let mut router = Router::new()
         .route("/payouts", get(payouts_all))
         .route("/payouts/failed", get(payouts_failed))
+        .route("/payouts/simulate", get(payouts_simulate))
         .route("/payouts/{blockheight}", get(payouts))
         .route("/payouts/update", post(update_payout_status))
         .route(
@@ -74,6 +76,63 @@ pub(crate) async fn payouts_failed(
     Extension(database): Extension<Database>,
 ) -> ServerResult<Response> {
     Ok(Json(database.get_failed_payouts().await?).into_response())
+}
+
+/// Simulate payouts as if a block was found now
+#[utoipa::path(
+    get,
+    path = "/payouts/simulate",
+    security(("admin_token" = [])),
+    params(
+        ("coinbase_value" = Option<i64>, Query, description = "Coinbase value in sats (default: 312500000 for 3.125 BTC)"),
+        ("winner_address" = Option<String>, Query, description = "Username of the block winner to exclude from payouts"),
+        ("format" = Option<String>, Query, description = "Response format: 'json', 'csv', or HTML (default)")
+    ),
+    responses(
+        (status = 200, description = "Simulated payouts", body = Vec<SimulatedPayout>),
+    ),
+    tag = "payouts"
+)]
+pub(crate) async fn payouts_simulate(
+    Extension(config): Extension<Arc<ServerConfig>>,
+    Extension(database): Extension<Database>,
+    Query(params): Query<HashMap<String, String>>,
+) -> ServerResult<Response> {
+    let coinbase_value: i64 = params
+        .get("coinbase_value")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(312_500_000); // 3.125 BTC, current coinbase value
+    let winner_address = params
+        .get("winner_address")
+        .map_or("", |user| user.as_str());
+
+    let payouts = database
+        .get_simulated_payouts(coinbase_value, winner_address)
+        .await?;
+
+    let format = params.get("format").map(|f| f.as_str()).unwrap_or("html");
+
+    match format {
+        "json" => Ok(Json(&payouts).into_response()),
+        "csv" => {
+            let mut csv =
+                String::from("lightning_address,bitcoin_address,amount_sats,percentage\n");
+            for payout in &payouts {
+                csv.push_str(&format!(
+                    "{},{},{},{}\n",
+                    payout.ln_address, payout.btc_address, payout.amount_sats, payout.percentage
+                ));
+            }
+            Ok(([(CONTENT_TYPE, "text/csv; charset=utf-8")], csv).into_response())
+        }
+        _ => Ok(SimulatePayoutsHtml {
+            payouts,
+            coinbase_value,
+            winner_address: winner_address.to_string(),
+        }
+        .page(config.domain())
+        .into_response()),
+    }
 }
 
 /// Get payouts for a specific block height

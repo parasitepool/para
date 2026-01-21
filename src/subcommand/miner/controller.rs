@@ -12,12 +12,13 @@ pub(crate) struct Controller {
     notify_rx: watch::Receiver<Option<(Notify, CancellationToken)>>,
     mode: Mode,
     pool_difficulty: Arc<Mutex<Difficulty>>,
-    root_cancel: CancellationToken,
-    share_tx: mpsc::Sender<(JobId, Header, Extranonce)>,
-    share_rx: mpsc::Receiver<(JobId, Header, Extranonce)>,
+    cancel: CancellationToken,
+    share_tx: mpsc::Sender<(JobId, Header, Extranonce, Option<Version>)>,
+    share_rx: mpsc::Receiver<(JobId, Header, Extranonce, Option<Version>)>,
     shares: Vec<Share>,
     throttle: f64,
     username: Username,
+    version_mask: Option<Version>,
 }
 
 impl Controller {
@@ -27,12 +28,43 @@ impl Controller {
         cpu_cores: usize,
         throttle: Option<HashRate>,
         mode: Mode,
+        disable_version_rolling: bool,
         cancel_token: CancellationToken,
     ) -> Result<Vec<Share>> {
         let events = client
             .connect()
             .await
             .context("failed to connect to stratum server")?;
+
+        let version_mask = if disable_version_rolling {
+            info!("Version rolling disabled");
+            None
+        } else {
+            match client
+                .configure(
+                    vec!["version-rolling".to_string()],
+                    Some(Version::from_str("ffffffff")?),
+                )
+                .await
+            {
+                Ok((response, _, _)) => {
+                    if response.version_rolling {
+                        info!(
+                            "Version rolling enabled: mask={:?}",
+                            response.version_rolling_mask
+                        );
+                        response.version_rolling_mask
+                    } else {
+                        info!("Server does not support version rolling");
+                        None
+                    }
+                }
+                Err(err) => {
+                    warn!("Failed to configure version rolling: {err}");
+                    None
+                }
+            }
+        };
 
         let (subscribe, _, _) = client
             .subscribe()
@@ -70,33 +102,38 @@ impl Controller {
             notify_tx,
             mode,
             pool_difficulty: Arc::new(Mutex::new(Difficulty::default())),
-            root_cancel: CancellationToken::new(),
+            cancel: cancel_token.clone(),
             share_rx,
             share_tx,
             shares: Vec::new(),
             throttle,
             username,
+            version_mask,
         };
 
         controller.spawn_hashers();
 
         if !integration_test() && !logs_enabled() {
-            spawn_throbber(controller.metrics.clone());
+            spawn_throbber(
+                controller.metrics.clone(),
+                cancel_token.clone(),
+                &mut controller.hashers,
+            );
         }
 
         controller.event_loop(events, cancel_token).await?;
 
-        controller.root_cancel.cancel();
+        controller.cancel.cancel();
         drop(controller.notify_tx);
         while controller.hashers.join_next().await.is_some() {}
-        controller.client.disconnect().await?;
+        controller.client.disconnect().await;
 
         Ok(controller.shares)
     }
 
     async fn event_loop(
         &mut self,
-        mut events: broadcast::Receiver<stratum::Event>,
+        mut events: stratum::EventReceiver,
         cancel_token: CancellationToken,
     ) -> Result {
         loop {
@@ -119,18 +156,25 @@ impl Controller {
                             self.cancel_hashers();
                             break;
                         }
-                        Err(broadcast::error::RecvError::Lagged(_)) => {
-                            warn!("Event loop lagged, missed messages");
+                        Err(stratum::ClientError::EventsLagged { count }) => {
+                            warn!("Event loop lagged, missed {count} messages");
                         }
-                         Err(broadcast::error::RecvError::Closed) => {
+                        Err(stratum::ClientError::EventChannelClosed) => {
                             info!("Client event channel closed, shutting down");
                             break;
+                        }
+                        Err(e) => {
+                            warn!("Unexpected event error: {e}");
                         }
                     }
                 },
                 maybe = self.share_rx.recv() => match maybe {
-                    Some((job_id, header, enonce2)) => {
-                        info!("Valid share found: blockhash={} nonce={}", header.block_hash(), header.nonce);
+                    Some((job_id, header, enonce2, version_bits)) => {
+                        info!(
+                            "Valid share found with difficulty={} version_bits={:?}",
+                            Difficulty::from(header.block_hash()),
+                            version_bits
+                        );
 
                         let share = Share {
                             enonce1: self.enonce1.clone(),
@@ -139,12 +183,12 @@ impl Controller {
                             nonce: header.nonce.into(),
                             ntime: header.time.into(),
                             username: self.username.clone(),
-                            version_bits: None,
+                            version_bits,
                         };
 
                         self.shares.push(share);
 
-                        match self.client.submit(job_id, enonce2, header.time.into(), header.nonce.into()).await {
+                        match self.client.submit(job_id, enonce2, header.time.into(), header.nonce.into(), version_bits).await {
                             Err(err) => warn!("Failed to submit share for job {job_id}: {err}"),
                             Ok(_) => info!("Share for job {job_id} submitted successfully"),
                         }
@@ -183,6 +227,7 @@ impl Controller {
             let pool_difficulty = self.pool_difficulty.clone();
             let metrics = self.metrics.clone();
             let throttle = self.throttle;
+            let version_mask = self.version_mask;
 
             info!("Starting hasher for core {core_id}",);
             self.hashers.spawn(async move {
@@ -207,19 +252,19 @@ impl Controller {
                             enonce2
                         };
 
-                        let merkle = stratum::merkle_root(
+                        let merkle_root = stratum::merkle_root(
                             &notify.coinb1,
                             &notify.coinb2,
                             &enonce1,
                             &enonce2,
                             &notify.merkle_branches,
                         )
-                        .expect("merkle");
+                        .expect("merkle root should calculate");
 
                         let header = Header {
                             version: notify.version.into(),
                             prev_blockhash: notify.prevhash.clone().into(),
-                            merkle_root: merkle.into(),
+                            merkle_root: merkle_root.into(),
                             time: notify.ntime.into(),
                             bits: notify.nbits.into(),
                             nonce: 0,
@@ -228,10 +273,12 @@ impl Controller {
                         let pool_target = { pool_difficulty.lock().await.to_target() };
 
                         let mut hasher = Hasher {
+                            version: notify.version,
                             header,
                             pool_target,
                             enonce2: enonce2.clone(),
                             job_id: notify.job_id,
+                            version_mask,
                         };
 
                         let cancel_clone = cancel.clone();
@@ -289,7 +336,7 @@ impl Controller {
         if let Some(cancel) = &self.hasher_cancel {
             cancel.cancel();
         }
-        let cancel = self.root_cancel.child_token();
+        let cancel = self.cancel.child_token();
         self.hasher_cancel = Some(cancel.clone());
         cancel
     }

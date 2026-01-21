@@ -1,10 +1,4 @@
-use {
-    super::*,
-    controller::Controller,
-    hasher::Hasher,
-    metrics::Metrics,
-    stratum::{Client, ClientConfig},
-};
+use {super::*, controller::Controller, hasher::Hasher, metrics::Metrics, stratum::Client};
 
 mod controller;
 mod hasher;
@@ -36,6 +30,8 @@ pub(crate) struct Miner {
     cpu_cores: Option<usize>,
     #[arg(long, help = "Hash rate to <THROTTLE> to.")]
     throttle: Option<HashRate>,
+    #[arg(long, help = "Disable version rolling.")]
+    disable_version_rolling: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -65,15 +61,13 @@ impl Miner {
                 )
             })?;
 
-        let config = ClientConfig {
-            address: address.to_string(),
-            username: self.username.clone(),
-            user_agent: USER_AGENT.into(),
-            password: self.password.clone(),
-            timeout: Duration::from_secs(10),
-        };
-
-        let client = Client::new(config);
+        let client = Client::new(
+            address.to_string(),
+            self.username.clone(),
+            self.password.clone(),
+            USER_AGENT.into(),
+            Duration::from_secs(10),
+        );
 
         let mut system = System::new();
         system.refresh_cpu_all();
@@ -94,6 +88,7 @@ impl Miner {
             cpu_cores,
             self.throttle,
             self.mode,
+            self.disable_version_rolling,
             cancel_token,
         )
         .await?;

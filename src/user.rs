@@ -48,11 +48,11 @@ impl User {
         self.workers.iter().map(|worker| worker.rejected()).sum()
     }
 
-    pub(crate) fn best_ever(&self) -> f64 {
+    pub(crate) fn best_ever(&self) -> Option<Difficulty> {
         self.workers
             .iter()
-            .map(|worker| worker.best_ever())
-            .fold(0.0, f64::max)
+            .filter_map(|worker| worker.best_ever())
+            .max()
     }
 
     pub(crate) fn last_share(&self) -> Option<Instant> {

@@ -1,83 +1,68 @@
 use {
     super::*,
-    axum::extract::{Json, Path, State},
+    axum::extract::{Path, State},
     http_server::error::{OptionExt, ServerResult},
 };
 
-pub(crate) fn router(metatron: Arc<Metatron>) -> Router {
-    Router::new()
-        .route("/api/stats", get(stats))
-        .route("/api/users", get(users))
-        .route("/api/users/{address}", get(user))
-        .with_state(metatron)
-}
-
-async fn stats(State(metatron): State<Arc<Metatron>>) -> ServerResult<Response> {
-    Ok(Json(metatron.stats()).into_response())
-}
-
-async fn users(State(metatron): State<Arc<Metatron>>) -> ServerResult<Response> {
-    Ok(Json(metatron.users()).into_response())
-}
-
-async fn user(
-    State(metatron): State<Arc<Metatron>>,
-    Path(address): Path<Address<NetworkUnchecked>>,
-) -> ServerResult<Response> {
-    let address = address.assume_checked();
-
-    Ok(Json(
-        metatron
-            .user(&address)
-            .ok_or_not_found(|| format!("User {address}"))?,
-    )
-    .into_response())
-}
+pub mod pool;
+pub mod proxy;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PoolStats {
-    pub hash_rate_1m: HashRate,
-    pub sps_1m: f64,
+pub struct PoolStatus {
     pub users: usize,
     pub workers: usize,
     pub connections: u64,
+    pub sps_1m: f64,
+    pub hashrate_1m: HashRate,
     pub accepted: u64,
     pub rejected: u64,
     pub blocks: u64,
-    pub best_ever: f64,
+    pub best_ever: Option<Difficulty>,
     pub last_share: Option<u64>,
     pub uptime_secs: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UserSummary {
-    pub address: String,
-    pub hash_rate: HashRate,
-    pub shares_per_second: f64,
+pub struct ProxyStatus {
+    pub users: usize,
     pub workers: usize,
+    pub connections: u64,
+    pub sps_1m: f64,
+    pub hashrate_1m: HashRate,
     pub accepted: u64,
     pub rejected: u64,
-    pub best_ever: f64,
+    pub best_ever: Option<Difficulty>,
+    pub last_share: Option<u64>,
+    pub uptime_secs: u64,
+    pub upstream_endpoint: String,
+    pub upstream_connected: bool,
+    pub upstream_difficulty: f64,
+    pub upstream_username: Username,
+    pub upstream_enonce1: Extranonce,
+    pub upstream_enonce2_size: usize,
+    pub upstream_version_mask: Option<Version>,
+    pub upstream_accepted: u64,
+    pub upstream_rejected: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserDetail {
     pub address: String,
-    pub hash_rate: HashRate,
-    pub shares_per_second: f64,
+    pub hashrate_1m: HashRate,
+    pub sps_1m: f64,
     pub accepted: u64,
     pub rejected: u64,
-    pub best_ever: f64,
+    pub best_ever: Option<Difficulty>,
     pub authorized: u64,
-    pub workers: Vec<WorkerSummary>,
+    pub workers: Vec<WorkerDetail>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorkerSummary {
+pub struct WorkerDetail {
     pub name: String,
-    pub hash_rate: HashRate,
-    pub shares_per_second: f64,
+    pub sps_1m: f64,
+    pub hashrate_1m: HashRate,
     pub accepted: u64,
     pub rejected: u64,
-    pub best_ever: f64,
+    pub best_ever: Option<Difficulty>,
 }

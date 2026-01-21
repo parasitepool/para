@@ -18,12 +18,12 @@ const SI_PREFIXES: &[(&str, f64)] = &[
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
-pub(crate) struct HashRate(pub f64);
+pub struct HashRate(pub f64);
 
 impl HashRate {
-    pub(crate) const ZERO: Self = Self(0.0);
+    pub const ZERO: Self = Self(0.0);
 
-    pub(crate) fn from_dsps(dsps: f64) -> Self {
+    pub fn from_dsps(dsps: f64) -> Self {
         Self(dsps * HASHES_PER_DIFF_1 as f64)
     }
 

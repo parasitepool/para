@@ -448,3 +448,59 @@ pub(crate) async fn insert_test_block(
     pool.close().await;
     Ok(())
 }
+
+pub async fn insert_test_account_with_diff(
+    database_url: String,
+    username: &str,
+    lnurl: Option<&str>,
+    total_diff: i64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use sqlx::{Pool, Postgres, postgres::PgPoolOptions};
+
+    let pool: Pool<Postgres> = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&database_url)
+        .await?;
+
+    sqlx::query(
+        "INSERT INTO accounts (username, lnurl, total_diff, created_at, updated_at)
+         VALUES ($1, $2, $3, NOW(), NOW())",
+    )
+    .bind(username)
+    .bind(lnurl)
+    .bind(total_diff)
+    .execute(&pool)
+    .await?;
+
+    pool.close().await;
+    Ok(())
+}
+
+pub async fn insert_test_payout(
+    database_url: String,
+    username: &str,
+    amount: i64,
+    diff_paid: i64,
+    status: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use sqlx::{Pool, Postgres, postgres::PgPoolOptions};
+
+    let pool: Pool<Postgres> = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&database_url)
+        .await?;
+
+    sqlx::query(
+        "INSERT INTO payouts (account_id, amount, diff_paid, blockheight_start, blockheight_end, status)
+         SELECT id, $2, $3, 0, 100, $4 FROM accounts WHERE username = $1",
+    )
+        .bind(username)
+        .bind(amount)
+        .bind(diff_paid)
+        .bind(status)
+        .execute(&pool)
+        .await?;
+
+    pool.close().await;
+    Ok(())
+}

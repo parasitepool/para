@@ -29,6 +29,18 @@ struct ConfigureOptions {
     version_rolling_min_bit_count: Option<u32>,
 }
 
+#[derive(Debug, Default, Clone, PartialEq, Deserialize)]
+pub struct ConfigureResponse {
+    #[serde(rename = "version-rolling", default)]
+    pub version_rolling: bool,
+
+    #[serde(rename = "version-rolling.mask", default)]
+    pub version_rolling_mask: Option<Version>,
+
+    #[serde(rename = "minimum-difficulty", default)]
+    pub minimum_difficulty: bool,
+}
+
 impl Serialize for Configure {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where

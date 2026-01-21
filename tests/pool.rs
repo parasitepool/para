@@ -1,53 +1,5 @@
 use super::*;
 
-async fn wait_for_notify(
-    events: &mut tokio::sync::broadcast::Receiver<stratum::Event>,
-) -> (stratum::Notify, Difficulty) {
-    let mut difficulty = Difficulty::from(1);
-    timeout(Duration::from_secs(10), async {
-        loop {
-            match events.recv().await.unwrap() {
-                stratum::Event::SetDifficulty(diff) => difficulty = diff,
-                stratum::Event::Notify(notify) => return (notify, difficulty),
-                _ => {}
-            }
-        }
-    })
-    .await
-    .expect("Timeout waiting for notify")
-}
-
-async fn wait_for_new_block(
-    events: &mut tokio::sync::broadcast::Receiver<stratum::Event>,
-    old_job_id: JobId,
-) -> stratum::Notify {
-    timeout(Duration::from_secs(10), async {
-        loop {
-            match events.recv().await.unwrap() {
-                stratum::Event::Notify(n) if n.job_id != old_job_id && n.clean_jobs => return n,
-                _ => {}
-            }
-        }
-    })
-    .await
-    .expect("Timeout waiting for new block")
-}
-
-fn assert_stratum_error<T: std::fmt::Debug>(
-    result: Result<T, ClientError>,
-    expected: StratumError,
-) {
-    assert!(
-        matches!(
-            &result,
-            Err(ClientError::Stratum { response }) if response.error_code == expected as i32
-        ),
-        "Expected {:?}, got {:?}",
-        expected,
-        result
-    );
-}
-
 #[test]
 #[serial(bitcoind)]
 #[timeout(90000)]
@@ -101,6 +53,7 @@ async fn stratum_state_machine() {
                     Extranonce::random(8),
                     Ntime::from(0),
                     Nonce::from(0),
+                    None,
                 )
                 .await,
             StratumError::Unauthorized,
@@ -141,6 +94,7 @@ async fn stratum_state_machine() {
                     Extranonce::random(8),
                     Ntime::from(0),
                     Nonce::from(0),
+                    None,
                 )
                 .await,
             StratumError::Unauthorized,
@@ -155,17 +109,19 @@ async fn stratum_state_machine() {
         let (subscribe, _, _) = client.subscribe().await.unwrap();
         assert_eq!(subscribe.subscriptions.len(), 2);
 
-        // configure in Subscribed -> allowed
-        client
-            .configure(
-                vec!["version-rolling".into()],
-                Some(Version::from_str("1fffe000").unwrap()),
-            )
-            .await
-            .unwrap();
+        // configure in Subscribed -> MethodNotAllowed
+        assert_stratum_error(
+            client
+                .configure(
+                    vec!["version-rolling".into()],
+                    Some(Version::from_str("1fffe000").unwrap()),
+                )
+                .await,
+            StratumError::MethodNotAllowed,
+        );
 
-        // subscribe again (resubscription in Subscribed) -> allowed
-        client.subscribe().await.unwrap();
+        // subscribe again (resubscription in Subscribed) -> MethodNotAllowed
+        assert_stratum_error(client.subscribe().await, StratumError::MethodNotAllowed);
 
         // submit in Subscribed -> Unauthorized
         assert_stratum_error(
@@ -175,6 +131,7 @@ async fn stratum_state_machine() {
                     Extranonce::random(8),
                     Ntime::from(0),
                     Nonce::from(0),
+                    None,
                 )
                 .await,
             StratumError::Unauthorized,
@@ -198,23 +155,15 @@ async fn stratum_state_machine() {
         assert_eq!(notify.job_id, JobId::from(0));
         assert!(notify.clean_jobs);
 
-        // configure in Working -> allowed
-        client
-            .configure(
-                vec!["version-rolling".into()],
-                Some(Version::from_str("1fffe000").unwrap()),
-            )
-            .await
-            .unwrap();
-
-        // configure with unsupported extension in Working -> error but stays in Working
-        assert!(
+        // configure in Working -> MethodNotAllowed
+        assert_stratum_error(
             client
-                .configure(vec!["unknown-extension".into()], None)
-                .await
-                .unwrap_err()
-                .to_string()
-                .contains("Unsupported extension")
+                .configure(
+                    vec!["version-rolling".into()],
+                    Some(Version::from_str("1fffe000").unwrap()),
+                )
+                .await,
+            StratumError::MethodNotAllowed,
         );
 
         // Verify we're still in Working state by submitting a share
@@ -227,6 +176,7 @@ async fn stratum_state_machine() {
                 enonce2_for_state_check,
                 ntime_check,
                 nonce_check,
+                None,
             )
             .await
             .unwrap();
@@ -238,7 +188,7 @@ async fn stratum_state_machine() {
         let enonce2 = Extranonce::random(enonce2_size);
         let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, difficulty);
         client
-            .submit(notify.job_id, enonce2, ntime, nonce)
+            .submit(notify.job_id, enonce2, ntime, nonce, None)
             .await
             .unwrap();
     }
@@ -248,7 +198,6 @@ async fn stratum_state_machine() {
         let client = pool.stratum_client().await;
         let mut events = client.connect().await.unwrap();
 
-        // Configure version rolling first
         client
             .configure(
                 vec!["version-rolling".into()],
@@ -265,48 +214,16 @@ async fn stratum_state_machine() {
 
         let (notify, difficulty) = wait_for_notify(&mut events).await;
 
-        // Submit a valid share (confirms Working state)
+        // Confirm Working state by submitting valid share
         let enonce2 = Extranonce::random(enonce2_size);
         let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, difficulty);
         client
-            .submit(notify.job_id, enonce2, ntime, nonce)
+            .submit(notify.job_id, enonce2, ntime, nonce, None)
             .await
             .unwrap();
 
-        // Resubscribe on same connection -> goes back to Subscribed state
-        let (new_subscribe_result, _, _) = client.subscribe().await.unwrap();
-
-        // Submit should fail with Unauthorized (not in Working state anymore)
-        assert_stratum_error(
-            client
-                .submit(
-                    notify.job_id,
-                    Extranonce::random(enonce2_size),
-                    ntime,
-                    nonce,
-                )
-                .await,
-            StratumError::Unauthorized,
-        );
-
-        // Must re-authorize after resubscription
-        client.authorize().await.unwrap();
-
-        // Wait for new job
-        let (new_notify, new_difficulty) = wait_for_notify(&mut events).await;
-
-        // New job ID should work
-        let new_enonce2 = Extranonce::random(enonce2_size);
-        let (new_ntime, new_nonce) = solve_share(
-            &new_notify,
-            &new_subscribe_result.enonce1,
-            &new_enonce2,
-            new_difficulty,
-        );
-        client
-            .submit(new_notify.job_id, new_enonce2, new_ntime, new_nonce)
-            .await
-            .unwrap();
+        // Resubscribe on same connection -> MethodNotAllowed
+        assert_stratum_error(client.subscribe().await, StratumError::MethodNotAllowed);
     }
 
     // Successful session resume preserves enonce1
@@ -324,11 +241,11 @@ async fn stratum_state_machine() {
         let enonce2 = Extranonce::random(subscribe_result.enonce2_size);
         let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, difficulty);
         client
-            .submit(notify.job_id, enonce2, ntime, nonce)
+            .submit(notify.job_id, enonce2, ntime, nonce, None)
             .await
             .unwrap();
 
-        client.disconnect().await.unwrap();
+        client.disconnect().await;
         enonce1
     };
 
@@ -357,7 +274,7 @@ async fn stratum_state_machine() {
         let enonce2 = Extranonce::random(subscribe_result.enonce2_size);
         let (ntime, nonce) = solve_share(&notify, &original_enonce1, &enonce2, difficulty);
         client
-            .submit(notify.job_id, enonce2, ntime, nonce)
+            .submit(notify.job_id, enonce2, ntime, nonce, None)
             .await
             .unwrap();
     }
@@ -576,7 +493,10 @@ async fn vardiff_adjusts_difficulty() {
         let enonce2 = Extranonce::random(subscribe.enonce2_size);
         let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, initial_difficulty);
 
-        match client.submit(notify.job_id, enonce2, ntime, nonce).await {
+        match client
+            .submit(notify.job_id, enonce2, ntime, nonce, None)
+            .await
+        {
             Ok(_) => accepted_shares += 1,
             Err(ClientError::Stratum { response })
                 if response.error_code == StratumError::Duplicate as i32 =>
@@ -630,6 +550,17 @@ async fn vardiff_adjusts_difficulty() {
 #[timeout(90000)]
 async fn share_validation() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001 --disable-bouncer");
+
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(status.users, 0);
+    assert_eq!(status.workers, 0);
+    assert_eq!(status.connections, 0);
+    assert_eq!(status.blocks, 0);
+    assert_eq!(status.accepted, 0);
+    assert_eq!(status.rejected, 0);
+    assert!(status.best_ever.is_none());
+    assert!(status.last_share.is_none());
+
     let client = pool.stratum_client().await;
     let mut events = client.connect().await.unwrap();
 
@@ -640,22 +571,57 @@ async fn share_validation() {
     client.authorize().await.unwrap();
 
     let (notify, difficulty) = wait_for_notify(&mut events).await;
+    let username = signet_username();
+    let user_address = username
+        .parse_address()
+        .unwrap()
+        .assume_checked()
+        .to_string();
 
     // Valid share accepted
     let enonce2 = Extranonce::random(enonce2_size);
     let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, difficulty);
-    assert!(
-        client
-            .submit(notify.job_id, enonce2.clone(), ntime, nonce)
-            .await
-            .is_ok()
-    );
+    client
+        .submit(notify.job_id, enonce2.clone(), ntime, nonce, None)
+        .await
+        .unwrap();
+
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(status.users, 1);
+    assert_eq!(status.workers, 1);
+    assert_eq!(status.connections, 1);
+    assert_eq!(status.accepted, 1);
+    assert_eq!(status.rejected, 0);
+    assert!(status.best_ever.is_some());
+    assert!(status.last_share.is_some());
+
+    let user = pool.get_user(&user_address).await.unwrap();
+    assert_eq!(user.address, user_address);
+    assert_eq!(user.accepted, 1);
+    assert_eq!(user.rejected, 0);
+    assert!(user.best_ever.is_some());
+    assert_eq!(user.workers.len(), 1);
+    assert_eq!(user.workers[0].accepted, 1);
+    assert_eq!(user.workers[0].rejected, 0);
+    assert!(user.workers[0].best_ever.is_some());
 
     // Duplicate rejected
     assert_stratum_error(
-        client.submit(notify.job_id, enonce2, ntime, nonce).await,
+        client
+            .submit(notify.job_id, enonce2, ntime, nonce, None)
+            .await,
         StratumError::Duplicate,
     );
+
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(status.accepted, 1);
+    assert_eq!(status.rejected, 1);
+
+    let user = pool.get_user(&user_address).await.unwrap();
+    assert_eq!(user.accepted, 1);
+    assert_eq!(user.rejected, 1);
+    assert_eq!(user.workers[0].accepted, 1);
+    assert_eq!(user.workers[0].rejected, 1);
 
     // Invalid enonce2 length (too short)
     assert_stratum_error(
@@ -665,10 +631,15 @@ async fn share_validation() {
                 Extranonce::random(enonce2_size - 1),
                 ntime,
                 nonce,
+                None,
             )
             .await,
         StratumError::InvalidNonce2Length,
     );
+
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(status.accepted, 1);
+    assert_eq!(status.rejected, 2);
 
     // Invalid enonce2 length (too long)
     assert_stratum_error(
@@ -678,10 +649,15 @@ async fn share_validation() {
                 Extranonce::random(enonce2_size + 1),
                 ntime,
                 nonce,
+                None,
             )
             .await,
         StratumError::InvalidNonce2Length,
     );
+
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(status.accepted, 1);
+    assert_eq!(status.rejected, 3);
 
     // Invalid job id (stale)
     assert_stratum_error(
@@ -691,10 +667,15 @@ async fn share_validation() {
                 Extranonce::random(enonce2_size),
                 ntime,
                 nonce,
+                None,
             )
             .await,
         StratumError::Stale,
     );
+
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(status.accepted, 1);
+    assert_eq!(status.rejected, 4);
 
     // Share above target
     assert_stratum_error(
@@ -704,10 +685,15 @@ async fn share_validation() {
                 Extranonce::random(enonce2_size),
                 notify.ntime,
                 Nonce::from(0),
+                None,
             )
             .await,
         StratumError::AboveTarget,
     );
+
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(status.accepted, 1);
+    assert_eq!(status.rejected, 5);
 
     // Worker mismatch rejected
     assert_stratum_error(
@@ -718,10 +704,19 @@ async fn share_validation() {
                 Extranonce::random(enonce2_size),
                 notify.ntime,
                 Nonce::from(0),
+                None,
             )
             .await,
         StratumError::WorkerMismatch,
     );
+
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(status.accepted, 1);
+    assert_eq!(status.rejected, 6);
+
+    let user = pool.get_user(&user_address).await.unwrap();
+    assert_eq!(user.accepted, 1);
+    assert_eq!(user.rejected, 6);
 
     // Ntime before job's ntime rejected
     let job_ntime: u32 = notify.ntime.into();
@@ -732,10 +727,15 @@ async fn share_validation() {
                 Extranonce::random(enonce2_size),
                 Ntime::from(job_ntime - 1),
                 Nonce::from(0),
+                None,
             )
             .await,
         StratumError::NtimeOutOfRange,
     );
+
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(status.accepted, 1);
+    assert_eq!(status.rejected, 7);
 
     // Ntime too far in future rejected (> 7000 seconds)
     assert_stratum_error(
@@ -745,10 +745,39 @@ async fn share_validation() {
                 Extranonce::random(enonce2_size),
                 Ntime::from(job_ntime + 7001),
                 Nonce::from(0),
+                None,
             )
             .await,
         StratumError::NtimeOutOfRange,
     );
+
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(status.accepted, 1);
+    assert_eq!(status.rejected, 8);
+
+    let user = pool.get_user(&user_address).await.unwrap();
+    assert_eq!(user.accepted, 1);
+    assert_eq!(user.rejected, 8);
+
+    // Version bits submitted without negotiation -> InvalidVersionMask
+    let enonce2_vr = Extranonce::random(enonce2_size);
+    let (ntime_vr, nonce_vr) = solve_share(&notify, &enonce1, &enonce2_vr, difficulty);
+    assert_stratum_error(
+        client
+            .submit(
+                notify.job_id,
+                enonce2_vr,
+                ntime_vr,
+                nonce_vr,
+                Some(Version::from_str("00100000").unwrap()),
+            )
+            .await,
+        StratumError::InvalidVersionMask,
+    );
+
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(status.accepted, 1);
+    assert_eq!(status.rejected, 9);
 
     // Stale after new block
     let old_job_id = notify.job_id;
@@ -758,12 +787,105 @@ async fn share_validation() {
     pool.mine_block();
     tokio::time::sleep(Duration::from_secs(2)).await;
 
+    let baseline = pool.get_status().await.unwrap();
+    let user_baseline = pool.get_user(&user_address).await.unwrap();
+
     assert_stratum_error(
         client
-            .submit(old_job_id, fresh_enonce2, old_ntime, old_nonce)
+            .submit(old_job_id, fresh_enonce2, old_ntime, old_nonce, None)
             .await,
         StratumError::Stale,
     );
+
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(status.rejected, baseline.rejected + 1);
+    assert_eq!(status.blocks, 1);
+
+    let user = pool.get_user(&user_address).await.unwrap();
+    assert_eq!(user.rejected, user_baseline.rejected + 1);
+    assert_eq!(
+        user.workers[0].rejected,
+        user_baseline.workers[0].rejected + 1
+    );
+
+    // Version rolling validation (new connection with configure)
+    {
+        let client = pool.stratum_client().await;
+        let mut events = client.connect().await.unwrap();
+
+        let (configure_response, _, _) = client
+            .configure(
+                vec!["version-rolling".into()],
+                Some(Version::from_str("1fffe000").unwrap()),
+            )
+            .await
+            .unwrap();
+
+        assert!(configure_response.version_rolling);
+        assert_eq!(
+            configure_response.version_rolling_mask,
+            Some(Version::from_str("1fffe000").unwrap())
+        );
+
+        let (subscribe, _, _) = client.subscribe().await.unwrap();
+        let enonce1 = subscribe.enonce1;
+        let enonce2_size = subscribe.enonce2_size;
+
+        client.authorize().await.unwrap();
+
+        let (notify, difficulty) = wait_for_notify(&mut events).await;
+        let version_mask = Version::from_str("1fffe000").unwrap();
+
+        // Valid version_bits within mask -> accepted
+        let version_bits_valid = Version::from_str("00100000").unwrap();
+        let enonce2_valid = Extranonce::random(enonce2_size);
+        let (ntime_valid, nonce_valid) = solve_share_with_version_bits(
+            &notify,
+            &enonce1,
+            &enonce2_valid,
+            difficulty,
+            Some(version_bits_valid),
+            Some(version_mask),
+        );
+        client
+            .submit(
+                notify.job_id,
+                enonce2_valid,
+                ntime_valid,
+                nonce_valid,
+                Some(version_bits_valid),
+            )
+            .await
+            .unwrap();
+
+        // Zero version_bits -> accepted (treated as no modification)
+        let enonce2_zero = Extranonce::random(enonce2_size);
+        let (ntime_zero, nonce_zero) = solve_share(&notify, &enonce1, &enonce2_zero, difficulty);
+        client
+            .submit(
+                notify.job_id,
+                enonce2_zero,
+                ntime_zero,
+                nonce_zero,
+                Some(Version::from(0)),
+            )
+            .await
+            .unwrap();
+
+        // Disallowed version_bits (outside mask) -> InvalidVersionMask
+        assert_stratum_error(
+            client
+                .submit(
+                    notify.job_id,
+                    Extranonce::random(enonce2_size),
+                    notify.ntime,
+                    Nonce::from(0),
+                    Some(Version::from_str("e0000000").unwrap()),
+                )
+                .await,
+            StratumError::InvalidVersionMask,
+        );
+    }
 }
 
 #[tokio::test]
@@ -783,7 +905,7 @@ async fn bouncer() {
         let result = client.authorize().await;
         assert!(
             result.is_err(),
-            "Expected connection to be dropped after AUTH_TIMEOUT"
+            "auth_timeout: Expected connection to be dropped after AUTH_TIMEOUT"
         );
     };
 
@@ -802,7 +924,7 @@ async fn bouncer() {
         let enonce2 = Extranonce::random(enonce2_size);
         let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, difficulty);
         client
-            .submit(notify.job_id, enonce2, ntime, nonce)
+            .submit(notify.job_id, enonce2, ntime, nonce, None)
             .await
             .unwrap();
 
@@ -814,12 +936,13 @@ async fn bouncer() {
                 Extranonce::random(enonce2_size),
                 ntime,
                 nonce,
+                None,
             )
             .await;
 
         assert!(
             result.is_err(),
-            "Expected connection to be dropped after IDLE_TIMEOUT"
+            "idle_timeout: Expected connection to be dropped after IDLE_TIMEOUT"
         );
     };
 
@@ -848,6 +971,7 @@ async fn bouncer() {
                     Extranonce::random(enonce2_size),
                     initial_notify.ntime,
                     Nonce::from(0),
+                    None,
                 )
                 .await;
 
@@ -858,7 +982,7 @@ async fn bouncer() {
                 _ => {}
             }
 
-            while let Ok(event) = events.try_recv() {
+            while let Some(Ok(event)) = events.try_recv() {
                 if let stratum::Event::Notify(notify) = event
                     && notify.job_id != last_job_id
                 {
@@ -868,15 +992,210 @@ async fn bouncer() {
             }
 
             if elapsed > Duration::from_secs(10) {
-                panic!("Connection still alive after 10s - expected drop at DROP_THRESHOLD (3s)");
+                panic!(
+                    "reject_escalation: Connection still alive after 10s - expected drop at DROP_THRESHOLD (3s)"
+                );
             }
         }
 
         assert!(
             fresh_job_received,
-            "Expected fresh job notification at WARN_THRESHOLD"
+            "reject_escalation: Expected fresh job notification at WARN_THRESHOLD"
         );
     };
 
-    tokio::join!(auth_timeout_test, idle_timeout_test, reject_escalation_test);
+    let auth_failure_test = async {
+        let client = pool.stratum_client_for_username("invalid.user").await;
+        client.connect().await.unwrap();
+        client.subscribe().await.unwrap();
+
+        let start = std::time::Instant::now();
+        let mut dropped = false;
+
+        while start.elapsed() < Duration::from_secs(10) {
+            match client.authorize().await {
+                Ok(_) => panic!("auth_failure: Expected unauthorized response"),
+                Err(ClientError::NotConnected) | Err(ClientError::Io { .. }) => {
+                    dropped = true;
+                    break;
+                }
+                Err(err) => {
+                    assert!(
+                        matches!(
+                            err,
+                            ClientError::Stratum { ref response }
+                                if response.error_code == StratumError::Unauthorized as i32
+                        ),
+                        "auth_failure: Expected Unauthorized, got {err:?}"
+                    );
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            }
+        }
+
+        assert!(
+            dropped,
+            "auth_failure: Expected connection to be dropped after auth failures and bouncer escalation"
+        );
+    };
+
+    let authorize_before_subscribe_test = async {
+        let client = pool.stratum_client().await;
+        client.connect().await.unwrap();
+
+        let start = std::time::Instant::now();
+        let mut dropped = false;
+
+        while start.elapsed() < Duration::from_secs(10) {
+            match client.authorize().await {
+                Ok(_) => panic!("auth_before_subscribe: Expected MethodNotAllowed response"),
+                Err(ClientError::NotConnected) | Err(ClientError::Io { .. }) => {
+                    dropped = true;
+                    break;
+                }
+                Err(err) => {
+                    assert!(
+                        matches!(
+                            err,
+                            ClientError::Stratum { ref response }
+                                if response.error_code == StratumError::MethodNotAllowed as i32
+                        ),
+                        "auth_before_subscribe: Expected MethodNotAllowed, got {err:?}"
+                    );
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            }
+        }
+
+        assert!(
+            dropped,
+            "auth_before_subscribe: Expected connection to be dropped after repeated authorize-before-subscribe attempts"
+        );
+    };
+
+    let submit_before_authorize_test = async {
+        let client = pool.stratum_client().await;
+        client.connect().await.unwrap();
+        client.subscribe().await.unwrap();
+
+        let start = std::time::Instant::now();
+        let mut dropped = false;
+
+        while start.elapsed() < Duration::from_secs(10) {
+            match client
+                .submit(
+                    JobId::new(0),
+                    Extranonce::random(8),
+                    Ntime::from(0),
+                    Nonce::from(0),
+                    None,
+                )
+                .await
+            {
+                Ok(_) => panic!("submit_before_authorize: Expected unauthorized response"),
+                Err(ClientError::NotConnected) | Err(ClientError::Io { .. }) => {
+                    dropped = true;
+                    break;
+                }
+                Err(err) => {
+                    assert!(
+                        matches!(
+                            err,
+                            ClientError::Stratum { ref response }
+                                if response.error_code == StratumError::Unauthorized as i32
+                        ),
+                        "submit_before_authorize: Expected Unauthorized, got {err:?}"
+                    );
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            }
+        }
+
+        assert!(
+            dropped,
+            "submit_before_authorize: Expected connection to be dropped after repeated submit-before-authorize attempts"
+        );
+    };
+
+    let duplicate_subscribe_test = async {
+        let client = pool.stratum_client().await;
+        client.connect().await.unwrap();
+        client.subscribe().await.unwrap();
+
+        let start = std::time::Instant::now();
+        let mut dropped = false;
+
+        while start.elapsed() < Duration::from_secs(10) {
+            match client.subscribe().await {
+                Ok(_) => panic!("duplicate_subscribe: Expected MethodNotAllowed response"),
+                Err(ClientError::NotConnected) | Err(ClientError::Io { .. }) => {
+                    dropped = true;
+                    break;
+                }
+                Err(err) => {
+                    assert!(
+                        matches!(
+                            err,
+                            ClientError::Stratum { ref response }
+                                if response.error_code == StratumError::MethodNotAllowed as i32
+                        ),
+                        "duplicate_subscribe: Expected MethodNotAllowed, got {err:?}"
+                    );
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            }
+        }
+
+        assert!(
+            dropped,
+            "duplicate_subscribe: Expected connection to be dropped after repeated subscribe attempts"
+        );
+    };
+
+    let duplicate_authorize_test = async {
+        let client = pool.stratum_client().await;
+        client.connect().await.unwrap();
+        client.subscribe().await.unwrap();
+        client.authorize().await.unwrap();
+
+        let start = std::time::Instant::now();
+        let mut dropped = false;
+
+        while start.elapsed() < Duration::from_secs(10) {
+            match client.authorize().await {
+                Ok(_) => panic!("duplicate_authorize: Expected MethodNotAllowed response"),
+                Err(ClientError::NotConnected) | Err(ClientError::Io { .. }) => {
+                    dropped = true;
+                    break;
+                }
+                Err(err) => {
+                    assert!(
+                        matches!(
+                            err,
+                            ClientError::Stratum { ref response }
+                                if response.error_code == StratumError::MethodNotAllowed as i32
+                        ),
+                        "duplicate_authorize: Expected MethodNotAllowed, got {err:?}"
+                    );
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            }
+        }
+
+        assert!(
+            dropped,
+            "duplicate_authorize: Expected connection to be dropped after repeated authorize attempts"
+        );
+    };
+
+    tokio::join!(
+        auth_timeout_test,
+        idle_timeout_test,
+        reject_escalation_test,
+        auth_failure_test,
+        authorize_before_subscribe_test,
+        submit_before_authorize_test,
+        duplicate_subscribe_test,
+        duplicate_authorize_test
+    );
 }

@@ -33,16 +33,18 @@ use {
     coinbase_builder::CoinbaseBuilder,
     dashmap::DashMap,
     decay::{DecayingAverage, calculate_time_bias},
+    extranonces::{Extranonces, PoolExtranonces, ProxyExtranonces},
     futures::{
         sink::SinkExt,
         stream::{FuturesUnordered, StreamExt},
     },
-    generator::Generator,
+    generator::spawn_generator,
     hash_rate::HashRate,
     job::Job,
     jobs::Jobs,
     lru::LruCache,
     metatron::Metatron,
+    metrics::Metrics,
     reqwest::Url,
     rust_embed::RustEmbed,
     rustls_acme::{
@@ -58,8 +60,7 @@ use {
     },
     serde_json::json,
     serde_with::{DeserializeFromStr, SerializeDisplay},
-    session::SessionSnapshot,
-    share::Share,
+    settings::{PoolOptions, ProxyOptions, Settings},
     snafu::Snafu,
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
     std::{
@@ -76,25 +77,27 @@ use {
         str::FromStr,
         sync::{
             Arc, LazyLock,
-            atomic::{AtomicU64, Ordering},
+            atomic::{AtomicBool, AtomicU64, Ordering},
         },
         thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     },
-    stratifier::Stratifier,
+    stratifier::{SessionSnapshot, Stratifier},
     stratum::{
         Authorize, Configure, Difficulty, Extranonce, Id, JobId, MerkleNode, Message, Nbits, Nonce,
         Notify, Ntime, PrevHash, SetDifficulty, StratumError, Submit, Subscribe, SubscribeResult,
         Username, Version,
     },
-    subcommand::{pool::pool_config::PoolConfig, server::account::Account},
+    subcommand::server::account::Account,
     sysinfo::{Disks, System},
     throbber::{StatusLine, spawn_throbber},
+    tokio::net::{
+        TcpListener, TcpStream,
+        tcp::{OwnedReadHalf, OwnedWriteHalf},
+    },
     tokio::{
-        io::{AsyncRead, AsyncWrite},
-        net::TcpListener,
         runtime::Runtime,
-        sync::{Mutex, broadcast, mpsc, watch},
+        sync::{Mutex, mpsc, watch},
         task::{self, JoinHandle, JoinSet},
         time::{MissedTickBehavior, interval, sleep, timeout},
     },
@@ -105,6 +108,7 @@ use {
     tracing::{debug, error, info, warn},
     tracing_appender::non_blocking,
     tracing_subscriber::EnvFilter,
+    upstream::Upstream,
     user::User,
     utoipa::{OpenApi, ToSchema},
     vardiff::Vardiff,
@@ -114,26 +118,29 @@ use {
     zmq::Zmq,
 };
 
-mod api;
+pub mod api;
 mod arguments;
 mod block_template;
 mod chain;
 pub mod ckpool;
 mod coinbase_builder;
 mod decay;
+mod extranonces;
 mod generator;
-mod hash_rate;
+pub mod hash_rate;
 mod http_server;
 mod job;
 mod jobs;
 mod metatron;
-mod session;
-mod share;
+mod metrics;
+pub mod settings;
+
 mod signal;
 mod stratifier;
 pub mod stratum;
 pub mod subcommand;
 mod throbber;
+mod upstream;
 mod user;
 mod vardiff;
 mod workbase;
@@ -142,7 +149,10 @@ mod zmq;
 
 pub const COIN_VALUE: u64 = 100_000_000;
 pub const USER_AGENT: &str = "para/0.5.2";
+pub const MIN_ENONCE_SIZE: usize = 2;
+pub const MAX_ENONCE_SIZE: usize = 8;
 pub const ENONCE1_SIZE: usize = 4;
+pub const ENONCE1_EXTENSION_SIZE: usize = 2;
 pub const MAX_MESSAGE_SIZE: usize = 32 * 1024;
 pub const SHARE_CHANNEL_CAPACITY: usize = 100_000;
 pub const SUBSCRIPTION_ID: &str = "deadbeef";

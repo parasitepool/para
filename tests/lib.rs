@@ -37,7 +37,8 @@ use {
     crate::{
         sync::BATCH_COUNTER,
         test_psql::{
-            create_test_block, create_test_shares, insert_test_account, insert_test_block,
+            create_test_block, create_test_shares, insert_test_account,
+            insert_test_account_with_diff, insert_test_block, insert_test_payout,
             insert_test_remote_shares, insert_test_shares, setup_test_schema,
         },
     },
@@ -52,7 +53,7 @@ use {
     harness::bitcoind::Bitcoind,
     ntest::timeout,
     para::{
-        USER_AGENT,
+        ENONCE1_EXTENSION_SIZE, USER_AGENT, api,
         stratum::{
             self, ClientError, Difficulty, Extranonce, JobId, Nonce, Notify, Ntime, StratumError,
             Username, Version,
@@ -61,7 +62,7 @@ use {
             miner::Share,
             server::{
                 account::{Account, AccountUpdate},
-                database::{Database, HighestDiff, Payout},
+                database::{Database, HighestDiff, Payout, SimulatedPayout},
             },
             sync::{ShareBatch, Sync, SyncResponse},
         },
@@ -80,6 +81,7 @@ use {
     tempfile::tempdir,
     test_ckpool::TestCkpool,
     test_pool::TestPool,
+    test_proxy::TestProxy,
 };
 
 mod command_builder;
@@ -87,6 +89,8 @@ mod command_builder;
 mod test_ckpool;
 #[cfg(target_os = "linux")]
 mod test_pool;
+#[cfg(target_os = "linux")]
+mod test_proxy;
 #[cfg(target_os = "linux")]
 mod test_psql;
 mod test_server;
@@ -101,6 +105,8 @@ mod payouts;
 mod ping;
 #[cfg(target_os = "linux")]
 mod pool;
+#[cfg(target_os = "linux")]
+mod proxy;
 mod server;
 #[cfg(target_os = "linux")]
 mod server_with_db;
@@ -128,6 +134,18 @@ fn solve_share(
     enonce2: &Extranonce,
     difficulty: stratum::Difficulty,
 ) -> (Ntime, Nonce) {
+    solve_share_with_version_bits(notify, enonce1, enonce2, difficulty, None, None)
+}
+
+#[cfg(target_os = "linux")]
+fn solve_share_with_version_bits(
+    notify: &stratum::Notify,
+    enonce1: &Extranonce,
+    enonce2: &Extranonce,
+    difficulty: stratum::Difficulty,
+    version_bits: Option<Version>,
+    version_mask: Option<Version>,
+) -> (Ntime, Nonce) {
     let merkle_root = stratum::merkle_root(
         &notify.coinb1,
         &notify.coinb2,
@@ -137,8 +155,13 @@ fn solve_share(
     )
     .unwrap();
 
+    let version = match (version_bits, version_mask) {
+        (Some(version_bits), Some(mask)) => (notify.version & !mask) | (version_bits & mask),
+        _ => notify.version,
+    };
+
     let mut header = Header {
-        version: notify.version.into(),
+        version: version.into(),
         prev_blockhash: notify.prevhash.clone().into(),
         merkle_root: merkle_root.into(),
         time: notify.ntime.into(),
@@ -162,6 +185,55 @@ fn solve_share(
             );
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+async fn wait_for_notify(events: &mut stratum::EventReceiver) -> (stratum::Notify, Difficulty) {
+    let mut difficulty = Difficulty::from(1);
+    timeout(Duration::from_secs(10), async {
+        loop {
+            match events.recv().await.unwrap() {
+                stratum::Event::SetDifficulty(diff) => difficulty = diff,
+                stratum::Event::Notify(notify) => return (notify, difficulty),
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("Timeout waiting for notify")
+}
+
+#[cfg(target_os = "linux")]
+async fn wait_for_new_block(
+    events: &mut stratum::EventReceiver,
+    old_job_id: JobId,
+) -> stratum::Notify {
+    timeout(Duration::from_secs(10), async {
+        loop {
+            match events.recv().await.unwrap() {
+                stratum::Event::Notify(n) if n.job_id != old_job_id && n.clean_jobs => return n,
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("Timeout waiting for new block")
+}
+
+#[cfg(target_os = "linux")]
+fn assert_stratum_error<T: std::fmt::Debug>(
+    result: Result<T, ClientError>,
+    expected: StratumError,
+) {
+    assert!(
+        matches!(
+            &result,
+            Err(ClientError::Stratum { response }) if response.error_code == expected as i32
+        ),
+        "Expected {:?}, got {:?}",
+        expected,
+        result
+    );
 }
 
 pub(crate) fn address(n: u32) -> Address {

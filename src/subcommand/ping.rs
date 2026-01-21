@@ -85,33 +85,31 @@ impl Ping {
     async fn ping_once(&self, addr: SocketAddr, ping_type: &PingType) -> Result<(Duration, usize)> {
         match ping_type {
             PingType::Subscribe => {
-                let config = stratum::ClientConfig {
-                    address: addr.to_string(),
-                    username: "".into(),
-                    user_agent: USER_AGENT.into(),
-                    password: None,
-                    timeout: Duration::from_secs(self.timeout),
-                };
+                let client = stratum::Client::new(
+                    addr.to_string(),
+                    "".into(),
+                    None,
+                    USER_AGENT.into(),
+                    Duration::from_secs(self.timeout),
+                );
 
-                let client = stratum::Client::new(config);
-                client.connect().await?;
+                let _events = client.connect().await?;
 
                 let (_, duration, size) = client.subscribe().await?;
 
-                client.disconnect().await?;
+                client.disconnect().await;
 
                 Ok((duration, size))
             }
             PingType::Authorized { username, password } => {
-                let config = stratum::ClientConfig {
-                    address: addr.to_string(),
-                    username: username.clone(),
-                    user_agent: USER_AGENT.into(),
-                    password: Some(password.clone()),
-                    timeout: Duration::from_secs(self.timeout),
-                };
+                let client = stratum::Client::new(
+                    addr.to_string(),
+                    username.clone(),
+                    Some(password.clone()),
+                    USER_AGENT.into(),
+                    Duration::from_secs(self.timeout),
+                );
 
-                let client = stratum::Client::new(config);
                 let mut events = client.connect().await?;
 
                 client.subscribe().await?;
@@ -136,7 +134,7 @@ impl Ping {
 
                 let duration = duration + instant.elapsed();
 
-                client.disconnect().await?;
+                client.disconnect().await;
 
                 Ok((duration, size))
             }
