@@ -96,13 +96,7 @@ impl Event {
 /// Returns Some with (sender, join_handle, cancel_token) if sinks are configured.
 pub(crate) async fn build_record_sink(
     settings: &Settings,
-) -> Result<
-    Option<(
-        mpsc::Sender<Event>,
-        JoinHandle<()>,
-        CancellationToken,
-    )>,
-> {
+) -> Result<Option<(mpsc::Sender<Event>, JoinHandle<()>, CancellationToken)>> {
     let mut sinks: Vec<Box<dyn RecordSink>> = Vec::new();
 
     if let Some(db_url) = settings.database_url() {
