@@ -106,6 +106,8 @@ mod ping;
 #[cfg(target_os = "linux")]
 mod pool;
 #[cfg(target_os = "linux")]
+mod pool_logging;
+#[cfg(target_os = "linux")]
 mod proxy;
 mod server;
 #[cfg(target_os = "linux")]
