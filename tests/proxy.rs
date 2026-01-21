@@ -11,10 +11,7 @@ async fn proxy() {
     let proxy =
         TestProxy::spawn_with_args(&upstream, &username.to_string(), "--start-diff 0.00001");
 
-    let status = proxy
-        .get_status()
-        .await
-        .expect("Failed to get proxy status");
+    let status = proxy.get_status().await.unwrap();
 
     assert_eq!(
         status.upstream_endpoint, upstream,
@@ -40,12 +37,9 @@ async fn proxy() {
     assert!(status.last_share.is_none());
 
     let client = proxy.stratum_client();
-    let mut events = client.connect().await.expect("Failed to connect to proxy");
+    let mut events = client.connect().await.unwrap();
 
-    let (subscribe, _, _) = client
-        .subscribe()
-        .await
-        .expect("Failed to subscribe through proxy");
+    let (subscribe, _, _) = client.subscribe().await.unwrap();
 
     let upstream_enonce1 = status.upstream_enonce1.as_bytes();
     let extended_enonce1 = subscribe.enonce1.as_bytes();
@@ -66,7 +60,7 @@ async fn proxy() {
         "Miner enonce2_size should be upstream minus extension"
     );
 
-    client.authorize().await.expect("Failed to authorize");
+    client.authorize().await.unwrap();
 
     let (notify, difficulty) = wait_for_notify(&mut events).await;
 
@@ -83,7 +77,7 @@ async fn proxy() {
     client
         .submit(notify.job_id, enonce2, ntime, nonce, None)
         .await
-        .expect("Valid share should be accepted by proxy");
+        .unwrap();
 
     let user_address = username
         .parse_address()
@@ -176,12 +170,12 @@ async fn proxy() {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let client2 = proxy.stratum_client();
-    let mut events2 = client2.connect().await.expect("Failed to reconnect");
+    let mut events2 = client2.connect().await.unwrap();
 
     let (subscribe2, _, _) = client2
         .subscribe_with_enonce1(Some(subscribe.enonce1.clone()))
         .await
-        .expect("Failed to subscribe with enonce1");
+        .unwrap();
 
     assert_eq!(
         subscribe2.enonce1, subscribe.enonce1,
@@ -192,7 +186,7 @@ async fn proxy() {
         "Session resume should return same enonce2_size"
     );
 
-    client2.authorize().await.expect("Failed to authorize");
+    client2.authorize().await.unwrap();
 
     let (notify2, _) = wait_for_notify(&mut events2).await;
 
@@ -202,7 +196,7 @@ async fn proxy() {
     client2
         .submit(notify2.job_id, enonce2_resumed, ntime2, nonce2, None)
         .await
-        .expect("Share with resumed session should be accepted");
+        .unwrap();
 
     let status = proxy.get_status().await.unwrap();
     assert_eq!(status.accepted, 2);
@@ -285,10 +279,7 @@ async fn proxy_with_non_default_enonce_sizes() {
         "--start-diff 0.00001",
     );
 
-    let status = proxy
-        .get_status()
-        .await
-        .expect("Failed to get proxy status");
+    let status = proxy.get_status().await.unwrap();
 
     assert_eq!(
         status.upstream_enonce1.len(),
@@ -301,12 +292,9 @@ async fn proxy_with_non_default_enonce_sizes() {
     );
 
     let client = proxy.stratum_client();
-    let mut events = client.connect().await.expect("Failed to connect to proxy");
+    let mut events = client.connect().await.unwrap();
 
-    let (subscribe, _, _) = client
-        .subscribe()
-        .await
-        .expect("Failed to subscribe through proxy");
+    let (subscribe, _, _) = client.subscribe().await.unwrap();
 
     assert_eq!(
         subscribe.enonce1.len(),
@@ -318,7 +306,7 @@ async fn proxy_with_non_default_enonce_sizes() {
         "Miner enonce2 should be 2 bytes (4 upstream - 2 extension)"
     );
 
-    client.authorize().await.expect("Failed to authorize");
+    client.authorize().await.unwrap();
 
     let (notify, difficulty) = wait_for_notify(&mut events).await;
 
@@ -328,7 +316,7 @@ async fn proxy_with_non_default_enonce_sizes() {
     client
         .submit(notify.job_id, enonce2, ntime, nonce, None)
         .await
-        .expect("Valid share should be accepted - job must use correct enonce2_size");
+        .unwrap();
 }
 
 #[tokio::test]
@@ -395,30 +383,25 @@ async fn proxy_allows_version_rolling() {
 #[serial(bitcoind)]
 #[timeout(120000)]
 async fn proxy_relays_job_updates_and_new_blocks() {
-    let pool = TestPool::spawn_with_args("--start-diff 0.00001 --update-interval 1");
-    let upstream = pool.stratum_endpoint();
-    let username = signet_username();
+    let pool = TestPool::spawn_with_args("--start-diff 0.00001 --update-interval 3");
 
-    let proxy =
-        TestProxy::spawn_with_args(&upstream, &username.to_string(), "--start-diff 0.00001");
+    let proxy = TestProxy::spawn_with_args(
+        &pool.stratum_endpoint(),
+        signet_username().as_str(),
+        "--start-diff 0.00001",
+    );
 
-    let address = username
-        .parse_address()
-        .unwrap()
-        .assume_checked()
-        .to_string();
+    let client_a = proxy.stratum_client();
+    let client_b = proxy.stratum_client();
 
-    let client_a = proxy.stratum_client_for_username(&format!("{address}.relay_a"));
-    let client_b = proxy.stratum_client_for_username(&format!("{address}.relay_b"));
+    let mut events_a = client_a.connect().await.unwrap();
+    let mut events_b = client_b.connect().await.unwrap();
 
-    let mut events_a = client_a.connect().await.expect("Failed to connect A");
-    let mut events_b = client_b.connect().await.expect("Failed to connect B");
+    client_a.subscribe().await.unwrap();
+    client_b.subscribe().await.unwrap();
 
-    client_a.subscribe().await.expect("Failed to subscribe A");
-    client_b.subscribe().await.expect("Failed to subscribe B");
-
-    client_a.authorize().await.expect("Failed to authorize A");
-    client_b.authorize().await.expect("Failed to authorize B");
+    client_a.authorize().await.unwrap();
+    client_b.authorize().await.unwrap();
 
     let (notify_a, _) = wait_for_notify(&mut events_a).await;
     let (notify_b, _) = wait_for_notify(&mut events_b).await;
@@ -441,10 +424,10 @@ async fn proxy_relays_job_updates_and_new_blocks() {
     assert!(new_block_b.clean_jobs);
     assert_eq!(new_block_a.job_id, new_block_b.job_id);
 
-    let client_c = proxy.stratum_client_for_username(&format!("{address}.relay_c"));
-    let mut events_c = client_c.connect().await.expect("Failed to connect C");
-    client_c.subscribe().await.expect("Failed to subscribe C");
-    client_c.authorize().await.expect("Failed to authorize C");
+    let client_c = proxy.stratum_client();
+    let mut events_c = client_c.connect().await.unwrap();
+    client_c.subscribe().await.unwrap();
+    client_c.authorize().await.unwrap();
 
     let (notify_c, _) = wait_for_notify(&mut events_c).await;
     assert_eq!(notify_c.job_id, new_block_a.job_id);
@@ -463,13 +446,13 @@ async fn proxy_exits_on_upstream_disconnect() {
     );
 
     let client = proxy.stratum_client();
-    let mut events = client.connect().await.expect("Failed to connect to proxy");
+    let mut events = client.connect().await.unwrap();
 
-    let (subscribe, _, _) = client.subscribe().await.expect("Failed to subscribe");
-    client.authorize().await.expect("Failed to authorize");
+    let (subscribe, _, _) = client.subscribe().await.unwrap();
+    client.authorize().await.unwrap();
     let (notify, difficulty) = wait_for_notify(&mut events).await;
 
-    let status = proxy.get_status().await.expect("Failed to read status");
+    let status = proxy.get_status().await.unwrap();
     assert!(status.upstream_connected);
 
     drop(pool);
