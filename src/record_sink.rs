@@ -99,7 +99,7 @@ pub(crate) async fn build_record_sink(
 ) -> Result<
     Option<(
         mpsc::Sender<Event>,
-        tokio::task::JoinHandle<()>,
+        JoinHandle<()>,
         CancellationToken,
     )>,
 > {
@@ -147,7 +147,7 @@ pub(crate) async fn build_record_sink(
 
     let (tx, rx) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
     let cancel = CancellationToken::new();
-    let handle = record_sink::spawn_sink_consumer(rx, sink, cancel.clone());
+    let handle = spawn_sink_consumer(rx, sink, cancel.clone());
 
     Ok(Some((tx, handle, cancel)))
 }
@@ -416,7 +416,7 @@ pub fn spawn_sink_consumer(
     mut rx: mpsc::Receiver<Event>,
     sink: Arc<dyn RecordSink>,
     cancel: CancellationToken,
-) -> tokio::task::JoinHandle<()> {
+) -> JoinHandle<()> {
     tokio::spawn(async move {
         loop {
             tokio::select! {

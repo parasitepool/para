@@ -56,7 +56,7 @@ impl Proxy {
             tasks.spawn(async move {
                 let _ = handle.await;
             });
-            // Store sink cancellation token to cancel when main cancel_token is triggered
+
             tasks.spawn({
                 let cancel_token = cancel_token.clone();
                 async move {
