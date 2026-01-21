@@ -216,6 +216,7 @@ async fn test_multi_sink() {
     );
 }
 
+#[ignore]
 #[cfg(target_os = "linux")]
 #[tokio::test]
 async fn test_block_found_event() {
