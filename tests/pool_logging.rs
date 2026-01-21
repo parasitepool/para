@@ -40,16 +40,21 @@ async fn test_file_sink_json() {
             pool.stratum_endpoint()
         ))
         .spawn();
-        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        let status = pool
+            .wait_for_shares(3, Duration::from_secs(10))
+            .await
+            .expect("Failed to get shares within timeout");
+        println!("Pool status: {} accepted shares", status.accepted);
 
         let _ = miner.kill();
         let _ = miner.wait();
 
-        let status = pool.get_status().await;
-        if let Ok(status) = status {
-            println!("Pool status: {} accepted shares", status.accepted);
-            assert!(status.accepted > 0, "No shares were submitted to pool");
-        }
+        assert!(
+            status.accepted >= 3,
+            "Expected at least 3 shares, got {}",
+            status.accepted
+        );
     }
 
     assert!(events_file.exists(), "JSON events file should be created");
@@ -93,7 +98,10 @@ async fn test_file_sink_csv() {
             pool.stratum_endpoint()
         ))
         .spawn();
-        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        pool.wait_for_shares(3, Duration::from_secs(10))
+            .await
+            .expect("Failed to get shares within timeout");
 
         let _ = miner.kill();
         let _ = miner.wait();
@@ -133,7 +141,10 @@ async fn test_database_sink() {
             pool.stratum_endpoint()
         ))
         .spawn();
-        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        pool.wait_for_shares(5, Duration::from_secs(10))
+            .await
+            .expect("Failed to get shares within timeout");
 
         let _ = miner.kill();
         let _ = miner.wait();
@@ -186,7 +197,10 @@ async fn test_multi_sink() {
             pool.stratum_endpoint()
         ))
         .spawn();
-        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        pool.wait_for_shares(5, Duration::from_secs(10))
+            .await
+            .expect("Failed to get shares within timeout");
 
         let _ = miner.kill();
         let _ = miner.wait();
@@ -237,6 +251,9 @@ async fn test_block_found_event() {
         ));
 
         pool.mine_block();
+        pool.wait_for_blocks(1, Duration::from_secs(10))
+            .await
+            .expect("Failed to detect block in pool status within timeout");
     }
 
     assert!(block_events.exists(), "Block events file should exist");

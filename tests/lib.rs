@@ -43,6 +43,7 @@ use {
         },
     },
     anyhow::Error,
+    api::{PoolStatus as PoolStatusAPI, UserDetail},
     base64::{Engine, engine::general_purpose},
     bip322::sign_simple_encoded,
     bitcoin::{
@@ -77,6 +78,7 @@ use {
             atomic::{AtomicUsize, Ordering},
             mpsc,
         },
+        time::Instant,
     },
     tempfile::tempdir,
     test_ckpool::TestCkpool,
