@@ -204,6 +204,23 @@ async fn wait_for_notify(events: &mut stratum::EventReceiver) -> (stratum::Notif
 }
 
 #[cfg(target_os = "linux")]
+async fn wait_for_job_update(
+    events: &mut stratum::EventReceiver,
+    old_job_id: JobId,
+) -> stratum::Notify {
+    timeout(Duration::from_secs(10), async {
+        loop {
+            match events.recv().await.unwrap() {
+                stratum::Event::Notify(n) if n.job_id != old_job_id && !n.clean_jobs => return n,
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("Timeout waiting for template update")
+}
+
+#[cfg(target_os = "linux")]
 async fn wait_for_new_block(
     events: &mut stratum::EventReceiver,
     old_job_id: JobId,
