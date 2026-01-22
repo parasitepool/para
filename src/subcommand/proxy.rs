@@ -48,26 +48,9 @@ impl Proxy {
             &mut tasks,
         )?;
 
-        let event_tx = if let Some((tx, handle, sink_cancel)) =
-            build_record_sink(&settings)
-                .await
-                .context("failed to build record sink")?
-        {
-            tasks.spawn(async move {
-                let _ = handle.await;
-            });
-
-            tasks.spawn({
-                let cancel_token = cancel_token.clone();
-                async move {
-                    cancel_token.cancelled().await;
-                    sink_cancel.cancel();
-                }
-            });
-            Some(tx)
-        } else {
-            None
-        };
+        let event_tx = build_record_sink(&settings, cancel_token.clone(), &mut tasks)
+            .await
+            .context("failed to build record sink")?;
 
         let address = settings.address();
         let port = settings.port();

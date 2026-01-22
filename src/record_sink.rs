@@ -93,10 +93,12 @@ impl Event {
 
 /// Builds a record sink from settings configuration.
 /// Returns None if no sinks are configured.
-/// Returns Some with (sender, join_handle, cancel_token) if sinks are configured.
+/// Returns Some with sender if sinks are configured.
 pub(crate) async fn build_record_sink(
     settings: &Settings,
-) -> Result<Option<(mpsc::Sender<Event>, JoinHandle<()>, CancellationToken)>> {
+    cancel_token: CancellationToken,
+    tasks: &mut JoinSet<()>,
+) -> Result<Option<mpsc::Sender<Event>>> {
     let mut sinks: Vec<Box<dyn RecordSink>> = Vec::new();
 
     if let Some(db_url) = settings.database_url() {
@@ -140,10 +142,22 @@ pub(crate) async fn build_record_sink(
     };
 
     let (tx, rx) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
-    let cancel = CancellationToken::new();
-    let handle = spawn_sink_consumer(rx, sink, cancel.clone());
+    let sink_cancel = CancellationToken::new();
+    let handle = spawn_sink_consumer(rx, sink, sink_cancel.clone());
 
-    Ok(Some((tx, handle, cancel)))
+    tasks.spawn(async move {
+        let _ = handle.await;
+    });
+
+    tasks.spawn({
+        let cancel_token = cancel_token.clone();
+        async move {
+            cancel_token.cancelled().await;
+            sink_cancel.cancel();
+        }
+    });
+
+    Ok(Some(tx))
 }
 
 /// Trait for consuming and storing pool events
