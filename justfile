@@ -38,6 +38,12 @@ coverage:
 test-without-ckpool:
   cargo test --all -- --skip ckpool
 
+bitcoind:
+  #!/usr/bin/env bash
+  ./bitcoin/build/bin/bitcoind \
+    -datadir=copr \
+    -signet
+
 pool: 
   cargo run -- pool \
     --api-port 8080 \
@@ -57,17 +63,18 @@ proxy:
     --api-port 8081 \
     --address 0.0.0.0 \
     --port 42070 \
-    --username tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.proxy \
+    --username tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.proxy \
     --password x \
     --start-diff 0.00001 \
     --vardiff-window 10 \
     --vardiff-period 1 \
     --upstream localhost:42069 
 
+# Mine to anyone-can-spend P2WSH(OP_TRUE)
 miner port='42069': 
   cargo run --release -- miner \
     127.0.0.1:{{port}} \
-    --username tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.tick \
+    --username tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.tick \
     --password x \
     --cpu-cores 2 \
     --throttle 500K
@@ -92,6 +99,21 @@ pool-mainnet:
     --vardiff-period 5 \
     --zmq-block-notifications tcp://127.0.0.1:28333
 
+harness: build-bitcoind
+  cargo run -p harness -- spawn
+
+flood:
+  cargo run -p harness -- flood
+
+flood-continuous:
+  cargo run -p harness -- flood --continuous 5000000
+
+mempool:
+  docker compose -f copr/mempool/docker-compose.yml up
+
+mempool-down:
+  docker compose -f copr/mempool/docker-compose.yml down -v --remove-orphans
+
 server: 
   RUST_LOG=info cargo run --features swagger-ui -- server \
     --log-dir copr/logs \
@@ -99,9 +121,6 @@ server:
 
 openapi:
   cargo run --example openapi > openapi.json
-
-harness: build-bitcoind
-  cargo run -p harness
 
 install:
   git submodule update --init --recursive
@@ -137,15 +156,6 @@ build-ckpool: install
   make
 
 build: build-bitcoind build-ckpool
-
-bitcoind:
-  #!/usr/bin/env bash
-  ./bitcoin/build/bin/bitcoind \
-    -datadir=copr \
-    -signet 
-
-mine:
-  ./bin/mine
 
 ckpool:
   #!/usr/bin/env bash
