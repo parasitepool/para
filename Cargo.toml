@@ -77,7 +77,6 @@ zeromq = "0.4.1"
 
 [dev-dependencies]
 chrono = "0.4.41"
-executable-path = "1.0.0"
 harness = { path = "crates/harness" }
 nix = "0.30.1"
 ntest = "0.9.3"
