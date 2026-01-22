@@ -55,32 +55,18 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Spawn an ephemeral bitcoind and continuously flood its mempool
     Spawn,
-
-    /// Flood an existing bitcoind's mempool with transactions
     Flood {
-        /// RPC port of the bitcoind instance
         #[arg(long, default_value = "38332")]
         rpc_port: u16,
-
-        /// RPC username
         #[arg(long, default_value = "satoshi")]
         rpc_user: String,
-
-        /// RPC password
         #[arg(long, default_value = "nakamoto")]
         rpc_password: String,
-
-        /// Bitcoin network (mainnet, testnet, signet, regtest)
         #[arg(long, default_value = "signet")]
         network: String,
-
-        /// Number of outputs per transaction (breadth). If not set, creates chains of 25 txs.
         #[arg(long)]
         breadth: Option<u64>,
-
-        /// Run continuously, keeping mempool at target size (in bytes)
         #[arg(long)]
         continuous: Option<u64>,
     },
@@ -143,7 +129,6 @@ pub fn main() {
                     std::thread::sleep(Duration::from_secs(5));
                 }
             } else {
-                // One-shot mode
                 match bitcoind.flood_mempool(breadth) {
                     Ok(count) => println!("Created {} transactions", count),
                     Err(e) => {
@@ -155,7 +140,6 @@ pub fn main() {
         }
 
         Some(Commands::Spawn) | None => {
-            // Original behavior: spawn ephemeral bitcoind
             run_ephemeral_harness();
         }
     }

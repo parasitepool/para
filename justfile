@@ -38,6 +38,12 @@ coverage:
 test-without-ckpool:
   cargo test --all -- --skip ckpool
 
+bitcoind:
+  #!/usr/bin/env bash
+  ./bitcoin/build/bin/bitcoind \
+    -datadir=copr \
+    -signet
+
 pool: 
   cargo run -- pool \
     --api-port 8080 \
@@ -93,14 +99,6 @@ pool-mainnet:
     --vardiff-period 5 \
     --zmq-block-notifications tcp://127.0.0.1:28333
 
-server: 
-  RUST_LOG=info cargo run --features swagger-ui -- server \
-    --log-dir copr/logs \
-    --port 8080
-
-openapi:
-  cargo run --example openapi > openapi.json
-
 harness: build-bitcoind
   cargo run -p harness -- spawn
 
@@ -109,6 +107,20 @@ flood:
 
 flood-continuous:
   cargo run -p harness -- flood --continuous 5000000
+
+mempool:
+  docker compose -f copr/mempool/docker-compose.yml up
+
+mempool-down:
+  docker compose -f copr/mempool/docker-compose.yml down -v --remove-orphans
+
+server: 
+  RUST_LOG=info cargo run --features swagger-ui -- server \
+    --log-dir copr/logs \
+    --port 8080
+
+openapi:
+  cargo run --example openapi > openapi.json
 
 install:
   git submodule update --init --recursive
@@ -144,18 +156,6 @@ build-ckpool: install
   make
 
 build: build-bitcoind build-ckpool
-
-bitcoind:
-  #!/usr/bin/env bash
-  ./bitcoin/build/bin/bitcoind \
-    -datadir=copr \
-    -signet
-
-mempool:
-  sudo docker compose -f copr/mempool/docker-compose.yml up
-
-mempool-down:
-  sudo docker compose -f copr/mempool/docker-compose.yml down -v --remove-orphans
 
 ckpool:
   #!/usr/bin/env bash
