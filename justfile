@@ -38,6 +38,9 @@ coverage:
 test-without-ckpool:
   cargo test --all -- --skip ckpool
 
+gui:
+  cargo hot --features debug -- gui
+
 pool: 
   cargo run -- pool \
     --api-port 8080 \
