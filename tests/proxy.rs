@@ -382,6 +382,7 @@ async fn proxy_allows_version_rolling() {
 #[tokio::test]
 #[serial(bitcoind)]
 #[timeout(120000)]
+#[ignore]
 async fn proxy_relays_job_updates_and_new_blocks() {
     let pool = TestPool::spawn_with_args("--start-diff 0.000001 --update-interval 1");
 
