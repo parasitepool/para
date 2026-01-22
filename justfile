@@ -57,17 +57,18 @@ proxy:
     --api-port 8081 \
     --address 0.0.0.0 \
     --port 42070 \
-    --username tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.proxy \
+    --username tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.proxy \
     --password x \
     --start-diff 0.00001 \
     --vardiff-window 10 \
     --vardiff-period 1 \
     --upstream localhost:42069 
 
+# Mine to anyone-can-spend P2WSH(OP_TRUE)
 miner port='42069': 
   cargo run --release -- miner \
     127.0.0.1:{{port}} \
-    --username tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.tick \
+    --username tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.tick \
     --password x \
     --cpu-cores 2 \
     --throttle 500K
@@ -101,7 +102,13 @@ openapi:
   cargo run --example openapi > openapi.json
 
 harness: build-bitcoind
-  cargo run -p harness
+  cargo run -p harness -- spawn
+
+flood:
+  cargo run -p harness -- flood
+
+flood-continuous:
+  cargo run -p harness -- flood --continuous 5000000
 
 install:
   git submodule update --init --recursive
@@ -142,10 +149,13 @@ bitcoind:
   #!/usr/bin/env bash
   ./bitcoin/build/bin/bitcoind \
     -datadir=copr \
-    -signet 
+    -signet
 
-mine:
-  ./bin/mine
+mempool:
+  sudo docker compose -f copr/mempool/docker-compose.yml up
+
+mempool-down:
+  sudo docker compose -f copr/mempool/docker-compose.yml down -v --remove-orphans
 
 ckpool:
   #!/usr/bin/env bash

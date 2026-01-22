@@ -1543,6 +1543,7 @@ dependencies = [
  "bitcoin",
  "bitcoincore-rpc",
  "cargo_metadata",
+ "clap",
  "ctrlc",
  "serde",
  "serde_json",
