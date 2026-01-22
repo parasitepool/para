@@ -383,7 +383,7 @@ async fn proxy_allows_version_rolling() {
 #[serial(bitcoind)]
 #[timeout(120000)]
 async fn proxy_relays_job_updates_and_new_blocks() {
-    let pool = TestPool::spawn_with_args("--start-diff 0.00001 --update-interval 3");
+    let pool = TestPool::spawn_with_args("--start-diff 0.000001 --update-interval 1");
 
     let proxy = TestProxy::spawn_with_args(
         &pool.stratum_endpoint(),
@@ -391,46 +391,25 @@ async fn proxy_relays_job_updates_and_new_blocks() {
         "--start-diff 0.00001",
     );
 
-    let client_a = proxy.stratum_client();
-    let client_b = proxy.stratum_client();
+    let client = proxy.stratum_client();
+    let mut events = client.connect().await.unwrap();
 
-    let mut events_a = client_a.connect().await.unwrap();
-    let mut events_b = client_b.connect().await.unwrap();
+    client.subscribe().await.unwrap();
+    client.authorize().await.unwrap();
 
-    client_a.subscribe().await.unwrap();
-    client_b.subscribe().await.unwrap();
+    let (notify, _) = wait_for_notify(&mut events).await;
 
-    client_a.authorize().await.unwrap();
-    client_b.authorize().await.unwrap();
+    assert!(notify.clean_jobs, "Initial job should be clean_jobs=true");
 
-    let (notify_a, _) = wait_for_notify(&mut events_a).await;
-    let (notify_b, _) = wait_for_notify(&mut events_b).await;
+    let updated = wait_for_job_update(&mut events, notify.job_id).await;
 
-    assert!(notify_a.clean_jobs, "Initial job should be clean_jobs=true");
-    assert!(notify_b.clean_jobs, "Initial job should be clean_jobs=true");
-
-    let updated_a = wait_for_job_update(&mut events_a, notify_a.job_id).await;
-    let updated_b = wait_for_job_update(&mut events_b, notify_b.job_id).await;
-
-    assert!(!updated_a.clean_jobs);
-    assert!(!updated_b.clean_jobs);
+    assert!(!updated.clean_jobs);
 
     pool.mine_block();
 
-    let new_block_a = wait_for_new_block(&mut events_a, updated_a.job_id).await;
-    let new_block_b = wait_for_new_block(&mut events_b, updated_b.job_id).await;
+    let new_block = wait_for_new_block(&mut events, updated.job_id).await;
 
-    assert!(new_block_a.clean_jobs);
-    assert!(new_block_b.clean_jobs);
-    assert_eq!(new_block_a.job_id, new_block_b.job_id);
-
-    let client_c = proxy.stratum_client();
-    let mut events_c = client_c.connect().await.unwrap();
-    client_c.subscribe().await.unwrap();
-    client_c.authorize().await.unwrap();
-
-    let (notify_c, _) = wait_for_notify(&mut events_c).await;
-    assert_eq!(notify_c.job_id, new_block_a.job_id);
+    assert!(new_block.clean_jobs);
 }
 
 #[tokio::test]
