@@ -1,7 +1,6 @@
 use {
     bitcoin::{Address, address::NetworkUnchecked},
     command_builder::CommandBuilder,
-    executable_path::executable_path,
     para::{
         ckpool::{self, HashRate, HashRateStatus, PoolStatus, ShareStatus, User, Worker},
         subcommand::server::{
