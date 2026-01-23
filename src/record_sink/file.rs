@@ -46,17 +46,32 @@ impl FileSink {
     }
 
     async fn write_event(&self, event: &Event) -> Result<u64> {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let now = || -> i64 {
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64
+        };
+
         let mut guard = self.writer.lock().await;
         let writer = guard.as_mut().ok_or_else(|| anyhow!("FileSink closed"))?;
 
         match self.format {
             FileFormat::JsonLines => {
-                let json = serde_json::to_string(event)?;
+                let mut event_with_timestamp = event.clone();
+                match &mut event_with_timestamp {
+                    Event::Share(s) if s.timestamp.is_none() => s.timestamp = Some(now()),
+                    Event::BlockFound(b) if b.timestamp.is_none() => b.timestamp = Some(now()),
+                    _ => {}
+                }
+                let json = serde_json::to_string(&event_with_timestamp)?;
                 writer.write_all(json.as_bytes()).await?;
                 writer.write_all(b"\n").await?;
             }
             FileFormat::Csv => {
-                let line = self.event_to_csv(event);
+                let line = self.event_to_csv(event, now());
                 writer.write_all(line.as_bytes()).await?;
                 writer.write_all(b"\n").await?;
             }
@@ -64,7 +79,7 @@ impl FileSink {
         Ok(1)
     }
 
-    fn event_to_csv(&self, event: &Event) -> String {
+    fn event_to_csv(&self, event: &Event, default_timestamp: i64) -> String {
         fn quote_if_needed(s: &str) -> String {
             if s.contains(',') {
                 format!("\"{}\"", s.replace('"', "\"\""))
@@ -75,9 +90,10 @@ impl FileSink {
 
         match event {
             Event::Share(s) => {
+                let timestamp = s.timestamp.unwrap_or(default_timestamp);
                 format!(
                     "{},{},{},{},{},{},{},{}",
-                    s.timestamp,
+                    timestamp,
                     "share",
                     quote_if_needed(&s.address),
                     quote_if_needed(&s.workername),
@@ -91,9 +107,10 @@ impl FileSink {
                 )
             }
             Event::BlockFound(b) => {
+                let timestamp = b.timestamp.unwrap_or(default_timestamp);
                 format!(
                     "{},{},{},{},{},{},{}",
-                    b.timestamp,
+                    timestamp,
                     "block_found",
                     quote_if_needed(&b.address),
                     quote_if_needed(&b.workername),

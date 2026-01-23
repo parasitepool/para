@@ -9,7 +9,8 @@ pub enum Event {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShareEvent {
-    pub timestamp: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<i64>,
     pub address: String,
     pub workername: String,
     pub pool_diff: f64,
@@ -21,7 +22,8 @@ pub struct ShareEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockFoundEvent {
-    pub timestamp: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<i64>,
     pub blockheight: i32,
     pub blockhash: String,
     pub address: String,
@@ -31,7 +33,7 @@ pub struct BlockFoundEvent {
 }
 
 impl Event {
-    pub fn _timestamp(&self) -> i64 {
+    pub fn _timestamp(&self) -> Option<i64> {
         match self {
             Event::Share(e) => e.timestamp,
             Event::BlockFound(e) => e.timestamp,
@@ -48,21 +50,11 @@ impl Event {
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::*,
-        std::time::{SystemTime, UNIX_EPOCH},
-    };
-
-    fn now() -> i64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64
-    }
+    use super::*;
 
     fn test_share() -> Event {
         Event::Share(ShareEvent {
-            timestamp: now(),
+            timestamp: None,
             address: "bc1test".into(),
             workername: "rig1".into(),
             pool_diff: 1.0,
@@ -75,7 +67,7 @@ mod tests {
 
     fn test_block() -> Event {
         Event::BlockFound(BlockFoundEvent {
-            timestamp: now(),
+            timestamp: None,
             blockheight: 800000,
             blockhash: "00000000000000000001".into(),
             address: "bc1test".into(),

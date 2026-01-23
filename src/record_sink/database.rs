@@ -30,7 +30,8 @@ impl super::RecordSink for DatabaseSink {
                     "INSERT INTO shares (
                         blockheight, diff, sdiff, result, reject_reason,
                         workername, username, createdate
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, to_timestamp($8))",
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7,
+                        COALESCE(to_timestamp($8), CURRENT_TIMESTAMP))",
                 )
                     .bind(share.blockheight)
                     .bind(share.pool_diff)
@@ -47,7 +48,8 @@ impl super::RecordSink for DatabaseSink {
                 sqlx::query(
                     "INSERT INTO blocks (
                         blockheight, blockhash, workername, username, diff, coinbasevalue, time_found
-                    ) VALUES ($1, $2, $3, $4, $5, $6, to_timestamp($7))",
+                    ) VALUES ($1, $2, $3, $4, $5, $6,
+                        COALESCE(to_timestamp($7), CURRENT_TIMESTAMP))",
                 )
                     .bind(block.blockheight)
                     .bind(&block.blockhash)

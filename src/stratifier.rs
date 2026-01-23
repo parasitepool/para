@@ -82,7 +82,7 @@ impl<W: Workbase> Stratifier<W> {
     pub(crate) async fn serve(&mut self) -> Result {
         let mut workbase_rx = self.workbase_rx.clone();
         let cancel_token = self.cancel_token.clone();
-        let mut idle_check = tokio::time::interval(self.bouncer.check_interval());
+        let mut idle_check = interval(self.bouncer.check_interval());
 
         loop {
             if matches!(self.state, State::Dropped) {
@@ -842,10 +842,7 @@ impl<W: Workbase> Stratifier<W> {
                             let coinbase_value = job.workbase.coinbase_value();
 
                             self.send_event(Event::BlockFound(BlockFoundEvent {
-                                timestamp: SystemTime::now()
-                                    .duration_since(UNIX_EPOCH)
-                                    .unwrap()
-                                    .as_secs() as i64,
+                                timestamp: None,
                                 blockheight: job_height,
                                 blockhash: blockhash_str,
                                 address: session.address.to_string(),
@@ -883,10 +880,7 @@ impl<W: Workbase> Stratifier<W> {
             let job_height = job.workbase.height();
 
             self.send_event(Event::Share(ShareEvent {
-                timestamp: SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs() as i64,
+                timestamp: None,
                 address: session.address.to_string(),
                 workername: session.workername.clone(),
                 pool_diff,

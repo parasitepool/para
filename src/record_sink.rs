@@ -132,10 +132,7 @@ pub fn spawn_sink_consumer(
 macro_rules! rejection_event {
     ($address:expr, $workername:expr, $blockheight:expr, $reason:expr) => {
         $crate::record_sink::Event::Share($crate::record_sink::ShareEvent {
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs() as i64,
+            timestamp: None,
             address: $address,
             workername: $workername,
             pool_diff: 0.0,
@@ -147,10 +144,7 @@ macro_rules! rejection_event {
     };
     ($address:expr, $workername:expr, $pool_diff:expr, $share_diff:expr, $blockheight:expr, $reason:expr) => {
         $crate::record_sink::Event::Share($crate::record_sink::ShareEvent {
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs() as i64,
+            timestamp: None,
             address: $address,
             workername: $workername,
             pool_diff: $pool_diff,
@@ -168,17 +162,8 @@ mod tests {
 
     #[tokio::test]
     async fn multi_sink_broadcasts_to_all() {
-        use std::time::{SystemTime, UNIX_EPOCH};
-
-        fn now() -> i64 {
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs() as i64
-        }
-
         let event = Event::Share(ShareEvent {
-            timestamp: now(),
+            timestamp: None,
             address: "bc1test".into(),
             workername: "rig1".into(),
             pool_diff: 1.0,
