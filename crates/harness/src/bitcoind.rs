@@ -1,8 +1,8 @@
 use super::*;
 
 pub struct Bitcoind {
-    pub datadir: PathBuf,
-    pub handle: Child,
+    pub datadir: Option<PathBuf>,
+    pub handle: Option<Child>,
     pub network: Network,
     pub rpc_port: u16,
     pub rpc_user: String,
@@ -11,6 +11,32 @@ pub struct Bitcoind {
 }
 
 impl Bitcoind {
+    pub fn connect(
+        rpc_port: u16,
+        rpc_user: String,
+        rpc_password: String,
+        network: Network,
+    ) -> Result<Self> {
+        let bitcoind = Self {
+            datadir: None,
+            handle: None,
+            network,
+            rpc_port,
+            rpc_user,
+            rpc_password,
+            with_output: true,
+        };
+
+        let info = bitcoind.client()?.get_blockchain_info()?;
+
+        println!(
+            "Connected to bitcoind: chain={}, blocks={}",
+            info.chain, info.blocks
+        );
+
+        Ok(bitcoind)
+    }
+
     pub fn spawn(
         tempdir: Arc<TempDir>,
         bitcoind_port: u16,
@@ -96,8 +122,8 @@ maxtxfee=1000000
         );
 
         Ok(Self {
-            datadir: bitcoind_data_dir,
-            handle,
+            datadir: Some(bitcoind_data_dir),
+            handle: Some(handle),
             network,
             rpc_port,
             rpc_user,
@@ -199,12 +225,12 @@ maxtxfee=1000000
             }
         }
 
-        println!("Num utxos: {}", outpoints.len());
+        println!("Found {} spendable UTXOs", outpoints.len());
 
         Ok(outpoints)
     }
 
-    pub fn flood_mempool(&self, breadth: Option<u64>) -> Result {
+    pub fn flood_mempool(&self, breadth: Option<u64>) -> Result<usize> {
         let mut witness = Witness::new();
         witness.push(
             Builder::new()
@@ -214,6 +240,7 @@ maxtxfee=1000000
         );
 
         let utxos = self.get_spendable_utxos()?;
+        let mut tx_count = 0;
 
         for (outpoint, amount) in utxos {
             if let Some(breadth) = breadth {
@@ -243,6 +270,7 @@ maxtxfee=1000000
                 };
 
                 self.client().unwrap().send_raw_transaction(&tx)?;
+                tx_count += 1;
             } else {
                 let mut previous_output = outpoint;
                 let mut value = amount - Amount::from_sat(1000);
@@ -263,6 +291,7 @@ maxtxfee=1000000
                     };
 
                     self.client().unwrap().send_raw_transaction(&tx)?;
+                    tx_count += 1;
 
                     previous_output = OutPoint {
                         txid: tx.compute_txid(),
@@ -274,58 +303,14 @@ maxtxfee=1000000
             }
         }
 
-        Ok(())
-    }
-
-    pub fn mine_blocks(&self, n: usize) -> Result {
-        self.create_or_load_wallet()?;
-
-        let workspace = workspace_root();
-
-        // quick hack, refactor later
-        let script = format!(
-            r#"#!/usr/bin/env bash
-set -euo pipefail
-{workspace}/bitcoin/contrib/signet/miner \
-    --cli="{workspace}/bitcoin/build/bin/bitcoin-cli -datadir={} -signet -rpcport={}" \
-    generate \
-    --grind-cmd="{workspace}/bitcoin/build/bin/bitcoin-util grind" \
-    --address="{}" \
-    --nbits=1d00ffff
-"#,
-            self.datadir.display(),
-            self.rpc_port,
-            self.op_true_address()
-        );
-
-        for _ in 0..n {
-            let status = Command::new("bash")
-                .arg("-c")
-                .arg(script.clone())
-                .stdin(Stdio::null())
-                .stdout(if self.with_output {
-                    Stdio::inherit()
-                } else {
-                    Stdio::null()
-                })
-                .stderr(if self.with_output {
-                    Stdio::inherit()
-                } else {
-                    Stdio::null()
-                })
-                .status()?;
-
-            if !status.success() {
-                anyhow::bail!("bash script failed");
-            }
-        }
-
-        Ok(())
+        Ok(tx_count)
     }
 
     pub fn shutdown(&mut self) {
-        self.handle.kill().unwrap();
-        self.handle.wait().unwrap();
+        if let Some(ref mut handle) = self.handle {
+            let _ = handle.kill();
+            let _ = handle.wait();
+        }
     }
 }
 

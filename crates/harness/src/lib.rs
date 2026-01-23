@@ -11,6 +11,7 @@ use {
     bitcoincore_rpc::{Auth, Client, RpcApi},
     bitcoind::Bitcoind,
     cargo_metadata::MetadataCommand,
+    clap::{Parser, Subcommand},
     serde::{Deserialize, Serialize},
     serde_json::json,
     std::{
@@ -44,16 +45,107 @@ fn workspace_root() -> String {
         .to_string()
 }
 
+#[derive(Parser)]
+#[command(name = "harness")]
+#[command(about = "Bitcoin testing harness for flooding mempool and spawning nodes")]
+pub struct Cli {
+    #[command(subcommand)]
+    pub command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+pub enum Commands {
+    Spawn,
+    Flood {
+        #[arg(long, default_value = "38332")]
+        rpc_port: u16,
+        #[arg(long, default_value = "satoshi")]
+        rpc_user: String,
+        #[arg(long, default_value = "nakamoto")]
+        rpc_password: String,
+        #[arg(long, default_value = "signet")]
+        network: String,
+        #[arg(long)]
+        breadth: Option<u64>,
+        #[arg(long)]
+        continuous: Option<u64>,
+    },
+}
+
+fn parse_network(s: &str) -> Network {
+    match s.to_lowercase().as_str() {
+        "mainnet" | "main" => Network::Bitcoin,
+        "testnet" | "test" => Network::Testnet,
+        "signet" => Network::Signet,
+        "regtest" => Network::Regtest,
+        _ => panic!("Unknown network: {}", s),
+    }
+}
+
 pub fn main() {
+    let cli = Cli::parse();
+
     ctrlc::set_handler(move || {
         if SHUTTING_DOWN.fetch_or(true, Ordering::Relaxed) {
             process::exit(1);
         }
 
-        eprintln!("Shutting down");
+        eprintln!("\nShutting down...");
     })
     .expect("Error setting <CTRL-C> handler");
 
+    match cli.command {
+        Some(Commands::Flood {
+            rpc_port,
+            rpc_user,
+            rpc_password,
+            network,
+            breadth,
+            continuous,
+        }) => {
+            let network = parse_network(&network);
+            let bitcoind = Bitcoind::connect(rpc_port, rpc_user, rpc_password, network)
+                .expect("Failed to connect to bitcoind");
+
+            if let Some(target_bytes) = continuous {
+                println!(
+                    "Running in continuous mode, target mempool size: {} bytes",
+                    target_bytes
+                );
+                while !SHUTTING_DOWN.load(Ordering::Relaxed) {
+                    let mempool_info = bitcoind.client().unwrap().get_mempool_info().unwrap();
+                    println!(
+                        "Mempool: {} txs, {} bytes",
+                        mempool_info.size, mempool_info.bytes
+                    );
+
+                    if (mempool_info.bytes as u64) < target_bytes {
+                        match bitcoind.flood_mempool(breadth) {
+                            Ok(count) => println!("Created {} transactions", count),
+                            Err(e) => eprintln!("Error flooding mempool: {}", e),
+                        }
+                    }
+
+                    std::thread::sleep(Duration::from_secs(5));
+                }
+            } else {
+                match bitcoind.flood_mempool(breadth) {
+                    Ok(count) => println!("Created {} transactions", count),
+                    Err(e) => {
+                        eprintln!("Error: {}", e);
+                        process::exit(1);
+                    }
+                }
+            }
+        }
+
+        Some(Commands::Spawn) | None => {
+            run_ephemeral_harness();
+        }
+    }
+}
+
+fn run_ephemeral_harness() {
     let tempdir = Arc::new(TempDir::new().unwrap());
 
     let (bitcoind_port, rpc_port, zmq_port) = (
@@ -77,11 +169,6 @@ pub fn main() {
     let bitcoind =
         Bitcoind::spawn(tempdir.clone(), bitcoind_port, rpc_port, zmq_port, true).unwrap();
 
-    println!("Mining 101 blocks to get a mature output...");
-
-    bitcoind.mine_blocks(101).unwrap();
-
-    println!("Done creating 101 blocks");
     println!("Bitcoin rpc port: {}", bitcoind.rpc_port);
     println!("Bitcoin zmq port: {}", zmq_port);
 
@@ -93,7 +180,7 @@ pub fn main() {
         println!("Bitcoin zmq port: {}", zmq_port);
 
         if result.bytes < 5000000 {
-            bitcoind.flood_mempool(Some(2)).unwrap();
+            let _ = bitcoind.flood_mempool(Some(2));
         }
 
         std::thread::sleep(Duration::from_millis(5000));

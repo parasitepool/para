@@ -47,7 +47,7 @@ impl CommandBuilder {
     }
 
     pub(crate) fn command(&self) -> Command {
-        let mut command = Command::new(executable_path("para"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_para"));
 
         let mut args = Vec::new();
 
