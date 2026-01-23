@@ -96,7 +96,7 @@ impl TestPool {
         format!("http://127.0.0.1:{}", self.api_port)
     }
 
-    pub(crate) async fn get_status(&self) -> reqwest::Result<PoolStatusAPI> {
+    pub(crate) async fn get_status(&self) -> reqwest::Result<api::PoolStatus> {
         reqwest::Client::new()
             .get(format!("{}/pool/status", self.api_endpoint()))
             .send()
@@ -118,7 +118,7 @@ impl TestPool {
         &self,
         min_shares: u64,
         timeout: Duration,
-    ) -> Result<PoolStatusAPI, String> {
+    ) -> Result<api::PoolStatus, String> {
         let start = Instant::now();
         loop {
             if start.elapsed() > timeout {
@@ -140,7 +140,7 @@ impl TestPool {
         &self,
         min_blocks: u64,
         timeout: Duration,
-    ) -> Result<PoolStatusAPI, String> {
+    ) -> Result<api::PoolStatus, String> {
         let start = Instant::now();
         loop {
             if start.elapsed() > timeout {

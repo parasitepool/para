@@ -39,8 +39,10 @@ async fn listen_for_ntfy_message(channel: &str, timeout_duration: Duration) -> N
 }
 
 fn generate_test_channel() -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::{
+        sync::atomic::{AtomicU64, Ordering},
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     static COUNTER: AtomicU64 = AtomicU64::new(0);
 

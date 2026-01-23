@@ -43,7 +43,7 @@ use {
         },
     },
     anyhow::Error,
-    api::{PoolStatus as PoolStatusAPI, UserDetail},
+    api::UserDetail,
     base64::{Engine, engine::general_purpose},
     bip322::sign_simple_encoded,
     bitcoin::{

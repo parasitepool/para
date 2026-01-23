@@ -1,7 +1,6 @@
-use crate::record_sink::build_record_sink;
 use {
     super::*,
-    crate::{api, http_server},
+    crate::{api, http_server, record_sink::build_record_sink},
 };
 
 #[derive(Parser, Debug)]

@@ -1,99 +1,24 @@
-use async_trait::async_trait;
 use {
-    super::*,
-    sqlx::{Pool, Postgres},
-    std::{
-        fs::{File, OpenOptions},
-        io::{BufWriter, Write},
-        path::PathBuf,
-    },
-    tokio::sync::mpsc,
+    std::sync::Arc,
+    tokio::{sync::mpsc, task::JoinHandle},
 };
+
+mod database;
+mod event;
+mod file;
+mod multi;
+
+pub use {
+    database::DatabaseSink,
+    event::{BlockFoundEvent, Event, ShareEvent},
+    file::{FileFormat, FileSink},
+    multi::MultiSink,
+};
+
+use super::*;
 
 const EVENT_CHANNEL_CAPACITY: usize = 10_000;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum Event {
-    Share(ShareEvent),
-    BlockFound(BlockFoundEvent),
-    UserAuthorized(UserAuthorizedEvent),
-    WorkerConnected(WorkerConnectedEvent),
-    WorkerDisconnected(WorkerDisconnectedEvent),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ShareEvent {
-    pub timestamp: i64,
-    pub address: String,
-    pub workername: String,
-    pub pool_diff: f64,
-    pub share_diff: f64,
-    pub result: bool,
-    pub blockheight: Option<i32>,
-    pub reject_reason: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BlockFoundEvent {
-    pub timestamp: i64,
-    pub blockheight: i32,
-    pub blockhash: String,
-    pub address: String,
-    pub workername: String,
-    pub diff: f64,
-    pub coinbase_value: Option<i64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UserAuthorizedEvent {
-    pub timestamp: i64,
-    pub address: String,
-    pub workername: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorkerConnectedEvent {
-    pub timestamp: i64,
-    pub address: String,
-    pub workername: String,
-    pub agent: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorkerDisconnectedEvent {
-    pub timestamp: i64,
-    pub address: String,
-    pub workername: String,
-    pub duration_secs: u64,
-    pub shares_submitted: u64,
-}
-
-impl Event {
-    pub fn _timestamp(&self) -> i64 {
-        match self {
-            Event::Share(e) => e.timestamp,
-            Event::BlockFound(e) => e.timestamp,
-            Event::UserAuthorized(e) => e.timestamp,
-            Event::WorkerConnected(e) => e.timestamp,
-            Event::WorkerDisconnected(e) => e.timestamp,
-        }
-    }
-
-    pub fn _event_type(&self) -> &'static str {
-        match self {
-            Event::Share(_) => "share",
-            Event::BlockFound(_) => "block_found",
-            Event::UserAuthorized(_) => "user_authorized",
-            Event::WorkerConnected(_) => "worker_connected",
-            Event::WorkerDisconnected(_) => "worker_disconnected",
-        }
-    }
-}
-
-/// Builds a record sink from settings configuration.
-/// Returns None if no sinks are configured.
-/// Returns Some with sender if sinks are configured.
 pub(crate) async fn build_record_sink(
     settings: &Settings,
     cancel_token: CancellationToken,
@@ -120,7 +45,7 @@ pub(crate) async fn build_record_sink(
             FileFormat::JsonLines
         };
 
-        match FileSink::new(events_file.clone(), format) {
+        match FileSink::new(events_file.clone(), format).await {
             Ok(file_sink) => {
                 info!("File sink writing to {}", events_file.display());
                 sinks.push(Box::new(file_sink));
@@ -142,25 +67,15 @@ pub(crate) async fn build_record_sink(
     };
 
     let (tx, rx) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
-    let sink_cancel = CancellationToken::new();
-    let handle = spawn_sink_consumer(rx, sink, sink_cancel.clone());
+    let handle = spawn_sink_consumer(rx, sink, cancel_token.clone());
 
     tasks.spawn(async move {
         let _ = handle.await;
     });
 
-    tasks.spawn({
-        let cancel_token = cancel_token.clone();
-        async move {
-            cancel_token.cancelled().await;
-            sink_cancel.cancel();
-        }
-    });
-
     Ok(Some(tx))
 }
 
-/// Trait for consuming and storing pool events
 #[async_trait]
 pub trait RecordSink: Send + Sync {
     async fn record(&self, event: Event) -> Result<u64>;
@@ -178,245 +93,6 @@ pub trait RecordSink: Send + Sync {
 
     async fn close(&self) -> Result<()> {
         self.flush().await
-    }
-}
-
-pub struct DatabaseSink {
-    pool: Pool<Postgres>,
-}
-
-impl DatabaseSink {
-    pub fn _new(pool: Pool<Postgres>) -> Self {
-        Self { pool }
-    }
-
-    pub async fn connect(database_url: &str) -> Result<Self> {
-        let pool = PgPoolOptions::new()
-            .max_connections(5)
-            .connect(database_url)
-            .await?;
-        Ok(Self { pool })
-    }
-}
-
-#[async_trait::async_trait]
-impl RecordSink for DatabaseSink {
-    async fn record(&self, event: Event) -> Result<u64> {
-        let rows_changed = match event {
-            Event::Share(share) => {
-                sqlx::query(
-                    "INSERT INTO shares (
-                        blockheight, diff, sdiff, result, reject_reason,
-                        workername, username, createdate
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, to_timestamp($8))",
-                )
-                    .bind(share.blockheight)
-                    .bind(share.pool_diff)
-                    .bind(share.share_diff)
-                    .bind(share.result)
-                    .bind(&share.reject_reason)
-                    .bind(&share.workername)
-                    .bind(&share.address)
-                    .bind(share.timestamp)
-                    .execute(&self.pool)
-                    .await?
-            }
-            Event::BlockFound(block) => {
-                sqlx::query(
-                    "INSERT INTO blocks (
-                        blockheight, blockhash, workername, username, diff, coinbasevalue, time_found
-                    ) VALUES ($1, $2, $3, $4, $5, $6, to_timestamp($7))",
-                )
-                    .bind(block.blockheight)
-                    .bind(&block.blockhash)
-                    .bind(&block.workername)
-                    .bind(&block.address)
-                    .bind(block.diff)
-                    .bind(block.coinbase_value)
-                    .bind(block.timestamp)
-                    .execute(&self.pool)
-                    .await?
-            }
-            _ => {
-                return Ok(0);
-            }
-        }.rows_affected();
-        Ok(rows_changed)
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-pub enum FileFormat {
-    #[default]
-    JsonLines,
-    Csv,
-}
-
-pub struct FileSink {
-    _path: PathBuf,
-    format: FileFormat,
-    writer: std::sync::Mutex<Option<BufWriter<File>>>,
-}
-
-impl FileSink {
-    pub fn new(path: PathBuf, format: FileFormat) -> Result<Self> {
-        let file = OpenOptions::new().create(true).append(true).open(&path)?;
-        let writer = BufWriter::new(file);
-
-        Ok(Self {
-            _path: path,
-            format,
-            writer: std::sync::Mutex::new(Some(writer)),
-        })
-    }
-
-    pub fn _json_lines(path: PathBuf) -> Result<Self> {
-        Self::new(path, FileFormat::JsonLines)
-    }
-
-    pub fn _csv(path: PathBuf) -> Result<Self> {
-        Self::new(path, FileFormat::Csv)
-    }
-
-    fn write_event(&self, event: &Event) -> Result<u64> {
-        let mut guard = self.writer.lock().unwrap();
-        let writer = guard.as_mut().ok_or_else(|| anyhow!("FileSink closed"))?;
-
-        match self.format {
-            FileFormat::JsonLines => {
-                serde_json::to_writer(&mut *writer, event)?;
-                writeln!(writer)?;
-            }
-            FileFormat::Csv => {
-                let line = self.event_to_csv(event);
-                writeln!(writer, "{}", line)?;
-            }
-        }
-        Ok(1)
-    }
-
-    fn event_to_csv(&self, event: &Event) -> String {
-        match event {
-            Event::Share(s) => {
-                format!(
-                    "{},{},{},{},{},{},{},{}",
-                    s.timestamp,
-                    "share",
-                    s.address,
-                    s.workername,
-                    s.pool_diff,
-                    s.share_diff,
-                    s.result,
-                    s.reject_reason.as_deref().unwrap_or("")
-                )
-            }
-            Event::BlockFound(b) => {
-                format!(
-                    "{},{},{},{},{},{},{}",
-                    b.timestamp,
-                    "block_found",
-                    b.address,
-                    b.workername,
-                    b.blockheight,
-                    b.blockhash,
-                    b.diff
-                )
-            }
-            Event::UserAuthorized(u) => {
-                format!(
-                    "{},{},{},{}",
-                    u.timestamp, "user_authorized", u.address, u.workername
-                )
-            }
-            Event::WorkerConnected(w) => {
-                format!(
-                    "{},{},{},{},{}",
-                    w.timestamp,
-                    "worker_connected",
-                    w.address,
-                    w.workername,
-                    w.agent.as_deref().unwrap_or("")
-                )
-            }
-            Event::WorkerDisconnected(w) => {
-                format!(
-                    "{},{},{},{},{},{}",
-                    w.timestamp,
-                    "worker_disconnected",
-                    w.address,
-                    w.workername,
-                    w.duration_secs,
-                    w.shares_submitted
-                )
-            }
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl RecordSink for FileSink {
-    async fn record(&self, event: Event) -> Result<u64> {
-        self.write_event(&event)
-    }
-
-    async fn flush(&self) -> Result<()> {
-        let mut guard = self.writer.lock().unwrap();
-        if let Some(writer) = guard.as_mut() {
-            writer.flush()?;
-        }
-        Ok(())
-    }
-
-    async fn close(&self) -> Result<()> {
-        let mut guard = self.writer.lock().unwrap();
-        if let Some(mut writer) = guard.take() {
-            writer.flush()?;
-        }
-        Ok(())
-    }
-}
-
-pub struct MultiSink {
-    sinks: Vec<Box<dyn RecordSink>>,
-}
-
-impl MultiSink {
-    pub fn new(sinks: Vec<Box<dyn RecordSink>>) -> Self {
-        Self { sinks }
-    }
-}
-
-#[async_trait::async_trait]
-impl RecordSink for MultiSink {
-    async fn record(&self, event: Event) -> Result<u64> {
-        let mut updated_records = 0;
-        for sink in &self.sinks {
-            updated_records = updated_records.max(sink.record(event.clone()).await?);
-        }
-        Ok(updated_records)
-    }
-
-    async fn flush(&self) -> Result<()> {
-        for sink in &self.sinks {
-            sink.flush().await?;
-        }
-        Ok(())
-    }
-
-    async fn close(&self) -> Result<()> {
-        for sink in &self.sinks {
-            sink.close().await?;
-        }
-        Ok(())
-    }
-}
-
-pub struct _NullSink;
-
-#[async_trait::async_trait]
-impl RecordSink for _NullSink {
-    async fn record(&self, _event: Event) -> Result<u64> {
-        Ok(0)
     }
 }
 
@@ -452,20 +128,56 @@ pub fn spawn_sink_consumer(
     })
 }
 
+#[macro_export]
+macro_rules! rejection_event {
+    ($address:expr, $workername:expr, $blockheight:expr, $reason:expr) => {
+        $crate::record_sink::Event::Share($crate::record_sink::ShareEvent {
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64,
+            address: $address,
+            workername: $workername,
+            pool_diff: 0.0,
+            share_diff: 0.0,
+            result: false,
+            blockheight: Some($blockheight),
+            reject_reason: Some($reason.to_string()),
+        })
+    };
+    ($address:expr, $workername:expr, $pool_diff:expr, $share_diff:expr, $blockheight:expr, $reason:expr) => {
+        $crate::record_sink::Event::Share($crate::record_sink::ShareEvent {
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64,
+            address: $address,
+            workername: $workername,
+            pool_diff: $pool_diff,
+            share_diff: $share_diff,
+            result: false,
+            blockheight: Some($blockheight),
+            reject_reason: Some($reason.to_string()),
+        })
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn now() -> i64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64
-    }
+    #[tokio::test]
+    async fn multi_sink_broadcasts_to_all() {
+        use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn test_share() -> Event {
-        Event::Share(ShareEvent {
+        fn now() -> i64 {
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64
+        }
+
+        let event = Event::Share(ShareEvent {
             timestamp: now(),
             address: "bc1test".into(),
             workername: "rig1".into(),
@@ -474,52 +186,36 @@ mod tests {
             result: true,
             blockheight: Some(800000),
             reject_reason: None,
-        })
-    }
+        });
 
-    fn test_block() -> Event {
-        Event::BlockFound(BlockFoundEvent {
-            timestamp: now(),
-            blockheight: 800000,
-            blockhash: "00000000000000000001".into(),
-            address: "bc1test".into(),
-            workername: "rig1".into(),
-            diff: 1000.0,
-            coinbase_value: Some(625000000),
-        })
-    }
+        struct CountingSink {
+            count: Arc<Mutex<u64>>,
+        }
 
-    #[test]
-    fn event_type_returns_correct_string() {
-        assert_eq!(test_share()._event_type(), "share");
-        assert_eq!(test_block()._event_type(), "block_found");
-    }
+        #[async_trait]
+        impl RecordSink for CountingSink {
+            async fn record(&self, _event: Event) -> Result<u64> {
+                let mut count = self.count.lock().await;
+                *count += 1;
+                Ok(1)
+            }
+        }
 
-    #[test]
-    fn event_serializes_to_json() {
-        let share = test_share();
-        let json = serde_json::to_string(&share).unwrap();
-        assert!(json.contains("\"type\":\"share\""));
-    }
+        let count1 = Arc::new(Mutex::new(0));
+        let count2 = Arc::new(Mutex::new(0));
 
-    #[test]
-    fn event_deserializes_from_json() {
-        let share = test_share();
-        let json = serde_json::to_string(&share).unwrap();
-        let parsed: Event = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed._event_type(), "share");
-    }
+        let sink = MultiSink::new(vec![
+            Box::new(CountingSink {
+                count: count1.clone(),
+            }),
+            Box::new(CountingSink {
+                count: count2.clone(),
+            }),
+        ]);
 
-    #[tokio::test]
-    async fn null_sink_accepts_events() {
-        let sink = _NullSink;
-        sink.record(test_share()).await.unwrap();
-        sink.record(test_block()).await.unwrap();
-    }
+        sink.record(event).await.unwrap();
 
-    #[tokio::test]
-    async fn multi_sink_broadcasts_to_all() {
-        let sink = MultiSink::new(vec![Box::new(_NullSink), Box::new(_NullSink)]);
-        sink.record(test_share()).await.unwrap();
+        assert_eq!(*count1.lock().await, 1);
+        assert_eq!(*count2.lock().await, 1);
     }
 }

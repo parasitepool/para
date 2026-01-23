@@ -3,8 +3,7 @@ use super::*;
 mod pool_options;
 mod proxy_options;
 
-pub(crate) use pool_options::PoolOptions;
-pub(crate) use proxy_options::ProxyOptions;
+pub(crate) use {pool_options::PoolOptions, proxy_options::ProxyOptions};
 
 #[derive(Clone, Debug)]
 pub(crate) struct Settings {
@@ -406,8 +405,7 @@ impl Settings {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::arguments::Arguments;
+    use {super::*, crate::arguments::Arguments};
 
     fn parse_pool_options(args: &str) -> PoolOptions {
         match Arguments::try_parse_from(args.split_whitespace()) {
