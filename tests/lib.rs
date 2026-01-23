@@ -1,7 +1,6 @@
 use {
     bitcoin::{Address, address::NetworkUnchecked},
     command_builder::CommandBuilder,
-    executable_path::executable_path,
     para::{
         ckpool::{self, HashRate, HashRateStatus, PoolStatus, ShareStatus, User, Worker},
         subcommand::server::{
@@ -128,7 +127,9 @@ fn next_json<T: DeserializeOwned>(r: &mut BufReader<ChildStdout>) -> T {
 
 #[cfg(target_os = "linux")]
 fn signet_username() -> Username {
-    Username::new("tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.tick.abcdef@lnurl.com")
+    Username::new(
+        "tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.tick.abcdef@lnurl.com",
+    )
 }
 
 #[cfg(target_os = "linux")]
