@@ -80,13 +80,6 @@ pub(crate) async fn build_record_sink(
 pub trait RecordSink: Send + Sync {
     async fn record(&self, event: Event) -> Result<u64>;
 
-    async fn _record_batch(&self, events: Vec<Event>) -> Result<()> {
-        for event in events {
-            self.record(event).await?;
-        }
-        Ok(())
-    }
-
     async fn flush(&self) -> Result<()> {
         Ok(())
     }

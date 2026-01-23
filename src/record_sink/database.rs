@@ -8,10 +8,6 @@ pub struct DatabaseSink {
 }
 
 impl DatabaseSink {
-    pub fn _new(pool: Pool<Postgres>) -> Self {
-        Self { pool }
-    }
-
     pub async fn connect(database_url: &str) -> Result<Self> {
         let pool = PgPoolOptions::new()
             .max_connections(5)

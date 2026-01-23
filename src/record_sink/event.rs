@@ -32,22 +32,6 @@ pub struct BlockFoundEvent {
     pub coinbase_value: Option<i64>,
 }
 
-impl Event {
-    pub fn _timestamp(&self) -> Option<i64> {
-        match self {
-            Event::Share(e) => e.timestamp,
-            Event::BlockFound(e) => e.timestamp,
-        }
-    }
-
-    pub fn _event_type(&self) -> &'static str {
-        match self {
-            Event::Share(_) => "share",
-            Event::BlockFound(_) => "block_found",
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -65,36 +49,10 @@ mod tests {
         })
     }
 
-    fn test_block() -> Event {
-        Event::BlockFound(BlockFoundEvent {
-            timestamp: None,
-            blockheight: 800000,
-            blockhash: "00000000000000000001".into(),
-            address: "bc1test".into(),
-            workername: "rig1".into(),
-            diff: 1000.0,
-            coinbase_value: Some(625000000),
-        })
-    }
-
-    #[test]
-    fn event_type_returns_correct_string() {
-        assert_eq!(test_share()._event_type(), "share");
-        assert_eq!(test_block()._event_type(), "block_found");
-    }
-
     #[test]
     fn event_serializes_to_json() {
         let share = test_share();
         let json = serde_json::to_string(&share).unwrap();
         assert!(json.contains("\"type\":\"share\""));
-    }
-
-    #[test]
-    fn event_deserializes_from_json() {
-        let share = test_share();
-        let json = serde_json::to_string(&share).unwrap();
-        let parsed: Event = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed._event_type(), "share");
     }
 }

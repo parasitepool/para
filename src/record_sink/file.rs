@@ -16,7 +16,6 @@ pub enum FileFormat {
 }
 
 pub struct FileSink {
-    _path: PathBuf,
     format: FileFormat,
     writer: Arc<tokio::sync::Mutex<Option<BufWriter<tokio::fs::File>>>>,
 }
@@ -31,18 +30,9 @@ impl FileSink {
         let writer = BufWriter::new(file);
 
         Ok(Self {
-            _path: path,
             format,
             writer: Arc::new(tokio::sync::Mutex::new(Some(writer))),
         })
-    }
-
-    pub async fn _json_lines(path: PathBuf) -> Result<Self> {
-        Self::new(path, FileFormat::JsonLines).await
-    }
-
-    pub async fn _csv(path: PathBuf) -> Result<Self> {
-        Self::new(path, FileFormat::Csv).await
     }
 
     async fn write_event(&self, event: &Event) -> Result<u64> {
