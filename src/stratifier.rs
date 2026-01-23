@@ -74,8 +74,10 @@ impl<W: Workbase> Stratifier<W> {
     }
 
     fn send_event(&self, event: Event) {
-        if let Some(tx) = &self.event_tx {
-            let _ = tx.try_send(event);
+        if let Some(tx) = &self.event_tx
+            && let Err(e) = tx.try_send(event)
+        {
+            warn!("Failed to send event: {e}");
         }
     }
 
