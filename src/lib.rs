@@ -39,7 +39,7 @@ use {
         stream::{FuturesUnordered, StreamExt},
     },
     generator::spawn_generator,
-    hash_rate::HashRate,
+    hashrate::HashRate,
     job::Job,
     jobs::Jobs,
     lru::LruCache,
@@ -86,7 +86,7 @@ use {
     stratum::{
         Authorize, Configure, Difficulty, Extranonce, Id, JobId, MerkleNode, Message, Nbits, Nonce,
         Notify, Ntime, PrevHash, SetDifficulty, StratumError, Submit, Subscribe, SubscribeResult,
-        Username, Version,
+        Username, Version, format_si, parse_si,
     },
     subcommand::server::account::Account,
     sysinfo::{Disks, System},
@@ -127,14 +127,13 @@ mod coinbase_builder;
 mod decay;
 mod extranonces;
 mod generator;
-pub mod hash_rate;
+pub mod hashrate;
 mod http_server;
 mod job;
 mod jobs;
 mod metatron;
 mod metrics;
 pub mod settings;
-
 mod signal;
 mod stratifier;
 pub mod stratum;
