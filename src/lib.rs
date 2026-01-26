@@ -39,7 +39,7 @@ use {
         stream::{FuturesUnordered, StreamExt},
     },
     generator::spawn_generator,
-    hash_rate::HashRate,
+    hashrate::HashRate,
     job::Job,
     jobs::Jobs,
     lru::LruCache,
@@ -127,14 +127,14 @@ mod coinbase_builder;
 mod decay;
 mod extranonces;
 mod generator;
-pub mod hash_rate;
+pub mod hashrate;
 mod http_server;
 mod job;
 mod jobs;
 mod metatron;
 mod metrics;
 pub mod settings;
-
+mod si;
 mod signal;
 mod stratifier;
 pub mod stratum;

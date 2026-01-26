@@ -157,7 +157,7 @@ impl fmt::Display for Difficulty {
         let d = self.as_f64();
 
         if d >= 1.0 {
-            write!(f, "{}", d.floor() as u64)
+            crate::si::format_si(d.floor(), "", f)
         } else if let Some(p) = f.precision() {
             write!(f, "{:.*}", p, d)
         } else {
@@ -338,10 +338,16 @@ mod tests {
     }
 
     #[test]
-    fn display_integer_when_greater_than_1() {
-        assert_eq!(format!("{}", Difficulty::from(1)), "1");
-        assert_eq!(format!("{}", Difficulty::from(42)), "42");
-        assert_eq!(format!("{}", Difficulty::from(2.9)), "2");
+    fn display_si_when_greater_than_1() {
+        assert_eq!(format!("{}", Difficulty::from(1)), "1 ");
+        assert_eq!(format!("{}", Difficulty::from(42)), "42 ");
+        assert_eq!(format!("{}", Difficulty::from(2.9)), "2 ");
+        assert_eq!(format!("{}", Difficulty::from(1000)), "1 K");
+        assert_eq!(format!("{}", Difficulty::from(1_000_000)), "1 M");
+
+        let large = Difficulty::from(150_000_000_000_000u64);
+        let s = large.to_string();
+        assert!(s.ends_with(" T"), "expected T suffix, got: {s}");
     }
 
     #[test]
@@ -369,7 +375,7 @@ mod tests {
 
     #[test]
     fn display_pairs_with_parsed() {
-        for s in ["0.5", "1", "42", "0.125"] {
+        for s in ["0.5", "0.125"] {
             let d1 = Difficulty::from_str(s).unwrap();
             let s2 = d1.to_string();
             let d2 = Difficulty::from_str(&s2).unwrap();
