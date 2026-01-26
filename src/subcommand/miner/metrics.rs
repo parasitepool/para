@@ -9,7 +9,8 @@ pub(crate) struct Metrics {
     hashes: AtomicU64,
     shares: AtomicU64,
     started: Instant,
-    hash_rate: Mutex<HashRateCounter>,
+    hashrate: Mutex<HashRateCounter>,
+    sps: Mutex<DecayingAverage>,
 }
 
 impl Metrics {
@@ -18,10 +19,11 @@ impl Metrics {
             hashes: AtomicU64::new(0),
             shares: AtomicU64::new(0),
             started: Instant::now(),
-            hash_rate: Mutex::new(HashRateCounter {
+            hashrate: Mutex::new(HashRateCounter {
                 last_total: 0,
                 smoothed: DecayingAverage::new(Duration::from_secs(5)),
             }),
+            sps: Mutex::new(DecayingAverage::new(Duration::from_secs(10))),
         }
     }
 
@@ -31,6 +33,7 @@ impl Metrics {
 
     pub(crate) fn add_share(&self) {
         self.shares.fetch_add(1, Ordering::Relaxed);
+        self.sps.lock().record(1.0, Instant::now());
     }
 
     pub(crate) fn total_hashes(&self) -> u64 {
@@ -45,8 +48,8 @@ impl Metrics {
         self.started.elapsed()
     }
 
-    pub(crate) fn hash_rate(&self) -> HashRate {
-        let mut state = self.hash_rate.lock();
+    pub(crate) fn hashrate(&self) -> HashRate {
+        let mut state = self.hashrate.lock();
         let total = self.total_hashes();
         let delta = total.saturating_sub(state.last_total);
         let now = Instant::now();
@@ -54,14 +57,19 @@ impl Metrics {
         state.last_total = total;
         HashRate(state.smoothed.value_at(now))
     }
+
+    pub(crate) fn sps(&self) -> f64 {
+        self.sps.lock().value_at(Instant::now())
+    }
 }
 
 impl StatusLine for Metrics {
     fn status_line(&self) -> String {
         format!(
-            "hashrate={}  shares={}  uptime={}s",
-            self.hash_rate(),
+            "hashrate={:.2}  shares={} ({:.2}/s)  uptime={}s",
+            self.hashrate(),
             self.total_shares(),
+            self.sps(),
             self.uptime().as_secs()
         )
     }
@@ -98,14 +106,14 @@ mod tests {
     fn avg_hashrate_zero_hashes_returns_zero() {
         let metrics = Metrics::new();
         thread::sleep(Duration::from_millis(10));
-        let rate = metrics.hash_rate();
+        let rate = metrics.hashrate();
         assert_eq!(rate, HashRate(0.0));
     }
 
     #[test]
     fn avg_hashrate_is_finite() {
         let metrics = Metrics::new();
-        let rate = metrics.hash_rate();
+        let rate = metrics.hashrate();
         assert!(rate.0.is_finite(), "hashrate should be finite: {rate}");
     }
 
@@ -115,7 +123,7 @@ mod tests {
         thread::sleep(Duration::from_millis(50));
         metrics.add_hashes(100_000);
 
-        let rate = metrics.hash_rate();
+        let rate = metrics.hashrate();
         assert!(rate > HashRate(0.0), "hashrate should be positive: {rate}");
         assert!(rate.0.is_finite(), "hashrate should be finite: {rate}");
     }
@@ -127,10 +135,10 @@ mod tests {
         for _ in 0..5 {
             thread::sleep(Duration::from_millis(50));
             metrics.add_hashes(10_000);
-            metrics.hash_rate();
+            metrics.hashrate();
         }
 
-        let rate = metrics.hash_rate();
+        let rate = metrics.hashrate();
         assert!(
             rate > HashRate(0.0),
             "smoothed rate should be positive: {rate}"
@@ -147,6 +155,7 @@ mod tests {
         assert!(line.contains("hashrate="), "missing hashrate: {line}");
         assert!(line.contains("H/s"), "missing H/s unit: {line}");
         assert!(line.contains("shares=1"), "missing shares: {line}");
+        assert!(line.contains("/s)"), "missing sps: {line}");
         assert!(line.contains("uptime="), "missing uptime: {line}");
     }
 
@@ -156,7 +165,10 @@ mod tests {
         let line = metrics.status_line();
 
         assert!(
-            line.contains("hashrate=") && line.contains("shares=0") && line.contains("uptime="),
+            line.contains("hashrate=")
+                && line.contains("shares=0")
+                && line.contains("/s)")
+                && line.contains("uptime="),
             "unexpected format: {line}"
         );
     }
