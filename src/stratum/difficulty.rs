@@ -351,6 +351,17 @@ mod tests {
     }
 
     #[test]
+    fn display_sub_1() {
+        let s = format!("{}", Difficulty::from(0.5));
+        assert!(s.starts_with("0.5"), "expected 0.5..., got: {s}");
+        assert!(!s.ends_with('0'), "should trim trailing zeros: {s}");
+
+        let s = format!("{}", Difficulty::from(0.001));
+        assert!(s.starts_with("0.00"), "expected 0.00..., got: {s}");
+        assert!(!s.ends_with('0'), "should trim trailing zeros: {s}");
+    }
+
+    #[test]
     fn display_respects_precision_flag() {
         assert_eq!(format!("{:.5}", Difficulty::from(0.5)), "0.50000");
         assert_eq!(format!("{:.2}", Difficulty::from(0.125)), "0.13");

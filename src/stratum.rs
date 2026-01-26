@@ -46,7 +46,7 @@ mod notify;
 mod ntime;
 mod prevhash;
 mod set_difficulty;
-pub mod si;
+mod si;
 mod submit;
 mod subscribe;
 mod suggest_difficulty;
@@ -70,6 +70,7 @@ pub use {
     ntime::Ntime,
     prevhash::PrevHash,
     set_difficulty::SetDifficulty,
+    si::{format_si, parse_si},
     submit::Submit,
     subscribe::{Subscribe, SubscribeResult},
     suggest_difficulty::SuggestDifficulty,

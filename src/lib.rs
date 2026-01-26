@@ -86,8 +86,7 @@ use {
     stratum::{
         Authorize, Configure, Difficulty, Extranonce, Id, JobId, MerkleNode, Message, Nbits, Nonce,
         Notify, Ntime, PrevHash, SetDifficulty, StratumError, Submit, Subscribe, SubscribeResult,
-        Username, Version,
-        si::{format_si, parse_si},
+        Username, Version, format_si, parse_si,
     },
     subcommand::server::account::Account,
     sysinfo::{Disks, System},
