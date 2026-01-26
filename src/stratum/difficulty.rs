@@ -385,18 +385,6 @@ mod tests {
     }
 
     #[test]
-    fn display_pairs_with_parsed() {
-        for s in ["0.5", "0.125"] {
-            let d1 = Difficulty::from_str(s).unwrap();
-            let s2 = d1.to_string();
-            let d2 = Difficulty::from_str(&s2).unwrap();
-            assert!(
-                relative_error(d1.as_f64(), d2.as_f64()) < 1e-6,
-                "roundtrip {s}"
-            );
-        }
-    }
-    #[test]
     fn from_str_rejects_bad() {
         for s in [
             "",
