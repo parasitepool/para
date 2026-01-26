@@ -109,10 +109,10 @@ impl Metatron {
         self.connections.fetch_sub(1, Ordering::Relaxed);
     }
 
-    pub(crate) fn hash_rate_1m(&self) -> HashRate {
+    pub(crate) fn hashrate_1m(&self) -> HashRate {
         self.users
             .iter()
-            .map(|user| user.hash_rate_1m())
+            .map(|user| user.hashrate_1m())
             .fold(HashRate::ZERO, |acc, r| acc + r)
     }
 
@@ -164,9 +164,9 @@ impl Metatron {
 impl StatusLine for Metatron {
     fn status_line(&self) -> String {
         format!(
-            "sps={:.2}  hash_rate={}  connections={}  users={}  workers={}  accepted={}  rejected={}  blocks={}  uptime={}s",
+            "sps={:.2}  hashrate={:.2}  connections={}  users={}  workers={}  accepted={}  rejected={}  blocks={}  uptime={}s",
             self.sps_1m(),
-            self.hash_rate_1m(),
+            self.hashrate_1m(),
             self.total_connections(),
             self.total_users(),
             self.total_workers(),

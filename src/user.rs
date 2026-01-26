@@ -29,10 +29,10 @@ impl User {
         self.workers.len()
     }
 
-    pub(crate) fn hash_rate_1m(&self) -> HashRate {
+    pub(crate) fn hashrate_1m(&self) -> HashRate {
         self.workers
             .iter()
-            .map(|worker| worker.hash_rate_1m())
+            .map(|worker| worker.hashrate_1m())
             .fold(HashRate::ZERO, |acc, r| acc + r)
     }
 
