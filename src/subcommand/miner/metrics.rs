@@ -23,7 +23,7 @@ impl Metrics {
                 last_total: 0,
                 smoothed: DecayingAverage::new(Duration::from_secs(5)),
             }),
-            sps: Mutex::new(DecayingAverage::new(Duration::from_secs(10))),
+            sps: Mutex::new(DecayingAverage::new(Duration::from_secs(30))),
         }
     }
 

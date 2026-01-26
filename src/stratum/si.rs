@@ -28,7 +28,8 @@ pub fn format_si(value: f64, unit: &str, f: &mut Formatter<'_>) -> fmt::Result {
         .unwrap_or(&SI_PREFIXES[0]);
 
     let scaled = value / divisor;
-    let s = format!("{scaled:.3}");
+    let precision = f.precision().unwrap_or(3);
+    let s = format!("{scaled:.precision$}");
     let trimmed = s.trim_end_matches('0').trim_end_matches('.');
 
     let suffix = format!("{prefix}{unit}");

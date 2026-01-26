@@ -50,7 +50,7 @@ impl Worker {
         &self.workername
     }
 
-    pub(crate) fn hash_rate_1m(&self) -> HashRate {
+    pub(crate) fn hashrate_1m(&self) -> HashRate {
         HashRate::from_dsps(self.stats.lock().dsps_1m.value_at(Instant::now()))
     }
 
