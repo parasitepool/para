@@ -1,7 +1,4 @@
-use {
-    super::*,
-    crate::si::{format_si, parse_si},
-};
+use super::*;
 
 const HASHES_PER_DIFF_1: u64 = 1 << 32;
 

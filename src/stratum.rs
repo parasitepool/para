@@ -46,6 +46,7 @@ mod notify;
 mod ntime;
 mod prevhash;
 mod set_difficulty;
+pub mod si;
 mod submit;
 mod subscribe;
 mod suggest_difficulty;

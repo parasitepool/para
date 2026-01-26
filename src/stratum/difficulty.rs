@@ -1,4 +1,4 @@
-use {super::*, core::cmp::Ordering, primitive_types::U256};
+use {super::*, core::cmp::Ordering, primitive_types::U256, si::format_si};
 
 pub static DIFFICULTY_1_TARGET: LazyLock<U256> =
     LazyLock::new(|| U256::from_big_endian(&Target::MAX.to_be_bytes()));
@@ -157,7 +157,7 @@ impl fmt::Display for Difficulty {
         let d = self.as_f64();
 
         if d >= 1.0 {
-            crate::si::format_si(d.floor(), "", f)
+            format_si(d.floor(), "", f)
         } else if let Some(p) = f.precision() {
             write!(f, "{:.*}", p, d)
         } else {

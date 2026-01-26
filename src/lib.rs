@@ -87,6 +87,7 @@ use {
         Authorize, Configure, Difficulty, Extranonce, Id, JobId, MerkleNode, Message, Nbits, Nonce,
         Notify, Ntime, PrevHash, SetDifficulty, StratumError, Submit, Subscribe, SubscribeResult,
         Username, Version,
+        si::{format_si, parse_si},
     },
     subcommand::server::account::Account,
     sysinfo::{Disks, System},
@@ -134,7 +135,6 @@ mod jobs;
 mod metatron;
 mod metrics;
 pub mod settings;
-mod si;
 mod signal;
 mod stratifier;
 pub mod stratum;

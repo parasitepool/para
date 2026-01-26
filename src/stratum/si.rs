@@ -1,7 +1,4 @@
-use {
-    super::*,
-    std::fmt::{self, Formatter},
-};
+use super::*;
 
 pub const SI_PREFIXES: &[(&str, f64)] = &[
     ("", 1.0),
@@ -35,7 +32,12 @@ pub fn format_si(value: f64, unit: &str, f: &mut Formatter<'_>) -> fmt::Result {
 
 pub fn parse_si(s: &str, units: &[&str]) -> Result<f64> {
     let s = s.trim();
-    ensure!(!s.is_empty(), "empty string");
+
+    if s.is_empty() {
+        return Err(InternalError::InvalidValue {
+            reason: "empty string".to_string(),
+        });
+    }
 
     let s = units
         .iter()
@@ -56,11 +58,23 @@ pub fn parse_si(s: &str, units: &[&str]) -> Result<f64> {
         })
         .unwrap_or((s, 1.0));
 
-    let num: f64 = num_str.parse().context("invalid number")?;
-    ensure!(num.is_finite() && num >= 0.0, "invalid value");
+    let num: f64 = num_str.parse().map_err(|_| InternalError::Parse {
+        message: "invalid number".to_string(),
+    })?;
+
+    if !num.is_finite() || num < 0.0 {
+        return Err(InternalError::InvalidValue {
+            reason: "invalid value".to_string(),
+        });
+    }
 
     let result = num * mult;
-    ensure!(result.is_finite(), "value overflow after SI prefix scaling");
+
+    if !result.is_finite() {
+        return Err(InternalError::InvalidValue {
+            reason: "value overflow after SI prefix scaling".to_string(),
+        });
+    }
 
     Ok(result)
 }
