@@ -339,9 +339,9 @@ mod tests {
 
     #[test]
     fn display_si_when_greater_than_1() {
-        assert_eq!(format!("{}", Difficulty::from(1)), "1 ");
-        assert_eq!(format!("{}", Difficulty::from(42)), "42 ");
-        assert_eq!(format!("{}", Difficulty::from(2.9)), "2 ");
+        assert_eq!(format!("{}", Difficulty::from(1)), "1");
+        assert_eq!(format!("{}", Difficulty::from(42)), "42");
+        assert_eq!(format!("{}", Difficulty::from(2.9)), "2");
         assert_eq!(format!("{}", Difficulty::from(1000)), "1 K");
         assert_eq!(format!("{}", Difficulty::from(1_000_000)), "1 M");
 

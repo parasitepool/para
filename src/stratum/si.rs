@@ -14,7 +14,11 @@ pub const SI_PREFIXES: &[(&str, f64)] = &[
 
 pub fn format_si(value: f64, unit: &str, f: &mut Formatter<'_>) -> fmt::Result {
     if value == 0.0 {
-        return write!(f, "0 {unit}");
+        return if unit.is_empty() {
+            write!(f, "0")
+        } else {
+            write!(f, "0 {unit}")
+        };
     }
 
     let (prefix, divisor) = SI_PREFIXES
@@ -27,7 +31,13 @@ pub fn format_si(value: f64, unit: &str, f: &mut Formatter<'_>) -> fmt::Result {
     let s = format!("{scaled:.3}");
     let trimmed = s.trim_end_matches('0').trim_end_matches('.');
 
-    write!(f, "{trimmed} {prefix}{unit}")
+    let suffix = format!("{prefix}{unit}");
+
+    if suffix.is_empty() {
+        write!(f, "{trimmed}")
+    } else {
+        write!(f, "{trimmed} {suffix}")
+    }
 }
 
 pub fn parse_si(s: &str, units: &[&str]) -> Result<f64> {
@@ -98,11 +108,11 @@ mod tests {
             assert_eq!(FormatSi(value, unit).to_string(), expected);
         }
 
-        case(0.0, "", "0 ");
+        case(0.0, "", "0");
         case(0.0, "H/s", "0 H/s");
-        case(1.0, "", "1 ");
-        case(42.0, "", "42 ");
-        case(999.0, "", "999 ");
+        case(1.0, "", "1");
+        case(42.0, "", "42");
+        case(999.0, "", "999");
         case(1e3, "", "1 K");
         case(1.5e3, "", "1.5 K");
         case(1e6, "", "1 M");
