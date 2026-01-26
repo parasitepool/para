@@ -1,7 +1,4 @@
-use {
-    super::*,
-    tokio::{sync::mpsc, task::JoinHandle},
-};
+use {super::*, tokio::sync::mpsc};
 
 mod database;
 mod event;
@@ -59,34 +56,12 @@ pub(crate) async fn build_record_sink(
     };
 
     let (tx, rx) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
-    let handle = spawn_sink_consumer(rx, sink, cancel_token.clone());
 
     tasks.spawn(async move {
-        let _ = handle.await;
-    });
+        let mut rx = rx;
+        let mut sink = sink;
+        let cancel = cancel_token;
 
-    Ok(Some(tx))
-}
-
-#[async_trait]
-pub trait RecordSink: Send + Sync {
-    async fn record(&mut self, event: Event) -> Result<u64>;
-
-    async fn flush(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    async fn close(&mut self) -> Result<()> {
-        self.flush().await
-    }
-}
-
-pub fn spawn_sink_consumer(
-    mut rx: mpsc::Receiver<Event>,
-    mut sink: Box<dyn RecordSink>,
-    cancel: CancellationToken,
-) -> JoinHandle<()> {
-    tokio::spawn(async move {
         loop {
             tokio::select! {
                 biased;
@@ -110,7 +85,22 @@ pub fn spawn_sink_consumer(
                 }
             }
         }
-    })
+    });
+
+    Ok(Some(tx))
+}
+
+#[async_trait]
+pub trait RecordSink: Send + Sync {
+    async fn record(&mut self, event: Event) -> Result<u64>;
+
+    async fn flush(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    async fn close(&mut self) -> Result<()> {
+        self.flush().await
+    }
 }
 
 #[macro_export]
@@ -143,7 +133,10 @@ macro_rules! rejection_event {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use {
+        super::*,
+        std::sync::atomic::{AtomicU64, Ordering},
+    };
 
     #[tokio::test]
     async fn multi_sink_broadcasts_to_all() {
@@ -159,20 +152,19 @@ mod tests {
         });
 
         struct CountingSink {
-            count: Arc<Mutex<u64>>,
+            count: Arc<AtomicU64>,
         }
 
         #[async_trait]
         impl RecordSink for CountingSink {
             async fn record(&mut self, _event: Event) -> Result<u64> {
-                let mut count = self.count.lock().await;
-                *count += 1;
+                self.count.fetch_add(1, Ordering::Relaxed);
                 Ok(1)
             }
         }
 
-        let count1 = Arc::new(Mutex::new(0));
-        let count2 = Arc::new(Mutex::new(0));
+        let count1 = Arc::new(AtomicU64::new(0));
+        let count2 = Arc::new(AtomicU64::new(0));
 
         let mut sink = MultiSink::new(vec![
             Box::new(CountingSink {
@@ -185,7 +177,7 @@ mod tests {
 
         sink.record(event).await.unwrap();
 
-        assert_eq!(*count1.lock().await, 1);
-        assert_eq!(*count2.lock().await, 1);
+        assert_eq!(count1.load(Ordering::Relaxed), 1);
+        assert_eq!(count2.load(Ordering::Relaxed), 1);
     }
 }
