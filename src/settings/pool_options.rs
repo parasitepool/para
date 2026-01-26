@@ -95,15 +95,15 @@ pub(crate) struct PoolOptions {
     #[arg(
         long,
         value_parser = validate_events_file,
-        help = "Write events to <EVENTS_FILE> (.json or .csv extension)."
+        help = "Write events to JSON or CSV <EVENTS_FILE>."
     )]
     pub(crate) events_file: Option<PathBuf>,
 }
 
-fn validate_events_file(s: &str) -> anyhow::Result<PathBuf> {
+fn validate_events_file(s: &str) -> Result<PathBuf> {
     let path = PathBuf::from(s);
     let ext = path.extension().and_then(|e| e.to_str());
-    anyhow::ensure!(
+    ensure!(
         matches!(ext, Some("json") | Some("csv")),
         "Events file must have .json or .csv extension"
     );
@@ -111,7 +111,7 @@ fn validate_events_file(s: &str) -> anyhow::Result<PathBuf> {
 }
 
 fn validate_database_url(s: &str) -> anyhow::Result<String> {
-    anyhow::ensure!(
+    ensure!(
         s.starts_with("postgres://") || s.starts_with("postgresql://"),
         "Database URL must start with postgres:// or postgresql://"
     );
