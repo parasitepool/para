@@ -1,7 +1,6 @@
 use {
     super::{Result, async_trait, event::*},
-    anyhow::anyhow,
-    std::{path::PathBuf, sync::Arc},
+    std::path::PathBuf,
     tokio::{
         fs::OpenOptions,
         io::{AsyncWriteExt, BufWriter},
@@ -17,11 +16,11 @@ pub enum FileFormat {
 
 pub struct FileSink {
     format: FileFormat,
-    writer: Arc<tokio::sync::Mutex<Option<BufWriter<tokio::fs::File>>>>,
+    writer: BufWriter<tokio::fs::File>,
 }
 
 impl FileSink {
-    pub async fn new(path: PathBuf, format: FileFormat) -> Result<Self> {
+    pub async fn new(path: PathBuf) -> Result<Self> {
         let file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -29,13 +28,16 @@ impl FileSink {
             .await?;
         let writer = BufWriter::new(file);
 
-        Ok(Self {
-            format,
-            writer: Arc::new(tokio::sync::Mutex::new(Some(writer))),
-        })
+        let format = if path.extension().is_some_and(|e| e == "csv") {
+            FileFormat::Csv
+        } else {
+            FileFormat::JsonLines
+        };
+
+        Ok(Self { format, writer })
     }
 
-    async fn write_event(&self, event: &Event) -> Result<u64> {
+    async fn write_event(&mut self, event: &Event) -> Result<u64> {
         use std::time::{SystemTime, UNIX_EPOCH};
 
         let now = || -> i64 {
@@ -44,9 +46,6 @@ impl FileSink {
                 .unwrap()
                 .as_secs() as i64
         };
-
-        let mut guard = self.writer.lock().await;
-        let writer = guard.as_mut().ok_or_else(|| anyhow!("FileSink closed"))?;
 
         match self.format {
             FileFormat::JsonLines => {
@@ -57,13 +56,13 @@ impl FileSink {
                     _ => {}
                 }
                 let json = serde_json::to_string(&event_with_timestamp)?;
-                writer.write_all(json.as_bytes()).await?;
-                writer.write_all(b"\n").await?;
+                self.writer.write_all(json.as_bytes()).await?;
+                self.writer.write_all(b"\n").await?;
             }
             FileFormat::Csv => {
                 let line = self.event_to_csv(event, now());
-                writer.write_all(line.as_bytes()).await?;
-                writer.write_all(b"\n").await?;
+                self.writer.write_all(line.as_bytes()).await?;
+                self.writer.write_all(b"\n").await?;
             }
         }
         Ok(1)
@@ -115,23 +114,17 @@ impl FileSink {
 
 #[async_trait]
 impl super::RecordSink for FileSink {
-    async fn record(&self, event: Event) -> Result<u64> {
+    async fn record(&mut self, event: Event) -> Result<u64> {
         self.write_event(&event).await
     }
 
-    async fn flush(&self) -> Result<()> {
-        let mut guard = self.writer.lock().await;
-        if let Some(writer) = guard.as_mut() {
-            writer.flush().await?;
-        }
+    async fn flush(&mut self) -> Result<()> {
+        self.writer.flush().await?;
         Ok(())
     }
 
-    async fn close(&self) -> Result<()> {
-        let mut guard = self.writer.lock().await;
-        if let Some(mut writer) = guard.take() {
-            writer.flush().await?;
-        }
+    async fn close(&mut self) -> Result<()> {
+        self.writer.flush().await?;
         Ok(())
     }
 }

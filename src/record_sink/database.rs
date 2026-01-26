@@ -19,15 +19,14 @@ impl DatabaseSink {
 
 #[async_trait]
 impl super::RecordSink for DatabaseSink {
-    async fn record(&self, event: Event) -> Result<u64> {
+    async fn record(&mut self, event: Event) -> Result<u64> {
         let rows_changed = match event {
             Event::Share(share) => {
                 sqlx::query(
                     "INSERT INTO shares (
                         blockheight, diff, sdiff, result, reject_reason,
                         workername, username, createdate
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7,
-                        COALESCE(to_timestamp($8), CURRENT_TIMESTAMP))",
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP::TEXT)",
                 )
                     .bind(share.blockheight)
                     .bind(share.pool_diff)
@@ -36,7 +35,6 @@ impl super::RecordSink for DatabaseSink {
                     .bind(&share.reject_reason)
                     .bind(&share.workername)
                     .bind(&share.address)
-                    .bind(share.timestamp)
                     .execute(&self.pool)
                     .await?
             }

@@ -1,5 +1,5 @@
 use {
-    std::sync::Arc,
+    super::*,
     tokio::{sync::mpsc, task::JoinHandle},
 };
 
@@ -11,11 +11,9 @@ mod multi;
 pub use {
     database::DatabaseSink,
     event::{BlockFoundEvent, Event, ShareEvent},
-    file::{FileFormat, FileSink},
+    file::FileSink,
     multi::MultiSink,
 };
-
-use super::*;
 
 const EVENT_CHANNEL_CAPACITY: usize = 10_000;
 
@@ -39,13 +37,7 @@ pub(crate) async fn build_record_sink(
     }
 
     if let Some(events_file) = settings.events_file() {
-        let format = if events_file.extension().is_some_and(|e| e == "csv") {
-            FileFormat::Csv
-        } else {
-            FileFormat::JsonLines
-        };
-
-        match FileSink::new(events_file.clone(), format).await {
+        match FileSink::new(events_file.clone()).await {
             Ok(file_sink) => {
                 info!("File sink writing to {}", events_file.display());
                 sinks.push(Box::new(file_sink));
@@ -60,10 +52,10 @@ pub(crate) async fn build_record_sink(
         return Ok(None);
     }
 
-    let sink: Arc<dyn RecordSink> = if sinks.len() == 1 {
-        Arc::from(sinks.remove(0))
+    let sink: Box<dyn RecordSink> = if sinks.len() == 1 {
+        sinks.remove(0)
     } else {
-        Arc::new(MultiSink::new(sinks))
+        Box::new(MultiSink::new(sinks))
     };
 
     let (tx, rx) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
@@ -78,20 +70,20 @@ pub(crate) async fn build_record_sink(
 
 #[async_trait]
 pub trait RecordSink: Send + Sync {
-    async fn record(&self, event: Event) -> Result<u64>;
+    async fn record(&mut self, event: Event) -> Result<u64>;
 
-    async fn flush(&self) -> Result<()> {
+    async fn flush(&mut self) -> Result<()> {
         Ok(())
     }
 
-    async fn close(&self) -> Result<()> {
+    async fn close(&mut self) -> Result<()> {
         self.flush().await
     }
 }
 
 pub fn spawn_sink_consumer(
     mut rx: mpsc::Receiver<Event>,
-    sink: Arc<dyn RecordSink>,
+    mut sink: Box<dyn RecordSink>,
     cancel: CancellationToken,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
@@ -172,7 +164,7 @@ mod tests {
 
         #[async_trait]
         impl RecordSink for CountingSink {
-            async fn record(&self, _event: Event) -> Result<u64> {
+            async fn record(&mut self, _event: Event) -> Result<u64> {
                 let mut count = self.count.lock().await;
                 *count += 1;
                 Ok(1)
@@ -182,7 +174,7 @@ mod tests {
         let count1 = Arc::new(Mutex::new(0));
         let count2 = Arc::new(Mutex::new(0));
 
-        let sink = MultiSink::new(vec![
+        let mut sink = MultiSink::new(vec![
             Box::new(CountingSink {
                 count: count1.clone(),
             }),
