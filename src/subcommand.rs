@@ -1,5 +1,7 @@
 use super::*;
 
+#[cfg(feature = "gui")]
+pub(crate) mod gui;
 pub mod miner;
 mod ping;
 pub(crate) mod pool;
@@ -10,6 +12,9 @@ pub mod template;
 
 #[derive(Debug, Parser)]
 pub(crate) enum Subcommand {
+    #[cfg(feature = "gui")]
+    #[command(about = "Launch GUI")]
+    Gui(gui::Gui),
     #[command(about = "Run a toy miner")]
     Miner(miner::Miner),
     #[command(about = "Measure Stratum message ping")]
@@ -29,6 +34,8 @@ pub(crate) enum Subcommand {
 impl Subcommand {
     pub(crate) async fn run(self, cancel_token: CancellationToken) -> Result {
         match self {
+            #[cfg(feature = "gui")]
+            Self::Gui(_) => unreachable!("GUI handled before tokio runtime"),
             Self::Miner(miner) => miner.run(cancel_token).await,
             Self::Ping(ping) => ping.run(cancel_token).await,
             Self::Pool(pool) => pool.run(cancel_token).await,
