@@ -105,7 +105,7 @@ pub trait RecordSink: Send + Sync {
 
 #[macro_export]
 macro_rules! rejection_event {
-    ($address:expr, $workername:expr, $blockheight:expr, $reason:expr) => {
+    ($address:expr, $workername:expr, $blockheight:expr, $error:expr) => {
         $crate::record_sink::Event::Share($crate::record_sink::ShareEvent {
             timestamp: None,
             address: $address,
@@ -114,10 +114,10 @@ macro_rules! rejection_event {
             share_diff: 0.0,
             result: false,
             blockheight: Some($blockheight),
-            reject_reason: Some($reason.to_string()),
+            reject_reason: Some($error.to_string()),
         })
     };
-    ($address:expr, $workername:expr, $pool_diff:expr, $share_diff:expr, $blockheight:expr, $reason:expr) => {
+    ($address:expr, $workername:expr, $pool_diff:expr, $share_diff:expr, $blockheight:expr, $error:expr) => {
         $crate::record_sink::Event::Share($crate::record_sink::ShareEvent {
             timestamp: None,
             address: $address,
@@ -126,7 +126,7 @@ macro_rules! rejection_event {
             share_diff: $share_diff,
             result: false,
             blockheight: Some($blockheight),
-            reject_reason: Some($reason.to_string()),
+            reject_reason: Some($error.to_string()),
         })
     };
 }

@@ -616,13 +616,6 @@ impl<W: Workbase> Stratifier<W> {
         if submit.username != session.username {
             let job_height = self.workbase_rx.borrow().height();
 
-            self.send_event(rejection_event!(
-                session.address.to_string(),
-                session.workername.clone(),
-                job_height,
-                "worker_mismatch"
-            ));
-
             self.send_error(
                 id,
                 StratumError::WorkerMismatch,
@@ -633,6 +626,13 @@ impl<W: Workbase> Stratifier<W> {
             )
             .await?;
 
+            self.send_event(rejection_event!(
+                session.address.to_string(),
+                session.workername.clone(),
+                job_height,
+                StratumError::WorkerMismatch
+            ));
+
             worker.record_rejected();
 
             return Ok(self.bouncer.reject());
@@ -641,14 +641,14 @@ impl<W: Workbase> Stratifier<W> {
         let Some(job) = self.jobs.get(&submit.job_id) else {
             let job_height = self.workbase_rx.borrow().height();
 
+            self.send_error(id, StratumError::Stale, None).await?;
+
             self.send_event(rejection_event!(
                 session.address.to_string(),
                 session.workername.clone(),
                 job_height,
-                "stale"
+                StratumError::Stale
             ));
-
-            self.send_error(id, StratumError::Stale, None).await?;
 
             worker.record_rejected();
 
@@ -667,13 +667,6 @@ impl<W: Workbase> Stratifier<W> {
 
             let job_height = job.workbase.height();
 
-            self.send_event(rejection_event!(
-                session.address.to_string(),
-                session.workername.clone(),
-                job_height,
-                "invalid_nonce2_length"
-            ));
-
             self.send_error(
                 id,
                 StratumError::InvalidNonce2Length,
@@ -684,6 +677,13 @@ impl<W: Workbase> Stratifier<W> {
             )
             .await?;
 
+            self.send_event(rejection_event!(
+                session.address.to_string(),
+                session.workername.clone(),
+                job_height,
+                StratumError::InvalidNonce2Length
+            ));
+
             worker.record_rejected();
 
             return Ok(self.bouncer.reject());
@@ -693,13 +693,6 @@ impl<W: Workbase> Stratifier<W> {
         let submit_ntime = submit.ntime.0;
         if submit_ntime < job_ntime || submit_ntime > job_ntime + MAX_NTIME_OFFSET {
             let job_height = job.workbase.height();
-
-            self.send_event(rejection_event!(
-                session.address.to_string(),
-                session.workername.clone(),
-                job_height,
-                "ntime_out_of_range"
-            ));
 
             self.send_error(
                 id,
@@ -712,6 +705,13 @@ impl<W: Workbase> Stratifier<W> {
             )
             .await?;
 
+            self.send_event(rejection_event!(
+                session.address.to_string(),
+                session.workername.clone(),
+                job_height,
+                StratumError::NtimeOutOfRange
+            ));
+
             worker.record_rejected();
 
             return Ok(self.bouncer.reject());
@@ -722,19 +722,19 @@ impl<W: Workbase> Stratifier<W> {
                 let Some(version_mask) = job.version_mask else {
                     let job_height = job.workbase.height();
 
-                    self.send_event(rejection_event!(
-                        session.address.to_string(),
-                        session.workername.clone(),
-                        job_height,
-                        "version_rolling_not_negotiated"
-                    ));
-
                     self.send_error(
                         id,
                         StratumError::InvalidVersionMask,
                         Some(serde_json::json!({"reason": "Version rolling not negotiated"})),
                     )
                     .await?;
+
+                    self.send_event(rejection_event!(
+                        session.address.to_string(),
+                        session.workername.clone(),
+                        job_height,
+                        StratumError::InvalidVersionMask
+                    ));
 
                     worker.record_rejected();
 
@@ -746,13 +746,6 @@ impl<W: Workbase> Stratifier<W> {
                 if disallowed != Version::from(0) {
                     let job_height = job.workbase.height();
 
-                    self.send_event(rejection_event!(
-                        session.address.to_string(),
-                        session.workername.clone(),
-                        job_height,
-                        "invalid_version_bits"
-                    ));
-
                     self.send_error(
                         id,
                         StratumError::InvalidVersionMask,
@@ -763,6 +756,13 @@ impl<W: Workbase> Stratifier<W> {
                         })),
                     )
                     .await?;
+
+                    self.send_event(rejection_event!(
+                        session.address.to_string(),
+                        session.workername.clone(),
+                        job_height,
+                        StratumError::InvalidVersionMask
+                    ));
 
                     worker.record_rejected();
 
@@ -810,16 +810,16 @@ impl<W: Workbase> Stratifier<W> {
             let share_diff = Difficulty::from(hash).as_f64();
             let job_height = job.workbase.height();
 
+            self.send_error(id, StratumError::Duplicate, None).await?;
+
             self.send_event(rejection_event!(
                 session.address.to_string(),
                 session.workername.clone(),
                 pool_diff,
                 share_diff,
                 job_height,
-                "duplicate"
+                StratumError::Duplicate
             ));
-
-            self.send_error(id, StratumError::Duplicate, None).await?;
 
             worker.record_rejected();
 
@@ -931,16 +931,16 @@ impl<W: Workbase> Stratifier<W> {
         let share_diff = Difficulty::from(hash).as_f64();
         let job_height = job.workbase.height();
 
+        self.send_error(id, StratumError::AboveTarget, None).await?;
+
         self.send_event(rejection_event!(
             session.address.to_string(),
             session.workername.clone(),
             pool_diff,
             share_diff,
             job_height,
-            "above_target"
+            StratumError::AboveTarget
         ));
-
-        self.send_error(id, StratumError::AboveTarget, None).await?;
 
         worker.record_rejected();
 
