@@ -1,4 +1,4 @@
-use {super::*, core::cmp::Ordering, primitive_types::U256, si::format_si};
+use {super::*, core::cmp::Ordering, primitive_types::U256};
 
 pub static DIFFICULTY_1_TARGET: LazyLock<U256> =
     LazyLock::new(|| U256::from_big_endian(&Target::MAX.to_be_bytes()));

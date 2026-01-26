@@ -1,5 +1,8 @@
 use super::*;
 
+/// Expected hashes per difficulty-1 share: 2^32 =~ 4.29 billion.
+/// The precise value is 2^256/target_1 =~ 4,295,032,833 (~0.0015% higher),
+/// but 2^32 is the standard approximation used across the mining ecosystem.
 const HASHES_PER_DIFF_1: u64 = 1 << 32;
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
