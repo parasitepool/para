@@ -6,12 +6,12 @@
   <title>Proxy</title>
   <link rel=icon href=/static/parasite.svg type=image/x-icon size=16x16>
   <style>
-    body { font: 18px/1.6 monospace; margin: 30px; background: #111; color: #eee; }
-    h1 { text-align: center; margin-bottom: 40px; font-size: 28px; }
+    body { font: clamp(14px, 1.5vw, 18px)/1.6 monospace; margin: 30px; background: #111; color: #eee; }
+    h1 { text-align: center; margin-bottom: 40px; font-size: 1.55em; }
     .columns { display: flex; gap: 60px; }
-    .column { border: 1px solid #444; padding: 20px 30px; width: 500px; }
-    .column h2 { margin: 0 0 15px; font-size: 22px; text-align: center; }
-    .column h3 { margin: 15px 0 10px; font-size: 20px; color: #888; border-top: 1px solid #444; padding-top: 15px; text-align: center; }
+    .column { border: 1px solid #444; padding: 20px 30px; width: 500px; box-sizing: border-box; }
+    .column h2 { margin: 0 0 15px; font-size: 1.22em; text-align: center; }
+    .column h3 { margin: 15px 0 10px; font-size: 1.11em; color: #888; border-top: 1px solid #444; padding-top: 15px; text-align: center; }
     .row { display: flex; justify-content: space-between; }
     .connected { color: #4f4; }
     .disconnected { color: #f44; }
@@ -39,6 +39,17 @@
     .log-info { color: #4f4; }
     .log-debug { color: #88f; }
     .log-trace { color: #888; }
+    @media (max-width: 1140px) {
+      body { margin: 20px; }
+      .wrapper { width: auto; }
+      .columns { flex-direction: column; gap: 30px; align-items: center; }
+      .column { width: 100%; max-width: 500px; }
+      #logs { max-width: 500px; margin-left: auto; margin-right: auto; }
+    }
+    @media (max-width: 560px) {
+      body { margin: 10px; }
+      .column { padding: 15px 20px; }
+    }
   </style>
 </head>
 <body>
