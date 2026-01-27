@@ -552,6 +552,7 @@ async fn share_validation() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001 --disable-bouncer");
 
     let status = pool.get_status().await.unwrap();
+    assert_eq!(status.endpoint, pool.stratum_endpoint());
     assert_eq!(status.users, 0);
     assert_eq!(status.workers, 0);
     assert_eq!(status.connections, 0);

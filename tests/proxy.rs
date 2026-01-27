@@ -13,6 +13,8 @@ async fn proxy() {
 
     let status = proxy.get_status().await.unwrap();
 
+    assert_eq!(status.endpoint, proxy.stratum_endpoint());
+
     assert_eq!(
         status.upstream_endpoint, upstream,
         "Upstream URL should match"

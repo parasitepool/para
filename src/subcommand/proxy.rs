@@ -32,7 +32,8 @@ impl Proxy {
             ProxyExtranonces::new(upstream.enonce1().clone(), upstream.enonce2_size())
                 .context("upstream extranonce configuration incompatible with proxy mode")?,
         );
-        let metatron = Arc::new(Metatron::new(extranonces));
+        let endpoint = format!("{}:{}", settings.address(), settings.port());
+        let metatron = Arc::new(Metatron::new(extranonces, endpoint));
         metatron.clone().spawn(cancel_token.clone(), &mut tasks);
 
         let metrics = Arc::new(Metrics {

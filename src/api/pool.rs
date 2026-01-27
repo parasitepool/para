@@ -31,6 +31,7 @@ async fn home() -> Response {
 
 async fn status(State(metatron): State<Arc<Metatron>>) -> Json<PoolStatus> {
     Json(PoolStatus {
+        endpoint: metatron.endpoint().to_string(),
         hashrate_1m: metatron.hashrate_1m(),
         sps_1m: metatron.sps_1m(),
         users: metatron.total_users(),

@@ -31,6 +31,7 @@ async fn home() -> Response {
 
 async fn status(State(metrics): State<Arc<Metrics>>) -> Json<ProxyStatus> {
     Json(ProxyStatus {
+        endpoint: metrics.metatron.endpoint().to_string(),
         hashrate_1m: metrics.metatron.hashrate_1m(),
         sps_1m: metrics.metatron.sps_1m(),
         users: metrics.metatron.total_users(),
