@@ -50,8 +50,7 @@ impl<W: Workbase> Jobs<W> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use bitcoin::block;
+    use {super::*, bitcoin::block};
 
     trait TestWorkbaseFactory: Workbase + Sized {
         fn workbase_that_cleans(seq: u64, job_id: JobId) -> Arc<Self>;

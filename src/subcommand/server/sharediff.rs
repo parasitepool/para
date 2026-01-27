@@ -1,5 +1,4 @@
-use super::*;
-use crate::subcommand::server::database::HighestDiff;
+use {super::*, crate::subcommand::server::database::HighestDiff};
 
 pub(crate) fn share_difficulty_router(config: Arc<ServerConfig>, database: Database) -> Router {
     let mut router = Router::new()

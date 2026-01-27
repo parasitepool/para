@@ -85,4 +85,35 @@ pub(crate) struct PoolOptions {
 
     #[arg(long, help = "Disable bouncer.")]
     pub(crate) disable_bouncer: bool,
+
+    #[arg(
+        long,
+        value_parser = validate_database_url,
+        help = "Connect to Postgres at <DATABASE_URL> for event storage."
+    )]
+    pub(crate) database_url: Option<String>,
+    #[arg(
+        long,
+        value_parser = validate_events_file,
+        help = "Write events to JSON or CSV <EVENTS_FILE>."
+    )]
+    pub(crate) events_file: Option<PathBuf>,
+}
+
+fn validate_events_file(s: &str) -> Result<PathBuf> {
+    let path = PathBuf::from(s);
+    let ext = path.extension().and_then(|e| e.to_str());
+    ensure!(
+        matches!(ext, Some("json") | Some("csv")),
+        "Events file must have .json or .csv extension"
+    );
+    Ok(path)
+}
+
+fn validate_database_url(s: &str) -> anyhow::Result<String> {
+    ensure!(
+        s.starts_with("postgres://") || s.starts_with("postgresql://"),
+        "Database URL must start with postgres:// or postgresql://"
+    );
+    Ok(s.to_string())
 }

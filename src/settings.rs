@@ -3,8 +3,7 @@ use super::*;
 mod pool_options;
 mod proxy_options;
 
-pub(crate) use pool_options::PoolOptions;
-pub(crate) use proxy_options::ProxyOptions;
+pub(crate) use {pool_options::PoolOptions, proxy_options::ProxyOptions};
 
 #[derive(Clone, Debug)]
 pub(crate) struct Settings {
@@ -36,6 +35,8 @@ pub(crate) struct Settings {
     enonce1_size: usize,
     enonce2_size: usize,
     disable_bouncer: bool,
+    database_url: Option<String>,
+    events_file: Option<PathBuf>,
 }
 
 impl Default for Settings {
@@ -69,6 +70,8 @@ impl Default for Settings {
             enonce1_size: ENONCE1_SIZE,
             enonce2_size: MAX_ENONCE_SIZE,
             disable_bouncer: false,
+            database_url: None,
+            events_file: None,
         }
     }
 }
@@ -114,6 +117,8 @@ impl Settings {
             enonce1_size: options.enonce1_size.unwrap_or(ENONCE1_SIZE),
             enonce2_size: options.enonce2_size.unwrap_or(MAX_ENONCE_SIZE),
             disable_bouncer: options.disable_bouncer,
+            database_url: options.database_url.clone(),
+            events_file: options.events_file.clone(),
         };
 
         settings.validate()?;
@@ -388,12 +393,19 @@ impl Settings {
     pub(crate) fn disable_bouncer(&self) -> bool {
         self.disable_bouncer
     }
+
+    pub(crate) fn database_url(&self) -> Option<String> {
+        self.database_url.clone()
+    }
+
+    pub(crate) fn events_file(&self) -> Option<PathBuf> {
+        self.events_file.clone()
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::arguments::Arguments;
+    use {super::*, crate::arguments::Arguments};
 
     fn parse_pool_options(args: &str) -> PoolOptions {
         match Arguments::try_parse_from(args.split_whitespace()) {

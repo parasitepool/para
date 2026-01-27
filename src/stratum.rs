@@ -20,13 +20,10 @@ use {
     serde_with::{DeserializeFromStr, SerializeDisplay},
     snafu::{ResultExt, Snafu},
     std::{
+        fmt::{self, Display, Formatter},
         ops::{BitAnd, BitOr, BitXor, Not},
         str::FromStr,
         sync::LazyLock,
-        {
-            fmt,
-            fmt::{Display, Formatter},
-        },
     },
 };
 

@@ -1,8 +1,12 @@
-use super::*;
-use crate::subcommand::server::database::{
-    FailedPayout, Payout, PendingPayout, SimulatedPayout, Split, UpdatePayoutStatusRequest,
+use {
+    super::*,
+    crate::subcommand::server::{
+        database::{
+            FailedPayout, Payout, PendingPayout, SimulatedPayout, Split, UpdatePayoutStatusRequest,
+        },
+        templates::simulate_payouts::SimulatePayoutsHtml,
+    },
 };
-use crate::subcommand::server::templates::simulate_payouts::SimulatePayoutsHtml;
 
 pub(crate) fn payouts_router(config: Arc<ServerConfig>, database: Database) -> Router {
     let mut router = Router::new()

@@ -56,8 +56,10 @@ async fn insert_test_shares_remote(
     count: u32,
     block_height: i64,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use crate::address;
-    use sqlx::{Pool, Postgres, postgres::PgPoolOptions};
+    use {
+        crate::address,
+        sqlx::{Pool, Postgres, postgres::PgPoolOptions},
+    };
 
     let pool: Pool<Postgres> = PgPoolOptions::new()
         .max_connections(5)

@@ -31,8 +31,10 @@ use {
         services::ServeDir, set_header::SetResponseHeaderLayer,
         validate_request::ValidateRequestHeaderLayer,
     },
-    utoipa::Modify,
-    utoipa::openapi::security::{Http, HttpAuthScheme, SecurityScheme},
+    utoipa::{
+        Modify,
+        openapi::security::{Http, HttpAuthScheme, SecurityScheme},
+    },
 };
 
 pub mod account;

@@ -1,6 +1,7 @@
 use {
     anyhow::{Context, Error, anyhow, bail, ensure},
     arguments::Arguments,
+    async_trait::async_trait,
     axum::{
         Extension, Json, Router,
         extract::{DefaultBodyLimit, FromRequestParts},
@@ -125,6 +126,7 @@ mod chain;
 pub mod ckpool;
 mod coinbase_builder;
 mod decay;
+mod event_sink;
 mod extranonces;
 mod generator;
 pub mod hashrate;

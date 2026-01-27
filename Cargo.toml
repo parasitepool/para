@@ -75,6 +75,7 @@ tracing-subscriber = { version =  "0.3.19", features = ["env-filter", "fmt"] }
 utoipa = "5.4.0"
 utoipa-swagger-ui = { version =  "9.0.2", features = ["axum"], optional = true }
 zeromq = "0.4.1"
+async-trait = "0.1.89"
 
 [dev-dependencies]
 chrono = "0.4.41"

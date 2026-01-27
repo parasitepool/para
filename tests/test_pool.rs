@@ -1,4 +1,4 @@
-use {super::*, api::PoolStatus, api::UserDetail};
+use super::*;
 
 pub(crate) struct TestPool {
     bitcoind_handle: Bitcoind,
@@ -96,7 +96,7 @@ impl TestPool {
         format!("http://127.0.0.1:{}", self.http_port)
     }
 
-    pub(crate) async fn get_status(&self) -> reqwest::Result<PoolStatus> {
+    pub(crate) async fn get_status(&self) -> reqwest::Result<api::PoolStatus> {
         reqwest::Client::new()
             .get(format!("{}/api/pool/status", self.api_endpoint()))
             .send()
@@ -116,6 +116,50 @@ impl TestPool {
             .await?
             .json()
             .await
+    }
+
+    pub(crate) async fn wait_for_shares(
+        &self,
+        min_shares: u64,
+        timeout: Duration,
+    ) -> Result<api::PoolStatus, String> {
+        let start = Instant::now();
+        loop {
+            if start.elapsed() > timeout {
+                return Err(format!(
+                    "Timeout waiting for {} shares after {:?}",
+                    min_shares, timeout
+                ));
+            }
+
+            match self.get_status().await {
+                Ok(status) if status.accepted >= min_shares => return Ok(status),
+                Ok(_) => tokio::time::sleep(Duration::from_millis(100)).await,
+                Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
+            }
+        }
+    }
+
+    pub(crate) async fn wait_for_blocks(
+        &self,
+        min_blocks: u64,
+        timeout: Duration,
+    ) -> Result<api::PoolStatus, String> {
+        let start = Instant::now();
+        loop {
+            if start.elapsed() > timeout {
+                return Err(format!(
+                    "Timeout waiting for {} blocks after {:?}",
+                    min_blocks, timeout
+                ));
+            }
+
+            match self.get_status().await {
+                Ok(status) if status.blocks >= min_blocks => return Ok(status),
+                Ok(_) => tokio::time::sleep(Duration::from_millis(100)).await,
+                Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
+            }
+        }
     }
 
     pub(crate) async fn stratum_client(&self) -> stratum::Client {

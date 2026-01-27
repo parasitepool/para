@@ -1,6 +1,6 @@
 use {
     super::*,
-    crate::{api, http_server},
+    crate::{api, event_sink::build_event_sink, http_server},
 };
 
 #[derive(Parser, Debug)]
@@ -47,6 +47,10 @@ impl Proxy {
             &mut tasks,
         )?;
 
+        let event_tx = build_event_sink(&settings, cancel_token.clone(), &mut tasks)
+            .await
+            .context("failed to build record sink")?;
+
         let address = settings.address();
         let port = settings.port();
         let listener = TcpListener::bind((address, port))
@@ -69,6 +73,7 @@ impl Proxy {
                     let metatron = metatron.clone();
                     let upstream = upstream.clone();
                     let conn_cancel_token = cancel_token.child_token();
+                    let event_tx = event_tx.clone();
 
                     tasks.spawn(async move {
                         let mut stratifier: Stratifier<Notify> = Stratifier::new(
@@ -79,6 +84,7 @@ impl Proxy {
                             stream,
                             workbase_rx,
                             conn_cancel_token,
+                            event_tx,
                         );
 
                         if let Err(err) = stratifier.serve().await {
