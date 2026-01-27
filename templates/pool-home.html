@@ -3,36 +3,24 @@
 <head>
   <meta charset=utf-8>
   <meta name=viewport content='width=device-width,initial-scale=1.0'>
-  <title>Proxy</title>
+  <title>Pool</title>
   <link rel=icon href=/static/parasite.svg type=image/x-icon size=16x16>
   <link rel=stylesheet href=/static/dashboard.css>
 </head>
 <body>
 <img src=/static/parasite.svg alt="" class=logo>
-<h1>Parasite Proxy</h1>
+<h1>Parasite Pool</h1>
 <div class=wrapper>
 <div class=columns>
-  <div class=column>
-    <h2>Upstream</h2>
-    <div class=row><span>Endpoint</span><span id=upstream_endpoint></span></div>
-    <div class=row><span>Status</span><span id=upstream_status></span></div>
-    <div class=row><span>Username</span><span id=upstream_username class=copyable></span></div>
-    <div class=row><span>Extranonce1</span><span id=upstream_enonce1></span></div>
-    <div class=row><span>Extranonce2 Size</span><span id=upstream_enonce2_size></span></div>
-    <div class=row><span>Version Mask</span><span id=upstream_version_mask></span></div>
-    <h3>Shares</h3>
-    <div class=row><span>Accepted</span><span id=upstream_accepted></span></div>
-    <div class=row><span>Rejected</span><span id=upstream_rejected></span></div>
-  </div>
-
-  <div class=column>
-    <h2>Downstream</h2>
+  <div class="column column-full">
+    <h2>Pool</h2>
     <div class=row><span>Users</span><span id=users></span></div>
     <div class=row><span>Workers</span><span id=workers></span></div>
     <div class=row><span>Connections</span><span id=connections></span></div>
     <div class=row><span>Hashrate</span><span id=hashrate></span></div>
     <div class=row><span>SPS</span><span id=sps></span></div>
     <div class=row><span>Uptime</span><span id=uptime></span></div>
+    <div class=row><span>Blocks</span><span id=blocks></span></div>
     <h3>Shares</h3>
     <div class=row><span>Accepted</span><span id=accepted></span></div>
     <div class=row><span>Rejected</span><span id=rejected></span></div>
@@ -48,7 +36,7 @@
 <script>
 async function refresh() {
   try {
-    const r = await fetch('/api/proxy/status');
+    const r = await fetch('/api/pool/status');
     if (!r.ok) return;
     const s = await r.json();
     document.getElementById('users').textContent = s.users;
@@ -57,29 +45,15 @@ async function refresh() {
     document.getElementById('uptime').textContent = s.uptime_secs + 's';
     document.getElementById('hashrate').textContent = s.hashrate_1m;
     document.getElementById('sps').textContent = s.sps_1m.toFixed(2);
+    document.getElementById('blocks').textContent = s.blocks;
     document.getElementById('accepted').textContent = s.accepted;
     document.getElementById('rejected').textContent = s.rejected;
     document.getElementById('best_ever').textContent = s.best_ever ?? '-';
     document.getElementById('last_share').textContent = s.last_share != null ? s.last_share + 's ago' : '-';
-    document.getElementById('upstream_endpoint').textContent = s.upstream_endpoint;
-    const st = document.getElementById('upstream_status');
-    st.textContent = s.upstream_connected ? 'Connected' : 'Disconnected';
-    st.className = s.upstream_connected ? 'connected' : 'disconnected';
-    const u = s.upstream_username;
-    const uel = document.getElementById('upstream_username');
-    uel.textContent = u.length <= 15 ? u : u.slice(0,6) + '...' + u.slice(-6);
-    uel.dataset.full = u;
-    uel.title = u;
-    document.getElementById('upstream_enonce1').textContent = s.upstream_enonce1;
-    document.getElementById('upstream_enonce2_size').textContent = s.upstream_enonce2_size;
-    document.getElementById('upstream_version_mask').textContent = s.upstream_version_mask ?? '-';
-    document.getElementById('upstream_accepted').textContent = s.upstream_accepted;
-    document.getElementById('upstream_rejected').textContent = s.upstream_rejected;
   } catch (e) {}
 }
 startPolling(refresh);
 connectWs();
-copyOnClick('upstream_username');
 </script>
 </body>
 </html>
