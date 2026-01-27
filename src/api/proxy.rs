@@ -1,16 +1,37 @@
-use super::*;
+use {super::*, crate::http_server, boilerplate::Boilerplate};
+
+#[derive(Boilerplate)]
+struct ProxyHtml;
 
 pub(crate) fn router(metrics: Arc<Metrics>) -> Router {
     Router::new()
-        .route("/proxy/status", get(status))
-        .route("/proxy/users", get(users))
-        .route("/proxy/users/{address}", get(user))
+        .route("/", get(home))
+        .route("/api/proxy/status", get(status))
+        .route("/api/proxy/users", get(users))
+        .route("/api/proxy/users/{address}", get(user))
+        .route("/ws/logs", get(http_server::ws_logs))
+        .route("/static/{*path}", get(http_server::static_assets))
         .with_state(metrics)
+}
+
+async fn home() -> Response {
+    let html = ProxyHtml;
+
+    #[cfg(feature = "reload")]
+    let body = match html.reload_from_path() {
+        Ok(reloaded) => reloaded.to_string(),
+        Err(_) => html.to_string(),
+    };
+
+    #[cfg(not(feature = "reload"))]
+    let body = html.to_string();
+
+    ([(CONTENT_TYPE, "text/html;charset=utf-8")], body).into_response()
 }
 
 async fn status(State(metrics): State<Arc<Metrics>>) -> Json<ProxyStatus> {
     Json(ProxyStatus {
-        hashrate_1m: metrics.metatron.hash_rate_1m(),
+        hashrate_1m: metrics.metatron.hashrate_1m(),
         sps_1m: metrics.metatron.sps_1m(),
         users: metrics.metatron.total_users(),
         workers: metrics.metatron.total_workers(),
@@ -60,7 +81,7 @@ async fn user(
 
     Ok(Json(UserDetail {
         address: user.address.to_string(),
-        hashrate_1m: user.hash_rate_1m(),
+        hashrate_1m: user.hashrate_1m(),
         sps_1m: user.sps_1m(),
         accepted: user.accepted(),
         rejected: user.rejected(),
@@ -70,7 +91,7 @@ async fn user(
             .workers()
             .map(|worker| WorkerDetail {
                 name: worker.workername().to_string(),
-                hashrate_1m: worker.hash_rate_1m(),
+                hashrate_1m: worker.hashrate_1m(),
                 sps_1m: worker.sps_1m(),
                 accepted: worker.accepted(),
                 rejected: worker.rejected(),

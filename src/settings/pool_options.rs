@@ -8,8 +8,8 @@ pub(crate) struct PoolOptions {
     #[arg(long, help = "Listen on <PORT>.")]
     pub(crate) port: Option<u16>,
 
-    #[arg(long, help = "Enable HTTP API on <API_PORT>. Disabled if not set.")]
-    pub(crate) api_port: Option<u16>,
+    #[arg(long, help = "Enable HTTP API on <HTTP_PORT>. Disabled if not set.")]
+    pub(crate) http_port: Option<u16>,
 
     #[arg(long, help = "ACME domain for TLS certificate.")]
     pub(crate) acme_domain: Vec<String>,

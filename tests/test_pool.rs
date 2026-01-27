@@ -4,7 +4,7 @@ pub(crate) struct TestPool {
     bitcoind_handle: Bitcoind,
     pool_handle: Child,
     pool_port: u16,
-    api_port: u16,
+    http_port: u16,
     _tempdir: Arc<TempDir>,
 }
 
@@ -16,7 +16,7 @@ impl TestPool {
     pub(crate) fn spawn_with_args(args: impl ToArgs) -> Self {
         let tempdir = Arc::new(TempDir::new().unwrap());
 
-        let (bitcoind_port, rpc_port, zmq_port, pool_port, api_port) = (
+        let (bitcoind_port, rpc_port, zmq_port, pool_port, http_port) = (
             TcpListener::bind("127.0.0.1:0")
                 .unwrap()
                 .local_addr()
@@ -52,7 +52,7 @@ impl TestPool {
                 --chain signet
                 --address 127.0.0.1
                 --port {pool_port}
-                --api-port {api_port}
+                --http-port {http_port}
                 --bitcoin-rpc-username satoshi
                 --bitcoin-rpc-password nakamoto
                 --bitcoin-rpc-port {rpc_port}
@@ -83,7 +83,7 @@ impl TestPool {
             bitcoind_handle,
             pool_handle,
             pool_port,
-            api_port,
+            http_port,
             _tempdir: tempdir,
         }
     }
@@ -93,12 +93,12 @@ impl TestPool {
     }
 
     pub(crate) fn api_endpoint(&self) -> String {
-        format!("http://127.0.0.1:{}", self.api_port)
+        format!("http://127.0.0.1:{}", self.http_port)
     }
 
     pub(crate) async fn get_status(&self) -> reqwest::Result<api::PoolStatus> {
         reqwest::Client::new()
-            .get(format!("{}/pool/status", self.api_endpoint()))
+            .get(format!("{}/api/pool/status", self.api_endpoint()))
             .send()
             .await?
             .json()
@@ -107,7 +107,11 @@ impl TestPool {
 
     pub(crate) async fn get_user(&self, address: &str) -> reqwest::Result<UserDetail> {
         reqwest::Client::new()
-            .get(format!("{}/pool/users/{}", self.api_endpoint(), address))
+            .get(format!(
+                "{}/api/pool/users/{}",
+                self.api_endpoint(),
+                address
+            ))
             .send()
             .await?
             .json()

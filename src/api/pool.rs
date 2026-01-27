@@ -1,16 +1,37 @@
-use super::*;
+use {super::*, crate::http_server, boilerplate::Boilerplate};
+
+#[derive(Boilerplate)]
+struct PoolHtml;
 
 pub(crate) fn router(metatron: Arc<Metatron>) -> Router {
     Router::new()
-        .route("/pool/status", get(status))
-        .route("/pool/users", get(users))
-        .route("/pool/users/{address}", get(user))
+        .route("/", get(home))
+        .route("/api/pool/status", get(status))
+        .route("/api/pool/users", get(users))
+        .route("/api/pool/users/{address}", get(user))
+        .route("/ws/logs", get(http_server::ws_logs))
+        .route("/static/{*path}", get(http_server::static_assets))
         .with_state(metatron)
+}
+
+async fn home() -> Response {
+    let html = PoolHtml;
+
+    #[cfg(feature = "reload")]
+    let body = match html.reload_from_path() {
+        Ok(reloaded) => reloaded.to_string(),
+        Err(_) => html.to_string(),
+    };
+
+    #[cfg(not(feature = "reload"))]
+    let body = html.to_string();
+
+    ([(CONTENT_TYPE, "text/html;charset=utf-8")], body).into_response()
 }
 
 async fn status(State(metatron): State<Arc<Metatron>>) -> Json<PoolStatus> {
     Json(PoolStatus {
-        hashrate_1m: metatron.hash_rate_1m(),
+        hashrate_1m: metatron.hashrate_1m(),
         sps_1m: metatron.sps_1m(),
         users: metatron.total_users(),
         workers: metatron.total_workers(),
@@ -47,7 +68,7 @@ async fn user(
 
     Ok(Json(UserDetail {
         address: user.address.to_string(),
-        hashrate_1m: user.hash_rate_1m(),
+        hashrate_1m: user.hashrate_1m(),
         sps_1m: user.sps_1m(),
         accepted: user.accepted(),
         rejected: user.rejected(),
@@ -57,7 +78,7 @@ async fn user(
             .workers()
             .map(|worker| WorkerDetail {
                 name: worker.workername().to_string(),
-                hashrate_1m: worker.hash_rate_1m(),
+                hashrate_1m: worker.hashrate_1m(),
                 sps_1m: worker.sps_1m(),
                 accepted: worker.accepted(),
                 rejected: worker.rejected(),

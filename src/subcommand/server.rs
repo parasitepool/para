@@ -69,10 +69,6 @@ fn exclusion_list_from_params(params: HashMap<String, String>) -> Vec<String> {
         .unwrap_or_default()
 }
 
-#[derive(RustEmbed)]
-#[folder = "static"]
-struct StaticAssets;
-
 pub type Status = StatusHtml;
 
 #[derive(Debug)]
@@ -374,20 +370,8 @@ impl Server {
         })
     }
 
-    pub(crate) async fn static_assets(Path(path): Path<String>) -> ServerResult<Response> {
-        let content = StaticAssets::get(if let Some(stripped) = path.strip_prefix('/') {
-            stripped
-        } else {
-            &path
-        })
-        .ok_or_not_found(|| format!("asset {path}"))?;
-
-        let mime = mime_guess::from_path(path).first_or_octet_stream();
-
-        Ok(Response::builder()
-            .header(CONTENT_TYPE, mime.as_ref())
-            .body(content.data.into())
-            .unwrap())
+    pub(crate) async fn static_assets(path: Path<String>) -> ServerResult<Response> {
+        http_server::static_assets(path).await
     }
 
     async fn get_synced_blockheight(config: &ServerConfig) -> Option<i32> {
