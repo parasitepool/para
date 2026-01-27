@@ -136,6 +136,26 @@ impl Metatron {
         self.connections.load(Ordering::Relaxed)
     }
 
+    pub(crate) fn disconnected(&self) -> usize {
+        self.sessions.len()
+    }
+
+    pub(crate) fn idle(&self) -> usize {
+        let now = Instant::now();
+        self.users
+            .iter()
+            .map(|user| {
+                user.workers()
+                    .filter(|worker| {
+                        worker
+                            .last_share()
+                            .is_none_or(|last| now.duration_since(last).as_secs() > 60)
+                    })
+                    .count()
+            })
+            .sum()
+    }
+
     pub(crate) fn total_users(&self) -> usize {
         self.users.len()
     }

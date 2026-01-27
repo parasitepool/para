@@ -36,6 +36,8 @@ async fn status(State(metatron): State<Arc<Metatron>>) -> Json<PoolStatus> {
         users: metatron.total_users(),
         workers: metatron.total_workers(),
         connections: metatron.total_connections(),
+        disconnected: metatron.disconnected(),
+        idle: metatron.idle(),
         accepted: metatron.accepted(),
         rejected: metatron.rejected(),
         blocks: metatron.total_blocks(),
