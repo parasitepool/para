@@ -1,7 +1,7 @@
 use {super::*, crate::http_server, boilerplate::Boilerplate};
 
 #[derive(Boilerplate)]
-struct PoolHomeHtml;
+struct PoolHtml;
 
 pub(crate) fn router(metatron: Arc<Metatron>) -> Router {
     Router::new()
@@ -15,7 +15,7 @@ pub(crate) fn router(metatron: Arc<Metatron>) -> Router {
 }
 
 async fn home() -> Response {
-    let html = PoolHomeHtml;
+    let html = PoolHtml;
 
     #[cfg(feature = "reload")]
     let body = match html.reload_from_path() {

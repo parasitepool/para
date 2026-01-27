@@ -1,7 +1,7 @@
 use {super::*, crate::http_server, boilerplate::Boilerplate};
 
 #[derive(Boilerplate)]
-struct ProxyHomeHtml;
+struct ProxyHtml;
 
 pub(crate) fn router(metrics: Arc<Metrics>) -> Router {
     Router::new()
@@ -15,7 +15,7 @@ pub(crate) fn router(metrics: Arc<Metrics>) -> Router {
 }
 
 async fn home() -> Response {
-    let html = ProxyHomeHtml;
+    let html = ProxyHtml;
 
     #[cfg(feature = "reload")]
     let body = match html.reload_from_path() {
