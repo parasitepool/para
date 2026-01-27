@@ -9,7 +9,7 @@ pub(crate) fn router(metrics: Arc<Metrics>) -> Router {
         .route("/api/proxy/status", get(status))
         .route("/api/proxy/users", get(users))
         .route("/api/proxy/users/{address}", get(user))
-        .route("/ws/logs", get(http_server::logs_ws))
+        .route("/ws/logs", get(http_server::ws_logs))
         .route("/static/{*path}", get(http_server::static_assets))
         .with_state(metrics)
 }

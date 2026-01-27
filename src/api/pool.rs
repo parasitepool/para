@@ -9,7 +9,7 @@ pub(crate) fn router(metatron: Arc<Metatron>) -> Router {
         .route("/api/pool/status", get(status))
         .route("/api/pool/users", get(users))
         .route("/api/pool/users/{address}", get(user))
-        .route("/ws/logs", get(http_server::logs_ws))
+        .route("/ws/logs", get(http_server::ws_logs))
         .route("/static/{*path}", get(http_server::static_assets))
         .with_state(metatron)
 }

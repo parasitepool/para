@@ -179,7 +179,7 @@ fn acceptor(
 #[folder = "static"]
 pub(crate) struct StaticAssets;
 
-pub(crate) async fn logs_ws(ws: WebSocketUpgrade) -> Response {
+pub(crate) async fn ws_logs(ws: WebSocketUpgrade) -> Response {
     ws.on_upgrade(|mut socket| async move {
         for msg in logstream::backlog() {
             if socket

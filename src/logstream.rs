@@ -13,7 +13,10 @@ pub fn subscribe() -> broadcast::Receiver<Arc<str>> {
 }
 
 pub fn backlog() -> Vec<Arc<str>> {
-    BACKLOG.lock().unwrap().iter().cloned().collect()
+    BACKLOG
+        .lock()
+        .map(|b| b.iter().cloned().collect())
+        .unwrap_or_default()
 }
 
 pub struct LogStreamLayer;
@@ -34,8 +37,7 @@ where
         let message = visitor.message.unwrap_or_default();
 
         let formatted: Arc<str> = format!("{level:>5}\t{message}").into();
-        {
-            let mut backlog = BACKLOG.lock().unwrap();
+        if let Ok(mut backlog) = BACKLOG.lock() {
             if backlog.len() == BACKLOG_SIZE {
                 backlog.pop_front();
             }
