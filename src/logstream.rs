@@ -3,34 +3,22 @@ use {super::*, std::sync::Mutex};
 const BACKLOG_SIZE: usize = 30;
 const CHANNEL_CAPACITY: usize = 1000;
 
-static LOGSTREAM: LazyLock<LogStream> = LazyLock::new(|| {
-    let (tx, _) = broadcast::channel(CHANNEL_CAPACITY);
-    let backlog = Arc::new(Mutex::new(VecDeque::with_capacity(BACKLOG_SIZE)));
+static TX: LazyLock<broadcast::Sender<Arc<str>>> =
+    LazyLock::new(|| broadcast::channel(CHANNEL_CAPACITY).0);
 
-    LogStream { tx, backlog }
-});
+static BACKLOG: Mutex<VecDeque<Arc<str>>> = Mutex::new(VecDeque::new());
 
-#[derive(Clone)]
-pub struct LogStream {
-    tx: broadcast::Sender<Arc<str>>,
-    backlog: Arc<Mutex<VecDeque<Arc<str>>>>,
+pub fn subscribe() -> broadcast::Receiver<Arc<str>> {
+    TX.subscribe()
 }
 
-impl LogStream {
-    pub fn subscribe(&self) -> broadcast::Receiver<Arc<str>> {
-        self.tx.subscribe()
-    }
-
-    pub fn backlog(&self) -> Vec<Arc<str>> {
-        self.backlog.lock().unwrap().iter().cloned().collect()
-    }
+pub fn backlog() -> Vec<Arc<str>> {
+    BACKLOG.lock().unwrap().iter().cloned().collect()
 }
 
-pub fn get() -> &'static LogStream {
-    &LOGSTREAM
-}
+pub struct LogStreamLayer;
 
-impl<S> Layer<S> for &'static LogStream
+impl<S> Layer<S> for LogStreamLayer
 where
     S: Subscriber,
 {
@@ -47,13 +35,13 @@ where
 
         let formatted: Arc<str> = format!("{level:>5}\t{message}").into();
         {
-            let mut backlog = self.backlog.lock().unwrap();
+            let mut backlog = BACKLOG.lock().unwrap();
             if backlog.len() == BACKLOG_SIZE {
                 backlog.pop_front();
             }
             backlog.push_back(formatted.clone());
         }
-        let _ = self.tx.send(formatted);
+        let _ = TX.send(formatted);
     }
 }
 

@@ -181,9 +181,7 @@ pub(crate) struct StaticAssets;
 
 pub(crate) async fn logs_ws(ws: WebSocketUpgrade) -> Response {
     ws.on_upgrade(|mut socket| async move {
-        let stream = logstream::get();
-
-        for msg in stream.backlog() {
+        for msg in logstream::backlog() {
             if socket
                 .send(Message::Text(msg.as_ref().into()))
                 .await
@@ -193,7 +191,7 @@ pub(crate) async fn logs_ws(ws: WebSocketUpgrade) -> Response {
             }
         }
 
-        let mut rx = stream.subscribe();
+        let mut rx = logstream::subscribe();
 
         while let Ok(msg) = rx.recv().await {
             if socket
