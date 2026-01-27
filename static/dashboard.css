@@ -3,7 +3,7 @@ h1 { text-align: center; margin-bottom: 40px; font-size: 1.55em; }
 .logo { display: block; margin: 0 auto 20px; height: 4em; }
 .columns { display: flex; gap: 60px; }
 .column { border: 1px solid #444; padding: 20px 30px; width: 500px; box-sizing: border-box; }
-.column-full { width: 100%; }
+.column-full { width: 1060px; }
 .column h2 { margin: 0 0 15px; font-size: 1.22em; text-align: center; }
 .column h3 { margin: 15px 0 10px; font-size: 1.11em; color: #888; border-top: 1px solid #444; padding-top: 15px; text-align: center; }
 .row { display: flex; justify-content: space-between; }
@@ -14,7 +14,7 @@ h1 { text-align: center; margin-bottom: 40px; font-size: 1.55em; }
 .wrapper { width: fit-content; margin: 0 auto; }
 #logs {
   margin-top: 40px;
-  height: 300px;
+  height: 450px;
   overflow-y: auto;
   background: #0a0a0a;
   border: 1px solid #444;
@@ -38,6 +38,7 @@ h1 { text-align: center; margin-bottom: 40px; font-size: 1.55em; }
   .wrapper { width: auto; }
   .columns { flex-direction: column; gap: 30px; align-items: center; }
   .column { width: 100%; max-width: 500px; }
+  .column-full { width: 100%; max-width: 500px; }
   #logs { max-width: 500px; margin-left: auto; margin-right: auto; }
 }
 @media (max-width: 560px) {

@@ -1,29 +1,22 @@
-use {
-    std::{
-        collections::VecDeque,
-        sync::{Arc, Mutex, OnceLock},
-    },
-    tokio::sync::broadcast,
-    tracing::Subscriber,
-    tracing_subscriber::Layer,
-};
+use {super::*, std::sync::Mutex};
 
 const BACKLOG_SIZE: usize = 30;
+const CHANNEL_CAPACITY: usize = 1000;
 
-static LOG_SUBSCRIBER: OnceLock<LogSubscriber> = OnceLock::new();
+static LOGSTREAM: LazyLock<LogStream> = LazyLock::new(|| {
+    let (tx, _) = broadcast::channel(CHANNEL_CAPACITY);
+    let backlog = Arc::new(Mutex::new(VecDeque::with_capacity(BACKLOG_SIZE)));
 
-pub struct LogBroadcastLayer {
-    tx: broadcast::Sender<Arc<str>>,
-    backlog: Arc<Mutex<VecDeque<Arc<str>>>>,
-}
+    LogStream { tx, backlog }
+});
 
 #[derive(Clone)]
-pub struct LogSubscriber {
+pub struct LogStream {
     tx: broadcast::Sender<Arc<str>>,
     backlog: Arc<Mutex<VecDeque<Arc<str>>>>,
 }
 
-impl LogSubscriber {
+impl LogStream {
     pub fn subscribe(&self) -> broadcast::Receiver<Arc<str>> {
         self.tx.subscribe()
     }
@@ -33,22 +26,11 @@ impl LogSubscriber {
     }
 }
 
-pub fn init(capacity: usize) -> LogBroadcastLayer {
-    let (tx, _) = broadcast::channel(capacity);
-    let backlog = Arc::new(Mutex::new(VecDeque::with_capacity(BACKLOG_SIZE)));
-    let subscriber = LogSubscriber {
-        tx: tx.clone(),
-        backlog: backlog.clone(),
-    };
-    LOG_SUBSCRIBER.set(subscriber).ok();
-    LogBroadcastLayer { tx, backlog }
+pub fn get() -> &'static LogStream {
+    &LOGSTREAM
 }
 
-pub fn subscriber() -> Option<LogSubscriber> {
-    LOG_SUBSCRIBER.get().cloned()
-}
-
-impl<S> Layer<S> for LogBroadcastLayer
+impl<S> Layer<S> for &'static LogStream
 where
     S: Subscriber,
 {
