@@ -5,6 +5,7 @@ struct Stats {
     sps_1m: DecayingAverage,
     best_ever: Option<Difficulty>,
     last_share: Option<Instant>,
+    total_work: f64,
 }
 
 pub(crate) struct Worker {
@@ -23,6 +24,7 @@ impl Worker {
                 sps_1m: DecayingAverage::new(Duration::from_secs(60)),
                 best_ever: None,
                 last_share: None,
+                total_work: 0.0,
             }),
             accepted: AtomicU64::new(0),
             rejected: AtomicU64::new(0),
@@ -34,6 +36,7 @@ impl Worker {
         let mut stats = self.stats.lock();
         stats.dsps_1m.record(pool_diff.as_f64(), now);
         stats.sps_1m.record(1.0, now);
+        stats.total_work += pool_diff.as_f64();
         stats.last_share = Some(now);
         if stats.best_ever.is_none_or(|best| share_diff > best) {
             stats.best_ever = Some(share_diff);
@@ -72,5 +75,9 @@ impl Worker {
 
     pub(crate) fn last_share(&self) -> Option<Instant> {
         self.stats.lock().last_share
+    }
+
+    pub(crate) fn total_work(&self) -> f64 {
+        self.stats.lock().total_work
     }
 }

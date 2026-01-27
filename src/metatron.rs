@@ -164,6 +164,10 @@ impl Metatron {
         self.users.iter().map(|u| u.worker_count()).sum()
     }
 
+    pub(crate) fn total_work(&self) -> f64 {
+        self.users.iter().map(|u| u.total_work()).sum()
+    }
+
     pub(crate) fn last_share(&self) -> Option<Instant> {
         self.users.iter().filter_map(|user| user.last_share()).max()
     }

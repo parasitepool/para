@@ -45,6 +45,7 @@ async fn status(State(metrics): State<Arc<Metrics>>) -> Json<ProxyStatus> {
             .metatron
             .last_share()
             .map(|time| time.elapsed().as_secs()),
+        total_work: metrics.metatron.total_work(),
         uptime_secs: metrics.metatron.uptime().as_secs(),
         upstream_endpoint: metrics.upstream.endpoint().to_string(),
         upstream_difficulty: metrics.upstream.difficulty().await.as_f64(),
@@ -88,6 +89,7 @@ async fn user(
         accepted: user.accepted(),
         rejected: user.rejected(),
         best_ever: user.best_ever(),
+        total_work: user.total_work(),
         authorized: user.authorized,
         workers: user
             .workers()
@@ -98,6 +100,7 @@ async fn user(
                 accepted: worker.accepted(),
                 rejected: worker.rejected(),
                 best_ever: worker.best_ever(),
+                total_work: worker.total_work(),
             })
             .collect(),
     })
