@@ -44,9 +44,10 @@ bitcoind:
     -datadir=copr \
     -signet
 
-pool: 
-  cargo run -- pool \
-    --api-port 8080 \
+pool:
+  cargo run --features reload -- \
+    pool \
+    --http-port 8080 \
     --chain signet \
     --address 0.0.0.0 \
     --bitcoin-rpc-username satoshi \
@@ -57,10 +58,11 @@ pool:
     --vardiff-period 1 \
     --zmq-block-notifications tcp://127.0.0.1:28332
 
-proxy: 
-  cargo run -- proxy \
+proxy:
+  cargo run --features reload -- \
+    proxy \
     --chain signet \
-    --api-port 8081 \
+    --http-port 8081 \
     --address 0.0.0.0 \
     --port 42070 \
     --username tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.proxy \
@@ -88,7 +90,7 @@ miner-mainnet stratum_endpoint='127.0.0.1:42069':
 
 pool-mainnet: 
   cargo run -- pool \
-    --api-port 8080 \
+    --http-port 8080 \
     --chain mainnet \
     --address 0.0.0.0 \
     --bitcoin-rpc-username satoshi \
