@@ -1,11 +1,32 @@
-use super::*;
+use {super::*, crate::http_server, boilerplate::Boilerplate};
+
+#[derive(Boilerplate)]
+struct PoolHtml;
 
 pub(crate) fn router(metatron: Arc<Metatron>) -> Router {
     Router::new()
-        .route("/pool/status", get(status))
-        .route("/pool/users", get(users))
-        .route("/pool/users/{address}", get(user))
+        .route("/", get(home))
+        .route("/api/pool/status", get(status))
+        .route("/api/pool/users", get(users))
+        .route("/api/pool/users/{address}", get(user))
+        .route("/ws/logs", get(http_server::ws_logs))
+        .route("/static/{*path}", get(http_server::static_assets))
         .with_state(metatron)
+}
+
+async fn home() -> Response {
+    let html = PoolHtml;
+
+    #[cfg(feature = "reload")]
+    let body = match html.reload_from_path() {
+        Ok(reloaded) => reloaded.to_string(),
+        Err(_) => html.to_string(),
+    };
+
+    #[cfg(not(feature = "reload"))]
+    let body = html.to_string();
+
+    ([(CONTENT_TYPE, "text/html;charset=utf-8")], body).into_response()
 }
 
 async fn status(State(metatron): State<Arc<Metatron>>) -> Json<PoolStatus> {

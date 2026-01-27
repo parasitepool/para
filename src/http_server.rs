@@ -1,4 +1,11 @@
-use super::*;
+use {
+    super::*,
+    axum::extract::{
+        Path,
+        ws::{Message, WebSocketUpgrade},
+    },
+    error::OptionExt,
+};
 
 pub(crate) mod accept_json;
 pub(crate) mod error;
@@ -18,7 +25,7 @@ pub fn spawn(
     cancel_token: CancellationToken,
     tasks: &mut JoinSet<()>,
 ) -> Result<()> {
-    let Some(port) = settings.api_port() else {
+    let Some(port) = settings.http_port() else {
         return Ok(());
     };
 
@@ -166,4 +173,50 @@ fn acceptor(
     });
 
     Ok(acceptor)
+}
+
+#[derive(RustEmbed)]
+#[folder = "static"]
+pub(crate) struct StaticAssets;
+
+pub(crate) async fn ws_logs(ws: WebSocketUpgrade) -> Response {
+    ws.on_upgrade(|mut socket| async move {
+        for msg in logstream::backlog() {
+            if socket
+                .send(Message::Text(msg.as_ref().into()))
+                .await
+                .is_err()
+            {
+                return;
+            }
+        }
+
+        let mut rx = logstream::subscribe();
+
+        while let Ok(msg) = rx.recv().await {
+            if socket
+                .send(Message::Text(msg.as_ref().into()))
+                .await
+                .is_err()
+            {
+                break;
+            }
+        }
+    })
+}
+
+pub(crate) async fn static_assets(Path(path): Path<String>) -> error::ServerResult<Response> {
+    let content = StaticAssets::get(if let Some(stripped) = path.strip_prefix('/') {
+        stripped
+    } else {
+        &path
+    })
+    .ok_or_not_found(|| format!("asset {path}"))?;
+
+    let mime = mime_guess::from_path(path).first_or_octet_stream();
+
+    Ok(Response::builder()
+        .header(CONTENT_TYPE, mime.as_ref())
+        .body(content.data.into())
+        .unwrap())
 }

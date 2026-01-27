@@ -64,7 +64,7 @@ use {
     snafu::Snafu,
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
     std::{
-        collections::{BTreeMap, HashMap, HashSet},
+        collections::{BTreeMap, HashMap, HashSet, VecDeque},
         env,
         fmt::{self, Display, Formatter},
         fs,
@@ -91,13 +91,13 @@ use {
     subcommand::server::account::Account,
     sysinfo::{Disks, System},
     throbber::{StatusLine, spawn_throbber},
-    tokio::net::{
-        TcpListener, TcpStream,
-        tcp::{OwnedReadHalf, OwnedWriteHalf},
-    },
     tokio::{
+        net::{
+            TcpListener, TcpStream,
+            tcp::{OwnedReadHalf, OwnedWriteHalf},
+        },
         runtime::Runtime,
-        sync::{Mutex, mpsc, watch},
+        sync::{Mutex, broadcast, mpsc, watch},
         task::{self, JoinHandle, JoinSet},
         time::{MissedTickBehavior, interval, sleep, timeout},
     },
@@ -105,9 +105,9 @@ use {
         codec::{FramedRead, FramedWrite, LinesCodec},
         sync::CancellationToken,
     },
-    tracing::{debug, error, info, warn},
+    tracing::{Subscriber, debug, error, info, warn},
     tracing_appender::non_blocking,
-    tracing_subscriber::EnvFilter,
+    tracing_subscriber::{EnvFilter, Layer, layer::SubscriberExt, util::SubscriberInitExt},
     upstream::Upstream,
     user::User,
     utoipa::{OpenApi, ToSchema},
@@ -131,6 +131,7 @@ pub mod hashrate;
 mod http_server;
 mod job;
 mod jobs;
+mod logstream;
 mod metatron;
 mod metrics;
 pub mod settings;
@@ -191,10 +192,15 @@ fn logs_enabled() -> bool {
 
 pub fn main() {
     let (writer, _guard) = non_blocking(io::stderr());
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .with_target(false)
-        .with_writer(writer)
+
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_target(false)
+                .with_writer(writer)
+                .with_filter(EnvFilter::from_default_env()),
+        )
+        .with(logstream::LogStreamLayer.with_filter(tracing_subscriber::filter::LevelFilter::INFO))
         .init();
 
     let args = Arguments::parse();
