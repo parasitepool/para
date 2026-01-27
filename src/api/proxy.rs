@@ -1,9 +1,4 @@
-use {
-    super::*,
-    axum::extract::ws::{Message, WebSocket, WebSocketUpgrade},
-    boilerplate::Boilerplate,
-    crate::{http_server, log_broadcast},
-};
+use {super::*, crate::http_server, boilerplate::Boilerplate};
 
 #[derive(Boilerplate)]
 struct ProxyHomeHtml;
@@ -14,7 +9,7 @@ pub(crate) fn router(metrics: Arc<Metrics>) -> Router {
         .route("/api/proxy/status", get(status))
         .route("/api/proxy/users", get(users))
         .route("/api/proxy/users/{address}", get(user))
-        .route("/ws/logs", get(logs_ws))
+        .route("/ws/logs", get(http_server::logs_ws))
         .route("/static/{*path}", get(http_server::static_assets))
         .with_state(metrics)
 }
@@ -105,28 +100,4 @@ async fn user(
             .collect(),
     })
     .into_response())
-}
-
-async fn logs_ws(ws: WebSocketUpgrade) -> Response {
-    ws.on_upgrade(handle_logs_socket)
-}
-
-async fn handle_logs_socket(mut socket: WebSocket) {
-    let Some(subscriber) = log_broadcast::subscriber() else {
-        return;
-    };
-
-    for msg in subscriber.backlog() {
-        if socket.send(Message::Text(msg.as_ref().into())).await.is_err() {
-            return;
-        }
-    }
-
-    let mut rx = subscriber.subscribe();
-
-    while let Ok(msg) = rx.recv().await {
-        if socket.send(Message::Text(msg.as_ref().into())).await.is_err() {
-            break;
-        }
-    }
 }

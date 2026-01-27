@@ -1,4 +1,11 @@
-use {super::*, axum::extract::Path, error::OptionExt};
+use {
+    super::*,
+    axum::extract::{
+        Path,
+        ws::{Message, WebSocket, WebSocketUpgrade},
+    },
+    error::OptionExt,
+};
 
 pub(crate) mod accept_json;
 pub(crate) mod error;
@@ -7,9 +14,39 @@ pub(crate) mod error;
 #[folder = "static"]
 pub(crate) struct StaticAssets;
 
-pub(crate) async fn static_assets(
-    Path(path): Path<String>,
-) -> error::ServerResult<Response> {
+pub(crate) async fn logs_ws(ws: WebSocketUpgrade) -> Response {
+    ws.on_upgrade(handle_logs_socket)
+}
+
+async fn handle_logs_socket(mut socket: WebSocket) {
+    let Some(subscriber) = log_broadcast::subscriber() else {
+        return;
+    };
+
+    for msg in subscriber.backlog() {
+        if socket
+            .send(Message::Text(msg.as_ref().into()))
+            .await
+            .is_err()
+        {
+            return;
+        }
+    }
+
+    let mut rx = subscriber.subscribe();
+
+    while let Ok(msg) = rx.recv().await {
+        if socket
+            .send(Message::Text(msg.as_ref().into()))
+            .await
+            .is_err()
+        {
+            break;
+        }
+    }
+}
+
+pub(crate) async fn static_assets(Path(path): Path<String>) -> error::ServerResult<Response> {
     let content = StaticAssets::get(if let Some(stripped) = path.strip_prefix('/') {
         stripped
     } else {

@@ -129,7 +129,11 @@ impl TestProxy {
 
     pub(crate) async fn get_user(&self, address: &str) -> reqwest::Result<UserDetail> {
         reqwest::Client::new()
-            .get(format!("{}/api/proxy/users/{}", self.api_endpoint(), address))
+            .get(format!(
+                "{}/api/proxy/users/{}",
+                self.api_endpoint(),
+                address
+            ))
             .send()
             .await?
             .json()

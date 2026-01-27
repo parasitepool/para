@@ -107,7 +107,11 @@ impl TestPool {
 
     pub(crate) async fn get_user(&self, address: &str) -> reqwest::Result<UserDetail> {
         reqwest::Client::new()
-            .get(format!("{}/api/pool/users/{}", self.api_endpoint(), address))
+            .get(format!(
+                "{}/api/pool/users/{}",
+                self.api_endpoint(),
+                address
+            ))
             .send()
             .await?
             .json()
