@@ -27,8 +27,7 @@ impl Pool {
                 .context("invalid extranonce configuration")?,
         );
 
-        let endpoint = format!("{}:{}", settings.address(), settings.port());
-        let metatron = Arc::new(Metatron::new(extranonces, endpoint));
+        let metatron = Arc::new(Metatron::new(extranonces, format!("{}:{}", settings.address(), settings.port())));
         metatron.clone().spawn(cancel_token.clone(), &mut tasks);
 
         http_server::spawn(
