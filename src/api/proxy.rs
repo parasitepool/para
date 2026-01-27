@@ -31,7 +31,7 @@ async fn home() -> Response {
 
 async fn status(State(metrics): State<Arc<Metrics>>) -> Json<ProxyStatus> {
     Json(ProxyStatus {
-        hashrate_1m: metrics.metatron.hash_rate_1m(),
+        hashrate_1m: metrics.metatron.hashrate_1m(),
         sps_1m: metrics.metatron.sps_1m(),
         users: metrics.metatron.total_users(),
         workers: metrics.metatron.total_workers(),
@@ -81,7 +81,7 @@ async fn user(
 
     Ok(Json(UserDetail {
         address: user.address.to_string(),
-        hashrate_1m: user.hash_rate_1m(),
+        hashrate_1m: user.hashrate_1m(),
         sps_1m: user.sps_1m(),
         accepted: user.accepted(),
         rejected: user.rejected(),
@@ -91,7 +91,7 @@ async fn user(
             .workers()
             .map(|worker| WorkerDetail {
                 name: worker.workername().to_string(),
-                hashrate_1m: worker.hash_rate_1m(),
+                hashrate_1m: worker.hashrate_1m(),
                 sps_1m: worker.sps_1m(),
                 accepted: worker.accepted(),
                 rejected: worker.rejected(),
