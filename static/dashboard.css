@@ -21,13 +21,13 @@ h1 { text-align: center; margin-bottom: 40px; font-size: 1.55em; }
   padding: 10px;
   font-size: 0.67em;
   box-sizing: border-box;
+  scrollbar-color: #444 #1a1a1a;
 }
 #logs div { white-space: pre-wrap; word-break: break-all; }
 #logs::-webkit-scrollbar { width: 8px; }
 #logs::-webkit-scrollbar-track { background: #1a1a1a; }
 #logs::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
 #logs::-webkit-scrollbar-thumb:hover { background: #666; }
-#logs { scrollbar-color: #444 #1a1a1a; }
 .log-error { color: #f55; }
 .log-warn { color: #fa0; }
 .log-info { color: #4f4; }

@@ -2,65 +2,13 @@ use {
     super::*,
     axum::extract::{
         Path,
-        ws::{Message, WebSocket, WebSocketUpgrade},
+        ws::{Message, WebSocketUpgrade},
     },
     error::OptionExt,
 };
 
 pub(crate) mod accept_json;
 pub(crate) mod error;
-
-#[derive(RustEmbed)]
-#[folder = "static"]
-pub(crate) struct StaticAssets;
-
-pub(crate) async fn logs_ws(ws: WebSocketUpgrade) -> Response {
-    ws.on_upgrade(handle_logs_socket)
-}
-
-async fn handle_logs_socket(mut socket: WebSocket) {
-    let Some(subscriber) = log_broadcast::subscriber() else {
-        return;
-    };
-
-    for msg in subscriber.backlog() {
-        if socket
-            .send(Message::Text(msg.as_ref().into()))
-            .await
-            .is_err()
-        {
-            return;
-        }
-    }
-
-    let mut rx = subscriber.subscribe();
-
-    while let Ok(msg) = rx.recv().await {
-        if socket
-            .send(Message::Text(msg.as_ref().into()))
-            .await
-            .is_err()
-        {
-            break;
-        }
-    }
-}
-
-pub(crate) async fn static_assets(Path(path): Path<String>) -> error::ServerResult<Response> {
-    let content = StaticAssets::get(if let Some(stripped) = path.strip_prefix('/') {
-        stripped
-    } else {
-        &path
-    })
-    .ok_or_not_found(|| format!("asset {path}"))?;
-
-    let mime = mime_guess::from_path(path).first_or_octet_stream();
-
-    Ok(Response::builder()
-        .header(CONTENT_TYPE, mime.as_ref())
-        .body(content.data.into())
-        .unwrap())
-}
 
 #[derive(Clone, Debug)]
 pub struct HttpConfig {
@@ -225,4 +173,54 @@ fn acceptor(
     });
 
     Ok(acceptor)
+}
+
+#[derive(RustEmbed)]
+#[folder = "static"]
+pub(crate) struct StaticAssets;
+
+pub(crate) async fn logs_ws(ws: WebSocketUpgrade) -> Response {
+    ws.on_upgrade(|mut socket| async move {
+        let Some(subscriber) = log_broadcast::subscriber() else {
+            return;
+        };
+
+        for msg in subscriber.backlog() {
+            if socket
+                .send(Message::Text(msg.as_ref().into()))
+                .await
+                .is_err()
+            {
+                return;
+            }
+        }
+
+        let mut rx = subscriber.subscribe();
+
+        while let Ok(msg) = rx.recv().await {
+            if socket
+                .send(Message::Text(msg.as_ref().into()))
+                .await
+                .is_err()
+            {
+                break;
+            }
+        }
+    })
+}
+
+pub(crate) async fn static_assets(Path(path): Path<String>) -> error::ServerResult<Response> {
+    let content = StaticAssets::get(if let Some(stripped) = path.strip_prefix('/') {
+        stripped
+    } else {
+        &path
+    })
+    .ok_or_not_found(|| format!("asset {path}"))?;
+
+    let mime = mime_guess::from_path(path).first_or_octet_stream();
+
+    Ok(Response::builder()
+        .header(CONTENT_TYPE, mime.as_ref())
+        .body(content.data.into())
+        .unwrap())
 }
