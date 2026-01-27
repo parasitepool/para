@@ -113,7 +113,7 @@ impl FileSink {
 }
 
 #[async_trait]
-impl super::RecordSink for FileSink {
+impl super::EventSink for FileSink {
     async fn record(&mut self, event: Event) -> Result<u64> {
         self.write_event(&event).await
     }

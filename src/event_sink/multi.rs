@@ -1,17 +1,17 @@
-use super::{RecordSink, Result, async_trait, event::Event};
+use super::{EventSink, Result, async_trait, event::Event};
 
 pub struct MultiSink {
-    sinks: Vec<Box<dyn RecordSink>>,
+    sinks: Vec<Box<dyn EventSink>>,
 }
 
 impl MultiSink {
-    pub fn new(sinks: Vec<Box<dyn RecordSink>>) -> Self {
+    pub fn new(sinks: Vec<Box<dyn EventSink>>) -> Self {
         Self { sinks }
     }
 }
 
 #[async_trait]
-impl RecordSink for MultiSink {
+impl EventSink for MultiSink {
     async fn record(&mut self, event: Event) -> Result<u64> {
         let mut updated_records = 0;
         for sink in &mut self.sinks {

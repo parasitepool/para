@@ -1,6 +1,6 @@
 use {
     super::*,
-    crate::{api, http_server, record_sink::build_record_sink},
+    crate::{api, event_sink::build_event_sink, http_server},
 };
 
 #[derive(Parser, Debug)]
@@ -37,7 +37,7 @@ impl Pool {
             &mut tasks,
         )?;
 
-        let event_tx = build_record_sink(&settings, cancel_token.clone(), &mut tasks)
+        let event_tx = build_event_sink(&settings, cancel_token.clone(), &mut tasks)
             .await
             .context("failed to build record sink")?;
 

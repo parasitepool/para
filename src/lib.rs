@@ -126,6 +126,7 @@ mod chain;
 pub mod ckpool;
 mod coinbase_builder;
 mod decay;
+mod event_sink;
 mod extranonces;
 mod generator;
 pub mod hash_rate;
@@ -134,7 +135,6 @@ mod job;
 mod jobs;
 mod metatron;
 mod metrics;
-mod record_sink;
 pub mod settings;
 
 mod signal;

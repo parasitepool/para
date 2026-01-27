@@ -1,6 +1,6 @@
 use {
     super::*,
-    crate::record_sink::{BlockFoundEvent, Event, ShareEvent},
+    crate::event_sink::{BlockFoundEvent, Event, ShareEvent},
     bouncer::{Bouncer, Consequence},
     state::{Session, State},
     upstream::UpstreamSubmit,

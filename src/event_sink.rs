@@ -14,12 +14,12 @@ pub use {
 
 const EVENT_CHANNEL_CAPACITY: usize = 10_000;
 
-pub(crate) async fn build_record_sink(
+pub(crate) async fn build_event_sink(
     settings: &Settings,
     cancel_token: CancellationToken,
     tasks: &mut JoinSet<()>,
 ) -> Result<Option<mpsc::Sender<Event>>> {
-    let mut sinks: Vec<Box<dyn RecordSink>> = Vec::new();
+    let mut sinks: Vec<Box<dyn EventSink>> = Vec::new();
 
     if let Some(db_url) = settings.database_url() {
         match DatabaseSink::connect(&db_url).await {
@@ -49,7 +49,7 @@ pub(crate) async fn build_record_sink(
         return Ok(None);
     }
 
-    let sink: Box<dyn RecordSink> = if sinks.len() == 1 {
+    let sink: Box<dyn EventSink> = if sinks.len() == 1 {
         sinks.remove(0)
     } else {
         Box::new(MultiSink::new(sinks))
@@ -91,7 +91,7 @@ pub(crate) async fn build_record_sink(
 }
 
 #[async_trait]
-pub trait RecordSink: Send + Sync {
+pub trait EventSink: Send + Sync {
     async fn record(&mut self, event: Event) -> Result<u64>;
 
     async fn flush(&mut self) -> Result<()> {
@@ -106,7 +106,7 @@ pub trait RecordSink: Send + Sync {
 #[macro_export]
 macro_rules! rejection_event {
     ($address:expr, $workername:expr, $blockheight:expr, $error:expr) => {
-        $crate::record_sink::Event::Share($crate::record_sink::ShareEvent {
+        $crate::event_sink::Event::Share($crate::event_sink::ShareEvent {
             timestamp: None,
             address: $address,
             workername: $workername,
@@ -118,7 +118,7 @@ macro_rules! rejection_event {
         })
     };
     ($address:expr, $workername:expr, $pool_diff:expr, $share_diff:expr, $blockheight:expr, $error:expr) => {
-        $crate::record_sink::Event::Share($crate::record_sink::ShareEvent {
+        $crate::event_sink::Event::Share($crate::event_sink::ShareEvent {
             timestamp: None,
             address: $address,
             workername: $workername,
@@ -156,7 +156,7 @@ mod tests {
         }
 
         #[async_trait]
-        impl RecordSink for CountingSink {
+        impl EventSink for CountingSink {
             async fn record(&mut self, _event: Event) -> Result<u64> {
                 self.count.fetch_add(1, Ordering::Relaxed);
                 Ok(1)

@@ -18,7 +18,7 @@ impl DatabaseSink {
 }
 
 #[async_trait]
-impl super::RecordSink for DatabaseSink {
+impl super::EventSink for DatabaseSink {
     async fn record(&mut self, event: Event) -> Result<u64> {
         let rows_changed = match event {
             Event::Share(share) => {
