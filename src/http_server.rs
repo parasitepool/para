@@ -1,7 +1,29 @@
-use super::*;
+use {super::*, axum::extract::Path, error::OptionExt};
 
 pub(crate) mod accept_json;
 pub(crate) mod error;
+
+#[derive(RustEmbed)]
+#[folder = "static"]
+pub(crate) struct StaticAssets;
+
+pub(crate) async fn static_assets(
+    Path(path): Path<String>,
+) -> error::ServerResult<Response> {
+    let content = StaticAssets::get(if let Some(stripped) = path.strip_prefix('/') {
+        stripped
+    } else {
+        &path
+    })
+    .ok_or_not_found(|| format!("asset {path}"))?;
+
+    let mime = mime_guess::from_path(path).first_or_octet_stream();
+
+    Ok(Response::builder()
+        .header(CONTENT_TYPE, mime.as_ref())
+        .body(content.data.into())
+        .unwrap())
+}
 
 #[derive(Clone, Debug)]
 pub struct HttpConfig {
@@ -18,7 +40,7 @@ pub fn spawn(
     cancel_token: CancellationToken,
     tasks: &mut JoinSet<()>,
 ) -> Result<()> {
-    let Some(port) = settings.api_port() else {
+    let Some(port) = settings.http_port() else {
         return Ok(());
     };
 

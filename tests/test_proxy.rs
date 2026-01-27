@@ -7,7 +7,7 @@ use {
 pub(crate) struct TestProxy {
     proxy_handle: Child,
     proxy_port: u16,
-    api_port: u16,
+    http_port: u16,
 }
 
 fn allocate_ports() -> (u16, u16) {
@@ -29,7 +29,7 @@ fn build_proxy_command(
     upstream: &str,
     username: &str,
     proxy_port: u16,
-    api_port: u16,
+    http_port: u16,
     args: impl ToArgs,
 ) -> CommandBuilder {
     CommandBuilder::new(format!(
@@ -39,7 +39,7 @@ fn build_proxy_command(
             --username {username} \
             --address 127.0.0.1 \
             --port {proxy_port} \
-            --api-port {api_port} \
+            --http-port {http_port} \
             {}",
         args.to_args().join(" ")
     ))
@@ -51,13 +51,13 @@ fn build_proxy_command(
 
 impl TestProxy {
     pub(crate) fn spawn_with_args(upstream: &str, username: &str, args: impl ToArgs) -> Self {
-        let (proxy_port, api_port) = allocate_ports();
+        let (proxy_port, http_port) = allocate_ports();
 
         let proxy_handle =
-            build_proxy_command(upstream, username, proxy_port, api_port, args).spawn();
+            build_proxy_command(upstream, username, proxy_port, http_port, args).spawn();
 
         for attempt in 0.. {
-            match TcpStream::connect(format!("127.0.0.1:{api_port}")) {
+            match TcpStream::connect(format!("127.0.0.1:{http_port}")) {
                 Ok(_) => break,
                 Err(_) if attempt < 100 => {
                     thread::sleep(Duration::from_millis(50));
@@ -72,7 +72,7 @@ impl TestProxy {
         Self {
             proxy_handle,
             proxy_port,
-            api_port,
+            http_port,
         }
     }
 
@@ -81,9 +81,9 @@ impl TestProxy {
         username: &str,
         args: impl ToArgs,
     ) -> String {
-        let (proxy_port, api_port) = allocate_ports();
+        let (proxy_port, http_port) = allocate_ports();
 
-        let output = build_proxy_command(upstream, username, proxy_port, api_port, args)
+        let output = build_proxy_command(upstream, username, proxy_port, http_port, args)
             .spawn()
             .wait_with_output()
             .expect("Failed to wait for proxy process");
@@ -115,12 +115,12 @@ impl TestProxy {
     }
 
     pub(crate) fn api_endpoint(&self) -> String {
-        format!("http://127.0.0.1:{}", self.api_port)
+        format!("http://127.0.0.1:{}", self.http_port)
     }
 
     pub(crate) async fn get_status(&self) -> reqwest::Result<ProxyStatus> {
         reqwest::Client::new()
-            .get(format!("{}/proxy/status", self.api_endpoint()))
+            .get(format!("{}/api/proxy/status", self.api_endpoint()))
             .send()
             .await?
             .json()
@@ -129,7 +129,7 @@ impl TestProxy {
 
     pub(crate) async fn get_user(&self, address: &str) -> reqwest::Result<UserDetail> {
         reqwest::Client::new()
-            .get(format!("{}/proxy/users/{}", self.api_endpoint(), address))
+            .get(format!("{}/api/proxy/users/{}", self.api_endpoint(), address))
             .send()
             .await?
             .json()

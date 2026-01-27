@@ -1,11 +1,37 @@
-use super::*;
+use {
+    super::*,
+    axum::extract::ws::{Message, WebSocket, WebSocketUpgrade},
+    boilerplate::Boilerplate,
+    crate::{http_server, log_broadcast},
+};
+
+#[derive(Boilerplate)]
+struct ProxyHomeHtml;
 
 pub(crate) fn router(metrics: Arc<Metrics>) -> Router {
     Router::new()
-        .route("/proxy/status", get(status))
-        .route("/proxy/users", get(users))
-        .route("/proxy/users/{address}", get(user))
+        .route("/", get(home))
+        .route("/api/proxy/status", get(status))
+        .route("/api/proxy/users", get(users))
+        .route("/api/proxy/users/{address}", get(user))
+        .route("/ws/logs", get(logs_ws))
+        .route("/static/{*path}", get(http_server::static_assets))
         .with_state(metrics)
+}
+
+async fn home() -> Response {
+    let html = ProxyHomeHtml;
+
+    #[cfg(feature = "reload")]
+    let body = match html.reload_from_path() {
+        Ok(reloaded) => reloaded.to_string(),
+        Err(_) => html.to_string(),
+    };
+
+    #[cfg(not(feature = "reload"))]
+    let body = html.to_string();
+
+    ([(CONTENT_TYPE, "text/html;charset=utf-8")], body).into_response()
 }
 
 async fn status(State(metrics): State<Arc<Metrics>>) -> Json<ProxyStatus> {
@@ -79,4 +105,28 @@ async fn user(
             .collect(),
     })
     .into_response())
+}
+
+async fn logs_ws(ws: WebSocketUpgrade) -> Response {
+    ws.on_upgrade(handle_logs_socket)
+}
+
+async fn handle_logs_socket(mut socket: WebSocket) {
+    let Some(subscriber) = log_broadcast::subscriber() else {
+        return;
+    };
+
+    for msg in subscriber.backlog() {
+        if socket.send(Message::Text(msg.as_ref().into())).await.is_err() {
+            return;
+        }
+    }
+
+    let mut rx = subscriber.subscribe();
+
+    while let Ok(msg) = rx.recv().await {
+        if socket.send(Message::Text(msg.as_ref().into())).await.is_err() {
+            break;
+        }
+    }
 }

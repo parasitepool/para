@@ -107,7 +107,7 @@ use {
     },
     tracing::{debug, error, info, warn},
     tracing_appender::non_blocking,
-    tracing_subscriber::EnvFilter,
+    tracing_subscriber::{EnvFilter, Layer, layer::SubscriberExt, util::SubscriberInitExt},
     upstream::Upstream,
     user::User,
     utoipa::{OpenApi, ToSchema},
@@ -126,6 +126,7 @@ pub mod ckpool;
 mod coinbase_builder;
 mod decay;
 mod extranonces;
+mod log_broadcast;
 mod generator;
 pub mod hashrate;
 mod http_server;
@@ -191,10 +192,17 @@ fn logs_enabled() -> bool {
 
 pub fn main() {
     let (writer, _guard) = non_blocking(io::stderr());
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .with_target(false)
-        .with_writer(writer)
+
+    let log_layer = log_broadcast::init(1000);
+
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_target(false)
+                .with_writer(writer)
+                .with_filter(EnvFilter::from_default_env()),
+        )
+        .with(log_layer.with_filter(tracing_subscriber::filter::LevelFilter::INFO))
         .init();
 
     let args = Arguments::parse();

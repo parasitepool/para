@@ -2,9 +2,9 @@ use super::*;
 
 pub(crate) fn router(metatron: Arc<Metatron>) -> Router {
     Router::new()
-        .route("/pool/status", get(status))
-        .route("/pool/users", get(users))
-        .route("/pool/users/{address}", get(user))
+        .route("/api/pool/status", get(status))
+        .route("/api/pool/users", get(users))
+        .route("/api/pool/users/{address}", get(user))
         .with_state(metatron)
 }
 
