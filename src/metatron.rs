@@ -164,6 +164,10 @@ impl Metatron {
         self.users.iter().map(|u| u.worker_count()).sum()
     }
 
+    pub(crate) fn total_work(&self) -> f64 {
+        self.users.iter().map(|u| u.total_work()).sum()
+    }
+
     pub(crate) fn last_share(&self) -> Option<Instant> {
         self.users.iter().filter_map(|user| user.last_share()).max()
     }
@@ -354,5 +358,36 @@ mod tests {
         let ext1 = u16::from_le_bytes(e1.as_bytes()[4..6].try_into().unwrap());
         let ext2 = u16::from_le_bytes(e2.as_bytes()[4..6].try_into().unwrap());
         assert_eq!(ext2, ext1 + 1);
+    }
+
+    #[test]
+    fn total_work_accumulates() {
+        let metatron = Metatron::new(pool_extranonces());
+        let addr = test_address();
+        let pool_diff = Difficulty::from(100.0);
+        let pool_diff_f64 = pool_diff.as_f64();
+
+        assert_eq!(metatron.total_work(), 0.0);
+
+        let foo = metatron.get_or_create_worker(addr.clone(), "foo");
+        foo.record_accepted(pool_diff, Difficulty::from(200.0));
+        foo.record_accepted(pool_diff, Difficulty::from(50.0));
+
+        assert!(
+            (foo.total_work() - 2.0 * pool_diff_f64).abs() < f64::EPSILON * 2.0 * pool_diff_f64
+        );
+        assert!(
+            (metatron.total_work() - 2.0 * pool_diff_f64).abs()
+                < f64::EPSILON * 2.0 * pool_diff_f64
+        );
+
+        let bar = metatron.get_or_create_worker(addr, "bar");
+        bar.record_accepted(pool_diff, Difficulty::from(400.0));
+
+        assert!((bar.total_work() - pool_diff_f64).abs() < f64::EPSILON * pool_diff_f64);
+        assert!(
+            (metatron.total_work() - 3.0 * pool_diff_f64).abs()
+                < f64::EPSILON * 3.0 * pool_diff_f64
+        );
     }
 }

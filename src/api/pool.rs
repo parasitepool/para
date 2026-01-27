@@ -43,6 +43,7 @@ async fn status(State(metatron): State<Arc<Metatron>>) -> Json<PoolStatus> {
         blocks: metatron.total_blocks(),
         best_ever: metatron.best_ever(),
         last_share: metatron.last_share().map(|time| time.elapsed().as_secs()),
+        total_work: metatron.total_work(),
         uptime_secs: metatron.uptime().as_secs(),
     })
 }
@@ -75,6 +76,7 @@ async fn user(
         accepted: user.accepted(),
         rejected: user.rejected(),
         best_ever: user.best_ever(),
+        total_work: user.total_work(),
         authorized: user.authorized,
         workers: user
             .workers()
@@ -85,6 +87,7 @@ async fn user(
                 accepted: worker.accepted(),
                 rejected: worker.rejected(),
                 best_ever: worker.best_ever(),
+                total_work: worker.total_work(),
             })
             .collect(),
     })

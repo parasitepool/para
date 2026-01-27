@@ -21,6 +21,7 @@ pub struct PoolStatus {
     pub blocks: u64,
     pub best_ever: Option<Difficulty>,
     pub last_share: Option<u64>,
+    pub total_work: f64,
     pub uptime_secs: u64,
 }
 
@@ -37,6 +38,7 @@ pub struct ProxyStatus {
     pub rejected: u64,
     pub best_ever: Option<Difficulty>,
     pub last_share: Option<u64>,
+    pub total_work: f64,
     pub uptime_secs: u64,
     pub upstream_endpoint: String,
     pub upstream_connected: bool,
@@ -57,6 +59,7 @@ pub struct UserDetail {
     pub accepted: u64,
     pub rejected: u64,
     pub best_ever: Option<Difficulty>,
+    pub total_work: f64,
     pub authorized: u64,
     pub workers: Vec<WorkerDetail>,
 }
@@ -69,4 +72,5 @@ pub struct WorkerDetail {
     pub accepted: u64,
     pub rejected: u64,
     pub best_ever: Option<Difficulty>,
+    pub total_work: f64,
 }
