@@ -359,4 +359,27 @@ mod tests {
         let ext2 = u16::from_le_bytes(e2.as_bytes()[4..6].try_into().unwrap());
         assert_eq!(ext2, ext1 + 1);
     }
+
+    #[test]
+    fn total_work_accumulates() {
+        let metatron = Metatron::new(pool_extranonces());
+        let addr = test_address();
+        let pool_diff = Difficulty::from(100.0);
+        let pool_diff_f64 = pool_diff.as_f64();
+
+        assert_eq!(metatron.total_work(), 0.0);
+
+        let worker_a = metatron.get_or_create_worker(addr.clone(), "worker_a");
+        worker_a.record_accepted(pool_diff, Difficulty::from(200.0));
+        worker_a.record_accepted(pool_diff, Difficulty::from(50.0));
+
+        assert!((worker_a.total_work() - 2.0 * pool_diff_f64).abs() < f64::EPSILON * 2.0 * pool_diff_f64);
+        assert!((metatron.total_work() - 2.0 * pool_diff_f64).abs() < f64::EPSILON * 2.0 * pool_diff_f64);
+
+        let worker_b = metatron.get_or_create_worker(addr, "woker_b");
+        worker_b.record_accepted(pool_diff, Difficulty::from(400.0));
+
+        assert!((worker_b.total_work() - pool_diff_f64).abs() < f64::EPSILON * pool_diff_f64);
+        assert!((metatron.total_work() - 3.0 * pool_diff_f64).abs() < f64::EPSILON * 3.0 * pool_diff_f64);
+    }
 }
