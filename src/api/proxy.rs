@@ -15,6 +15,8 @@ async fn status(State(metrics): State<Arc<Metrics>>) -> Json<ProxyStatus> {
         users: metrics.metatron.total_users(),
         workers: metrics.metatron.total_workers(),
         connections: metrics.metatron.total_connections(),
+        disconnected: metrics.metatron.disconnected(),
+        idle: metrics.metatron.idle(),
         accepted: metrics.metatron.accepted(),
         rejected: metrics.metatron.rejected(),
         best_ever: metrics.metatron.best_ever(),
