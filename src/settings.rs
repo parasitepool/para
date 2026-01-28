@@ -1,4 +1,4 @@
-use {super::*, bitcoind_async_client::traits::Reader};
+use super::*;
 
 mod pool_options;
 mod proxy_options;
