@@ -105,6 +105,15 @@ impl TestPool {
             .await
     }
 
+    pub(crate) async fn get_system_status(&self) -> reqwest::Result<api::SystemStatus> {
+        reqwest::Client::new()
+            .get(format!("{}/api/system/status", self.api_endpoint()))
+            .send()
+            .await?
+            .json()
+            .await
+    }
+
     pub(crate) async fn get_user(&self, address: &str) -> reqwest::Result<UserDetail> {
         reqwest::Client::new()
             .get(format!(

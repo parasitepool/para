@@ -1,6 +1,6 @@
 use {
     super::*,
-    api::{ProxyStatus, UserDetail},
+    api::{ProxyStatus, SystemStatus, UserDetail},
     para::{USER_AGENT, stratum},
 };
 
@@ -121,6 +121,15 @@ impl TestProxy {
     pub(crate) async fn get_status(&self) -> reqwest::Result<ProxyStatus> {
         reqwest::Client::new()
             .get(format!("{}/api/proxy/status", self.api_endpoint()))
+            .send()
+            .await?
+            .json()
+            .await
+    }
+
+    pub(crate) async fn get_system_status(&self) -> reqwest::Result<SystemStatus> {
+        reqwest::Client::new()
+            .get(format!("{}/api/system/status", self.api_endpoint()))
             .send()
             .await?
             .json()

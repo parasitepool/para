@@ -223,7 +223,7 @@ pub(crate) async fn static_assets(Path(path): Path<String>) -> ServerResult<Resp
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct SystemStatus {
+pub struct SystemStatus {
     pub cpu_usage: f64,
     pub memory_usage: f64,
     pub disk_usage: f64,
