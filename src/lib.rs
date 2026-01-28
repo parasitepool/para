@@ -46,6 +46,7 @@ use {
     lru::LruCache,
     metatron::Metatron,
     metrics::Metrics,
+    percentum::Percentage,
     reqwest::Url,
     rust_embed::RustEmbed,
     rustls_acme::{

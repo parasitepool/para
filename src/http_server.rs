@@ -4,7 +4,8 @@ use {
         Path,
         ws::{Message, WebSocketUpgrade},
     },
-    error::OptionExt,
+    error::{OptionExt, ServerResult},
+    sysinfo::DiskRefreshKind,
 };
 
 pub(crate) mod accept_json;
@@ -205,7 +206,7 @@ pub(crate) async fn ws_logs(ws: WebSocketUpgrade) -> Response {
     })
 }
 
-pub(crate) async fn static_assets(Path(path): Path<String>) -> error::ServerResult<Response> {
+pub(crate) async fn static_assets(Path(path): Path<String>) -> ServerResult<Response> {
     let content = StaticAssets::get(if let Some(stripped) = path.strip_prefix('/') {
         stripped
     } else {
@@ -219,4 +220,56 @@ pub(crate) async fn static_assets(Path(path): Path<String>) -> error::ServerResu
         .header(CONTENT_TYPE, mime.as_ref())
         .body(content.data.into())
         .unwrap())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct SystemStatus {
+    #[serde(with = "percentum::serde_points")]
+    pub cpu_usage: Percentage<f64>,
+    #[serde(with = "percentum::serde_points")]
+    pub memory_usage: Percentage<f64>,
+    #[serde(with = "percentum::serde_points")]
+    pub disk_usage: Percentage<f64>,
+    pub uptime: u64,
+}
+
+pub(crate) async fn system_status() -> Json<SystemStatus> {
+    Json(task::block_in_place(|| {
+        let mut system = System::new_all();
+        system.refresh_all();
+
+        let path = env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+
+        let mut disk_usage = Percentage::from_points(0.0);
+        let disks =
+            Disks::new_with_refreshed_list_specifics(DiskRefreshKind::nothing().with_storage());
+        for disk in &disks {
+            if path.starts_with(disk.mount_point()) {
+                let total = disk.total_space();
+                if total > 0 {
+                    disk_usage = Percentage::from_fraction(
+                        (total - disk.available_space()) as f64 / total as f64,
+                    );
+                }
+                break;
+            }
+        }
+
+        let total_memory = system.total_memory();
+        let memory_usage = if total_memory > 0 {
+            Percentage::from_fraction(system.used_memory() as f64 / total_memory as f64)
+        } else {
+            Percentage::from_points(0.0)
+        };
+
+        system.refresh_cpu_all();
+        let cpu_usage = Percentage::from_points(system.global_cpu_usage().into());
+
+        SystemStatus {
+            cpu_usage,
+            memory_usage,
+            disk_usage,
+            uptime: System::uptime(),
+        }
+    }))
 }
