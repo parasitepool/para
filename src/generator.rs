@@ -17,31 +17,28 @@ pub(crate) async fn spawn_generator(
     ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
     tasks.spawn(async move {
+        let fetch_and_push = || async {
+            match get_block_template(&rpc, &settings).await {
+                Ok(template) => {
+                    tx.send_replace(Arc::new(template));
+                }
+                Err(err) => warn!("Failed to fetch new block template: {err}"),
+            }
+        };
+
         loop {
             tokio::select! {
-                _ = cancel.cancelled() => break,
-                result = subscription.recv_blockhash() => {
-                    match result {
-                        Ok(blockhash) => {
-                            info!("ZMQ blockhash {blockhash}");
-                            match get_block_template(&rpc, &settings).await {
-                                Ok(template) => {
-                                    tx.send_replace(Arc::new(template));
-                                }
-                                Err(err) => warn!("Failed to fetch new block template: {err}"),
-                            }
-                        }
-                        Err(err) => error!("ZMQ receive error: {err}"),
+            _ = cancel.cancelled() => break,
+            result = subscription.recv_blockhash() => {
+                match result {
+                    Ok(blockhash) => {
+                        info!("ZMQ blockhash {blockhash}");
+                        fetch_and_push().await;
                     }
+                    Err(err) => error!("ZMQ receive error: {err}"),
                 }
-                _ = ticker.tick() => {
-                    match get_block_template(&rpc, &settings).await {
-                        Ok(template) => {
-                            tx.send_replace(Arc::new(template));
-                        }
-                        Err(err) => warn!("Failed to fetch new block template: {err}"),
-                    }
-                }
+            }
+            _ = ticker.tick() => fetch_and_push().await,
             }
         }
         info!("Shutting down generator");
