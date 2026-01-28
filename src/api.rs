@@ -9,6 +9,7 @@ pub mod proxy;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolStatus {
+    pub endpoint: String,
     pub users: usize,
     pub workers: usize,
     pub connections: u64,
@@ -27,6 +28,7 @@ pub struct PoolStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyStatus {
+    pub endpoint: String,
     pub users: usize,
     pub workers: usize,
     pub connections: u64,

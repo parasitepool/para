@@ -8,10 +8,11 @@ pub(crate) struct Metatron {
     sessions: DashMap<Extranonce, SessionSnapshot>,
     extranonces: Extranonces,
     counter: AtomicU64,
+    endpoint: String,
 }
 
 impl Metatron {
-    pub(crate) fn new(extranonces: Extranonces) -> Self {
+    pub(crate) fn new(extranonces: Extranonces, endpoint: String) -> Self {
         Self {
             blocks: AtomicU64::new(0),
             started: Instant::now(),
@@ -25,7 +26,12 @@ impl Metatron {
                     .unwrap_or_default()
                     .as_millis() as u64,
             ),
+            endpoint,
         }
+    }
+
+    pub(crate) fn endpoint(&self) -> &str {
+        &self.endpoint
     }
 
     pub(crate) fn spawn(self: Arc<Self>, cancel: CancellationToken, tasks: &mut JoinSet<()>) {
@@ -224,7 +230,7 @@ mod tests {
 
     #[test]
     fn new_metatron_starts_at_zero() {
-        let metatron = Metatron::new(pool_extranonces());
+        let metatron = Metatron::new(pool_extranonces(), String::new());
         assert_eq!(metatron.total_connections(), 0);
         assert_eq!(metatron.accepted(), 0);
         assert_eq!(metatron.rejected(), 0);
@@ -235,7 +241,7 @@ mod tests {
 
     #[test]
     fn connection_count_increments_and_decrements() {
-        let metatron = Metatron::new(pool_extranonces());
+        let metatron = Metatron::new(pool_extranonces(), String::new());
         assert_eq!(metatron.total_connections(), 0);
 
         metatron.add_connection();
@@ -248,7 +254,7 @@ mod tests {
 
     #[test]
     fn get_or_create_worker_creates_user_and_worker() {
-        let metatron = Metatron::new(pool_extranonces());
+        let metatron = Metatron::new(pool_extranonces(), String::new());
         let addr = test_address();
 
         let worker = metatron.get_or_create_worker(addr.clone(), "rig1");
@@ -264,7 +270,7 @@ mod tests {
 
     #[test]
     fn record_accepted_updates_stats() {
-        let metatron = Metatron::new(pool_extranonces());
+        let metatron = Metatron::new(pool_extranonces(), String::new());
         let addr = test_address();
         let worker = metatron.get_or_create_worker(addr, "rig1");
 
@@ -280,7 +286,7 @@ mod tests {
 
     #[test]
     fn record_rejected_updates_stats() {
-        let metatron = Metatron::new(pool_extranonces());
+        let metatron = Metatron::new(pool_extranonces(), String::new());
         let addr = test_address();
         let worker = metatron.get_or_create_worker(addr, "rig1");
 
@@ -293,14 +299,14 @@ mod tests {
 
     #[test]
     fn block_count_increments() {
-        let metatron = Metatron::new(pool_extranonces());
+        let metatron = Metatron::new(pool_extranonces(), String::new());
         metatron.add_block();
         assert_eq!(metatron.total_blocks(), 1);
     }
 
     #[test]
     fn next_enonce1_is_sequential() {
-        let metatron = Metatron::new(pool_extranonces());
+        let metatron = Metatron::new(pool_extranonces(), String::new());
         let e1 = metatron.next_enonce1();
         let e2 = metatron.next_enonce1();
         let e3 = metatron.next_enonce1();
@@ -315,13 +321,13 @@ mod tests {
 
     #[test]
     fn next_enonce1_has_correct_size() {
-        let metatron = Metatron::new(pool_extranonces());
+        let metatron = Metatron::new(pool_extranonces(), String::new());
         assert_eq!(metatron.next_enonce1().len(), ENONCE1_SIZE);
     }
 
     #[test]
     fn next_enonce1_is_unique() {
-        let metatron = Metatron::new(pool_extranonces());
+        let metatron = Metatron::new(pool_extranonces(), String::new());
         let mut seen = std::collections::HashSet::new();
         for _ in 0..1000 {
             let enonce = metatron.next_enonce1();
@@ -334,7 +340,7 @@ mod tests {
         let upstream_enonce1 = Extranonce::from_bytes(&[0xde, 0xad, 0xbe, 0xef]);
         let extranonces =
             Extranonces::Proxy(ProxyExtranonces::new(upstream_enonce1.clone(), 8).unwrap());
-        let metatron = Metatron::new(extranonces);
+        let metatron = Metatron::new(extranonces, String::new());
 
         let e1 = metatron.next_enonce1();
 
@@ -344,13 +350,13 @@ mod tests {
 
     #[test]
     fn proxy_mode_enonce2_size_reduced() {
-        let metatron = Metatron::new(proxy_extranonces());
+        let metatron = Metatron::new(proxy_extranonces(), String::new());
         assert_eq!(metatron.enonce2_size(), 6);
     }
 
     #[test]
     fn proxy_mode_next_enonce1_is_sequential() {
-        let metatron = Metatron::new(proxy_extranonces());
+        let metatron = Metatron::new(proxy_extranonces(), String::new());
 
         let e1 = metatron.next_enonce1();
         let e2 = metatron.next_enonce1();
@@ -362,7 +368,7 @@ mod tests {
 
     #[test]
     fn total_work_accumulates() {
-        let metatron = Metatron::new(pool_extranonces());
+        let metatron = Metatron::new(pool_extranonces(), String::new());
         let addr = test_address();
         let pool_diff = Difficulty::from(100.0);
         let pool_diff_f64 = pool_diff.as_f64();
