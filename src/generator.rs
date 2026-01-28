@@ -28,17 +28,17 @@ pub(crate) async fn spawn_generator(
 
         loop {
             tokio::select! {
-            _ = cancel.cancelled() => break,
-            result = subscription.recv_blockhash() => {
-                match result {
-                    Ok(blockhash) => {
-                        info!("ZMQ blockhash {blockhash}");
-                        fetch_and_push().await;
+                _ = cancel.cancelled() => break,
+                result = subscription.recv_blockhash() => {
+                    match result {
+                        Ok(blockhash) => {
+                            info!("ZMQ blockhash {blockhash}");
+                            fetch_and_push().await;
+                        }
+                        Err(err) => error!("ZMQ receive error: {err}"),
                     }
-                    Err(err) => error!("ZMQ receive error: {err}"),
                 }
-            }
-            _ = ticker.tick() => fetch_and_push().await,
+                _ = ticker.tick() => fetch_and_push().await,
             }
         }
         info!("Shutting down generator");
