@@ -207,7 +207,6 @@ impl TestPool {
 
     pub(crate) async fn mine_block(&self) {
         let current_height = self.get_block_height().await;
-        let current_blocks = self.get_status().await.map(|s| s.blocks).unwrap_or(0);
 
         CommandBuilder::new(format!(
             "miner --mode block-found --username {} {}",
@@ -224,10 +223,6 @@ impl TestPool {
             }
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
-
-        self.wait_for_blocks(current_blocks + 1, Duration::from_secs(10))
-            .await
-            .expect("Pool did not register block within timeout");
     }
 }
 

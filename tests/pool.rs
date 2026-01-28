@@ -801,7 +801,9 @@ async fn share_validation() {
     let (old_ntime, old_nonce) = solve_share(&notify, &enonce1, &fresh_enonce2, difficulty);
 
     pool.mine_block().await;
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    pool.wait_for_blocks(1, Duration::from_secs(10))
+        .await
+        .expect("Pool did not register block");
 
     let baseline = pool.get_status().await.unwrap();
     let user_baseline = pool.get_user(&user_address).await.unwrap();
