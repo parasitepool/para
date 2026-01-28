@@ -196,16 +196,17 @@ impl TestPool {
         &self.bitcoind_handle
     }
 
-    pub(crate) fn get_block_height(&self) -> u64 {
+    pub(crate) async fn get_block_height(&self) -> u64 {
         self.bitcoind_handle
             .client()
             .unwrap()
             .get_block_count()
+            .await
             .unwrap()
     }
 
-    pub(crate) fn mine_block(&self) {
-        let current_height = self.get_block_height();
+    pub(crate) async fn mine_block(&self, current_blocks: u64) {
+        let current_height = self.get_block_height().await;
 
         CommandBuilder::new(format!(
             "miner --mode block-found --username {} {}",
@@ -216,12 +217,22 @@ impl TestPool {
         .wait()
         .unwrap();
 
+        // First wait for bitcoind height to increase
         for _ in 0..100 {
-            if self.get_block_height() > current_height {
-                thread::sleep(Duration::from_millis(500));
+            if self.get_block_height().await > current_height {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+
+        // Then wait for pool blocks to increase
+        for _ in 0..50 {
+            if let Ok(status) = self.get_status().await
+                && status.blocks > current_blocks
+            {
                 return;
             }
-            thread::sleep(Duration::from_millis(100));
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }
 }

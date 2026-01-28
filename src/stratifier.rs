@@ -833,7 +833,14 @@ impl<W: Workbase> Stratifier<W> {
                 Ok(block) => {
                     info!("Submitting potential block solve");
 
-                    match self.settings.bitcoin_rpc_client()?.submit_block(&block) {
+                    let block_hex = encode::serialize_hex(&block);
+                    match self
+                        .settings
+                        .bitcoin_rpc_client()
+                        .await?
+                        .call_raw::<serde_json::Value>("submitblock", &[json!(block_hex)])
+                        .await
+                    {
                         Ok(_) => {
                             info!("SUCCESSFULLY mined block {}", block.block_hash());
                             self.metatron.add_block();

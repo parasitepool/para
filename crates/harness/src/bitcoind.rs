@@ -1,4 +1,7 @@
-use super::*;
+use {
+    super::*,
+    bitcoind_async_client::traits::{Broadcaster, Reader},
+};
 
 pub struct Bitcoind {
     pub datadir: Option<PathBuf>,
@@ -11,7 +14,7 @@ pub struct Bitcoind {
 }
 
 impl Bitcoind {
-    pub fn connect(
+    pub async fn connect(
         rpc_port: u16,
         rpc_user: String,
         rpc_password: String,
@@ -27,7 +30,7 @@ impl Bitcoind {
             with_output: true,
         };
 
-        let info = bitcoind.client()?.get_blockchain_info()?;
+        let info = bitcoind.client()?.get_blockchain_info().await?;
 
         println!(
             "Connected to bitcoind: chain={}, blocks={}",
@@ -137,7 +140,7 @@ maxtxfee=1000000
             salt_overide.to_string()
         } else {
             let mut salt_bytes = [0u8; 16];
-            thread_rng().fill_bytes(&mut salt_bytes);
+            rng().fill_bytes(&mut salt_bytes);
             salt_bytes
                 .clone()
                 .iter()
@@ -154,15 +157,19 @@ maxtxfee=1000000
 
     pub fn client(&self) -> Result<Client> {
         Ok(Client::new(
-            &format!("127.0.0.1:{}", self.rpc_port),
+            format!("http://127.0.0.1:{}", self.rpc_port),
             Auth::UserPass(self.rpc_user.clone(), self.rpc_password.clone()),
+            None,
+            None,
+            None,
         )?)
     }
 
-    pub fn create_or_load_wallet(&self) -> Result {
+    pub async fn create_or_load_wallet(&self) -> Result {
         match self
             .client()?
-            .create_wallet("testing-harness", None, None, None, None)
+            .call_raw::<serde_json::Value>("createwallet", &[json!("testing-harness")])
+            .await
         {
             Ok(_) => {}
             Err(_err) => {}
@@ -176,7 +183,7 @@ maxtxfee=1000000
         Address::p2wsh(&op_true, self.network)
     }
 
-    pub fn get_spendable_utxos(&self) -> Result<Vec<(OutPoint, Amount)>> {
+    pub async fn get_spendable_utxos(&self) -> Result<Vec<(OutPoint, Amount)>> {
         let descriptor = format!("addr({})", self.op_true_address());
 
         #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
@@ -208,9 +215,10 @@ maxtxfee=1000000
 
         let result: ScanTxOutResult = self
             .client()?
-            .call("scantxoutset", &["start".into(), json!([descriptor])])?;
+            .call_raw("scantxoutset", &[json!("start"), json!([descriptor])])
+            .await?;
 
-        let block_count = self.client()?.get_block_count()?;
+        let block_count = self.client()?.get_block_count().await?;
 
         let mut outpoints = Vec::new();
         for utxo in result.unspents {
@@ -230,7 +238,7 @@ maxtxfee=1000000
         Ok(outpoints)
     }
 
-    pub fn flood_mempool(&self, breadth: Option<u64>) -> Result<usize> {
+    pub async fn flood_mempool(&self, breadth: Option<u64>) -> Result<usize> {
         let mut witness = Witness::new();
         witness.push(
             Builder::new()
@@ -239,7 +247,7 @@ maxtxfee=1000000
                 .into_bytes(),
         );
 
-        let utxos = self.get_spendable_utxos()?;
+        let utxos = self.get_spendable_utxos().await?;
         let mut tx_count = 0;
 
         for (outpoint, amount) in utxos {
@@ -269,7 +277,7 @@ maxtxfee=1000000
                     output: outputs,
                 };
 
-                self.client().unwrap().send_raw_transaction(&tx)?;
+                self.client().unwrap().send_raw_transaction(&tx).await?;
                 tx_count += 1;
             } else {
                 let mut previous_output = outpoint;
@@ -290,7 +298,7 @@ maxtxfee=1000000
                         }],
                     };
 
-                    self.client().unwrap().send_raw_transaction(&tx)?;
+                    self.client().unwrap().send_raw_transaction(&tx).await?;
                     tx_count += 1;
 
                     previous_output = OutPoint {

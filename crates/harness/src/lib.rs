@@ -5,13 +5,14 @@ use {
         absolute::LockTime,
         blockdata::{opcodes::OP_TRUE, script::Builder},
         hashes::{Hash, HashEngine, Hmac, hmac, sha256},
-        key::rand::{RngCore, thread_rng},
         transaction::Version,
     },
-    bitcoincore_rpc::{Auth, Client, RpcApi},
     bitcoind::Bitcoind,
+    bitcoind_async_client::traits::Reader,
+    bitcoind_async_client::{Auth, Client},
     cargo_metadata::MetadataCommand,
     clap::{Parser, Subcommand},
+    rand::{RngCore, rng},
     serde::{Deserialize, Serialize},
     serde_json::json,
     std::{
@@ -104,39 +105,45 @@ pub fn main() {
             continuous,
         }) => {
             let network = parse_network(&network);
-            let bitcoind = Bitcoind::connect(rpc_port, rpc_user, rpc_password, network)
-                .expect("Failed to connect to bitcoind");
+            // For now, we need to spawn a runtime for async calls
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async {
+                let bitcoind = Bitcoind::connect(rpc_port, rpc_user, rpc_password, network)
+                    .await
+                    .expect("Failed to connect to bitcoind");
 
-            if let Some(target_bytes) = continuous {
-                println!(
-                    "Running in continuous mode, target mempool size: {} bytes",
-                    target_bytes
-                );
-                while !SHUTTING_DOWN.load(Ordering::Relaxed) {
-                    let mempool_info = bitcoind.client().unwrap().get_mempool_info().unwrap();
+                if let Some(target_bytes) = continuous {
                     println!(
-                        "Mempool: {} txs, {} bytes",
-                        mempool_info.size, mempool_info.bytes
+                        "Running in continuous mode, target mempool size: {} bytes",
+                        target_bytes
                     );
+                    while !SHUTTING_DOWN.load(Ordering::Relaxed) {
+                        let mempool_info =
+                            bitcoind.client().unwrap().get_mempool_info().await.unwrap();
+                        println!(
+                            "Mempool: {} txs, {} bytes",
+                            mempool_info.size, mempool_info.bytes
+                        );
 
-                    if (mempool_info.bytes as u64) < target_bytes {
-                        match bitcoind.flood_mempool(breadth) {
-                            Ok(count) => println!("Created {} transactions", count),
-                            Err(e) => eprintln!("Error flooding mempool: {}", e),
+                        if (mempool_info.bytes as u64) < target_bytes {
+                            match bitcoind.flood_mempool(breadth).await {
+                                Ok(count) => println!("Created {} transactions", count),
+                                Err(e) => eprintln!("Error flooding mempool: {}", e),
+                            }
+                        }
+
+                        std::thread::sleep(Duration::from_secs(5));
+                    }
+                } else {
+                    match bitcoind.flood_mempool(breadth).await {
+                        Ok(count) => println!("Created {} transactions", count),
+                        Err(e) => {
+                            eprintln!("Error: {}", e);
+                            process::exit(1);
                         }
                     }
-
-                    std::thread::sleep(Duration::from_secs(5));
                 }
-            } else {
-                match bitcoind.flood_mempool(breadth) {
-                    Ok(count) => println!("Created {} transactions", count),
-                    Err(e) => {
-                        eprintln!("Error: {}", e);
-                        process::exit(1);
-                    }
-                }
-            }
+            });
         }
 
         Some(Commands::Spawn) | None => {
@@ -172,17 +179,21 @@ fn run_ephemeral_harness() {
     println!("Bitcoin rpc port: {}", bitcoind.rpc_port);
     println!("Bitcoin zmq port: {}", zmq_port);
 
-    while !SHUTTING_DOWN.load(Ordering::Relaxed) {
-        let result = bitcoind.client().unwrap().get_mempool_info().unwrap();
-        println!("Mempool size: {} bytes", result.bytes);
-        println!("Mempool size: {} transactions", result.size);
-        println!("Bitcoin rpc port: {}", bitcoind.rpc_port);
-        println!("Bitcoin zmq port: {}", zmq_port);
+    // For now, spawn a runtime for async calls
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        while !SHUTTING_DOWN.load(Ordering::Relaxed) {
+            let result = bitcoind.client().unwrap().get_mempool_info().await.unwrap();
+            println!("Mempool size: {} bytes", result.bytes);
+            println!("Mempool size: {} transactions", result.size);
+            println!("Bitcoin rpc port: {}", bitcoind.rpc_port);
+            println!("Bitcoin zmq port: {}", zmq_port);
 
-        if result.bytes < 5000000 {
-            let _ = bitcoind.flood_mempool(Some(2));
+            if result.bytes < 5000000 {
+                let _ = bitcoind.flood_mempool(Some(2)).await;
+            }
+
+            tokio::time::sleep(Duration::from_millis(5000)).await;
         }
-
-        std::thread::sleep(Duration::from_millis(5000));
-    }
+    });
 }

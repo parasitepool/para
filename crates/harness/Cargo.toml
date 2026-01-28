@@ -11,13 +11,15 @@ rust-version.workspace = true
 [dependencies]
 anyhow.workspace = true
 bitcoin.workspace = true
-bitcoincore-rpc.workspace = true
+bitcoind-async-client.workspace = true
 cargo_metadata = "0.23.0"
 clap.workspace = true
 ctrlc = { version = "3.5", features = ["termination"] }
 serde.workspace = true
 serde_json.workspace = true
 tempfile = "3.23.0"
+tokio.workspace = true
+rand = "0.9"
 
 [[bin]]
 name = "harness"
