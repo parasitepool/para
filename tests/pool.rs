@@ -552,6 +552,7 @@ async fn share_validation() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001 --disable-bouncer");
 
     let status = pool.get_status().await.unwrap();
+    assert_eq!(status.endpoint, pool.stratum_endpoint());
     assert_eq!(status.users, 0);
     assert_eq!(status.workers, 0);
     assert_eq!(status.connections, 0);
@@ -560,6 +561,14 @@ async fn share_validation() {
     assert_eq!(status.rejected, 0);
     assert!(status.best_ever.is_none());
     assert!(status.last_share.is_none());
+
+    let system_status = pool.get_system_status().await.unwrap();
+    assert!(system_status.cpu_usage_percent >= 0.0 && system_status.cpu_usage_percent <= 100.0);
+    assert!(
+        system_status.memory_usage_percent >= 0.0 && system_status.memory_usage_percent <= 100.0
+    );
+    assert!(system_status.disk_usage_percent >= 0.0 && system_status.disk_usage_percent <= 100.0);
+    assert!(system_status.uptime > 0);
 
     let client = pool.stratum_client().await;
     let mut events = client.connect().await.unwrap();

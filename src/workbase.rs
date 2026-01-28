@@ -6,6 +6,8 @@ pub(crate) trait Workbase: Clone + Send + Sync + 'static {
     fn version(&self) -> Version;
     fn nbits(&self) -> Nbits;
     fn ntime(&self) -> Ntime;
+    fn height(&self) -> i32;
+    fn coinbase_value(&self) -> Option<i64>;
 
     fn create_job(
         self: &Arc<Self>,
@@ -44,6 +46,14 @@ impl Workbase for BlockTemplate {
 
     fn ntime(&self) -> Ntime {
         self.current_time
+    }
+
+    fn height(&self) -> i32 {
+        self.height as i32
+    }
+
+    fn coinbase_value(&self) -> Option<i64> {
+        Some(self.coinbase_value.to_sat() as i64)
     }
 
     fn create_job(
@@ -136,6 +146,14 @@ impl Workbase for Notify {
 
     fn ntime(&self) -> Ntime {
         self.ntime
+    }
+
+    fn height(&self) -> i32 {
+        0
+    }
+
+    fn coinbase_value(&self) -> Option<i64> {
+        None
     }
 
     fn create_job(

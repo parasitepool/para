@@ -1,5 +1,7 @@
-use super::*;
-use crate::subcommand::server::database::{FailedPayout, PendingPayout};
+use {
+    super::*,
+    crate::subcommand::server::database::{FailedPayout, PendingPayout},
+};
 
 #[derive(Boilerplate, Debug, Deserialize, Serialize, PartialEq)]
 pub struct PayoutsHtml {

@@ -1,6 +1,6 @@
 use {
     super::*,
-    crate::{api, http_server},
+    crate::{api, event_sink::build_event_sink, http_server},
 };
 
 #[derive(Parser, Debug)]
@@ -27,7 +27,10 @@ impl Pool {
                 .context("invalid extranonce configuration")?,
         );
 
-        let metatron = Arc::new(Metatron::new(extranonces));
+        let metatron = Arc::new(Metatron::new(
+            extranonces,
+            format!("{}:{}", settings.address(), settings.port()),
+        ));
         metatron.clone().spawn(cancel_token.clone(), &mut tasks);
 
         http_server::spawn(
@@ -36,6 +39,10 @@ impl Pool {
             cancel_token.clone(),
             &mut tasks,
         )?;
+
+        let event_tx = build_event_sink(&settings, cancel_token.clone(), &mut tasks)
+            .await
+            .context("failed to build record sink")?;
 
         let address = settings.address();
         let port = settings.port();
@@ -59,6 +66,7 @@ impl Pool {
                     let settings = settings.clone();
                     let metatron = metatron.clone();
                     let conn_cancel_token = cancel_token.child_token();
+                    let event_tx = event_tx.clone();
 
                     tasks.spawn(async move {
                         let mut stratifier: Stratifier<BlockTemplate> = Stratifier::new(
@@ -69,6 +77,7 @@ impl Pool {
                             stream,
                             workbase_rx,
                             conn_cancel_token,
+                            event_tx,
                         );
 
                         if let Err(err) = stratifier.serve().await {

@@ -156,8 +156,7 @@ impl Bouncer {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::thread;
+    use {super::*, std::thread};
 
     #[test]
     fn new_bouncer_starts_at_zero() {

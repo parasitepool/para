@@ -1,20 +1,54 @@
-use super::*;
+use {super::*, crate::http_server, boilerplate::Boilerplate};
 
 pub(crate) fn router(metrics: Arc<Metrics>) -> Router {
     Router::new()
-        .route("/proxy/status", get(status))
-        .route("/proxy/users", get(users))
-        .route("/proxy/users/{address}", get(user))
+        .route("/", get(home))
+        .route("/api/proxy/status", get(status))
+        .route("/api/proxy/users", get(users))
+        .route("/api/proxy/users/{address}", get(user))
+        .route("/api/system/status", get(http_server::system_status))
+        .route("/ws/logs", get(http_server::ws_logs))
+        .route("/static/{*path}", get(http_server::static_assets))
         .with_state(metrics)
+}
+
+#[derive(Boilerplate)]
+struct ProxyHtml;
+
+async fn home() -> Response {
+    let html = ProxyHtml;
+
+    #[cfg(feature = "reload")]
+    let body = match html.reload_from_path() {
+        Ok(reloaded) => reloaded.to_string(),
+        Err(_) => html.to_string(),
+    };
+
+    #[cfg(not(feature = "reload"))]
+    let body = html.to_string();
+
+    ([(CONTENT_TYPE, "text/html;charset=utf-8")], body).into_response()
 }
 
 async fn status(State(metrics): State<Arc<Metrics>>) -> Json<ProxyStatus> {
     Json(ProxyStatus {
-        hashrate_1m: metrics.metatron.hash_rate_1m(),
+        endpoint: metrics.metatron.endpoint().to_string(),
+        hashrate_1m: metrics.metatron.hashrate_1m(),
+        hashrate_5m: metrics.metatron.hashrate_5m(),
+        hashrate_15m: metrics.metatron.hashrate_15m(),
+        hashrate_1hr: metrics.metatron.hashrate_1hr(),
+        hashrate_6hr: metrics.metatron.hashrate_6hr(),
+        hashrate_1d: metrics.metatron.hashrate_1d(),
+        hashrate_7d: metrics.metatron.hashrate_7d(),
         sps_1m: metrics.metatron.sps_1m(),
+        sps_5m: metrics.metatron.sps_5m(),
+        sps_15m: metrics.metatron.sps_15m(),
+        sps_1hr: metrics.metatron.sps_1hr(),
         users: metrics.metatron.total_users(),
         workers: metrics.metatron.total_workers(),
         connections: metrics.metatron.total_connections(),
+        disconnected: metrics.metatron.disconnected(),
+        idle: metrics.metatron.idle(),
         accepted: metrics.metatron.accepted(),
         rejected: metrics.metatron.rejected(),
         best_ever: metrics.metatron.best_ever(),
@@ -22,6 +56,7 @@ async fn status(State(metrics): State<Arc<Metrics>>) -> Json<ProxyStatus> {
             .metatron
             .last_share()
             .map(|time| time.elapsed().as_secs()),
+        total_work: metrics.metatron.total_work(),
         uptime_secs: metrics.metatron.uptime().as_secs(),
         upstream_endpoint: metrics.upstream.endpoint().to_string(),
         upstream_difficulty: metrics.upstream.difficulty().await.as_f64(),
@@ -60,21 +95,41 @@ async fn user(
 
     Ok(Json(UserDetail {
         address: user.address.to_string(),
-        hashrate_1m: user.hash_rate_1m(),
+        hashrate_1m: user.hashrate_1m(),
+        hashrate_5m: user.hashrate_5m(),
+        hashrate_15m: user.hashrate_15m(),
+        hashrate_1hr: user.hashrate_1hr(),
+        hashrate_6hr: user.hashrate_6hr(),
+        hashrate_1d: user.hashrate_1d(),
+        hashrate_7d: user.hashrate_7d(),
         sps_1m: user.sps_1m(),
+        sps_5m: user.sps_5m(),
+        sps_15m: user.sps_15m(),
+        sps_1hr: user.sps_1hr(),
         accepted: user.accepted(),
         rejected: user.rejected(),
         best_ever: user.best_ever(),
+        total_work: user.total_work(),
         authorized: user.authorized,
         workers: user
             .workers()
             .map(|worker| WorkerDetail {
                 name: worker.workername().to_string(),
-                hashrate_1m: worker.hash_rate_1m(),
+                hashrate_1m: worker.hashrate_1m(),
+                hashrate_5m: worker.hashrate_5m(),
+                hashrate_15m: worker.hashrate_15m(),
+                hashrate_1hr: worker.hashrate_1hr(),
+                hashrate_6hr: worker.hashrate_6hr(),
+                hashrate_1d: worker.hashrate_1d(),
+                hashrate_7d: worker.hashrate_7d(),
                 sps_1m: worker.sps_1m(),
+                sps_5m: worker.sps_5m(),
+                sps_15m: worker.sps_15m(),
+                sps_1hr: worker.sps_1hr(),
                 accepted: worker.accepted(),
                 rejected: worker.rejected(),
                 best_ever: worker.best_ever(),
+                total_work: worker.total_work(),
             })
             .collect(),
     })

@@ -42,6 +42,7 @@ use {
         },
     },
     anyhow::Error,
+    api::UserDetail,
     base64::{Engine, engine::general_purpose},
     bip322::sign_simple_encoded,
     bitcoin::{
@@ -76,6 +77,7 @@ use {
             atomic::{AtomicUsize, Ordering},
             mpsc,
         },
+        time::Instant,
     },
     tempfile::tempdir,
     test_ckpool::TestCkpool,
@@ -98,6 +100,8 @@ mod to_args;
 #[cfg(target_os = "linux")]
 mod account;
 mod alerts;
+#[cfg(target_os = "linux")]
+mod event_sink;
 #[cfg(target_os = "linux")]
 mod payouts;
 #[cfg(target_os = "linux")]
