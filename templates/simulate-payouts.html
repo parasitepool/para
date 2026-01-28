@@ -31,22 +31,24 @@
     <div>
         %% if !self.payouts.is_empty() {
         <h3>Simulated Payments</h3>
-        <table border="1" cellpadding="5" cellspacing="0" style="width: 100%;">
-            <tr>
-                <th>Lightning Address</th>
-                <th>Bitcoin Address</th>
-                <th>Amount</th>
-                <th>Percentage</th>
-            </tr>
-            %% for payout in &self.payouts {
-            <tr>
-                <td>{{ payout.ln_address }}</td>
-                <td>{{ payout.btc_address }}</td>
-                <td>{{ crate::subcommand::server::templates::simulate_payouts::format_sats(payout.amount_sats) }}</td>
-                <td>{{ format!("{:.6}%", payout.percentage * 100.0) }}</td>
-            </tr>
-            %% }
-        </table>
+        <div style="overflow: auto; max-height: 500px;">
+            <table border="1" cellpadding="5" cellspacing="0" style="width: 100%;">
+                <tr>
+                    <th>Lightning Address</th>
+                    <th>Bitcoin Address</th>
+                    <th>Amount</th>
+                    <th>Percentage</th>
+                </tr>
+                %% for payout in &self.payouts {
+                <tr>
+                    <td>{{ payout.ln_address }}</td>
+                    <td>{{ payout.btc_address }}</td>
+                    <td>{{ crate::subcommand::server::templates::simulate_payouts::format_sats(payout.amount_sats) }}</td>
+                    <td>{{ format!("{:.6}%", payout.percentage * 100.0) }}</td>
+                </tr>
+                %% }
+            </table>
+        </div>
         %% } else {
         <p>No payouts to display. The coinbase value may be too small (must be > 1 BTC).</p>
         %% }
