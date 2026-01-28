@@ -217,7 +217,6 @@ impl TestPool {
         .wait()
         .unwrap();
 
-        // First wait for bitcoind height to increase
         for _ in 0..100 {
             if self.get_block_height().await > current_height {
                 break;
@@ -225,15 +224,9 @@ impl TestPool {
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
 
-        // Then wait for pool blocks to increase
-        for _ in 0..50 {
-            if let Ok(status) = self.get_status().await
-                && status.blocks > current_blocks
-            {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
+        self.wait_for_blocks(current_blocks + 1, Duration::from_secs(10))
+            .await
+            .expect("Pool did not register block within timeout");
     }
 }
 

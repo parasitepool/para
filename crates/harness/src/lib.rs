@@ -8,8 +8,10 @@ use {
         transaction::Version,
     },
     bitcoind::Bitcoind,
-    bitcoind_async_client::traits::Reader,
-    bitcoind_async_client::{Auth, Client},
+    bitcoind_async_client::{
+        Auth, Client,
+        traits::{Broadcaster, Reader},
+    },
     cargo_metadata::MetadataCommand,
     clap::{Parser, Subcommand},
     rand::{RngCore, rng},

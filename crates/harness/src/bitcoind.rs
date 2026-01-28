@@ -1,7 +1,4 @@
-use {
-    super::*,
-    bitcoind_async_client::traits::{Broadcaster, Reader},
-};
+use super::*;
 
 pub struct Bitcoind {
     pub datadir: Option<PathBuf>,

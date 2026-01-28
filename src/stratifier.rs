@@ -834,33 +834,53 @@ impl<W: Workbase> Stratifier<W> {
                     info!("Submitting potential block solve");
 
                     let block_hex = encode::serialize_hex(&block);
-                    match self
-                        .settings
-                        .bitcoin_rpc_client()
-                        .await?
-                        .call_raw::<serde_json::Value>("submitblock", &[json!(block_hex)])
-                        .await
-                    {
-                        Ok(_) => {
-                            info!("SUCCESSFULLY mined block {}", block.block_hash());
-                            self.metatron.add_block();
-
-                            let job_height = job.workbase.height();
-                            let blockhash_str = blockhash.to_string();
-                            let diff = Difficulty::from(job.nbits()).as_f64();
-                            let coinbase_value = job.workbase.coinbase_value();
-
-                            self.send_event(Event::BlockFound(BlockFoundEvent {
-                                timestamp: None,
-                                blockheight: job_height,
-                                blockhash: blockhash_str,
-                                address: session.address.to_string(),
-                                workername: session.workername.clone(),
-                                diff,
-                                coinbase_value,
-                            }));
+                    let client = match self.settings.bitcoin_rpc_client().await {
+                        Ok(c) => c,
+                        Err(e) => {
+                            error!("Failed to create bitcoin RPC client: {e}");
+                            return Err(e);
                         }
-                        Err(err) => error!("Failed to submit block: {err}"),
+                    };
+                    let result = client
+                        .call_raw::<serde_json::Value>("submitblock", &[json!(block_hex)])
+                        .await;
+                    let is_success = match &result {
+                        Ok(v) if v.is_null() => true,
+                        Ok(v) if v.as_str() == Some("duplicate") => {
+                            info!("Block was already submitted (duplicate)");
+                            false
+                        }
+                        Ok(v) => {
+                            warn!("submitblock returned unexpected value: {v:?}");
+                            false
+                        }
+                        Err(e) if e.to_string().contains("Empty data received") => {
+                            info!("submitblock returned null (success)");
+                            true
+                        }
+                        Err(e) => {
+                            error!("Failed to submit block: {e}");
+                            false
+                        }
+                    };
+                    if is_success {
+                        info!("SUCCESSFULLY mined block {}", block.block_hash());
+                        self.metatron.add_block();
+
+                        let job_height = job.workbase.height();
+                        let blockhash_str = blockhash.to_string();
+                        let diff = Difficulty::from(job.nbits()).as_f64();
+                        let coinbase_value = job.workbase.coinbase_value();
+
+                        self.send_event(Event::BlockFound(BlockFoundEvent {
+                            timestamp: None,
+                            blockheight: job_height,
+                            blockhash: blockhash_str,
+                            address: session.address.to_string(),
+                            workername: session.workername.clone(),
+                            diff,
+                            coinbase_value,
+                        }));
                     }
                 }
                 Err(err) => {
