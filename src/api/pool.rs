@@ -1,18 +1,19 @@
 use {super::*, crate::http_server, boilerplate::Boilerplate};
 
-#[derive(Boilerplate)]
-struct PoolHtml;
-
 pub(crate) fn router(metatron: Arc<Metatron>) -> Router {
     Router::new()
         .route("/", get(home))
         .route("/api/pool/status", get(status))
         .route("/api/pool/users", get(users))
         .route("/api/pool/users/{address}", get(user))
+        .route("/api/system/status", get(http_server::system_status))
         .route("/ws/logs", get(http_server::ws_logs))
         .route("/static/{*path}", get(http_server::static_assets))
         .with_state(metatron)
 }
+
+#[derive(Boilerplate)]
+struct PoolHtml;
 
 async fn home() -> Response {
     let html = PoolHtml;

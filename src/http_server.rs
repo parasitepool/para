@@ -4,7 +4,8 @@ use {
         Path,
         ws::{Message, WebSocketUpgrade},
     },
-    error::OptionExt,
+    error::{OptionExt, ServerResult},
+    sysinfo::DiskRefreshKind,
 };
 
 pub(crate) mod accept_json;
@@ -205,7 +206,7 @@ pub(crate) async fn ws_logs(ws: WebSocketUpgrade) -> Response {
     })
 }
 
-pub(crate) async fn static_assets(Path(path): Path<String>) -> error::ServerResult<Response> {
+pub(crate) async fn static_assets(Path(path): Path<String>) -> ServerResult<Response> {
     let content = StaticAssets::get(if let Some(stripped) = path.strip_prefix('/') {
         stripped
     } else {
@@ -219,4 +220,56 @@ pub(crate) async fn static_assets(Path(path): Path<String>) -> error::ServerResu
         .header(CONTENT_TYPE, mime.as_ref())
         .body(content.data.into())
         .unwrap())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemStatus {
+    pub cpu_usage_percent: f64,
+    pub memory_usage_percent: f64,
+    pub disk_usage_percent: f64,
+    pub uptime: u64,
+}
+
+fn round2(value: f64) -> f64 {
+    (value * 100.0).round() / 100.0
+}
+
+pub(crate) async fn system_status() -> Json<SystemStatus> {
+    Json(task::block_in_place(|| {
+        let system = System::new_all();
+
+        let path = env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+
+        let mut disk_usage_percent = 0.0;
+
+        let disks =
+            Disks::new_with_refreshed_list_specifics(DiskRefreshKind::nothing().with_storage());
+
+        for disk in &disks {
+            if path.starts_with(disk.mount_point()) {
+                let total = disk.total_space();
+                if total > 0 {
+                    disk_usage_percent =
+                        100.0 * (total - disk.available_space()) as f64 / total as f64;
+                }
+                break;
+            }
+        }
+
+        let total_memory = system.total_memory();
+        let memory_usage_percent = if total_memory > 0 {
+            100.0 * system.used_memory() as f64 / total_memory as f64
+        } else {
+            0.0
+        };
+
+        let cpu_usage_percent: f64 = system.global_cpu_usage().into();
+
+        SystemStatus {
+            cpu_usage_percent: round2(cpu_usage_percent),
+            memory_usage_percent: round2(memory_usage_percent),
+            disk_usage_percent: round2(disk_usage_percent),
+            uptime: System::uptime(),
+        }
+    }))
 }

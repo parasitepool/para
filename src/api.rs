@@ -112,3 +112,5 @@ pub struct WorkerDetail {
     pub best_ever: Option<Difficulty>,
     pub total_work: f64,
 }
+
+pub type SystemStatus = http_server::SystemStatus;

@@ -15,6 +15,14 @@ async fn proxy() {
 
     assert_eq!(status.endpoint, proxy.stratum_endpoint());
 
+    let system_status = proxy.get_system_status().await.unwrap();
+    assert!(system_status.cpu_usage_percent >= 0.0 && system_status.cpu_usage_percent <= 100.0);
+    assert!(
+        system_status.memory_usage_percent >= 0.0 && system_status.memory_usage_percent <= 100.0
+    );
+    assert!(system_status.disk_usage_percent >= 0.0 && system_status.disk_usage_percent <= 100.0);
+    assert!(system_status.uptime > 0);
+
     assert_eq!(
         status.upstream_endpoint, upstream,
         "Upstream URL should match"

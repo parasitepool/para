@@ -1,18 +1,19 @@
 use {super::*, crate::http_server, boilerplate::Boilerplate};
 
-#[derive(Boilerplate)]
-struct ProxyHtml;
-
 pub(crate) fn router(metrics: Arc<Metrics>) -> Router {
     Router::new()
         .route("/", get(home))
         .route("/api/proxy/status", get(status))
         .route("/api/proxy/users", get(users))
         .route("/api/proxy/users/{address}", get(user))
+        .route("/api/system/status", get(http_server::system_status))
         .route("/ws/logs", get(http_server::ws_logs))
         .route("/static/{*path}", get(http_server::static_assets))
         .with_state(metrics)
 }
+
+#[derive(Boilerplate)]
+struct ProxyHtml;
 
 async fn home() -> Response {
     let html = ProxyHtml;

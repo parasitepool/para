@@ -562,6 +562,14 @@ async fn share_validation() {
     assert!(status.best_ever.is_none());
     assert!(status.last_share.is_none());
 
+    let system_status = pool.get_system_status().await.unwrap();
+    assert!(system_status.cpu_usage_percent >= 0.0 && system_status.cpu_usage_percent <= 100.0);
+    assert!(
+        system_status.memory_usage_percent >= 0.0 && system_status.memory_usage_percent <= 100.0
+    );
+    assert!(system_status.disk_usage_percent >= 0.0 && system_status.disk_usage_percent <= 100.0);
+    assert!(system_status.uptime > 0);
+
     let client = pool.stratum_client().await;
     let mut events = client.connect().await.unwrap();
 
