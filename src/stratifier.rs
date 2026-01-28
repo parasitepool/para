@@ -834,36 +834,24 @@ impl<W: Workbase> Stratifier<W> {
                     info!("Submitting potential block solve");
 
                     let block_hex = encode::serialize_hex(&block);
-                    let client = match self.settings.bitcoin_rpc_client().await {
-                        Ok(c) => c,
-                        Err(e) => {
-                            error!("Failed to create bitcoin RPC client: {e}");
-                            return Err(e);
-                        }
-                    };
-                    let result = client
-                        .call_raw::<serde_json::Value>("submitblock", &[json!(block_hex)])
-                        .await;
-                    let is_success = match &result {
-                        Ok(v) if v.is_null() => true,
-                        Ok(v) if v.as_str() == Some("duplicate") => {
-                            info!("Block was already submitted (duplicate)");
+                    let client = self.settings.bitcoin_rpc_client().await?;
+
+                    let success = match client
+                        .call_raw::<String>("submitblock", &[json!(block_hex)])
+                        .await
+                    {
+                        Ok(msg) => {
+                            info!("submitblock returned: {msg}");
                             false
                         }
-                        Ok(v) => {
-                            warn!("submitblock returned unexpected value: {v:?}");
-                            false
-                        }
-                        Err(e) if e.to_string().contains("Empty data received") => {
-                            info!("submitblock returned null (success)");
-                            true
-                        }
+                        Err(e) if e.to_string().contains("Empty data received") => true,
                         Err(e) => {
                             error!("Failed to submit block: {e}");
                             false
                         }
                     };
-                    if is_success {
+
+                    if success {
                         info!("SUCCESSFULLY mined block {}", block.block_hash());
                         self.metatron.add_block();
 
