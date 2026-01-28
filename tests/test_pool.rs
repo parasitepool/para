@@ -205,8 +205,9 @@ impl TestPool {
             .unwrap()
     }
 
-    pub(crate) async fn mine_block(&self, current_blocks: u64) {
+    pub(crate) async fn mine_block(&self) {
         let current_height = self.get_block_height().await;
+        let current_blocks = self.get_status().await.map(|s| s.blocks).unwrap_or(0);
 
         CommandBuilder::new(format!(
             "miner --mode block-found --username {} {}",

@@ -348,7 +348,7 @@ async fn clean_jobs_true_on_init_and_new_block() {
     let (notify, _) = wait_for_notify(&mut events).await;
     assert!(notify.clean_jobs);
 
-    pool.mine_block(0).await;
+    pool.mine_block().await;
 
     let notify = wait_for_new_block(&mut events, notify.job_id).await;
     assert!(notify.clean_jobs);
@@ -433,7 +433,7 @@ async fn concurrently_listening_workers_receive_new_templates_on_new_block() {
 
     gate.wait();
 
-    pool.mine_block(0).await;
+    pool.mine_block().await;
 
     let (initial_template_worker_a, new_template_worker_a) =
         tokio::time::timeout(Duration::from_secs(10), in_1.recv())
@@ -800,7 +800,7 @@ async fn share_validation() {
     let fresh_enonce2 = Extranonce::random(enonce2_size);
     let (old_ntime, old_nonce) = solve_share(&notify, &enonce1, &fresh_enonce2, difficulty);
 
-    pool.mine_block(0).await;
+    pool.mine_block().await;
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     let baseline = pool.get_status().await.unwrap();
