@@ -195,9 +195,9 @@ impl Settings {
             None,
             None,
         )
-        .map_err(|_e| {
+        .map_err(|err| {
             anyhow!(format!(
-                "failed to connect to Bitcoin Core RPC at `{rpc_url}` with {}",
+                "failed to connect to Bitcoin Core RPC at `{rpc_url}` with {} and error: {err}",
                 match bitcoin_credentials {
                     Auth::UserPass(_, _) => "username and password".into(),
                     Auth::CookieFile(cookie_file) =>

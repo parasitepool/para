@@ -219,9 +219,10 @@ impl TestPool {
 
         for _ in 0..100 {
             if self.get_block_height().await > current_height {
+                sleep(Duration::from_millis(500)).await;
                 break;
             }
-            tokio::time::sleep(Duration::from_millis(200)).await;
+            sleep(Duration::from_millis(100)).await;
         }
     }
 }
