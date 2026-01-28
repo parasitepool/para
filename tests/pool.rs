@@ -402,8 +402,8 @@ async fn concurrently_listening_workers_receive_new_templates_on_new_block() {
     let user = signet_username();
 
     let gate = Arc::new(Barrier::new(3));
-    let (out_1, mut in_1) = tokio::sync::mpsc::channel(2);
-    let (out_2, mut in_2) = tokio::sync::mpsc::channel(2);
+    let (out_1, mut in_1) = mpsc::channel(2);
+    let (out_2, mut in_2) = mpsc::channel(2);
 
     for out in [out_1, out_2] {
         let gate = gate.clone();

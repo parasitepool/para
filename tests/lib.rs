@@ -80,6 +80,7 @@ use {
     test_ckpool::TestCkpool,
     test_pool::TestPool,
     test_proxy::TestProxy,
+    tokio::sync::mpsc,
 };
 
 mod command_builder;
