@@ -122,8 +122,62 @@ impl Metatron {
             .fold(HashRate::ZERO, |acc, r| acc + r)
     }
 
+    pub(crate) fn hashrate_5m(&self) -> HashRate {
+        self.users
+            .iter()
+            .map(|user| user.hashrate_5m())
+            .fold(HashRate::ZERO, |acc, r| acc + r)
+    }
+
+    pub(crate) fn hashrate_15m(&self) -> HashRate {
+        self.users
+            .iter()
+            .map(|user| user.hashrate_15m())
+            .fold(HashRate::ZERO, |acc, r| acc + r)
+    }
+
+    pub(crate) fn hashrate_1hr(&self) -> HashRate {
+        self.users
+            .iter()
+            .map(|user| user.hashrate_1hr())
+            .fold(HashRate::ZERO, |acc, r| acc + r)
+    }
+
+    pub(crate) fn hashrate_6hr(&self) -> HashRate {
+        self.users
+            .iter()
+            .map(|user| user.hashrate_6hr())
+            .fold(HashRate::ZERO, |acc, r| acc + r)
+    }
+
+    pub(crate) fn hashrate_1d(&self) -> HashRate {
+        self.users
+            .iter()
+            .map(|user| user.hashrate_1d())
+            .fold(HashRate::ZERO, |acc, r| acc + r)
+    }
+
+    pub(crate) fn hashrate_7d(&self) -> HashRate {
+        self.users
+            .iter()
+            .map(|user| user.hashrate_7d())
+            .fold(HashRate::ZERO, |acc, r| acc + r)
+    }
+
     pub(crate) fn sps_1m(&self) -> f64 {
         self.users.iter().map(|user| user.sps_1m()).sum()
+    }
+
+    pub(crate) fn sps_5m(&self) -> f64 {
+        self.users.iter().map(|user| user.sps_5m()).sum()
+    }
+
+    pub(crate) fn sps_15m(&self) -> f64 {
+        self.users.iter().map(|user| user.sps_15m()).sum()
+    }
+
+    pub(crate) fn sps_1hr(&self) -> f64 {
+        self.users.iter().map(|user| user.sps_1hr()).sum()
     }
 
     pub(crate) fn accepted(&self) -> u64 {
