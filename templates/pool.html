@@ -4,29 +4,29 @@
     <div class=row><span>Users</span><span id=users></span></div>
     <div class=row><span>Workers</span><span id=workers></span></div>
     <div class=row><span>Connections</span><span id=connections></span></div>
-    <div class=row><span>Hashrate</span><span id=hashrate></span></div>
+    <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
     <div class=row><span>SPS</span><span id=sps></span></div>
-    <div class=row><span>Uptime</span><span id=uptime></span></div>
+    <div class=row><span>Uptime</span><span><span id=uptime_secs></span>s</span></div>
     <div class=row><span>Blocks</span><span id=blocks></span></div>
     <h3>Shares</h3>
     <div class=row><span>Accepted</span><span id=accepted></span></div>
     <div class=row><span>Rejected</span><span id=rejected></span></div>
     <div class=row><span>Best</span><span id=best_ever></span></div>
-    <div class=row><span>Last</span><span id=last_share></span></div>
+    <div class=row><span>Last</span><span><span id=last_share></span>s ago</span></div>
   </div>
 
   <div class=column>
     <h2>Bitcoin</h2>
     <div class=row><span>Block Height</span><span id=btc_height></span></div>
-    <div class=row><span>Network Difficulty</span><span id=btc_difficulty></span></div>
+    <div class=row><span>Network Difficulty</span><span id=network_difficulty></span></div>
   </div>
 
   <div class=column>
     <h2>System</h2>
-    <div class=row><span>CPU</span><span id=cpu></span></div>
-    <div class=row><span>Memory</span><span id=memory></span></div>
-    <div class=row><span>Disk</span><span id=disk></span></div>
-    <div class=row><span>Uptime</span><span id=system_uptime></span></div>
+    <div class=row><span>CPU</span><span><span id=cpu_usage_percent></span>%</span></div>
+    <div class=row><span>Memory</span><span><span id=memory_usage_percent></span>%</span></div>
+    <div class=row><span>Disk</span><span><span id=disk_usage_percent></span>%</span></div>
+    <div class=row><span>Uptime</span><span><span id=uptime></span>s</span></div>
   </div>
 </div>
 
@@ -35,40 +35,17 @@
 <script>
 async function refresh() {
   try {
-    const [mainRes, sysRes, btcRes] = await Promise.all([
-      fetch('/api/pool/status'),
-      fetch('/api/system/status'),
-      fetch('/api/bitcoin/status')
+    const [poolData, systemData, bitcoinData] = await Promise.all([
+      fetch('/api/pool/status').then(r => r.json()).catch(() => ({})),
+      fetch('/api/system/status').then(r => r.json()).catch(() => ({})),
+      fetch('/api/bitcoin/status').then(r => r.json()).catch(() => ({}))
     ]);
+    const merged = {...poolData, ...systemData, ...bitcoinData, sps: poolData.sps_1m?.toFixed(2)};
 
-    if (mainRes.ok) {
-      const s = await mainRes.json();
-      document.getElementById('users').textContent = s.users;
-      document.getElementById('workers').textContent = s.workers;
-      document.getElementById('connections').textContent = s.connections;
-      document.getElementById('uptime').textContent = s.uptime_secs + 's';
-      document.getElementById('hashrate').textContent = s.hashrate_1m;
-      document.getElementById('sps').textContent = s.sps_1m.toFixed(2);
-      document.getElementById('blocks').textContent = s.blocks;
-      document.getElementById('accepted').textContent = s.accepted;
-      document.getElementById('rejected').textContent = s.rejected;
-      document.getElementById('best_ever').textContent = s.best_ever ?? '-';
-      document.getElementById('last_share').textContent = s.last_share != null ? s.last_share + 's ago' : '-';
-    }
-
-    if (sysRes.ok) {
-      const sys = await sysRes.json();
-      document.getElementById('cpu').textContent = sys.cpu_usage_percent + '%';
-      document.getElementById('memory').textContent = sys.memory_usage_percent + '%';
-      document.getElementById('disk').textContent = sys.disk_usage_percent + '%';
-      document.getElementById('system_uptime').textContent = sys.uptime + 's';
-    }
-
-    if (btcRes.ok) {
-      const btc = await btcRes.json();
-      document.getElementById('btc_height').textContent = btc.height.toLocaleString();
-      document.getElementById('btc_difficulty').textContent = btc.network_difficulty;
-    }
+    Object.keys(merged).forEach(key => {
+      const el = document.getElementById(key);
+      if (el) el.textContent = merged[key] != null ? merged[key].toLocaleString() : '-';
+    });
   } catch (e) {}
 }
 startPolling(refresh);
