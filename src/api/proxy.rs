@@ -111,6 +111,7 @@ async fn user(
         accepted: user.accepted(),
         rejected: user.rejected(),
         best_ever: user.best_ever(),
+        last_share: user.last_share().map(|time| time.elapsed().as_secs()),
         total_work: user.total_work(),
         authorized: user.authorized,
         workers: user
@@ -131,6 +132,7 @@ async fn user(
                 accepted: worker.accepted(),
                 rejected: worker.rejected(),
                 best_ever: worker.best_ever(),
+                last_share: worker.last_share().map(|time| time.elapsed().as_secs()),
                 total_work: worker.total_work(),
             })
             .collect(),

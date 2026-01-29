@@ -118,10 +118,12 @@ async fn proxy() {
     assert_eq!(user.accepted, 1);
     assert_eq!(user.rejected, 0);
     assert!(user.best_ever.is_some());
+    assert!(user.last_share.is_some());
     assert_eq!(user.workers.len(), 1);
     assert_eq!(user.workers[0].accepted, 1);
     assert_eq!(user.workers[0].rejected, 0);
     assert!(user.workers[0].best_ever.is_some());
+    assert!(user.workers[0].last_share.is_some());
 
     let bad_enonce2 = Extranonce::random(subscribe.enonce2_size);
     let result = client

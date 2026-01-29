@@ -619,10 +619,12 @@ async fn share_validation() {
     assert_eq!(user.accepted, 1);
     assert_eq!(user.rejected, 0);
     assert!(user.best_ever.is_some());
+    assert!(user.last_share.is_some());
     assert_eq!(user.workers.len(), 1);
     assert_eq!(user.workers[0].accepted, 1);
     assert_eq!(user.workers[0].rejected, 0);
     assert!(user.workers[0].best_ever.is_some());
+    assert!(user.workers[0].last_share.is_some());
 
     // Duplicate rejected
     assert_stratum_error(
