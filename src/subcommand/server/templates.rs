@@ -3,7 +3,7 @@ use {
     boilerplate::{Boilerplate, Trusted},
 };
 
-pub(crate) mod dashboard;
+pub(crate) mod aggregator_dashboard;
 pub(crate) mod home;
 pub(crate) mod payouts;
 pub(crate) mod simulate_payouts;
@@ -37,6 +37,32 @@ pub trait PageContent: fmt::Display + 'static {
     {
         PageHtml::new(self, domain)
     }
+}
+
+#[derive(Boilerplate)]
+pub struct DashboardHtml<T: DashboardContent> {
+    content: T,
+    chain: Chain,
+}
+
+impl<T: DashboardContent> DashboardHtml<T> {
+    pub fn new(content: T, chain: Chain) -> Self {
+        Self { content, chain }
+    }
+
+    fn superscript(&self) -> &'static str {
+        match self.chain {
+            Chain::Mainnet => "",
+            Chain::Signet => "signet",
+            Chain::Testnet => "testnet",
+            Chain::Testnet4 => "testnet4",
+            Chain::Regtest => "regtest",
+        }
+    }
+}
+
+pub trait DashboardContent: fmt::Display + 'static {
+    fn title(&self) -> &'static str;
 }
 
 pub fn format_sats(sats: i64) -> String {

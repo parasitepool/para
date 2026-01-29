@@ -1,6 +1,6 @@
 use super::*;
 
-pub(crate) fn router(metrics: Arc<Metrics>, bitcoin_client: Arc<Client>) -> Router {
+pub(crate) fn router(metrics: Arc<Metrics>, bitcoin_client: Arc<Client>, chain: Chain) -> Router {
     Router::new()
         .route("/", get(home))
         .route("/api/proxy/status", get(status))
@@ -12,13 +12,20 @@ pub(crate) fn router(metrics: Arc<Metrics>, bitcoin_client: Arc<Client>) -> Rout
         .route("/static/{*path}", get(http_server::static_assets))
         .with_state(metrics)
         .layer(Extension(bitcoin_client))
+        .layer(Extension(chain))
 }
 
 #[derive(Boilerplate)]
 struct ProxyHtml;
 
-async fn home() -> Response {
-    let html = ProxyHtml;
+impl DashboardContent for ProxyHtml {
+    fn title(&self) -> &'static str {
+        "Proxy"
+    }
+}
+
+async fn home(Extension(chain): Extension<Chain>) -> Response {
+    let html = DashboardHtml::new(ProxyHtml, chain);
 
     #[cfg(feature = "reload")]
     let body = match html.reload_from_path() {

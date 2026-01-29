@@ -1,6 +1,6 @@
 use super::*;
 
-pub(crate) fn router(metatron: Arc<Metatron>, bitcoin_client: Arc<Client>) -> Router {
+pub(crate) fn router(metatron: Arc<Metatron>, bitcoin_client: Arc<Client>, chain: Chain) -> Router {
     Router::new()
         .route("/", get(home))
         .route("/api/pool/status", get(status))
@@ -12,13 +12,20 @@ pub(crate) fn router(metatron: Arc<Metatron>, bitcoin_client: Arc<Client>) -> Ro
         .route("/static/{*path}", get(http_server::static_assets))
         .with_state(metatron)
         .layer(Extension(bitcoin_client))
+        .layer(Extension(chain))
 }
 
 #[derive(Boilerplate)]
 struct PoolHtml;
 
-async fn home() -> Response {
-    let html = PoolHtml;
+impl DashboardContent for PoolHtml {
+    fn title(&self) -> &'static str {
+        "Pool"
+    }
+}
+
+async fn home(Extension(chain): Extension<Chain>) -> Response {
+    let html = DashboardHtml::new(PoolHtml, chain);
 
     #[cfg(feature = "reload")]
     let body = match html.reload_from_path() {

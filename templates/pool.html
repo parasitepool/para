@@ -1,19 +1,6 @@
-<!doctype html>
-<html lang=en>
-<head>
-  <meta charset=utf-8>
-  <meta name=viewport content='width=device-width,initial-scale=1.0'>
-  <title>Pool</title>
-  <link rel=icon href=/static/parasite.svg type=image/x-icon size=16x16>
-  <link rel=stylesheet href=/static/dashboard.css>
-</head>
-<body>
-<img src=/static/parasite.svg alt="" class=logo>
-<h1>Parasite Pool</h1>
-<div class=wrapper>
 <div class=columns>
   <div class="column column-full">
-    <h2>Pool</h2>
+    <h2>Stats</h2>
     <div class=row><span>Users</span><span id=users></span></div>
     <div class=row><span>Workers</span><span id=workers></span></div>
     <div class=row><span>Connections</span><span id=connections></span></div>
@@ -30,9 +17,7 @@
 </div>
 
 <div id=logs></div>
-</div>
 
-<script src=/static/dashboard.js></script>
 <script>
 async function refresh() {
   try {
@@ -55,5 +40,3 @@ async function refresh() {
 startPolling(refresh);
 connectWs();
 </script>
-</body>
-</html>

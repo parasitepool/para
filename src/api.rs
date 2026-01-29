@@ -9,6 +9,7 @@ use {
         self,
         error::{OptionExt, ServerResult},
     },
+    subcommand::server::templates::{DashboardContent, DashboardHtml},
 };
 
 pub mod pool;
