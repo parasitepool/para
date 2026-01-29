@@ -3,7 +3,7 @@ h1 { text-align: center; margin-bottom: 40px; font-size: 1.55em; }
 h1 sup { font-size: 0.5em; vertical-align: super; opacity: 0.7; }
 .logo { display: block; margin: 0 auto 20px; height: 4em; }
 .columns { display: flex; gap: 60px; justify-content: center; }
-.grid { display: flex; flex-wrap: wrap; gap: 60px; justify-content: center; }
+.grid { display: flex; flex-wrap: wrap; gap: 60px; justify-content: center; max-width: 1060px; margin: 0 auto; }
 .grid + #logs { width: 1060px; margin-left: auto; margin-right: auto; }
 .column { border: 1px solid #444; padding: 20px 30px; width: 500px; box-sizing: border-box; }
 .column-full { width: 1060px; }
