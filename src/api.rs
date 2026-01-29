@@ -1,7 +1,14 @@
 use {
     super::*,
-    axum::extract::{Path, State},
-    http_server::error::{OptionExt, ServerResult},
+    axum::{
+        Extension,
+        extract::{Path, State},
+    },
+    boilerplate::Boilerplate,
+    http_server::{
+        self,
+        error::{OptionExt, ServerError, ServerResult},
+    },
 };
 
 pub mod pool;

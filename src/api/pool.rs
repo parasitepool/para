@@ -1,11 +1,4 @@
-use {
-    super::*,
-    crate::http_server,
-    crate::http_server::error::ServerError,
-    axum::Extension,
-    bitcoind_async_client::{Client, traits::Reader},
-    boilerplate::Boilerplate,
-};
+use super::*;
 
 pub(crate) fn router(metatron: Arc<Metatron>, bitcoin_client: Arc<Client>) -> Router {
     Router::new()
