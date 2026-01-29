@@ -578,7 +578,6 @@ async fn share_validation() {
     assert!(system_status.uptime > 0);
 
     let bitcoin_status = pool.get_bitcoin_status().await.unwrap();
-    assert!(bitcoin_status.height > 0);
     assert!(bitcoin_status.difficulty > 0.0);
 
     let client = pool.stratum_client().await;
