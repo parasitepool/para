@@ -46,7 +46,7 @@ mod payouts;
 mod server_config;
 mod sharediff;
 mod sync_routes;
-pub mod templates;
+mod templates;
 
 const MEBIBYTE: usize = 1 << 20;
 const BUDGET: Duration = Duration::from_secs(15);

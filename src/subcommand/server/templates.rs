@@ -39,32 +39,6 @@ pub trait PageContent: fmt::Display + 'static {
     }
 }
 
-#[derive(Boilerplate)]
-pub struct DashboardHtml<T: DashboardContent> {
-    content: T,
-    chain: Chain,
-}
-
-impl<T: DashboardContent> DashboardHtml<T> {
-    pub fn new(content: T, chain: Chain) -> Self {
-        Self { content, chain }
-    }
-
-    fn superscript(&self) -> &'static str {
-        match self.chain {
-            Chain::Mainnet => "",
-            Chain::Signet => "signet",
-            Chain::Testnet => "testnet",
-            Chain::Testnet4 => "testnet4",
-            Chain::Regtest => "regtest",
-        }
-    }
-}
-
-pub trait DashboardContent: fmt::Display + 'static {
-    fn title(&self) -> &'static str;
-}
-
 pub fn format_sats(sats: i64) -> String {
     if sats >= 100_000_000 {
         format!("{:.3} BTC", sats as f64 / 100_000_000.0)

@@ -2,7 +2,7 @@ use super::*;
 
 pub(crate) fn router(metatron: Arc<Metatron>, bitcoin_client: Arc<Client>, chain: Chain) -> Router {
     Router::new()
-        .route("/", get(home))
+        .route("/", get(http_server::templates::pool_home))
         .route("/api/pool/status", get(status))
         .route("/api/pool/users", get(users))
         .route("/api/pool/users/{address}", get(user))
@@ -13,30 +13,6 @@ pub(crate) fn router(metatron: Arc<Metatron>, bitcoin_client: Arc<Client>, chain
         .with_state(metatron)
         .layer(Extension(bitcoin_client))
         .layer(Extension(chain))
-}
-
-#[derive(Boilerplate)]
-struct PoolHtml;
-
-impl DashboardContent for PoolHtml {
-    fn title(&self) -> &'static str {
-        "Pool"
-    }
-}
-
-async fn home(Extension(chain): Extension<Chain>) -> Response {
-    let html = DashboardHtml::new(PoolHtml, chain);
-
-    #[cfg(feature = "reload")]
-    let body = match html.reload_from_path() {
-        Ok(reloaded) => reloaded.to_string(),
-        Err(_) => html.to_string(),
-    };
-
-    #[cfg(not(feature = "reload"))]
-    let body = html.to_string();
-
-    ([(CONTENT_TYPE, "text/html;charset=utf-8")], body).into_response()
 }
 
 async fn status(State(metatron): State<Arc<Metatron>>) -> Json<PoolStatus> {

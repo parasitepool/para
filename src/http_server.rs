@@ -10,6 +10,7 @@ use {
 
 pub(crate) mod accept_json;
 pub(crate) mod error;
+pub(crate) mod templates;
 
 #[derive(Clone, Debug)]
 pub struct HttpConfig {
