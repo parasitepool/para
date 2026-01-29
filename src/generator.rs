@@ -1,12 +1,12 @@
 use super::*;
 
 pub(crate) async fn spawn_generator(
+    rpc: Arc<Client>,
     settings: Arc<Settings>,
     cancel: CancellationToken,
     tasks: &mut JoinSet<()>,
 ) -> Result<watch::Receiver<Arc<BlockTemplate>>> {
     info!("Spawning generator task");
-    let rpc = Arc::new(settings.bitcoin_rpc_client().await?);
 
     let initial = get_block_template(&rpc, &settings).await?;
     let (tx, rx) = watch::channel(Arc::new(initial));

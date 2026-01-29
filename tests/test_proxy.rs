@@ -1,17 +1,34 @@
 use {
     super::*,
-    api::{ProxyStatus, SystemStatus, UserDetail},
+    api::{BitcoinStatus, ProxyStatus, SystemStatus, UserDetail},
     para::{USER_AGENT, stratum},
 };
 
 pub(crate) struct TestProxy {
+    _bitcoind_handle: Bitcoind,
     proxy_handle: Child,
     proxy_port: u16,
     http_port: u16,
+    _tempdir: Arc<TempDir>,
 }
 
-fn allocate_ports() -> (u16, u16) {
+fn allocate_ports() -> (u16, u16, u16, u16, u16) {
     (
+        TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port(),
+        TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port(),
+        TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port(),
         TcpListener::bind("127.0.0.1:0")
             .unwrap()
             .local_addr()
@@ -30,6 +47,7 @@ fn build_proxy_command(
     username: &str,
     proxy_port: u16,
     http_port: u16,
+    rpc_port: u16,
     args: impl ToArgs,
 ) -> CommandBuilder {
     CommandBuilder::new(format!(
@@ -40,6 +58,9 @@ fn build_proxy_command(
             --address 127.0.0.1 \
             --port {proxy_port} \
             --http-port {http_port} \
+            --bitcoin-rpc-username satoshi \
+            --bitcoin-rpc-password nakamoto \
+            --bitcoin-rpc-port {rpc_port} \
             {}",
         args.to_args().join(" ")
     ))
@@ -51,10 +72,15 @@ fn build_proxy_command(
 
 impl TestProxy {
     pub(crate) fn spawn_with_args(upstream: &str, username: &str, args: impl ToArgs) -> Self {
-        let (proxy_port, http_port) = allocate_ports();
+        let tempdir = Arc::new(TempDir::new().unwrap());
+
+        let (bitcoind_port, rpc_port, zmq_port, proxy_port, http_port) = allocate_ports();
+
+        let bitcoind_handle =
+            Bitcoind::spawn(tempdir.clone(), bitcoind_port, rpc_port, zmq_port, false).unwrap();
 
         let proxy_handle =
-            build_proxy_command(upstream, username, proxy_port, http_port, args).spawn();
+            build_proxy_command(upstream, username, proxy_port, http_port, rpc_port, args).spawn();
 
         for attempt in 0.. {
             match TcpStream::connect(format!("127.0.0.1:{http_port}")) {
@@ -70,9 +96,11 @@ impl TestProxy {
         }
 
         Self {
+            _bitcoind_handle: bitcoind_handle,
             proxy_handle,
             proxy_port,
             http_port,
+            _tempdir: tempdir,
         }
     }
 
@@ -81,9 +109,14 @@ impl TestProxy {
         username: &str,
         args: impl ToArgs,
     ) -> String {
-        let (proxy_port, http_port) = allocate_ports();
+        let tempdir = Arc::new(TempDir::new().unwrap());
 
-        let output = build_proxy_command(upstream, username, proxy_port, http_port, args)
+        let (bitcoind_port, rpc_port, zmq_port, proxy_port, http_port) = allocate_ports();
+
+        let _bitcoind_handle =
+            Bitcoind::spawn(tempdir.clone(), bitcoind_port, rpc_port, zmq_port, false).unwrap();
+
+        let output = build_proxy_command(upstream, username, proxy_port, http_port, rpc_port, args)
             .spawn()
             .wait_with_output()
             .expect("Failed to wait for proxy process");
@@ -143,6 +176,15 @@ impl TestProxy {
                 self.api_endpoint(),
                 address
             ))
+            .send()
+            .await?
+            .json()
+            .await
+    }
+
+    pub(crate) async fn get_bitcoin_status(&self) -> reqwest::Result<BitcoinStatus> {
+        reqwest::Client::new()
+            .get(format!("{}/api/bitcoin/status", self.api_endpoint()))
             .send()
             .await?
             .json()

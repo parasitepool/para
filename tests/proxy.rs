@@ -23,6 +23,10 @@ async fn proxy() {
     assert!(system_status.disk_usage_percent >= 0.0 && system_status.disk_usage_percent <= 100.0);
     assert!(system_status.uptime > 0);
 
+    let bitcoin_status = proxy.get_bitcoin_status().await.unwrap();
+    assert!(bitcoin_status.height > 0);
+    assert!(bitcoin_status.difficulty > 0.0);
+
     assert_eq!(
         status.upstream_endpoint, upstream,
         "Upstream URL should match"

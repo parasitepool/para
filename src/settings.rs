@@ -126,6 +126,8 @@ impl Settings {
     }
 
     pub(crate) fn from_proxy_options(options: ProxyOptions) -> Result<Self> {
+        let chain = options.chain.unwrap_or_default();
+
         let settings = Self {
             address: options.address.unwrap_or_else(|| "0.0.0.0".into()),
             port: options.port.unwrap_or(42069),
@@ -134,7 +136,14 @@ impl Settings {
             upstream_username: Some(options.username),
             upstream_password: options.password,
             timeout: Duration::from_secs(options.timeout.unwrap_or(30)),
-            chain: options.chain.unwrap_or_default(),
+            bitcoin_data_dir: options.bitcoin_data_dir,
+            bitcoin_rpc_password: options.bitcoin_rpc_password,
+            bitcoin_rpc_port: options
+                .bitcoin_rpc_port
+                .unwrap_or_else(|| chain.default_rpc_port()),
+            bitcoin_rpc_username: options.bitcoin_rpc_username,
+            bitcoin_rpc_cookie_file: options.bitcoin_rpc_cookie_file,
+            chain,
             start_diff: options.start_diff.unwrap_or_else(|| Difficulty::from(1.0)),
             min_diff: options.min_diff,
             max_diff: options.max_diff,

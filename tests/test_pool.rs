@@ -127,6 +127,15 @@ impl TestPool {
             .await
     }
 
+    pub(crate) async fn get_bitcoin_status(&self) -> reqwest::Result<api::BitcoinStatus> {
+        reqwest::Client::new()
+            .get(format!("{}/api/bitcoin/status", self.api_endpoint()))
+            .send()
+            .await?
+            .json()
+            .await
+    }
+
     pub(crate) async fn wait_for_shares(
         &self,
         min_shares: u64,

@@ -1,15 +1,24 @@
-use {super::*, crate::http_server, boilerplate::Boilerplate};
+use {
+    super::*,
+    crate::http_server,
+    crate::http_server::error::ServerError,
+    axum::Extension,
+    bitcoind_async_client::{Client, traits::Reader},
+    boilerplate::Boilerplate,
+};
 
-pub(crate) fn router(metrics: Arc<Metrics>) -> Router {
+pub(crate) fn router(metrics: Arc<Metrics>, bitcoin_client: Arc<Client>) -> Router {
     Router::new()
         .route("/", get(home))
         .route("/api/proxy/status", get(status))
         .route("/api/proxy/users", get(users))
         .route("/api/proxy/users/{address}", get(user))
+        .route("/api/bitcoin/status", get(bitcoin_status))
         .route("/api/system/status", get(http_server::system_status))
         .route("/ws/logs", get(http_server::ws_logs))
         .route("/static/{*path}", get(http_server::static_assets))
         .with_state(metrics)
+        .layer(Extension(bitcoin_client))
 }
 
 #[derive(Boilerplate)]
@@ -134,4 +143,18 @@ async fn user(
             .collect(),
     })
     .into_response())
+}
+
+async fn bitcoin_status(
+    Extension(client): Extension<Arc<Client>>,
+) -> ServerResult<Json<BitcoinStatus>> {
+    let info = client
+        .get_blockchain_info()
+        .await
+        .map_err(|e| ServerError::Internal(e.into()))?;
+
+    Ok(Json(BitcoinStatus {
+        height: info.blocks as u64,
+        difficulty: info.difficulty,
+    }))
 }

@@ -18,9 +18,16 @@ impl Pool {
                 .context("failed to create settings")?,
         );
 
-        let workbase_rx = spawn_generator(settings.clone(), cancel_token.clone(), &mut tasks)
-            .await
-            .context("failed to subscribe to ZMQ block notifications")?;
+        let bitcoin_client = Arc::new(settings.bitcoin_rpc_client().await?);
+
+        let workbase_rx = spawn_generator(
+            bitcoin_client.clone(),
+            settings.clone(),
+            cancel_token.clone(),
+            &mut tasks,
+        )
+        .await
+        .context("failed to subscribe to ZMQ block notifications")?;
 
         let extranonces = Extranonces::Pool(
             PoolExtranonces::new(settings.enonce1_size(), settings.enonce2_size())
@@ -35,7 +42,7 @@ impl Pool {
 
         http_server::spawn(
             &settings,
-            api::pool::router(metatron.clone()),
+            api::pool::router(metatron.clone(), bitcoin_client),
             cancel_token.clone(),
             &mut tasks,
         )?;

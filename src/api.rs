@@ -113,4 +113,10 @@ pub struct WorkerDetail {
     pub total_work: f64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BitcoinStatus {
+    pub height: u64,
+    pub difficulty: f64,
+}
+
 pub type SystemStatus = http_server::SystemStatus;
