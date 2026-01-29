@@ -8,10 +8,11 @@ pub(crate) struct Metatron {
     sessions: DashMap<Extranonce, SessionSnapshot>,
     extranonces: Extranonces,
     counter: AtomicU64,
+    endpoint: String,
 }
 
 impl Metatron {
-    pub(crate) fn new(extranonces: Extranonces) -> Self {
+    pub(crate) fn new(extranonces: Extranonces, endpoint: String) -> Self {
         Self {
             blocks: AtomicU64::new(0),
             started: Instant::now(),
@@ -25,7 +26,12 @@ impl Metatron {
                     .unwrap_or_default()
                     .as_millis() as u64,
             ),
+            endpoint,
         }
+    }
+
+    pub(crate) fn endpoint(&self) -> &str {
+        &self.endpoint
     }
 
     pub(crate) fn spawn(self: Arc<Self>, cancel: CancellationToken, tasks: &mut JoinSet<()>) {
@@ -109,15 +115,69 @@ impl Metatron {
         self.connections.fetch_sub(1, Ordering::Relaxed);
     }
 
-    pub(crate) fn hash_rate_1m(&self) -> HashRate {
+    pub(crate) fn hashrate_1m(&self) -> HashRate {
         self.users
             .iter()
-            .map(|user| user.hash_rate_1m())
+            .map(|user| user.hashrate_1m())
+            .fold(HashRate::ZERO, |acc, r| acc + r)
+    }
+
+    pub(crate) fn hashrate_5m(&self) -> HashRate {
+        self.users
+            .iter()
+            .map(|user| user.hashrate_5m())
+            .fold(HashRate::ZERO, |acc, r| acc + r)
+    }
+
+    pub(crate) fn hashrate_15m(&self) -> HashRate {
+        self.users
+            .iter()
+            .map(|user| user.hashrate_15m())
+            .fold(HashRate::ZERO, |acc, r| acc + r)
+    }
+
+    pub(crate) fn hashrate_1hr(&self) -> HashRate {
+        self.users
+            .iter()
+            .map(|user| user.hashrate_1hr())
+            .fold(HashRate::ZERO, |acc, r| acc + r)
+    }
+
+    pub(crate) fn hashrate_6hr(&self) -> HashRate {
+        self.users
+            .iter()
+            .map(|user| user.hashrate_6hr())
+            .fold(HashRate::ZERO, |acc, r| acc + r)
+    }
+
+    pub(crate) fn hashrate_1d(&self) -> HashRate {
+        self.users
+            .iter()
+            .map(|user| user.hashrate_1d())
+            .fold(HashRate::ZERO, |acc, r| acc + r)
+    }
+
+    pub(crate) fn hashrate_7d(&self) -> HashRate {
+        self.users
+            .iter()
+            .map(|user| user.hashrate_7d())
             .fold(HashRate::ZERO, |acc, r| acc + r)
     }
 
     pub(crate) fn sps_1m(&self) -> f64 {
         self.users.iter().map(|user| user.sps_1m()).sum()
+    }
+
+    pub(crate) fn sps_5m(&self) -> f64 {
+        self.users.iter().map(|user| user.sps_5m()).sum()
+    }
+
+    pub(crate) fn sps_15m(&self) -> f64 {
+        self.users.iter().map(|user| user.sps_15m()).sum()
+    }
+
+    pub(crate) fn sps_1hr(&self) -> f64 {
+        self.users.iter().map(|user| user.sps_1hr()).sum()
     }
 
     pub(crate) fn accepted(&self) -> u64 {
@@ -136,12 +196,36 @@ impl Metatron {
         self.connections.load(Ordering::Relaxed)
     }
 
+    pub(crate) fn disconnected(&self) -> usize {
+        self.sessions.len()
+    }
+
+    pub(crate) fn idle(&self) -> usize {
+        let now = Instant::now();
+        self.users
+            .iter()
+            .map(|user| {
+                user.workers()
+                    .filter(|worker| {
+                        worker
+                            .last_share()
+                            .is_none_or(|last| now.duration_since(last).as_secs() > 60)
+                    })
+                    .count()
+            })
+            .sum()
+    }
+
     pub(crate) fn total_users(&self) -> usize {
         self.users.len()
     }
 
     pub(crate) fn total_workers(&self) -> usize {
         self.users.iter().map(|u| u.worker_count()).sum()
+    }
+
+    pub(crate) fn total_work(&self) -> f64 {
+        self.users.iter().map(|u| u.total_work()).sum()
     }
 
     pub(crate) fn last_share(&self) -> Option<Instant> {
@@ -164,9 +248,9 @@ impl Metatron {
 impl StatusLine for Metatron {
     fn status_line(&self) -> String {
         format!(
-            "sps={:.2}  hash_rate={}  connections={}  users={}  workers={}  accepted={}  rejected={}  blocks={}  uptime={}s",
+            "sps={:.2}  hashrate={:.2}  connections={}  users={}  workers={}  accepted={}  rejected={}  blocks={}  uptime={}s",
             self.sps_1m(),
-            self.hash_rate_1m(),
+            self.hashrate_1m(),
             self.total_connections(),
             self.total_users(),
             self.total_workers(),
@@ -200,7 +284,7 @@ mod tests {
 
     #[test]
     fn new_metatron_starts_at_zero() {
-        let metatron = Metatron::new(pool_extranonces());
+        let metatron = Metatron::new(pool_extranonces(), String::new());
         assert_eq!(metatron.total_connections(), 0);
         assert_eq!(metatron.accepted(), 0);
         assert_eq!(metatron.rejected(), 0);
@@ -211,7 +295,7 @@ mod tests {
 
     #[test]
     fn connection_count_increments_and_decrements() {
-        let metatron = Metatron::new(pool_extranonces());
+        let metatron = Metatron::new(pool_extranonces(), String::new());
         assert_eq!(metatron.total_connections(), 0);
 
         metatron.add_connection();
@@ -224,7 +308,7 @@ mod tests {
 
     #[test]
     fn get_or_create_worker_creates_user_and_worker() {
-        let metatron = Metatron::new(pool_extranonces());
+        let metatron = Metatron::new(pool_extranonces(), String::new());
         let addr = test_address();
 
         let worker = metatron.get_or_create_worker(addr.clone(), "rig1");
@@ -240,7 +324,7 @@ mod tests {
 
     #[test]
     fn record_accepted_updates_stats() {
-        let metatron = Metatron::new(pool_extranonces());
+        let metatron = Metatron::new(pool_extranonces(), String::new());
         let addr = test_address();
         let worker = metatron.get_or_create_worker(addr, "rig1");
 
@@ -256,7 +340,7 @@ mod tests {
 
     #[test]
     fn record_rejected_updates_stats() {
-        let metatron = Metatron::new(pool_extranonces());
+        let metatron = Metatron::new(pool_extranonces(), String::new());
         let addr = test_address();
         let worker = metatron.get_or_create_worker(addr, "rig1");
 
@@ -269,14 +353,14 @@ mod tests {
 
     #[test]
     fn block_count_increments() {
-        let metatron = Metatron::new(pool_extranonces());
+        let metatron = Metatron::new(pool_extranonces(), String::new());
         metatron.add_block();
         assert_eq!(metatron.total_blocks(), 1);
     }
 
     #[test]
     fn next_enonce1_is_sequential() {
-        let metatron = Metatron::new(pool_extranonces());
+        let metatron = Metatron::new(pool_extranonces(), String::new());
         let e1 = metatron.next_enonce1();
         let e2 = metatron.next_enonce1();
         let e3 = metatron.next_enonce1();
@@ -291,13 +375,13 @@ mod tests {
 
     #[test]
     fn next_enonce1_has_correct_size() {
-        let metatron = Metatron::new(pool_extranonces());
+        let metatron = Metatron::new(pool_extranonces(), String::new());
         assert_eq!(metatron.next_enonce1().len(), ENONCE1_SIZE);
     }
 
     #[test]
     fn next_enonce1_is_unique() {
-        let metatron = Metatron::new(pool_extranonces());
+        let metatron = Metatron::new(pool_extranonces(), String::new());
         let mut seen = std::collections::HashSet::new();
         for _ in 0..1000 {
             let enonce = metatron.next_enonce1();
@@ -310,7 +394,7 @@ mod tests {
         let upstream_enonce1 = Extranonce::from_bytes(&[0xde, 0xad, 0xbe, 0xef]);
         let extranonces =
             Extranonces::Proxy(ProxyExtranonces::new(upstream_enonce1.clone(), 8).unwrap());
-        let metatron = Metatron::new(extranonces);
+        let metatron = Metatron::new(extranonces, String::new());
 
         let e1 = metatron.next_enonce1();
 
@@ -320,13 +404,13 @@ mod tests {
 
     #[test]
     fn proxy_mode_enonce2_size_reduced() {
-        let metatron = Metatron::new(proxy_extranonces());
+        let metatron = Metatron::new(proxy_extranonces(), String::new());
         assert_eq!(metatron.enonce2_size(), 6);
     }
 
     #[test]
     fn proxy_mode_next_enonce1_is_sequential() {
-        let metatron = Metatron::new(proxy_extranonces());
+        let metatron = Metatron::new(proxy_extranonces(), String::new());
 
         let e1 = metatron.next_enonce1();
         let e2 = metatron.next_enonce1();
@@ -334,5 +418,36 @@ mod tests {
         let ext1 = u16::from_le_bytes(e1.as_bytes()[4..6].try_into().unwrap());
         let ext2 = u16::from_le_bytes(e2.as_bytes()[4..6].try_into().unwrap());
         assert_eq!(ext2, ext1 + 1);
+    }
+
+    #[test]
+    fn total_work_accumulates() {
+        let metatron = Metatron::new(pool_extranonces(), String::new());
+        let addr = test_address();
+        let pool_diff = Difficulty::from(100.0);
+        let pool_diff_f64 = pool_diff.as_f64();
+
+        assert_eq!(metatron.total_work(), 0.0);
+
+        let foo = metatron.get_or_create_worker(addr.clone(), "foo");
+        foo.record_accepted(pool_diff, Difficulty::from(200.0));
+        foo.record_accepted(pool_diff, Difficulty::from(50.0));
+
+        assert!(
+            (foo.total_work() - 2.0 * pool_diff_f64).abs() < f64::EPSILON * 2.0 * pool_diff_f64
+        );
+        assert!(
+            (metatron.total_work() - 2.0 * pool_diff_f64).abs()
+                < f64::EPSILON * 2.0 * pool_diff_f64
+        );
+
+        let bar = metatron.get_or_create_worker(addr, "bar");
+        bar.record_accepted(pool_diff, Difficulty::from(400.0));
+
+        assert!((bar.total_work() - pool_diff_f64).abs() < f64::EPSILON * pool_diff_f64);
+        assert!(
+            (metatron.total_work() - 3.0 * pool_diff_f64).abs()
+                < f64::EPSILON * 3.0 * pool_diff_f64
+        );
     }
 }

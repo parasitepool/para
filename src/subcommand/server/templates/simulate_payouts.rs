@@ -1,5 +1,4 @@
-use super::*;
-use crate::subcommand::server::database::SimulatedPayout;
+use {super::*, crate::subcommand::server::database::SimulatedPayout};
 
 #[derive(Boilerplate, Debug, Deserialize, Serialize, PartialEq)]
 pub struct SimulatePayoutsHtml {

@@ -1,5 +1,6 @@
 use {
     super::*,
+    crate::event_sink::{BlockFoundEvent, Event, ShareEvent},
     bouncer::{Bouncer, Consequence},
     state::{Session, State},
     upstream::UpstreamSubmit,
@@ -24,6 +25,7 @@ pub(crate) struct Stratifier<W: Workbase> {
     jobs: Jobs<W>,
     vardiff: Vardiff,
     bouncer: Bouncer,
+    event_tx: Option<mpsc::Sender<Event>>,
 }
 
 impl<W: Workbase> Stratifier<W> {
@@ -36,6 +38,7 @@ impl<W: Workbase> Stratifier<W> {
         tcp_stream: TcpStream,
         workbase_rx: watch::Receiver<Arc<W>>,
         cancel_token: CancellationToken,
+        event_tx: Option<mpsc::Sender<Event>>,
     ) -> Self {
         let _ = tcp_stream.set_nodelay(true);
 
@@ -66,13 +69,22 @@ impl<W: Workbase> Stratifier<W> {
             jobs: Jobs::new(),
             vardiff,
             bouncer,
+            event_tx,
+        }
+    }
+
+    fn send_event(&self, event: Event) {
+        if let Some(tx) = &self.event_tx
+            && let Err(e) = tx.try_send(event)
+        {
+            warn!("Failed to send event: {e}");
         }
     }
 
     pub(crate) async fn serve(&mut self) -> Result {
         let mut workbase_rx = self.workbase_rx.clone();
         let cancel_token = self.cancel_token.clone();
-        let mut idle_check = tokio::time::interval(self.bouncer.check_interval());
+        let mut idle_check = interval(self.bouncer.check_interval());
 
         loop {
             if matches!(self.state, State::Dropped) {
@@ -602,6 +614,8 @@ impl<W: Workbase> Stratifier<W> {
             .get_or_create_worker(session.address.clone(), &session.workername);
 
         if submit.username != session.username {
+            let job_height = self.workbase_rx.borrow().height();
+
             self.send_error(
                 id,
                 StratumError::WorkerMismatch,
@@ -612,13 +626,29 @@ impl<W: Workbase> Stratifier<W> {
             )
             .await?;
 
+            self.send_event(rejection_event!(
+                session.address.to_string(),
+                session.workername.clone(),
+                job_height,
+                StratumError::WorkerMismatch
+            ));
+
             worker.record_rejected();
 
             return Ok(self.bouncer.reject());
         }
 
         let Some(job) = self.jobs.get(&submit.job_id) else {
+            let job_height = self.workbase_rx.borrow().height();
+
             self.send_error(id, StratumError::Stale, None).await?;
+
+            self.send_event(rejection_event!(
+                session.address.to_string(),
+                session.workername.clone(),
+                job_height,
+                StratumError::Stale
+            ));
 
             worker.record_rejected();
 
@@ -635,6 +665,8 @@ impl<W: Workbase> Stratifier<W> {
                 expected_extranonce2_size
             );
 
+            let job_height = job.workbase.height();
+
             self.send_error(
                 id,
                 StratumError::InvalidNonce2Length,
@@ -645,6 +677,13 @@ impl<W: Workbase> Stratifier<W> {
             )
             .await?;
 
+            self.send_event(rejection_event!(
+                session.address.to_string(),
+                session.workername.clone(),
+                job_height,
+                StratumError::InvalidNonce2Length
+            ));
+
             worker.record_rejected();
 
             return Ok(self.bouncer.reject());
@@ -653,6 +692,8 @@ impl<W: Workbase> Stratifier<W> {
         let job_ntime = job.ntime().0;
         let submit_ntime = submit.ntime.0;
         if submit_ntime < job_ntime || submit_ntime > job_ntime + MAX_NTIME_OFFSET {
+            let job_height = job.workbase.height();
+
             self.send_error(
                 id,
                 StratumError::NtimeOutOfRange,
@@ -664,6 +705,13 @@ impl<W: Workbase> Stratifier<W> {
             )
             .await?;
 
+            self.send_event(rejection_event!(
+                session.address.to_string(),
+                session.workername.clone(),
+                job_height,
+                StratumError::NtimeOutOfRange
+            ));
+
             worker.record_rejected();
 
             return Ok(self.bouncer.reject());
@@ -672,12 +720,21 @@ impl<W: Workbase> Stratifier<W> {
         let version = match submit.version_bits {
             Some(version_bits) if version_bits != Version::from(0) => {
                 let Some(version_mask) = job.version_mask else {
+                    let job_height = job.workbase.height();
+
                     self.send_error(
                         id,
                         StratumError::InvalidVersionMask,
                         Some(serde_json::json!({"reason": "Version rolling not negotiated"})),
                     )
                     .await?;
+
+                    self.send_event(rejection_event!(
+                        session.address.to_string(),
+                        session.workername.clone(),
+                        job_height,
+                        StratumError::InvalidVersionMask
+                    ));
 
                     worker.record_rejected();
 
@@ -687,6 +744,8 @@ impl<W: Workbase> Stratifier<W> {
                 let disallowed = version_bits & !version_mask;
 
                 if disallowed != Version::from(0) {
+                    let job_height = job.workbase.height();
+
                     self.send_error(
                         id,
                         StratumError::InvalidVersionMask,
@@ -697,6 +756,13 @@ impl<W: Workbase> Stratifier<W> {
                         })),
                     )
                     .await?;
+
+                    self.send_event(rejection_event!(
+                        session.address.to_string(),
+                        session.workername.clone(),
+                        job_height,
+                        StratumError::InvalidVersionMask
+                    ));
 
                     worker.record_rejected();
 
@@ -740,7 +806,20 @@ impl<W: Workbase> Stratifier<W> {
         let hash = header.block_hash();
 
         if self.jobs.is_duplicate(hash) {
+            let pool_diff = Target::from_compact(nbits.into()).difficulty_float();
+            let share_diff = Difficulty::from(hash).as_f64();
+            let job_height = job.workbase.height();
+
             self.send_error(id, StratumError::Duplicate, None).await?;
+
+            self.send_event(rejection_event!(
+                session.address.to_string(),
+                session.workername.clone(),
+                pool_diff,
+                share_diff,
+                job_height,
+                StratumError::Duplicate
+            ));
 
             worker.record_rejected();
 
@@ -754,12 +833,42 @@ impl<W: Workbase> Stratifier<W> {
                 Ok(block) => {
                     info!("Submitting potential block solve");
 
-                    match self.settings.bitcoin_rpc_client()?.submit_block(&block) {
-                        Ok(_) => {
-                            info!("SUCCESSFULLY mined block {}", block.block_hash());
-                            self.metatron.add_block();
+                    let block_hex = encode::serialize_hex(&block);
+                    let client = self.settings.bitcoin_rpc_client().await?;
+
+                    let success = match client
+                        .call_raw::<String>("submitblock", &[json!(block_hex)])
+                        .await
+                    {
+                        Ok(msg) => {
+                            info!("submitblock returned: {msg}");
+                            false
                         }
-                        Err(err) => error!("Failed to submit block: {err}"),
+                        Err(e) if e.to_string().contains("Empty data received") => true,
+                        Err(e) => {
+                            error!("Failed to submit block: {e}");
+                            false
+                        }
+                    };
+
+                    if success {
+                        info!("SUCCESSFULLY mined block {}", block.block_hash());
+                        self.metatron.add_block();
+
+                        let job_height = job.workbase.height();
+                        let blockhash_str = blockhash.to_string();
+                        let diff = Difficulty::from(job.nbits()).as_f64();
+                        let coinbase_value = job.workbase.coinbase_value();
+
+                        self.send_event(Event::BlockFound(BlockFoundEvent {
+                            timestamp: None,
+                            blockheight: job_height,
+                            blockhash: blockhash_str,
+                            address: session.address.to_string(),
+                            workername: session.workername.clone(),
+                            diff,
+                            coinbase_value,
+                        }));
                     }
                 }
                 Err(err) => {
@@ -782,6 +891,21 @@ impl<W: Workbase> Stratifier<W> {
             let share_diff = Difficulty::from(hash);
 
             worker.record_accepted(current_diff, share_diff);
+
+            let pool_diff = current_diff.as_f64();
+            let share_diff_f64 = share_diff.as_f64();
+            let job_height = job.workbase.height();
+
+            self.send_event(Event::Share(ShareEvent {
+                timestamp: None,
+                address: session.address.to_string(),
+                workername: session.workername.clone(),
+                pool_diff,
+                share_diff: share_diff_f64,
+                result: true,
+                blockheight: Some(job_height),
+                reject_reason: None,
+            }));
 
             self.submit_to_upstream(&submit, share_diff, &session.enonce1)
                 .await;
@@ -818,7 +942,20 @@ impl<W: Workbase> Stratifier<W> {
             return Ok(Consequence::None);
         }
 
+        let pool_diff = current_diff.as_f64();
+        let share_diff = Difficulty::from(hash).as_f64();
+        let job_height = job.workbase.height();
+
         self.send_error(id, StratumError::AboveTarget, None).await?;
+
+        self.send_event(rejection_event!(
+            session.address.to_string(),
+            session.workername.clone(),
+            pool_diff,
+            share_diff,
+            job_height,
+            StratumError::AboveTarget
+        ));
 
         worker.record_rejected();
 

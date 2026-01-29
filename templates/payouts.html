@@ -16,33 +16,37 @@
     <div>
         %% if !self.pending.is_empty() {
         <h3>Pending Payments</h3>
-        <table border="1" cellpadding="5" cellspacing="0" style="width: 100%;">
-            <tr>
-                <th>Lightning Address</th>
-                <th>Amount</th>
-            </tr>
-            %% for payout in &self.pending {
-            <tr>
-                <td>{{ payout.ln_address }}</td>
-                <td>{{ crate::subcommand::server::templates::payouts::format_sats(payout.amount_sats) }}</td>
-            </tr>
-            %% }
-        </table>
+        <div style="overflow: auto; max-height: 500px;">
+            <table border="1" cellpadding="5" cellspacing="0" style="width: 100%;">
+                <tr>
+                    <th>Lightning Address</th>
+                    <th>Amount</th>
+                </tr>
+                %% for payout in &self.pending {
+                <tr>
+                    <td>{{ payout.ln_address }}</td>
+                    <td>{{ crate::subcommand::server::templates::payouts::format_sats(payout.amount_sats) }}</td>
+                </tr>
+                %% }
+            </table>
+        </div>
         %% }
         %% if !self.failed.is_empty() {
         <h3>Failed Payments</h3>
-        <table border="1" cellpadding="5" cellspacing="0" style="width: 100%;">
-            <tr>
-                <th>Bitcoin Address</th>
-                <th>Amount</th>
-            </tr>
-            %% for payout in &self.failed {
-            <tr>
-                <td>{{ payout.btc_address }}</td>
-                <td>{{ crate::subcommand::server::templates::payouts::format_sats(payout.amount_sats) }}</td>
-            </tr>
-            %% }
-        </table>
+        <div style="overflow: auto; max-height: 500px;">
+            <table border="1" cellpadding="5" cellspacing="0" style="width: 100%;">
+                <tr>
+                    <th>Bitcoin Address</th>
+                    <th>Amount</th>
+                </tr>
+                %% for payout in &self.failed {
+                <tr>
+                    <td>{{ payout.btc_address }}</td>
+                    <td>{{ crate::subcommand::server::templates::payouts::format_sats(payout.amount_sats) }}</td>
+                </tr>
+                %% }
+            </table>
+        </div>
         %% }
     </div>
 </div>

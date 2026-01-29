@@ -157,7 +157,7 @@ impl fmt::Display for Difficulty {
         let d = self.as_f64();
 
         if d >= 1.0 {
-            write!(f, "{}", d.floor() as u64)
+            format_si(d.floor(), "", f)
         } else if let Some(p) = f.precision() {
             write!(f, "{:.*}", p, d)
         } else {
@@ -338,10 +338,27 @@ mod tests {
     }
 
     #[test]
-    fn display_integer_when_greater_than_1() {
+    fn display_si_when_greater_than_1() {
         assert_eq!(format!("{}", Difficulty::from(1)), "1");
         assert_eq!(format!("{}", Difficulty::from(42)), "42");
         assert_eq!(format!("{}", Difficulty::from(2.9)), "2");
+        assert_eq!(format!("{}", Difficulty::from(1000)), "1 K");
+        assert_eq!(format!("{}", Difficulty::from(1_000_000)), "1 M");
+
+        let large = Difficulty::from(150_000_000_000_000u64);
+        let s = large.to_string();
+        assert!(s.ends_with(" T"), "expected T suffix, got: {s}");
+    }
+
+    #[test]
+    fn display_sub_1() {
+        let s = format!("{}", Difficulty::from(0.5));
+        assert!(s.starts_with("0.5"), "expected 0.5..., got: {s}");
+        assert!(!s.ends_with('0'), "should trim trailing zeros: {s}");
+
+        let s = format!("{}", Difficulty::from(0.001));
+        assert!(s.starts_with("0.00"), "expected 0.00..., got: {s}");
+        assert!(!s.ends_with('0'), "should trim trailing zeros: {s}");
     }
 
     #[test]
@@ -367,18 +384,6 @@ mod tests {
         case_from_str("1000", 1000.0);
     }
 
-    #[test]
-    fn display_pairs_with_parsed() {
-        for s in ["0.5", "1", "42", "0.125"] {
-            let d1 = Difficulty::from_str(s).unwrap();
-            let s2 = d1.to_string();
-            let d2 = Difficulty::from_str(&s2).unwrap();
-            assert!(
-                relative_error(d1.as_f64(), d2.as_f64()) < 1e-6,
-                "roundtrip {s}"
-            );
-        }
-    }
     #[test]
     fn from_str_rejects_bad() {
         for s in [

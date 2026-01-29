@@ -24,26 +24,29 @@ rust-version = "1.89.0"
 [workspace.dependencies]
 anyhow = { version = "1.0.98", features = ["backtrace"] }
 bitcoin = { version = "0.32.7", features = ["rand", "serde"] }
-bitcoincore-rpc = "0.19.0"
+bitcoind-async-client = { version = "0.10.0", features = ["raw_rpc"] }
 clap = { version = "4.5.36", features = ["derive", "env"] }
+rand = "0.9.1"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
+tokio = { version = "1.44.2", features = ["macros", "rt-multi-thread", "signal"] }
 
 [features]
 gui = ["dep:iced"]
 swagger-ui = ["dep:utoipa-swagger-ui"]
+reload = ["boilerplate/reload"]
 
 [dependencies]
 anyhow.workspace = true
 asic-rs = { path = "/home/paratoxic/projects/asic-rs" }
 async-stream = "0.3.6"
-axum = { version = "0.8.3", features = ["http2"] }
+axum = { version = "0.8.3", features = ["http2", "ws"] }
 axum-server = "0.7.3"
 backon = "1.6.0"
 base64 = "0.22.1"
 bip322 = "0.0.10"
 bitcoin.workspace = true
-bitcoincore-rpc.workspace = true
+bitcoind-async-client.workspace = true
 boilerplate = { version = "1.1.1", features = ["axum"] }
 byteorder = "1.5.0"
 chrono = "0.4.41"
@@ -58,7 +61,7 @@ lru = "0.16.2"
 mime_guess = "2.0.5"
 parking_lot = "0.12.5"
 primitive-types = "0.14.0"
-rand = "0.9.1"
+rand.workspace = true
 reqwest = { version = "0.12.22", features = ["rustls-tls", "blocking", "json"] }
 rust-embed = "8.7.1"
 rustls = { version = "0.23.26", features = ["ring"] }
@@ -69,7 +72,7 @@ serde_with = "3.14.0"
 snafu = "0.8.9"
 sqlx = { version =  "0.8.5", features = ["postgres", "runtime-tokio"] }
 sysinfo = "0.37.0"
-tokio = { version = "1.44.2", features = ["macros", "rt-multi-thread", "signal"] }
+tokio.workspace = true
 tokio-util = "0.7.15"
 tower-http = { version = "0.6.2", features = ["auth", "fs", "set-header"] }
 tracing = "0.1.41"
@@ -78,6 +81,7 @@ tracing-subscriber = { version =  "0.3.19", features = ["env-filter", "fmt"] }
 utoipa = "5.4.0"
 utoipa-swagger-ui = { version =  "9.0.2", features = ["axum"], optional = true }
 zeromq = "0.4.1"
+async-trait = "0.1.89"
 
 [dev-dependencies]
 chrono = "0.4.41"

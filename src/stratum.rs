@@ -20,13 +20,10 @@ use {
     serde_with::{DeserializeFromStr, SerializeDisplay},
     snafu::{ResultExt, Snafu},
     std::{
+        fmt::{self, Display, Formatter},
         ops::{BitAnd, BitOr, BitXor, Not},
         str::FromStr,
         sync::LazyLock,
-        {
-            fmt,
-            fmt::{Display, Formatter},
-        },
     },
 };
 
@@ -46,6 +43,7 @@ mod notify;
 mod ntime;
 mod prevhash;
 mod set_difficulty;
+mod si;
 mod submit;
 mod subscribe;
 mod suggest_difficulty;
@@ -69,6 +67,7 @@ pub use {
     ntime::Ntime,
     prevhash::PrevHash,
     set_difficulty::SetDifficulty,
+    si::{format_si, parse_si},
     submit::Submit,
     subscribe::{Subscribe, SubscribeResult},
     suggest_difficulty::SuggestDifficulty,

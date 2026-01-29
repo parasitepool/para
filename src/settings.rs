@@ -3,14 +3,13 @@ use super::*;
 mod pool_options;
 mod proxy_options;
 
-pub(crate) use pool_options::PoolOptions;
-pub(crate) use proxy_options::ProxyOptions;
+pub(crate) use {pool_options::PoolOptions, proxy_options::ProxyOptions};
 
 #[derive(Clone, Debug)]
 pub(crate) struct Settings {
     address: String,
     port: u16,
-    api_port: Option<u16>,
+    http_port: Option<u16>,
     upstream_endpoint: Option<String>,
     upstream_username: Option<Username>,
     upstream_password: Option<String>,
@@ -36,6 +35,8 @@ pub(crate) struct Settings {
     enonce1_size: usize,
     enonce2_size: usize,
     disable_bouncer: bool,
+    database_url: Option<String>,
+    events_file: Option<PathBuf>,
 }
 
 impl Default for Settings {
@@ -43,7 +44,7 @@ impl Default for Settings {
         Self {
             address: "0.0.0.0".into(),
             port: 42069,
-            api_port: None,
+            http_port: None,
             upstream_endpoint: None,
             upstream_username: None,
             upstream_password: None,
@@ -69,6 +70,8 @@ impl Default for Settings {
             enonce1_size: ENONCE1_SIZE,
             enonce2_size: MAX_ENONCE_SIZE,
             disable_bouncer: false,
+            database_url: None,
+            events_file: None,
         }
     }
 }
@@ -80,7 +83,7 @@ impl Settings {
         let settings = Self {
             address: options.address.unwrap_or_else(|| "0.0.0.0".into()),
             port: options.port.unwrap_or(42069),
-            api_port: options.api_port,
+            http_port: options.http_port,
             upstream_endpoint: None,
             upstream_username: None,
             upstream_password: None,
@@ -114,6 +117,8 @@ impl Settings {
             enonce1_size: options.enonce1_size.unwrap_or(ENONCE1_SIZE),
             enonce2_size: options.enonce2_size.unwrap_or(MAX_ENONCE_SIZE),
             disable_bouncer: options.disable_bouncer,
+            database_url: options.database_url.clone(),
+            events_file: options.events_file.clone(),
         };
 
         settings.validate()?;
@@ -124,7 +129,7 @@ impl Settings {
         let settings = Self {
             address: options.address.unwrap_or_else(|| "0.0.0.0".into()),
             port: options.port.unwrap_or(42069),
-            api_port: options.api_port,
+            http_port: options.http_port,
             upstream_endpoint: Some(options.upstream),
             upstream_username: Some(options.username),
             upstream_password: options.password,
@@ -176,29 +181,34 @@ impl Settings {
         Ok(path.join(".cookie"))
     }
 
-    pub(crate) fn bitcoin_rpc_client(&self) -> Result<bitcoincore_rpc::Client> {
-        let rpc_url = self.bitcoin_rpc_url();
+    pub(crate) async fn bitcoin_rpc_client(&self) -> Result<Client> {
+        let rpc_url = format!("http://{}", self.bitcoin_rpc_url());
 
         let bitcoin_credentials = self.bitcoin_credentials()?;
 
-        info!("Connecting to Bitcoin Core at {rpc_url}",);
+        info!("Connecting to Bitcoin Core at {rpc_url}");
 
-        let client =
-            bitcoincore_rpc::Client::new(&rpc_url, bitcoin_credentials.clone()).map_err(|_| {
-                anyhow!(format!(
-                    "failed to connect to Bitcoin Core RPC at `{rpc_url}` with {}",
-                    match bitcoin_credentials {
-                        Auth::None => "no credentials".into(),
-                        Auth::UserPass(_, _) => "username and password".into(),
-                        Auth::CookieFile(cookie_file) =>
-                            format!("cookie file at {}", cookie_file.display()),
-                    }
-                ))
-            })?;
+        let client = Client::new(
+            rpc_url.clone(),
+            bitcoin_credentials.clone(),
+            None,
+            None,
+            None,
+        )
+        .map_err(|err| {
+            anyhow!(format!(
+                "failed to connect to Bitcoin Core RPC at `{rpc_url}` with {} and error: {err}",
+                match bitcoin_credentials {
+                    Auth::UserPass(_, _) => "username and password".into(),
+                    Auth::CookieFile(cookie_file) =>
+                        format!("cookie file at {}", cookie_file.display()),
+                }
+            ))
+        })?;
 
         let mut checks = 0;
         let rpc_chain = loop {
-            match client.get_blockchain_info() {
+            match client.get_blockchain_info().await {
                 Ok(blockchain_info) => {
                     break match blockchain_info.chain.to_string().as_str() {
                         "bitcoin" => Chain::Mainnet,
@@ -209,20 +219,19 @@ impl Settings {
                         other => bail!("Bitcoin RPC server on unknown chain: {other}"),
                     };
                 }
-                Err(bitcoincore_rpc::Error::JsonRpc(bitcoincore_rpc::jsonrpc::Error::Rpc(err)))
-                    if err.code == -28 => {}
+                Err(bitcoind_async_client::error::ClientError::Server(-28, _)) => {}
                 Err(err) => {
-                    bail!("Failed to connect to Bitcoin Core RPC at `{rpc_url}`:  {err}")
+                    bail!("Failed to connect to Bitcoin Core RPC at `{rpc_url}`: {err}")
                 }
             }
 
             ensure! {
-              checks < 100,
-              "Failed to connect to Bitcoin Core RPC at `{rpc_url}`",
+                checks < 100,
+                "Failed to connect to Bitcoin Core RPC at `{rpc_url}`",
             }
 
             checks += 1;
-            thread::sleep(Duration::from_millis(100));
+            sleep(Duration::from_millis(100)).await;
         };
 
         let para_chain = self.chain;
@@ -309,8 +318,8 @@ impl Settings {
         self.port
     }
 
-    pub(crate) fn api_port(&self) -> Option<u16> {
-        self.api_port
+    pub(crate) fn http_port(&self) -> Option<u16> {
+        self.http_port
     }
 
     pub(crate) fn upstream(&self) -> Result<&str> {
@@ -388,12 +397,19 @@ impl Settings {
     pub(crate) fn disable_bouncer(&self) -> bool {
         self.disable_bouncer
     }
+
+    pub(crate) fn database_url(&self) -> Option<String> {
+        self.database_url.clone()
+    }
+
+    pub(crate) fn events_file(&self) -> Option<PathBuf> {
+        self.events_file.clone()
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::arguments::Arguments;
+    use {super::*, crate::arguments::Arguments};
 
     fn parse_pool_options(args: &str) -> PoolOptions {
         match Arguments::try_parse_from(args.split_whitespace()) {
@@ -771,7 +787,7 @@ mod tests {
         assert_eq!(settings.upstream_password, None);
         assert_eq!(settings.address, "0.0.0.0");
         assert_eq!(settings.port, 42069);
-        assert_eq!(settings.api_port, None);
+        assert_eq!(settings.http_port, None);
         assert_eq!(settings.timeout, Duration::from_secs(30));
     }
 
@@ -787,13 +803,13 @@ mod tests {
     }
 
     #[test]
-    fn proxy_override_api_port() {
+    fn proxy_override_http_port() {
         let options = parse_proxy_options(
-            "para proxy --upstream pool.example.com:3333 --username bc1qtest --api-port 8080",
+            "para proxy --upstream pool.example.com:3333 --username bc1qtest --http-port 8080",
         );
         let settings = Settings::from_proxy_options(options).unwrap();
 
-        assert_eq!(settings.api_port, Some(8080));
+        assert_eq!(settings.http_port, Some(8080));
     }
 
     #[test]

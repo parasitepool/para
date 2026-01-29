@@ -66,8 +66,7 @@ impl<'de> Deserialize<'de> for Notify {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use bitcoin::block;
+    use {super::*, bitcoin::block};
 
     #[track_caller]
     fn case(json: &str, expected: Notify) {
