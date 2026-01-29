@@ -1,7 +1,6 @@
 use {
     super::*,
     axum::extract::{Path, State},
-    boilerplate::Boilerplate,
     http_server::{
         self,
         error::{OptionExt, ServerResult},

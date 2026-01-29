@@ -1,7 +1,4 @@
-use {
-    super::*,
-    boilerplate::{Boilerplate, Trusted},
-};
+use super::*;
 
 #[derive(Boilerplate)]
 pub(crate) struct DashboardHtml<T: DashboardContent> {
@@ -44,5 +41,25 @@ pub(crate) struct ProxyHtml;
 impl DashboardContent for ProxyHtml {
     fn title(&self) -> &'static str {
         "Proxy"
+    }
+}
+
+#[cfg(feature = "reload")]
+pub(crate) struct ReloadedContent {
+    pub(crate) html: String,
+    pub(crate) title: &'static str,
+}
+
+#[cfg(feature = "reload")]
+impl fmt::Display for ReloadedContent {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(&self.html)
+    }
+}
+
+#[cfg(feature = "reload")]
+impl DashboardContent for ReloadedContent {
+    fn title(&self) -> &'static str {
+        self.title
     }
 }

@@ -2,7 +2,9 @@ body { font: clamp(14px, 1.5vw, 18px)/1.6 monospace; margin: 30px; background: #
 h1 { text-align: center; margin-bottom: 40px; font-size: 1.55em; }
 h1 sup { font-size: 0.5em; vertical-align: super; opacity: 0.7; }
 .logo { display: block; margin: 0 auto 20px; height: 4em; }
-.columns { display: flex; gap: 60px; }
+.columns { display: flex; gap: 60px; justify-content: center; }
+.grid { display: flex; flex-wrap: wrap; gap: 60px; justify-content: center; }
+.grid + #logs { width: 1060px; margin-left: auto; margin-right: auto; }
 .column { border: 1px solid #444; padding: 20px 30px; width: 500px; box-sizing: border-box; }
 .column-full { width: 1060px; }
 .column h2 { margin: 0 0 15px; font-size: 1.22em; text-align: center; }
@@ -38,9 +40,11 @@ h1 sup { font-size: 0.5em; vertical-align: super; opacity: 0.7; }
   body { margin: 20px; }
   .wrapper { width: auto; }
   .columns { flex-direction: column; gap: 30px; align-items: center; }
+  .grid { gap: 30px; }
   .column { width: 100%; max-width: 500px; }
   .column-full { width: 100%; max-width: 500px; }
   #logs { max-width: 500px; margin-left: auto; margin-right: auto; }
+  .grid + #logs { width: 100%; max-width: 500px; }
 }
 @media (max-width: 560px) {
   body { margin: 10px; }
