@@ -87,7 +87,7 @@ maxtxfee=1000000
         )?;
 
         let compiled_bitcoind = format!("{}/bitcoin/build/bin", workspace_root());
-        let expanded_path = format!("{}:{}", std::env::var("PATH")?, compiled_bitcoind);
+        let expanded_path = format!("{compiled_bitcoind}:{}", std::env::var("PATH")?);
 
         let handle = Command::new("bitcoind")
             .env("PATH", &expanded_path)
