@@ -1,8 +1,11 @@
 use {
     super::*,
-    axum::extract::{
-        Path,
-        ws::{Message, WebSocketUpgrade},
+    axum::{
+        Extension,
+        extract::{
+            Path,
+            ws::{Message, WebSocketUpgrade},
+        },
     },
     error::{OptionExt, ServerError, ServerResult},
     sysinfo::DiskRefreshKind,
