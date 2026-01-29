@@ -577,6 +577,9 @@ async fn share_validation() {
     assert!(system_status.disk_usage_percent >= 0.0 && system_status.disk_usage_percent <= 100.0);
     assert!(system_status.uptime > 0);
 
+    let bitcoin_status = pool.get_bitcoin_status().await.unwrap();
+    assert!(bitcoin_status.network_difficulty.as_f64() > 0.0);
+
     let client = pool.stratum_client().await;
     let mut events = client.connect().await.unwrap();
 
@@ -616,10 +619,12 @@ async fn share_validation() {
     assert_eq!(user.accepted, 1);
     assert_eq!(user.rejected, 0);
     assert!(user.best_ever.is_some());
+    assert!(user.last_share.is_some());
     assert_eq!(user.workers.len(), 1);
     assert_eq!(user.workers[0].accepted, 1);
     assert_eq!(user.workers[0].rejected, 0);
     assert!(user.workers[0].best_ever.is_some());
+    assert!(user.workers[0].last_share.is_some());
 
     // Duplicate rejected
     assert_stratum_error(

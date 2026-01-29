@@ -1,6 +1,6 @@
 use {
     super::*,
-    api::{ProxyStatus, SystemStatus, UserDetail},
+    api::{BitcoinStatus, ProxyStatus, SystemStatus, UserDetail},
     para::{USER_AGENT, stratum},
 };
 
@@ -30,6 +30,7 @@ fn build_proxy_command(
     username: &str,
     proxy_port: u16,
     http_port: u16,
+    bitcoind_rpc_port: u16,
     args: impl ToArgs,
 ) -> CommandBuilder {
     CommandBuilder::new(format!(
@@ -40,6 +41,9 @@ fn build_proxy_command(
             --address 127.0.0.1 \
             --port {proxy_port} \
             --http-port {http_port} \
+            --bitcoin-rpc-username satoshi \
+            --bitcoin-rpc-password nakamoto \
+            --bitcoin-rpc-port {bitcoind_rpc_port} \
             {}",
         args.to_args().join(" ")
     ))
@@ -50,11 +54,23 @@ fn build_proxy_command(
 }
 
 impl TestProxy {
-    pub(crate) fn spawn_with_args(upstream: &str, username: &str, args: impl ToArgs) -> Self {
+    pub(crate) fn spawn_with_args(
+        upstream: &str,
+        username: &str,
+        bitcoind_rpc_port: u16,
+        args: impl ToArgs,
+    ) -> Self {
         let (proxy_port, http_port) = allocate_ports();
 
-        let proxy_handle =
-            build_proxy_command(upstream, username, proxy_port, http_port, args).spawn();
+        let proxy_handle = build_proxy_command(
+            upstream,
+            username,
+            proxy_port,
+            http_port,
+            bitcoind_rpc_port,
+            args,
+        )
+        .spawn();
 
         for attempt in 0.. {
             match TcpStream::connect(format!("127.0.0.1:{http_port}")) {
@@ -79,14 +95,22 @@ impl TestProxy {
     pub(crate) fn spawn_expect_failure(
         upstream: &str,
         username: &str,
+        bitcoind_rpc_port: u16,
         args: impl ToArgs,
     ) -> String {
         let (proxy_port, http_port) = allocate_ports();
 
-        let output = build_proxy_command(upstream, username, proxy_port, http_port, args)
-            .spawn()
-            .wait_with_output()
-            .expect("Failed to wait for proxy process");
+        let output = build_proxy_command(
+            upstream,
+            username,
+            proxy_port,
+            http_port,
+            bitcoind_rpc_port,
+            args,
+        )
+        .spawn()
+        .wait_with_output()
+        .expect("Failed to wait for proxy process");
 
         assert!(
             !output.status.success(),
@@ -143,6 +167,15 @@ impl TestProxy {
                 self.api_endpoint(),
                 address
             ))
+            .send()
+            .await?
+            .json()
+            .await
+    }
+
+    pub(crate) async fn get_bitcoin_status(&self) -> reqwest::Result<BitcoinStatus> {
+        reqwest::Client::new()
+            .get(format!("{}/api/bitcoin/status", self.api_endpoint()))
             .send()
             .await?
             .json()

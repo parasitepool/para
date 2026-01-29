@@ -1,15 +1,17 @@
-use {super::*, crate::http_server, boilerplate::Boilerplate};
+use super::*;
 
-pub(crate) fn router(metrics: Arc<Metrics>) -> Router {
+pub(crate) fn router(metrics: Arc<Metrics>, bitcoin_client: Arc<Client>) -> Router {
     Router::new()
         .route("/", get(home))
         .route("/api/proxy/status", get(status))
         .route("/api/proxy/users", get(users))
         .route("/api/proxy/users/{address}", get(user))
+        .route("/api/bitcoin/status", get(http_server::bitcoin_status))
         .route("/api/system/status", get(http_server::system_status))
         .route("/ws/logs", get(http_server::ws_logs))
         .route("/static/{*path}", get(http_server::static_assets))
         .with_state(metrics)
+        .layer(Extension(bitcoin_client))
 }
 
 #[derive(Boilerplate)]
@@ -109,6 +111,7 @@ async fn user(
         accepted: user.accepted(),
         rejected: user.rejected(),
         best_ever: user.best_ever(),
+        last_share: user.last_share().map(|time| time.elapsed().as_secs()),
         total_work: user.total_work(),
         authorized: user.authorized,
         workers: user
@@ -129,6 +132,7 @@ async fn user(
                 accepted: worker.accepted(),
                 rejected: worker.rejected(),
                 best_ever: worker.best_ever(),
+                last_share: worker.last_share().map(|time| time.elapsed().as_secs()),
                 total_work: worker.total_work(),
             })
             .collect(),

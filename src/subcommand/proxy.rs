@@ -18,6 +18,8 @@ impl Proxy {
                 .context("failed to create settings")?,
         );
 
+        let bitcoin_client = Arc::new(settings.bitcoin_rpc_client().await?);
+
         let (upstream, events) = Upstream::connect(settings.clone()).await?;
 
         let upstream = Arc::new(upstream);
@@ -45,7 +47,7 @@ impl Proxy {
 
         http_server::spawn(
             &settings,
-            api::proxy::router(metrics.clone()),
+            api::proxy::router(metrics.clone(), bitcoin_client),
             cancel_token.clone(),
             &mut tasks,
         )?;

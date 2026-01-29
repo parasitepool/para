@@ -5,6 +5,7 @@ pub(crate) struct TestPool {
     pool_handle: Child,
     pool_port: u16,
     http_port: u16,
+    bitcoind_rpc_port: u16,
     _tempdir: Arc<TempDir>,
 }
 
@@ -84,6 +85,7 @@ impl TestPool {
             pool_handle,
             pool_port,
             http_port,
+            bitcoind_rpc_port: rpc_port,
             _tempdir: tempdir,
         }
     }
@@ -121,6 +123,15 @@ impl TestPool {
                 self.api_endpoint(),
                 address
             ))
+            .send()
+            .await?
+            .json()
+            .await
+    }
+
+    pub(crate) async fn get_bitcoin_status(&self) -> reqwest::Result<api::BitcoinStatus> {
+        reqwest::Client::new()
+            .get(format!("{}/api/bitcoin/status", self.api_endpoint()))
             .send()
             .await?
             .json()
@@ -194,6 +205,10 @@ impl TestPool {
     #[allow(unused)]
     pub(crate) fn bitcoind_handle(&self) -> &Bitcoind {
         &self.bitcoind_handle
+    }
+
+    pub(crate) fn bitcoind_rpc_port(&self) -> u16 {
+        self.bitcoind_rpc_port
     }
 
     pub(crate) async fn get_block_height(&self) -> u64 {

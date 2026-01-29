@@ -1,7 +1,14 @@
 use {
     super::*,
-    axum::extract::{Path, State},
-    http_server::error::{OptionExt, ServerResult},
+    axum::{
+        Extension,
+        extract::{Path, State},
+    },
+    boilerplate::Boilerplate,
+    http_server::{
+        self,
+        error::{OptionExt, ServerResult},
+    },
 };
 
 pub mod pool;
@@ -88,6 +95,7 @@ pub struct UserDetail {
     pub accepted: u64,
     pub rejected: u64,
     pub best_ever: Option<Difficulty>,
+    pub last_share: Option<u64>,
     pub total_work: f64,
     pub authorized: u64,
     pub workers: Vec<WorkerDetail>,
@@ -110,7 +118,9 @@ pub struct WorkerDetail {
     pub accepted: u64,
     pub rejected: u64,
     pub best_ever: Option<Difficulty>,
+    pub last_share: Option<u64>,
     pub total_work: f64,
 }
 
+pub type BitcoinStatus = http_server::BitcoinStatus;
 pub type SystemStatus = http_server::SystemStatus;

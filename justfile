@@ -47,12 +47,12 @@ bitcoind:
 pool:
   cargo run --features reload -- \
     pool \
-    --http-port 8080 \
     --chain signet \
     --address 0.0.0.0 \
     --bitcoin-rpc-username satoshi \
     --bitcoin-rpc-password nakamoto \
     --bitcoin-rpc-port 38332 \
+    --http-port 8080 \
     --start-diff 0.00001 \
     --vardiff-window 10 \
     --vardiff-period 1 \
@@ -62,11 +62,14 @@ proxy:
   cargo run --features reload -- \
     proxy \
     --chain signet \
-    --http-port 8081 \
+    --bitcoin-rpc-username satoshi \
+    --bitcoin-rpc-password nakamoto \
+    --bitcoin-rpc-port 38332 \
     --address 0.0.0.0 \
     --port 42070 \
     --username tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.proxy \
     --password x \
+    --http-port 8081 \
     --start-diff 0.00001 \
     --vardiff-window 10 \
     --vardiff-period 1 \
