@@ -52,7 +52,9 @@ async function refresh() {
       fetch('/api/system/status').then(r => r.json()).catch(() => ({})),
       fetch('/api/bitcoin/status').then(r => r.json()).catch(() => ({}))
     ]);
-    const merged = {...proxyData, ...systemData, ...bitcoinData, sps: proxyData.sps_1m?.toFixed(2), upstream_status: proxyData.upstream_connected ? 'Connected' : 'Disconnected'};
+    const u = proxyData.upstream_username;
+    const upstream_username = u?.length > 15 ? u.slice(0,6) + '...' + u.slice(-6) : u;
+    const merged = {...proxyData, ...systemData, ...bitcoinData, sps: proxyData.sps_1m?.toFixed(2), upstream_status: proxyData.upstream_connected ? 'Connected' : 'Disconnected', upstream_username};
 
     Object.keys(merged).forEach(key => {
       const el = document.getElementById(key);
@@ -61,9 +63,7 @@ async function refresh() {
 
     document.getElementById('upstream_status').className = proxyData.upstream_status.toLowerCase();
 
-    const u = proxyData.upstream_username;
     const uel = document.getElementById('upstream_username');
-    uel.textContent = u.length <= 15 ? u : u.slice(0,6) + '...' + u.slice(-6);
     uel.dataset.full = u;
     uel.title = u;
   } catch (e) {}
