@@ -24,8 +24,8 @@ use {
     std::sync::OnceLock,
     sysinfo::DiskRefreshKind,
     templates::{
-        PageContent, PageHtml, dashboard::DashboardHtml, home::HomeHtml, payouts::PayoutsHtml,
-        status::StatusHtml,
+        PageContent, PageHtml, aggregator_dashboard::AggregatorDashboardHtml, home::HomeHtml,
+        payouts::PayoutsHtml, status::StatusHtml,
     },
     tower_http::{
         services::ServeDir, set_header::SetResponseHeaderLayer,

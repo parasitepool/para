@@ -29,6 +29,9 @@ pub(crate) struct ProxyOptions {
     #[arg(long, help = "Load Bitcoin Core data dir from <BITCOIN_DATA_DIR>.")]
     pub(crate) bitcoin_data_dir: Option<PathBuf>,
 
+    #[arg(long, help = "Load Bitcoin Core RPC cookie file from <COOKIE_FILE>.")]
+    pub(crate) bitcoin_rpc_cookie_file: Option<PathBuf>,
+
     #[arg(long, help = "Connect to Bitcoin Core RPC at <BITCOIN_RPC_PORT>.")]
     pub(crate) bitcoin_rpc_port: Option<u16>,
 
@@ -43,9 +46,6 @@ pub(crate) struct ProxyOptions {
         help = "Authenticate to Bitcoin Core RPC with <BITCOIN_RPC_PASSWORD>."
     )]
     pub(crate) bitcoin_rpc_password: Option<String>,
-
-    #[arg(long, help = "Load Bitcoin Core RPC cookie file from <COOKIE_FILE>.")]
-    pub(crate) bitcoin_rpc_cookie_file: Option<PathBuf>,
 
     #[arg(long, help = "Give <START_DIFF> to new clients.")]
     pub(crate) start_diff: Option<Difficulty>,

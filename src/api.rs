@@ -1,13 +1,10 @@
 use {
     super::*,
-    axum::{
-        Extension,
-        extract::{Path, State},
-    },
-    boilerplate::Boilerplate,
+    axum::extract::{Path, State},
     http_server::{
         self,
         error::{OptionExt, ServerResult},
+        templates::{DashboardHtml, PoolHtml, ProxyHtml},
     },
 };
 

@@ -1,59 +1,53 @@
-<!doctype html>
-<html lang=en>
-<head>
-  <meta charset=utf-8>
-  <meta name=viewport content='width=device-width,initial-scale=1.0'>
-  <title>Pool</title>
-  <link rel=icon href=/static/parasite.svg type=image/x-icon size=16x16>
-  <link rel=stylesheet href=/static/dashboard.css>
-</head>
-<body>
-<img src=/static/parasite.svg alt="" class=logo>
-<h1>Parasite Pool</h1>
-<div class=wrapper>
-<div class=columns>
+<div class=grid>
   <div class="column column-full">
-    <h2>Pool</h2>
+    <h2>Stats</h2>
     <div class=row><span>Users</span><span id=users></span></div>
     <div class=row><span>Workers</span><span id=workers></span></div>
     <div class=row><span>Connections</span><span id=connections></span></div>
-    <div class=row><span>Hashrate</span><span id=hashrate></span></div>
+    <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
     <div class=row><span>SPS</span><span id=sps></span></div>
-    <div class=row><span>Uptime</span><span id=uptime></span></div>
+    <div class=row><span>Uptime</span><span><span id=uptime_secs></span>s</span></div>
     <div class=row><span>Blocks</span><span id=blocks></span></div>
     <h3>Shares</h3>
     <div class=row><span>Accepted</span><span id=accepted></span></div>
     <div class=row><span>Rejected</span><span id=rejected></span></div>
     <div class=row><span>Best</span><span id=best_ever></span></div>
-    <div class=row><span>Last</span><span id=last_share></span></div>
+    <div class=row><span>Last</span><span><span id=last_share></span>s ago</span></div>
+  </div>
+
+  <div class=column>
+    <h2>Bitcoin</h2>
+    <div class=row><span>Block Height</span><span id=btc_height></span></div>
+    <div class=row><span>Network Difficulty</span><span id=network_difficulty></span></div>
+  </div>
+
+  <div class=column>
+    <h2>System</h2>
+    <div class=row><span>CPU</span><span><span id=cpu_usage_percent></span>%</span></div>
+    <div class=row><span>Memory</span><span><span id=memory_usage_percent></span>%</span></div>
+    <div class=row><span>Disk</span><span><span id=disk_usage_percent></span>%</span></div>
+    <div class=row><span>Uptime</span><span><span id=uptime></span>s</span></div>
   </div>
 </div>
 
 <div id=logs></div>
-</div>
 
-<script src=/static/dashboard.js></script>
 <script>
 async function refresh() {
   try {
-    const r = await fetch('/api/pool/status');
-    if (!r.ok) return;
-    const s = await r.json();
-    document.getElementById('users').textContent = s.users;
-    document.getElementById('workers').textContent = s.workers;
-    document.getElementById('connections').textContent = s.connections;
-    document.getElementById('uptime').textContent = s.uptime_secs + 's';
-    document.getElementById('hashrate').textContent = s.hashrate_1m;
-    document.getElementById('sps').textContent = s.sps_1m.toFixed(2);
-    document.getElementById('blocks').textContent = s.blocks;
-    document.getElementById('accepted').textContent = s.accepted;
-    document.getElementById('rejected').textContent = s.rejected;
-    document.getElementById('best_ever').textContent = s.best_ever ?? '-';
-    document.getElementById('last_share').textContent = s.last_share != null ? s.last_share + 's ago' : '-';
+    const [poolData, systemData, bitcoinData] = await Promise.all([
+      fetch('/api/pool/status').then(r => r.json()).catch(() => ({})),
+      fetch('/api/system/status').then(r => r.json()).catch(() => ({})),
+      fetch('/api/bitcoin/status').then(r => r.json()).catch(() => ({}))
+    ]);
+    const merged = {...poolData, ...systemData, ...bitcoinData, sps: poolData.sps_1m?.toFixed(2)};
+
+    Object.keys(merged).forEach(key => {
+      const el = document.getElementById(key);
+      if (el) el.textContent = merged[key] != null ? merged[key].toLocaleString() : '-';
+    });
   } catch (e) {}
 }
 startPolling(refresh);
 connectWs();
 </script>
-</body>
-</html>

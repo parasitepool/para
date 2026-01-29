@@ -158,7 +158,7 @@ impl Aggregator {
             }
         }
 
-        Ok(DashboardHtml { statuses: checks }
+        Ok(AggregatorDashboardHtml { statuses: checks }
             .page(config.domain())
             .into_response())
     }

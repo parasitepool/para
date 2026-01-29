@@ -32,6 +32,7 @@ use {
         {Auth, Client},
     },
     block_template::BlockTemplate,
+    boilerplate::{Boilerplate, Trusted},
     chain::Chain,
     clap::Parser,
     coinbase_builder::CoinbaseBuilder,

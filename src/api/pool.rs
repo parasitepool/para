@@ -1,6 +1,6 @@
 use super::*;
 
-pub(crate) fn router(metatron: Arc<Metatron>, bitcoin_client: Arc<Client>) -> Router {
+pub(crate) fn router(metatron: Arc<Metatron>, bitcoin_client: Arc<Client>, chain: Chain) -> Router {
     Router::new()
         .route("/", get(home))
         .route("/api/pool/status", get(status))
@@ -12,22 +12,34 @@ pub(crate) fn router(metatron: Arc<Metatron>, bitcoin_client: Arc<Client>) -> Ro
         .route("/static/{*path}", get(http_server::static_assets))
         .with_state(metatron)
         .layer(Extension(bitcoin_client))
+        .layer(Extension(chain))
 }
 
-#[derive(Boilerplate)]
-struct PoolHtml;
-
-async fn home() -> Response {
-    let html = PoolHtml;
-
+async fn home(Extension(chain): Extension<Chain>) -> Response {
     #[cfg(feature = "reload")]
-    let body = match html.reload_from_path() {
-        Ok(reloaded) => reloaded.to_string(),
-        Err(_) => html.to_string(),
+    let body = {
+        use http_server::templates::ReloadedContent;
+
+        let content = PoolHtml
+            .reload_from_path()
+            .map(|r| r.to_string())
+            .unwrap_or_else(|_| PoolHtml.to_string());
+
+        let html = DashboardHtml::new(
+            ReloadedContent {
+                html: content,
+                title: "Pool",
+            },
+            chain,
+        );
+
+        html.reload_from_path()
+            .map(|r| r.to_string())
+            .unwrap_or_else(|_| html.to_string())
     };
 
     #[cfg(not(feature = "reload"))]
-    let body = html.to_string();
+    let body = DashboardHtml::new(PoolHtml, chain).to_string();
 
     ([(CONTENT_TYPE, "text/html;charset=utf-8")], body).into_response()
 }

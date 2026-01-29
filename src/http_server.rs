@@ -1,8 +1,11 @@
 use {
     super::*,
-    axum::extract::{
-        Path,
-        ws::{Message, WebSocketUpgrade},
+    axum::{
+        Extension,
+        extract::{
+            Path,
+            ws::{Message, WebSocketUpgrade},
+        },
     },
     error::{OptionExt, ServerError, ServerResult},
     sysinfo::DiskRefreshKind,
@@ -10,6 +13,7 @@ use {
 
 pub(crate) mod accept_json;
 pub(crate) mod error;
+pub(crate) mod templates;
 
 #[derive(Clone, Debug)]
 pub struct HttpConfig {

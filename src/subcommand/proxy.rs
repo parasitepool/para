@@ -47,7 +47,7 @@ impl Proxy {
 
         http_server::spawn(
             &settings,
-            api::proxy::router(metrics.clone(), bitcoin_client),
+            api::proxy::router(metrics.clone(), bitcoin_client, settings.chain()),
             cancel_token.clone(),
             &mut tasks,
         )?;
