@@ -30,7 +30,7 @@ fn build_proxy_command(
     username: &str,
     proxy_port: u16,
     http_port: u16,
-    rpc_port: u16,
+    bitcoind_rpc_port: u16,
     args: impl ToArgs,
 ) -> CommandBuilder {
     CommandBuilder::new(format!(
@@ -43,7 +43,7 @@ fn build_proxy_command(
             --http-port {http_port} \
             --bitcoin-rpc-username satoshi \
             --bitcoin-rpc-password nakamoto \
-            --bitcoin-rpc-port {rpc_port} \
+            --bitcoin-rpc-port {bitcoind_rpc_port} \
             {}",
         args.to_args().join(" ")
     ))
@@ -57,13 +57,13 @@ impl TestProxy {
     pub(crate) fn spawn_with_args(
         upstream: &str,
         username: &str,
-        rpc_port: u16,
+        bitcoind_rpc_port: u16,
         args: impl ToArgs,
     ) -> Self {
         let (proxy_port, http_port) = allocate_ports();
 
         let proxy_handle =
-            build_proxy_command(upstream, username, proxy_port, http_port, rpc_port, args).spawn();
+            build_proxy_command(upstream, username, proxy_port, http_port, bitcoind_rpc_port, args).spawn();
 
         for attempt in 0.. {
             match TcpStream::connect(format!("127.0.0.1:{http_port}")) {
@@ -88,12 +88,12 @@ impl TestProxy {
     pub(crate) fn spawn_expect_failure(
         upstream: &str,
         username: &str,
-        rpc_port: u16,
+        bitcoind_rpc_port: u16,
         args: impl ToArgs,
     ) -> String {
         let (proxy_port, http_port) = allocate_ports();
 
-        let output = build_proxy_command(upstream, username, proxy_port, http_port, rpc_port, args)
+        let output = build_proxy_command(upstream, username, proxy_port, http_port, bitcoind_rpc_port, args)
             .spawn()
             .wait_with_output()
             .expect("Failed to wait for proxy process");
