@@ -62,8 +62,15 @@ impl TestProxy {
     ) -> Self {
         let (proxy_port, http_port) = allocate_ports();
 
-        let proxy_handle =
-            build_proxy_command(upstream, username, proxy_port, http_port, bitcoind_rpc_port, args).spawn();
+        let proxy_handle = build_proxy_command(
+            upstream,
+            username,
+            proxy_port,
+            http_port,
+            bitcoind_rpc_port,
+            args,
+        )
+        .spawn();
 
         for attempt in 0.. {
             match TcpStream::connect(format!("127.0.0.1:{http_port}")) {
@@ -93,10 +100,17 @@ impl TestProxy {
     ) -> String {
         let (proxy_port, http_port) = allocate_ports();
 
-        let output = build_proxy_command(upstream, username, proxy_port, http_port, bitcoind_rpc_port, args)
-            .spawn()
-            .wait_with_output()
-            .expect("Failed to wait for proxy process");
+        let output = build_proxy_command(
+            upstream,
+            username,
+            proxy_port,
+            http_port,
+            bitcoind_rpc_port,
+            args,
+        )
+        .spawn()
+        .wait_with_output()
+        .expect("Failed to wait for proxy process");
 
         assert!(
             !output.status.success(),
