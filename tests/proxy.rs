@@ -8,8 +8,12 @@ async fn proxy() {
     let upstream = pool.stratum_endpoint();
     let username = signet_username();
 
-    let proxy =
-        TestProxy::spawn_with_args(&upstream, &username.to_string(), "--start-diff 0.00001");
+    let proxy = TestProxy::spawn_with_args(
+        &upstream,
+        &username.to_string(),
+        pool.bitcoind_rpc_port(),
+        "--start-diff 0.00001",
+    );
 
     let status = proxy.get_status().await.unwrap();
 
@@ -233,6 +237,7 @@ fn mine_through_proxy() {
     let proxy = TestProxy::spawn_with_args(
         &pool.stratum_endpoint(),
         &signet_username().to_string(),
+        pool.bitcoind_rpc_port(),
         "--start-diff 0.00001",
     );
 
@@ -266,6 +271,7 @@ fn proxy_rejects_incompatible_upstream_enonce2_size() {
     let stderr = TestProxy::spawn_expect_failure(
         &pool.stratum_endpoint(),
         &signet_username().to_string(),
+        pool.bitcoind_rpc_port(),
         "--start-diff 0.00001",
     );
 
@@ -289,6 +295,7 @@ async fn proxy_with_non_default_enonce_sizes() {
     let proxy = TestProxy::spawn_with_args(
         &upstream,
         &signet_username().to_string(),
+        pool.bitcoind_rpc_port(),
         "--start-diff 0.00001",
     );
 
@@ -341,6 +348,7 @@ async fn proxy_allows_version_rolling() {
     let proxy = TestProxy::spawn_with_args(
         &pool.stratum_endpoint(),
         &signet_username().to_string(),
+        pool.bitcoind_rpc_port(),
         "--start-diff 0.00001",
     );
 
@@ -402,6 +410,7 @@ async fn proxy_relays_job_updates_and_new_blocks() {
     let proxy = TestProxy::spawn_with_args(
         &pool.stratum_endpoint(),
         signet_username().as_str(),
+        pool.bitcoind_rpc_port(),
         "--start-diff 0.00001",
     );
 
@@ -435,6 +444,7 @@ async fn proxy_exits_on_upstream_disconnect() {
     let proxy = TestProxy::spawn_with_args(
         &pool.stratum_endpoint(),
         signet_username().as_str(),
+        pool.bitcoind_rpc_port(),
         "--start-diff 0.00001",
     );
 

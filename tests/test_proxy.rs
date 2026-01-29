@@ -5,30 +5,13 @@ use {
 };
 
 pub(crate) struct TestProxy {
-    _bitcoind_handle: Bitcoind,
     proxy_handle: Child,
     proxy_port: u16,
     http_port: u16,
-    _tempdir: Arc<TempDir>,
 }
 
-fn allocate_ports() -> (u16, u16, u16, u16, u16) {
+fn allocate_ports() -> (u16, u16) {
     (
-        TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port(),
-        TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port(),
-        TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port(),
         TcpListener::bind("127.0.0.1:0")
             .unwrap()
             .local_addr()
@@ -71,13 +54,13 @@ fn build_proxy_command(
 }
 
 impl TestProxy {
-    pub(crate) fn spawn_with_args(upstream: &str, username: &str, args: impl ToArgs) -> Self {
-        let tempdir = Arc::new(TempDir::new().unwrap());
-
-        let (bitcoind_port, rpc_port, zmq_port, proxy_port, http_port) = allocate_ports();
-
-        let bitcoind_handle =
-            Bitcoind::spawn(tempdir.clone(), bitcoind_port, rpc_port, zmq_port, false).unwrap();
+    pub(crate) fn spawn_with_args(
+        upstream: &str,
+        username: &str,
+        rpc_port: u16,
+        args: impl ToArgs,
+    ) -> Self {
+        let (proxy_port, http_port) = allocate_ports();
 
         let proxy_handle =
             build_proxy_command(upstream, username, proxy_port, http_port, rpc_port, args).spawn();
@@ -96,25 +79,19 @@ impl TestProxy {
         }
 
         Self {
-            _bitcoind_handle: bitcoind_handle,
             proxy_handle,
             proxy_port,
             http_port,
-            _tempdir: tempdir,
         }
     }
 
     pub(crate) fn spawn_expect_failure(
         upstream: &str,
         username: &str,
+        rpc_port: u16,
         args: impl ToArgs,
     ) -> String {
-        let tempdir = Arc::new(TempDir::new().unwrap());
-
-        let (bitcoind_port, rpc_port, zmq_port, proxy_port, http_port) = allocate_ports();
-
-        let _bitcoind_handle =
-            Bitcoind::spawn(tempdir.clone(), bitcoind_port, rpc_port, zmq_port, false).unwrap();
+        let (proxy_port, http_port) = allocate_ports();
 
         let output = build_proxy_command(upstream, username, proxy_port, http_port, rpc_port, args)
             .spawn()
