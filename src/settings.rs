@@ -137,12 +137,12 @@ impl Settings {
             upstream_password: options.password,
             timeout: Duration::from_secs(options.timeout.unwrap_or(30)),
             bitcoin_data_dir: options.bitcoin_data_dir,
-            bitcoin_rpc_password: options.bitcoin_rpc_password,
+            bitcoin_rpc_cookie_file: options.bitcoin_rpc_cookie_file,
             bitcoin_rpc_port: options
                 .bitcoin_rpc_port
                 .unwrap_or_else(|| chain.default_rpc_port()),
             bitcoin_rpc_username: options.bitcoin_rpc_username,
-            bitcoin_rpc_cookie_file: options.bitcoin_rpc_cookie_file,
+            bitcoin_rpc_password: options.bitcoin_rpc_password,
             chain,
             start_diff: options.start_diff.unwrap_or_else(|| Difficulty::from(1.0)),
             min_diff: options.min_diff,
