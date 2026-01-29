@@ -7,7 +7,7 @@ use {
     boilerplate::Boilerplate,
     http_server::{
         self,
-        error::{OptionExt, ServerError, ServerResult},
+        error::{OptionExt, ServerResult},
     },
 };
 
@@ -120,10 +120,5 @@ pub struct WorkerDetail {
     pub total_work: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BitcoinStatus {
-    pub height: u64,
-    pub difficulty: f64,
-}
-
+pub type BitcoinStatus = http_server::BitcoinStatus;
 pub type SystemStatus = http_server::SystemStatus;

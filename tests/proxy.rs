@@ -28,7 +28,7 @@ async fn proxy() {
     assert!(system_status.uptime > 0);
 
     let bitcoin_status = proxy.get_bitcoin_status().await.unwrap();
-    assert!(bitcoin_status.difficulty > 0.0);
+    assert!(bitcoin_status.network_difficulty.as_f64() > 0.0);
 
     assert_eq!(
         status.upstream_endpoint, upstream,

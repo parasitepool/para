@@ -4,7 +4,7 @@ use {
         Path,
         ws::{Message, WebSocketUpgrade},
     },
-    error::{OptionExt, ServerResult},
+    error::{OptionExt, ServerError, ServerResult},
     sysinfo::DiskRefreshKind,
 };
 
@@ -271,5 +271,25 @@ pub(crate) async fn system_status() -> Json<SystemStatus> {
             disk_usage_percent: round2(disk_usage_percent),
             uptime: System::uptime(),
         }
+    }))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BitcoinStatus {
+    pub height: u32,
+    pub network_difficulty: Difficulty,
+}
+
+pub(crate) async fn bitcoin_status(
+    Extension(client): Extension<Arc<Client>>,
+) -> ServerResult<Json<BitcoinStatus>> {
+    let info = client
+        .get_blockchain_info()
+        .await
+        .map_err(|e| ServerError::Internal(e.into()))?;
+
+    Ok(Json(BitcoinStatus {
+        height: info.blocks,
+        network_difficulty: Difficulty::from(info.difficulty),
     }))
 }

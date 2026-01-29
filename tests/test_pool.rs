@@ -5,7 +5,7 @@ pub(crate) struct TestPool {
     pool_handle: Child,
     pool_port: u16,
     http_port: u16,
-    rpc_port: u16,
+    bitcoind_rpc_port: u16,
     _tempdir: Arc<TempDir>,
 }
 
@@ -85,7 +85,7 @@ impl TestPool {
             pool_handle,
             pool_port,
             http_port,
-            rpc_port,
+            bitcoind_rpc_port: rpc_port,
             _tempdir: tempdir,
         }
     }
@@ -208,7 +208,7 @@ impl TestPool {
     }
 
     pub(crate) fn bitcoind_rpc_port(&self) -> u16 {
-        self.rpc_port
+        self.bitcoind_rpc_port
     }
 
     pub(crate) async fn get_block_height(&self) -> u64 {
