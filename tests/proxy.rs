@@ -416,7 +416,7 @@ async fn proxy_relays_job_updates_and_new_blocks() {
 
     assert!(!updated.clean_jobs);
 
-    pool.mine_block();
+    pool.mine_block().await;
 
     let new_block = wait_for_new_block(&mut events, updated.job_id).await;
 

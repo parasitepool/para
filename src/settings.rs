@@ -181,29 +181,34 @@ impl Settings {
         Ok(path.join(".cookie"))
     }
 
-    pub(crate) fn bitcoin_rpc_client(&self) -> Result<bitcoincore_rpc::Client> {
-        let rpc_url = self.bitcoin_rpc_url();
+    pub(crate) async fn bitcoin_rpc_client(&self) -> Result<Client> {
+        let rpc_url = format!("http://{}", self.bitcoin_rpc_url());
 
         let bitcoin_credentials = self.bitcoin_credentials()?;
 
-        info!("Connecting to Bitcoin Core at {rpc_url}",);
+        info!("Connecting to Bitcoin Core at {rpc_url}");
 
-        let client =
-            bitcoincore_rpc::Client::new(&rpc_url, bitcoin_credentials.clone()).map_err(|_| {
-                anyhow!(format!(
-                    "failed to connect to Bitcoin Core RPC at `{rpc_url}` with {}",
-                    match bitcoin_credentials {
-                        Auth::None => "no credentials".into(),
-                        Auth::UserPass(_, _) => "username and password".into(),
-                        Auth::CookieFile(cookie_file) =>
-                            format!("cookie file at {}", cookie_file.display()),
-                    }
-                ))
-            })?;
+        let client = Client::new(
+            rpc_url.clone(),
+            bitcoin_credentials.clone(),
+            None,
+            None,
+            None,
+        )
+        .map_err(|err| {
+            anyhow!(format!(
+                "failed to connect to Bitcoin Core RPC at `{rpc_url}` with {} and error: {err}",
+                match bitcoin_credentials {
+                    Auth::UserPass(_, _) => "username and password".into(),
+                    Auth::CookieFile(cookie_file) =>
+                        format!("cookie file at {}", cookie_file.display()),
+                }
+            ))
+        })?;
 
         let mut checks = 0;
         let rpc_chain = loop {
-            match client.get_blockchain_info() {
+            match client.get_blockchain_info().await {
                 Ok(blockchain_info) => {
                     break match blockchain_info.chain.to_string().as_str() {
                         "bitcoin" => Chain::Mainnet,
@@ -214,20 +219,19 @@ impl Settings {
                         other => bail!("Bitcoin RPC server on unknown chain: {other}"),
                     };
                 }
-                Err(bitcoincore_rpc::Error::JsonRpc(bitcoincore_rpc::jsonrpc::Error::Rpc(err)))
-                    if err.code == -28 => {}
+                Err(bitcoind_async_client::error::ClientError::Server(-28, _)) => {}
                 Err(err) => {
-                    bail!("Failed to connect to Bitcoin Core RPC at `{rpc_url}`:  {err}")
+                    bail!("Failed to connect to Bitcoin Core RPC at `{rpc_url}`: {err}")
                 }
             }
 
             ensure! {
-              checks < 100,
-              "Failed to connect to Bitcoin Core RPC at `{rpc_url}`",
+                checks < 100,
+                "Failed to connect to Bitcoin Core RPC at `{rpc_url}`",
             }
 
             checks += 1;
-            thread::sleep(Duration::from_millis(100));
+            sleep(Duration::from_millis(100)).await;
         };
 
         let para_chain = self.chain;

@@ -348,7 +348,7 @@ async fn clean_jobs_true_on_init_and_new_block() {
     let (notify, _) = wait_for_notify(&mut events).await;
     assert!(notify.clean_jobs);
 
-    pool.mine_block();
+    pool.mine_block().await;
 
     let notify = wait_for_new_block(&mut events, notify.job_id).await;
     assert!(notify.clean_jobs);
@@ -389,79 +389,86 @@ fn configure_template_update_interval() {
     assert!(t1.ntime < t2.ntime);
 }
 
-#[test]
+#[tokio::test]
 #[serial(bitcoind)]
 #[timeout(90000)]
 #[ignore]
-fn concurrently_listening_workers_receive_new_templates_on_new_block() {
+async fn concurrently_listening_workers_receive_new_templates_on_new_block() {
+    use std::sync::Barrier;
+    use std::time::Duration;
+
     let pool = TestPool::spawn_with_args("--start-diff 0.0001");
     let endpoint = pool.stratum_endpoint();
     let user = signet_username();
 
     let gate = Arc::new(Barrier::new(3));
-    let (out_1, in_1) = mpsc::channel();
-    let (out_2, in_2) = mpsc::channel();
+    let (out_1, mut in_1) = mpsc::channel(2);
+    let (out_2, mut in_2) = mpsc::channel(2);
 
-    thread::scope(|thread| {
-        for out in [out_1.clone(), out_2.clone()].into_iter() {
-            let gate = gate.clone();
-            let endpoint = endpoint.clone();
-            let user = user.clone();
+    for out in [out_1, out_2] {
+        let gate = gate.clone();
+        let endpoint = endpoint.clone();
+        let user = user.clone();
 
-            thread.spawn(move || {
-                let mut template_watcher = CommandBuilder::new(format!(
-                    "template {endpoint} --username {user} --watch --raw"
-                ))
-                .spawn();
+        tokio::task::spawn_blocking(move || {
+            let mut template_watcher = CommandBuilder::new(format!(
+                "template {endpoint} --username {user} --watch --raw"
+            ))
+            .spawn();
 
-                let mut reader = BufReader::new(template_watcher.stdout.take().unwrap());
+            let mut reader = BufReader::new(template_watcher.stdout.take().unwrap());
 
-                let initial_template = next_json::<stratum::Notify>(&mut reader);
+            let initial_template = next_json::<stratum::Notify>(&mut reader);
 
-                gate.wait();
+            gate.wait();
 
-                let new_template = next_json::<stratum::Notify>(&mut reader);
+            let new_template = next_json::<stratum::Notify>(&mut reader);
 
-                out.send((initial_template, new_template)).ok();
+            out.blocking_send((initial_template, new_template)).ok();
 
-                template_watcher.kill().unwrap();
-                template_watcher.wait().unwrap();
-            });
-        }
+            template_watcher.kill().unwrap();
+            template_watcher.wait().unwrap();
+        });
+    }
 
-        gate.wait();
+    gate.wait();
 
-        pool.mine_block();
+    pool.mine_block().await;
 
-        let (initial_template_worker_a, new_template_worker_a) =
-            in_1.recv_timeout(Duration::from_secs(10)).unwrap();
+    let (initial_template_worker_a, new_template_worker_a) =
+        tokio::time::timeout(Duration::from_secs(10), in_1.recv())
+            .await
+            .unwrap()
+            .unwrap();
 
-        let (initial_template_worker_b, new_template_worker_b) =
-            in_2.recv_timeout(Duration::from_secs(10)).unwrap();
+    let (initial_template_worker_b, new_template_worker_b) =
+        tokio::time::timeout(Duration::from_secs(10), in_2.recv())
+            .await
+            .unwrap()
+            .unwrap();
 
-        assert_eq!(
-            initial_template_worker_a.prevhash,
-            initial_template_worker_b.prevhash
-        );
+    assert_eq!(
+        initial_template_worker_a.prevhash,
+        initial_template_worker_b.prevhash
+    );
 
-        assert_ne!(
-            initial_template_worker_a.prevhash,
-            new_template_worker_a.prevhash
-        );
+    assert_ne!(
+        initial_template_worker_a.prevhash,
+        new_template_worker_a.prevhash
+    );
 
-        assert_ne!(
-            initial_template_worker_b.prevhash,
-            new_template_worker_b.prevhash,
-        );
+    assert_ne!(
+        initial_template_worker_b.prevhash,
+        new_template_worker_b.prevhash,
+    );
 
-        assert_eq!(
-            new_template_worker_a.prevhash,
-            new_template_worker_b.prevhash
-        );
+    assert_eq!(
+        new_template_worker_a.prevhash,
+        new_template_worker_b.prevhash
+    );
 
-        assert!(new_template_worker_a.ntime >= initial_template_worker_a.ntime);
-        assert!(new_template_worker_b.ntime >= initial_template_worker_b.ntime);
-    });
+    assert!(new_template_worker_a.ntime >= initial_template_worker_a.ntime);
+    assert!(new_template_worker_b.ntime >= initial_template_worker_b.ntime);
 }
 
 #[tokio::test]
@@ -793,8 +800,10 @@ async fn share_validation() {
     let fresh_enonce2 = Extranonce::random(enonce2_size);
     let (old_ntime, old_nonce) = solve_share(&notify, &enonce1, &fresh_enonce2, difficulty);
 
-    pool.mine_block();
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    pool.mine_block().await;
+    pool.wait_for_blocks(1, Duration::from_secs(10))
+        .await
+        .expect("Pool did not register block");
 
     let baseline = pool.get_status().await.unwrap();
     let user_baseline = pool.get_user(&user_address).await.unwrap();

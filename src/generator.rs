@@ -6,9 +6,9 @@ pub(crate) async fn spawn_generator(
     tasks: &mut JoinSet<()>,
 ) -> Result<watch::Receiver<Arc<BlockTemplate>>> {
     info!("Spawning generator task");
-    let rpc = Arc::new(settings.bitcoin_rpc_client()?);
+    let rpc = Arc::new(settings.bitcoin_rpc_client().await?);
 
-    let initial = get_block_template_blocking(&rpc, &settings)?;
+    let initial = get_block_template(&rpc, &settings).await?;
     let (tx, rx) = watch::channel(Arc::new(initial));
 
     let mut subscription = Zmq::connect(settings.clone()).await?;
@@ -17,16 +17,13 @@ pub(crate) async fn spawn_generator(
     ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
     tasks.spawn(async move {
-        let fetch_and_push = || {
-            let rpc = rpc.clone();
-            let settings = settings.clone();
-            let tx = tx.clone();
-            task::spawn_blocking(move || match get_block_template_blocking(&rpc, &settings) {
+        let fetch_and_push = || async {
+            match get_block_template(&rpc, &settings).await {
                 Ok(template) => {
                     tx.send_replace(Arc::new(template));
                 }
                 Err(err) => warn!("Failed to fetch new block template: {err}"),
-            });
+            }
         };
 
         loop {
@@ -36,14 +33,12 @@ pub(crate) async fn spawn_generator(
                     match result {
                         Ok(blockhash) => {
                             info!("ZMQ blockhash {blockhash}");
-                            fetch_and_push();
+                            fetch_and_push().await;
                         }
                         Err(err) => error!("ZMQ receive error: {err}"),
                     }
                 }
-                _ = ticker.tick() => {
-                    fetch_and_push();
-                }
+                _ = ticker.tick() => fetch_and_push().await,
             }
         }
         info!("Shutting down generator");
@@ -52,8 +47,8 @@ pub(crate) async fn spawn_generator(
     Ok(rx)
 }
 
-fn get_block_template_blocking(
-    bitcoin_rpc_client: &bitcoincore_rpc::Client,
+async fn get_block_template(
+    bitcoin_rpc_client: &Client,
     settings: &Settings,
 ) -> Result<BlockTemplate> {
     let mut rules = vec!["segwit"];
@@ -66,8 +61,9 @@ fn get_block_template_blocking(
         "rules": rules,
     });
 
-    let gbt = bitcoin_rpc_client
-        .call::<block_template::GetBlockTemplate>("getblocktemplate", &[params])?;
+    let gbt: block_template::GetBlockTemplate = bitcoin_rpc_client
+        .call_raw("getblocktemplate", &[params])
+        .await?;
 
     let block_template = BlockTemplate::from(gbt);
 

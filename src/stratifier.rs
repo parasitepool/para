@@ -833,27 +833,42 @@ impl<W: Workbase> Stratifier<W> {
                 Ok(block) => {
                     info!("Submitting potential block solve");
 
-                    match self.settings.bitcoin_rpc_client()?.submit_block(&block) {
-                        Ok(_) => {
-                            info!("SUCCESSFULLY mined block {}", block.block_hash());
-                            self.metatron.add_block();
+                    let block_hex = encode::serialize_hex(&block);
+                    let client = self.settings.bitcoin_rpc_client().await?;
 
-                            let job_height = job.workbase.height();
-                            let blockhash_str = blockhash.to_string();
-                            let diff = Difficulty::from(job.nbits()).as_f64();
-                            let coinbase_value = job.workbase.coinbase_value();
-
-                            self.send_event(Event::BlockFound(BlockFoundEvent {
-                                timestamp: None,
-                                blockheight: job_height,
-                                blockhash: blockhash_str,
-                                address: session.address.to_string(),
-                                workername: session.workername.clone(),
-                                diff,
-                                coinbase_value,
-                            }));
+                    let success = match client
+                        .call_raw::<String>("submitblock", &[json!(block_hex)])
+                        .await
+                    {
+                        Ok(msg) => {
+                            info!("submitblock returned: {msg}");
+                            false
                         }
-                        Err(err) => error!("Failed to submit block: {err}"),
+                        Err(e) if e.to_string().contains("Empty data received") => true,
+                        Err(e) => {
+                            error!("Failed to submit block: {e}");
+                            false
+                        }
+                    };
+
+                    if success {
+                        info!("SUCCESSFULLY mined block {}", block.block_hash());
+                        self.metatron.add_block();
+
+                        let job_height = job.workbase.height();
+                        let blockhash_str = blockhash.to_string();
+                        let diff = Difficulty::from(job.nbits()).as_f64();
+                        let coinbase_value = job.workbase.coinbase_value();
+
+                        self.send_event(Event::BlockFound(BlockFoundEvent {
+                            timestamp: None,
+                            blockheight: job_height,
+                            blockhash: blockhash_str,
+                            address: session.address.to_string(),
+                            workername: session.workername.clone(),
+                            diff,
+                            coinbase_value,
+                        }));
                     }
                 }
                 Err(err) => {

@@ -49,7 +49,7 @@ use {
         CompressedPublicKey, Network, PrivateKey, block::Header, hashes::Hash,
         key::UntweakedPublicKey, secp256k1::Secp256k1, sign_message::MessageSignature,
     },
-    bitcoincore_rpc::RpcApi,
+    bitcoind_async_client::traits::Reader,
     harness::bitcoind::Bitcoind,
     ntest::timeout,
     para::{
@@ -73,16 +73,14 @@ use {
         io::{BufReader, stderr},
         net::TcpStream,
         process::ChildStdout,
-        sync::{
-            atomic::{AtomicUsize, Ordering},
-            mpsc,
-        },
+        sync::atomic::{AtomicUsize, Ordering},
         time::Instant,
     },
     tempfile::tempdir,
     test_ckpool::TestCkpool,
     test_pool::TestPool,
     test_proxy::TestProxy,
+    tokio::{sync::mpsc, time::sleep},
 };
 
 mod command_builder;

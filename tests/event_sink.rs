@@ -250,7 +250,7 @@ async fn test_block_found_event() {
             database_url
         ));
 
-        pool.mine_block();
+        pool.mine_block().await;
         pool.wait_for_blocks(1, Duration::from_secs(10))
             .await
             .expect("Failed to detect block in pool status within timeout");

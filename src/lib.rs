@@ -27,7 +27,10 @@ use {
         secp256k1::Secp256k1,
         sign_message::MessageSignature,
     },
-    bitcoincore_rpc::{Auth, RpcApi},
+    bitcoind_async_client::{
+        traits::Reader,
+        {Auth, Client},
+    },
     block_template::BlockTemplate,
     chain::Chain,
     clap::Parser,
