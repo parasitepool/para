@@ -61,17 +61,14 @@ impl Vardiff {
     fn clamp_difficulty(&self, diff: Difficulty, upstream_diff: Option<Difficulty>) -> Difficulty {
         let mut result = diff;
 
-        // Apply min_diff floor if set
         if let Some(min) = self.min_diff {
             result = result.max(min);
         }
 
-        // Use upstream_diff as CEILING (not floor) - allows filtering, matches ckpool
         if let Some(upstream) = upstream_diff {
             result = result.min(upstream);
         }
 
-        // Apply max_diff ceiling if set
         if let Some(max) = self.max_diff {
             result = result.min(max);
         }
@@ -86,9 +83,6 @@ impl Vardiff {
         self.current_diff
     }
 
-    /// Forces difficulty down to match upstream when upstream decreases.
-    /// Returns the new difficulty if it was lowered, None otherwise.
-    /// Mirrors ckpool's behavior: immediately clamp down to prevent death spiral.
     pub(crate) fn force_downstream_if_needed(
         &mut self,
         upstream_diff: Difficulty,
@@ -440,7 +434,6 @@ mod tests {
         let start_diff = Difficulty::from(100);
         let mut vardiff = Vardiff::new(start_diff, secs(5), secs(300), None, None);
 
-        // When upstream decreases, should force down immediately
         let upstream_diff = Difficulty::from(50);
         let result = vardiff.force_downstream_if_needed(upstream_diff);
 
@@ -457,7 +450,6 @@ mod tests {
         let start_diff = Difficulty::from(50);
         let mut vardiff = Vardiff::new(start_diff, secs(5), secs(300), None, None);
 
-        // When upstream increases, should not change
         let upstream_diff = Difficulty::from(100);
         let result = vardiff.force_downstream_if_needed(upstream_diff);
 
@@ -473,11 +465,9 @@ mod tests {
         let start_diff = Difficulty::from(100);
         let mut vardiff = Vardiff::new(start_diff, secs(5), secs(300), None, None);
 
-        // Simulate some shares
         vardiff.first_share = Some(Instant::now());
         vardiff.shares_since_change = 50;
 
-        // Force down
         let upstream_diff = Difficulty::from(50);
         vardiff.force_downstream_if_needed(upstream_diff);
 

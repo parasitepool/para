@@ -337,8 +337,6 @@ impl<W: Workbase> Stratifier<W> {
     }
 
     async fn workbase_update(&mut self, workbase: Arc<W>, session: Arc<Session>) -> Result {
-        // Check if upstream difficulty decreased and force proxy difficulty down
-        // This mirrors ckpool's proxy behavior to prevent death spiral
         if let Some(ref upstream) = self.upstream {
             let upstream_diff = upstream.difficulty().await;
             if let Some(new_diff) = self.vardiff.force_downstream_if_needed(upstream_diff) {
