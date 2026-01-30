@@ -73,7 +73,7 @@ proxy:
     --start-diff 0.00001 \
     --vardiff-window 10 \
     --vardiff-period 1 \
-    --upstream localhost:42069 
+    --upstream 127.0.0.1:42069 
 
 # Mine to anyone-can-spend P2WSH(OP_TRUE)
 miner port='42069': 
@@ -84,25 +84,36 @@ miner port='42069':
     --cpu-cores 2 \
     --throttle 500K
 
+pool-mainnet: 
+  cargo run --release -- pool \
+    --chain mainnet \
+    --address 0.0.0.0 \
+    --port 42069 \
+    --bitcoin-rpc-username satoshi \
+    --bitcoin-rpc-password nakamoto \
+    --http-port 8080 \
+    --start-diff 999 \
+    --zmq-block-notifications tcp://127.0.0.1:28333
+
+proxy-mainnet:
+  cargo run --release -- \
+    proxy \
+    --chain mainnet \
+    --bitcoin-rpc-username satoshi \
+    --bitcoin-rpc-password nakamoto \
+    --address 0.0.0.0 \
+    --port 42070 \
+    --username bc1qyr294wemhvcp69dheccp2nat2yemtxfd6sc96e.proxy \
+    --http-port 8081 \
+    --start-diff 999 \
+    --upstream 127.0.0.1:42069 
+
 miner-mainnet stratum_endpoint='127.0.0.1:42069': 
   cargo run --release -- miner \
     {{stratum_endpoint}} \
     --username bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg6dzw5nk24r45dzasde25r3.tick \
     --password x \
     --cpu-cores 2
-
-pool-mainnet: 
-  cargo run -- pool \
-    --http-port 8080 \
-    --chain mainnet \
-    --address 0.0.0.0 \
-    --bitcoin-rpc-username satoshi \
-    --bitcoin-rpc-password nakamoto \
-    --bitcoin-rpc-port 8332 \
-    --start-diff 999 \
-    --vardiff-window 300 \
-    --vardiff-period 5 \
-    --zmq-block-notifications tcp://127.0.0.1:28333
 
 harness: build-bitcoind
   cargo run -p harness -- spawn
