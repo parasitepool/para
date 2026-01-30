@@ -164,7 +164,7 @@ impl<W: Workbase> Stratifier<W> {
                             self.handle_protocol_consequence(consequence).await;
                         }
                         "mining.submit" => {
-                            debug!("SUBMIT from {} with params {params}", self.socket_addr);
+                            debug!("mining.submit from {} with params {params}", self.socket_addr);
 
                             let Some(session) = self.state.working() else {
                                 self.send_error(id.clone(), StratumError::Unauthorized, None)
@@ -337,6 +337,25 @@ impl<W: Workbase> Stratifier<W> {
     }
 
     async fn workbase_update(&mut self, workbase: Arc<W>, session: Arc<Session>) -> Result {
+        // Check if upstream difficulty decreased and force proxy difficulty down
+        // This mirrors ckpool's proxy behavior to prevent death spiral
+        if let Some(ref upstream) = self.upstream {
+            let upstream_diff = upstream.difficulty().await;
+            if let Some(new_diff) = self.vardiff.force_downstream_if_needed(upstream_diff) {
+                info!(
+                    "Upstream difficulty decreased, forcing proxy difficulty {} -> {} for {}",
+                    self.vardiff.current_diff(),
+                    new_diff,
+                    self.socket_addr
+                );
+                self.send(Message::Notification {
+                    method: "mining.set_difficulty".into(),
+                    params: json!(SetDifficulty(new_diff)),
+                })
+                .await?;
+            }
+        }
+
         let new_job = Arc::new(
             workbase
                 .create_job(
@@ -582,11 +601,13 @@ impl<W: Workbase> Stratifier<W> {
         self.bouncer.authorize();
         self.bouncer.accept();
 
-        debug!("Sending SET DIFFICULTY");
+        let current_diff = self.vardiff.current_diff();
+
+        debug!("Sending mining.set_difficulty with {current_diff}");
 
         self.send(Message::Notification {
             method: "mining.set_difficulty".into(),
-            params: json!(SetDifficulty(self.vardiff.current_diff())),
+            params: json!(SetDifficulty(current_diff)),
         })
         .await?;
 
@@ -922,7 +943,16 @@ impl<W: Workbase> Stratifier<W> {
                 self.vardiff.shares_since_change()
             );
 
-            if let Some(new_diff) = self.vardiff.record_share(current_diff, network_diff) {
+            let upstream_diff = if let Some(ref upstream) = self.upstream {
+                Some(upstream.difficulty().await)
+            } else {
+                None
+            };
+
+            if let Some(new_diff) =
+                self.vardiff
+                    .record_share(current_diff, network_diff, upstream_diff)
+            {
                 debug!(
                     "Adjusting difficulty {} -> {} for {} | dsps={:.4} period={}s",
                     current_diff,

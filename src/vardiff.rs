@@ -58,11 +58,20 @@ impl Vardiff {
         }
     }
 
-    fn clamp_difficulty(&self, diff: Difficulty) -> Difficulty {
+    fn clamp_difficulty(&self, diff: Difficulty, upstream_diff: Option<Difficulty>) -> Difficulty {
         let mut result = diff;
+
+        // Apply min_diff floor if set
         if let Some(min) = self.min_diff {
             result = result.max(min);
         }
+
+        // Use upstream_diff as CEILING (not floor) - allows filtering, matches ckpool
+        if let Some(upstream) = upstream_diff {
+            result = result.min(upstream);
+        }
+
+        // Apply max_diff ceiling if set
         if let Some(max) = self.max_diff {
             result = result.min(max);
         }
@@ -77,6 +86,27 @@ impl Vardiff {
         self.current_diff
     }
 
+    /// Forces difficulty down to match upstream when upstream decreases.
+    /// Returns the new difficulty if it was lowered, None otherwise.
+    /// Mirrors ckpool's behavior: immediately clamp down to prevent death spiral.
+    pub(crate) fn force_downstream_if_needed(
+        &mut self,
+        upstream_diff: Difficulty,
+    ) -> Option<Difficulty> {
+        if upstream_diff < self.current_diff {
+            debug!(
+                "Upstream difficulty decreased: {} -> {}, forcing proxy down",
+                self.current_diff, upstream_diff
+            );
+            self.old_diff = self.current_diff;
+            self.current_diff = upstream_diff;
+            self.shares_since_change = 0;
+            self.last_diff_change = Instant::now();
+            return Some(upstream_diff);
+        }
+        None
+    }
+
     pub(crate) fn dsps(&self) -> f64 {
         self.dsps.value_at(Instant::now())
     }
@@ -89,6 +119,7 @@ impl Vardiff {
         &mut self,
         share_diff: Difficulty,
         network_diff: Difficulty,
+        upstream_diff: Option<Difficulty>,
     ) -> Option<Difficulty> {
         let now = Instant::now();
 
@@ -100,12 +131,13 @@ impl Vardiff {
         self.dsps.record(share_diff.as_f64(), now);
         self.shares_since_change = self.shares_since_change.saturating_add(1);
 
-        self.evaluate_adjustment(network_diff, now)
+        self.evaluate_adjustment(network_diff, upstream_diff, now)
     }
 
     fn evaluate_adjustment(
         &mut self,
         network_diff: Difficulty,
+        upstream_diff: Option<Difficulty>,
         now: Instant,
     ) -> Option<Difficulty> {
         let first_share = self.first_share?;
@@ -149,11 +181,11 @@ impl Vardiff {
         let new_diff = Difficulty::from(optimal.min(network_diff.as_f64()));
 
         let new_diff = {
-            let clamped = self.clamp_difficulty(new_diff);
+            let clamped = self.clamp_difficulty(new_diff, upstream_diff);
             if clamped != new_diff {
                 debug!(
-                    "Vardiff clamped {} -> {} (min={:?}, max={:?})",
-                    new_diff, clamped, self.min_diff, self.max_diff
+                    "Vardiff clamped {} -> {} (min={:?}, upstream={:?}, max={:?})",
+                    new_diff, clamped, self.min_diff, upstream_diff, self.max_diff
                 );
             }
             clamped
@@ -241,7 +273,7 @@ mod tests {
     #[test]
     fn no_change_on_first_share() {
         let mut vardiff = Vardiff::new(Difficulty::from(10), secs(5), secs(300), None, None);
-        let result = vardiff.record_share(Difficulty::from(10), Difficulty::from(1_000_000));
+        let result = vardiff.record_share(Difficulty::from(10), Difficulty::from(1_000_000), None);
         assert!(result.is_none());
     }
 
@@ -250,7 +282,8 @@ mod tests {
         let mut vardiff = Vardiff::new(Difficulty::from(10), secs(5), secs(300), None, None);
 
         for _ in 0..10 {
-            let result = vardiff.record_share(Difficulty::from(10), Difficulty::from(1_000_000));
+            let result =
+                vardiff.record_share(Difficulty::from(10), Difficulty::from(1_000_000), None);
             assert!(result.is_none(), "Should not adjust with few shares");
         }
     }
@@ -261,7 +294,7 @@ mod tests {
 
         assert_eq!(vardiff.shares_since_change, 0);
 
-        vardiff.record_share(Difficulty::from(42), Difficulty::from(1_000_000));
+        vardiff.record_share(Difficulty::from(42), Difficulty::from(1_000_000), None);
         assert_eq!(vardiff.shares_since_change, 1);
     }
 
@@ -282,7 +315,7 @@ mod tests {
             vardiff.shares_since_change += 1;
         }
 
-        if let Some(new_diff) = vardiff.evaluate_adjustment(Difficulty::from(1_000_000), t) {
+        if let Some(new_diff) = vardiff.evaluate_adjustment(Difficulty::from(1_000_000), None, t) {
             assert!(new_diff > start_diff);
         }
     }
@@ -304,7 +337,7 @@ mod tests {
         }
 
         let network_diff = Difficulty::from(100);
-        if let Some(new_diff) = vardiff.evaluate_adjustment(network_diff, t) {
+        if let Some(new_diff) = vardiff.evaluate_adjustment(network_diff, None, t) {
             assert!(
                 new_diff.as_f64() <= network_diff.as_f64() * 1.01,
                 "Difficulty exceeded network_diff"
@@ -359,7 +392,7 @@ mod tests {
             vardiff.shares_since_change += 1;
         }
 
-        if let Some(new_diff) = vardiff.evaluate_adjustment(Difficulty::from(1_000_000), t) {
+        if let Some(new_diff) = vardiff.evaluate_adjustment(Difficulty::from(1_000_000), None, t) {
             assert!(
                 new_diff >= min_diff,
                 "Difficulty {} should not go below min_diff {}",
@@ -392,7 +425,7 @@ mod tests {
             vardiff.shares_since_change += 1;
         }
 
-        if let Some(new_diff) = vardiff.evaluate_adjustment(Difficulty::from(1_000_000), t) {
+        if let Some(new_diff) = vardiff.evaluate_adjustment(Difficulty::from(1_000_000), None, t) {
             assert!(
                 new_diff <= max_diff,
                 "Difficulty {} should not exceed max_diff {}",
@@ -400,5 +433,57 @@ mod tests {
                 max_diff
             );
         }
+    }
+
+    #[test]
+    fn force_downstream_lowers_difficulty() {
+        let start_diff = Difficulty::from(100);
+        let mut vardiff = Vardiff::new(start_diff, secs(5), secs(300), None, None);
+
+        // When upstream decreases, should force down immediately
+        let upstream_diff = Difficulty::from(50);
+        let result = vardiff.force_downstream_if_needed(upstream_diff);
+
+        assert!(
+            result.is_some(),
+            "Should return new difficulty when forcing down"
+        );
+        assert_eq!(result.unwrap(), upstream_diff);
+        assert_eq!(vardiff.current_diff(), upstream_diff);
+    }
+
+    #[test]
+    fn force_downstream_ignores_increase() {
+        let start_diff = Difficulty::from(50);
+        let mut vardiff = Vardiff::new(start_diff, secs(5), secs(300), None, None);
+
+        // When upstream increases, should not change
+        let upstream_diff = Difficulty::from(100);
+        let result = vardiff.force_downstream_if_needed(upstream_diff);
+
+        assert!(
+            result.is_none(),
+            "Should return None when upstream is higher"
+        );
+        assert_eq!(vardiff.current_diff(), start_diff);
+    }
+
+    #[test]
+    fn force_downstream_resets_shares_since_change() {
+        let start_diff = Difficulty::from(100);
+        let mut vardiff = Vardiff::new(start_diff, secs(5), secs(300), None, None);
+
+        // Simulate some shares
+        vardiff.first_share = Some(Instant::now());
+        vardiff.shares_since_change = 50;
+
+        // Force down
+        let upstream_diff = Difficulty::from(50);
+        vardiff.force_downstream_if_needed(upstream_diff);
+
+        assert_eq!(
+            vardiff.shares_since_change, 0,
+            "Should reset shares_since_change"
+        );
     }
 }

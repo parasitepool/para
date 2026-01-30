@@ -64,7 +64,7 @@ impl Default for Settings {
             start_diff: Difficulty::from(1.0),
             min_diff: None,
             max_diff: None,
-            vardiff_period: Duration::from_secs(5),
+            vardiff_period: Duration::from_secs_f64(3.33),
             vardiff_window: Duration::from_secs(300),
             zmq_block_notifications: "tcp://127.0.0.1:28332".parse().unwrap(),
             enonce1_size: ENONCE1_SIZE,
@@ -109,7 +109,7 @@ impl Settings {
             start_diff: options.start_diff.unwrap_or_else(|| Difficulty::from(1.0)),
             min_diff: options.min_diff,
             max_diff: options.max_diff,
-            vardiff_period: Duration::from_secs_f64(options.vardiff_period.unwrap_or(5.0)),
+            vardiff_period: Duration::from_secs_f64(options.vardiff_period.unwrap_or(3.33)),
             vardiff_window: Duration::from_secs_f64(options.vardiff_window.unwrap_or(300.0)),
             zmq_block_notifications: options
                 .zmq_block_notifications
@@ -147,7 +147,7 @@ impl Settings {
             start_diff: options.start_diff.unwrap_or_else(|| Difficulty::from(1.0)),
             min_diff: options.min_diff,
             max_diff: options.max_diff,
-            vardiff_period: Duration::from_secs_f64(options.vardiff_period.unwrap_or(5.0)),
+            vardiff_period: Duration::from_secs_f64(options.vardiff_period.unwrap_or(3.33)),
             vardiff_window: Duration::from_secs_f64(options.vardiff_window.unwrap_or(300.0)),
             ..Default::default()
         };
@@ -637,7 +637,7 @@ mod tests {
 
         let options = parse_pool_options("para pool");
         let settings = Settings::from_pool_options(options).unwrap();
-        assert_eq!(settings.vardiff_period, Duration::from_secs(5));
+        assert_eq!(settings.vardiff_period, Duration::from_secs_f64(3.33));
     }
 
     #[test]
