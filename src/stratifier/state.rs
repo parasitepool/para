@@ -42,6 +42,14 @@ impl State {
                 *self = State::Configured { version_mask };
                 true
             }
+            State::Subscribed(subscription) => {
+                *self = State::Subscribed(Subscription {
+                    version_mask: Some(version_mask),
+                    enonce1: subscription.enonce1.clone(),
+                    user_agent: subscription.user_agent.clone(),
+                });
+                true
+            }
             _ => false,
         }
     }
@@ -177,27 +185,29 @@ mod tests {
     }
 
     #[test]
-    fn configure_fails_in_subscribed() {
+    fn configure_works_in_subscribed() {
         let mut state = State::new();
+        let mask = Version::from(0x1fffe000);
 
-        assert!(state.subscribe(test_enonce1(), "test/1.0".into()));
-        assert!(!state.configure(Version::from(0x1fffe000)));
+        assert!(state.subscribe(test_enonce1(), "foo".into()));
+        assert!(state.configure(mask));
 
         assert!(state.subscribed().is_some());
+        assert_eq!(state.version_mask(), Some(mask));
     }
 
     #[test]
-    fn configure_fails_in_working() {
+    fn authorize_transitions_to_working() {
         let mut state = State::new();
 
-        assert!(state.subscribe(test_enonce1(), "test/1.0".into()));
-        assert!(state.authorize(test_address(), "worker1".into(), test_username()));
+        assert!(state.subscribe(test_enonce1(), "foo".into()));
+        assert!(state.authorize(test_address(), "bar".into(), test_username()));
 
         assert!(state.subscribed().is_none());
 
         let session = state.working().unwrap();
         assert_eq!(session.address, test_address());
-        assert_eq!(session.workername, "worker1");
+        assert_eq!(session.workername, "bar");
     }
 
     #[test]
@@ -235,22 +245,13 @@ mod tests {
     }
 
     #[test]
-    fn configure_only_works_in_init_and_configured() {
+    fn configure_fails_in_working() {
         let mut state = State::new();
-        let mask1 = Version::from(0x1fffe000);
-        let mask2 = Version::from(0x0ffff000);
+        let mask = Version::from(0x1fffe000);
 
-        assert!(state.configure(mask1));
-        assert_eq!(state.version_mask(), Some(mask1));
-
-        assert!(state.configure(mask2));
-        assert_eq!(state.version_mask(), Some(mask2));
-
-        assert!(state.subscribe(test_enonce1(), "test/1.0".into()));
-        assert!(!state.configure(mask1));
-
-        assert!(state.authorize(test_address(), "worker1".into(), test_username()));
-        assert!(!state.configure(mask1));
+        assert!(state.subscribe(test_enonce1(), "foo".into()));
+        assert!(state.authorize(test_address(), "bar".into(), test_username()));
+        assert!(!state.configure(mask));
     }
 
     #[test]

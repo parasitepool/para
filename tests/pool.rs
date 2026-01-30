@@ -109,16 +109,15 @@ async fn stratum_state_machine() {
         let (subscribe, _, _) = client.subscribe().await.unwrap();
         assert_eq!(subscribe.subscriptions.len(), 2);
 
-        // configure in Subscribed -> MethodNotAllowed
-        assert_stratum_error(
-            client
-                .configure(
-                    vec!["version-rolling".into()],
-                    Some(Version::from_str("1fffe000").unwrap()),
-                )
-                .await,
-            StratumError::MethodNotAllowed,
-        );
+        // configure in Subscribed -> allowed
+        let (configure, _, _) = client
+            .configure(
+                vec!["version-rolling".into()],
+                Some(Version::from_str("1fffe000").unwrap()),
+            )
+            .await
+            .unwrap();
+        assert!(configure.version_rolling);
 
         // subscribe again (resubscription in Subscribed) -> MethodNotAllowed
         assert_stratum_error(client.subscribe().await, StratumError::MethodNotAllowed);
