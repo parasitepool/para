@@ -4,12 +4,15 @@
     <div class=row><span>Endpoint</span><span id=upstream_endpoint></span></div>
     <div class=row><span>Status</span><span id=upstream_status></span></div>
     <div class=row><span>Username</span><span id=upstream_username class=copyable></span></div>
+    <div class=row><span>Difficulty</span><span id=upstream_difficulty></span></div>
     <div class=row><span>Extranonce1</span><span id=upstream_enonce1></span></div>
     <div class=row><span>Extranonce2 Size</span><span id=upstream_enonce2_size></span></div>
     <div class=row><span>Version Mask</span><span id=upstream_version_mask></span></div>
     <h3>Shares</h3>
     <div class=row><span>Accepted</span><span id=upstream_accepted></span></div>
     <div class=row><span>Rejected</span><span id=upstream_rejected></span></div>
+    <div class=row><span>Filtered</span><span id=upstream_filtered></span></div>
+    <div class=row><span>Forward %</span><span id=forward_ratio></span></div>
   </div>
 
   <div class=column>
@@ -42,6 +45,11 @@
   </div>
 </div>
 
+<div id=log-controls>
+  <input type=search id=log-filter placeholder="Filter logs..." autocomplete=off data-1p-ignore data-lpignore=true data-bwignore=true>
+  <button id=log-pause>Pause</button>
+  <button id=log-clear>Clear</button>
+</div>
 <div id=logs></div>
 
 <script>
@@ -54,7 +62,10 @@ async function refresh() {
     ]);
     const u = proxyData.upstream_username;
     const upstream_username = u?.length > 15 ? u.slice(0,6) + '...' + u.slice(-6) : u;
-    const merged = {...proxyData, ...systemData, ...bitcoinData, sps: proxyData.sps_1m?.toFixed(2), upstream_status: proxyData.upstream_connected ? 'Connected' : 'Disconnected', upstream_username};
+    const forwarded = (proxyData.upstream_accepted || 0) + (proxyData.upstream_rejected || 0);
+    const total = forwarded + (proxyData.upstream_filtered || 0);
+    const forward_ratio = total > 0 ? ((forwarded / total) * 100).toFixed(1) + '%' : '-';
+    const merged = {...proxyData, ...systemData, ...bitcoinData, sps: proxyData.sps_1m?.toFixed(2), upstream_status: proxyData.upstream_connected ? 'Connected' : 'Disconnected', upstream_username, forward_ratio};
 
     Object.keys(merged).forEach(key => {
       const el = document.getElementById(key);

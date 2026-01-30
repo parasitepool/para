@@ -4,7 +4,8 @@ h1 sup { font-size: 0.5em; vertical-align: super; opacity: 0.7; }
 .logo { display: block; margin: 0 auto 20px; height: 4em; }
 .columns { display: flex; gap: 60px; justify-content: center; }
 .grid { display: flex; flex-wrap: wrap; gap: 60px; justify-content: center; max-width: 1060px; margin: 0 auto; }
-.grid + #logs { width: 1060px; margin-left: auto; margin-right: auto; }
+.grid + #log-controls { width: 1060px; margin-left: auto; margin-right: auto; }
+.grid + #log-controls + #logs { width: 1060px; margin-left: auto; margin-right: auto; }
 .column { border: 1px solid #444; padding: 20px 30px; width: 500px; box-sizing: border-box; }
 .column-full { width: 1060px; }
 .column h2 { margin: 0 0 15px; font-size: 1.22em; text-align: center; }
@@ -15,8 +16,33 @@ h1 sup { font-size: 0.5em; vertical-align: super; opacity: 0.7; }
 .copyable { cursor: pointer; }
 .copyable:hover { text-decoration: underline; }
 .wrapper { width: fit-content; margin: 0 auto; }
-#logs {
+#log-controls {
   margin-top: 40px;
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+#log-controls input {
+  flex: 1;
+  background: #1a1a1a;
+  border: 1px solid #444;
+  color: #eee;
+  padding: 8px 12px;
+  font: inherit;
+}
+#log-controls input::placeholder { color: #666; }
+#log-controls button {
+  background: #333;
+  border: 1px solid #444;
+  color: #eee;
+  padding: 8px 16px;
+  cursor: pointer;
+  font: inherit;
+}
+#log-controls button:hover { background: #444; }
+#log-controls button.paused { background: #4a3; color: #111; }
+#log-controls + #logs { margin-top: 0; }
+#logs {
   height: 450px;
   overflow-y: auto;
   background: #0a0a0a;
@@ -43,8 +69,8 @@ h1 sup { font-size: 0.5em; vertical-align: super; opacity: 0.7; }
   .grid { gap: 30px; }
   .column { width: 100%; max-width: 500px; }
   .column-full { width: 100%; max-width: 500px; }
-  #logs { max-width: 500px; margin-left: auto; margin-right: auto; }
-  .grid + #logs { width: 100%; max-width: 500px; }
+  #log-controls, #logs { max-width: 500px; margin-left: auto; margin-right: auto; }
+  .grid + #log-controls, .grid + #log-controls + #logs { width: 100%; max-width: 500px; }
 }
 @media (max-width: 560px) {
   body { margin: 10px; }

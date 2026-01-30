@@ -22,6 +22,7 @@ pub(crate) struct Upstream {
     difficulty: Arc<RwLock<Difficulty>>,
     accepted: Arc<AtomicU64>,
     rejected: Arc<AtomicU64>,
+    filtered: Arc<AtomicU64>,
     version_mask: Option<Version>,
 }
 
@@ -95,6 +96,7 @@ impl Upstream {
                 difficulty: Arc::new(RwLock::new(Difficulty::from(1))),
                 accepted: Arc::new(AtomicU64::new(0)),
                 rejected: Arc::new(AtomicU64::new(0)),
+                filtered: Arc::new(AtomicU64::new(0)),
                 version_mask,
             },
             events,
@@ -207,6 +209,7 @@ impl Upstream {
                 "Share below upstream difficulty: share_diff={} < upstream_diff={}",
                 submit.share_diff, upstream_diff
             );
+            self.filtered.fetch_add(1, Ordering::Relaxed);
             return;
         }
 
@@ -279,6 +282,10 @@ impl Upstream {
 
     pub(crate) fn rejected(&self) -> u64 {
         self.rejected.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn filtered(&self) -> u64 {
+        self.filtered.load(Ordering::Relaxed)
     }
 
     pub(crate) fn version_mask(&self) -> Option<Version> {

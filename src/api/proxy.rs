@@ -81,6 +81,7 @@ async fn status(State(metrics): State<Arc<Metrics>>) -> Json<ProxyStatus> {
         upstream_version_mask: metrics.upstream.version_mask(),
         upstream_accepted: metrics.upstream.accepted(),
         upstream_rejected: metrics.upstream.rejected(),
+        upstream_filtered: metrics.upstream.filtered(),
     })
 }
 
