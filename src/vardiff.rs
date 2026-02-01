@@ -476,4 +476,108 @@ mod tests {
             "Should reset shares_since_change"
         );
     }
+
+    #[test]
+    fn decreases_difficulty_for_slow_shares() {
+        let start_diff = Difficulty::from(100);
+        let mut vardiff = Vardiff::new(start_diff, secs(5), secs(10), None, None);
+
+        let base = Instant::now();
+        vardiff.first_share = Some(base);
+        vardiff.last_diff_change = base;
+        vardiff.dsps = DecayingAverage::with_start_time(secs(10), base);
+
+        let mut t = base;
+        for _ in 0..100 {
+            t += secs(10);
+            vardiff.dsps.record(1.0, t);
+            vardiff.shares_since_change += 1;
+        }
+
+        if let Some(new_diff) = vardiff.evaluate_adjustment(Difficulty::from(1_000_000), None, t) {
+            assert!(
+                new_diff < start_diff,
+                "Difficulty {} should decrease from {}",
+                new_diff,
+                start_diff
+            );
+        }
+    }
+
+    #[test]
+    fn no_change_within_hysteresis_band() {
+        let start_diff = Difficulty::from(10);
+        let mut vardiff = Vardiff::new(start_diff, secs(5), secs(10), None, None);
+
+        let base = Instant::now();
+        vardiff.first_share = Some(base);
+        vardiff.last_diff_change = base;
+        vardiff.dsps = DecayingAverage::with_start_time(secs(10), base);
+
+        let mut t = base;
+        for _ in 0..100 {
+            t += secs(5);
+            vardiff.dsps.record(10.0, t);
+            vardiff.shares_since_change += 1;
+        }
+
+        let result = vardiff.evaluate_adjustment(Difficulty::from(1_000_000), None, t);
+        assert!(
+            result.is_none(),
+            "Should not adjust when drr is within hysteresis band"
+        );
+    }
+
+    #[test]
+    fn oscillation_guard_on_decrease() {
+        let start_diff = Difficulty::from(100);
+        let mut vardiff = Vardiff::new(start_diff, secs(5), secs(10), None, None);
+
+        let base = Instant::now();
+        vardiff.first_share = Some(base);
+        vardiff.last_diff_change = base;
+        vardiff.dsps = DecayingAverage::with_start_time(secs(10), base);
+
+        let t = base + secs(100);
+        for _ in 0..100 {
+            vardiff.dsps.record(1.0, t);
+        }
+        vardiff.shares_since_change = 1;
+
+        let result = vardiff.evaluate_adjustment(Difficulty::from(1_000_000), None, t);
+        assert!(
+            result.is_none(),
+            "Should not decrease on first share after change"
+        );
+        assert_eq!(vardiff.current_diff(), start_diff);
+    }
+
+    #[test]
+    fn upstream_diff_clamps_optimal() {
+        let mut vardiff = Vardiff::new(Difficulty::from(10), secs(5), secs(10), None, None);
+
+        let base = Instant::now();
+        vardiff.first_share = Some(base);
+        vardiff.last_diff_change = base;
+        vardiff.dsps = DecayingAverage::with_start_time(secs(10), base);
+
+        let mut t = base;
+        for _ in 0..100 {
+            t += millis(10);
+            vardiff.dsps.record(100.0, t);
+            vardiff.shares_since_change += 1;
+        }
+
+        let upstream_diff = Difficulty::from(50);
+        if let Some(new_diff) =
+            vardiff.evaluate_adjustment(Difficulty::from(1_000_000), Some(upstream_diff), t)
+        {
+            assert!(
+                new_diff <= upstream_diff,
+                "Difficulty {} should not exceed upstream_diff {}",
+                new_diff,
+                upstream_diff
+            );
+        }
+    }
 }
