@@ -90,7 +90,7 @@ pool-mainnet:
     --chain mainnet \
     --address 0.0.0.0 \
     --port 42069 \
-    --start-diff 999 \
+    --start-diff 0.001 \
     --bitcoin-rpc-username satoshi \
     --bitcoin-rpc-password nakamoto \
     --http-port 8080 \
@@ -104,7 +104,7 @@ proxy-mainnet:
     --bitcoin-rpc-password nakamoto \
     --address 0.0.0.0 \
     --port 42070 \
-    --start-diff 999 \
+    --start-diff 0.001 \
     --http-port 8081 \
     --username bc1qyr294wemhvcp69dheccp2nat2yemtxfd6sc96e.proxy \
     --upstream parasite.wtf:42069 
