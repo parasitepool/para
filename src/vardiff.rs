@@ -83,21 +83,24 @@ impl Vardiff {
         self.current_diff
     }
 
-    pub(crate) fn force_downstream_if_needed(
+    pub(crate) fn clamp_to_upstream(
         &mut self,
         upstream_diff: Difficulty,
     ) -> Option<Difficulty> {
         if upstream_diff < self.current_diff {
             debug!(
-                "Upstream difficulty decreased: {} -> {}, forcing proxy down",
+                "Clamping to upstream difficulty: {} -> {}",
                 self.current_diff, upstream_diff
             );
+
             self.old_diff = self.current_diff;
             self.current_diff = upstream_diff;
             self.shares_since_change = 0;
             self.last_diff_change = Instant::now();
+
             return Some(upstream_diff);
         }
+
         None
     }
 
@@ -430,28 +433,28 @@ mod tests {
     }
 
     #[test]
-    fn force_downstream_lowers_difficulty() {
+    fn clamp_to_upstream_lowers_difficulty() {
         let start_diff = Difficulty::from(100);
         let mut vardiff = Vardiff::new(start_diff, secs(5), secs(300), None, None);
 
         let upstream_diff = Difficulty::from(50);
-        let result = vardiff.force_downstream_if_needed(upstream_diff);
+        let result = vardiff.clamp_to_upstream(upstream_diff);
 
         assert!(
             result.is_some(),
-            "Should return new difficulty when forcing down"
+            "Should return new difficulty when clamping"
         );
         assert_eq!(result.unwrap(), upstream_diff);
         assert_eq!(vardiff.current_diff(), upstream_diff);
     }
 
     #[test]
-    fn force_downstream_ignores_increase() {
+    fn clamp_to_upstream_ignores_increase() {
         let start_diff = Difficulty::from(50);
         let mut vardiff = Vardiff::new(start_diff, secs(5), secs(300), None, None);
 
         let upstream_diff = Difficulty::from(100);
-        let result = vardiff.force_downstream_if_needed(upstream_diff);
+        let result = vardiff.clamp_to_upstream(upstream_diff);
 
         assert!(
             result.is_none(),
@@ -461,7 +464,7 @@ mod tests {
     }
 
     #[test]
-    fn force_downstream_resets_shares_since_change() {
+    fn clamp_to_upstream_resets_shares_since_change() {
         let start_diff = Difficulty::from(100);
         let mut vardiff = Vardiff::new(start_diff, secs(5), secs(300), None, None);
 
@@ -469,7 +472,7 @@ mod tests {
         vardiff.shares_since_change = 50;
 
         let upstream_diff = Difficulty::from(50);
-        vardiff.force_downstream_if_needed(upstream_diff);
+        vardiff.clamp_to_upstream(upstream_diff);
 
         assert_eq!(
             vardiff.shares_since_change, 0,

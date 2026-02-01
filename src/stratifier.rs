@@ -339,13 +339,15 @@ impl<W: Workbase> Stratifier<W> {
     async fn workbase_update(&mut self, workbase: Arc<W>, session: Arc<Session>) -> Result {
         if let Some(ref upstream) = self.upstream {
             let upstream_diff = upstream.difficulty().await;
-            if let Some(new_diff) = self.vardiff.force_downstream_if_needed(upstream_diff) {
+
+            if let Some(new_diff) = self.vardiff.clamp_to_upstream(upstream_diff) {
                 info!(
-                    "Upstream difficulty decreased, forcing proxy difficulty {} -> {} for {}",
+                    "Clamping proxy difficulty to upstream: {} -> {} for {}",
                     self.vardiff.current_diff(),
                     new_diff,
                     self.socket_addr
                 );
+
                 self.send(Message::Notification {
                     method: "mining.set_difficulty".into(),
                     params: json!(SetDifficulty(new_diff)),
