@@ -85,14 +85,15 @@ miner port='42069':
     --throttle 500K
 
 pool-mainnet: 
-  cargo run --release -- pool \
+  cargo run --release -- \
+    pool \
     --chain mainnet \
     --address 0.0.0.0 \
     --port 42069 \
+    --start-diff 999 \
     --bitcoin-rpc-username satoshi \
     --bitcoin-rpc-password nakamoto \
     --http-port 8080 \
-    --start-diff 999 \
     --zmq-block-notifications tcp://127.0.0.1:28333
 
 proxy-mainnet:
@@ -103,10 +104,10 @@ proxy-mainnet:
     --bitcoin-rpc-password nakamoto \
     --address 0.0.0.0 \
     --port 42070 \
-    --username bc1qyr294wemhvcp69dheccp2nat2yemtxfd6sc96e.proxy \
-    --http-port 8081 \
     --start-diff 999 \
-    --upstream 127.0.0.1:42069 
+    --http-port 8081 \
+    --username bc1qyr294wemhvcp69dheccp2nat2yemtxfd6sc96e.proxy \
+    --upstream parasite.wtf:42069 
 
 miner-mainnet stratum_endpoint='127.0.0.1:42069': 
   cargo run --release -- miner \
