@@ -83,10 +83,7 @@ impl Vardiff {
         self.current_diff
     }
 
-    pub(crate) fn clamp_to_upstream(
-        &mut self,
-        upstream_diff: Difficulty,
-    ) -> Option<Difficulty> {
+    pub(crate) fn clamp_to_upstream(&mut self, upstream_diff: Difficulty) -> Option<Difficulty> {
         if upstream_diff < self.current_diff {
             debug!(
                 "Clamping to upstream difficulty: {} -> {}",
