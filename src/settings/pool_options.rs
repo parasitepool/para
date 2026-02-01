@@ -34,6 +34,7 @@ pub(crate) struct PoolOptions {
         help = "Authenticate to Bitcoin Core RPC as <BITCOIN_RPC_USERNAME>."
     )]
     pub(crate) bitcoin_rpc_username: Option<String>,
+
     #[arg(
         long,
         help = "Authenticate to Bitcoin Core RPC with <BITCOIN_RPC_PASSWORD>."
