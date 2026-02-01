@@ -15,8 +15,8 @@ pub(crate) struct Settings {
     upstream_password: Option<String>,
     timeout: Duration,
     bitcoin_data_dir: Option<PathBuf>,
-    bitcoin_rpc_cookie_file: Option<PathBuf>,
     bitcoin_rpc_port: u16,
+    bitcoin_rpc_cookie_file: Option<PathBuf>,
     bitcoin_rpc_username: Option<String>,
     bitcoin_rpc_password: Option<String>,
     chain: Chain,
@@ -50,8 +50,8 @@ impl Default for Settings {
             upstream_password: None,
             timeout: Duration::from_secs(30),
             bitcoin_data_dir: None,
-            bitcoin_rpc_cookie_file: None,
             bitcoin_rpc_port: Chain::Mainnet.default_rpc_port(),
+            bitcoin_rpc_cookie_file: None,
             bitcoin_rpc_username: None,
             bitcoin_rpc_password: None,
             chain: Chain::Mainnet,
@@ -89,10 +89,10 @@ impl Settings {
             upstream_password: None,
             timeout: Duration::from_secs(30),
             bitcoin_data_dir: options.bitcoin_data_dir,
-            bitcoin_rpc_cookie_file: options.bitcoin_rpc_cookie_file,
             bitcoin_rpc_port: options
                 .bitcoin_rpc_port
                 .unwrap_or_else(|| chain.default_rpc_port()),
+            bitcoin_rpc_cookie_file: options.bitcoin_rpc_cookie_file,
             bitcoin_rpc_username: options.bitcoin_rpc_username,
             bitcoin_rpc_password: options.bitcoin_rpc_password,
             chain,
@@ -137,10 +137,10 @@ impl Settings {
             upstream_password: options.password,
             timeout: Duration::from_secs(options.timeout.unwrap_or(30)),
             bitcoin_data_dir: options.bitcoin_data_dir,
-            bitcoin_rpc_cookie_file: options.bitcoin_rpc_cookie_file,
             bitcoin_rpc_port: options
                 .bitcoin_rpc_port
                 .unwrap_or_else(|| chain.default_rpc_port()),
+            bitcoin_rpc_cookie_file: options.bitcoin_rpc_cookie_file,
             bitcoin_rpc_username: options.bitcoin_rpc_username,
             bitcoin_rpc_password: options.bitcoin_rpc_password,
             chain,
