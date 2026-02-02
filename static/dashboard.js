@@ -117,6 +117,11 @@ function set(id, value, formatter = v => v) {
   return el;
 }
 
+function setClass(id, className) {
+  const el = document.getElementById(id);
+  if (el) el.className = className;
+}
+
 function copyable(id, formatted, raw) {
   const el = set(id, formatted);
   if (el) {
@@ -124,32 +129,6 @@ function copyable(id, formatted, raw) {
     el.dataset.formatted = formatted;
   }
   return el;
-}
-
-function setupCopyOnClick(id) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.addEventListener('click', async function() {
-    const full = this.dataset.full;
-    if (!full || full === 'undefined') return;
-    try {
-      await navigator.clipboard.writeText(full);
-      const prev = this.textContent;
-      this.textContent = 'Copied!';
-      setTimeout(() => { this.textContent = this.dataset.formatted || prev; }, 1000);
-    } catch (e) { console.error('Copy failed:', e); }
-  });
-}
-
-function setupHoverExpand(id) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.addEventListener('mouseenter', () => {
-    if (el.dataset.full) el.textContent = el.dataset.full;
-  });
-  el.addEventListener('mouseleave', () => {
-    if (el.dataset.formatted) el.textContent = el.dataset.formatted;
-  });
 }
 
 function initCopyables() {
