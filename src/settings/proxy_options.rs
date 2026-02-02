@@ -76,4 +76,7 @@ pub(crate) struct ProxyOptions {
 
     #[arg(long, help = "ACME cache directory.")]
     pub(crate) acme_cache: Option<PathBuf>,
+
+    #[arg(long, alias = "datadir", help = "Store data in <DATA_DIR>.")]
+    pub(crate) data_dir: Option<PathBuf>,
 }

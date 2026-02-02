@@ -149,6 +149,7 @@ impl Settings {
             acme_cache: options
                 .acme_cache
                 .unwrap_or_else(|| PathBuf::from("acme-cache")),
+            data_dir: options.data_dir,
             start_diff: options.start_diff.unwrap_or_else(|| Difficulty::from(1.0)),
             min_diff: options.min_diff,
             max_diff: options.max_diff,
