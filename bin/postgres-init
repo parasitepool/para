@@ -417,6 +417,26 @@ PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
   \$\$ LANGUAGE plpgsql;
   "
 
+PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
+  CREATE OR REPLACE FUNCTION get_tera_shares(
+      min_blockheight INTEGER DEFAULT NULL,
+      max_blockheight INTEGER DEFAULT NULL
+  )
+      RETURNS TABLE(username TEXT, tera_shares BIGINT) AS \$\$
+  BEGIN
+      RETURN QUERY
+          SELECT rs.username,
+                 COUNT(rs.sdiff) as tera_shares
+          FROM remote_shares rs
+          WHERE rs.sdiff >= 1000000000000
+            AND (min_blockheight IS NULL OR rs.blockheight >= min_blockheight)
+            AND (max_blockheight IS NULL OR rs.blockheight < max_blockheight)
+          GROUP BY rs.username
+          ORDER BY tera_shares DESC;
+  END;
+  \$\$ LANGUAGE plpgsql;
+"
+
 echo "PostgreSQL is running"
 echo "Database: ckpool"
 echo "User: satoshi"
