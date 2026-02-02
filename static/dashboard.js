@@ -1,3 +1,13 @@
+let wsReconnectTimeout;
+
+const CONFIG = {
+  MAX_LOGS: 500,
+  LOGS_TO_SHOW: 100,
+  WS_RECONNECT_DELAY: 2000,
+  COPY_FEEDBACK_DURATION: 1000,
+  DEFAULT_POLL_INTERVAL: 1000
+};
+
 function connectWs() {
   const logsEl = document.getElementById('logs');
   const pauseBtn = document.getElementById('log-pause');
@@ -8,7 +18,7 @@ function connectWs() {
   let paused = false;
   let allLogs = [];
   let pausedLogs = [];
-  const maxLogs = 500;
+  const maxLogs = CONFIG.MAX_LOGS;
 
   function createLogLine(level, text) {
     const line = document.createElement('div');
@@ -32,7 +42,7 @@ function connectWs() {
     logsEl.innerHTML = '';
     const source = paused ? pausedLogs : allLogs;
     const filtered = source.filter(log => matchesFilter(log, filter));
-    const toShow = filtered.slice(-100);
+    const toShow = filtered.slice(-CONFIG.LOGS_TO_SHOW);
     toShow.forEach(log => {
       logsEl.appendChild(createLogLine(log.level, log.text));
     });
@@ -63,7 +73,6 @@ function connectWs() {
 
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const ws = new WebSocket(`${protocol}//${location.host}/ws/logs`);
-  let reconnectTimeout;
   ws.onmessage = (e) => {
     const [level, ...rest] = e.data.split('\t');
     const text = rest.join('\t');
@@ -73,17 +82,20 @@ function connectWs() {
     }
     if (!paused) renderLogs();
   };
-  ws.onerror = (e) => { console.error('WebSocket error:', e); };
+  ws.onerror = (e) => {
+    console.error('WebSocket error:', e);
+    ws.close();
+  };
   ws.onclose = () => {
-    clearTimeout(reconnectTimeout);
-    reconnectTimeout = setTimeout(connectWs, 2000);
+    clearTimeout(wsReconnectTimeout);
+    wsReconnectTimeout = setTimeout(connectWs, CONFIG.WS_RECONNECT_DELAY);
   };
 }
 
 const SI_PREFIXES = ['', 'K', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y'];
 
 function formatDifficulty(d) {
-  if (d == null) return null;
+  if (d === null || d === undefined) return null;
   if (d < 1) {
     return d.toFixed(8).replace(/\.?0+$/, '');
   }
@@ -94,7 +106,7 @@ function formatDifficulty(d) {
 }
 
 function formatHashrate(h) {
-  if (h == null) return null;
+  if (h === null || h === undefined) return null;
   if (h === 0) return '0 H/s';
   const i = Math.min(Math.floor(Math.log10(h) / 3), SI_PREFIXES.length - 1);
   const scaled = h / Math.pow(1000, i);
@@ -103,7 +115,7 @@ function formatHashrate(h) {
 }
 
 function formatTruncated(n) {
-  if (n == null) return '-';
+  if (n === null || n === undefined) return '-';
   const truncated = Math.floor(n * 100) / 100;
   return truncated.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
 }
@@ -111,7 +123,7 @@ function formatTruncated(n) {
 function set(id, value, formatter = v => v) {
   const el = document.getElementById(id);
   if (el && !el.matches(':hover')) {
-    el.textContent = value != null ? formatter(value) : '-';
+    el.textContent = (value !== null && value !== undefined) ? formatter(value) : '-';
   }
   return el;
 }
@@ -139,7 +151,7 @@ function initCopyables() {
         await navigator.clipboard.writeText(full);
         const formatted = el.dataset.formatted || el.textContent;
         el.textContent = 'Copied!';
-        setTimeout(() => { el.textContent = formatted; }, 1000);
+        setTimeout(() => { el.textContent = formatted; }, CONFIG.COPY_FEEDBACK_DURATION);
       } catch (e) { console.error('Copy failed:', e); }
     });
 
@@ -178,7 +190,7 @@ let pollInterval;
 function startPolling(refreshFn, intervalMs) {
   refreshFn();
   clearInterval(pollInterval);
-  pollInterval = setInterval(refreshFn, intervalMs || 1000);
+  pollInterval = setInterval(refreshFn, intervalMs || CONFIG.DEFAULT_POLL_INTERVAL);
 }
 
 window.addEventListener('beforeunload', () => {
