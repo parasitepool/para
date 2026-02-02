@@ -21,8 +21,8 @@
     <div class=row><span>Users</span><span id=users></span></div>
     <div class=row><span>Workers</span><span id=workers></span></div>
     <div class=row><span>Connections</span><span id=connections></span></div>
-    <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
-    <div class=row><span>SPS</span><span id=sps></span></div>
+    <div class=row><span>Hashrate (5m)</span><span id=hashrate_5m></span></div>
+    <div class=row><span>SPS (5m)</span><span id=sps_5m></span></div>
     <div class=row><span>Uptime</span><span><span id=uptime_secs></span>s</span></div>
     <h3>Shares</h3>
     <div class=row><span>Accepted</span><span id=accepted></span></div>
@@ -56,6 +56,10 @@
 <div id=logs style="display:none"></div>
 
 <script>
+function fmt2(n) {
+  return n != null ? n.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '-';
+}
+
 async function refresh() {
   try {
     const [proxyData, systemData, bitcoinData] = await Promise.all([
@@ -67,17 +71,29 @@ async function refresh() {
     const upstream_username = u?.length > 15 ? u.slice(0,6) + '...' + u.slice(-6) : u;
     const forwarded = (proxyData.upstream_accepted || 0) + (proxyData.upstream_rejected || 0);
     const total = forwarded + (proxyData.upstream_filtered || 0);
-    const forward_ratio = total > 0 ? ((forwarded / total) * 100).toFixed(1) + '%' : '-';
+    const forward_ratio = total > 0 ? fmt2t((forwarded / total) * 100) + '%' : '-';
     const upstream_difficulty = formatDifficulty(proxyData.upstream_difficulty);
     const network_difficulty = formatDifficulty(bitcoinData.network_difficulty);
     const btc_height = bitcoinData.height;
     const best_ever = formatDifficulty(proxyData.best_ever);
-    const merged = {...proxyData, ...systemData, ...bitcoinData, sps: proxyData.sps_1m?.toFixed(2), upstream_status: proxyData.upstream_connected ? 'Connected' : 'Disconnected', upstream_username, upstream_difficulty, network_difficulty, btc_height, best_ever, forward_ratio};
+    const hashrate_5m = formatHashrate(proxyData.hashrate_5m);
+    const sps_5m = fmt2t(proxyData.sps_5m);
+    const merged = {...proxyData, ...systemData, ...bitcoinData, upstream_status: proxyData.upstream_connected ? 'Connected' : 'Disconnected', upstream_username, upstream_difficulty, network_difficulty, btc_height, best_ever, forward_ratio};
 
     Object.keys(merged).forEach(key => {
       const el = document.getElementById(key);
-      if (el && !el.matches(':hover')) el.textContent = merged[key] != null ? merged[key].toLocaleString() : '-';
+      if (el && !el.matches(':hover')) {
+        const val = merged[key];
+        if (key === 'cpu_usage_percent' || key === 'memory_usage_percent' || key === 'disk_usage_percent') {
+          el.textContent = fmt2t(val);
+        } else if (key !== 'sps_5m' && key !== 'hashrate_5m') {
+          el.textContent = val != null ? val.toLocaleString() : '-';
+        }
+      }
     });
+
+    document.getElementById('hashrate_5m').textContent = hashrate_5m;
+    document.getElementById('sps_5m').textContent = sps_5m;
 
     document.getElementById('upstream_status').className = proxyData.upstream_connected ? 'connected' : 'disconnected';
 

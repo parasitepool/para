@@ -61,7 +61,6 @@ use {
     serde::{
         Deserialize, Serialize,
         de::{self, Deserializer},
-        ser::Serializer,
     },
     serde_json::json,
     serde_with::{DeserializeFromStr, SerializeDisplay},

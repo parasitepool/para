@@ -89,8 +89,24 @@ function formatDifficulty(d) {
   const prefixes = ['', 'K', 'M', 'G', 'T', 'P', 'E'];
   const i = Math.min(Math.floor(Math.log10(d) / 3), prefixes.length - 1);
   const scaled = d / Math.pow(10, i * 3);
-  const s = scaled.toFixed(3).replace(/\.?0+$/, '');
-  return s + prefixes[i];
+  const truncated = Math.floor(scaled * 100) / 100;
+  return truncated.toFixed(2) + prefixes[i];
+}
+
+function formatHashrate(h) {
+  if (h == null) return null;
+  if (h === 0) return '0 H/s';
+  const prefixes = ['', 'K', 'M', 'G', 'T', 'P', 'E'];
+  const i = Math.min(Math.floor(Math.log10(h) / 3), prefixes.length - 1);
+  const scaled = h / Math.pow(1000, i);
+  const truncated = Math.floor(scaled * 100) / 100;
+  return truncated.toFixed(2) + ' ' + prefixes[i] + 'H/s';
+}
+
+function fmt2t(n) {
+  if (n == null) return '-';
+  const truncated = Math.floor(n * 100) / 100;
+  return truncated.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
 }
 
 function setupCopyOnClick(id) {

@@ -4,8 +4,8 @@
     <div class=row><span>Users</span><span id=users></span></div>
     <div class=row><span>Workers</span><span id=workers></span></div>
     <div class=row><span>Connections</span><span id=connections></span></div>
-    <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
-    <div class=row><span>SPS</span><span id=sps></span></div>
+    <div class=row><span>Hashrate (5m)</span><span id=hashrate_5m></span></div>
+    <div class=row><span>SPS (5m)</span><span id=sps_5m></span></div>
     <div class=row><span>Uptime</span><span><span id=uptime_secs></span>s</span></div>
     <div class=row><span>Blocks</span><span id=blocks></span></div>
     <h3>Shares</h3>
@@ -40,6 +40,10 @@
 <div id=logs style="display:none"></div>
 
 <script>
+function fmt2(n) {
+  return n != null ? n.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '-';
+}
+
 async function refresh() {
   try {
     const [poolData, systemData, bitcoinData] = await Promise.all([
@@ -50,12 +54,24 @@ async function refresh() {
     const network_difficulty = formatDifficulty(bitcoinData.network_difficulty);
     const btc_height = bitcoinData.height;
     const best_ever = formatDifficulty(poolData.best_ever);
-    const merged = {...poolData, ...systemData, ...bitcoinData, sps: poolData.sps_1m?.toFixed(2), network_difficulty, btc_height, best_ever};
+    const hashrate_5m = formatHashrate(poolData.hashrate_5m);
+    const sps_5m = fmt2t(poolData.sps_5m);
+    const merged = {...poolData, ...systemData, ...bitcoinData, network_difficulty, btc_height, best_ever};
 
     Object.keys(merged).forEach(key => {
       const el = document.getElementById(key);
-      if (el && !el.matches(':hover')) el.textContent = merged[key] != null ? merged[key].toLocaleString() : '-';
+      if (el && !el.matches(':hover')) {
+        const val = merged[key];
+        if (key === 'cpu_usage_percent' || key === 'memory_usage_percent' || key === 'disk_usage_percent') {
+          el.textContent = fmt2t(val);
+        } else if (key !== 'sps_5m' && key !== 'hashrate_5m') {
+          el.textContent = val != null ? val.toLocaleString() : '-';
+        }
+      }
     });
+
+    document.getElementById('hashrate_5m').textContent = hashrate_5m;
+    document.getElementById('sps_5m').textContent = sps_5m;
 
     const nel = document.getElementById('network_difficulty');
     nel.dataset.full = String(bitcoinData.network_difficulty);

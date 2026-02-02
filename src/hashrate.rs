@@ -5,7 +5,7 @@ use super::*;
 /// but 2^32 is the standard approximation used across the mining ecosystem.
 const HASHES_PER_DIFF_1: u64 = 1 << 32;
 
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default, Serialize, Deserialize)]
 pub struct HashRate(pub f64);
 
 impl HashRate {
@@ -36,19 +36,6 @@ impl FromStr for HashRate {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(Self(parse_si(s, &["H/s", "H"])?))
-    }
-}
-
-impl Serialize for HashRate {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.to_string())
-    }
-}
-
-impl<'de> Deserialize<'de> for HashRate {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        s.parse().map_err(serde::de::Error::custom)
     }
 }
 
