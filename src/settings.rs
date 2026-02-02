@@ -144,6 +144,11 @@ impl Settings {
             bitcoin_rpc_username: options.bitcoin_rpc_username,
             bitcoin_rpc_password: options.bitcoin_rpc_password,
             chain,
+            acme_domains: options.acme_domain,
+            acme_contacts: options.acme_contact,
+            acme_cache: options
+                .acme_cache
+                .unwrap_or_else(|| PathBuf::from("acme-cache")),
             start_diff: options.start_diff.unwrap_or_else(|| Difficulty::from(1.0)),
             min_diff: options.min_diff,
             max_diff: options.max_diff,
@@ -851,6 +856,76 @@ mod tests {
         assert_eq!(
             settings.upstream_username.as_ref().map(|u| u.to_string()),
             Some("bc1qtest.worker1".into())
+        );
+    }
+
+    #[test]
+    fn proxy_acme_defaults() {
+        let options =
+            parse_proxy_options("para proxy --upstream pool.example.com:3333 --username bc1qtest");
+        let settings = Settings::from_proxy_options(options).unwrap();
+
+        assert!(settings.acme_domains.is_empty());
+        assert!(settings.acme_contacts.is_empty());
+        assert_eq!(settings.acme_cache, PathBuf::from("acme-cache"));
+    }
+
+    #[test]
+    fn proxy_acme_domains() {
+        let options = parse_proxy_options(
+            "para proxy --upstream pool.example.com:3333 --username bc1qtest \
+             --acme-domain proxy.example.com --acme-domain proxy2.example.com",
+        );
+        let settings = Settings::from_proxy_options(options).unwrap();
+
+        assert_eq!(
+            settings.acme_domains,
+            vec![
+                "proxy.example.com".to_string(),
+                "proxy2.example.com".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn proxy_acme_contacts() {
+        let options = parse_proxy_options(
+            "para proxy --upstream pool.example.com:3333 --username bc1qtest \
+             --acme-contact admin@example.com --acme-contact support@example.com",
+        );
+        let settings = Settings::from_proxy_options(options).unwrap();
+
+        assert_eq!(
+            settings.acme_contacts,
+            vec![
+                "admin@example.com".to_string(),
+                "support@example.com".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn proxy_acme_cache_override() {
+        let options = parse_proxy_options(
+            "para proxy --upstream pool.example.com:3333 --username bc1qtest \
+             --acme-cache /custom/acme/path",
+        );
+        let settings = Settings::from_proxy_options(options).unwrap();
+
+        assert_eq!(settings.acme_cache, PathBuf::from("/custom/acme/path"));
+    }
+
+    #[test]
+    fn proxy_acme_cache_with_data_dir() {
+        let options = parse_proxy_options(
+            "para proxy --upstream pool.example.com:3333 --username bc1qtest \
+             --data-dir /var/lib/para",
+        );
+        let settings = Settings::from_proxy_options(options).unwrap();
+
+        assert_eq!(
+            settings.acme_cache_path(),
+            PathBuf::from("/var/lib/para/acme-cache")
         );
     }
 }
