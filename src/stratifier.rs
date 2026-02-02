@@ -117,18 +117,16 @@ impl<W: Workbase> Stratifier<W> {
                         continue;
                     };
 
+                    debug!("{} from {} with {params}", method.as_str(), self.socket_addr);
+
                     match method.as_str() {
                         "mining.configure" => {
-                            debug!("CONFIGURE from {} with {params}", self.socket_addr);
-
                             let configure = serde_json::from_value::<Configure>(params)
                                 .context(format!("failed to deserialize {method}"))?;
 
                             self.configure(id, configure).await?
                         }
                         "mining.subscribe" => {
-                            debug!("SUBSCRIBE from {} with {params}", self.socket_addr);
-
                             let subscribe = serde_json::from_value::<Subscribe>(params)
                                 .context(format!("failed to deserialize {method}"))?;
 
@@ -137,8 +135,6 @@ impl<W: Workbase> Stratifier<W> {
                             self.handle_protocol_consequence(consequence).await;
                         }
                         "mining.authorize" => {
-                            debug!("AUTHORIZE from {} with {params}", self.socket_addr);
-
                             let Some(subscription) = self.state.subscribed() else {
                                 self.send_error(
                                     id.clone(),
@@ -164,8 +160,6 @@ impl<W: Workbase> Stratifier<W> {
                             self.handle_protocol_consequence(consequence).await;
                         }
                         "mining.submit" => {
-                            debug!("mining.submit from {} with params {params}", self.socket_addr);
-
                             let Some(session) = self.state.working() else {
                                 self.send_error(id.clone(), StratumError::Unauthorized, None)
                                     .await?;
@@ -186,7 +180,7 @@ impl<W: Workbase> Stratifier<W> {
                             self.handle_submit_consequence(consequence, &session.address, &session.enonce1).await;
                         }
                         method => {
-                            warn!("UNKNOWN method {method} with {params} from {}", self.socket_addr);
+                            warn!("Unknown method {method} with {params} from {}", self.socket_addr);
                         }
                     }
                 }
@@ -370,7 +364,10 @@ impl<W: Workbase> Stratifier<W> {
 
         let clean_jobs = self.jobs.insert(new_job.clone());
 
-        debug!("Template updated sending NOTIFY");
+        debug!(
+            "Template updated, sending mining.notify to {}",
+            self.socket_addr
+        );
 
         self.send(Message::Notification {
             method: "mining.notify".into(),
@@ -603,7 +600,10 @@ impl<W: Workbase> Stratifier<W> {
 
         let current_diff = self.vardiff.current_diff();
 
-        debug!("Sending mining.set_difficulty with {current_diff}");
+        debug!(
+            "Sending mining.set_difficulty with {current_diff} to {}",
+            self.socket_addr
+        );
 
         self.send(Message::Notification {
             method: "mining.set_difficulty".into(),
@@ -611,7 +611,7 @@ impl<W: Workbase> Stratifier<W> {
         })
         .await?;
 
-        debug!("Sending NOTIFY");
+        debug!("Sending mining.notify to {}", self.socket_addr);
 
         let clean_jobs = self.jobs.insert(job.clone());
 
