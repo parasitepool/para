@@ -11,14 +11,14 @@
     <h3>Shares</h3>
     <div class=row><span>Accepted</span><span id=accepted></span></div>
     <div class=row><span>Rejected</span><span id=rejected></span></div>
-    <div class=row><span>Best</span><span id=best_ever></span></div>
+    <div class=row><span>Best</span><span id=best_ever class=copyable></span></div>
     <div class=row><span>Last</span><span><span id=last_share></span>s ago</span></div>
   </div>
 
   <div class=column>
     <h2>Bitcoin</h2>
     <div class=row><span>Block Height</span><span id=btc_height></span></div>
-    <div class=row><span>Network Difficulty</span><span id=network_difficulty></span></div>
+    <div class=row><span>Network Difficulty</span><span id=network_difficulty class=copyable></span></div>
   </div>
 
   <div class=column>
@@ -30,12 +30,14 @@
   </div>
 </div>
 
-<div id=log-controls>
+<button id=log-show>Show Logs</button>
+<div id=log-controls style="display:none">
   <input type=search id=log-filter placeholder="Filter logs..." autocomplete=off data-1p-ignore data-lpignore=true data-bwignore=true>
   <button id=log-pause>Pause</button>
   <button id=log-clear>Clear</button>
+  <button id=log-hide>Hide</button>
 </div>
-<div id=logs></div>
+<div id=logs style="display:none"></div>
 
 <script>
 async function refresh() {
@@ -45,14 +47,28 @@ async function refresh() {
       fetch('/api/system/status').then(r => r.json()).catch(() => ({})),
       fetch('/api/bitcoin/status').then(r => r.json()).catch(() => ({}))
     ]);
-    const merged = {...poolData, ...systemData, ...bitcoinData, sps: poolData.sps_1m?.toFixed(2)};
+    const network_difficulty = formatDifficulty(bitcoinData.network_difficulty);
+    const btc_height = bitcoinData.height;
+    const best_ever = formatDifficulty(poolData.best_ever);
+    const merged = {...poolData, ...systemData, ...bitcoinData, sps: poolData.sps_1m?.toFixed(2), network_difficulty, btc_height, best_ever};
 
     Object.keys(merged).forEach(key => {
       const el = document.getElementById(key);
-      if (el) el.textContent = merged[key] != null ? merged[key].toLocaleString() : '-';
+      if (el && !el.matches(':hover')) el.textContent = merged[key] != null ? merged[key].toLocaleString() : '-';
     });
-  } catch (e) {}
+
+    const nel = document.getElementById('network_difficulty');
+    nel.dataset.full = String(bitcoinData.network_difficulty);
+    nel.dataset.formatted = network_difficulty;
+
+    const bel = document.getElementById('best_ever');
+    bel.dataset.full = String(poolData.best_ever);
+    bel.dataset.formatted = best_ever;
+  } catch (e) { console.error('refresh error:', e); }
 }
 startPolling(refresh);
 connectWs();
+setupLogToggle();
+setupCopyable('network_difficulty');
+setupCopyable('best_ever');
 </script>

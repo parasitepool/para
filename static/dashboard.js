@@ -81,16 +81,68 @@ function connectWs() {
   ws.onclose = () => setTimeout(connectWs, 2000);
 }
 
-function copyOnClick(elementId) {
-  document.getElementById(elementId).addEventListener('click', function() {
+function formatDifficulty(d) {
+  if (d == null) return null;
+  if (d < 1) {
+    return d.toFixed(8).replace(/\.?0+$/, '');
+  }
+  const prefixes = ['', 'K', 'M', 'G', 'T', 'P', 'E'];
+  const i = Math.min(Math.floor(Math.log10(d) / 3), prefixes.length - 1);
+  const scaled = d / Math.pow(10, i * 3);
+  const s = scaled.toFixed(3).replace(/\.?0+$/, '');
+  return s + prefixes[i];
+}
+
+function setupCopyOnClick(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener('click', async function() {
     const full = this.dataset.full;
-    if (!full) return;
-    navigator.clipboard.writeText(full).then(() => {
+    if (!full || full === 'undefined') return;
+    try {
+      await navigator.clipboard.writeText(full);
       const prev = this.textContent;
       this.textContent = 'Copied!';
-      setTimeout(() => { this.textContent = prev; }, 1000);
-    });
+      setTimeout(() => { this.textContent = this.dataset.formatted || prev; }, 1000);
+    } catch (e) {}
   });
+}
+
+function setupHoverExpand(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener('mouseenter', () => {
+    if (el.dataset.full) el.textContent = el.dataset.full;
+  });
+  el.addEventListener('mouseleave', () => {
+    if (el.dataset.formatted) el.textContent = el.dataset.formatted;
+  });
+}
+
+function setupCopyable(id) {
+  setupCopyOnClick(id);
+  setupHoverExpand(id);
+}
+
+function setupLogToggle() {
+  const showBtn = document.getElementById('log-show');
+  const hideBtn = document.getElementById('log-hide');
+  const controls = document.getElementById('log-controls');
+  const logs = document.getElementById('logs');
+  if (showBtn && controls && logs) {
+    showBtn.addEventListener('click', () => {
+      showBtn.style.display = 'none';
+      controls.style.display = '';
+      logs.style.display = '';
+    });
+  }
+  if (hideBtn && showBtn && controls && logs) {
+    hideBtn.addEventListener('click', () => {
+      showBtn.style.display = '';
+      controls.style.display = 'none';
+      logs.style.display = 'none';
+    });
+  }
 }
 
 function startPolling(refreshFn, intervalMs) {

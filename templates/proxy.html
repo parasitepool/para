@@ -17,6 +17,7 @@
 
   <div class=column>
     <h2>Downstream</h2>
+    <div class=row><span>Endpoint</span><span id=endpoint></span></div>
     <div class=row><span>Users</span><span id=users></span></div>
     <div class=row><span>Workers</span><span id=workers></span></div>
     <div class=row><span>Connections</span><span id=connections></span></div>
@@ -55,18 +56,6 @@
 <div id=logs style="display:none"></div>
 
 <script>
-function formatDifficulty(d) {
-  if (d == null) return null;
-  if (d < 1) {
-    return d.toFixed(8).replace(/\.?0+$/, '');
-  }
-  const prefixes = ['', 'K', 'M', 'G', 'T', 'P', 'E'];
-  const i = Math.min(Math.floor(Math.log10(d) / 3), prefixes.length - 1);
-  const scaled = d / Math.pow(10, i * 3);
-  const s = scaled.toFixed(3).replace(/\.?0+$/, '');
-  return s + prefixes[i];
-}
-
 async function refresh() {
   try {
     const [proxyData, systemData, bitcoinData] = await Promise.all([
@@ -111,46 +100,9 @@ async function refresh() {
 }
 startPolling(refresh);
 connectWs();
-function setupCopyOnClick(id) {
-  const el = document.getElementById(id);
-  el.addEventListener('click', async function() {
-    const full = this.dataset.full;
-    if (!full || full === 'undefined') return;
-    try {
-      await navigator.clipboard.writeText(full);
-      const prev = this.textContent;
-      this.textContent = 'Copied!';
-      setTimeout(() => { this.textContent = this.dataset.formatted || prev; }, 1000);
-    } catch (e) {}
-  });
-}
-setupCopyOnClick('upstream_username');
-setupCopyOnClick('upstream_difficulty');
-setupCopyOnClick('network_difficulty');
-setupCopyOnClick('best_ever');
-
-function setupHoverExpand(id) {
-  const el = document.getElementById(id);
-  el.addEventListener('mouseenter', () => {
-    if (el.dataset.full) el.textContent = el.dataset.full;
-  });
-  el.addEventListener('mouseleave', () => {
-    if (el.dataset.formatted) el.textContent = el.dataset.formatted;
-  });
-}
-setupHoverExpand('upstream_username');
-setupHoverExpand('upstream_difficulty');
-setupHoverExpand('network_difficulty');
-setupHoverExpand('best_ever');
-
-document.getElementById('log-show').addEventListener('click', () => {
-  document.getElementById('log-show').style.display = 'none';
-  document.getElementById('log-controls').style.display = '';
-  document.getElementById('logs').style.display = '';
-});
-document.getElementById('log-hide').addEventListener('click', () => {
-  document.getElementById('log-show').style.display = '';
-  document.getElementById('log-controls').style.display = 'none';
-  document.getElementById('logs').style.display = 'none';
-});
+setupLogToggle();
+setupCopyable('upstream_username');
+setupCopyable('upstream_difficulty');
+setupCopyable('network_difficulty');
+setupCopyable('best_ever');
 </script>
