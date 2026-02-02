@@ -2,10 +2,12 @@ body { font: clamp(14px, 1.5vw, 18px)/1.6 monospace; margin: 30px; background: #
 h1 { text-align: center; margin-bottom: 40px; font-size: 1.55em; }
 h1 sup { font-size: 0.5em; vertical-align: super; opacity: 0.7; }
 .logo { display: block; margin: 0 auto 20px; height: 4em; }
+body > a:last-of-type .logo { margin-top: 640px; }
 .columns { display: flex; gap: 60px; justify-content: center; }
 .grid { display: flex; flex-wrap: wrap; gap: 60px; justify-content: center; max-width: 1060px; margin: 0 auto; }
-.grid + #log-controls { width: 1060px; margin-left: auto; margin-right: auto; }
-.grid + #log-controls + #logs { width: 1060px; margin-left: auto; margin-right: auto; }
+#log-show { max-width: 1060px; width: 100%; margin-left: auto; margin-right: auto; }
+#log-controls { max-width: 1060px; width: 100%; margin-left: auto; margin-right: auto; }
+#logs { max-width: 1060px; width: 100%; margin-left: auto; margin-right: auto; }
 .column { border: 1px solid #444; padding: 20px 30px; width: 500px; box-sizing: border-box; }
 .column-full { width: 1060px; }
 .column h2 { margin: 0 0 15px; font-size: 1.22em; text-align: center; }
@@ -13,9 +15,20 @@ h1 sup { font-size: 0.5em; vertical-align: super; opacity: 0.7; }
 .row { display: flex; justify-content: space-between; }
 .connected { color: #4f4; }
 .disconnected { color: #f44; }
-.copyable { cursor: pointer; }
-.copyable:hover { text-decoration: underline; }
+.copyable { cursor: pointer; position: relative; }
+.copyable:hover { background: #222; border: 1px solid #444; padding: 4px 8px; margin: -5px -9px; z-index: 10; box-shadow: 0 2px 8px rgba(0,0,0,0.8); }
 .wrapper { width: fit-content; margin: 0 auto; }
+#log-show {
+  display: block;
+  margin: 40px auto 0;
+  background: #333;
+  border: 1px solid #444;
+  color: #eee;
+  padding: 8px 16px;
+  cursor: pointer;
+  font: inherit;
+}
+#log-show:hover { background: #444; }
 #log-controls {
   margin-top: 40px;
   display: flex;
@@ -52,7 +65,8 @@ h1 sup { font-size: 0.5em; vertical-align: super; opacity: 0.7; }
   box-sizing: border-box;
   scrollbar-color: #444 #1a1a1a;
 }
-#logs div { white-space: pre-wrap; word-break: break-all; }
+#logs { overflow-x: auto; }
+#logs div { white-space: pre; }
 #logs::-webkit-scrollbar { width: 8px; }
 #logs::-webkit-scrollbar-track { background: #1a1a1a; }
 #logs::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
@@ -69,8 +83,9 @@ h1 sup { font-size: 0.5em; vertical-align: super; opacity: 0.7; }
   .grid { gap: 30px; }
   .column { width: 100%; max-width: 500px; }
   .column-full { width: 100%; max-width: 500px; }
-  #log-controls, #logs { max-width: 500px; margin-left: auto; margin-right: auto; }
-  .grid + #log-controls, .grid + #log-controls + #logs { width: 100%; max-width: 500px; }
+  #log-controls { flex-wrap: wrap; }
+  #log-controls input { width: 100%; flex: none; margin-bottom: 10px; }
+  #log-controls button { flex: 1; }
 }
 @media (max-width: 560px) {
   body { margin: 10px; }

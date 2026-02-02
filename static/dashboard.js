@@ -8,6 +8,7 @@ function connectWs() {
 
   let paused = false;
   let allLogs = [];
+  let pausedLogs = [];
   const maxLogs = 500;
 
   function createLogLine(level, text) {
@@ -30,7 +31,8 @@ function connectWs() {
   function renderLogs() {
     const filter = filterInput?.value || '';
     logsEl.innerHTML = '';
-    const filtered = allLogs.filter(log => matchesFilter(log, filter));
+    const source = paused ? pausedLogs : allLogs;
+    const filtered = source.filter(log => matchesFilter(log, filter));
     const toShow = filtered.slice(-100);
     toShow.forEach(log => {
       logsEl.appendChild(createLogLine(log.level, log.text));
@@ -45,6 +47,11 @@ function connectWs() {
       paused = !paused;
       pauseBtn.textContent = paused ? 'Resume' : 'Pause';
       pauseBtn.className = paused ? 'paused' : '';
+      if (paused) {
+        pausedLogs = [...allLogs];
+      } else {
+        renderLogs();
+      }
     });
   }
 
@@ -55,6 +62,8 @@ function connectWs() {
   if (clearBtn) {
     clearBtn.addEventListener('click', () => {
       allLogs = [];
+      pausedLogs = [];
+      if (filterInput) filterInput.value = '';
       renderLogs();
     });
   }
@@ -67,7 +76,7 @@ function connectWs() {
     while (allLogs.length > maxLogs) {
       allLogs.shift();
     }
-    renderLogs();
+    if (!paused) renderLogs();
   };
   ws.onclose = () => setTimeout(connectWs, 2000);
 }

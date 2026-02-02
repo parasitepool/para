@@ -60,11 +60,12 @@ impl Upstream {
             .await
         {
             Ok((response, _, _)) if response.version_rolling => {
-                info!(
-                    "Upstream supports version rolling: mask={:?}",
-                    response.version_rolling_mask
-                );
-                response.version_rolling_mask
+                if let Some(mask) = response.version_rolling_mask {
+                    info!("Upstream supports version rolling: mask={mask}",);
+                    Some(mask)
+                } else {
+                    None
+                }
             }
             Ok(_) => {
                 info!("Upstream does not support version rolling");

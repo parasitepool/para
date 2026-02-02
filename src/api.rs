@@ -66,7 +66,7 @@ pub struct ProxyStatus {
     pub uptime_secs: u64,
     pub upstream_endpoint: String,
     pub upstream_connected: bool,
-    pub upstream_difficulty: f64,
+    pub upstream_difficulty: Difficulty,
     pub upstream_username: Username,
     pub upstream_enonce1: Extranonce,
     pub upstream_enonce2_size: usize,
