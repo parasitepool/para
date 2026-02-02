@@ -62,24 +62,12 @@ async function refresh() {
     set('rejected', poolData.rejected);
     set('last_share', poolData.last_share);
     set('btc_height', bitcoinData.height);
-    set('network_difficulty', network_difficulty);
+    copyable('network_difficulty', network_difficulty, bitcoinData.network_difficulty);
     set('cpu_usage_percent', systemData.cpu_usage_percent, fmt2t);
     set('memory_usage_percent', systemData.memory_usage_percent, fmt2t);
     set('disk_usage_percent', systemData.disk_usage_percent, fmt2t);
     set('uptime', systemData.uptime);
-    set('best_ever', best_ever);
-
-    const nel = document.getElementById('network_difficulty');
-    if (nel) {
-      nel.dataset.full = String(bitcoinData.network_difficulty);
-      nel.dataset.formatted = network_difficulty;
-    }
-
-    const bel = document.getElementById('best_ever');
-    if (bel) {
-      bel.dataset.full = String(poolData.best_ever);
-      bel.dataset.formatted = best_ever;
-    }
+    copyable('best_ever', best_ever, poolData.best_ever);
   } catch (e) { console.error('refresh error:', e); }
 }
 startPolling(refresh);

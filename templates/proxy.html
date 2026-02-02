@@ -74,9 +74,11 @@ async function refresh() {
     const best_ever = formatDifficulty(proxyData.best_ever);
 
     set('upstream_endpoint', proxyData.upstream_endpoint);
-    set('upstream_status', proxyData.upstream_connected ? 'Connected' : 'Disconnected');
-    set('upstream_username', upstream_username);
-    set('upstream_difficulty', upstream_difficulty);
+    const statusEl = document.getElementById('upstream_status');
+    if (statusEl) statusEl.className = proxyData.upstream_connected ? 'connected' : 'disconnected';
+
+    copyable('upstream_username', upstream_username, u);
+    copyable('upstream_difficulty', upstream_difficulty, proxyData.upstream_difficulty);
     set('upstream_enonce1', proxyData.upstream_enonce1);
     set('upstream_enonce2_size', proxyData.upstream_enonce2_size);
     set('upstream_version_mask', proxyData.upstream_version_mask);
@@ -95,39 +97,12 @@ async function refresh() {
     set('rejected', proxyData.rejected);
     set('last_share', proxyData.last_share);
     set('btc_height', bitcoinData.height);
-    set('network_difficulty', network_difficulty);
+    copyable('network_difficulty', network_difficulty, bitcoinData.network_difficulty);
     set('cpu_usage_percent', systemData.cpu_usage_percent, fmt2t);
     set('memory_usage_percent', systemData.memory_usage_percent, fmt2t);
     set('disk_usage_percent', systemData.disk_usage_percent, fmt2t);
     set('uptime', systemData.uptime);
-    set('best_ever', best_ever);
-
-    const statusEl = document.getElementById('upstream_status');
-    if (statusEl) statusEl.className = proxyData.upstream_connected ? 'connected' : 'disconnected';
-
-    const uel = document.getElementById('upstream_username');
-    if (uel) {
-      uel.dataset.full = u;
-      uel.dataset.formatted = upstream_username;
-    }
-
-    const del = document.getElementById('upstream_difficulty');
-    if (del) {
-      del.dataset.full = String(proxyData.upstream_difficulty);
-      del.dataset.formatted = upstream_difficulty;
-    }
-
-    const nel = document.getElementById('network_difficulty');
-    if (nel) {
-      nel.dataset.full = String(bitcoinData.network_difficulty);
-      nel.dataset.formatted = network_difficulty;
-    }
-
-    const bel = document.getElementById('best_ever');
-    if (bel) {
-      bel.dataset.full = String(proxyData.best_ever);
-      bel.dataset.formatted = best_ever;
-    }
+    copyable('best_ever', best_ever, proxyData.best_ever);
   } catch (e) { console.error('refresh error:', e); }
 }
 startPolling(refresh);

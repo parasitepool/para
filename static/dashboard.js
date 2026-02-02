@@ -117,6 +117,15 @@ function set(id, value, formatter = v => v) {
   return el;
 }
 
+function copyable(id, formatted, raw) {
+  const el = set(id, formatted);
+  if (el) {
+    el.dataset.full = String(raw);
+    el.dataset.formatted = formatted;
+  }
+  return el;
+}
+
 function setupCopyOnClick(id) {
   const el = document.getElementById(id);
   if (!el) return;
