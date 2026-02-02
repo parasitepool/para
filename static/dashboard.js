@@ -1,10 +1,9 @@
-const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-
 function connectWs() {
   const logsEl = document.getElementById('logs');
   const pauseBtn = document.getElementById('log-pause');
   const filterInput = document.getElementById('log-filter');
   const clearBtn = document.getElementById('log-clear');
+  if (!logsEl) return;
 
   let paused = false;
   let allLogs = [];
@@ -42,33 +41,29 @@ function connectWs() {
     }
   }
 
-  if (pauseBtn) {
-    pauseBtn.addEventListener('click', () => {
-      paused = !paused;
-      pauseBtn.textContent = paused ? 'Resume' : 'Pause';
-      pauseBtn.className = paused ? 'paused' : '';
-      if (paused) {
-        pausedLogs = [...allLogs];
-      } else {
-        renderLogs();
-      }
-    });
-  }
-
-  if (filterInput) {
-    filterInput.addEventListener('input', renderLogs);
-  }
-
-  if (clearBtn) {
-    clearBtn.addEventListener('click', () => {
-      allLogs = [];
-      pausedLogs = [];
-      if (filterInput) filterInput.value = '';
+  pauseBtn?.addEventListener('click', () => {
+    paused = !paused;
+    pauseBtn.textContent = paused ? 'Resume' : 'Pause';
+    pauseBtn.className = paused ? 'paused' : '';
+    if (paused) {
+      pausedLogs = [...allLogs];
+    } else {
       renderLogs();
-    });
-  }
+    }
+  });
 
+  filterInput?.addEventListener('input', renderLogs);
+
+  clearBtn?.addEventListener('click', () => {
+    allLogs = [];
+    pausedLogs = [];
+    if (filterInput) filterInput.value = '';
+    renderLogs();
+  });
+
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const ws = new WebSocket(`${protocol}//${location.host}/ws/logs`);
+  let reconnectTimeout;
   ws.onmessage = (e) => {
     const [level, ...rest] = e.data.split('\t');
     const text = rest.join('\t');
@@ -78,7 +73,11 @@ function connectWs() {
     }
     if (!paused) renderLogs();
   };
-  ws.onclose = () => setTimeout(connectWs, 2000);
+  ws.onerror = (e) => { console.error('WebSocket error:', e); };
+  ws.onclose = () => {
+    clearTimeout(reconnectTimeout);
+    reconnectTimeout = setTimeout(connectWs, 2000);
+  };
 }
 
 const SI_PREFIXES = ['', 'K', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y'];
@@ -103,7 +102,7 @@ function formatHashrate(h) {
   return truncated.toFixed(2) + ' ' + SI_PREFIXES[i] + 'H/s';
 }
 
-function fmt2t(n) {
+function formatTruncated(n) {
   if (n == null) return '-';
   const truncated = Math.floor(n * 100) / 100;
   return truncated.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
@@ -138,9 +137,9 @@ function initCopyables() {
       if (!full || full === 'undefined') return;
       try {
         await navigator.clipboard.writeText(full);
-        const prev = el.textContent;
+        const formatted = el.dataset.formatted || el.textContent;
         el.textContent = 'Copied!';
-        setTimeout(() => { el.textContent = el.dataset.formatted || prev; }, 1000);
+        setTimeout(() => { el.textContent = formatted; }, 1000);
       } catch (e) { console.error('Copy failed:', e); }
     });
 
@@ -159,23 +158,29 @@ function setupLogToggle() {
   const hideBtn = document.getElementById('log-hide');
   const controls = document.getElementById('log-controls');
   const logs = document.getElementById('logs');
-  if (showBtn && controls && logs) {
-    showBtn.addEventListener('click', () => {
-      showBtn.style.display = 'none';
-      controls.style.display = '';
-      logs.style.display = '';
-    });
-  }
-  if (hideBtn && showBtn && controls && logs) {
-    hideBtn.addEventListener('click', () => {
-      showBtn.style.display = '';
-      controls.style.display = 'none';
-      logs.style.display = 'none';
-    });
-  }
+  if (!showBtn || !hideBtn || !controls || !logs) return;
+
+  showBtn.addEventListener('click', () => {
+    showBtn.classList.add('hidden');
+    controls.classList.remove('hidden');
+    logs.classList.remove('hidden');
+  });
+
+  hideBtn.addEventListener('click', () => {
+    showBtn.classList.remove('hidden');
+    controls.classList.add('hidden');
+    logs.classList.add('hidden');
+  });
 }
+
+let pollInterval;
 
 function startPolling(refreshFn, intervalMs) {
   refreshFn();
-  setInterval(refreshFn, intervalMs || 1000);
+  clearInterval(pollInterval);
+  pollInterval = setInterval(refreshFn, intervalMs || 1000);
 }
+
+window.addEventListener('beforeunload', () => {
+  clearInterval(pollInterval);
+});
