@@ -786,6 +786,67 @@ mod tests {
     }
 
     #[test]
+    fn pool_acme_defaults() {
+        let options = parse_pool_options("para pool");
+        let settings = Settings::from_pool_options(options).unwrap();
+
+        assert!(settings.acme_domains.is_empty());
+        assert!(settings.acme_contacts.is_empty());
+        assert_eq!(settings.acme_cache, PathBuf::from("acme-cache"));
+    }
+
+    #[test]
+    fn pool_acme_domains() {
+        let options = parse_pool_options(
+            "para pool --acme-domain pool.example.com --acme-domain pool2.example.com",
+        );
+        let settings = Settings::from_pool_options(options).unwrap();
+
+        assert_eq!(
+            settings.acme_domains,
+            vec![
+                "pool.example.com".to_string(),
+                "pool2.example.com".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn pool_acme_contacts() {
+        let options = parse_pool_options(
+            "para pool --acme-contact admin@example.com --acme-contact support@example.com",
+        );
+        let settings = Settings::from_pool_options(options).unwrap();
+
+        assert_eq!(
+            settings.acme_contacts,
+            vec![
+                "admin@example.com".to_string(),
+                "support@example.com".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn pool_acme_cache_override() {
+        let options = parse_pool_options("para pool --acme-cache /custom/acme/path");
+        let settings = Settings::from_pool_options(options).unwrap();
+
+        assert_eq!(settings.acme_cache, PathBuf::from("/custom/acme/path"));
+    }
+
+    #[test]
+    fn pool_acme_cache_with_data_dir() {
+        let options = parse_pool_options("para pool --data-dir /var/lib/para");
+        let settings = Settings::from_pool_options(options).unwrap();
+
+        assert_eq!(
+            settings.acme_cache_path(),
+            PathBuf::from("/var/lib/para/acme-cache")
+        );
+    }
+
+    #[test]
     fn proxy_defaults_are_sane() {
         let options =
             parse_proxy_options("para proxy --upstream pool.example.com:3333 --username bc1qtest");
