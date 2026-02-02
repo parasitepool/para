@@ -85,7 +85,7 @@ miner port='42069':
     --throttle 500K
 
 pool-mainnet: 
-  cargo run --release -- \
+  cargo run --features reload -- \
     pool \
     --chain mainnet \
     --address 0.0.0.0 \
@@ -97,7 +97,7 @@ pool-mainnet:
     --zmq-block-notifications tcp://127.0.0.1:28333
 
 proxy-mainnet:
-  cargo run --release -- \
+  cargo run --features reload -- \
     proxy \
     --chain mainnet \
     --bitcoin-rpc-username satoshi \

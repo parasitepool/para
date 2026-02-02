@@ -81,26 +81,26 @@ function connectWs() {
   ws.onclose = () => setTimeout(connectWs, 2000);
 }
 
+const SI_PREFIXES = ['', 'K', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y'];
+
 function formatDifficulty(d) {
   if (d == null) return null;
   if (d < 1) {
     return d.toFixed(8).replace(/\.?0+$/, '');
   }
-  const prefixes = ['', 'K', 'M', 'G', 'T', 'P', 'E'];
-  const i = Math.min(Math.floor(Math.log10(d) / 3), prefixes.length - 1);
+  const i = Math.min(Math.floor(Math.log10(d) / 3), SI_PREFIXES.length - 1);
   const scaled = d / Math.pow(10, i * 3);
   const truncated = Math.floor(scaled * 100) / 100;
-  return truncated.toFixed(2) + prefixes[i];
+  return truncated.toFixed(2) + ' ' + SI_PREFIXES[i];
 }
 
 function formatHashrate(h) {
   if (h == null) return null;
   if (h === 0) return '0 H/s';
-  const prefixes = ['', 'K', 'M', 'G', 'T', 'P', 'E'];
-  const i = Math.min(Math.floor(Math.log10(h) / 3), prefixes.length - 1);
+  const i = Math.min(Math.floor(Math.log10(h) / 3), SI_PREFIXES.length - 1);
   const scaled = h / Math.pow(1000, i);
   const truncated = Math.floor(scaled * 100) / 100;
-  return truncated.toFixed(2) + ' ' + prefixes[i] + 'H/s';
+  return truncated.toFixed(2) + ' ' + SI_PREFIXES[i] + 'H/s';
 }
 
 function fmt2t(n) {
