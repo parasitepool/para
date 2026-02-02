@@ -51,23 +51,23 @@ async function refresh() {
     const network_difficulty = formatDifficulty(bitcoinData.network_difficulty);
     const best_ever = formatDifficulty(poolData.best_ever);
 
-    setTextIfNotHovering('users', poolData.users);
-    setTextIfNotHovering('workers', poolData.workers);
-    setTextIfNotHovering('connections', poolData.connections);
-    setTextIfNotHovering('hashrate_5m', poolData.hashrate_5m, formatHashrate);
-    setTextIfNotHovering('sps_5m', poolData.sps_5m, fmt2t);
-    setTextIfNotHovering('uptime_secs', poolData.uptime_secs);
-    setTextIfNotHovering('blocks', poolData.blocks);
-    setTextIfNotHovering('accepted', poolData.accepted);
-    setTextIfNotHovering('rejected', poolData.rejected);
-    setTextIfNotHovering('last_share', poolData.last_share);
-    setTextIfNotHovering('btc_height', bitcoinData.height);
-    setTextIfNotHovering('network_difficulty', network_difficulty);
-    setTextIfNotHovering('cpu_usage_percent', systemData.cpu_usage_percent, fmt2t);
-    setTextIfNotHovering('memory_usage_percent', systemData.memory_usage_percent, fmt2t);
-    setTextIfNotHovering('disk_usage_percent', systemData.disk_usage_percent, fmt2t);
-    setTextIfNotHovering('uptime', systemData.uptime);
-    setTextIfNotHovering('best_ever', best_ever);
+    set('users', poolData.users);
+    set('workers', poolData.workers);
+    set('connections', poolData.connections);
+    set('hashrate_5m', poolData.hashrate_5m, formatHashrate);
+    set('sps_5m', poolData.sps_5m, fmt2t);
+    set('uptime_secs', poolData.uptime_secs);
+    set('blocks', poolData.blocks);
+    set('accepted', poolData.accepted);
+    set('rejected', poolData.rejected);
+    set('last_share', poolData.last_share);
+    set('btc_height', bitcoinData.height);
+    set('network_difficulty', network_difficulty);
+    set('cpu_usage_percent', systemData.cpu_usage_percent, fmt2t);
+    set('memory_usage_percent', systemData.memory_usage_percent, fmt2t);
+    set('disk_usage_percent', systemData.disk_usage_percent, fmt2t);
+    set('uptime', systemData.uptime);
+    set('best_ever', best_ever);
 
     const nel = document.getElementById('network_difficulty');
     if (nel) {

@@ -109,7 +109,7 @@ function fmt2t(n) {
   return truncated.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
 }
 
-function setTextIfNotHovering(id, value, formatter = v => v) {
+function set(id, value, formatter = v => v) {
   const el = document.getElementById(id);
   if (el && !el.matches(':hover')) {
     el.textContent = value != null ? formatter(value) : '-';
