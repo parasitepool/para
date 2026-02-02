@@ -40,10 +40,6 @@
 <div id=logs style="display:none"></div>
 
 <script>
-function fmt2(n) {
-  return n != null ? n.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '-';
-}
-
 async function refresh() {
   try {
     const [poolData, systemData, bitcoinData] = await Promise.all([
@@ -51,35 +47,39 @@ async function refresh() {
       fetch('/api/system/status').then(r => r.json()).catch(() => ({})),
       fetch('/api/bitcoin/status').then(r => r.json()).catch(() => ({}))
     ]);
+
     const network_difficulty = formatDifficulty(bitcoinData.network_difficulty);
-    const btc_height = bitcoinData.height;
     const best_ever = formatDifficulty(poolData.best_ever);
-    const hashrate_5m = formatHashrate(poolData.hashrate_5m);
-    const sps_5m = fmt2t(poolData.sps_5m);
-    const merged = {...poolData, ...systemData, ...bitcoinData, network_difficulty, btc_height, best_ever};
 
-    Object.keys(merged).forEach(key => {
-      const el = document.getElementById(key);
-      if (el && !el.matches(':hover')) {
-        const val = merged[key];
-        if (key === 'cpu_usage_percent' || key === 'memory_usage_percent' || key === 'disk_usage_percent') {
-          el.textContent = fmt2t(val);
-        } else if (key !== 'sps_5m' && key !== 'hashrate_5m') {
-          el.textContent = val != null ? val.toLocaleString() : '-';
-        }
-      }
-    });
-
-    document.getElementById('hashrate_5m').textContent = hashrate_5m;
-    document.getElementById('sps_5m').textContent = sps_5m;
+    setTextIfNotHovering('users', poolData.users);
+    setTextIfNotHovering('workers', poolData.workers);
+    setTextIfNotHovering('connections', poolData.connections);
+    setTextIfNotHovering('hashrate_5m', poolData.hashrate_5m, formatHashrate);
+    setTextIfNotHovering('sps_5m', poolData.sps_5m, fmt2t);
+    setTextIfNotHovering('uptime_secs', poolData.uptime_secs);
+    setTextIfNotHovering('blocks', poolData.blocks);
+    setTextIfNotHovering('accepted', poolData.accepted);
+    setTextIfNotHovering('rejected', poolData.rejected);
+    setTextIfNotHovering('last_share', poolData.last_share);
+    setTextIfNotHovering('btc_height', bitcoinData.height);
+    setTextIfNotHovering('network_difficulty', network_difficulty);
+    setTextIfNotHovering('cpu_usage_percent', systemData.cpu_usage_percent, fmt2t);
+    setTextIfNotHovering('memory_usage_percent', systemData.memory_usage_percent, fmt2t);
+    setTextIfNotHovering('disk_usage_percent', systemData.disk_usage_percent, fmt2t);
+    setTextIfNotHovering('uptime', systemData.uptime);
+    setTextIfNotHovering('best_ever', best_ever);
 
     const nel = document.getElementById('network_difficulty');
-    nel.dataset.full = String(bitcoinData.network_difficulty);
-    nel.dataset.formatted = network_difficulty;
+    if (nel) {
+      nel.dataset.full = String(bitcoinData.network_difficulty);
+      nel.dataset.formatted = network_difficulty;
+    }
 
     const bel = document.getElementById('best_ever');
-    bel.dataset.full = String(poolData.best_ever);
-    bel.dataset.formatted = best_ever;
+    if (bel) {
+      bel.dataset.full = String(poolData.best_ever);
+      bel.dataset.formatted = best_ever;
+    }
   } catch (e) { console.error('refresh error:', e); }
 }
 startPolling(refresh);

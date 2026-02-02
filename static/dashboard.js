@@ -109,6 +109,14 @@ function fmt2t(n) {
   return truncated.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
 }
 
+function setTextIfNotHovering(id, value, formatter = v => v) {
+  const el = document.getElementById(id);
+  if (el && !el.matches(':hover')) {
+    el.textContent = value != null ? formatter(value) : '-';
+  }
+  return el;
+}
+
 function setupCopyOnClick(id) {
   const el = document.getElementById(id);
   if (!el) return;
@@ -120,7 +128,7 @@ function setupCopyOnClick(id) {
       const prev = this.textContent;
       this.textContent = 'Copied!';
       setTimeout(() => { this.textContent = this.dataset.formatted || prev; }, 1000);
-    } catch (e) {}
+    } catch (e) { console.error('Copy failed:', e); }
   });
 }
 

@@ -56,10 +56,6 @@
 <div id=logs style="display:none"></div>
 
 <script>
-function fmt2(n) {
-  return n != null ? n.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '-';
-}
-
 async function refresh() {
   try {
     const [proxyData, systemData, bitcoinData] = await Promise.all([
@@ -67,6 +63,7 @@ async function refresh() {
       fetch('/api/system/status').then(r => r.json()).catch(() => ({})),
       fetch('/api/bitcoin/status').then(r => r.json()).catch(() => ({}))
     ]);
+
     const u = proxyData.upstream_username;
     const upstream_username = u?.length > 15 ? u.slice(0,6) + '...' + u.slice(-6) : u;
     const forwarded = (proxyData.upstream_accepted || 0) + (proxyData.upstream_rejected || 0);
@@ -74,44 +71,63 @@ async function refresh() {
     const forward_ratio = total > 0 ? fmt2t((forwarded / total) * 100) + '%' : '-';
     const upstream_difficulty = formatDifficulty(proxyData.upstream_difficulty);
     const network_difficulty = formatDifficulty(bitcoinData.network_difficulty);
-    const btc_height = bitcoinData.height;
     const best_ever = formatDifficulty(proxyData.best_ever);
-    const hashrate_5m = formatHashrate(proxyData.hashrate_5m);
-    const sps_5m = fmt2t(proxyData.sps_5m);
-    const merged = {...proxyData, ...systemData, ...bitcoinData, upstream_status: proxyData.upstream_connected ? 'Connected' : 'Disconnected', upstream_username, upstream_difficulty, network_difficulty, btc_height, best_ever, forward_ratio};
 
-    Object.keys(merged).forEach(key => {
-      const el = document.getElementById(key);
-      if (el && !el.matches(':hover')) {
-        const val = merged[key];
-        if (key === 'cpu_usage_percent' || key === 'memory_usage_percent' || key === 'disk_usage_percent') {
-          el.textContent = fmt2t(val);
-        } else if (key !== 'sps_5m' && key !== 'hashrate_5m') {
-          el.textContent = val != null ? val.toLocaleString() : '-';
-        }
-      }
-    });
+    setTextIfNotHovering('upstream_endpoint', proxyData.upstream_endpoint);
+    setTextIfNotHovering('upstream_status', proxyData.upstream_connected ? 'Connected' : 'Disconnected');
+    setTextIfNotHovering('upstream_username', upstream_username);
+    setTextIfNotHovering('upstream_difficulty', upstream_difficulty);
+    setTextIfNotHovering('upstream_enonce1', proxyData.upstream_enonce1);
+    setTextIfNotHovering('upstream_enonce2_size', proxyData.upstream_enonce2_size);
+    setTextIfNotHovering('upstream_version_mask', proxyData.upstream_version_mask);
+    setTextIfNotHovering('upstream_accepted', proxyData.upstream_accepted);
+    setTextIfNotHovering('upstream_rejected', proxyData.upstream_rejected);
+    setTextIfNotHovering('upstream_filtered', proxyData.upstream_filtered);
+    setTextIfNotHovering('forward_ratio', forward_ratio);
+    setTextIfNotHovering('endpoint', proxyData.endpoint);
+    setTextIfNotHovering('users', proxyData.users);
+    setTextIfNotHovering('workers', proxyData.workers);
+    setTextIfNotHovering('connections', proxyData.connections);
+    setTextIfNotHovering('hashrate_5m', proxyData.hashrate_5m, formatHashrate);
+    setTextIfNotHovering('sps_5m', proxyData.sps_5m, fmt2t);
+    setTextIfNotHovering('uptime_secs', proxyData.uptime_secs);
+    setTextIfNotHovering('accepted', proxyData.accepted);
+    setTextIfNotHovering('rejected', proxyData.rejected);
+    setTextIfNotHovering('last_share', proxyData.last_share);
+    setTextIfNotHovering('btc_height', bitcoinData.height);
+    setTextIfNotHovering('network_difficulty', network_difficulty);
+    setTextIfNotHovering('cpu_usage_percent', systemData.cpu_usage_percent, fmt2t);
+    setTextIfNotHovering('memory_usage_percent', systemData.memory_usage_percent, fmt2t);
+    setTextIfNotHovering('disk_usage_percent', systemData.disk_usage_percent, fmt2t);
+    setTextIfNotHovering('uptime', systemData.uptime);
+    setTextIfNotHovering('best_ever', best_ever);
 
-    document.getElementById('hashrate_5m').textContent = hashrate_5m;
-    document.getElementById('sps_5m').textContent = sps_5m;
-
-    document.getElementById('upstream_status').className = proxyData.upstream_connected ? 'connected' : 'disconnected';
+    const statusEl = document.getElementById('upstream_status');
+    if (statusEl) statusEl.className = proxyData.upstream_connected ? 'connected' : 'disconnected';
 
     const uel = document.getElementById('upstream_username');
-    uel.dataset.full = u;
-    uel.dataset.formatted = upstream_username;
+    if (uel) {
+      uel.dataset.full = u;
+      uel.dataset.formatted = upstream_username;
+    }
 
     const del = document.getElementById('upstream_difficulty');
-    del.dataset.full = String(proxyData.upstream_difficulty);
-    del.dataset.formatted = upstream_difficulty;
+    if (del) {
+      del.dataset.full = String(proxyData.upstream_difficulty);
+      del.dataset.formatted = upstream_difficulty;
+    }
 
     const nel = document.getElementById('network_difficulty');
-    nel.dataset.full = String(bitcoinData.network_difficulty);
-    nel.dataset.formatted = network_difficulty;
+    if (nel) {
+      nel.dataset.full = String(bitcoinData.network_difficulty);
+      nel.dataset.formatted = network_difficulty;
+    }
 
     const bel = document.getElementById('best_ever');
-    bel.dataset.full = String(proxyData.best_ever);
-    bel.dataset.formatted = best_ever;
+    if (bel) {
+      bel.dataset.full = String(proxyData.best_ever);
+      bel.dataset.formatted = best_ever;
+    }
   } catch (e) { console.error('refresh error:', e); }
 }
 startPolling(refresh);
