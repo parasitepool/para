@@ -152,9 +152,27 @@ function setupHoverExpand(id) {
   });
 }
 
-function setupCopyable(id) {
-  setupCopyOnClick(id);
-  setupHoverExpand(id);
+function initCopyables() {
+  document.querySelectorAll('.copyable').forEach(el => {
+    el.addEventListener('click', async () => {
+      const full = el.dataset.full;
+      if (!full || full === 'undefined') return;
+      try {
+        await navigator.clipboard.writeText(full);
+        const prev = el.textContent;
+        el.textContent = 'Copied!';
+        setTimeout(() => { el.textContent = el.dataset.formatted || prev; }, 1000);
+      } catch (e) { console.error('Copy failed:', e); }
+    });
+
+    el.addEventListener('mouseenter', () => {
+      if (el.dataset.full) el.textContent = el.dataset.full;
+    });
+
+    el.addEventListener('mouseleave', () => {
+      if (el.dataset.formatted) el.textContent = el.dataset.formatted;
+    });
+  });
 }
 
 function setupLogToggle() {
