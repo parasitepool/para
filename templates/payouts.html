@@ -16,7 +16,7 @@
     <div>
         %% if !self.pending.is_empty() {
         <h3>Pending Payments</h3>
-        <div style="overflow: auto; max-height: 500px;">
+        <div style="overflow: auto; max-height: 500px; max-width: 80%">
             <table border="1" cellpadding="5" cellspacing="0" style="width: 100%;">
                 <tr>
                     <th>Lightning Address</th>
@@ -24,7 +24,7 @@
                 </tr>
                 %% for payout in &self.pending {
                 <tr>
-                    <td>{{ payout.ln_address }}</td>
+                    <td style="max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ payout.ln_address }}</td>
                     <td>{{ crate::subcommand::server::templates::payouts::format_sats(payout.amount_sats) }}</td>
                 </tr>
                 %% }
@@ -33,7 +33,7 @@
         %% }
         %% if !self.failed.is_empty() {
         <h3>Failed Payments</h3>
-        <div style="overflow: auto; max-height: 500px;">
+        <div style="overflow: auto; max-height: 500px; max-width: 80%">
             <table border="1" cellpadding="5" cellspacing="0" style="width: 100%;">
                 <tr>
                     <th>Bitcoin Address</th>
@@ -41,7 +41,7 @@
                 </tr>
                 %% for payout in &self.failed {
                 <tr>
-                    <td>{{ payout.btc_address }}</td>
+                    <td style="max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ payout.btc_address }}</td>
                     <td>{{ crate::subcommand::server::templates::payouts::format_sats(payout.amount_sats) }}</td>
                 </tr>
                 %% }

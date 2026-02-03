@@ -1,9 +1,7 @@
 use {
     super::*,
     crate::subcommand::server::{
-        database::{
-            FailedPayout, Payout, PendingPayout, SimulatedPayout, Split, UpdatePayoutStatusRequest,
-        },
+        database::{FailedPayout, Payout, PendingPayout, Split, UpdatePayoutStatusRequest},
         templates::simulate_payouts::SimulatePayoutsHtml,
     },
 };
@@ -93,7 +91,7 @@ pub(crate) async fn payouts_failed(
         ("format" = Option<String>, Query, description = "Response format: 'json', 'csv', or HTML (default)")
     ),
     responses(
-        (status = 200, description = "Simulated payouts", body = Vec<SimulatedPayout>),
+        (status = 200, description = "Simulated payouts", body = Vec<PendingPayout>),
     ),
     tag = "payouts"
 )]
@@ -119,12 +117,11 @@ pub(crate) async fn payouts_simulate(
     match format {
         "json" => Ok(Json(&payouts).into_response()),
         "csv" => {
-            let mut csv =
-                String::from("lightning_address,bitcoin_address,amount_sats,percentage\n");
+            let mut csv = String::from("lightning_address,bitcoin_address,amount_sats\n");
             for payout in &payouts {
                 csv.push_str(&format!(
-                    "{},{},{},{}\n",
-                    payout.ln_address, payout.btc_address, payout.amount_sats, payout.percentage
+                    "{},{},{}\n",
+                    payout.ln_address, payout.btc_address, payout.amount_sats
                 ));
             }
             Ok(([(CONTENT_TYPE, "text/csv; charset=utf-8")], csv).into_response())
