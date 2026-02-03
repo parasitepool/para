@@ -1,9 +1,10 @@
 use {
     super::*,
-    std::collections::VecDeque,
     stratum::{Client, ClientError, Event, EventReceiver},
     tokio::sync::RwLock,
 };
+
+const PING_MEASUREMENT_COUNT: usize = 10;
 
 pub(crate) struct UpstreamSubmit {
     pub(crate) job_id: JobId,
@@ -25,7 +26,7 @@ pub(crate) struct Upstream {
     rejected: Arc<AtomicU64>,
     filtered: Arc<AtomicU64>,
     version_mask: Option<Version>,
-    ping_measurement: Arc<Mutex<VecDeque<f64>>>,
+    ping_measurements: Arc<Mutex<VecDeque<Duration>>>,
 }
 
 impl Upstream {
@@ -54,7 +55,7 @@ impl Upstream {
             .await
             .context("failed to connect to upstream")?;
 
-        let mut ping_measurement = VecDeque::with_capacity(10);
+        let mut ping_measurements = VecDeque::with_capacity(PING_MEASUREMENT_COUNT);
 
         let version_mask = match client
             .configure(
@@ -64,7 +65,7 @@ impl Upstream {
             .await
         {
             Ok((response, duration, _)) => {
-                ping_measurement.push_back(duration.as_secs_f64() * 1000.0);
+                ping_measurements.push_back(duration);
                 if response.version_rolling {
                     if let Some(mask) = response.version_rolling_mask {
                         info!("Upstream supports version rolling: mask={mask}",);
@@ -85,7 +86,7 @@ impl Upstream {
             .subscribe()
             .await
             .context("failed to subscribe to upstream")?;
-        ping_measurement.push_back(duration.as_secs_f64() * 1000.0);
+        ping_measurements.push_back(duration);
 
         info!(
             "Subscribed to upstream: enonce1={}, enonce2_size={}",
@@ -104,7 +105,7 @@ impl Upstream {
                 rejected: Arc::new(AtomicU64::new(0)),
                 filtered: Arc::new(AtomicU64::new(0)),
                 version_mask,
-                ping_measurement: Arc::new(Mutex::new(ping_measurement)),
+                ping_measurements: Arc::new(Mutex::new(ping_measurements)),
             },
             events,
         ))
@@ -116,18 +117,13 @@ impl Upstream {
         cancel: CancellationToken,
         tasks: &mut JoinSet<()>,
     ) -> Result<watch::Receiver<Arc<Notify>>> {
-        let (authorize_duration, _) = self
+        let (duration, _) = self
             .client
             .authorize()
             .await
             .context("failed to authorize with upstream")?;
 
-        let mut ping_measurement = self.ping_measurement.lock().await;
-        ping_measurement.push_back(authorize_duration.as_secs_f64() * 1000.0);
-        while ping_measurement.len() > 10 {
-            ping_measurement.pop_front();
-        }
-        drop(ping_measurement);
+        self.record_ping(duration).await;
 
         info!(
             "Authorized to upstream {} with {}",
@@ -236,7 +232,7 @@ impl Upstream {
         let client = self.client.clone();
         let accepted = self.accepted.clone();
         let rejected = self.rejected.clone();
-        let ping_measurement = self.ping_measurement.clone();
+        let upstream = self.clone();
 
         tokio::spawn(async move {
             let start = Instant::now();
@@ -252,12 +248,7 @@ impl Upstream {
             {
                 Ok(_) => {
                     let duration = start.elapsed();
-                    let mut pings = ping_measurement.lock().await;
-                    pings.push_back(duration.as_secs_f64() * 1000.0);
-                    while pings.len() > 10 {
-                        pings.pop_front();
-                    }
-                    drop(pings);
+                    upstream.record_ping(duration).await;
                     accepted.fetch_add(1, Ordering::Relaxed);
                     info!("Upstream accepted share");
                 }
@@ -316,12 +307,21 @@ impl Upstream {
         self.version_mask
     }
 
+    async fn record_ping(&self, duration: Duration) {
+        let mut pings = self.ping_measurements.lock().await;
+        pings.push_back(duration);
+        if pings.len() > PING_MEASUREMENT_COUNT {
+            pings.pop_front();
+        }
+    }
+
     pub(crate) async fn ping_ms(&self) -> f64 {
-        let pings = self.ping_measurement.lock().await;
+        let pings = self.ping_measurements.lock().await;
         if pings.is_empty() {
             0.0
         } else {
-            pings.iter().sum::<f64>() / pings.len() as f64
+            let total_ms: f64 = pings.iter().map(|d| d.as_secs_f64() * 1000.0).sum();
+            total_ms / pings.len() as f64
         }
     }
 }
