@@ -8,6 +8,12 @@ pub struct HighestDiff {
 }
 
 #[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone, PartialEq, ToSchema)]
+pub struct TeraShare {
+    pub username: String,
+    pub tera_shares: i64,
+}
+
+#[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone, PartialEq, ToSchema)]
 pub(crate) struct Split {
     pub(crate) worker_name: String,
     pub(crate) worker_total: i64,
@@ -503,6 +509,32 @@ impl Database {
             ",
         )
         .bind(blockheight)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))
+    }
+
+    pub async fn get_tera_shares(
+        &self,
+        min_blockheight: Option<i32>,
+        max_blockheight: Option<i32>,
+        min_diff: i64,
+    ) -> Result<Vec<TeraShare>> {
+        sqlx::query_as::<_, TeraShare>(
+            "
+            SELECT rs.username,
+                   COUNT(rs.sdiff) as tera_shares
+            FROM remote_shares rs
+            WHERE rs.sdiff >= $3
+              AND ($1::INTEGER IS NULL OR rs.blockheight >= $1)
+              AND ($2::INTEGER IS NULL OR rs.blockheight < $2)
+            GROUP BY rs.username
+            ORDER BY tera_shares DESC
+            ",
+        )
+        .bind(min_blockheight)
+        .bind(max_blockheight)
+        .bind(min_diff)
         .fetch_all(&self.pool)
         .await
         .map_err(|err| anyhow!(err))
