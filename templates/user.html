@@ -1,0 +1,77 @@
+<div class="grid grid-stack">
+  <div class="column column-full">
+    <h2>Info</h2>
+    <div class=row><span>Address</span><span id=address class=copyable></span></div>
+    <div class=row><span>Workers</span><span id=workers_count></span></div>
+    <div class=row><span>Hashrate (5m)</span><span id=hashrate_5m></span></div>
+    <div class=row><span>SPS (5m)</span><span id=sps_5m></span></div>
+    <div class=row><span>Authorized</span><span id=authorized></span></div>
+    <h3>Shares</h3>
+    <div class=row><span>Accepted</span><span id=accepted></span></div>
+    <div class=row><span>Rejected</span><span id=rejected></span></div>
+    <div class=row><span>Best</span><span id=best_ever class=copyable></span></div>
+    <div class=row><span>Last</span><span><span id=last_share></span>s ago</span></div>
+  </div>
+
+  <div class="column column-full">
+    <h2>Workers</h2>
+    <table id=workers-table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Hashrate</th>
+          <th>SPS</th>
+          <th>Best</th>
+          <th>Last</th>
+        </tr>
+      </thead>
+      <tbody id=workers-list></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const apiBase = '{{ self.api_base }}';
+const userAddress = window.location.pathname.split('/').pop();
+
+async function refresh() {
+  try {
+    const user = await fetch(`${apiBase}/user/${userAddress}`).then(r => r.json()).catch(() => null);
+
+    if (!user) {
+      document.querySelector('.grid').innerHTML = '<div class="column column-full"><h2>User Not Found</h2></div>';
+      return;
+    }
+
+    const addr = user.address;
+    const shortAddr = addr.length > 20 ? addr.slice(0,8) + '...' + addr.slice(-8) : addr;
+    const best_ever = formatDifficulty(user.best_ever);
+
+    copyable('address', shortAddr, addr);
+    set('workers_count', user.workers.length);
+    set('hashrate_5m', user.hashrate_5m, formatHashrate);
+    set('sps_5m', user.sps_5m, formatTruncated);
+    set('authorized', new Date(user.authorized * 1000).toLocaleString());
+    set('accepted', user.accepted);
+    set('rejected', user.rejected);
+    set('last_share', user.last_share);
+    copyable('best_ever', best_ever, user.best_ever);
+
+    const container = document.getElementById('workers-list');
+    const workers = user.workers.sort((a, b) => b.hashrate_5m - a.hashrate_5m);
+    container.innerHTML = workers.map(w => {
+      const lastShare = w.last_share != null ? `${w.last_share}s ago` : '-';
+      const bestShare = formatDifficulty(w.best_ever);
+      return `<tr>
+        <td>${w.name || '(default)'}</td>
+        <td>${formatHashrate(w.hashrate_5m)}</td>
+        <td>${formatTruncated(w.sps_5m)}</td>
+        <td>${bestShare || '-'}</td>
+        <td>${lastShare}</td>
+      </tr>`;
+    }).join('');
+  } catch (e) { console.error('refresh error:', e); }
+}
+startPolling(refresh);
+initCopyables();
+</script>

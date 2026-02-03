@@ -44,6 +44,30 @@ impl DashboardContent for ProxyHtml {
     }
 }
 
+#[derive(Boilerplate)]
+pub(crate) struct UsersHtml {
+    pub(crate) title: &'static str,
+    pub(crate) api_base: &'static str,
+}
+
+impl DashboardContent for UsersHtml {
+    fn title(&self) -> &'static str {
+        self.title
+    }
+}
+
+#[derive(Boilerplate)]
+pub(crate) struct UserHtml {
+    pub(crate) title: &'static str,
+    pub(crate) api_base: &'static str,
+}
+
+impl DashboardContent for UserHtml {
+    fn title(&self) -> &'static str {
+        self.title
+    }
+}
+
 #[cfg(feature = "reload")]
 pub(crate) struct ReloadedContent {
     pub(crate) html: String,
