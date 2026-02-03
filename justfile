@@ -112,7 +112,7 @@ proxy-mainnet:
 miner-mainnet stratum_endpoint='127.0.0.1:42069': 
   cargo run --release -- miner \
     {{stratum_endpoint}} \
-    --username bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg6dzw5nk24r45dzasde25r3.tick \
+    --username bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg6dzw5nk24r45dzasde25r3.www \
     --password x \
     --cpu-cores 2 \
     --throttle 500K
