@@ -283,7 +283,7 @@ impl Client {
         ntime: Ntime,
         nonce: Nonce,
         version_bits: Option<Version>,
-    ) -> Result<Submit> {
+    ) -> Result<Duration> {
         self.submit_with_username(
             self.config.username.clone(),
             job_id,
@@ -303,7 +303,7 @@ impl Client {
         ntime: Ntime,
         nonce: Nonce,
         version_bits: Option<Version>,
-    ) -> Result<Submit> {
+    ) -> Result<Duration> {
         let submit = Submit {
             username,
             job_id,
@@ -320,14 +320,14 @@ impl Client {
             )
             .await?;
 
-        let (message, _, _) = self.await_response(rx, instant).await?;
+        let (message, _, duration) = self.await_response(rx, instant).await?;
         let result = self.handle_response(message, "mining.submit")?;
 
         if !serde_json::from_value::<bool>(result).context(error::SerializationSnafu)? {
             return Err(ClientError::SubmitFalse);
         }
 
-        Ok(submit)
+        Ok(duration)
     }
 }
 

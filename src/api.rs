@@ -1,13 +1,10 @@
 use {
     super::*,
-    axum::{
-        Extension,
-        extract::{Path, State},
-    },
-    boilerplate::Boilerplate,
+    axum::extract::{Path, State},
     http_server::{
         self,
         error::{OptionExt, ServerResult},
+        templates::{DashboardHtml, PoolHtml, ProxyHtml},
     },
 };
 
@@ -69,13 +66,15 @@ pub struct ProxyStatus {
     pub uptime_secs: u64,
     pub upstream_endpoint: String,
     pub upstream_connected: bool,
-    pub upstream_difficulty: f64,
+    pub upstream_ping: f64,
+    pub upstream_difficulty: Difficulty,
     pub upstream_username: Username,
     pub upstream_enonce1: Extranonce,
     pub upstream_enonce2_size: usize,
     pub upstream_version_mask: Option<Version>,
     pub upstream_accepted: u64,
     pub upstream_rejected: u64,
+    pub upstream_filtered: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -32,6 +32,7 @@ use {
         {Auth, Client},
     },
     block_template::BlockTemplate,
+    boilerplate::{Boilerplate, Trusted},
     chain::Chain,
     clap::Parser,
     coinbase_builder::CoinbaseBuilder,
@@ -60,7 +61,6 @@ use {
     serde::{
         Deserialize, Serialize,
         de::{self, Deserializer},
-        ser::Serializer,
     },
     serde_json::json,
     serde_with::{DeserializeFromStr, SerializeDisplay},
@@ -205,7 +205,7 @@ pub fn main() {
                 .with_writer(writer)
                 .with_filter(EnvFilter::from_default_env()),
         )
-        .with(logstream::LogStreamLayer.with_filter(tracing_subscriber::filter::LevelFilter::INFO))
+        .with(logstream::LogStreamLayer.with_filter(EnvFilter::from_default_env()))
         .init();
 
     let args = Arguments::parse();

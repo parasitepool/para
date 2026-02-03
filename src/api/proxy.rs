@@ -1,6 +1,6 @@
 use super::*;
 
-pub(crate) fn router(metrics: Arc<Metrics>, bitcoin_client: Arc<Client>) -> Router {
+pub(crate) fn router(metrics: Arc<Metrics>, bitcoin_client: Arc<Client>, chain: Chain) -> Router {
     Router::new()
         .route("/", get(home))
         .route("/api/proxy/status", get(status))
@@ -12,22 +12,34 @@ pub(crate) fn router(metrics: Arc<Metrics>, bitcoin_client: Arc<Client>) -> Rout
         .route("/static/{*path}", get(http_server::static_assets))
         .with_state(metrics)
         .layer(Extension(bitcoin_client))
+        .layer(Extension(chain))
 }
 
-#[derive(Boilerplate)]
-struct ProxyHtml;
-
-async fn home() -> Response {
-    let html = ProxyHtml;
-
+async fn home(Extension(chain): Extension<Chain>) -> Response {
     #[cfg(feature = "reload")]
-    let body = match html.reload_from_path() {
-        Ok(reloaded) => reloaded.to_string(),
-        Err(_) => html.to_string(),
+    let body = {
+        use http_server::templates::ReloadedContent;
+
+        let content = ProxyHtml
+            .reload_from_path()
+            .map(|r| r.to_string())
+            .unwrap_or_else(|_| ProxyHtml.to_string());
+
+        let html = DashboardHtml::new(
+            ReloadedContent {
+                html: content,
+                title: "Proxy",
+            },
+            chain,
+        );
+
+        html.reload_from_path()
+            .map(|r| r.to_string())
+            .unwrap_or_else(|_| html.to_string())
     };
 
     #[cfg(not(feature = "reload"))]
-    let body = html.to_string();
+    let body = DashboardHtml::new(ProxyHtml, chain).to_string();
 
     ([(CONTENT_TYPE, "text/html;charset=utf-8")], body).into_response()
 }
@@ -61,14 +73,16 @@ async fn status(State(metrics): State<Arc<Metrics>>) -> Json<ProxyStatus> {
         total_work: metrics.metatron.total_work(),
         uptime_secs: metrics.metatron.uptime().as_secs(),
         upstream_endpoint: metrics.upstream.endpoint().to_string(),
-        upstream_difficulty: metrics.upstream.difficulty().await.as_f64(),
-        upstream_username: metrics.upstream.username().clone(),
         upstream_connected: metrics.upstream.is_connected(),
+        upstream_ping: metrics.upstream.ping_ms().await,
+        upstream_difficulty: metrics.upstream.difficulty().await,
+        upstream_username: metrics.upstream.username().clone(),
         upstream_enonce1: metrics.upstream.enonce1().clone(),
         upstream_enonce2_size: metrics.upstream.enonce2_size(),
         upstream_version_mask: metrics.upstream.version_mask(),
         upstream_accepted: metrics.upstream.accepted(),
         upstream_rejected: metrics.upstream.rejected(),
+        upstream_filtered: metrics.upstream.filtered(),
     })
 }
 

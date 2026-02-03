@@ -15,8 +15,8 @@ pub(crate) struct Settings {
     upstream_password: Option<String>,
     timeout: Duration,
     bitcoin_data_dir: Option<PathBuf>,
-    bitcoin_rpc_cookie_file: Option<PathBuf>,
     bitcoin_rpc_port: u16,
+    bitcoin_rpc_cookie_file: Option<PathBuf>,
     bitcoin_rpc_username: Option<String>,
     bitcoin_rpc_password: Option<String>,
     chain: Chain,
@@ -50,8 +50,8 @@ impl Default for Settings {
             upstream_password: None,
             timeout: Duration::from_secs(30),
             bitcoin_data_dir: None,
-            bitcoin_rpc_cookie_file: None,
             bitcoin_rpc_port: Chain::Mainnet.default_rpc_port(),
+            bitcoin_rpc_cookie_file: None,
             bitcoin_rpc_username: None,
             bitcoin_rpc_password: None,
             chain: Chain::Mainnet,
@@ -64,7 +64,7 @@ impl Default for Settings {
             start_diff: Difficulty::from(1.0),
             min_diff: None,
             max_diff: None,
-            vardiff_period: Duration::from_secs(5),
+            vardiff_period: Duration::from_secs_f64(3.33),
             vardiff_window: Duration::from_secs(300),
             zmq_block_notifications: "tcp://127.0.0.1:28332".parse().unwrap(),
             enonce1_size: ENONCE1_SIZE,
@@ -89,10 +89,10 @@ impl Settings {
             upstream_password: None,
             timeout: Duration::from_secs(30),
             bitcoin_data_dir: options.bitcoin_data_dir,
-            bitcoin_rpc_cookie_file: options.bitcoin_rpc_cookie_file,
             bitcoin_rpc_port: options
                 .bitcoin_rpc_port
                 .unwrap_or_else(|| chain.default_rpc_port()),
+            bitcoin_rpc_cookie_file: options.bitcoin_rpc_cookie_file,
             bitcoin_rpc_username: options.bitcoin_rpc_username,
             bitcoin_rpc_password: options.bitcoin_rpc_password,
             chain,
@@ -109,7 +109,7 @@ impl Settings {
             start_diff: options.start_diff.unwrap_or_else(|| Difficulty::from(1.0)),
             min_diff: options.min_diff,
             max_diff: options.max_diff,
-            vardiff_period: Duration::from_secs_f64(options.vardiff_period.unwrap_or(5.0)),
+            vardiff_period: Duration::from_secs_f64(options.vardiff_period.unwrap_or(3.33)),
             vardiff_window: Duration::from_secs_f64(options.vardiff_window.unwrap_or(300.0)),
             zmq_block_notifications: options
                 .zmq_block_notifications
@@ -137,17 +137,23 @@ impl Settings {
             upstream_password: options.password,
             timeout: Duration::from_secs(options.timeout.unwrap_or(30)),
             bitcoin_data_dir: options.bitcoin_data_dir,
-            bitcoin_rpc_cookie_file: options.bitcoin_rpc_cookie_file,
             bitcoin_rpc_port: options
                 .bitcoin_rpc_port
                 .unwrap_or_else(|| chain.default_rpc_port()),
+            bitcoin_rpc_cookie_file: options.bitcoin_rpc_cookie_file,
             bitcoin_rpc_username: options.bitcoin_rpc_username,
             bitcoin_rpc_password: options.bitcoin_rpc_password,
             chain,
+            acme_domains: options.acme_domain,
+            acme_contacts: options.acme_contact,
+            acme_cache: options
+                .acme_cache
+                .unwrap_or_else(|| PathBuf::from("acme-cache")),
+            data_dir: options.data_dir,
             start_diff: options.start_diff.unwrap_or_else(|| Difficulty::from(1.0)),
             min_diff: options.min_diff,
             max_diff: options.max_diff,
-            vardiff_period: Duration::from_secs_f64(options.vardiff_period.unwrap_or(5.0)),
+            vardiff_period: Duration::from_secs_f64(options.vardiff_period.unwrap_or(3.33)),
             vardiff_window: Duration::from_secs_f64(options.vardiff_window.unwrap_or(300.0)),
             ..Default::default()
         };
@@ -637,7 +643,7 @@ mod tests {
 
         let options = parse_pool_options("para pool");
         let settings = Settings::from_pool_options(options).unwrap();
-        assert_eq!(settings.vardiff_period, Duration::from_secs(5));
+        assert_eq!(settings.vardiff_period, Duration::from_secs_f64(3.33));
     }
 
     #[test]
@@ -780,18 +786,67 @@ mod tests {
     }
 
     #[test]
+    fn acme_options() {
+        #[track_caller]
+        fn case(pool_args: &str, proxy_args: &str, check: impl Fn(&Settings)) {
+            let pool = Settings::from_pool_options(parse_pool_options(pool_args)).unwrap();
+            let proxy = Settings::from_proxy_options(parse_proxy_options(proxy_args)).unwrap();
+            check(&pool);
+            check(&proxy);
+        }
+
+        case(
+            "para pool",
+            "para proxy --upstream foo:1234 --username bar",
+            |s| {
+                assert!(s.acme_domains.is_empty());
+                assert!(s.acme_contacts.is_empty());
+                assert_eq!(s.acme_cache, PathBuf::from("acme-cache"));
+            },
+        );
+
+        case(
+            "para pool --acme-domain foo.bar --acme-domain baz.qux",
+            "para proxy --upstream foo:1234 --username bar --acme-domain foo.bar --acme-domain baz.qux",
+            |s| {
+                assert_eq!(s.acme_domains, vec!["foo.bar", "baz.qux"]);
+            },
+        );
+
+        case(
+            "para pool --acme-contact foo@bar --acme-contact baz@qux",
+            "para proxy --upstream foo:1234 --username bar --acme-contact foo@bar --acme-contact baz@qux",
+            |s| {
+                assert_eq!(s.acme_contacts, vec!["foo@bar", "baz@qux"]);
+            },
+        );
+
+        case(
+            "para pool --acme-cache /foo/bar",
+            "para proxy --upstream foo:1234 --username bar --acme-cache /foo/bar",
+            |s| {
+                assert_eq!(s.acme_cache, PathBuf::from("/foo/bar"));
+            },
+        );
+
+        case(
+            "para pool --data-dir /foo",
+            "para proxy --upstream foo:1234 --username bar --data-dir /foo",
+            |s| {
+                assert_eq!(s.acme_cache_path(), PathBuf::from("/foo/acme-cache"));
+            },
+        );
+    }
+
+    #[test]
     fn proxy_defaults_are_sane() {
-        let options =
-            parse_proxy_options("para proxy --upstream pool.example.com:3333 --username bc1qtest");
+        let options = parse_proxy_options("para proxy --upstream foo:1234 --username bar");
         let settings = Settings::from_proxy_options(options).unwrap();
 
-        assert_eq!(
-            settings.upstream_endpoint,
-            Some("pool.example.com:3333".into())
-        );
+        assert_eq!(settings.upstream_endpoint, Some("foo:1234".into()));
         assert_eq!(
             settings.upstream_username.as_ref().map(|u| u.to_string()),
-            Some("bc1qtest".into())
+            Some("bar".into())
         );
         assert_eq!(settings.upstream_password, None);
         assert_eq!(settings.address, "0.0.0.0");
@@ -803,7 +858,7 @@ mod tests {
     #[test]
     fn proxy_override_address_and_port() {
         let options = parse_proxy_options(
-            "para proxy --upstream pool.example.com:3333 --username bc1qtest --address 127.0.0.1 --port 9999",
+            "para proxy --upstream foo:1234 --username bar --address 127.0.0.1 --port 9999",
         );
         let settings = Settings::from_proxy_options(options).unwrap();
 
@@ -813,9 +868,8 @@ mod tests {
 
     #[test]
     fn proxy_override_http_port() {
-        let options = parse_proxy_options(
-            "para proxy --upstream pool.example.com:3333 --username bc1qtest --http-port 8080",
-        );
+        let options =
+            parse_proxy_options("para proxy --upstream foo:1234 --username bar --http-port 8080");
         let settings = Settings::from_proxy_options(options).unwrap();
 
         assert_eq!(settings.http_port, Some(8080));
@@ -823,9 +877,8 @@ mod tests {
 
     #[test]
     fn proxy_override_timeout() {
-        let options = parse_proxy_options(
-            "para proxy --upstream pool.example.com:3333 --username bc1qtest --timeout 60",
-        );
+        let options =
+            parse_proxy_options("para proxy --upstream foo:1234 --username bar --timeout 60");
         let settings = Settings::from_proxy_options(options).unwrap();
 
         assert_eq!(settings.timeout, Duration::from_secs(60));
@@ -833,24 +886,21 @@ mod tests {
 
     #[test]
     fn proxy_password_override() {
-        let options = parse_proxy_options(
-            "para proxy --upstream pool.example.com:3333 --username bc1qtest --password secret",
-        );
+        let options =
+            parse_proxy_options("para proxy --upstream foo:1234 --username bar --password baz");
         let settings = Settings::from_proxy_options(options).unwrap();
 
-        assert_eq!(settings.upstream_password, Some("secret".to_string()));
+        assert_eq!(settings.upstream_password, Some("baz".into()));
     }
 
     #[test]
     fn proxy_username_with_worker() {
-        let options = parse_proxy_options(
-            "para proxy --upstream pool.example.com:3333 --username bc1qtest.worker1",
-        );
+        let options = parse_proxy_options("para proxy --upstream foo:1234 --username bar.baz");
         let settings = Settings::from_proxy_options(options).unwrap();
 
         assert_eq!(
             settings.upstream_username.as_ref().map(|u| u.to_string()),
-            Some("bc1qtest.worker1".into())
+            Some("bar.baz".into())
         );
     }
 }

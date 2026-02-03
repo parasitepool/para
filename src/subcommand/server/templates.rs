@@ -3,7 +3,7 @@ use {
     boilerplate::{Boilerplate, Trusted},
 };
 
-pub(crate) mod dashboard;
+pub(crate) mod aggregator_dashboard;
 pub(crate) mod home;
 pub(crate) mod payouts;
 pub(crate) mod simulate_payouts;

@@ -49,7 +49,7 @@ async fn proxy() {
     assert_eq!(status.rejected, 0);
     assert_eq!(status.upstream_accepted, 0);
     assert_eq!(status.upstream_rejected, 0);
-    assert!((status.upstream_difficulty - 0.00001).abs() < 1e-9);
+    assert_eq!(status.upstream_difficulty, Difficulty::from(0.00001));
     assert!(status.best_ever.is_none());
     assert!(status.last_share.is_none());
 

@@ -1,21 +1,64 @@
 body { font: clamp(14px, 1.5vw, 18px)/1.6 monospace; margin: 30px; background: #111; color: #eee; }
 h1 { text-align: center; margin-bottom: 40px; font-size: 1.55em; }
+h1 sup { font-size: 0.5em; vertical-align: super; opacity: 0.7; }
 .logo { display: block; margin: 0 auto 20px; height: 4em; }
-.columns { display: flex; gap: 60px; }
+body > a:last-of-type .logo { margin-top: 640px; }
+.grid { display: flex; flex-wrap: wrap; gap: 60px; justify-content: center; max-width: 1060px; margin: 0 auto; }
+#log-show, #log-controls, #logs { max-width: 1060px; width: 100%; margin: 0 auto; }
+#log-show.hidden, #log-controls.hidden, #logs.hidden { display: none; }
 .column { border: 1px solid #444; padding: 20px 30px; width: 500px; box-sizing: border-box; }
 .column-full { width: 1060px; }
 .column h2 { margin: 0 0 15px; font-size: 1.22em; text-align: center; }
 .column h3 { margin: 15px 0 10px; font-size: 1.11em; color: #888; border-top: 1px solid #444; padding-top: 15px; text-align: center; }
 .row { display: flex; justify-content: space-between; }
+.row a { color: inherit; text-decoration: none; }
+.row a:hover { text-decoration: underline; }
 .connected { color: #4f4; }
 .disconnected { color: #f44; }
-.copyable { cursor: pointer; }
-.copyable:hover { text-decoration: underline; }
+.copyable { cursor: pointer; position: relative; z-index: 10; }
+.copyable:hover { background: #222; border: 1px solid #444; padding: 4px 8px; margin: -5px -9px; z-index: 10; box-shadow: 0 2px 8px rgba(0,0,0,0.8); }
 .wrapper { width: fit-content; margin: 0 auto; }
-#logs {
+#log-show {
+  display: block;
+  margin: 40px auto 0;
+  background: #333;
+  border: 1px solid #444;
+  color: #eee;
+  padding: 8px 16px;
+  cursor: pointer;
+  font: inherit;
+}
+#log-show:hover { background: #444; }
+#log-controls {
   margin-top: 40px;
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+#log-controls input {
+  flex: 1;
+  background: #1a1a1a;
+  border: 1px solid #444;
+  color: #eee;
+  padding: 8px 12px;
+  font: inherit;
+}
+#log-controls input::placeholder { color: #666; }
+#log-controls button {
+  background: #333;
+  border: 1px solid #444;
+  color: #eee;
+  padding: 8px 16px;
+  cursor: pointer;
+  font: inherit;
+}
+#log-controls button:hover { background: #444; }
+#log-controls button.paused { background: #4a3; color: #111; }
+#log-controls + #logs { margin-top: 0; }
+#logs {
   height: 450px;
   overflow-y: auto;
+  overflow-x: auto;
   background: #0a0a0a;
   border: 1px solid #444;
   padding: 10px;
@@ -23,7 +66,7 @@ h1 { text-align: center; margin-bottom: 40px; font-size: 1.55em; }
   box-sizing: border-box;
   scrollbar-color: #444 #1a1a1a;
 }
-#logs div { white-space: pre-wrap; word-break: break-all; }
+#logs div { white-space: pre; }
 #logs::-webkit-scrollbar { width: 8px; }
 #logs::-webkit-scrollbar-track { background: #1a1a1a; }
 #logs::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
@@ -37,9 +80,12 @@ h1 { text-align: center; margin-bottom: 40px; font-size: 1.55em; }
   body { margin: 20px; }
   .wrapper { width: auto; }
   .columns { flex-direction: column; gap: 30px; align-items: center; }
+  .grid { gap: 30px; }
   .column { width: 100%; max-width: 500px; }
   .column-full { width: 100%; max-width: 500px; }
-  #logs { max-width: 500px; margin-left: auto; margin-right: auto; }
+  #log-controls { flex-wrap: wrap; }
+  #log-controls input { width: 100%; flex: none; margin-bottom: 10px; }
+  #log-controls button { flex: 1; }
 }
 @media (max-width: 560px) {
   body { margin: 10px; }

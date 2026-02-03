@@ -11,26 +11,23 @@ pub(crate) struct PoolOptions {
     #[arg(long, help = "Enable HTTP API on <HTTP_PORT>. Disabled if not set.")]
     pub(crate) http_port: Option<u16>,
 
-    #[arg(long, help = "ACME domain for TLS certificate.")]
+    #[arg(long, help = "Request ACME TLS certificate for <ACME_DOMAIN>.")]
     pub(crate) acme_domain: Vec<String>,
 
-    #[arg(long, help = "ACME contact email for TLS certificate.")]
+    #[arg(long, help = "Provide ACME contact <ACME_CONTACT>.")]
     pub(crate) acme_contact: Vec<String>,
 
-    #[arg(long, help = "ACME cache directory.")]
+    #[arg(long, help = "Store ACME cache in <ACME_CACHE>.")]
     pub(crate) acme_cache: Option<PathBuf>,
 
     #[arg(long, help = "Load Bitcoin Core data dir from <BITCOIN_DATA_DIR>.")]
     pub(crate) bitcoin_data_dir: Option<PathBuf>,
 
-    #[arg(
-        long,
-        help = "Authenticate to Bitcoin Core RPC with <BITCOIN_RPC_PASSWORD>."
-    )]
-    pub(crate) bitcoin_rpc_password: Option<String>,
-
     #[arg(long, help = "Connect to Bitcoin Core RPC at <BITCOIN_RPC_PORT>.")]
     pub(crate) bitcoin_rpc_port: Option<u16>,
+
+    #[arg(long, help = "Load Bitcoin Core RPC cookie file from <COOKIE_FILE>.")]
+    pub(crate) bitcoin_rpc_cookie_file: Option<PathBuf>,
 
     #[arg(
         long,
@@ -38,8 +35,11 @@ pub(crate) struct PoolOptions {
     )]
     pub(crate) bitcoin_rpc_username: Option<String>,
 
-    #[arg(long, help = "Load Bitcoin Core RPC cookie file from <COOKIE_FILE>.")]
-    pub(crate) bitcoin_rpc_cookie_file: Option<PathBuf>,
+    #[arg(
+        long,
+        help = "Authenticate to Bitcoin Core RPC with <BITCOIN_RPC_PASSWORD>."
+    )]
+    pub(crate) bitcoin_rpc_password: Option<String>,
 
     #[arg(long, help = "Block template update interval in seconds.")]
     pub(crate) update_interval: Option<u64>,

@@ -1,8 +1,11 @@
 use {
     super::*,
-    axum::extract::{
-        Path,
-        ws::{Message, WebSocketUpgrade},
+    axum::{
+        Extension,
+        extract::{
+            Path,
+            ws::{Message, WebSocketUpgrade},
+        },
     },
     error::{OptionExt, ServerError, ServerResult},
     sysinfo::DiskRefreshKind,
@@ -10,6 +13,7 @@ use {
 
 pub(crate) mod accept_json;
 pub(crate) mod error;
+pub(crate) mod templates;
 
 #[derive(Clone, Debug)]
 pub struct HttpConfig {
@@ -278,18 +282,30 @@ pub(crate) async fn system_status() -> Json<SystemStatus> {
 pub struct BitcoinStatus {
     pub height: u32,
     pub network_difficulty: Difficulty,
+    pub network_hashrate: HashRate,
+    pub mempool_txs: u32,
 }
 
 pub(crate) async fn bitcoin_status(
     Extension(client): Extension<Arc<Client>>,
 ) -> ServerResult<Json<BitcoinStatus>> {
-    let info = client
-        .get_blockchain_info()
+    #[derive(Debug, Deserialize)]
+    struct GetMiningInfoResponse {
+        blocks: u32,
+        difficulty: f64,
+        networkhashps: f64,
+        pooledtx: u32,
+    }
+
+    let info: GetMiningInfoResponse = client
+        .call_raw("getmininginfo", &[])
         .await
         .map_err(|e| ServerError::Internal(e.into()))?;
 
     Ok(Json(BitcoinStatus {
         height: info.blocks,
         network_difficulty: Difficulty::from(info.difficulty),
+        network_hashrate: HashRate(info.networkhashps),
+        mempool_txs: info.pooledtx,
     }))
 }
