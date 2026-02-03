@@ -5,8 +5,6 @@ use {
     tokio::sync::RwLock,
 };
 
-const PING_MEASUREMENT_COUNT: usize = 10;
-
 pub(crate) struct UpstreamSubmit {
     pub(crate) job_id: JobId,
     pub(crate) enonce2: Extranonce,
@@ -56,41 +54,38 @@ impl Upstream {
             .await
             .context("failed to connect to upstream")?;
 
-        let mut ping_measurement = VecDeque::with_capacity(PING_MEASUREMENT_COUNT);
+        let mut ping_measurement = VecDeque::with_capacity(10);
 
-        let (version_mask, _configure_duration) = match client
+        let version_mask = match client
             .configure(
                 vec!["version-rolling".to_string()],
                 Some(Version::from_str("1fffe000").expect("valid hex")),
             )
             .await
         {
-            Ok((response, duration, _)) if response.version_rolling => {
-                if let Some(mask) = response.version_rolling_mask {
-                    info!("Upstream supports version rolling: mask={mask}",);
-                    ping_measurement.push_back(duration.as_secs_f64() * 1000.0);
-                    (Some(mask), duration)
-                } else {
-                    ping_measurement.push_back(duration.as_secs_f64() * 1000.0);
-                    (None, duration)
-                }
-            }
-            Ok((_, duration, _)) => {
-                info!("Upstream does not support version rolling");
+            Ok((response, duration, _)) => {
                 ping_measurement.push_back(duration.as_secs_f64() * 1000.0);
-                (None, duration)
+                if response.version_rolling {
+                    if let Some(mask) = response.version_rolling_mask {
+                        info!("Upstream supports version rolling: mask={mask}",);
+                    }
+                    response.version_rolling_mask
+                } else {
+                    info!("Upstream does not support version rolling");
+                    None
+                }
             }
             Err(e) => {
                 warn!("Failed to negotiate version rolling with upstream: {e}");
-                (None, Duration::ZERO)
+                None
             }
         };
 
-        let (subscribe, subscribe_duration, _) = client
+        let (subscribe, duration, _) = client
             .subscribe()
             .await
             .context("failed to subscribe to upstream")?;
-        ping_measurement.push_back(subscribe_duration.as_secs_f64() * 1000.0);
+        ping_measurement.push_back(duration.as_secs_f64() * 1000.0);
 
         info!(
             "Subscribed to upstream: enonce1={}, enonce2_size={}",
@@ -129,7 +124,7 @@ impl Upstream {
 
         let mut ping_measurement = self.ping_measurement.lock().await;
         ping_measurement.push_back(authorize_duration.as_secs_f64() * 1000.0);
-        while ping_measurement.len() > PING_MEASUREMENT_COUNT {
+        while ping_measurement.len() > 10 {
             ping_measurement.pop_front();
         }
         drop(ping_measurement);
@@ -255,11 +250,11 @@ impl Upstream {
                 )
                 .await
             {
-                Ok(_submit_result) => {
+                Ok(_) => {
                     let duration = start.elapsed();
                     let mut pings = ping_measurement.lock().await;
                     pings.push_back(duration.as_secs_f64() * 1000.0);
-                    while pings.len() > PING_MEASUREMENT_COUNT {
+                    while pings.len() > 10 {
                         pings.pop_front();
                     }
                     drop(pings);
