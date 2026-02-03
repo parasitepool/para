@@ -67,4 +67,16 @@ pub(crate) struct ProxyOptions {
         help = "Average the share submission rate over <VARDIFF_WINDOW> seconds."
     )]
     pub(crate) vardiff_window: Option<f64>,
+
+    #[arg(long, help = "Request ACME TLS certificate for <ACME_DOMAIN>.")]
+    pub(crate) acme_domain: Vec<String>,
+
+    #[arg(long, help = "Provide ACME contact <ACME_CONTACT>.")]
+    pub(crate) acme_contact: Vec<String>,
+
+    #[arg(long, help = "Store ACME cache in <ACME_CACHE>.")]
+    pub(crate) acme_cache: Option<PathBuf>,
+
+    #[arg(long, alias = "datadir", help = "Store data in <DATA_DIR>.")]
+    pub(crate) data_dir: Option<PathBuf>,
 }

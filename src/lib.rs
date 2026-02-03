@@ -205,7 +205,7 @@ pub fn main() {
                 .with_writer(writer)
                 .with_filter(EnvFilter::from_default_env()),
         )
-        .with(logstream::LogStreamLayer.with_filter(tracing_subscriber::filter::LevelFilter::DEBUG))
+        .with(logstream::LogStreamLayer.with_filter(EnvFilter::from_default_env()))
         .init();
 
     let args = Arguments::parse();
