@@ -232,7 +232,7 @@ impl Upstream {
         let client = self.client.clone();
         let accepted = self.accepted.clone();
         let rejected = self.rejected.clone();
-        let upstream = self.clone();
+        let ping_measurements = self.ping_measurements.clone();
 
         tokio::spawn(async move {
             let start = Instant::now();
@@ -248,7 +248,7 @@ impl Upstream {
             {
                 Ok(_) => {
                     let duration = start.elapsed();
-                    upstream.record_ping(duration).await;
+                    Upstream::record_ping_with(ping_measurements, duration).await;
                     accepted.fetch_add(1, Ordering::Relaxed);
                     info!("Upstream accepted share");
                 }
@@ -308,7 +308,14 @@ impl Upstream {
     }
 
     async fn record_ping(&self, duration: Duration) {
-        let mut pings = self.ping_measurements.lock().await;
+        Self::record_ping_with(self.ping_measurements.clone(), duration).await;
+    }
+
+    async fn record_ping_with(
+        ping_measurements: Arc<Mutex<VecDeque<Duration>>>,
+        duration: Duration,
+    ) {
+        let mut pings = ping_measurements.lock().await;
         pings.push_back(duration);
         if pings.len() > PING_MEASUREMENT_COUNT {
             pings.pop_front();
