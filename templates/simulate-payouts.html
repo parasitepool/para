@@ -31,7 +31,7 @@
     <div>
         %% if !self.payouts.is_empty() {
         <h3>Simulated Payments</h3>
-        <div style="overflow: auto; max-height: 500px;">
+        <div style="overflow: auto; max-height: 500px; max-width: 80%;">
             <table border="1" cellpadding="5" cellspacing="0" style="width: 100%;">
                 <tr>
                     <th>Lightning Address</th>
@@ -40,8 +40,8 @@
                 </tr>
                 %% for payout in &self.payouts {
                 <tr>
-                    <td>{{ payout.ln_address }}</td>
-                    <td>{{ payout.btc_address }}</td>
+                    <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ payout.ln_address }}</td>
+                    <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ payout.btc_address }}</td>
                     <td>{{ crate::subcommand::server::templates::simulate_payouts::format_sats(payout.amount_sats) }}</td>
                 </tr>
                 %% }
