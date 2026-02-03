@@ -795,11 +795,15 @@ mod tests {
             check(&proxy);
         }
 
-        case("para pool", "para proxy --upstream foo:1234 --username bar", |s| {
-            assert!(s.acme_domains.is_empty());
-            assert!(s.acme_contacts.is_empty());
-            assert_eq!(s.acme_cache, PathBuf::from("acme-cache"));
-        });
+        case(
+            "para pool",
+            "para proxy --upstream foo:1234 --username bar",
+            |s| {
+                assert!(s.acme_domains.is_empty());
+                assert!(s.acme_contacts.is_empty());
+                assert_eq!(s.acme_cache, PathBuf::from("acme-cache"));
+            },
+        );
 
         case(
             "para pool --acme-domain foo.bar --acme-domain baz.qux",
@@ -899,5 +903,4 @@ mod tests {
             Some("bar.baz".into())
         );
     }
-
 }
