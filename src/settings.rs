@@ -786,71 +786,63 @@ mod tests {
     }
 
     #[test]
-    fn pool_acme_defaults() {
-        let options = parse_pool_options("para pool");
-        let settings = Settings::from_pool_options(options).unwrap();
+    fn acme_options() {
+        #[track_caller]
+        fn case(pool_args: &str, proxy_args: &str, check: impl Fn(&Settings)) {
+            let pool = Settings::from_pool_options(parse_pool_options(pool_args)).unwrap();
+            let proxy = Settings::from_proxy_options(parse_proxy_options(proxy_args)).unwrap();
+            check(&pool);
+            check(&proxy);
+        }
 
-        assert!(settings.acme_domains.is_empty());
-        assert!(settings.acme_contacts.is_empty());
-        assert_eq!(settings.acme_cache, PathBuf::from("acme-cache"));
-    }
+        case("para pool", "para proxy --upstream foo:1234 --username bar", |s| {
+            assert!(s.acme_domains.is_empty());
+            assert!(s.acme_contacts.is_empty());
+            assert_eq!(s.acme_cache, PathBuf::from("acme-cache"));
+        });
 
-    #[test]
-    fn pool_acme_domains() {
-        let options = parse_pool_options(
-            "para pool --acme-domain pool.example.com --acme-domain pool2.example.com",
+        case(
+            "para pool --acme-domain foo.bar --acme-domain baz.qux",
+            "para proxy --upstream foo:1234 --username bar --acme-domain foo.bar --acme-domain baz.qux",
+            |s| {
+                assert_eq!(s.acme_domains, vec!["foo.bar", "baz.qux"]);
+            },
         );
-        let settings = Settings::from_pool_options(options).unwrap();
 
-        assert_eq!(
-            settings.acme_domains,
-            vec![
-                "pool.example.com".to_string(),
-                "pool2.example.com".to_string()
-            ]
+        case(
+            "para pool --acme-contact foo@bar --acme-contact baz@qux",
+            "para proxy --upstream foo:1234 --username bar --acme-contact foo@bar --acme-contact baz@qux",
+            |s| {
+                assert_eq!(s.acme_contacts, vec!["foo@bar", "baz@qux"]);
+            },
         );
-    }
 
-    #[test]
-    fn pool_acme_contacts() {
-        let options = parse_pool_options(
-            "para pool --acme-contact admin@example.com --acme-contact support@example.com",
+        case(
+            "para pool --acme-cache /foo/bar",
+            "para proxy --upstream foo:1234 --username bar --acme-cache /foo/bar",
+            |s| {
+                assert_eq!(s.acme_cache, PathBuf::from("/foo/bar"));
+            },
         );
-        let settings = Settings::from_pool_options(options).unwrap();
 
-        assert_eq!(
-            settings.acme_contacts,
-            vec![
-                "admin@example.com".to_string(),
-                "support@example.com".to_string()
-            ]
-        );
-    }
-
-    #[test]
-    fn pool_acme_cache_with_data_dir() {
-        let options = parse_pool_options("para pool --data-dir /var/lib/para");
-        let settings = Settings::from_pool_options(options).unwrap();
-
-        assert_eq!(
-            settings.acme_cache_path(),
-            PathBuf::from("/var/lib/para/acme-cache")
+        case(
+            "para pool --data-dir /foo",
+            "para proxy --upstream foo:1234 --username bar --data-dir /foo",
+            |s| {
+                assert_eq!(s.acme_cache_path(), PathBuf::from("/foo/acme-cache"));
+            },
         );
     }
 
     #[test]
     fn proxy_defaults_are_sane() {
-        let options =
-            parse_proxy_options("para proxy --upstream pool.example.com:3333 --username bc1qtest");
+        let options = parse_proxy_options("para proxy --upstream foo:1234 --username bar");
         let settings = Settings::from_proxy_options(options).unwrap();
 
-        assert_eq!(
-            settings.upstream_endpoint,
-            Some("pool.example.com:3333".into())
-        );
+        assert_eq!(settings.upstream_endpoint, Some("foo:1234".into()));
         assert_eq!(
             settings.upstream_username.as_ref().map(|u| u.to_string()),
-            Some("bc1qtest".into())
+            Some("bar".into())
         );
         assert_eq!(settings.upstream_password, None);
         assert_eq!(settings.address, "0.0.0.0");
@@ -862,7 +854,7 @@ mod tests {
     #[test]
     fn proxy_override_address_and_port() {
         let options = parse_proxy_options(
-            "para proxy --upstream pool.example.com:3333 --username bc1qtest --address 127.0.0.1 --port 9999",
+            "para proxy --upstream foo:1234 --username bar --address 127.0.0.1 --port 9999",
         );
         let settings = Settings::from_proxy_options(options).unwrap();
 
@@ -872,9 +864,8 @@ mod tests {
 
     #[test]
     fn proxy_override_http_port() {
-        let options = parse_proxy_options(
-            "para proxy --upstream pool.example.com:3333 --username bc1qtest --http-port 8080",
-        );
+        let options =
+            parse_proxy_options("para proxy --upstream foo:1234 --username bar --http-port 8080");
         let settings = Settings::from_proxy_options(options).unwrap();
 
         assert_eq!(settings.http_port, Some(8080));
@@ -882,9 +873,8 @@ mod tests {
 
     #[test]
     fn proxy_override_timeout() {
-        let options = parse_proxy_options(
-            "para proxy --upstream pool.example.com:3333 --username bc1qtest --timeout 60",
-        );
+        let options =
+            parse_proxy_options("para proxy --upstream foo:1234 --username bar --timeout 60");
         let settings = Settings::from_proxy_options(options).unwrap();
 
         assert_eq!(settings.timeout, Duration::from_secs(60));
@@ -892,94 +882,22 @@ mod tests {
 
     #[test]
     fn proxy_password_override() {
-        let options = parse_proxy_options(
-            "para proxy --upstream pool.example.com:3333 --username bc1qtest --password secret",
-        );
+        let options =
+            parse_proxy_options("para proxy --upstream foo:1234 --username bar --password baz");
         let settings = Settings::from_proxy_options(options).unwrap();
 
-        assert_eq!(settings.upstream_password, Some("secret".to_string()));
+        assert_eq!(settings.upstream_password, Some("baz".into()));
     }
 
     #[test]
     fn proxy_username_with_worker() {
-        let options = parse_proxy_options(
-            "para proxy --upstream pool.example.com:3333 --username bc1qtest.worker1",
-        );
+        let options = parse_proxy_options("para proxy --upstream foo:1234 --username bar.baz");
         let settings = Settings::from_proxy_options(options).unwrap();
 
         assert_eq!(
             settings.upstream_username.as_ref().map(|u| u.to_string()),
-            Some("bc1qtest.worker1".into())
+            Some("bar.baz".into())
         );
     }
 
-    #[test]
-    fn proxy_acme_defaults() {
-        let options =
-            parse_proxy_options("para proxy --upstream pool.example.com:3333 --username bc1qtest");
-        let settings = Settings::from_proxy_options(options).unwrap();
-
-        assert!(settings.acme_domains.is_empty());
-        assert!(settings.acme_contacts.is_empty());
-        assert_eq!(settings.acme_cache, PathBuf::from("acme-cache"));
-    }
-
-    #[test]
-    fn proxy_acme_domains() {
-        let options = parse_proxy_options(
-            "para proxy --upstream pool.example.com:3333 --username bc1qtest \
-             --acme-domain proxy.example.com --acme-domain proxy2.example.com",
-        );
-        let settings = Settings::from_proxy_options(options).unwrap();
-
-        assert_eq!(
-            settings.acme_domains,
-            vec![
-                "proxy.example.com".to_string(),
-                "proxy2.example.com".to_string()
-            ]
-        );
-    }
-
-    #[test]
-    fn proxy_acme_contacts() {
-        let options = parse_proxy_options(
-            "para proxy --upstream pool.example.com:3333 --username bc1qtest \
-             --acme-contact admin@example.com --acme-contact support@example.com",
-        );
-        let settings = Settings::from_proxy_options(options).unwrap();
-
-        assert_eq!(
-            settings.acme_contacts,
-            vec![
-                "admin@example.com".to_string(),
-                "support@example.com".to_string()
-            ]
-        );
-    }
-
-    #[test]
-    fn proxy_acme_cache_override() {
-        let options = parse_proxy_options(
-            "para proxy --upstream pool.example.com:3333 --username bc1qtest \
-             --acme-cache /custom/acme/path",
-        );
-        let settings = Settings::from_proxy_options(options).unwrap();
-
-        assert_eq!(settings.acme_cache, PathBuf::from("/custom/acme/path"));
-    }
-
-    #[test]
-    fn proxy_acme_cache_with_data_dir() {
-        let options = parse_proxy_options(
-            "para proxy --upstream pool.example.com:3333 --username bc1qtest \
-             --data-dir /var/lib/para",
-        );
-        let settings = Settings::from_proxy_options(options).unwrap();
-
-        assert_eq!(
-            settings.acme_cache_path(),
-            PathBuf::from("/var/lib/para/acme-cache")
-        );
-    }
 }
