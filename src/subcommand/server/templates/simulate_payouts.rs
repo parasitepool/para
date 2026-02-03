@@ -1,8 +1,8 @@
-use {super::*, crate::subcommand::server::database::SimulatedPayout};
+use {super::*, crate::subcommand::server::database::PendingPayout};
 
 #[derive(Boilerplate, Debug, Deserialize, Serialize, PartialEq)]
 pub struct SimulatePayoutsHtml {
-    pub payouts: Vec<SimulatedPayout>,
+    pub payouts: Vec<PendingPayout>,
     pub coinbase_value: i64,
     pub winner_address: String,
 }

@@ -62,7 +62,7 @@ use {
             miner::Share,
             server::{
                 account::{Account, AccountUpdate},
-                database::{Database, HighestDiff, Payout, SimulatedPayout},
+                database::{Database, HighestDiff, Payout, PendingPayout},
             },
             sync::{ShareBatch, Sync, SyncResponse},
         },

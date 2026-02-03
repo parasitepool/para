@@ -164,7 +164,6 @@ impl Modify for SecurityAddon {
         database::Payout,
         database::PendingPayout,
         database::FailedPayout,
-        database::SimulatedPayout,
         database::UpdatePayoutStatusRequest,
         // Server schemas
         Payment,

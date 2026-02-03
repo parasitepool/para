@@ -37,14 +37,12 @@
                     <th>Lightning Address</th>
                     <th>Bitcoin Address</th>
                     <th>Amount</th>
-                    <th>Percentage</th>
                 </tr>
                 %% for payout in &self.payouts {
                 <tr>
                     <td>{{ payout.ln_address }}</td>
                     <td>{{ payout.btc_address }}</td>
                     <td>{{ crate::subcommand::server::templates::simulate_payouts::format_sats(payout.amount_sats) }}</td>
-                    <td>{{ format!("{:.6}%", payout.percentage * 100.0) }}</td>
                 </tr>
                 %% }
             </table>
