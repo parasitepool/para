@@ -1,8 +1,11 @@
 use {
     super::*,
+    std::collections::VecDeque,
     stratum::{Client, ClientError, Event, EventReceiver},
     tokio::sync::RwLock,
 };
+
+const PING_MEASUREMENT_COUNT: usize = 10;
 
 pub(crate) struct UpstreamSubmit {
     pub(crate) job_id: JobId,
@@ -24,6 +27,7 @@ pub(crate) struct Upstream {
     rejected: Arc<AtomicU64>,
     filtered: Arc<AtomicU64>,
     version_mask: Option<Version>,
+    ping_measurement: Arc<Mutex<VecDeque<f64>>>,
 }
 
 impl Upstream {
@@ -52,35 +56,41 @@ impl Upstream {
             .await
             .context("failed to connect to upstream")?;
 
-        let version_mask = match client
+        let mut ping_measurement = VecDeque::with_capacity(PING_MEASUREMENT_COUNT);
+
+        let (version_mask, _configure_duration) = match client
             .configure(
                 vec!["version-rolling".to_string()],
                 Some(Version::from_str("1fffe000").expect("valid hex")),
             )
             .await
         {
-            Ok((response, _, _)) if response.version_rolling => {
+            Ok((response, duration, _)) if response.version_rolling => {
                 if let Some(mask) = response.version_rolling_mask {
                     info!("Upstream supports version rolling: mask={mask}",);
-                    Some(mask)
+                    ping_measurement.push_back(duration.as_secs_f64() * 1000.0);
+                    (Some(mask), duration)
                 } else {
-                    None
+                    ping_measurement.push_back(duration.as_secs_f64() * 1000.0);
+                    (None, duration)
                 }
             }
-            Ok(_) => {
+            Ok((_, duration, _)) => {
                 info!("Upstream does not support version rolling");
-                None
+                ping_measurement.push_back(duration.as_secs_f64() * 1000.0);
+                (None, duration)
             }
             Err(e) => {
                 warn!("Failed to negotiate version rolling with upstream: {e}");
-                None
+                (None, Duration::ZERO)
             }
         };
 
-        let (subscribe, _, _) = client
+        let (subscribe, subscribe_duration, _) = client
             .subscribe()
             .await
             .context("failed to subscribe to upstream")?;
+        ping_measurement.push_back(subscribe_duration.as_secs_f64() * 1000.0);
 
         info!(
             "Subscribed to upstream: enonce1={}, enonce2_size={}",
@@ -99,6 +109,7 @@ impl Upstream {
                 rejected: Arc::new(AtomicU64::new(0)),
                 filtered: Arc::new(AtomicU64::new(0)),
                 version_mask,
+                ping_measurement: Arc::new(Mutex::new(ping_measurement)),
             },
             events,
         ))
@@ -110,10 +121,18 @@ impl Upstream {
         cancel: CancellationToken,
         tasks: &mut JoinSet<()>,
     ) -> Result<watch::Receiver<Arc<Notify>>> {
-        self.client
+        let (authorize_duration, _) = self
+            .client
             .authorize()
             .await
             .context("failed to authorize with upstream")?;
+
+        let mut ping_measurement = self.ping_measurement.lock().await;
+        ping_measurement.push_back(authorize_duration.as_secs_f64() * 1000.0);
+        while ping_measurement.len() > PING_MEASUREMENT_COUNT {
+            ping_measurement.pop_front();
+        }
+        drop(ping_measurement);
 
         info!(
             "Authorized to upstream {} with {}",
@@ -222,8 +241,10 @@ impl Upstream {
         let client = self.client.clone();
         let accepted = self.accepted.clone();
         let rejected = self.rejected.clone();
+        let ping_measurement = self.ping_measurement.clone();
 
         tokio::spawn(async move {
+            let start = Instant::now();
             match client
                 .submit(
                     submit.job_id,
@@ -234,7 +255,14 @@ impl Upstream {
                 )
                 .await
             {
-                Ok(_) => {
+                Ok(_submit_result) => {
+                    let duration = start.elapsed();
+                    let mut pings = ping_measurement.lock().await;
+                    pings.push_back(duration.as_secs_f64() * 1000.0);
+                    while pings.len() > PING_MEASUREMENT_COUNT {
+                        pings.pop_front();
+                    }
+                    drop(pings);
                     accepted.fetch_add(1, Ordering::Relaxed);
                     info!("Upstream accepted share");
                 }
@@ -291,5 +319,14 @@ impl Upstream {
 
     pub(crate) fn version_mask(&self) -> Option<Version> {
         self.version_mask
+    }
+
+    pub(crate) async fn ping_ms(&self) -> f64 {
+        let pings = self.ping_measurement.lock().await;
+        if pings.is_empty() {
+            0.0
+        } else {
+            pings.iter().sum::<f64>() / pings.len() as f64
+        }
     }
 }

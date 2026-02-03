@@ -120,6 +120,12 @@ function formatTruncated(n) {
   return truncated.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
 }
 
+function formatPing(ms) {
+  if (ms === null || ms === undefined) return null;
+  if (ms === 0) return '0';
+  return ms.toFixed(2);
+}
+
 function set(id, value, formatter = v => v) {
   const el = document.getElementById(id);
   if (el && !el.matches(':hover')) {

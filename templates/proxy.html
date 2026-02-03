@@ -3,6 +3,7 @@
     <h2>Upstream</h2>
     <div class=row><span>Endpoint</span><span id=upstream_endpoint></span></div>
     <div class=row><span>Status</span><span id=upstream_status></span></div>
+    <div class=row><span>Ping</span><span><span id=upstream_ping></span>ms</span></div>
     <div class=row><span>Username</span><span id=upstream_username class=copyable></span></div>
     <div class=row><span>Difficulty</span><span id=upstream_difficulty class=copyable></span></div>
     <div class=row><span>Extranonce1</span><span id=upstream_enonce1></span></div>
@@ -12,7 +13,7 @@
     <div class=row><span>Accepted</span><span id=upstream_accepted></span></div>
     <div class=row><span>Rejected</span><span id=upstream_rejected></span></div>
     <div class=row><span>Filtered</span><span id=upstream_filtered></span></div>
-    <div class=row><span>Forward %</span><span id=forward_ratio></span></div>
+    <div class=row><span>Forwarded</span><span><span id=forward_ratio></span>%</span></div>
   </div>
 
   <div class=column>
@@ -68,7 +69,7 @@ async function refresh() {
     const upstream_username = u?.length > 15 ? u.slice(0,6) + '...' + u.slice(-6) : u;
     const forwarded = (proxyData.upstream_accepted || 0) + (proxyData.upstream_rejected || 0);
     const total = forwarded + (proxyData.upstream_filtered || 0);
-    const forward_ratio = total > 0 ? formatTruncated((forwarded / total) * 100) + '%' : '-';
+    const forward_ratio = total > 0 ? formatTruncated((forwarded / total) * 100) : '-';
     const upstream_difficulty = formatDifficulty(proxyData.upstream_difficulty);
     const network_difficulty = formatDifficulty(bitcoinData.network_difficulty);
     const best_ever = formatDifficulty(proxyData.best_ever);
@@ -86,6 +87,7 @@ async function refresh() {
     set('upstream_rejected', proxyData.upstream_rejected);
     set('upstream_filtered', proxyData.upstream_filtered);
     set('forward_ratio', forward_ratio);
+    set('upstream_ping', proxyData.upstream_ping, formatPing);
 
     // Downstream data
     set('endpoint', proxyData.endpoint);

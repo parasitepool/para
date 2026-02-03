@@ -82,6 +82,7 @@ async fn status(State(metrics): State<Arc<Metrics>>) -> Json<ProxyStatus> {
         upstream_accepted: metrics.upstream.accepted(),
         upstream_rejected: metrics.upstream.rejected(),
         upstream_filtered: metrics.upstream.filtered(),
+        upstream_ping: metrics.upstream.ping_ms().await,
     })
 }
 

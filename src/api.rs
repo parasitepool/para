@@ -74,6 +74,7 @@ pub struct ProxyStatus {
     pub upstream_accepted: u64,
     pub upstream_rejected: u64,
     pub upstream_filtered: u64,
+    pub upstream_ping: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
