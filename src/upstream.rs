@@ -86,6 +86,7 @@ impl Upstream {
             .subscribe()
             .await
             .context("failed to subscribe to upstream")?;
+
         ping_measurements.push_back(duration);
 
         info!(
@@ -131,7 +132,7 @@ impl Upstream {
             self.client.username()
         );
 
-        self.connected.store(true, Ordering::SeqCst);
+        self.connected.store(true, Ordering::Relaxed);
 
         let mut initial_difficulty: Option<Difficulty> = None;
         let mut first_notify: Option<Notify> = None;
@@ -151,11 +152,11 @@ impl Upstream {
                     first_notify = Some(notify);
                 }
                 Ok(Event::Disconnected) => {
-                    self.connected.store(false, Ordering::SeqCst);
+                    self.connected.store(false, Ordering::Relaxed);
                     bail!("Disconnected from upstream before initialization complete");
                 }
                 Err(e) => {
-                    self.connected.store(false, Ordering::SeqCst);
+                    self.connected.store(false, Ordering::Relaxed);
                     bail!("Upstream error during initialization: {e}");
                 }
             }
@@ -235,7 +236,6 @@ impl Upstream {
         let ping_measurements = self.ping_measurements.clone();
 
         tokio::spawn(async move {
-            let start = Instant::now();
             match client
                 .submit(
                     submit.job_id,
@@ -246,10 +246,9 @@ impl Upstream {
                 )
                 .await
             {
-                Ok(_) => {
-                    let duration = start.elapsed();
-                    Upstream::record_ping_with(ping_measurements, duration).await;
+                Ok(duration) => {
                     accepted.fetch_add(1, Ordering::Relaxed);
+                    Upstream::record_ping_with(ping_measurements, duration).await;
                     info!("Upstream accepted share");
                 }
                 Err(ClientError::SubmitFalse) => {
