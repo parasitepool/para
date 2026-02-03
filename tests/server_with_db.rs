@@ -732,7 +732,7 @@ async fn test_payouts_simulate_basic() {
     .unwrap();
 
     server.admin_token = Some("testtoken".into());
-    let payouts: Vec<SimulatedPayout> = server
+    let payouts: Vec<PendingPayout> = server
         .get_json_async_raw("/payouts/simulate?format=json")
         .await
         .json()
@@ -747,8 +747,6 @@ async fn test_payouts_simulate_basic() {
     let user2_payout = payouts.iter().find(|p| p.btc_address == "user2").unwrap();
     let user1_payout = payouts.iter().find(|p| p.btc_address == "user1").unwrap();
     assert!(user2_payout.amount_sats > user1_payout.amount_sats);
-    assert!((user2_payout.percentage - 0.75).abs() < 0.01);
-    assert!((user1_payout.percentage - 0.25).abs() < 0.01);
 }
 
 #[tokio::test]
@@ -787,7 +785,7 @@ async fn test_payouts_simulate_excludes_already_paid() {
     .unwrap();
 
     server.admin_token = Some("testtoken".into());
-    let payouts: Vec<SimulatedPayout> = server
+    let payouts: Vec<PendingPayout> = server
         .get_json_async_raw("/payouts/simulate?format=json")
         .await
         .json()
@@ -829,7 +827,7 @@ async fn test_payouts_simulate_empty_when_fully_paid() {
     .unwrap();
 
     server.admin_token = Some("testtoken".into());
-    let payouts: Vec<SimulatedPayout> = server
+    let payouts: Vec<PendingPayout> = server
         .get_json_async_raw("/payouts/simulate?format=json")
         .await
         .json()
@@ -847,7 +845,7 @@ async fn test_payouts_simulate_empty_database() {
         .unwrap();
 
     server.admin_token = Some("testtoken".into());
-    let payouts: Vec<SimulatedPayout> = server
+    let payouts: Vec<PendingPayout> = server
         .get_json_async_raw("/payouts/simulate?format=json")
         .await
         .json()
@@ -905,7 +903,7 @@ async fn test_payouts_simulate_groups_by_lnurl() {
     .unwrap();
 
     server.admin_token = Some("testtoken".into());
-    let payouts: Vec<SimulatedPayout> = server
+    let payouts: Vec<PendingPayout> = server
         .get_json_async_raw("/payouts/simulate?format=json")
         .await
         .json()
@@ -923,6 +921,5 @@ async fn test_payouts_simulate_groups_by_lnurl() {
         .find(|p| p.ln_address == "other@ln.test")
         .unwrap();
 
-    assert!((shared_payout.percentage - 0.5).abs() < 0.01);
-    assert!((other_payout.percentage - 0.5).abs() < 0.01);
+    assert_eq!(shared_payout.amount_sats, other_payout.amount_sats);
 }

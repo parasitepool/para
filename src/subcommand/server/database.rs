@@ -27,16 +27,9 @@ pub struct Payout {
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, ToSchema)]
 pub struct PendingPayout {
     pub ln_address: String,
-    pub amount_sats: i64,
-    pub payout_ids: Vec<i64>,
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, ToSchema)]
-pub struct SimulatedPayout {
-    pub ln_address: String,
     pub btc_address: String,
     pub amount_sats: i64,
-    pub percentage: f64,
+    pub payout_ids: Vec<i64>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, ToSchema)]
@@ -513,6 +506,7 @@ impl Database {
         struct PayoutRow {
             payout_id: i64,
             ln_address: String,
+            username: String,
             amount: i64,
         }
 
@@ -521,6 +515,7 @@ impl Database {
             SELECT
                 p.id as payout_id,
                 COALESCE(a.lnurl, '') as ln_address,
+                a.username as username,
                 p.amount
             FROM payouts p
             JOIN accounts a ON p.account_id = a.id
@@ -534,25 +529,21 @@ impl Database {
         .await
         .map_err(|err| anyhow!(err))?;
 
-        let mut grouped: HashMap<String, (i64, Vec<i64>)> = HashMap::new();
-
+        let mut grouped: HashMap<String, PendingPayout> = HashMap::new();
         for row in rows {
             let entry = grouped
                 .entry(row.ln_address.clone())
-                .or_insert((0, Vec::new()));
-            entry.0 += row.amount;
-            entry.1.push(row.payout_id);
+                .or_insert_with(|| PendingPayout {
+                    ln_address: row.ln_address.clone(),
+                    btc_address: row.username.clone(),
+                    amount_sats: 0,
+                    payout_ids: Vec::new(),
+                });
+            entry.amount_sats += row.amount;
+            entry.payout_ids.push(row.payout_id);
         }
 
-        let mut result = Vec::new();
-        for (ln_address, (amount_sats, payout_ids)) in grouped {
-            result.push(PendingPayout {
-                ln_address,
-                amount_sats,
-                payout_ids,
-            });
-        }
-
+        let mut result: Vec<PendingPayout> = grouped.into_values().collect();
         result.sort_by(|a, b| b.amount_sats.cmp(&a.amount_sats));
 
         Ok(result)
@@ -610,7 +601,7 @@ impl Database {
         &self,
         total_reward: i64,
         block_winner: &str,
-    ) -> Result<Vec<SimulatedPayout>> {
+    ) -> Result<Vec<PendingPayout>> {
         if total_reward <= 100_000_000 {
             // 1 BTC of coinbase value is reserved for miner who found the block
             return Ok(Vec::new());
@@ -620,7 +611,6 @@ impl Database {
             username: String,
             ln_address: String,
             amount: i64,
-            percentage: f64,
         }
 
         let rows = sqlx::query_as::<_, PayoutRow>(
@@ -676,21 +666,23 @@ impl Database {
         .await
         .map_err(|err| anyhow!(err))?;
 
-        let mut grouped: HashMap<String, SimulatedPayout> = HashMap::new();
+        let mut grouped: HashMap<String, PendingPayout> = HashMap::new();
+        let mut payout_id = 1i64;
         for row in rows {
             let entry = grouped
                 .entry(row.ln_address.clone())
-                .or_insert_with(|| SimulatedPayout {
+                .or_insert_with(|| PendingPayout {
                     ln_address: row.ln_address.clone(),
                     btc_address: row.username.clone(),
                     amount_sats: 0,
-                    percentage: 0.0,
+                    payout_ids: Vec::new(),
                 });
             entry.amount_sats += row.amount;
-            entry.percentage += row.percentage;
+            entry.payout_ids.push(payout_id);
+            payout_id += 1;
         }
 
-        let mut result: Vec<SimulatedPayout> = grouped.into_values().collect();
+        let mut result: Vec<PendingPayout> = grouped.into_values().collect();
         result.sort_by(|a, b| b.amount_sats.cmp(&a.amount_sats));
 
         Ok(result)
