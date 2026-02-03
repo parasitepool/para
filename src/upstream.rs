@@ -4,8 +4,6 @@ use {
     tokio::sync::RwLock,
 };
 
-const PING_MEASUREMENT_COUNT: usize = 10;
-
 pub(crate) struct UpstreamSubmit {
     pub(crate) job_id: JobId,
     pub(crate) enonce2: Extranonce,
@@ -55,7 +53,7 @@ impl Upstream {
             .await
             .context("failed to connect to upstream")?;
 
-        let mut ping_measurements = VecDeque::with_capacity(PING_MEASUREMENT_COUNT);
+        let mut ping_measurements = VecDeque::with_capacity(10);
 
         let version_mask = match client
             .configure(
@@ -316,7 +314,7 @@ impl Upstream {
     ) {
         let mut pings = ping_measurements.lock().await;
         pings.push_back(duration);
-        if pings.len() > PING_MEASUREMENT_COUNT {
+        if pings.len() > 10 {
             pings.pop_front();
         }
     }
