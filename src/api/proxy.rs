@@ -73,16 +73,16 @@ async fn status(State(metrics): State<Arc<Metrics>>) -> Json<ProxyStatus> {
         total_work: metrics.metatron.total_work(),
         uptime_secs: metrics.metatron.uptime().as_secs(),
         upstream_endpoint: metrics.upstream.endpoint().to_string(),
+        upstream_connected: metrics.upstream.is_connected(),
+        upstream_ping: metrics.upstream.ping_ms().await,
         upstream_difficulty: metrics.upstream.difficulty().await,
         upstream_username: metrics.upstream.username().clone(),
-        upstream_connected: metrics.upstream.is_connected(),
         upstream_enonce1: metrics.upstream.enonce1().clone(),
         upstream_enonce2_size: metrics.upstream.enonce2_size(),
         upstream_version_mask: metrics.upstream.version_mask(),
         upstream_accepted: metrics.upstream.accepted(),
         upstream_rejected: metrics.upstream.rejected(),
         upstream_filtered: metrics.upstream.filtered(),
-        upstream_ping: metrics.upstream.ping_ms().await,
     })
 }
 

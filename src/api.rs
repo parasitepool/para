@@ -66,6 +66,7 @@ pub struct ProxyStatus {
     pub uptime_secs: u64,
     pub upstream_endpoint: String,
     pub upstream_connected: bool,
+    pub upstream_ping: f64,
     pub upstream_difficulty: Difficulty,
     pub upstream_username: Username,
     pub upstream_enonce1: Extranonce,
@@ -74,7 +75,6 @@ pub struct ProxyStatus {
     pub upstream_accepted: u64,
     pub upstream_rejected: u64,
     pub upstream_filtered: u64,
-    pub upstream_ping: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
