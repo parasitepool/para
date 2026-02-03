@@ -74,7 +74,7 @@ async function refresh() {
     }
     copyable('network_difficulty', network_difficulty, bitcoinData.network_difficulty);
     set('network_hashrate', bitcoinData.network_hashrate, formatHashrate);
-    set('pooled_tx', bitcoinData.pooled_tx, formatCount);
+    set('pooled_tx', bitcoinData.pooled_tx);
 
     // System data
     set('cpu_usage_percent', systemData.cpu_usage_percent, formatTruncated);
