@@ -34,8 +34,10 @@
 
   <div class=column>
     <h2>Bitcoin</h2>
-    <div class=row><span>Block Height</span><span id=btc_height></span></div>
+    <div class=row><span>Block Height</span><a id=btc_height_link target=_blank rel=noopener><span id=btc_height></span></a></div>
     <div class=row><span>Network Difficulty</span><span id=network_difficulty class=copyable></span></div>
+    <div class=row><span>Network Hashrate</span><span id=network_hashrate></span></div>
+    <div class=row><span>Mempool Txs</span><span id=pooled_tx></span></div>
   </div>
 
   <div class=column>
@@ -104,7 +106,13 @@ async function refresh() {
 
     // Bitcoin data
     set('btc_height', bitcoinData.height);
+    const height_link = document.getElementById('btc_height_link');
+    if (height_link && bitcoinData.height !== null && bitcoinData.height !== undefined) {
+      height_link.href = `https://mempool.space/block/${bitcoinData.height}`;
+    }
     copyable('network_difficulty', network_difficulty, bitcoinData.network_difficulty);
+    set('network_hashrate', bitcoinData.network_hashrate, formatHashrate);
+    set('pooled_tx', bitcoinData.pooled_tx, formatCount);
 
     // System data
     set('cpu_usage_percent', systemData.cpu_usage_percent, formatTruncated);

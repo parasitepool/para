@@ -11,6 +11,8 @@ body > a:last-of-type .logo { margin-top: 640px; }
 .column h2 { margin: 0 0 15px; font-size: 1.22em; text-align: center; }
 .column h3 { margin: 15px 0 10px; font-size: 1.11em; color: #888; border-top: 1px solid #444; padding-top: 15px; text-align: center; }
 .row { display: flex; justify-content: space-between; }
+.row a { color: inherit; text-decoration: none; }
+.row a:hover { text-decoration: underline; }
 .connected { color: #4f4; }
 .disconnected { color: #f44; }
 .copyable { cursor: pointer; position: relative; z-index: 10; }

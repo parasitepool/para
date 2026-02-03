@@ -126,6 +126,11 @@ function formatPing(ms) {
   return ms.toFixed(2);
 }
 
+function formatCount(n) {
+  if (n === null || n === undefined) return null;
+  return n.toLocaleString();
+}
+
 function set(id, value, formatter = v => v) {
   const el = document.getElementById(id);
   if (el && !el.matches(':hover')) {
