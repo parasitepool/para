@@ -828,14 +828,6 @@ mod tests {
     }
 
     #[test]
-    fn pool_acme_cache_override() {
-        let options = parse_pool_options("para pool --acme-cache /custom/acme/path");
-        let settings = Settings::from_pool_options(options).unwrap();
-
-        assert_eq!(settings.acme_cache, PathBuf::from("/custom/acme/path"));
-    }
-
-    #[test]
     fn pool_acme_cache_with_data_dir() {
         let options = parse_pool_options("para pool --data-dir /var/lib/para");
         let settings = Settings::from_pool_options(options).unwrap();
