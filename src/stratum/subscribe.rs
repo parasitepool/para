@@ -148,7 +148,7 @@ mod tests {
     }
 
     #[test]
-    fn subscribe_ignores_invalid_hex_like_ckpool() {
+    fn subscribe_ignores_invalid_hex() {
         let json = r#"["whatsminer/v1.0","b08cf00d1"]"#;
         let parsed: Subscribe = serde_json::from_str(json).unwrap();
         assert_eq!(
