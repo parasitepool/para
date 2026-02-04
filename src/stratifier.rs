@@ -121,14 +121,14 @@ impl<W: Workbase> Stratifier<W> {
 
                     match method.as_str() {
                         "mining.configure" => {
-                            let configure = serde_json::from_value::<Configure>(params)
-                                .context(format!("failed to deserialize {method}"))?;
+                            let configure = serde_json::from_value::<Configure>(params.clone())
+                                .context(format!("failed to deserialize {method} from {params}"))?;
 
                             self.configure(id, configure).await?
                         }
                         "mining.subscribe" => {
-                            let subscribe = serde_json::from_value::<Subscribe>(params)
-                                .context(format!("failed to deserialize {method}"))?;
+                            let subscribe = serde_json::from_value::<Subscribe>(params.clone())
+                                .context(format!("failed to deserialize {method} from {params}"))?;
 
                             let consequence = self.subscribe(id, subscribe).await?;
 
@@ -152,8 +152,8 @@ impl<W: Workbase> Stratifier<W> {
                                 continue;
                             };
 
-                            let authorize = serde_json::from_value::<Authorize>(params)
-                                .context(format!("failed to deserialize {method}"))?;
+                            let authorize = serde_json::from_value::<Authorize>(params.clone())
+                                .context(format!("failed to deserialize {method} from {params}"))?;
 
                             let consequence = self.authorize(id, authorize, subscription.enonce1).await?;
 
@@ -170,8 +170,8 @@ impl<W: Workbase> Stratifier<W> {
                                 continue;
                             };
 
-                            let submit = serde_json::from_value::<Submit>(params)
-                                .context(format!("failed to deserialize {method}"))?;
+                            let submit = serde_json::from_value::<Submit>(params.clone())
+                                .context(format!("failed to deserialize {method} from {params}"))?;
 
                             let consequence = self
                                 .submit(id, submit, session.clone())
