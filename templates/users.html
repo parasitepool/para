@@ -1,0 +1,41 @@
+<div class=grid>
+  <div class="column column-full">
+    <div id=users-list></div>
+  </div>
+</div>
+
+<script>
+const apiBase = '{{ self.api_base }}';
+
+async function refresh() {
+  try {
+    const users = await fetch(`${apiBase}/users`).then(r => r.json()).catch(() => []);
+    const container = document.getElementById('users-list');
+
+    if (users.length === 0) {
+      container.innerHTML = '';
+      return;
+    }
+
+    const userDetails = await Promise.all(
+      users.map(addr =>
+        fetch(`${apiBase}/user/${addr}`).then(r => r.json()).catch(() => null)
+      )
+    );
+
+    container.innerHTML = userDetails
+      .filter(u => u !== null)
+      .map(u => {
+        const addr = u.address;
+        const shortAddr = addr.length > 20 ? addr.slice(0,8) + '...' + addr.slice(-8) : addr;
+        return `<div class=row>
+          <a href="/user/${addr}">${shortAddr}</a>
+          <span class=divider></span>
+          <span class=hashrate>${formatHashrate(u.hashrate_5m)}</span>
+        </div>`;
+      })
+      .join('');
+  } catch (e) { console.error('refresh error:', e); }
+}
+startPolling(refresh);
+</script>

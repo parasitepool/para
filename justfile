@@ -114,7 +114,8 @@ miner-mainnet stratum_endpoint='127.0.0.1:42069':
     {{stratum_endpoint}} \
     --username bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg6dzw5nk24r45dzasde25r3.tick \
     --password x \
-    --cpu-cores 2
+    --cpu-cores 2 \
+    --throttle 500K
 
 harness: build-bitcoind
   cargo run -p harness -- spawn
