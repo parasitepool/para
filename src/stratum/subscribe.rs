@@ -30,7 +30,7 @@ impl<'de> Deserialize<'de> for Subscribe {
         #[serde(untagged)]
         enum Raw {
             One((String,)),
-            Two((String, Option<Extranonce>)),
+            Two((String, Option<String>)),
         }
 
         match Raw::deserialize(deserializer)? {
@@ -38,10 +38,13 @@ impl<'de> Deserialize<'de> for Subscribe {
                 user_agent,
                 enonce1: None,
             }),
-            Raw::Two((user_agent, enonce1)) => Ok(Subscribe {
-                user_agent,
-                enonce1,
-            }),
+            Raw::Two((user_agent, enonce1_str)) => {
+                let enonce1 = enonce1_str.and_then(|s| s.parse::<Extranonce>().ok());
+                Ok(Subscribe {
+                    user_agent,
+                    enonce1,
+                })
+            }
         }
     }
 }
@@ -141,6 +144,25 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<Value>(&ser).unwrap(),
             serde_json::json!(["ua"])
+        );
+    }
+
+    #[test]
+    fn subscribe_ignores_invalid_hex() {
+        let json = r#"["whatsminer/v1.0","b08cf00d1"]"#;
+        let parsed: Subscribe = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            parsed,
+            Subscribe {
+                user_agent: "whatsminer/v1.0".into(),
+                enonce1: None
+            }
+        );
+
+        let ser = serde_json::to_string(&parsed).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&ser).unwrap(),
+            serde_json::json!(["whatsminer/v1.0"])
         );
     }
 
