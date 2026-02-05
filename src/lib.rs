@@ -195,37 +195,35 @@ fn logs_enabled() -> bool {
     std::env::var_os("RUST_LOG").is_some()
 }
 
-fn build_env_filter() -> EnvFilter {
-    if let Ok(level) = CURRENT_LOG_LEVEL.read() {
-        if !level.is_empty() {
-            return EnvFilter::new(&*level);
-        }
-    }
+fn logstream_filter() -> EnvFilter {
+    let level = CURRENT_LOG_LEVEL
+        .read()
+        .ok()
+        .filter(|l| !l.is_empty())
+        .map(|l| l.clone());
 
-    if env::var("RUST_LOG").is_ok() {
-        return EnvFilter::from_default_env();
-    }
-
-    EnvFilter::new("info")
+    EnvFilter::new(level.as_deref().unwrap_or("info"))
 }
 
 static CURRENT_LOG_LEVEL: LazyLock<Arc<RwLock<String>>> =
     LazyLock::new(|| Arc::new(RwLock::new(String::from("info"))));
 
+type ReloadFn = Box<dyn Fn(EnvFilter) -> Result<()> + Send + Sync>;
+
 type ReloadHandles = (
-    Box<dyn Fn(EnvFilter) -> Result<()> + Send + Sync>,
+    ReloadFn,
+    ReloadFn,
     tracing_appender::non_blocking::WorkerGuard,
 );
 
 static FILTER_HANDLE: LazyLock<ReloadHandles> = LazyLock::new(|| {
     let (writer, guard) = non_blocking(io::stderr());
 
-    let fmt_filter = build_env_filter();
+    let fmt_filter = EnvFilter::from_default_env();
     let (fmt_filter, fmt_reload_handle) = tracing_subscriber::reload::Layer::new(fmt_filter);
 
-    let logstream_filter = build_env_filter();
-    let (logstream_filter, logstream_reload_handle) =
-        tracing_subscriber::reload::Layer::new(logstream_filter);
+    let ls_filter = logstream_filter();
+    let (ls_filter, ls_reload_handle) = tracing_subscriber::reload::Layer::new(ls_filter);
 
     tracing_subscriber::registry()
         .with(
@@ -234,20 +232,22 @@ static FILTER_HANDLE: LazyLock<ReloadHandles> = LazyLock::new(|| {
                 .with_writer(writer)
                 .with_filter(fmt_filter),
         )
-        .with(logstream::LogStreamLayer.with_filter(logstream_filter))
+        .with(logstream::LogStreamLayer.with_filter(ls_filter))
         .init();
 
-    let reload_fn = Box::new(move |new_filter: EnvFilter| {
+    let fmt_reload = Box::new(move |f: EnvFilter| {
         fmt_reload_handle
-            .reload(new_filter.clone())
-            .context("failed to reload fmt filter")?;
-        logstream_reload_handle
-            .reload(new_filter)
-            .context("failed to reload logstream filter")?;
-        Ok(())
+            .reload(f)
+            .context("failed to reload fmt filter")
     });
 
-    (reload_fn, guard)
+    let ls_reload = Box::new(move |f: EnvFilter| {
+        ls_reload_handle
+            .reload(f)
+            .context("failed to reload logstream filter")
+    });
+
+    (fmt_reload, ls_reload, guard)
 });
 
 pub fn reload_log_filter() -> Result<()> {
@@ -255,8 +255,8 @@ pub fn reload_log_filter() -> Result<()> {
         *level = String::new();
     }
 
-    let new_filter = build_env_filter();
-    (FILTER_HANDLE.0)(new_filter)?;
+    (FILTER_HANDLE.0)(EnvFilter::from_default_env())?;
+    (FILTER_HANDLE.1)(logstream_filter())?;
     info!("Log filter reloaded from environment");
     Ok(())
 }
@@ -264,7 +264,7 @@ pub fn reload_log_filter() -> Result<()> {
 pub fn set_log_level_runtime(level: &str) -> Result<()> {
     let new_filter = EnvFilter::new(level);
 
-    (FILTER_HANDLE.0)(new_filter)?;
+    (FILTER_HANDLE.1)(new_filter)?;
 
     if let Ok(mut current) = CURRENT_LOG_LEVEL.write() {
         *current = level.to_string();
