@@ -55,12 +55,15 @@
   <button id=log-pause>Pause</button>
   <button id=log-clear>Clear</button>
   <span id=log-level-controls>
-    <button class=log-level data-level=off>Off</button>
-    <button class=log-level data-level=error>Error</button>
-    <button class=log-level data-level=warn>Warn</button>
-    <button class=log-level data-level=info>Info</button>
-    <button class=log-level data-level=debug>Debug</button>
-    <button class=log-level data-level=trace>Trace</button>
+    <button id=log-level-toggle>INFO</button>
+    <span id=log-level-options class=hidden>
+      <button class=log-level data-level=off>OFF</button>
+      <button class=log-level data-level=error>ERROR</button>
+      <button class=log-level data-level=warn>WARN</button>
+      <button class=log-level data-level=info>INFO</button>
+      <button class=log-level data-level=debug>DEBUG</button>
+      <button class=log-level data-level=trace>TRACE</button>
+    </span>
   </span>
   <button id=log-hide>Hide</button>
 </div>
