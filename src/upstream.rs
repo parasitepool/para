@@ -240,8 +240,7 @@ impl Upstream {
             {
                 Ok(duration) => {
                     accepted.fetch_add(1, Ordering::Relaxed);
-                    ping
-                        .write()
+                    ping.write()
                         .await
                         .record(duration.as_secs_f64() * 1000.0, Instant::now());
 
