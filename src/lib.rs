@@ -47,6 +47,7 @@ use {
     hashrate::HashRate,
     job::Job,
     jobs::Jobs,
+    logs::logs_enabled,
     lru::LruCache,
     metatron::Metatron,
     metrics::Metrics,
@@ -81,7 +82,7 @@ use {
         process,
         str::FromStr,
         sync::{
-            Arc, LazyLock,
+            Arc, LazyLock, OnceLock,
             atomic::{AtomicBool, AtomicU64, Ordering},
         },
         thread,
@@ -137,7 +138,7 @@ pub mod hashrate;
 mod http_server;
 mod job;
 mod jobs;
-mod logstream;
+mod logs;
 mod metatron;
 mod metrics;
 pub mod settings;
@@ -192,65 +193,8 @@ fn integration_test() -> bool {
     std::env::var_os("PARA_INTEGRATION_TEST").is_some()
 }
 
-fn logs_enabled() -> bool {
-    std::env::var_os("RUST_LOG").is_some()
-}
-
-static CURRENT_LOG_LEVEL: LazyLock<Mutex<String>> =
-    LazyLock::new(|| Mutex::new(String::from("info")));
-
-struct FilterHandle {
-    ls_reload: Box<dyn Fn(EnvFilter) -> Result<()> + Send + Sync>,
-    _guard: tracing_appender::non_blocking::WorkerGuard,
-}
-
-static FILTER_HANDLE: LazyLock<FilterHandle> = LazyLock::new(|| {
-    let (writer, guard) = non_blocking(io::stderr());
-
-    let fmt_filter = EnvFilter::from_default_env();
-
-    let ls_filter = EnvFilter::new("warn,para=info");
-    let (ls_filter, ls_reload_handle) = tracing_subscriber::reload::Layer::new(ls_filter);
-
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_target(false)
-                .with_writer(writer)
-                .with_filter(fmt_filter),
-        )
-        .with(logstream::LogStreamLayer.with_filter(ls_filter))
-        .init();
-
-    let ls_reload = Box::new(move |f: EnvFilter| {
-        ls_reload_handle
-            .reload(f)
-            .context("failed to reload logstream filter")
-    });
-
-    FilterHandle {
-        ls_reload,
-        _guard: guard,
-    }
-});
-
-pub fn set_log_level_runtime(level: &str) -> Result<()> {
-    let new_filter = EnvFilter::new(format!("warn,para={level}"));
-
-    (FILTER_HANDLE.ls_reload)(new_filter)?;
-
-    *CURRENT_LOG_LEVEL.lock() = level.to_string();
-
-    info!("Log level changed to: {}", level);
-    Ok(())
-}
-
-pub fn get_current_log_level() -> String {
-    CURRENT_LOG_LEVEL.lock().clone()
-}
-
 pub fn main() {
-    let _ = &*FILTER_HANDLE;
+    let _guard = logs::init();
 
     let args = Arguments::parse();
 
