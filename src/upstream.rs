@@ -1,7 +1,6 @@
 use {
     super::*,
     stratum::{Client, ClientError, Event, EventReceiver},
-    tokio::sync::RwLock,
 };
 
 pub(crate) struct UpstreamSubmit {
@@ -15,16 +14,16 @@ pub(crate) struct UpstreamSubmit {
 
 pub(crate) struct Upstream {
     client: Client,
+    endpoint: String,
     enonce1: Extranonce,
     enonce2_size: usize,
     connected: Arc<AtomicBool>,
-    endpoint: String,
+    ping_ms: Arc<RwLock<DecayingAverage>>,
     difficulty: Arc<RwLock<Difficulty>>,
     accepted: Arc<AtomicU64>,
     rejected: Arc<AtomicU64>,
     filtered: Arc<AtomicU64>,
     version_mask: Option<Version>,
-    ping_ms: Arc<RwLock<DecayingAverage>>,
 }
 
 impl Upstream {
@@ -90,16 +89,16 @@ impl Upstream {
         Ok((
             Self {
                 client,
+                endpoint: upstream.to_string(),
                 enonce1: subscribe.enonce1,
                 enonce2_size: subscribe.enonce2_size,
                 connected: Arc::new(AtomicBool::new(false)),
-                endpoint: upstream.to_string(),
+                ping_ms: Arc::new(RwLock::new(DecayingAverage::new(Duration::from_secs(10)))),
                 difficulty: Arc::new(RwLock::new(Difficulty::from(1))),
                 accepted: Arc::new(AtomicU64::new(0)),
                 rejected: Arc::new(AtomicU64::new(0)),
                 filtered: Arc::new(AtomicU64::new(0)),
                 version_mask,
-                ping_ms: Arc::new(RwLock::new(DecayingAverage::new(Duration::from_secs(10)))),
             },
             events,
         ))

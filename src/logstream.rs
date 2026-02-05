@@ -1,4 +1,10 @@
-use {super::*, std::sync::Mutex};
+use {
+    super::*,
+    parking_lot::Mutex,
+    std::collections::VecDeque,
+    std::sync::{Arc, LazyLock},
+    tokio::sync::broadcast,
+};
 
 const BACKLOG_SIZE: usize = 30;
 const CHANNEL_CAPACITY: usize = 1000;
@@ -13,10 +19,7 @@ pub fn subscribe() -> broadcast::Receiver<Arc<str>> {
 }
 
 pub fn backlog() -> Vec<Arc<str>> {
-    BACKLOG
-        .lock()
-        .map(|b| b.iter().cloned().collect())
-        .unwrap_or_default()
+    BACKLOG.lock().iter().cloned().collect()
 }
 
 pub struct LogStreamLayer;
@@ -37,12 +40,11 @@ where
         let message = visitor.message.unwrap_or_default();
 
         let formatted: Arc<str> = format!("{level:>5}\t{message}").into();
-        if let Ok(mut backlog) = BACKLOG.lock() {
-            if backlog.len() == BACKLOG_SIZE {
-                backlog.pop_front();
-            }
-            backlog.push_back(formatted.clone());
+        let mut backlog = BACKLOG.lock();
+        if backlog.len() == BACKLOG_SIZE {
+            backlog.pop_front();
         }
+        backlog.push_back(formatted.clone());
         let _ = TX.send(formatted);
     }
 }

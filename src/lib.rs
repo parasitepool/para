@@ -68,7 +68,7 @@ use {
     snafu::Snafu,
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
     std::{
-        collections::{BTreeMap, HashMap, HashSet, VecDeque},
+        collections::{BTreeMap, HashMap, HashSet},
         env,
         fmt::{self, Display, Formatter},
         fs,
@@ -101,7 +101,7 @@ use {
             tcp::{OwnedReadHalf, OwnedWriteHalf},
         },
         runtime::Runtime,
-        sync::{Mutex, broadcast, mpsc, watch},
+        sync::{Mutex, RwLock, mpsc, watch},
         task::{self, JoinHandle, JoinSet},
         time::{MissedTickBehavior, interval, sleep, timeout},
     },
