@@ -60,7 +60,7 @@ impl Upstream {
             )
             .await
         {
-            Ok((response, _duration, _)) => {
+            Ok((response, ..)) => {
                 if response.version_rolling {
                     if let Some(mask) = response.version_rolling_mask {
                         info!("Upstream supports version rolling: mask={mask}",);
@@ -77,7 +77,7 @@ impl Upstream {
             }
         };
 
-        let (subscribe, _duration, _) = client
+        let (subscribe, ..) = client
             .subscribe()
             .await
             .context("failed to subscribe to upstream")?;
