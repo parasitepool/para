@@ -1,6 +1,6 @@
 use {super::*, std::sync::Mutex};
 
-const BACKLOG_SIZE: usize = 30;
+const BACKLOG_SIZE: usize = 100;
 const CHANNEL_CAPACITY: usize = 1000;
 
 static TX: LazyLock<broadcast::Sender<Arc<str>>> =
