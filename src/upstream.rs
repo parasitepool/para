@@ -99,7 +99,7 @@ impl Upstream {
                 rejected: Arc::new(AtomicU64::new(0)),
                 filtered: Arc::new(AtomicU64::new(0)),
                 version_mask,
-                ping_ms: Arc::new(RwLock::new(DecayingAverage::new(Duration::from_secs(60)))),
+                ping_ms: Arc::new(RwLock::new(DecayingAverage::new(Duration::from_secs(10)))),
             },
             events,
         ))
