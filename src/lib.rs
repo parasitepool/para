@@ -250,17 +250,6 @@ static FILTER_HANDLE: LazyLock<ReloadHandles> = LazyLock::new(|| {
     (fmt_reload, ls_reload, guard)
 });
 
-pub fn reload_log_filter() -> Result<()> {
-    if let Ok(mut level) = CURRENT_LOG_LEVEL.write() {
-        *level = String::new();
-    }
-
-    (FILTER_HANDLE.0)(EnvFilter::from_default_env())?;
-    (FILTER_HANDLE.1)(logstream_filter())?;
-    info!("Log filter reloaded from environment");
-    Ok(())
-}
-
 pub fn set_log_level_runtime(level: &str) -> Result<()> {
     let new_filter = EnvFilter::new(level);
 
