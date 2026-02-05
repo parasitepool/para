@@ -241,8 +241,11 @@ impl Upstream {
             {
                 Ok(duration) => {
                     accepted.fetch_add(1, Ordering::Relaxed);
-                    let sample_ms = duration.as_secs_f64() * 1000.0;
-                    ping_ms.write().await.record(sample_ms, Instant::now());
+                    ping_ms
+                        .write()
+                        .await
+                        .record(duration.as_secs_f64() * 1000.0, Instant::now());
+
                     info!("Upstream accepted share");
                 }
                 Err(ClientError::SubmitFalse) => {
@@ -301,8 +304,10 @@ impl Upstream {
     }
 
     async fn record_ping(&self, duration: Duration) {
-        let sample_ms = duration.as_secs_f64() * 1000.0;
-        self.ping_ms.write().await.record(sample_ms, Instant::now());
+        self.ping_ms
+            .write()
+            .await
+            .record(duration.as_secs_f64() * 1000.0, Instant::now());
     }
 
     pub(crate) async fn ping_ms(&self) -> f64 {
