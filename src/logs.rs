@@ -17,8 +17,9 @@ pub(crate) struct Logs {
 
 impl Logs {
     pub(crate) fn set_level(&self, level: &str) {
-        let _ = self.tx.send(Msg::SetLevel(level.to_string()));
-        *self.level.lock() = level.to_string();
+        let level = level.to_string();
+        *self.level.lock() = level.clone();
+        let _ = self.tx.send(Msg::SetLevel(level));
     }
 
     pub(crate) fn get_level(&self) -> String {
