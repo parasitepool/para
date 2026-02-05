@@ -1,4 +1,4 @@
-use super::*;
+use {super::*, tokio::sync::Mutex};
 
 pub mod miner;
 mod ping;

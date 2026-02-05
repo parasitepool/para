@@ -1,4 +1,4 @@
-use {super::*, parking_lot::Mutex};
+use super::*;
 
 struct Stats {
     dsps_1m: DecayingAverage,
