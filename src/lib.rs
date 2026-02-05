@@ -50,6 +50,7 @@ use {
     lru::LruCache,
     metatron::Metatron,
     metrics::Metrics,
+    parking_lot::Mutex,
     reqwest::Url,
     rust_embed::RustEmbed,
     rustls_acme::{
@@ -80,7 +81,7 @@ use {
         process,
         str::FromStr,
         sync::{
-            Arc, LazyLock, RwLock,
+            Arc, LazyLock,
             atomic::{AtomicBool, AtomicU64, Ordering},
         },
         thread,
@@ -101,7 +102,7 @@ use {
             tcp::{OwnedReadHalf, OwnedWriteHalf},
         },
         runtime::Runtime,
-        sync::{Mutex, broadcast, mpsc, watch},
+        sync::{RwLock, broadcast, mpsc, watch},
         task::{self, JoinHandle, JoinSet},
         time::{MissedTickBehavior, interval, sleep, timeout},
     },
@@ -205,8 +206,8 @@ fn logstream_filter() -> EnvFilter {
     EnvFilter::new(level.as_deref().unwrap_or("info"))
 }
 
-static CURRENT_LOG_LEVEL: LazyLock<Arc<RwLock<String>>> =
-    LazyLock::new(|| Arc::new(RwLock::new(String::from("info"))));
+static CURRENT_LOG_LEVEL: LazyLock<Arc<std::sync::RwLock<String>>> =
+    LazyLock::new(|| Arc::new(std::sync::RwLock::new(String::from("info"))));
 
 type ReloadFn = Box<dyn Fn(EnvFilter) -> Result<()> + Send + Sync>;
 
