@@ -1,6 +1,11 @@
 use super::*;
 
-pub(crate) fn router(metrics: Arc<Metrics>, bitcoin_client: Arc<Client>, chain: Chain) -> Router {
+pub(crate) fn router(
+    metrics: Arc<Metrics>,
+    bitcoin_client: Arc<Client>,
+    chain: Chain,
+    logs: Arc<logs::Logs>,
+) -> Router {
     Router::new()
         .route("/", get(home))
         .route("/users", get(users_page))
@@ -15,6 +20,7 @@ pub(crate) fn router(metrics: Arc<Metrics>, bitcoin_client: Arc<Client>, chain: 
         .with_state(metrics)
         .layer(Extension(bitcoin_client))
         .layer(Extension(chain))
+        .layer(Extension(logs))
 }
 
 async fn home(Extension(chain): Extension<Chain>) -> Response {

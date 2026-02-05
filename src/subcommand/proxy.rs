@@ -10,7 +10,11 @@ pub(crate) struct Proxy {
 }
 
 impl Proxy {
-    pub(crate) async fn run(&self, cancel_token: CancellationToken) -> Result {
+    pub(crate) async fn run(
+        &self,
+        cancel_token: CancellationToken,
+        logs: Arc<logs::Logs>,
+    ) -> Result {
         let mut tasks = JoinSet::new();
 
         let settings = Arc::new(
@@ -47,7 +51,7 @@ impl Proxy {
 
         http_server::spawn(
             &settings,
-            api::proxy::router(metrics.clone(), bitcoin_client, settings.chain()),
+            api::proxy::router(metrics.clone(), bitcoin_client, settings.chain(), logs),
             cancel_token.clone(),
             &mut tasks,
         )?;

@@ -82,7 +82,7 @@ use {
         process,
         str::FromStr,
         sync::{
-            Arc, LazyLock, OnceLock,
+            Arc, LazyLock,
             atomic::{AtomicBool, AtomicU64, Ordering},
         },
         thread,
@@ -194,7 +194,7 @@ fn integration_test() -> bool {
 }
 
 pub fn main() {
-    let _guard = logs::init();
+    let (logs, _guard) = logs::init();
 
     let args = Arguments::parse();
 
@@ -203,7 +203,7 @@ pub fn main() {
         .block_on(async {
             let cancel_token = signal::setup_signal_handler();
 
-            match args.run(cancel_token).await {
+            match args.run(cancel_token, logs).await {
                 Err(err) => {
                     eprintln!("error: {err}");
 
