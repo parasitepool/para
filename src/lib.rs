@@ -213,7 +213,7 @@ static FILTER_HANDLE: LazyLock<FilterHandle> = LazyLock::new(|| {
     let fmt_filter = EnvFilter::from_default_env();
     let (fmt_filter, fmt_reload_handle) = tracing_subscriber::reload::Layer::new(fmt_filter);
 
-    let ls_filter = EnvFilter::new("info");
+    let ls_filter = EnvFilter::new("warn,para=info");
     let (ls_filter, ls_reload_handle) = tracing_subscriber::reload::Layer::new(ls_filter);
 
     tracing_subscriber::registry()
@@ -246,7 +246,7 @@ static FILTER_HANDLE: LazyLock<FilterHandle> = LazyLock::new(|| {
 });
 
 pub fn set_log_level_runtime(level: &str) -> Result<()> {
-    let new_filter = EnvFilter::new(level);
+    let new_filter = EnvFilter::new(format!("warn,para={level}"));
 
     (FILTER_HANDLE.ls_reload)(new_filter)?;
 
