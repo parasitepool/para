@@ -50,6 +50,7 @@ use {
     lru::LruCache,
     metatron::Metatron,
     metrics::Metrics,
+    parking_lot::Mutex,
     reqwest::Url,
     rust_embed::RustEmbed,
     rustls_acme::{
@@ -101,7 +102,7 @@ use {
             tcp::{OwnedReadHalf, OwnedWriteHalf},
         },
         runtime::Runtime,
-        sync::{Mutex, broadcast, mpsc, watch},
+        sync::{RwLock, broadcast, mpsc, watch},
         task::{self, JoinHandle, JoinSet},
         time::{MissedTickBehavior, interval, sleep, timeout},
     },

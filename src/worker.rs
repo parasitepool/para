@@ -1,4 +1,4 @@
-use {super::*, parking_lot::Mutex};
+use super::*;
 
 struct Stats {
     dsps_1m: DecayingAverage,
@@ -29,17 +29,17 @@ impl Worker {
         Self {
             workername,
             stats: Mutex::new(Stats {
-                dsps_1m: DecayingAverage::new(Duration::from_secs(60)),
-                dsps_5m: DecayingAverage::new(Duration::from_secs(300)),
-                dsps_15m: DecayingAverage::new(Duration::from_secs(900)),
-                dsps_1hr: DecayingAverage::new(Duration::from_secs(3600)),
-                dsps_6hr: DecayingAverage::new(Duration::from_secs(21600)),
-                dsps_1d: DecayingAverage::new(Duration::from_secs(86400)),
-                dsps_7d: DecayingAverage::new(Duration::from_secs(604800)),
-                sps_1m: DecayingAverage::new(Duration::from_secs(60)),
-                sps_5m: DecayingAverage::new(Duration::from_secs(300)),
-                sps_15m: DecayingAverage::new(Duration::from_secs(900)),
-                sps_1hr: DecayingAverage::new(Duration::from_secs(3600)),
+                dsps_1m: DecayingAverage::new(Duration::from_mins(1)),
+                dsps_5m: DecayingAverage::new(Duration::from_mins(5)),
+                dsps_15m: DecayingAverage::new(Duration::from_mins(15)),
+                dsps_1hr: DecayingAverage::new(Duration::from_hours(1)),
+                dsps_6hr: DecayingAverage::new(Duration::from_hours(6)),
+                dsps_1d: DecayingAverage::new(Duration::from_hours(24)),
+                dsps_7d: DecayingAverage::new(Duration::from_hours(24 * 7)),
+                sps_1m: DecayingAverage::new(Duration::from_mins(1)),
+                sps_5m: DecayingAverage::new(Duration::from_mins(5)),
+                sps_15m: DecayingAverage::new(Duration::from_mins(15)),
+                sps_1hr: DecayingAverage::new(Duration::from_hours(1)),
                 best_ever: None,
                 last_share: None,
                 total_work: 0.0,
