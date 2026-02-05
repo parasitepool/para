@@ -199,11 +199,8 @@ fn logs_enabled() -> bool {
 static CURRENT_LOG_LEVEL: LazyLock<Mutex<String>> =
     LazyLock::new(|| Mutex::new(String::from("info")));
 
-type ReloadFn = Box<dyn Fn(EnvFilter) -> Result<()> + Send + Sync>;
-
 struct FilterHandle {
-    _fmt_reload: ReloadFn,
-    ls_reload: ReloadFn,
+    ls_reload: Box<dyn Fn(EnvFilter) -> Result<()> + Send + Sync>,
     _guard: tracing_appender::non_blocking::WorkerGuard,
 }
 
@@ -211,7 +208,6 @@ static FILTER_HANDLE: LazyLock<FilterHandle> = LazyLock::new(|| {
     let (writer, guard) = non_blocking(io::stderr());
 
     let fmt_filter = EnvFilter::from_default_env();
-    let (fmt_filter, fmt_reload_handle) = tracing_subscriber::reload::Layer::new(fmt_filter);
 
     let ls_filter = EnvFilter::new("warn,para=info");
     let (ls_filter, ls_reload_handle) = tracing_subscriber::reload::Layer::new(ls_filter);
@@ -226,12 +222,6 @@ static FILTER_HANDLE: LazyLock<FilterHandle> = LazyLock::new(|| {
         .with(logstream::LogStreamLayer.with_filter(ls_filter))
         .init();
 
-    let fmt_reload = Box::new(move |f: EnvFilter| {
-        fmt_reload_handle
-            .reload(f)
-            .context("failed to reload fmt filter")
-    });
-
     let ls_reload = Box::new(move |f: EnvFilter| {
         ls_reload_handle
             .reload(f)
@@ -239,7 +229,6 @@ static FILTER_HANDLE: LazyLock<FilterHandle> = LazyLock::new(|| {
     });
 
     FilterHandle {
-        _fmt_reload: fmt_reload,
         ls_reload,
         _guard: guard,
     }
