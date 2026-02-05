@@ -24,7 +24,7 @@ pub(crate) struct Upstream {
     rejected: Arc<AtomicU64>,
     filtered: Arc<AtomicU64>,
     version_mask: Option<Version>,
-    ping_measurements: Arc<Mutex<VecDeque<Duration>>>,
+    ping_ms: Arc<RwLock<DecayingAverage>>,
 }
 
 impl Upstream {
@@ -53,8 +53,6 @@ impl Upstream {
             .await
             .context("failed to connect to upstream")?;
 
-        let mut ping_measurements = VecDeque::with_capacity(10);
-
         let version_mask = match client
             .configure(
                 vec!["version-rolling".to_string()],
@@ -62,8 +60,7 @@ impl Upstream {
             )
             .await
         {
-            Ok((response, duration, _)) => {
-                ping_measurements.push_back(duration);
+            Ok((response, _duration, _)) => {
                 if response.version_rolling {
                     if let Some(mask) = response.version_rolling_mask {
                         info!("Upstream supports version rolling: mask={mask}",);
@@ -80,12 +77,10 @@ impl Upstream {
             }
         };
 
-        let (subscribe, duration, _) = client
+        let (subscribe, _duration, _) = client
             .subscribe()
             .await
             .context("failed to subscribe to upstream")?;
-
-        ping_measurements.push_back(duration);
 
         info!(
             "Subscribed to upstream: enonce1={}, enonce2_size={}",
@@ -104,7 +99,7 @@ impl Upstream {
                 rejected: Arc::new(AtomicU64::new(0)),
                 filtered: Arc::new(AtomicU64::new(0)),
                 version_mask,
-                ping_measurements: Arc::new(Mutex::new(ping_measurements)),
+                ping_ms: Arc::new(RwLock::new(DecayingAverage::new(Duration::from_secs(60)))),
             },
             events,
         ))
@@ -231,7 +226,7 @@ impl Upstream {
         let client = self.client.clone();
         let accepted = self.accepted.clone();
         let rejected = self.rejected.clone();
-        let ping_measurements = self.ping_measurements.clone();
+        let ping_ms = self.ping_ms.clone();
 
         tokio::spawn(async move {
             match client
@@ -246,7 +241,8 @@ impl Upstream {
             {
                 Ok(duration) => {
                     accepted.fetch_add(1, Ordering::Relaxed);
-                    Upstream::record_ping_with(ping_measurements, duration).await;
+                    let sample_ms = duration.as_secs_f64() * 1000.0;
+                    ping_ms.write().await.record(sample_ms, Instant::now());
                     info!("Upstream accepted share");
                 }
                 Err(ClientError::SubmitFalse) => {
@@ -305,27 +301,11 @@ impl Upstream {
     }
 
     async fn record_ping(&self, duration: Duration) {
-        Self::record_ping_with(self.ping_measurements.clone(), duration).await;
-    }
-
-    async fn record_ping_with(
-        ping_measurements: Arc<Mutex<VecDeque<Duration>>>,
-        duration: Duration,
-    ) {
-        let mut pings = ping_measurements.lock().await;
-        pings.push_back(duration);
-        if pings.len() > 10 {
-            pings.pop_front();
-        }
+        let sample_ms = duration.as_secs_f64() * 1000.0;
+        self.ping_ms.write().await.record(sample_ms, Instant::now());
     }
 
     pub(crate) async fn ping_ms(&self) -> f64 {
-        let pings = self.ping_measurements.lock().await;
-        if pings.is_empty() {
-            0.0
-        } else {
-            let total_ms: f64 = pings.iter().map(|d| d.as_secs_f64() * 1000.0).sum();
-            total_ms / pings.len() as f64
-        }
+        self.ping_ms.read().await.value_at(Instant::now())
     }
 }
