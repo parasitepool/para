@@ -196,8 +196,8 @@ fn logs_enabled() -> bool {
     std::env::var_os("RUST_LOG").is_some()
 }
 
-static CURRENT_LOG_LEVEL: LazyLock<std::sync::RwLock<String>> =
-    LazyLock::new(|| std::sync::RwLock::new(String::from("info")));
+static CURRENT_LOG_LEVEL: LazyLock<Mutex<String>> =
+    LazyLock::new(|| Mutex::new(String::from("info")));
 
 type ReloadFn = Box<dyn Fn(EnvFilter) -> Result<()> + Send + Sync>;
 
@@ -250,19 +250,14 @@ pub fn set_log_level_runtime(level: &str) -> Result<()> {
 
     (FILTER_HANDLE.ls_reload)(new_filter)?;
 
-    if let Ok(mut current) = CURRENT_LOG_LEVEL.write() {
-        *current = level.to_string();
-    }
+    *CURRENT_LOG_LEVEL.lock() = level.to_string();
 
     info!("Log level changed to: {}", level);
     Ok(())
 }
 
 pub fn get_current_log_level() -> String {
-    CURRENT_LOG_LEVEL
-        .read()
-        .map(|l| l.clone())
-        .unwrap_or_else(|_| String::from("info"))
+    CURRENT_LOG_LEVEL.lock().clone()
 }
 
 pub fn main() {
