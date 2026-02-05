@@ -247,15 +247,15 @@ impl Upstream {
                 Ok(duration) => {
                     accepted.fetch_add(1, Ordering::Relaxed);
                     Upstream::record_ping_with(ping_measurements, duration).await;
-                    info!("Upstream accepted share");
+                    debug!("Upstream accepted share");
                 }
                 Err(ClientError::SubmitFalse) => {
                     rejected.fetch_add(1, Ordering::Relaxed);
-                    warn!("Upstream rejected share: submit=false");
+                    debug!("Upstream rejected share: submit=false");
                 }
                 Err(ClientError::Rejected { reason, .. }) => {
                     rejected.fetch_add(1, Ordering::Relaxed);
-                    warn!("Upstream rejected share: {}", reason);
+                    debug!("Upstream rejected share: {}", reason);
                 }
                 Err(e) => {
                     warn!("Upstream submit error: {e}");

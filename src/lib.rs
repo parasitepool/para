@@ -195,18 +195,43 @@ fn logs_enabled() -> bool {
     std::env::var_os("RUST_LOG").is_some()
 }
 
-pub fn main() {
+fn build_env_filter() -> EnvFilter {
+    EnvFilter::from_default_env()
+}
+
+static FILTER_HANDLE: LazyLock<
+    std::sync::Mutex<tracing_subscriber::reload::Handle<EnvFilter, tracing_subscriber::Registry>>,
+> = LazyLock::new(|| {
     let (writer, _guard) = non_blocking(io::stderr());
+
+    let filter = build_env_filter();
+    let (filter, reload_handle) = tracing_subscriber::reload::Layer::new(filter);
 
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::fmt::layer()
                 .with_target(false)
                 .with_writer(writer)
-                .with_filter(EnvFilter::from_default_env()),
+                .with_filter(filter),
         )
-        .with(logstream::LogStreamLayer.with_filter(EnvFilter::from_default_env()))
+        .with(logstream::LogStreamLayer.with_filter(build_env_filter()))
         .init();
+
+    std::sync::Mutex::new(reload_handle)
+});
+
+pub fn reload_log_filter() -> Result<()> {
+    let new_filter = build_env_filter();
+    FILTER_HANDLE
+        .lock()
+        .map_err(|_| anyhow!("failed to acquire log filter lock"))?
+        .reload(new_filter)?;
+    info!("Log filter reloaded");
+    Ok(())
+}
+
+pub fn main() {
+    let _ = &*FILTER_HANDLE;
 
     let args = Arguments::parse();
 

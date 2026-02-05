@@ -215,7 +215,7 @@ impl<W: Workbase> Stratifier<W> {
         match consequence {
             Consequence::None => {}
             Consequence::Warn => {
-                info!(
+                debug!(
                     "Warning {} - {} consecutive rejects for {}s, sending fresh job",
                     self.socket_addr,
                     self.bouncer.consecutive_rejects(),
@@ -253,7 +253,7 @@ impl<W: Workbase> Stratifier<W> {
                 }
             }
             Consequence::Reconnect => {
-                info!(
+                debug!(
                     "Suggesting reconnect to {} - {} consecutive rejects for {}s",
                     self.socket_addr,
                     self.bouncer.consecutive_rejects(),
@@ -288,7 +288,7 @@ impl<W: Workbase> Stratifier<W> {
         match consequence {
             Consequence::None => {}
             Consequence::Warn => {
-                info!(
+                debug!(
                     "Warning {} - {} consecutive rejects for {}s",
                     self.socket_addr,
                     self.bouncer.consecutive_rejects(),
@@ -299,7 +299,7 @@ impl<W: Workbase> Stratifier<W> {
                 );
             }
             Consequence::Reconnect => {
-                info!(
+                debug!(
                     "Suggesting reconnect to {} - {} consecutive rejects for {}s",
                     self.socket_addr,
                     self.bouncer.consecutive_rejects(),
@@ -335,7 +335,7 @@ impl<W: Workbase> Stratifier<W> {
             let upstream_diff = upstream.difficulty().await;
 
             if let Some(new_diff) = self.vardiff.clamp_to_upstream(upstream_diff) {
-                info!(
+                debug!(
                     "Clamping proxy difficulty to upstream: {} -> {} for {}",
                     self.vardiff.current_diff(),
                     new_diff,
@@ -647,6 +647,11 @@ impl<W: Workbase> Stratifier<W> {
             )
             .await?;
 
+            debug!(
+                "Worker mismatch from {}: authorized={} submitted={}",
+                session.workername, session.username, submit.username
+            );
+
             self.send_event(rejection_event!(
                 session.address.to_string(),
                 session.workername.clone(),
@@ -661,6 +666,11 @@ impl<W: Workbase> Stratifier<W> {
 
         let Some(job) = self.jobs.get(&submit.job_id) else {
             let job_height = self.workbase_rx.borrow().height();
+
+            debug!(
+                "Stale share from {}: job_id={} height={}",
+                session.workername, submit.job_id, job_height
+            );
 
             self.send_error(id, StratumError::Stale, None).await?;
 
@@ -679,14 +689,22 @@ impl<W: Workbase> Stratifier<W> {
         let expected_extranonce2_size = self.metatron.enonce2_size();
 
         if submit.enonce2.len() != expected_extranonce2_size {
+            let job_height = job.workbase.height();
+
+            debug!(
+                "Invalid nonce2 length from {}: got {} bytes, expected {} height={}",
+                session.workername,
+                submit.enonce2.len(),
+                expected_extranonce2_size,
+                job_height
+            );
+
             warn!(
                 "Invalid extranonce2 length from {}: got {} bytes, expected {}",
                 self.socket_addr,
                 submit.enonce2.len(),
                 expected_extranonce2_size
             );
-
-            let job_height = job.workbase.height();
 
             self.send_error(
                 id,
@@ -714,6 +732,15 @@ impl<W: Workbase> Stratifier<W> {
         let submit_ntime = submit.ntime.0;
         if submit_ntime < job_ntime || submit_ntime > job_ntime + MAX_NTIME_OFFSET {
             let job_height = job.workbase.height();
+
+            debug!(
+                "Ntime out of range from {}: job_ntime={} submit_ntime={} max_ntime={} height={}",
+                session.workername,
+                job_ntime,
+                submit_ntime,
+                job_ntime + MAX_NTIME_OFFSET,
+                job_height
+            );
 
             self.send_error(
                 id,
@@ -743,6 +770,11 @@ impl<W: Workbase> Stratifier<W> {
                 let Some(version_mask) = job.version_mask else {
                     let job_height = job.workbase.height();
 
+                    debug!(
+                        "Invalid version mask from {}: version rolling not negotiated height={}",
+                        session.workername, job_height
+                    );
+
                     self.send_error(
                         id,
                         StratumError::InvalidVersionMask,
@@ -766,6 +798,11 @@ impl<W: Workbase> Stratifier<W> {
 
                 if disallowed != Version::from(0) {
                     let job_height = job.workbase.height();
+
+                    debug!(
+                        "Invalid version mask from {}: disallowed={} mask={} height={}",
+                        session.workername, disallowed, version_mask, job_height
+                    );
 
                     self.send_error(
                         id,
@@ -830,6 +867,11 @@ impl<W: Workbase> Stratifier<W> {
             let pool_diff = Target::from_compact(nbits.into()).difficulty_float();
             let share_diff = Difficulty::from(hash).as_f64();
             let job_height = job.workbase.height();
+
+            debug!(
+                "Duplicate share from {}: hash={} share_diff={} height={}",
+                session.workername, hash, share_diff, job_height
+            );
 
             self.send_error(id, StratumError::Duplicate, None).await?;
 
@@ -975,6 +1017,11 @@ impl<W: Workbase> Stratifier<W> {
         let pool_diff = current_diff.as_f64();
         let share_diff = Difficulty::from(hash).as_f64();
         let job_height = job.workbase.height();
+
+        debug!(
+            "Share above target from {}: share_diff={} pool_diff={} height={}",
+            session.workername, share_diff, pool_diff, job_height
+        );
 
         self.send_error(id, StratumError::AboveTarget, None).await?;
 
