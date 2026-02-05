@@ -9,7 +9,7 @@ enum Msg {
 }
 
 pub(crate) struct Logs {
-    tx: std::sync::mpsc::Sender<Msg>,
+    tx: tokio::sync::mpsc::UnboundedSender<Msg>,
     backlog: Mutex<VecDeque<Arc<str>>>,
     level: Mutex<String>,
     broadcast_tx: broadcast::Sender<Arc<str>>,
@@ -45,7 +45,7 @@ pub(crate) fn logs_enabled() -> bool {
 
 pub(crate) fn init() -> (Arc<Logs>, tracing_appender::non_blocking::WorkerGuard) {
     let (writer, guard) = non_blocking(io::stderr());
-    let (tx, rx) = std::sync::mpsc::channel();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let (broadcast_tx, _) = broadcast::channel(CHANNEL_CAPACITY);
 
     let fmt_filter = EnvFilter::from_default_env();
@@ -60,7 +60,7 @@ pub(crate) fn init() -> (Arc<Logs>, tracing_appender::non_blocking::WorkerGuard)
                 .with_writer(writer)
                 .with_filter(fmt_filter),
         )
-        .with(StreamLayer { tx: tx.clone() }.with_filter(ls_filter))
+        .with(StreamLayer(tx.clone()).with_filter(ls_filter))
         .init();
 
     let logs = Arc::new(Logs {
@@ -72,7 +72,7 @@ pub(crate) fn init() -> (Arc<Logs>, tracing_appender::non_blocking::WorkerGuard)
 
     let logs_bg = logs.clone();
     thread::spawn(move || {
-        while let Ok(msg) = rx.recv() {
+        while let Some(msg) = rx.blocking_recv() {
             match msg {
                 Msg::Event(level, message) => {
                     let formatted: Arc<str> = format!("{level:>5}\t{message}").into();
@@ -96,9 +96,7 @@ pub(crate) fn init() -> (Arc<Logs>, tracing_appender::non_blocking::WorkerGuard)
     (logs, guard)
 }
 
-struct StreamLayer {
-    tx: std::sync::mpsc::Sender<Msg>,
-}
+struct StreamLayer(tokio::sync::mpsc::UnboundedSender<Msg>);
 
 impl<S> Layer<S> for StreamLayer
 where
@@ -115,7 +113,7 @@ where
         let level = *event.metadata().level();
         let message = visitor.message.unwrap_or_default();
 
-        let _ = self.tx.send(Msg::Event(level, message));
+        let _ = self.0.send(Msg::Event(level, message));
     }
 }
 
