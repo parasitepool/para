@@ -196,34 +196,24 @@ fn logs_enabled() -> bool {
     std::env::var_os("RUST_LOG").is_some()
 }
 
-fn logstream_filter() -> EnvFilter {
-    let level = CURRENT_LOG_LEVEL
-        .read()
-        .ok()
-        .filter(|l| !l.is_empty())
-        .map(|l| l.clone());
-
-    EnvFilter::new(level.as_deref().unwrap_or("info"))
-}
-
-static CURRENT_LOG_LEVEL: LazyLock<Arc<std::sync::RwLock<String>>> =
-    LazyLock::new(|| Arc::new(std::sync::RwLock::new(String::from("info"))));
+static CURRENT_LOG_LEVEL: LazyLock<std::sync::RwLock<String>> =
+    LazyLock::new(|| std::sync::RwLock::new(String::from("info")));
 
 type ReloadFn = Box<dyn Fn(EnvFilter) -> Result<()> + Send + Sync>;
 
-type ReloadHandles = (
-    ReloadFn,
-    ReloadFn,
-    tracing_appender::non_blocking::WorkerGuard,
-);
+struct FilterHandle {
+    _fmt_reload: ReloadFn,
+    ls_reload: ReloadFn,
+    _guard: tracing_appender::non_blocking::WorkerGuard,
+}
 
-static FILTER_HANDLE: LazyLock<ReloadHandles> = LazyLock::new(|| {
+static FILTER_HANDLE: LazyLock<FilterHandle> = LazyLock::new(|| {
     let (writer, guard) = non_blocking(io::stderr());
 
     let fmt_filter = EnvFilter::from_default_env();
     let (fmt_filter, fmt_reload_handle) = tracing_subscriber::reload::Layer::new(fmt_filter);
 
-    let ls_filter = logstream_filter();
+    let ls_filter = EnvFilter::new("info");
     let (ls_filter, ls_reload_handle) = tracing_subscriber::reload::Layer::new(ls_filter);
 
     tracing_subscriber::registry()
@@ -248,13 +238,17 @@ static FILTER_HANDLE: LazyLock<ReloadHandles> = LazyLock::new(|| {
             .context("failed to reload logstream filter")
     });
 
-    (fmt_reload, ls_reload, guard)
+    FilterHandle {
+        _fmt_reload: fmt_reload,
+        ls_reload,
+        _guard: guard,
+    }
 });
 
 pub fn set_log_level_runtime(level: &str) -> Result<()> {
     let new_filter = EnvFilter::new(level);
 
-    (FILTER_HANDLE.1)(new_filter)?;
+    (FILTER_HANDLE.ls_reload)(new_filter)?;
 
     if let Ok(mut current) = CURRENT_LOG_LEVEL.write() {
         *current = level.to_string();
