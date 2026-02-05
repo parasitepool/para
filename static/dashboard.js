@@ -71,11 +71,21 @@ function connectWs() {
     renderLogs();
   });
 
+  function setActiveLevel(level) {
+    document.querySelectorAll('.log-level').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.level === level);
+    });
+  }
+
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const ws = new WebSocket(`${protocol}//${location.host}/ws/logs`);
   ws.onmessage = (e) => {
     const [level, ...rest] = e.data.split('\t');
     const text = rest.join('\t');
+    if (level === 'level') {
+      setActiveLevel(text);
+      return;
+    }
     allLogs.push({ level, text });
     while (allLogs.length > maxLogs) {
       allLogs.shift();
@@ -90,6 +100,12 @@ function connectWs() {
     clearTimeout(wsReconnectTimeout);
     wsReconnectTimeout = setTimeout(connectWs, CONFIG.WS_RECONNECT_DELAY);
   };
+
+  document.querySelectorAll('.log-level').forEach(btn => {
+    btn.addEventListener('click', () => {
+      ws.send('set-level:' + btn.dataset.level);
+    });
+  });
 }
 
 const SI_PREFIXES = ['', 'K', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y'];

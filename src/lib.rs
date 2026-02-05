@@ -80,7 +80,7 @@ use {
         process,
         str::FromStr,
         sync::{
-            Arc, LazyLock,
+            Arc, LazyLock, RwLock,
             atomic::{AtomicBool, AtomicU64, Ordering},
         },
         thread,
@@ -196,8 +196,21 @@ fn logs_enabled() -> bool {
 }
 
 fn build_env_filter() -> EnvFilter {
-    EnvFilter::from_default_env()
+    if let Ok(level) = CURRENT_LOG_LEVEL.read() {
+        if !level.is_empty() {
+            return EnvFilter::new(&*level);
+        }
+    }
+
+    if env::var("RUST_LOG").is_ok() {
+        return EnvFilter::from_default_env();
+    }
+
+    EnvFilter::new("info")
 }
+
+static CURRENT_LOG_LEVEL: LazyLock<Arc<RwLock<String>>> =
+    LazyLock::new(|| Arc::new(RwLock::new(String::from("info"))));
 
 type ReloadHandles = (
     Box<dyn Fn(EnvFilter) -> Result<()> + Send + Sync>,
@@ -238,10 +251,34 @@ static FILTER_HANDLE: LazyLock<ReloadHandles> = LazyLock::new(|| {
 });
 
 pub fn reload_log_filter() -> Result<()> {
+    if let Ok(mut level) = CURRENT_LOG_LEVEL.write() {
+        *level = String::new();
+    }
+
     let new_filter = build_env_filter();
     (FILTER_HANDLE.0)(new_filter)?;
-    info!("Log filter reloaded");
+    info!("Log filter reloaded from environment");
     Ok(())
+}
+
+pub fn set_log_level_runtime(level: &str) -> Result<()> {
+    let new_filter = EnvFilter::new(level);
+
+    (FILTER_HANDLE.0)(new_filter)?;
+
+    if let Ok(mut current) = CURRENT_LOG_LEVEL.write() {
+        *current = level.to_string();
+    }
+
+    info!("Log level changed to: {}", level);
+    Ok(())
+}
+
+pub fn get_current_log_level() -> String {
+    CURRENT_LOG_LEVEL
+        .read()
+        .map(|l| l.clone())
+        .unwrap_or_else(|_| String::from("info"))
 }
 
 pub fn main() {

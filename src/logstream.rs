@@ -19,6 +19,11 @@ pub fn backlog() -> Vec<Arc<str>> {
         .unwrap_or_default()
 }
 
+pub fn broadcast_level(level: &str) {
+    let msg: Arc<str> = format!("level\t{level}").into();
+    let _ = TX.send(msg);
+}
+
 pub struct LogStreamLayer;
 
 impl<S> Layer<S> for LogStreamLayer

@@ -60,6 +60,8 @@ table tbody tr:hover { background: #1a1a1a; }
 }
 #log-controls button:hover { background: #444; }
 #log-controls button.paused { background: #4a3; color: #111; }
+#log-level-controls { display: inline-flex; gap: 2px; margin: 0 4px; }
+.log-level.active { background: #4a3; color: #111; }
 #log-controls + #logs { margin-top: 0; }
 #logs {
   height: 450px;

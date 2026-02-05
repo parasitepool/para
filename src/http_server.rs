@@ -185,9 +185,11 @@ fn acceptor(
 pub(crate) struct StaticAssets;
 
 pub(crate) async fn ws_logs(ws: WebSocketUpgrade) -> Response {
-    ws.on_upgrade(|mut socket| async move {
+    ws.on_upgrade(|socket| async move {
+        let (mut sender, mut receiver) = socket.split();
+
         for msg in logstream::backlog() {
-            if socket
+            if sender
                 .send(Message::Text(msg.as_ref().into()))
                 .await
                 .is_err()
@@ -196,16 +198,45 @@ pub(crate) async fn ws_logs(ws: WebSocketUpgrade) -> Response {
             }
         }
 
+        let level = crate::get_current_log_level();
+        let _ = sender
+            .send(Message::Text(format!("level\t{level}").into()))
+            .await;
+
         let mut rx = logstream::subscribe();
 
-        while let Ok(msg) = rx.recv().await {
-            if socket
-                .send(Message::Text(msg.as_ref().into()))
-                .await
-                .is_err()
-            {
-                break;
+        let send_task = async {
+            while let Ok(msg) = rx.recv().await {
+                if sender
+                    .send(Message::Text(msg.as_ref().into()))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
             }
+        };
+
+        let recv_task = async {
+            while let Some(Ok(msg)) = receiver.next().await {
+                if let Message::Text(text) = msg {
+                    if let Some(level) = text.strip_prefix("set-level:") {
+                        match crate::set_log_level_runtime(level) {
+                            Ok(()) => {
+                                logstream::broadcast_level(level);
+                            }
+                            Err(e) => {
+                                warn!("Failed to set log level: {e}");
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        tokio::select! {
+            _ = send_task => {}
+            _ = recv_task => {}
         }
     })
 }

@@ -37,6 +37,13 @@
   <input type=search id=log-filter placeholder="Filter logs..." autocomplete=off data-1p-ignore data-lpignore=true data-bwignore=true>
   <button id=log-pause>Pause</button>
   <button id=log-clear>Clear</button>
+  <span id=log-level-controls>
+    <button class=log-level data-level=error>Error</button>
+    <button class=log-level data-level=warn>Warn</button>
+    <button class=log-level data-level=info>Info</button>
+    <button class=log-level data-level=debug>Debug</button>
+    <button class=log-level data-level=trace>Trace</button>
+  </span>
   <button id=log-hide>Hide</button>
 </div>
 <div id=logs class=hidden></div>
