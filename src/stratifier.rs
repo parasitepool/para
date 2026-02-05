@@ -215,7 +215,7 @@ impl<W: Workbase> Stratifier<W> {
         match consequence {
             Consequence::None => {}
             Consequence::Warn => {
-                debug!(
+                warn!(
                     "Warning {} - {} consecutive rejects for {}s, sending fresh job",
                     self.socket_addr,
                     self.bouncer.consecutive_rejects(),
@@ -253,7 +253,7 @@ impl<W: Workbase> Stratifier<W> {
                 }
             }
             Consequence::Reconnect => {
-                debug!(
+                warn!(
                     "Suggesting reconnect to {} - {} consecutive rejects for {}s",
                     self.socket_addr,
                     self.bouncer.consecutive_rejects(),
@@ -262,6 +262,7 @@ impl<W: Workbase> Stratifier<W> {
                         .map(|d| d.as_secs())
                         .unwrap_or(0)
                 );
+
                 let _ = self
                     .send(Message::Notification {
                         method: "client.reconnect".into(),
@@ -288,7 +289,7 @@ impl<W: Workbase> Stratifier<W> {
         match consequence {
             Consequence::None => {}
             Consequence::Warn => {
-                debug!(
+                warn!(
                     "Warning {} - {} consecutive rejects for {}s",
                     self.socket_addr,
                     self.bouncer.consecutive_rejects(),
@@ -299,7 +300,7 @@ impl<W: Workbase> Stratifier<W> {
                 );
             }
             Consequence::Reconnect => {
-                debug!(
+                warn!(
                     "Suggesting reconnect to {} - {} consecutive rejects for {}s",
                     self.socket_addr,
                     self.bouncer.consecutive_rejects(),
