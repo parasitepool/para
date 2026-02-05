@@ -219,15 +219,15 @@ pub(crate) async fn ws_logs(ws: WebSocketUpgrade) -> Response {
 
         let recv_task = async {
             while let Some(Ok(msg)) = receiver.next().await {
-                if let Message::Text(text) = msg {
-                    if let Some(level) = text.strip_prefix("set-level:") {
-                        match crate::set_log_level_runtime(level) {
-                            Ok(()) => {
-                                logstream::broadcast_level(level);
-                            }
-                            Err(e) => {
-                                warn!("Failed to set log level: {e}");
-                            }
+                if let Message::Text(text) = msg
+                    && let Some(level) = text.strip_prefix("set-level:")
+                {
+                    match crate::set_log_level_runtime(level) {
+                        Ok(()) => {
+                            logstream::broadcast_level(level);
+                        }
+                        Err(e) => {
+                            warn!("Failed to set log level: {e}");
                         }
                     }
                 }
