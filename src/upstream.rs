@@ -248,11 +248,11 @@ impl Upstream {
                 }
                 Err(ClientError::SubmitFalse) => {
                     rejected.fetch_add(1, Ordering::Relaxed);
-                    debug!("Upstream rejected share: submit=false");
+                    warn!("Upstream rejected share");
                 }
                 Err(ClientError::Rejected { reason, .. }) => {
                     rejected.fetch_add(1, Ordering::Relaxed);
-                    debug!("Upstream rejected share: {}", reason);
+                    warn!("Upstream rejected share: {}", reason);
                 }
                 Err(e) => {
                     warn!("Upstream submit error: {e}");

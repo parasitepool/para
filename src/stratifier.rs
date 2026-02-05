@@ -691,19 +691,13 @@ impl<W: Workbase> Stratifier<W> {
         if submit.enonce2.len() != expected_extranonce2_size {
             let job_height = job.workbase.height();
 
-            debug!(
-                "Invalid nonce2 length from {}: got {} bytes, expected {} height={}",
+            warn!(
+                "Invalid extranonce2 length from {} ({}): got {} bytes, expected {} height={}",
                 session.workername,
+                self.socket_addr,
                 submit.enonce2.len(),
                 expected_extranonce2_size,
                 job_height
-            );
-
-            warn!(
-                "Invalid extranonce2 length from {}: got {} bytes, expected {}",
-                self.socket_addr,
-                submit.enonce2.len(),
-                expected_extranonce2_size
             );
 
             self.send_error(
