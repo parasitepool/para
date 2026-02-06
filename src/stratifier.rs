@@ -1015,7 +1015,7 @@ impl<W: Workbase> Stratifier<W> {
 
         debug!(
             "Rejected share above target from {}: share_diff={} pool_diff={} height={}",
-            session.workername, share_diff, pool_diff, job_height
+            session.username, share_diff, pool_diff, job_height
         );
 
         self.send_error(id, StratumError::AboveTarget, None).await?;
