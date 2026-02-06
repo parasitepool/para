@@ -31,6 +31,7 @@ impl<'de> Deserialize<'de> for Subscribe {
         enum Raw {
             One((String,)),
             Two((String, Option<String>)),
+            Other(Vec<Value>),
         }
 
         match Raw::deserialize(deserializer)? {
@@ -45,6 +46,11 @@ impl<'de> Deserialize<'de> for Subscribe {
                     enonce1,
                 })
             }
+            Raw::Other(v) if v.is_empty() => Ok(Subscribe {
+                user_agent: String::new(),
+                enonce1: None,
+            }),
+            Raw::Other(_) => Err(de::Error::custom("unexpected subscribe params")),
         }
     }
 }
@@ -185,6 +191,23 @@ mod tests {
             serde_json::to_value(&b).unwrap(),
             serde_json::json!(["my_miner", "cafedade"])
         );
+    }
+
+    #[test]
+    fn subscribe_empty_params() {
+        let parsed: Subscribe = serde_json::from_str("[]").unwrap();
+        assert_eq!(
+            parsed,
+            Subscribe {
+                user_agent: String::new(),
+                enonce1: None,
+            }
+        );
+    }
+
+    #[test]
+    fn subscribe_unexpected_params() {
+        assert!(serde_json::from_str::<Subscribe>("[123]").is_err());
     }
 
     #[test]
