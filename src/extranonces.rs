@@ -10,6 +10,7 @@ pub(crate) struct PoolExtranonces {
 pub(crate) struct ProxyExtranonces {
     upstream_enonce1: Extranonce,
     downstream_enonce2_size: usize,
+    extension_size: usize,
 }
 
 #[derive(Debug)]
@@ -61,7 +62,11 @@ impl PoolExtranonces {
 }
 
 impl ProxyExtranonces {
-    pub(crate) fn new(upstream_enonce1: Extranonce, upstream_enonce2_size: usize) -> Result<Self> {
+    pub(crate) fn new(
+        upstream_enonce1: Extranonce,
+        upstream_enonce2_size: usize,
+        extension_size: usize,
+    ) -> Result<Self> {
         let upstream_enonce1_size = upstream_enonce1.len();
 
         ensure!(
@@ -78,12 +83,12 @@ impl ProxyExtranonces {
         );
 
         let downstream_enonce2_size = upstream_enonce2_size
-            .checked_sub(ENONCE1_EXTENSION_SIZE)
+            .checked_sub(extension_size)
             .ok_or_else(|| {
                 anyhow!(
                     "upstream enonce2_size {} too small to carve out {} byte extension",
                     upstream_enonce2_size,
-                    ENONCE1_EXTENSION_SIZE
+                    extension_size
                 )
             })?;
 
@@ -93,7 +98,7 @@ impl ProxyExtranonces {
             downstream_enonce2_size,
             MIN_ENONCE_SIZE,
             upstream_enonce2_size,
-            ENONCE1_EXTENSION_SIZE
+            extension_size
         );
         ensure!(
             downstream_enonce2_size <= MAX_ENONCE_SIZE,
@@ -105,6 +110,7 @@ impl ProxyExtranonces {
         Ok(Self {
             upstream_enonce1,
             downstream_enonce2_size,
+            extension_size,
         })
     }
 
@@ -112,9 +118,13 @@ impl ProxyExtranonces {
         &self.upstream_enonce1
     }
 
+    pub(crate) fn extension_size(&self) -> usize {
+        self.extension_size
+    }
+
     #[cfg(test)]
     pub(crate) fn extended_enonce1_size(&self) -> usize {
-        self.upstream_enonce1.len() + ENONCE1_EXTENSION_SIZE
+        self.upstream_enonce1.len() + self.extension_size
     }
 
     pub(crate) fn downstream_enonce2_size(&self) -> usize {
@@ -207,7 +217,7 @@ mod tests {
     #[test]
     fn proxy_rejects_upstream_enonce1_below_min() {
         let small_enonce1 = Extranonce::from_bytes(&[0xde]);
-        let err = ProxyExtranonces::new(small_enonce1, 8).unwrap_err();
+        let err = ProxyExtranonces::new(small_enonce1, 8, 2).unwrap_err();
         assert!(
             err.to_string()
                 .contains("upstream enonce1 size 1 below minimum")
@@ -217,7 +227,7 @@ mod tests {
     #[test]
     fn proxy_rejects_upstream_enonce1_above_max() {
         let large_enonce1 = Extranonce::from_bytes(&[0; 9]);
-        let err = ProxyExtranonces::new(large_enonce1, 8).unwrap_err();
+        let err = ProxyExtranonces::new(large_enonce1, 8, 2).unwrap_err();
         assert!(
             err.to_string()
                 .contains("upstream enonce1 size 9 exceeds maximum")
@@ -226,13 +236,13 @@ mod tests {
 
     #[test]
     fn proxy_rejects_upstream_enonce2_causing_underflow() {
-        let err = ProxyExtranonces::new(test_upstream_enonce1(), 1).unwrap_err();
+        let err = ProxyExtranonces::new(test_upstream_enonce1(), 1, 2).unwrap_err();
         assert!(err.to_string().contains("too small to carve out"));
     }
 
     #[test]
     fn proxy_rejects_insufficient_miner_enonce2_space() {
-        let err = ProxyExtranonces::new(test_upstream_enonce1(), 3).unwrap_err();
+        let err = ProxyExtranonces::new(test_upstream_enonce1(), 3, 2).unwrap_err();
         assert!(
             err.to_string()
                 .contains("miner enonce2 space 1 below minimum")
@@ -241,7 +251,7 @@ mod tests {
 
     #[test]
     fn proxy_rejects_excessive_miner_enonce2_space() {
-        let err = ProxyExtranonces::new(test_upstream_enonce1(), 11).unwrap_err();
+        let err = ProxyExtranonces::new(test_upstream_enonce1(), 11, 2).unwrap_err();
         assert!(
             err.to_string()
                 .contains("miner enonce2 space 9 exceeds maximum")
@@ -250,7 +260,7 @@ mod tests {
 
     #[test]
     fn proxy_accepts_valid_config() {
-        let p = ProxyExtranonces::new(test_upstream_enonce1(), 8).unwrap();
+        let p = ProxyExtranonces::new(test_upstream_enonce1(), 8, 2).unwrap();
         assert_eq!(p.downstream_enonce2_size(), 6);
         assert_eq!(p.extended_enonce1_size(), 6);
         assert_eq!(p.upstream_enonce1().as_bytes(), &[0xde, 0xad, 0xbe, 0xef]);
@@ -258,21 +268,29 @@ mod tests {
 
     #[test]
     fn proxy_accepts_boundary_minimum() {
-        let p = ProxyExtranonces::new(test_upstream_enonce1(), 4).unwrap();
+        let p = ProxyExtranonces::new(test_upstream_enonce1(), 4, 2).unwrap();
         assert_eq!(p.downstream_enonce2_size(), 2);
     }
 
     #[test]
     fn proxy_accepts_boundary_maximum() {
-        let p = ProxyExtranonces::new(test_upstream_enonce1(), 10).unwrap();
+        let p = ProxyExtranonces::new(test_upstream_enonce1(), 10, 2).unwrap();
         assert_eq!(p.downstream_enonce2_size(), 8);
     }
 
     #[test]
     fn proxy_computes_extended_enonce1_size() {
         let enonce1 = Extranonce::from_bytes(&[0xaa, 0xbb]);
-        let p = ProxyExtranonces::new(enonce1, 6).unwrap();
+        let p = ProxyExtranonces::new(enonce1, 6, 2).unwrap();
         assert_eq!(p.extended_enonce1_size(), 4);
+    }
+
+    #[test]
+    fn proxy_extension_size_1() {
+        let p = ProxyExtranonces::new(test_upstream_enonce1(), 8, 1).unwrap();
+        assert_eq!(p.downstream_enonce2_size(), 7);
+        assert_eq!(p.extended_enonce1_size(), 5);
+        assert_eq!(p.extension_size(), 1);
     }
 
     #[test]
@@ -285,7 +303,7 @@ mod tests {
 
     #[test]
     fn extranonces_proxy_delegates_correctly() {
-        let proxy = ProxyExtranonces::new(test_upstream_enonce1(), 8).unwrap();
+        let proxy = ProxyExtranonces::new(test_upstream_enonce1(), 8, 2).unwrap();
         let e = Extranonces::Proxy(proxy);
         assert_eq!(e.enonce1_size(), 6);
         assert_eq!(e.enonce2_size(), 6);
@@ -293,7 +311,7 @@ mod tests {
 
     #[test]
     fn proxy_reconstruct_enonce2_for_upstream() {
-        let proxy = ProxyExtranonces::new(test_upstream_enonce1(), 8).unwrap();
+        let proxy = ProxyExtranonces::new(test_upstream_enonce1(), 8, 2).unwrap();
         let miner_enonce1 = Extranonce::from_bytes(&[0xde, 0xad, 0xbe, 0xef, 0x01, 0x02]);
         let miner_enonce2 = Extranonce::from_bytes(&[0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]);
 

@@ -34,6 +34,7 @@ pub(crate) struct Settings {
     zmq_block_notifications: Endpoint,
     enonce1_size: usize,
     enonce2_size: usize,
+    enonce1_extension_size: usize,
     disable_bouncer: bool,
     database_url: Option<String>,
     events_file: Option<PathBuf>,
@@ -69,6 +70,7 @@ impl Default for Settings {
             zmq_block_notifications: "tcp://127.0.0.1:28332".parse().unwrap(),
             enonce1_size: ENONCE1_SIZE,
             enonce2_size: MAX_ENONCE_SIZE,
+            enonce1_extension_size: ENONCE1_EXTENSION_SIZE,
             disable_bouncer: false,
             database_url: None,
             events_file: None,
@@ -116,6 +118,7 @@ impl Settings {
                 .unwrap_or_else(|| "tcp://127.0.0.1:28332".parse().unwrap()),
             enonce1_size: options.enonce1_size.unwrap_or(ENONCE1_SIZE),
             enonce2_size: options.enonce2_size.unwrap_or(MAX_ENONCE_SIZE),
+            enonce1_extension_size: ENONCE1_EXTENSION_SIZE,
             disable_bouncer: options.disable_bouncer,
             database_url: options.database_url.clone(),
             events_file: options.events_file.clone(),
@@ -155,6 +158,9 @@ impl Settings {
             max_diff: options.max_diff,
             vardiff_period: Duration::from_secs_f64(options.vardiff_period.unwrap_or(3.33)),
             vardiff_window: Duration::from_secs_f64(options.vardiff_window.unwrap_or(300.0)),
+            enonce1_extension_size: options
+                .enonce1_extension_size
+                .unwrap_or(ENONCE1_EXTENSION_SIZE),
             ..Default::default()
         };
 
@@ -407,6 +413,10 @@ impl Settings {
 
     pub(crate) fn enonce2_size(&self) -> usize {
         self.enonce2_size
+    }
+
+    pub(crate) fn enonce1_extension_size(&self) -> usize {
+        self.enonce1_extension_size
     }
 
     pub(crate) fn disable_bouncer(&self) -> bool {

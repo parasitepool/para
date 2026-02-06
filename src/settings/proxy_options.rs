@@ -79,4 +79,7 @@ pub(crate) struct ProxyOptions {
 
     #[arg(long, alias = "datadir", help = "Store data in <DATA_DIR>.")]
     pub(crate) data_dir: Option<PathBuf>,
+
+    #[arg(long, help = "Set enonce1 extension size in bytes.")]
+    pub(crate) enonce1_extension_size: Option<usize>,
 }

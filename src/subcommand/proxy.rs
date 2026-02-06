@@ -35,8 +35,12 @@ impl Proxy {
             .context("failed to start upstream event loop")?;
 
         let extranonces = Extranonces::Proxy(
-            ProxyExtranonces::new(upstream.enonce1().clone(), upstream.enonce2_size())
-                .context("upstream extranonce configuration incompatible with proxy mode")?,
+            ProxyExtranonces::new(
+                upstream.enonce1().clone(),
+                upstream.enonce2_size(),
+                settings.enonce1_extension_size(),
+            )
+            .context("upstream extranonce configuration incompatible with proxy mode")?,
         );
         let metatron = Arc::new(Metatron::new(
             extranonces,
