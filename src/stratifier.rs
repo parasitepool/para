@@ -500,13 +500,7 @@ impl<W: Workbase> Stratifier<W> {
 
         self.bouncer.accept();
 
-        let subscriptions = vec![
-            (
-                "mining.set_difficulty".to_string(),
-                SUBSCRIPTION_ID.to_string(),
-            ),
-            ("mining.notify".to_string(), SUBSCRIPTION_ID.to_string()),
-        ];
+        let subscriptions = vec![("mining.notify".to_string(), SUBSCRIPTION_ID.to_string())];
 
         let result = SubscribeResult {
             subscriptions,

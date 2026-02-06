@@ -107,7 +107,7 @@ async fn stratum_state_machine() {
         client.connect().await.unwrap();
 
         let (subscribe, _, _) = client.subscribe().await.unwrap();
-        assert_eq!(subscribe.subscriptions.len(), 2);
+        assert_eq!(subscribe.subscriptions.len(), 1);
 
         // configure in Subscribed -> allowed
         let (configure, _, _) = client
