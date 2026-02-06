@@ -536,18 +536,16 @@ impl<W: Workbase> Stratifier<W> {
             .parse_with_network(self.settings.chain().network())
         {
             Ok(parsed) => parsed,
-            Err(e) => {
-                self.send_error(
+            Err(_) => {
+                self.send(Message::Response {
                     id,
-                    StratumError::Unauthorized,
-                    Some(json!({
-                        "message": e.to_string(),
-                        "username": authorize.username.as_str(),
-                    })),
-                )
+                    result: Some(json!(true)),
+                    error: None,
+                    reject_reason: None,
+                })
                 .await?;
 
-                return Ok(self.bouncer.reject());
+                return Ok(Consequence::None);
             }
         };
 

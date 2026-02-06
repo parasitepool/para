@@ -310,25 +310,8 @@ async fn stratum_state_machine() {
         client_invalid_username.subscribe().await.unwrap();
         client_address_wrong_network.subscribe().await.unwrap();
 
-        assert!(
-            client_invalid_username
-                .authorize()
-                .await
-                .unwrap_err()
-                .to_string()
-                .contains("Invalid bitcoin address")
-        );
-
-        assert!(
-            client_address_wrong_network
-                .authorize()
-                .await
-                .unwrap_err()
-                .to_string()
-                .contains(
-                    "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4 is not valid for signet network"
-                )
-        );
+        client_invalid_username.authorize().await.unwrap();
+        client_address_wrong_network.authorize().await.unwrap();
     }
 }
 
@@ -1051,33 +1034,14 @@ async fn bouncer() {
         client.connect().await.unwrap();
         client.subscribe().await.unwrap();
 
-        let start = std::time::Instant::now();
-        let mut dropped = false;
+        client.authorize().await.unwrap();
 
-        while start.elapsed() < Duration::from_secs(10) {
-            match client.authorize().await {
-                Ok(_) => panic!("auth_failure: Expected unauthorized response"),
-                Err(ClientError::NotConnected) | Err(ClientError::Io { .. }) => {
-                    dropped = true;
-                    break;
-                }
-                Err(err) => {
-                    assert!(
-                        matches!(
-                            err,
-                            ClientError::Stratum { ref response }
-                                if response.error_code == StratumError::Unauthorized as i32
-                        ),
-                        "auth_failure: Expected Unauthorized, got {err:?}"
-                    );
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                }
-            }
-        }
+        tokio::time::sleep(Duration::from_secs(4)).await;
 
+        let result = client.authorize().await;
         assert!(
-            dropped,
-            "auth_failure: Expected connection to be dropped after auth failures and bouncer escalation"
+            result.is_err(),
+            "auth_failure: Expected connection to be dropped after AUTH_TIMEOUT"
         );
     };
 
