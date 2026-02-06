@@ -522,6 +522,14 @@ impl<W: Workbase> Stratifier<W> {
         })
         .await?;
 
+        let current_diff = self.vardiff.current_diff();
+
+        self.send(Message::Notification {
+            method: "mining.set_difficulty".into(),
+            params: json!(SetDifficulty(current_diff)),
+        })
+        .await?;
+
         Ok(Consequence::None)
     }
 
@@ -539,7 +547,7 @@ impl<W: Workbase> Stratifier<W> {
             Err(_) => {
                 self.send(Message::Response {
                     id,
-                    result: Some(json!(true)),
+                    result: Some(json!(false)),
                     error: None,
                     reject_reason: None,
                 })
@@ -592,19 +600,6 @@ impl<W: Workbase> Stratifier<W> {
 
         self.bouncer.authorize();
         self.bouncer.accept();
-
-        let current_diff = self.vardiff.current_diff();
-
-        debug!(
-            "Sending mining.set_difficulty with {current_diff} to {}",
-            self.socket_addr
-        );
-
-        self.send(Message::Notification {
-            method: "mining.set_difficulty".into(),
-            params: json!(SetDifficulty(current_diff)),
-        })
-        .await?;
 
         debug!("Sending mining.notify to {}", self.socket_addr);
 

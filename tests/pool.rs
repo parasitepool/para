@@ -310,8 +310,14 @@ async fn stratum_state_machine() {
         client_invalid_username.subscribe().await.unwrap();
         client_address_wrong_network.subscribe().await.unwrap();
 
-        client_invalid_username.authorize().await.unwrap();
-        client_address_wrong_network.authorize().await.unwrap();
+        assert_stratum_error(
+            client_invalid_username.authorize().await,
+            StratumError::Unauthorized,
+        );
+        assert_stratum_error(
+            client_address_wrong_network.authorize().await,
+            StratumError::Unauthorized,
+        );
     }
 }
 
@@ -1034,7 +1040,7 @@ async fn bouncer() {
         client.connect().await.unwrap();
         client.subscribe().await.unwrap();
 
-        client.authorize().await.unwrap();
+        assert_stratum_error(client.authorize().await, StratumError::Unauthorized);
 
         tokio::time::sleep(Duration::from_secs(4)).await;
 
