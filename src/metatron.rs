@@ -426,6 +426,24 @@ mod tests {
     }
 
     #[test]
+    fn proxy_mode_extension_size_1() {
+        let upstream_enonce1 = Extranonce::from_bytes(&[0xde, 0xad, 0xbe, 0xef]);
+        let extranonces =
+            Extranonces::Proxy(ProxyExtranonces::new(upstream_enonce1.clone(), 8, 1).unwrap());
+        let metatron = Metatron::new(extranonces, String::new());
+
+        let e1 = metatron.next_enonce1();
+        assert_eq!(e1.len(), 5);
+        assert_eq!(&e1.as_bytes()[..4], upstream_enonce1.as_bytes());
+        assert_eq!(metatron.enonce2_size(), 7);
+
+        let e2 = metatron.next_enonce1();
+        let ext1 = e1.as_bytes()[4];
+        let ext2 = e2.as_bytes()[4];
+        assert_eq!(ext2, ext1 + 1);
+    }
+
+    #[test]
     fn total_work_accumulates() {
         let metatron = Metatron::new(pool_extranonces(), String::new());
         let addr = test_address();

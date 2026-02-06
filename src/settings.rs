@@ -328,6 +328,19 @@ impl Settings {
             MAX_ENONCE_SIZE
         );
 
+        ensure!(
+            self.enonce1_extension_size >= 1,
+            "enonce1_extension_size ({}) must be >= 1",
+            self.enonce1_extension_size
+        );
+
+        ensure!(
+            self.enonce1_extension_size <= MAX_ENONCE_SIZE - MIN_ENONCE_SIZE,
+            "enonce1_extension_size ({}) must be <= {}",
+            self.enonce1_extension_size,
+            MAX_ENONCE_SIZE - MIN_ENONCE_SIZE
+        );
+
         Ok(())
     }
 
@@ -911,6 +924,61 @@ mod tests {
         assert_eq!(
             settings.upstream_username.as_ref().map(|u| u.to_string()),
             Some("bar.baz".into())
+        );
+    }
+
+    #[test]
+    fn proxy_enonce1_extension_size_default() {
+        let options = parse_proxy_options("para proxy --upstream foo:1234 --username bar");
+        let settings = Settings::from_proxy_options(options).unwrap();
+        assert_eq!(settings.enonce1_extension_size, ENONCE1_EXTENSION_SIZE);
+    }
+
+    #[test]
+    fn proxy_enonce1_extension_size_override() {
+        let options = parse_proxy_options(
+            "para proxy --upstream foo:1234 --username bar --enonce1-extension-size 3",
+        );
+        let settings = Settings::from_proxy_options(options).unwrap();
+        assert_eq!(settings.enonce1_extension_size, 3);
+    }
+
+    #[test]
+    fn proxy_enonce1_extension_size_boundaries() {
+        let options = parse_proxy_options(
+            "para proxy --upstream foo:1234 --username bar --enonce1-extension-size 1",
+        );
+        let settings = Settings::from_proxy_options(options).unwrap();
+        assert_eq!(settings.enonce1_extension_size, 1);
+
+        let options = parse_proxy_options(
+            "para proxy --upstream foo:1234 --username bar --enonce1-extension-size 6",
+        );
+        let settings = Settings::from_proxy_options(options).unwrap();
+        assert_eq!(settings.enonce1_extension_size, 6);
+    }
+
+    #[test]
+    fn proxy_enonce1_extension_size_too_small() {
+        let options = parse_proxy_options(
+            "para proxy --upstream foo:1234 --username bar --enonce1-extension-size 0",
+        );
+        let err = Settings::from_proxy_options(options).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("enonce1_extension_size (0) must be >= 1")
+        );
+    }
+
+    #[test]
+    fn proxy_enonce1_extension_size_too_large() {
+        let options = parse_proxy_options(
+            "para proxy --upstream foo:1234 --username bar --enonce1-extension-size 7",
+        );
+        let err = Settings::from_proxy_options(options).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("enonce1_extension_size (7) must be <=")
         );
     }
 }
