@@ -649,7 +649,7 @@ impl<W: Workbase> Stratifier<W> {
             .await?;
 
             debug!(
-                "Worker mismatch from {}: authorized={} submitted={}",
+                "Rejected worker mismatch from {}: authorized={} submitted={}",
                 session.workername, session.username, submit.username
             );
 
@@ -669,7 +669,7 @@ impl<W: Workbase> Stratifier<W> {
             let job_height = self.workbase_rx.borrow().height();
 
             debug!(
-                "Stale share from {}: job_id={} height={}",
+                "Rejected stale share from {}: job_id={} height={}",
                 session.workername, submit.job_id, job_height
             );
 
@@ -693,7 +693,7 @@ impl<W: Workbase> Stratifier<W> {
             let job_height = job.workbase.height();
 
             warn!(
-                "Invalid extranonce2 length from {} ({}): got {} bytes, expected {} height={}",
+                "Rejected invalid extranonce2 length from {} ({}): got {} bytes, expected {} height={}",
                 session.workername,
                 self.socket_addr,
                 submit.enonce2.len(),
@@ -729,7 +729,7 @@ impl<W: Workbase> Stratifier<W> {
             let job_height = job.workbase.height();
 
             debug!(
-                "Ntime out of range from {}: job_ntime={} submit_ntime={} max_ntime={} height={}",
+                "Rejected ntime out of range from {}: job_ntime={} submit_ntime={} max_ntime={} height={}",
                 session.workername,
                 job_ntime,
                 submit_ntime,
@@ -766,7 +766,7 @@ impl<W: Workbase> Stratifier<W> {
                     let job_height = job.workbase.height();
 
                     debug!(
-                        "Invalid version mask from {}: version rolling not negotiated height={}",
+                        "Rejected invalid version mask from {}: version rolling not negotiated height={}",
                         session.workername, job_height
                     );
 
@@ -795,7 +795,7 @@ impl<W: Workbase> Stratifier<W> {
                     let job_height = job.workbase.height();
 
                     debug!(
-                        "Invalid version mask from {}: disallowed={} mask={} height={}",
+                        "Rejected invalid version mask from {}: disallowed={} mask={} height={}",
                         session.workername, disallowed, version_mask, job_height
                     );
 
@@ -864,7 +864,7 @@ impl<W: Workbase> Stratifier<W> {
             let job_height = job.workbase.height();
 
             debug!(
-                "Duplicate share from {}: hash={} share_diff={} height={}",
+                "Rejected duplicate share from {}: hash={} share_diff={} height={}",
                 session.workername, hash, share_diff, job_height
             );
 
@@ -1014,7 +1014,7 @@ impl<W: Workbase> Stratifier<W> {
         let job_height = job.workbase.height();
 
         debug!(
-            "Share above target from {}: share_diff={} pool_diff={} height={}",
+            "Rejected share above target from {}: share_diff={} pool_diff={} height={}",
             session.workername, share_diff, pool_diff, job_height
         );
 
