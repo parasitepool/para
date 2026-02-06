@@ -184,10 +184,15 @@ fn acceptor(
 #[folder = "static"]
 pub(crate) struct StaticAssets;
 
-pub(crate) async fn ws_logs(ws: WebSocketUpgrade) -> Response {
-    ws.on_upgrade(|mut socket| async move {
-        for msg in logstream::backlog() {
-            if socket
+pub(crate) async fn ws_logs(
+    Extension(logs): Extension<Arc<logs::Logs>>,
+    ws: WebSocketUpgrade,
+) -> Response {
+    ws.on_upgrade(|socket| async move {
+        let (mut sender, mut receiver) = socket.split();
+
+        for msg in logs.backlog() {
+            if sender
                 .send(Message::Text(msg.as_ref().into()))
                 .await
                 .is_err()
@@ -196,16 +201,39 @@ pub(crate) async fn ws_logs(ws: WebSocketUpgrade) -> Response {
             }
         }
 
-        let mut rx = logstream::subscribe();
+        let level = logs.get_level();
+        let _ = sender
+            .send(Message::Text(format!("level\t{level}").into()))
+            .await;
 
-        while let Ok(msg) = rx.recv().await {
-            if socket
-                .send(Message::Text(msg.as_ref().into()))
-                .await
-                .is_err()
-            {
-                break;
+        let mut rx = logs.subscribe();
+
+        let send_task = async {
+            while let Ok(msg) = rx.recv().await {
+                if sender
+                    .send(Message::Text(msg.as_ref().into()))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
             }
+        };
+
+        let recv_task = async {
+            while let Some(Ok(msg)) = receiver.next().await {
+                if let Message::Text(text) = msg
+                    && let Some(level) = text.strip_prefix("set-level:")
+                {
+                    logs.set_level(level);
+                    logs.broadcast_level(level);
+                }
+            }
+        };
+
+        tokio::select! {
+            _ = send_task => {}
+            _ = recv_task => {}
         }
     })
 }

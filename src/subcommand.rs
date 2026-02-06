@@ -27,12 +27,16 @@ pub(crate) enum Subcommand {
 }
 
 impl Subcommand {
-    pub(crate) async fn run(self, cancel_token: CancellationToken) -> Result {
+    pub(crate) async fn run(
+        self,
+        cancel_token: CancellationToken,
+        logs: Arc<logs::Logs>,
+    ) -> Result {
         match self {
             Self::Miner(miner) => miner.run(cancel_token).await,
             Self::Ping(ping) => ping.run(cancel_token).await,
-            Self::Pool(pool) => pool.run(cancel_token).await,
-            Self::Proxy(proxy) => proxy.run(cancel_token).await,
+            Self::Pool(pool) => pool.run(cancel_token, logs).await,
+            Self::Proxy(proxy) => proxy.run(cancel_token, logs).await,
             Self::Server(server) => {
                 let handle = Handle::new();
 

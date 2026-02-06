@@ -71,11 +71,27 @@ function connectWs() {
     renderLogs();
   });
 
+  const levelToggle = document.getElementById('log-level-toggle');
+  const levelOptions = document.getElementById('log-level-options');
+
+  function setActiveLevel(level) {
+    if (levelToggle) {
+      levelToggle.textContent = level.toUpperCase();
+    }
+    if (levelOptions) {
+      levelOptions.classList.add('hidden');
+    }
+  }
+
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const ws = new WebSocket(`${protocol}//${location.host}/ws/logs`);
   ws.onmessage = (e) => {
     const [level, ...rest] = e.data.split('\t');
     const text = rest.join('\t');
+    if (level === 'level') {
+      setActiveLevel(text);
+      return;
+    }
     allLogs.push({ level, text });
     while (allLogs.length > maxLogs) {
       allLogs.shift();
@@ -90,6 +106,23 @@ function connectWs() {
     clearTimeout(wsReconnectTimeout);
     wsReconnectTimeout = setTimeout(connectWs, CONFIG.WS_RECONNECT_DELAY);
   };
+
+  levelToggle?.addEventListener('click', () => {
+    levelOptions?.classList.toggle('hidden');
+  });
+
+  document.addEventListener('click', (e) => {
+    if (levelOptions && !levelOptions.classList.contains('hidden')
+        && !e.target.closest('#log-level-controls')) {
+      levelOptions.classList.add('hidden');
+    }
+  });
+
+  document.querySelectorAll('.log-level').forEach(btn => {
+    btn.addEventListener('click', () => {
+      ws.send('set-level:' + btn.dataset.level);
+    });
+  });
 }
 
 const SI_PREFIXES = ['', 'K', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y'];

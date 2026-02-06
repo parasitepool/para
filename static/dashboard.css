@@ -60,6 +60,9 @@ table tbody tr:hover { background: #1a1a1a; }
 }
 #log-controls button:hover { background: #444; }
 #log-controls button.paused { background: #4a3; color: #111; }
+#log-level-controls { position: relative; }
+#log-level-options.hidden { display: none; }
+#log-level-options { position: absolute; bottom: 100%; left: 0; display: flex; flex-direction: column; gap: 2px; padding-bottom: 4px; }
 #log-controls + #logs { margin-top: 0; }
 #logs {
   height: 450px;
@@ -81,7 +84,6 @@ table tbody tr:hover { background: #1a1a1a; }
 .log-warn { color: #fa0; }
 .log-info { color: #4f4; }
 .log-debug { color: #88f; }
-.log-trace { color: #888; }
 @media (max-width: 1140px) {
   body { padding: 20px; }
   .wrapper { width: auto; }

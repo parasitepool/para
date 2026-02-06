@@ -52,6 +52,8 @@ impl Metatron {
                     _ = cleanup_interval.tick() => {
                         self.sessions
                             .retain(|_, session| !session.is_expired(SESSION_TTL));
+
+                        info!("{}", self.status_line());
                     }
                 }
             }

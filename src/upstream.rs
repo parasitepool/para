@@ -244,11 +244,11 @@ impl Upstream {
                         .await
                         .record(duration.as_secs_f64() * 1000.0, Instant::now());
 
-                    info!("Upstream accepted share");
+                    debug!("Upstream accepted share");
                 }
                 Err(ClientError::SubmitFalse) => {
                     rejected.fetch_add(1, Ordering::Relaxed);
-                    warn!("Upstream rejected share: submit=false");
+                    warn!("Upstream rejected share");
                 }
                 Err(ClientError::Rejected { reason, .. }) => {
                     rejected.fetch_add(1, Ordering::Relaxed);

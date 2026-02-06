@@ -215,7 +215,7 @@ impl<W: Workbase> Stratifier<W> {
         match consequence {
             Consequence::None => {}
             Consequence::Warn => {
-                info!(
+                warn!(
                     "Warning {} - {} consecutive rejects for {}s, sending fresh job",
                     self.socket_addr,
                     self.bouncer.consecutive_rejects(),
@@ -253,7 +253,7 @@ impl<W: Workbase> Stratifier<W> {
                 }
             }
             Consequence::Reconnect => {
-                info!(
+                warn!(
                     "Suggesting reconnect to {} - {} consecutive rejects for {}s",
                     self.socket_addr,
                     self.bouncer.consecutive_rejects(),
@@ -262,6 +262,7 @@ impl<W: Workbase> Stratifier<W> {
                         .map(|d| d.as_secs())
                         .unwrap_or(0)
                 );
+
                 let _ = self
                     .send(Message::Notification {
                         method: "client.reconnect".into(),
@@ -288,7 +289,7 @@ impl<W: Workbase> Stratifier<W> {
         match consequence {
             Consequence::None => {}
             Consequence::Warn => {
-                info!(
+                warn!(
                     "Warning {} - {} consecutive rejects for {}s",
                     self.socket_addr,
                     self.bouncer.consecutive_rejects(),
@@ -299,7 +300,7 @@ impl<W: Workbase> Stratifier<W> {
                 );
             }
             Consequence::Reconnect => {
-                info!(
+                warn!(
                     "Suggesting reconnect to {} - {} consecutive rejects for {}s",
                     self.socket_addr,
                     self.bouncer.consecutive_rejects(),
@@ -335,7 +336,7 @@ impl<W: Workbase> Stratifier<W> {
             let upstream_diff = upstream.difficulty().await;
 
             if let Some(new_diff) = self.vardiff.clamp_to_upstream(upstream_diff) {
-                info!(
+                debug!(
                     "Clamping proxy difficulty to upstream: {} -> {} for {}",
                     self.vardiff.current_diff(),
                     new_diff,
@@ -647,6 +648,11 @@ impl<W: Workbase> Stratifier<W> {
             )
             .await?;
 
+            debug!(
+                "Rejected worker mismatch from {}: authorized={} submitted={}",
+                session.username, session.username, submit.username
+            );
+
             self.send_event(rejection_event!(
                 session.address.to_string(),
                 session.workername.clone(),
@@ -661,6 +667,11 @@ impl<W: Workbase> Stratifier<W> {
 
         let Some(job) = self.jobs.get(&submit.job_id) else {
             let job_height = self.workbase_rx.borrow().height();
+
+            debug!(
+                "Rejected stale share from {}: job_id={} height={}",
+                session.username, submit.job_id, job_height
+            );
 
             self.send_error(id, StratumError::Stale, None).await?;
 
@@ -679,14 +690,16 @@ impl<W: Workbase> Stratifier<W> {
         let expected_extranonce2_size = self.metatron.enonce2_size();
 
         if submit.enonce2.len() != expected_extranonce2_size {
+            let job_height = job.workbase.height();
+
             warn!(
-                "Invalid extranonce2 length from {}: got {} bytes, expected {}",
+                "Rejected invalid extranonce2 length from {} ({}): got {} bytes, expected {} height={}",
+                session.username,
                 self.socket_addr,
                 submit.enonce2.len(),
-                expected_extranonce2_size
+                expected_extranonce2_size,
+                job_height
             );
-
-            let job_height = job.workbase.height();
 
             self.send_error(
                 id,
@@ -714,6 +727,15 @@ impl<W: Workbase> Stratifier<W> {
         let submit_ntime = submit.ntime.0;
         if submit_ntime < job_ntime || submit_ntime > job_ntime + MAX_NTIME_OFFSET {
             let job_height = job.workbase.height();
+
+            debug!(
+                "Rejected ntime out of range from {}: job_ntime={} submit_ntime={} max_ntime={} height={}",
+                session.username,
+                job_ntime,
+                submit_ntime,
+                job_ntime + MAX_NTIME_OFFSET,
+                job_height
+            );
 
             self.send_error(
                 id,
@@ -743,6 +765,11 @@ impl<W: Workbase> Stratifier<W> {
                 let Some(version_mask) = job.version_mask else {
                     let job_height = job.workbase.height();
 
+                    debug!(
+                        "Rejected invalid version mask from {}: version rolling not negotiated height={}",
+                        session.username, job_height
+                    );
+
                     self.send_error(
                         id,
                         StratumError::InvalidVersionMask,
@@ -766,6 +793,11 @@ impl<W: Workbase> Stratifier<W> {
 
                 if disallowed != Version::from(0) {
                     let job_height = job.workbase.height();
+
+                    debug!(
+                        "Rejected invalid version mask from {}: disallowed={} mask={} height={}",
+                        session.username, disallowed, version_mask, job_height
+                    );
 
                     self.send_error(
                         id,
@@ -830,6 +862,11 @@ impl<W: Workbase> Stratifier<W> {
             let pool_diff = Target::from_compact(nbits.into()).difficulty_float();
             let share_diff = Difficulty::from(hash).as_f64();
             let job_height = job.workbase.height();
+
+            debug!(
+                "Rejected duplicate share from {}: hash={} share_diff={} height={}",
+                session.username, hash, share_diff, job_height
+            );
 
             self.send_error(id, StratumError::Duplicate, None).await?;
 
@@ -975,6 +1012,11 @@ impl<W: Workbase> Stratifier<W> {
         let pool_diff = current_diff.as_f64();
         let share_diff = Difficulty::from(hash).as_f64();
         let job_height = job.workbase.height();
+
+        debug!(
+            "Rejected share above target from {}: share_diff={} pool_diff={} height={}",
+            session.username, share_diff, pool_diff, job_height
+        );
 
         self.send_error(id, StratumError::AboveTarget, None).await?;
 

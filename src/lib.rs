@@ -47,6 +47,7 @@ use {
     hashrate::HashRate,
     job::Job,
     jobs::Jobs,
+    logs::logs_enabled,
     lru::LruCache,
     metatron::Metatron,
     metrics::Metrics,
@@ -137,7 +138,7 @@ pub mod hashrate;
 mod http_server;
 mod job;
 mod jobs;
-mod logstream;
+mod logs;
 mod metatron;
 mod metrics;
 pub mod settings;
@@ -192,22 +193,8 @@ fn integration_test() -> bool {
     std::env::var_os("PARA_INTEGRATION_TEST").is_some()
 }
 
-fn logs_enabled() -> bool {
-    std::env::var_os("RUST_LOG").is_some()
-}
-
 pub fn main() {
-    let (writer, _guard) = non_blocking(io::stderr());
-
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_target(false)
-                .with_writer(writer)
-                .with_filter(EnvFilter::from_default_env()),
-        )
-        .with(logstream::LogStreamLayer.with_filter(EnvFilter::from_default_env()))
-        .init();
+    let (logs, _guard) = logs::init();
 
     let args = Arguments::parse();
 
@@ -216,7 +203,7 @@ pub fn main() {
         .block_on(async {
             let cancel_token = signal::setup_signal_handler();
 
-            match args.run(cancel_token).await {
+            match args.run(cancel_token, logs).await {
                 Err(err) => {
                     eprintln!("error: {err}");
 
