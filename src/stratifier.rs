@@ -650,7 +650,7 @@ impl<W: Workbase> Stratifier<W> {
 
             debug!(
                 "Rejected worker mismatch from {}: authorized={} submitted={}",
-                session.workername, session.username, submit.username
+                session.username, session.username, submit.username
             );
 
             self.send_event(rejection_event!(
@@ -670,7 +670,7 @@ impl<W: Workbase> Stratifier<W> {
 
             debug!(
                 "Rejected stale share from {}: job_id={} height={}",
-                session.workername, submit.job_id, job_height
+                session.username, submit.job_id, job_height
             );
 
             self.send_error(id, StratumError::Stale, None).await?;
@@ -694,7 +694,7 @@ impl<W: Workbase> Stratifier<W> {
 
             warn!(
                 "Rejected invalid extranonce2 length from {} ({}): got {} bytes, expected {} height={}",
-                session.workername,
+                session.username,
                 self.socket_addr,
                 submit.enonce2.len(),
                 expected_extranonce2_size,
@@ -730,7 +730,7 @@ impl<W: Workbase> Stratifier<W> {
 
             debug!(
                 "Rejected ntime out of range from {}: job_ntime={} submit_ntime={} max_ntime={} height={}",
-                session.workername,
+                session.username,
                 job_ntime,
                 submit_ntime,
                 job_ntime + MAX_NTIME_OFFSET,
@@ -767,7 +767,7 @@ impl<W: Workbase> Stratifier<W> {
 
                     debug!(
                         "Rejected invalid version mask from {}: version rolling not negotiated height={}",
-                        session.workername, job_height
+                        session.username, job_height
                     );
 
                     self.send_error(
@@ -796,7 +796,7 @@ impl<W: Workbase> Stratifier<W> {
 
                     debug!(
                         "Rejected invalid version mask from {}: disallowed={} mask={} height={}",
-                        session.workername, disallowed, version_mask, job_height
+                        session.username, disallowed, version_mask, job_height
                     );
 
                     self.send_error(
@@ -865,7 +865,7 @@ impl<W: Workbase> Stratifier<W> {
 
             debug!(
                 "Rejected duplicate share from {}: hash={} share_diff={} height={}",
-                session.workername, hash, share_diff, job_height
+                session.username, hash, share_diff, job_height
             );
 
             self.send_error(id, StratumError::Duplicate, None).await?;
