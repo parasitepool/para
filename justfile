@@ -38,6 +38,9 @@ coverage:
 test-without-ckpool:
   cargo test --all -- --skip ckpool
 
+gui:
+  cargo run --features gui -- gui
+
 bitcoind:
   #!/usr/bin/env bash
   ./bitcoin/build/bin/bitcoind \
