@@ -70,13 +70,14 @@ impl Metatron {
             }
             Extranonces::Proxy(proxy) => {
                 let upstream = proxy.upstream_enonce1().as_bytes();
-                let mut bytes = [0u8; MAX_ENONCE_SIZE + ENONCE1_EXTENSION_SIZE];
+                let extension_size = proxy.extension_size();
+                let mut bytes = [0u8; MAX_ENONCE_SIZE * 2];
 
                 bytes[..upstream.len()].copy_from_slice(upstream);
-                bytes[upstream.len()..upstream.len() + ENONCE1_EXTENSION_SIZE]
-                    .copy_from_slice(&counter.to_le_bytes()[..ENONCE1_EXTENSION_SIZE]);
+                bytes[upstream.len()..upstream.len() + extension_size]
+                    .copy_from_slice(&counter.to_le_bytes()[..extension_size]);
 
-                Extranonce::from_bytes(&bytes[..upstream.len() + ENONCE1_EXTENSION_SIZE])
+                Extranonce::from_bytes(&bytes[..upstream.len() + extension_size])
             }
         }
     }
@@ -272,7 +273,7 @@ mod tests {
 
     fn proxy_extranonces() -> Extranonces {
         let upstream_enonce1 = Extranonce::from_bytes(&[0xde, 0xad, 0xbe, 0xef]);
-        Extranonces::Proxy(ProxyExtranonces::new(upstream_enonce1, 8).unwrap())
+        Extranonces::Proxy(ProxyExtranonces::new(upstream_enonce1, 8, 2).unwrap())
     }
 
     fn test_address() -> Address {
@@ -397,7 +398,7 @@ mod tests {
     fn proxy_mode_next_enonce1_extends_upstream() {
         let upstream_enonce1 = Extranonce::from_bytes(&[0xde, 0xad, 0xbe, 0xef]);
         let extranonces =
-            Extranonces::Proxy(ProxyExtranonces::new(upstream_enonce1.clone(), 8).unwrap());
+            Extranonces::Proxy(ProxyExtranonces::new(upstream_enonce1.clone(), 8, 2).unwrap());
         let metatron = Metatron::new(extranonces, String::new());
 
         let e1 = metatron.next_enonce1();
@@ -421,6 +422,24 @@ mod tests {
 
         let ext1 = u16::from_le_bytes(e1.as_bytes()[4..6].try_into().unwrap());
         let ext2 = u16::from_le_bytes(e2.as_bytes()[4..6].try_into().unwrap());
+        assert_eq!(ext2, ext1 + 1);
+    }
+
+    #[test]
+    fn proxy_mode_extension_size_1() {
+        let upstream_enonce1 = Extranonce::from_bytes(&[0xde, 0xad, 0xbe, 0xef]);
+        let extranonces =
+            Extranonces::Proxy(ProxyExtranonces::new(upstream_enonce1.clone(), 8, 1).unwrap());
+        let metatron = Metatron::new(extranonces, String::new());
+
+        let e1 = metatron.next_enonce1();
+        assert_eq!(e1.len(), 5);
+        assert_eq!(&e1.as_bytes()[..4], upstream_enonce1.as_bytes());
+        assert_eq!(metatron.enonce2_size(), 7);
+
+        let e2 = metatron.next_enonce1();
+        let ext1 = e1.as_bytes()[4];
+        let ext2 = e2.as_bytes()[4];
         assert_eq!(ext2, ext1 + 1);
     }
 
