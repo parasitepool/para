@@ -8,8 +8,7 @@ pub enum Id {
     String(String),
 }
 
-#[derive(Debug, Serialize, PartialEq)]
-#[serde(untagged)]
+#[derive(Debug, PartialEq)]
 pub enum Message {
     Request {
         id: Id,
@@ -20,13 +19,50 @@ pub enum Message {
         id: Id,
         result: Option<Value>,
         error: Option<StratumErrorResponse>,
-        #[serde(skip_serializing_if = "Option::is_none", rename = "reject-reason")]
         reject_reason: Option<String>,
     },
     Notification {
         method: String,
         params: Value,
     },
+}
+
+impl Serialize for Message {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        match self {
+            Message::Request { id, method, params } => {
+                let mut map = serializer.serialize_map(Some(3))?;
+                map.serialize_entry("id", id)?;
+                map.serialize_entry("method", method)?;
+                map.serialize_entry("params", params)?;
+                map.end()
+            }
+            Message::Response {
+                id,
+                result,
+                error,
+                reject_reason,
+            } => {
+                let len = 3 + reject_reason.is_some() as usize;
+                let mut map = serializer.serialize_map(Some(len))?;
+                map.serialize_entry("id", id)?;
+                map.serialize_entry("result", result)?;
+                map.serialize_entry("error", error)?;
+                if let Some(reason) = reject_reason {
+                    map.serialize_entry("reject-reason", reason)?;
+                }
+                map.end()
+            }
+            Message::Notification { method, params } => {
+                let mut map = serializer.serialize_map(Some(3))?;
+                map.serialize_entry("params", params)?;
+                map.serialize_entry("id", &Id::Null)?;
+                map.serialize_entry("method", method)?;
+                map.end()
+            }
+        }
+    }
 }
 
 /// Stratum does id: null, which is technically wrong according to the JSON-RPC spec, which
@@ -134,17 +170,17 @@ mod tests {
     #[test]
     fn notification() {
         case(
-            r#"{"method":"mining.notify","params":[]}"#,
+            r#"{"params":[],"id":null,"method":"mining.notify"}"#,
             Message::Notification {
                 method: "mining.notify".into(),
                 params: serde_json::json!([]),
             },
         );
 
-        let with_id_null = r#"{"method":"mining.notify","params":[],"id":null}"#;
+        let without_id = r#"{"method":"mining.notify","params":[]}"#;
 
         assert_eq!(
-            serde_json::from_str::<Message>(with_id_null).unwrap(),
+            serde_json::from_str::<Message>(without_id).unwrap(),
             Message::Notification {
                 method: "mining.notify".into(),
                 params: serde_json::json!([]),
@@ -226,7 +262,7 @@ mod tests {
         };
 
         case(
-            r#"{"method":"mining.notify","params":["bf","4d16b6f85af6e2198f44ae2a6de67f78487ae5611b77c6c0440b921e00000000","01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff20020862062f503253482f04b8864e5008","072f736c7573682f000000000100f2052a010000001976a914d23fcdf86f7e756a64a7a9688ef9903327048ed988ac00000000",[],"00000002","1c2ac4af","504e86b9",false]}"#,
+            r#"{"params":["bf","4d16b6f85af6e2198f44ae2a6de67f78487ae5611b77c6c0440b921e00000000","01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff20020862062f503253482f04b8864e5008","072f736c7573682f000000000100f2052a010000001976a914d23fcdf86f7e756a64a7a9688ef9903327048ed988ac00000000",[],"00000002","1c2ac4af","504e86b9",false],"id":null,"method":"mining.notify"}"#,
             Message::Notification {
                 method: "mining.notify".into(),
                 params: serde_json::to_value(&notify).unwrap(),

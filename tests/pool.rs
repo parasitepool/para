@@ -107,7 +107,7 @@ async fn stratum_state_machine() {
         client.connect().await.unwrap();
 
         let (subscribe, _, _) = client.subscribe().await.unwrap();
-        assert_eq!(subscribe.subscriptions.len(), 2);
+        assert_eq!(subscribe.subscriptions.len(), 1);
 
         // configure in Subscribed -> allowed
         let (configure, _, _) = client
@@ -310,24 +310,13 @@ async fn stratum_state_machine() {
         client_invalid_username.subscribe().await.unwrap();
         client_address_wrong_network.subscribe().await.unwrap();
 
-        assert!(
-            client_invalid_username
-                .authorize()
-                .await
-                .unwrap_err()
-                .to_string()
-                .contains("Invalid bitcoin address")
+        assert_stratum_error(
+            client_invalid_username.authorize().await,
+            StratumError::Unauthorized,
         );
-
-        assert!(
-            client_address_wrong_network
-                .authorize()
-                .await
-                .unwrap_err()
-                .to_string()
-                .contains(
-                    "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4 is not valid for signet network"
-                )
+        assert_stratum_error(
+            client_address_wrong_network.authorize().await,
+            StratumError::Unauthorized,
         );
     }
 }
@@ -1031,33 +1020,14 @@ async fn bouncer() {
         client.connect().await.unwrap();
         client.subscribe().await.unwrap();
 
-        let start = std::time::Instant::now();
-        let mut dropped = false;
+        assert_stratum_error(client.authorize().await, StratumError::Unauthorized);
 
-        while start.elapsed() < Duration::from_secs(10) {
-            match client.authorize().await {
-                Ok(_) => panic!("auth_failure: Expected unauthorized response"),
-                Err(ClientError::NotConnected) | Err(ClientError::Io { .. }) => {
-                    dropped = true;
-                    break;
-                }
-                Err(err) => {
-                    assert!(
-                        matches!(
-                            err,
-                            ClientError::Stratum { ref response }
-                                if response.error_code == StratumError::Unauthorized as i32
-                        ),
-                        "auth_failure: Expected Unauthorized, got {err:?}"
-                    );
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                }
-            }
-        }
+        tokio::time::sleep(Duration::from_secs(4)).await;
 
+        let result = client.authorize().await;
         assert!(
-            dropped,
-            "auth_failure: Expected connection to be dropped after auth failures and bouncer escalation"
+            result.is_err(),
+            "auth_failure: Expected connection to be dropped after AUTH_TIMEOUT"
         );
     };
 

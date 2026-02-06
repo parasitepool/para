@@ -504,13 +504,7 @@ impl<W: Workbase> Stratifier<W> {
 
         self.bouncer.accept();
 
-        let subscriptions = vec![
-            (
-                "mining.set_difficulty".to_string(),
-                SUBSCRIPTION_ID.to_string(),
-            ),
-            ("mining.notify".to_string(), SUBSCRIPTION_ID.to_string()),
-        ];
+        let subscriptions = vec![("mining.notify".to_string(), SUBSCRIPTION_ID.to_string())];
 
         let result = SubscribeResult {
             subscriptions,
@@ -523,6 +517,14 @@ impl<W: Workbase> Stratifier<W> {
             result: Some(json!(result)),
             error: None,
             reject_reason: None,
+        })
+        .await?;
+
+        let current_diff = self.vardiff.current_diff();
+
+        self.send(Message::Notification {
+            method: "mining.set_difficulty".into(),
+            params: json!(SetDifficulty(current_diff)),
         })
         .await?;
 
@@ -540,18 +542,16 @@ impl<W: Workbase> Stratifier<W> {
             .parse_with_network(self.settings.chain().network())
         {
             Ok(parsed) => parsed,
-            Err(e) => {
-                self.send_error(
+            Err(_) => {
+                self.send(Message::Response {
                     id,
-                    StratumError::Unauthorized,
-                    Some(json!({
-                        "message": e.to_string(),
-                        "username": authorize.username.as_str(),
-                    })),
-                )
+                    result: Some(json!(false)),
+                    error: None,
+                    reject_reason: None,
+                })
                 .await?;
 
-                return Ok(self.bouncer.reject());
+                return Ok(Consequence::None);
             }
         };
 
@@ -598,19 +598,6 @@ impl<W: Workbase> Stratifier<W> {
 
         self.bouncer.authorize();
         self.bouncer.accept();
-
-        let current_diff = self.vardiff.current_diff();
-
-        debug!(
-            "Sending mining.set_difficulty with {current_diff} to {}",
-            self.socket_addr
-        );
-
-        self.send(Message::Notification {
-            method: "mining.set_difficulty".into(),
-            params: json!(SetDifficulty(current_diff)),
-        })
-        .await?;
 
         debug!("Sending mining.notify to {}", self.socket_addr);
 
