@@ -18,7 +18,7 @@ pub(crate) struct Upstream {
     enonce1: Extranonce,
     enonce2_size: usize,
     connected: Arc<AtomicBool>,
-    ping: Arc<RwLock<DecayingAverage>>,
+    ping: Arc<RwLock<Duration>>,
     difficulty: Arc<RwLock<Difficulty>>,
     accepted: Arc<AtomicU64>,
     rejected: Arc<AtomicU64>,
@@ -93,7 +93,7 @@ impl Upstream {
                 enonce1: subscribe.enonce1,
                 enonce2_size: subscribe.enonce2_size,
                 connected: Arc::new(AtomicBool::new(false)),
-                ping: Arc::new(RwLock::new(DecayingAverage::new(Duration::from_secs(10)))),
+                ping: Arc::new(RwLock::new(Duration::from_secs(1))),
                 difficulty: Arc::new(RwLock::new(Difficulty::from(1))),
                 accepted: Arc::new(AtomicU64::new(0)),
                 rejected: Arc::new(AtomicU64::new(0)),
@@ -116,7 +116,7 @@ impl Upstream {
             .await
             .context("failed to authorize with upstream")?;
 
-        self.record_ping(duration).await;
+        self.set_ping(duration).await;
 
         info!(
             "Authorized to upstream {} with {}",
@@ -240,9 +240,8 @@ impl Upstream {
             {
                 Ok(duration) => {
                     accepted.fetch_add(1, Ordering::Relaxed);
-                    ping.write()
-                        .await
-                        .record(duration.as_secs_f64() * 1000.0, Instant::now());
+                    let mut ping = ping.write().await;
+                    *ping = duration;
 
                     debug!("Upstream accepted share");
                 }
@@ -301,14 +300,12 @@ impl Upstream {
         self.version_mask
     }
 
-    async fn record_ping(&self, duration: Duration) {
-        self.ping
-            .write()
-            .await
-            .record(duration.as_secs_f64() * 1000.0, Instant::now());
+    async fn set_ping(&self, duration: Duration) {
+        let mut ping = self.ping.write().await;
+        *ping = duration;
     }
 
-    pub(crate) async fn ping_ms(&self) -> f64 {
-        self.ping.read().await.value_at(Instant::now())
+    pub(crate) async fn ping_ms(&self) -> u128 {
+        self.ping.read().await.as_millis()
     }
 }
