@@ -71,7 +71,7 @@ impl Pool {
         loop {
             tokio::select! {
                 Ok((stream, addr)) = listener.accept() => {
-                    info!("Spawning stratifier task for {addr}");
+                    debug!("Spawning stratifier task for {addr}");
 
                     let workbase_rx = workbase_rx.clone();
                     let settings = settings.clone();
