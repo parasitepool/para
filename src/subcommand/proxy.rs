@@ -93,7 +93,13 @@ impl Proxy {
         loop {
             let (stream, addr, start_diff) = tokio::select! {
                 accept = listener.accept() => {
-                    let (stream, addr) = accept?;
+                    let (stream, addr) = match accept {
+                        Ok((stream, addr)) => (stream, addr),
+                        Err(err) => {
+                            error!("Accept error: {err}");
+                            continue;
+                        }
+                    };
                     (stream, addr, settings.start_diff())
                 }
                 Some(accept) = async {
