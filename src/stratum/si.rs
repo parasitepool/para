@@ -29,7 +29,8 @@ pub fn format_si(value: f64, unit: &str, f: &mut Formatter<'_>) -> fmt::Result {
 
     let scaled = value / divisor;
     let precision = f.precision().unwrap_or(2);
-    let s = format!("{scaled:.precision$}");
+    let factor = 10_f64.powi(precision as i32);
+    let s = format!("{:.precision$}", (scaled * factor).trunc() / factor);
     let trimmed = s.trim_end_matches('0').trim_end_matches('.');
 
     let suffix = format!("{prefix}{unit}");
@@ -121,8 +122,11 @@ mod tests {
         case(1e12, "", "1 T");
         case(1e15, "", "1 P");
         case(1e18, "", "1 E");
-        case(1.567e12, "H/s", "1.57 TH/s");
-        case(123.456e12, "", "123.46 T");
+        case(1.567e12, "H/s", "1.56 TH/s");
+        case(123.456e12, "", "123.45 T");
+        case(9999.0, "", "9.99 K");
+        case(999_999.0, "", "999.99 K");
+        case(9_999_999.0, "", "9.99 M");
     }
 
     #[test]
