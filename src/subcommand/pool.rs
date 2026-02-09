@@ -91,7 +91,7 @@ impl Pool {
                         None => std::future::pending().await,
                     }
                 } => {
-                    (stream, addr, Difficulty::from(1_000_000))
+                    (stream, addr, high_diff_start())
                 }
                 _ = cancel_token.cancelled() => {
                     info!("Shutting down stratum server");

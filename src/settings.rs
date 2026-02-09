@@ -5,6 +5,10 @@ mod proxy_options;
 
 pub(crate) use {pool_options::PoolOptions, proxy_options::ProxyOptions};
 
+pub(crate) fn high_diff_start() -> Difficulty {
+    Difficulty::from(1_000_000)
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct Settings {
     address: String,
@@ -344,6 +348,44 @@ impl Settings {
             self.enonce1_extension_size,
             MAX_ENONCE_SIZE - MIN_ENONCE_SIZE
         );
+
+        if let Some(high_diff_port) = self.high_diff_port {
+            ensure!(
+                high_diff_port != self.port,
+                "high_diff_port ({}) must not equal port ({})",
+                high_diff_port,
+                self.port
+            );
+
+            if let Some(http_port) = self.http_port {
+                ensure!(
+                    high_diff_port != http_port,
+                    "high_diff_port ({}) must not equal http_port ({})",
+                    high_diff_port,
+                    http_port
+                );
+            }
+
+            let high_diff = high_diff_start();
+
+            if let Some(max) = self.max_diff {
+                ensure!(
+                    high_diff <= max,
+                    "high_diff_port start difficulty ({}) must be <= max_diff ({})",
+                    high_diff,
+                    max
+                );
+            }
+
+            if let Some(min) = self.min_diff {
+                ensure!(
+                    high_diff >= min,
+                    "high_diff_port start difficulty ({}) must be >= min_diff ({})",
+                    high_diff,
+                    min
+                );
+            }
+        }
 
         Ok(())
     }
@@ -1011,5 +1053,71 @@ mod tests {
             "para proxy --upstream foo:1234 --username bar --high-diff-port 3333",
             Some(3333),
         );
+    }
+
+    #[test]
+    fn high_diff_port_equals_port_fails() {
+        let pool = parse_pool_options("para pool --port 3333 --high-diff-port 3333");
+        let proxy = parse_proxy_options(
+            "para proxy --upstream foo:1234 --username bar --port 3333 --high-diff-port 3333",
+        );
+        assert!(Settings::from_pool_options(pool)
+            .unwrap_err()
+            .to_string()
+            .contains("must not equal port"));
+        assert!(Settings::from_proxy_options(proxy)
+            .unwrap_err()
+            .to_string()
+            .contains("must not equal port"));
+    }
+
+    #[test]
+    fn high_diff_port_equals_http_port_fails() {
+        let pool = parse_pool_options("para pool --http-port 8080 --high-diff-port 8080");
+        let proxy = parse_proxy_options(
+            "para proxy --upstream foo:1234 --username bar --http-port 8080 --high-diff-port 8080",
+        );
+        assert!(Settings::from_pool_options(pool)
+            .unwrap_err()
+            .to_string()
+            .contains("must not equal http_port"));
+        assert!(Settings::from_proxy_options(proxy)
+            .unwrap_err()
+            .to_string()
+            .contains("must not equal http_port"));
+    }
+
+    #[test]
+    fn high_diff_port_above_max_diff_fails() {
+        let pool = parse_pool_options("para pool --high-diff-port 3333 --max-diff 100");
+        let proxy = parse_proxy_options(
+            "para proxy --upstream foo:1234 --username bar --high-diff-port 3333 --max-diff 100",
+        );
+        assert!(Settings::from_pool_options(pool)
+            .unwrap_err()
+            .to_string()
+            .contains("high_diff_port start difficulty"));
+        assert!(Settings::from_proxy_options(proxy)
+            .unwrap_err()
+            .to_string()
+            .contains("high_diff_port start difficulty"));
+    }
+
+    #[test]
+    fn high_diff_port_below_min_diff_fails() {
+        let pool = parse_pool_options(
+            "para pool --high-diff-port 3333 --min-diff 2000000 --start-diff 2000000",
+        );
+        let proxy = parse_proxy_options(
+            "para proxy --upstream foo:1234 --username bar --high-diff-port 3333 --min-diff 2000000 --start-diff 2000000",
+        );
+        assert!(Settings::from_pool_options(pool)
+            .unwrap_err()
+            .to_string()
+            .contains("high_diff_port start difficulty"));
+        assert!(Settings::from_proxy_options(proxy)
+            .unwrap_err()
+            .to_string()
+            .contains("high_diff_port start difficulty"));
     }
 }
