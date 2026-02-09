@@ -2,15 +2,15 @@ use super::*;
 
 #[derive(Clone, Debug, Parser)]
 pub(crate) struct PoolOptions {
-    #[arg(long, help = "Listen at <ADDRESS>.")]
+    #[arg(long, help = "Listen for stratum messages at <ADDRESS>.")]
     pub(crate) address: Option<String>,
 
-    #[arg(long, help = "Listen on <PORT>.")]
+    #[arg(long, help = "Listen for stratum messages on port <PORT>.")]
     pub(crate) port: Option<u16>,
 
     #[arg(
         long,
-        help = "Listen on <HIGH_DIFF_PORT> with initial difficulty 1000000."
+        help = "Listen for stratum messages on high diff port <HIGH_DIFF_PORT> with initial difficulty 1000000."
     )]
     pub(crate) high_diff_port: Option<u16>,
 

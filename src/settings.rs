@@ -5,10 +5,6 @@ mod proxy_options;
 
 pub(crate) use {pool_options::PoolOptions, proxy_options::ProxyOptions};
 
-pub(crate) fn high_diff_start() -> Difficulty {
-    Difficulty::from(1_000_000)
-}
-
 #[derive(Clone, Debug)]
 pub(crate) struct Settings {
     address: String,
@@ -366,22 +362,20 @@ impl Settings {
                 );
             }
 
-            let high_diff = high_diff_start();
-
             if let Some(max) = self.max_diff {
                 ensure!(
-                    high_diff <= max,
+                    *HIGH_DIFF_START <= max,
                     "high_diff_port start difficulty ({}) must be <= max_diff ({})",
-                    high_diff,
+                    *HIGH_DIFF_START,
                     max
                 );
             }
 
             if let Some(min) = self.min_diff {
                 ensure!(
-                    high_diff >= min,
+                    *HIGH_DIFF_START >= min,
                     "high_diff_port start difficulty ({}) must be >= min_diff ({})",
-                    high_diff,
+                    *HIGH_DIFF_START,
                     min
                 );
             }

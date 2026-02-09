@@ -66,7 +66,7 @@ use {
     },
     serde_json::json,
     serde_with::{DeserializeFromStr, SerializeDisplay},
-    settings::{PoolOptions, ProxyOptions, Settings, high_diff_start},
+    settings::{PoolOptions, ProxyOptions, Settings},
     snafu::Snafu,
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
     std::{
@@ -167,6 +167,8 @@ pub const LRU_CACHE_SIZE: usize = 256;
 pub const SESSION_TTL: Duration = Duration::from_secs(600);
 /// Max ntime forward roll in seconds. Conservative margin under Bitcoin's 2-hour limit.
 pub const MAX_NTIME_OFFSET: u32 = 7000;
+
+pub static HIGH_DIFF_START: LazyLock<Difficulty> = LazyLock::new(|| Difficulty::from(1_000_000u64));
 
 type Result<T = (), E = Error> = std::result::Result<T, E>;
 

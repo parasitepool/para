@@ -99,7 +99,7 @@ impl Proxy {
                         None => std::future::pending().await,
                     }
                 } => {
-                    (stream, addr, high_diff_start())
+                    (stream, addr, *HIGH_DIFF_START)
                 }
                 _ = async {
                     while upstream.is_connected() {
