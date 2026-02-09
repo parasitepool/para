@@ -1113,9 +1113,6 @@ impl<W: Workbase> Drop for Stratifier<W> {
 
         self.metatron.sub_connection();
 
-        debug!(
-            "Shutting down stratifier for {}",
-            self.socket_addr,
-        );
+        debug!("Shutting down stratifier for {}", self.socket_addr,);
     }
 }
