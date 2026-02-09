@@ -72,6 +72,18 @@ impl Proxy {
 
         info!("Stratum server listening for downstream miners on {address}:{port}");
 
+        let high_diff_listener = if let Some(high_diff_port) = settings.high_diff_port() {
+            let listener = TcpListener::bind((address, high_diff_port))
+                .await
+                .with_context(|| {
+                    format!("failed to bind high-diff listener to {address}:{high_diff_port}")
+                })?;
+            info!("High-diff stratum server listening on {address}:{high_diff_port}");
+            Some(listener)
+        } else {
+            None
+        };
+
         if !integration_test() && !logs_enabled() {
             spawn_throbber(metrics, cancel_token.clone(), &mut tasks);
         }
@@ -80,6 +92,41 @@ impl Proxy {
             tokio::select! {
                 Ok((stream, addr)) = listener.accept() => {
                     info!("Spawning stratifier task for {addr}");
+
+                    let workbase_rx = workbase_rx.clone();
+                    let settings = settings.clone();
+                    let metatron = metatron.clone();
+                    let upstream = upstream.clone();
+                    let conn_cancel_token = cancel_token.child_token();
+                    let event_tx = event_tx.clone();
+                    let start_diff = settings.start_diff();
+
+                    tasks.spawn(async move {
+                        let mut stratifier: Stratifier<Notify> = Stratifier::new(
+                            addr,
+                            settings,
+                            metatron,
+                            Some(upstream),
+                            stream,
+                            workbase_rx,
+                            conn_cancel_token,
+                            event_tx,
+                            start_diff,
+                        );
+
+                        if let Err(err) = stratifier.serve().await {
+                            error!("Stratifier error for {addr}: {err}");
+                        }
+                    });
+                }
+
+                Ok((stream, addr)) = async {
+                    match &high_diff_listener {
+                        Some(l) => l.accept().await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    info!("Spawning high-diff stratifier task for {addr}");
 
                     let workbase_rx = workbase_rx.clone();
                     let settings = settings.clone();
@@ -98,6 +145,7 @@ impl Proxy {
                             workbase_rx,
                             conn_cancel_token,
                             event_tx,
+                            Difficulty::from(1_000_000),
                         );
 
                         if let Err(err) = stratifier.serve().await {

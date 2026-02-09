@@ -38,6 +38,7 @@ pub(crate) struct Settings {
     disable_bouncer: bool,
     database_url: Option<String>,
     events_file: Option<PathBuf>,
+    high_diff_port: Option<u16>,
 }
 
 impl Default for Settings {
@@ -74,6 +75,7 @@ impl Default for Settings {
             disable_bouncer: false,
             database_url: None,
             events_file: None,
+            high_diff_port: None,
         }
     }
 }
@@ -122,6 +124,7 @@ impl Settings {
             disable_bouncer: options.disable_bouncer,
             database_url: options.database_url.clone(),
             events_file: options.events_file.clone(),
+            high_diff_port: options.high_diff_port,
         };
 
         settings.validate()?;
@@ -161,6 +164,7 @@ impl Settings {
             enonce1_extension_size: options
                 .enonce1_extension_size
                 .unwrap_or(ENONCE1_EXTENSION_SIZE),
+            high_diff_port: options.high_diff_port,
             ..Default::default()
         };
 
@@ -442,6 +446,10 @@ impl Settings {
 
     pub(crate) fn events_file(&self) -> Option<PathBuf> {
         self.events_file.clone()
+    }
+
+    pub(crate) fn high_diff_port(&self) -> Option<u16> {
+        self.high_diff_port
     }
 }
 
@@ -979,6 +987,29 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("enonce1_extension_size (7) must be <=")
+        );
+    }
+
+    #[test]
+    fn high_diff_port() {
+        #[track_caller]
+        fn case(pool_args: &str, proxy_args: &str, expected: Option<u16>) {
+            let pool = Settings::from_pool_options(parse_pool_options(pool_args)).unwrap();
+            let proxy = Settings::from_proxy_options(parse_proxy_options(proxy_args)).unwrap();
+            assert_eq!(pool.high_diff_port, expected);
+            assert_eq!(proxy.high_diff_port, expected);
+        }
+
+        case(
+            "para pool",
+            "para proxy --upstream foo:1234 --username bar",
+            None,
+        );
+
+        case(
+            "para pool --high-diff-port 3333",
+            "para proxy --upstream foo:1234 --username bar --high-diff-port 3333",
+            Some(3333),
         );
     }
 }
