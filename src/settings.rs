@@ -364,18 +364,18 @@ impl Settings {
 
             if let Some(max) = self.max_diff {
                 ensure!(
-                    *HIGH_DIFF_START <= max,
+                    self.high_diff_start() <= max,
                     "high_diff_port start difficulty ({}) must be <= max_diff ({})",
-                    *HIGH_DIFF_START,
+                    self.high_diff_start(),
                     max
                 );
             }
 
             if let Some(min) = self.min_diff {
                 ensure!(
-                    *HIGH_DIFF_START >= min,
+                    self.high_diff_start() >= min,
                     "high_diff_port start difficulty ({}) must be >= min_diff ({})",
-                    *HIGH_DIFF_START,
+                    self.high_diff_start(),
                     min
                 );
             }
@@ -486,6 +486,10 @@ impl Settings {
 
     pub(crate) fn high_diff_port(&self) -> Option<u16> {
         self.high_diff_port
+    }
+
+    pub(crate) fn high_diff_start(&self) -> Difficulty {
+        Difficulty::from(1_000_000)
     }
 }
 

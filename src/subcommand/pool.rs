@@ -86,13 +86,14 @@ impl Pool {
                     let (stream, addr) = accept?;
                     (stream, addr, settings.start_diff())
                 }
-                Some((stream, addr)) = async {
+                accept = async {
                     match &high_diff_listener {
-                        Some(listener) => listener.accept().await.ok(),
-                        None => None,
+                        Some(listener) => listener.accept().await,
+                        None => std::future::pending().await,
                     }
                 } => {
-                    (stream, addr, *HIGH_DIFF_START)
+                    let (stream, addr) = accept?;
+                    (stream, addr, settings.high_diff_start())
                 }
                 _ = cancel_token.cancelled() => {
                     info!("Shutting down stratum server");

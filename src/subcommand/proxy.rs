@@ -96,13 +96,14 @@ impl Proxy {
                     let (stream, addr) = accept?;
                     (stream, addr, settings.start_diff())
                 }
-                Some((stream, addr)) = async {
+                accept = async {
                     match &high_diff_listener {
-                        Some(listener) => listener.accept().await.ok(),
-                        None => None,
+                        Some(listener) => listener.accept().await,
+                        None => std::future::pending().await,
                     }
                 } => {
-                    (stream, addr, *HIGH_DIFF_START)
+                    let (stream, addr) = accept?;
+                    (stream, addr, settings.high_diff_start())
                 }
                 _ = async {
                     while upstream.is_connected() {
