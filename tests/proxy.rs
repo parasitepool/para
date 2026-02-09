@@ -473,3 +473,35 @@ async fn proxy_exits_on_upstream_disconnect() {
         "Miner should be disconnected after upstream loss"
     );
 }
+
+#[tokio::test]
+#[serial(bitcoind)]
+#[timeout(90000)]
+async fn proxy_high_diff_port() {
+    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
+    let upstream = pool.stratum_endpoint();
+    let username = signet_username();
+
+    let proxy = TestProxy::spawn_with_high_diff_port(
+        &upstream,
+        &username.to_string(),
+        pool.bitcoind_rpc_port(),
+        "--start-diff 0.00001",
+    );
+
+    let normal_client = proxy.stratum_client();
+    let mut normal_events = normal_client.connect().await.unwrap();
+    normal_client.subscribe().await.unwrap();
+    normal_client.authorize().await.unwrap();
+    let (_, normal_diff) = wait_for_notify(&mut normal_events).await;
+
+    assert_eq!(normal_diff, Difficulty::from(0.00001));
+
+    let high_diff_client = proxy.high_diff_stratum_client();
+    let mut high_diff_events = high_diff_client.connect().await.unwrap();
+    high_diff_client.subscribe().await.unwrap();
+    high_diff_client.authorize().await.unwrap();
+    let (_, high_diff) = wait_for_notify(&mut high_diff_events).await;
+
+    assert_eq!(high_diff, Difficulty::from(1_000_000));
+}
