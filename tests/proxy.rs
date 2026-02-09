@@ -482,11 +482,12 @@ async fn proxy_high_diff_port() {
     let upstream = pool.stratum_endpoint();
     let username = signet_username();
 
-    let proxy = TestProxy::spawn_with_high_diff_port(
+    let high_diff_port = allocate_port();
+    let proxy = TestProxy::spawn_with_args(
         &upstream,
         &username.to_string(),
         pool.bitcoind_rpc_port(),
-        "--start-diff 0.00001",
+        format!("--start-diff 0.00001 --high-diff-port {high_diff_port}",),
     );
 
     let normal_client = proxy.stratum_client();
@@ -497,7 +498,14 @@ async fn proxy_high_diff_port() {
 
     assert_eq!(normal_diff, Difficulty::from(0.00001));
 
-    let high_diff_client = proxy.high_diff_stratum_client();
+    let high_diff_client = stratum::Client::new(
+        format!("127.0.0.1:{high_diff_port}"),
+        signet_username(),
+        None,
+        USER_AGENT.to_string(),
+        Duration::from_secs(5),
+    );
+
     let mut high_diff_events = high_diff_client.connect().await.unwrap();
     high_diff_client.subscribe().await.unwrap();
     high_diff_client.authorize().await.unwrap();

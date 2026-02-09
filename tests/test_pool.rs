@@ -4,7 +4,6 @@ pub(crate) struct TestPool {
     bitcoind_handle: Bitcoind,
     pool_handle: Child,
     pool_port: u16,
-    high_diff_port: Option<u16>,
     http_port: u16,
     bitcoind_rpc_port: u16,
     _tempdir: Arc<TempDir>,
@@ -16,42 +15,16 @@ impl TestPool {
     }
 
     pub(crate) fn spawn_with_args(args: impl ToArgs) -> Self {
-        Self::spawn_inner(args, false)
-    }
-
-    pub(crate) fn spawn_with_high_diff_port(args: impl ToArgs) -> Self {
-        Self::spawn_inner(args, true)
-    }
-
-    fn allocate_port() -> u16 {
-        TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port()
-    }
-
-    fn spawn_inner(args: impl ToArgs, with_high_diff_port: bool) -> Self {
         let tempdir = Arc::new(TempDir::new().unwrap());
 
-        let bitcoind_port = Self::allocate_port();
-        let rpc_port = Self::allocate_port();
-        let zmq_port = Self::allocate_port();
-        let pool_port = Self::allocate_port();
-        let http_port = Self::allocate_port();
-        let high_diff_port = if with_high_diff_port {
-            Some(Self::allocate_port())
-        } else {
-            None
-        };
+        let bitcoind_port = allocate_port();
+        let rpc_port = allocate_port();
+        let zmq_port = allocate_port();
+        let pool_port = allocate_port();
+        let http_port = allocate_port();
 
         let bitcoind_handle =
             Bitcoind::spawn(tempdir.clone(), bitcoind_port, rpc_port, zmq_port, false).unwrap();
-
-        let high_diff_arg = match high_diff_port {
-            Some(port) => format!("--high-diff-port {port}"),
-            None => String::new(),
-        };
 
         let pool_handle = CommandBuilder::new(format!(
             "pool
@@ -63,7 +36,6 @@ impl TestPool {
                 --bitcoin-rpc-password nakamoto
                 --bitcoin-rpc-port {rpc_port}
                 --zmq-block-notifications tcp://127.0.0.1:{zmq_port}
-                {high_diff_arg}
                 {}",
             args.to_args().join(" ")
         ))
@@ -86,26 +58,10 @@ impl TestPool {
             }
         }
 
-        if let Some(hdp) = high_diff_port {
-            for attempt in 0.. {
-                match TcpStream::connect(format!("127.0.0.1:{hdp}")) {
-                    Ok(_) => break,
-                    Err(_) if attempt < 100 => {
-                        thread::sleep(Duration::from_millis(50));
-                    }
-                    Err(e) => panic!(
-                        "Failed to connect to high-diff port after {} attempts: {}",
-                        attempt, e
-                    ),
-                }
-            }
-        }
-
         Self {
             bitcoind_handle,
             pool_handle,
             pool_port,
-            high_diff_port,
             http_port,
             bitcoind_rpc_port: rpc_port,
             _tempdir: tempdir,
@@ -114,23 +70,6 @@ impl TestPool {
 
     pub(crate) fn stratum_endpoint(&self) -> String {
         format!("127.0.0.1:{}", self.pool_port)
-    }
-
-    pub(crate) fn high_diff_stratum_endpoint(&self) -> String {
-        format!(
-            "127.0.0.1:{}",
-            self.high_diff_port.expect("no high-diff port configured")
-        )
-    }
-
-    pub(crate) async fn high_diff_stratum_client(&self) -> stratum::Client {
-        stratum::Client::new(
-            self.high_diff_stratum_endpoint(),
-            signet_username(),
-            None,
-            USER_AGENT.into(),
-            Duration::from_secs(1),
-        )
     }
 
     pub(crate) fn api_endpoint(&self) -> String {

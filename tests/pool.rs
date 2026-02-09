@@ -1226,7 +1226,10 @@ async fn bouncer() {
 #[serial(bitcoind)]
 #[timeout(90000)]
 async fn high_diff_port() {
-    let pool = TestPool::spawn_with_high_diff_port("--start-diff 0.00001 --disable-bouncer");
+    let high_diff_port = allocate_port();
+    let pool = TestPool::spawn_with_args(format!(
+        "--start-diff 0.00001 --disable-bouncer --high-diff-port {high_diff_port}",
+    ));
 
     let normal_client = pool.stratum_client().await;
     let mut normal_events = normal_client.connect().await.unwrap();
@@ -1236,7 +1239,14 @@ async fn high_diff_port() {
 
     assert_eq!(normal_diff, Difficulty::from(0.00001));
 
-    let high_diff_client = pool.high_diff_stratum_client().await;
+    let high_diff_client = stratum::Client::new(
+        format!("127.0.0.1:{high_diff_port}"),
+        signet_username(),
+        None,
+        USER_AGENT.to_string(),
+        Duration::from_secs(5),
+    );
+
     let mut high_diff_events = high_diff_client.connect().await.unwrap();
     high_diff_client.subscribe().await.unwrap();
     high_diff_client.authorize().await.unwrap();

@@ -7,16 +7,7 @@ use {
 pub(crate) struct TestProxy {
     proxy_handle: Child,
     proxy_port: u16,
-    high_diff_port: Option<u16>,
     http_port: u16,
-}
-
-fn allocate_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
 }
 
 fn build_proxy_command(
@@ -25,14 +16,8 @@ fn build_proxy_command(
     proxy_port: u16,
     http_port: u16,
     bitcoind_rpc_port: u16,
-    high_diff_port: Option<u16>,
     args: impl ToArgs,
 ) -> CommandBuilder {
-    let high_diff_arg = match high_diff_port {
-        Some(port) => format!("--high-diff-port {port}"),
-        None => String::new(),
-    };
-
     CommandBuilder::new(format!(
         "proxy \
             --chain signet \
@@ -44,7 +29,6 @@ fn build_proxy_command(
             --bitcoin-rpc-username satoshi \
             --bitcoin-rpc-password nakamoto \
             --bitcoin-rpc-port {bitcoind_rpc_port} \
-            {high_diff_arg} \
             {}",
         args.to_args().join(" ")
     ))
@@ -61,32 +45,8 @@ impl TestProxy {
         bitcoind_rpc_port: u16,
         args: impl ToArgs,
     ) -> Self {
-        Self::spawn_inner(upstream, username, bitcoind_rpc_port, args, false)
-    }
-
-    pub(crate) fn spawn_with_high_diff_port(
-        upstream: &str,
-        username: &str,
-        bitcoind_rpc_port: u16,
-        args: impl ToArgs,
-    ) -> Self {
-        Self::spawn_inner(upstream, username, bitcoind_rpc_port, args, true)
-    }
-
-    fn spawn_inner(
-        upstream: &str,
-        username: &str,
-        bitcoind_rpc_port: u16,
-        args: impl ToArgs,
-        with_high_diff_port: bool,
-    ) -> Self {
         let proxy_port = allocate_port();
         let http_port = allocate_port();
-        let high_diff_port = if with_high_diff_port {
-            Some(allocate_port())
-        } else {
-            None
-        };
 
         let proxy_handle = build_proxy_command(
             upstream,
@@ -94,7 +54,6 @@ impl TestProxy {
             proxy_port,
             http_port,
             bitcoind_rpc_port,
-            high_diff_port,
             args,
         )
         .spawn();
@@ -112,25 +71,9 @@ impl TestProxy {
             }
         }
 
-        if let Some(hdp) = high_diff_port {
-            for attempt in 0.. {
-                match TcpStream::connect(format!("127.0.0.1:{hdp}")) {
-                    Ok(_) => break,
-                    Err(_) if attempt < 100 => {
-                        thread::sleep(Duration::from_millis(50));
-                    }
-                    Err(e) => panic!(
-                        "Failed to connect to high-diff port after {} attempts: {}",
-                        attempt, e
-                    ),
-                }
-            }
-        }
-
         Self {
             proxy_handle,
             proxy_port,
-            high_diff_port,
             http_port,
         }
     }
@@ -150,7 +93,6 @@ impl TestProxy {
             proxy_port,
             http_port,
             bitcoind_rpc_port,
-            None,
             args,
         )
         .spawn()
@@ -167,23 +109,6 @@ impl TestProxy {
 
     pub(crate) fn stratum_endpoint(&self) -> String {
         format!("127.0.0.1:{}", self.proxy_port)
-    }
-
-    pub(crate) fn high_diff_stratum_endpoint(&self) -> String {
-        format!(
-            "127.0.0.1:{}",
-            self.high_diff_port.expect("no high-diff port configured")
-        )
-    }
-
-    pub(crate) fn high_diff_stratum_client(&self) -> stratum::Client {
-        stratum::Client::new(
-            self.high_diff_stratum_endpoint(),
-            Username::new(signet_username().to_string()),
-            None,
-            USER_AGENT.into(),
-            Duration::from_secs(5),
-        )
     }
 
     pub(crate) fn stratum_client(&self) -> stratum::Client {
