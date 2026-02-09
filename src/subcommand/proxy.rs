@@ -76,9 +76,11 @@ impl Proxy {
             let listener = TcpListener::bind((address, high_diff_port))
                 .await
                 .with_context(|| {
-                    format!("failed to bind high-diff listener to {address}:{high_diff_port}")
+                    format!("failed to bind high diff listener to {address}:{high_diff_port}")
                 })?;
-            info!("High-diff stratum server listening on {address}:{high_diff_port}");
+
+            info!("High diff stratum server listening on {address}:{high_diff_port}");
+
             Some(listener)
         } else {
             None
@@ -90,13 +92,14 @@ impl Proxy {
 
         loop {
             let (stream, addr, start_diff) = tokio::select! {
-                Ok((stream, addr)) = listener.accept() => {
+                accept = listener.accept() => {
+                    let (stream, addr) = accept?;
                     (stream, addr, settings.start_diff())
                 }
-                Ok((stream, addr)) = async {
+                Some((stream, addr)) = async {
                     match &high_diff_listener {
-                        Some(l) => l.accept().await,
-                        None => std::future::pending().await,
+                        Some(listener) => listener.accept().await.ok(),
+                        None => None,
                     }
                 } => {
                     (stream, addr, *HIGH_DIFF_START)
@@ -145,7 +148,9 @@ impl Proxy {
         }
 
         info!("Waiting for {} tasks to complete...", tasks.len());
+
         while tasks.join_next().await.is_some() {}
+
         info!("All proxy tasks stopped");
 
         Ok(())
