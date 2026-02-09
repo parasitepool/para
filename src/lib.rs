@@ -168,7 +168,7 @@ pub const SESSION_TTL: Duration = Duration::from_secs(600);
 /// Max ntime forward roll in seconds. Conservative margin under Bitcoin's 2-hour limit.
 pub const MAX_NTIME_OFFSET: u32 = 7000;
 
-pub static HIGH_DIFF_START: LazyLock<Difficulty> = LazyLock::new(|| Difficulty::from(1_000_000u64));
+pub static HIGH_DIFF_START: LazyLock<Difficulty> = LazyLock::new(|| Difficulty::from(1_000_000));
 
 type Result<T = (), E = Error> = std::result::Result<T, E>;
 
