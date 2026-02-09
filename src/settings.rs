@@ -1061,14 +1061,18 @@ mod tests {
         let proxy = parse_proxy_options(
             "para proxy --upstream foo:1234 --username bar --port 3333 --high-diff-port 3333",
         );
-        assert!(Settings::from_pool_options(pool)
-            .unwrap_err()
-            .to_string()
-            .contains("must not equal port"));
-        assert!(Settings::from_proxy_options(proxy)
-            .unwrap_err()
-            .to_string()
-            .contains("must not equal port"));
+        assert!(
+            Settings::from_pool_options(pool)
+                .unwrap_err()
+                .to_string()
+                .contains("must not equal port")
+        );
+        assert!(
+            Settings::from_proxy_options(proxy)
+                .unwrap_err()
+                .to_string()
+                .contains("must not equal port")
+        );
     }
 
     #[test]
@@ -1077,14 +1081,18 @@ mod tests {
         let proxy = parse_proxy_options(
             "para proxy --upstream foo:1234 --username bar --http-port 8080 --high-diff-port 8080",
         );
-        assert!(Settings::from_pool_options(pool)
-            .unwrap_err()
-            .to_string()
-            .contains("must not equal http_port"));
-        assert!(Settings::from_proxy_options(proxy)
-            .unwrap_err()
-            .to_string()
-            .contains("must not equal http_port"));
+        assert!(
+            Settings::from_pool_options(pool)
+                .unwrap_err()
+                .to_string()
+                .contains("must not equal http_port")
+        );
+        assert!(
+            Settings::from_proxy_options(proxy)
+                .unwrap_err()
+                .to_string()
+                .contains("must not equal http_port")
+        );
     }
 
     #[test]
@@ -1093,14 +1101,18 @@ mod tests {
         let proxy = parse_proxy_options(
             "para proxy --upstream foo:1234 --username bar --high-diff-port 3333 --max-diff 100",
         );
-        assert!(Settings::from_pool_options(pool)
-            .unwrap_err()
-            .to_string()
-            .contains("high_diff_port start difficulty"));
-        assert!(Settings::from_proxy_options(proxy)
-            .unwrap_err()
-            .to_string()
-            .contains("high_diff_port start difficulty"));
+        assert!(
+            Settings::from_pool_options(pool)
+                .unwrap_err()
+                .to_string()
+                .contains("high_diff_port start difficulty")
+        );
+        assert!(
+            Settings::from_proxy_options(proxy)
+                .unwrap_err()
+                .to_string()
+                .contains("high_diff_port start difficulty")
+        );
     }
 
     #[test]
@@ -1111,13 +1123,17 @@ mod tests {
         let proxy = parse_proxy_options(
             "para proxy --upstream foo:1234 --username bar --high-diff-port 3333 --min-diff 2000000 --start-diff 2000000",
         );
-        assert!(Settings::from_pool_options(pool)
-            .unwrap_err()
-            .to_string()
-            .contains("high_diff_port start difficulty"));
-        assert!(Settings::from_proxy_options(proxy)
-            .unwrap_err()
-            .to_string()
-            .contains("high_diff_port start difficulty"));
+        assert!(
+            Settings::from_pool_options(pool)
+                .unwrap_err()
+                .to_string()
+                .contains("high_diff_port start difficulty")
+        );
+        assert!(
+            Settings::from_proxy_options(proxy)
+                .unwrap_err()
+                .to_string()
+                .contains("high_diff_port start difficulty")
+        );
     }
 }
