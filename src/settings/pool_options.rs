@@ -8,7 +8,10 @@ pub(crate) struct PoolOptions {
     #[arg(long, help = "Listen on <PORT>.")]
     pub(crate) port: Option<u16>,
 
-    #[arg(long, help = "Listen on <HIGH_DIFF_PORT> with initial difficulty 1000000.")]
+    #[arg(
+        long,
+        help = "Listen on <HIGH_DIFF_PORT> with initial difficulty 1000000."
+    )]
     pub(crate) high_diff_port: Option<u16>,
 
     #[arg(long, help = "Enable HTTP API on <HTTP_PORT>. Disabled if not set.")]
