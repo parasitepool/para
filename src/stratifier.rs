@@ -1077,7 +1077,7 @@ impl<W: Workbase> Stratifier<W> {
             }
             Some(Err(e)) => Err(anyhow!("read error from {}: {e}", self.socket_addr)),
             None => {
-                info!("Connection {} disconnected", self.socket_addr);
+                debug!("Client {} disconnected", self.socket_addr);
                 Ok(None)
             }
         }
@@ -1114,10 +1114,6 @@ impl<W: Workbase> Drop for Stratifier<W> {
 
         self.metatron.sub_connection();
 
-        info!(
-            "Shutting down stratifier for {} (remaining: {})",
-            self.socket_addr,
-            self.metatron.total_connections()
-        );
+        debug!("Shutting down stratifier for {}", self.socket_addr,);
     }
 }
