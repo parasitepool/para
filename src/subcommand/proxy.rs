@@ -89,71 +89,18 @@ impl Proxy {
         }
 
         loop {
-            tokio::select! {
+            let (stream, addr, start_diff) = tokio::select! {
                 Ok((stream, addr)) = listener.accept() => {
-                    info!("Spawning stratifier task for {addr}");
-
-                    let workbase_rx = workbase_rx.clone();
-                    let settings = settings.clone();
-                    let metatron = metatron.clone();
-                    let upstream = upstream.clone();
-                    let conn_cancel_token = cancel_token.child_token();
-                    let event_tx = event_tx.clone();
-                    let start_diff = settings.start_diff();
-
-                    tasks.spawn(async move {
-                        let mut stratifier: Stratifier<Notify> = Stratifier::new(
-                            addr,
-                            settings,
-                            metatron,
-                            Some(upstream),
-                            stream,
-                            workbase_rx,
-                            conn_cancel_token,
-                            event_tx,
-                            start_diff,
-                        );
-
-                        if let Err(err) = stratifier.serve().await {
-                            error!("Stratifier error for {addr}: {err}");
-                        }
-                    });
+                    (stream, addr, settings.start_diff())
                 }
-
                 Ok((stream, addr)) = async {
                     match &high_diff_listener {
                         Some(l) => l.accept().await,
                         None => std::future::pending().await,
                     }
                 } => {
-                    info!("Spawning high-diff stratifier task for {addr}");
-
-                    let workbase_rx = workbase_rx.clone();
-                    let settings = settings.clone();
-                    let metatron = metatron.clone();
-                    let upstream = upstream.clone();
-                    let conn_cancel_token = cancel_token.child_token();
-                    let event_tx = event_tx.clone();
-
-                    tasks.spawn(async move {
-                        let mut stratifier: Stratifier<Notify> = Stratifier::new(
-                            addr,
-                            settings,
-                            metatron,
-                            Some(upstream),
-                            stream,
-                            workbase_rx,
-                            conn_cancel_token,
-                            event_tx,
-                            Difficulty::from(1_000_000),
-                        );
-
-                        if let Err(err) = stratifier.serve().await {
-                            error!("Stratifier error for {addr}: {err}");
-                        }
-                    });
+                    (stream, addr, Difficulty::from(1_000_000))
                 }
-
                 _ = async {
                     while upstream.is_connected() {
                         tokio::time::sleep(Duration::from_secs(1)).await;
@@ -163,12 +110,38 @@ impl Proxy {
                     cancel_token.cancel();
                     break;
                 }
-
                 _ = cancel_token.cancelled() => {
                     info!("Shutting down proxy");
                     break;
                 }
-            }
+            };
+
+            info!("Spawning stratifier task for {addr}");
+
+            let workbase_rx = workbase_rx.clone();
+            let settings = settings.clone();
+            let metatron = metatron.clone();
+            let upstream = upstream.clone();
+            let conn_cancel_token = cancel_token.child_token();
+            let event_tx = event_tx.clone();
+
+            tasks.spawn(async move {
+                let mut stratifier: Stratifier<Notify> = Stratifier::new(
+                    addr,
+                    settings,
+                    metatron,
+                    Some(upstream),
+                    stream,
+                    workbase_rx,
+                    conn_cancel_token,
+                    event_tx,
+                    start_diff,
+                );
+
+                if let Err(err) = stratifier.serve().await {
+                    error!("Stratifier error for {addr}: {err}");
+                }
+            });
         }
 
         info!("Waiting for {} tasks to complete...", tasks.len());

@@ -81,34 +81,9 @@ impl Pool {
         }
 
         loop {
-            tokio::select! {
+            let (stream, addr, start_diff) = tokio::select! {
                 Ok((stream, addr)) = listener.accept() => {
-                    info!("Spawning stratifier task for {addr}");
-
-                    let workbase_rx = workbase_rx.clone();
-                    let settings = settings.clone();
-                    let metatron = metatron.clone();
-                    let conn_cancel_token = cancel_token.child_token();
-                    let event_tx = event_tx.clone();
-                    let start_diff = settings.start_diff();
-
-                    tasks.spawn(async move {
-                        let mut stratifier: Stratifier<BlockTemplate> = Stratifier::new(
-                            addr,
-                            settings.clone(),
-                            metatron,
-                            None,
-                            stream,
-                            workbase_rx,
-                            conn_cancel_token,
-                            event_tx,
-                            start_diff,
-                        );
-
-                        if let Err(err) = stratifier.serve().await {
-                            error!("Stratifier error: {err}")
-                        }
-                    });
+                    (stream, addr, settings.start_diff())
                 }
                 Ok((stream, addr)) = async {
                     match &high_diff_listener {
@@ -116,37 +91,39 @@ impl Pool {
                         None => std::future::pending().await,
                     }
                 } => {
-                    info!("Spawning high-diff stratifier task for {addr}");
-
-                    let workbase_rx = workbase_rx.clone();
-                    let settings = settings.clone();
-                    let metatron = metatron.clone();
-                    let conn_cancel_token = cancel_token.child_token();
-                    let event_tx = event_tx.clone();
-
-                    tasks.spawn(async move {
-                        let mut stratifier: Stratifier<BlockTemplate> = Stratifier::new(
-                            addr,
-                            settings.clone(),
-                            metatron,
-                            None,
-                            stream,
-                            workbase_rx,
-                            conn_cancel_token,
-                            event_tx,
-                            Difficulty::from(1_000_000),
-                        );
-
-                        if let Err(err) = stratifier.serve().await {
-                            error!("Stratifier error: {err}")
-                        }
-                    });
+                    (stream, addr, Difficulty::from(1_000_000))
                 }
                 _ = cancel_token.cancelled() => {
                     info!("Shutting down stratum server");
                     break;
                 }
-            }
+            };
+
+            info!("Spawning stratifier task for {addr}");
+
+            let workbase_rx = workbase_rx.clone();
+            let settings = settings.clone();
+            let metatron = metatron.clone();
+            let conn_cancel_token = cancel_token.child_token();
+            let event_tx = event_tx.clone();
+
+            tasks.spawn(async move {
+                let mut stratifier: Stratifier<BlockTemplate> = Stratifier::new(
+                    addr,
+                    settings.clone(),
+                    metatron,
+                    None,
+                    stream,
+                    workbase_rx,
+                    conn_cancel_token,
+                    event_tx,
+                    start_diff,
+                );
+
+                if let Err(err) = stratifier.serve().await {
+                    error!("Stratifier error: {err}")
+                }
+            });
         }
 
         info!("Waiting for {} tasks to complete...", tasks.len());
