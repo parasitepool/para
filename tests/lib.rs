@@ -117,6 +117,15 @@ mod sync;
 mod template;
 
 #[cfg(target_os = "linux")]
+fn allocate_port() -> u16 {
+    TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+}
+
+#[cfg(target_os = "linux")]
 fn next_json<T: DeserializeOwned>(r: &mut BufReader<ChildStdout>) -> T {
     let de = serde_json::Deserializer::from_reader(&mut *r);
     let mut stream = de.into_iter::<T>();

@@ -422,7 +422,7 @@ mod tests {
 
         let ext1 = u16::from_le_bytes(e1.as_bytes()[4..6].try_into().unwrap());
         let ext2 = u16::from_le_bytes(e2.as_bytes()[4..6].try_into().unwrap());
-        assert_eq!(ext2, ext1 + 1);
+        assert_eq!(ext2, ext1.wrapping_add(1));
     }
 
     #[test]
@@ -440,7 +440,7 @@ mod tests {
         let e2 = metatron.next_enonce1();
         let ext1 = e1.as_bytes()[4];
         let ext2 = e2.as_bytes()[4];
-        assert_eq!(ext2, ext1 + 1);
+        assert_eq!(ext2, ext1.wrapping_add(1));
     }
 
     #[test]

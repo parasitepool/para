@@ -64,47 +64,86 @@ impl Pool {
 
         info!("Stratum server listening on {address}:{port}");
 
+        let high_diff_listener = if let Some(high_diff_port) = settings.high_diff_port() {
+            let listener = TcpListener::bind((address, high_diff_port))
+                .await
+                .with_context(|| {
+                    format!("failed to bind high diff listener to {address}:{high_diff_port}")
+                })?;
+            info!("High diff stratum server listening on {address}:{high_diff_port}");
+            Some(listener)
+        } else {
+            None
+        };
+
         if !integration_test() && !logs_enabled() {
             spawn_throbber(metatron.clone(), cancel_token.clone(), &mut tasks);
         }
 
         loop {
-            tokio::select! {
-                Ok((stream, addr)) = listener.accept() => {
-                    debug!("Spawning stratifier task for {addr}");
-
-                    let workbase_rx = workbase_rx.clone();
-                    let settings = settings.clone();
-                    let metatron = metatron.clone();
-                    let conn_cancel_token = cancel_token.child_token();
-                    let event_tx = event_tx.clone();
-
-                    tasks.spawn(async move {
-                        let mut stratifier: Stratifier<BlockTemplate> = Stratifier::new(
-                            addr,
-                            settings.clone(),
-                            metatron,
-                            None,
-                            stream,
-                            workbase_rx,
-                            conn_cancel_token,
-                            event_tx,
-                        );
-
-                        if let Err(err) = stratifier.serve().await {
-                            error!("Stratifier error: {err}")
+            let (stream, addr, start_diff) = tokio::select! {
+                accept = listener.accept() => {
+                    let (stream, addr) = match accept {
+                        Ok((stream, addr)) => (stream, addr),
+                        Err(err) => {
+                            error!("Accept error: {err}");
+                            continue;
                         }
-                    });
+                    };
+                    (stream, addr, settings.start_diff())
+                }
+                Some(accept) = async {
+                    match &high_diff_listener {
+                        Some(listener) => Some(listener.accept().await),
+                        None => None,
+                    }
+                } => {
+                    let (stream, addr) = match accept {
+                        Ok((stream, addr)) => (stream, addr),
+                        Err(err) => {
+                            error!("High diff accept error: {err}");
+                            continue;
+                        }
+                    };
+                    (stream, addr, settings.high_diff_start())
                 }
                 _ = cancel_token.cancelled() => {
                     info!("Shutting down stratum server");
                     break;
                 }
-            }
+            };
+
+            info!("Spawning stratifier task for {addr}");
+
+            let workbase_rx = workbase_rx.clone();
+            let settings = settings.clone();
+            let metatron = metatron.clone();
+            let conn_cancel_token = cancel_token.child_token();
+            let event_tx = event_tx.clone();
+
+            tasks.spawn(async move {
+                let mut stratifier: Stratifier<BlockTemplate> = Stratifier::new(
+                    addr,
+                    settings.clone(),
+                    metatron,
+                    None,
+                    stream,
+                    workbase_rx,
+                    conn_cancel_token,
+                    event_tx,
+                    start_diff,
+                );
+
+                if let Err(err) = stratifier.serve().await {
+                    error!("Stratifier error for {addr}: {err}")
+                }
+            });
         }
 
         info!("Waiting for {} tasks to complete...", tasks.len());
+
         while tasks.join_next().await.is_some() {}
+
         info!("All pool tasks stopped");
 
         Ok(())

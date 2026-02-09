@@ -17,33 +17,11 @@ impl TestPool {
     pub(crate) fn spawn_with_args(args: impl ToArgs) -> Self {
         let tempdir = Arc::new(TempDir::new().unwrap());
 
-        let (bitcoind_port, rpc_port, zmq_port, pool_port, http_port) = (
-            TcpListener::bind("127.0.0.1:0")
-                .unwrap()
-                .local_addr()
-                .unwrap()
-                .port(),
-            TcpListener::bind("127.0.0.1:0")
-                .unwrap()
-                .local_addr()
-                .unwrap()
-                .port(),
-            TcpListener::bind("127.0.0.1:0")
-                .unwrap()
-                .local_addr()
-                .unwrap()
-                .port(),
-            TcpListener::bind("127.0.0.1:0")
-                .unwrap()
-                .local_addr()
-                .unwrap()
-                .port(),
-            TcpListener::bind("127.0.0.1:0")
-                .unwrap()
-                .local_addr()
-                .unwrap()
-                .port(),
-        );
+        let bitcoind_port = allocate_port();
+        let rpc_port = allocate_port();
+        let zmq_port = allocate_port();
+        let pool_port = allocate_port();
+        let http_port = allocate_port();
 
         let bitcoind_handle =
             Bitcoind::spawn(tempdir.clone(), bitcoind_port, rpc_port, zmq_port, false).unwrap();

@@ -10,21 +10,6 @@ pub(crate) struct TestProxy {
     http_port: u16,
 }
 
-fn allocate_ports() -> (u16, u16) {
-    (
-        TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port(),
-        TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port(),
-    )
-}
-
 fn build_proxy_command(
     upstream: &str,
     username: &str,
@@ -60,7 +45,8 @@ impl TestProxy {
         bitcoind_rpc_port: u16,
         args: impl ToArgs,
     ) -> Self {
-        let (proxy_port, http_port) = allocate_ports();
+        let proxy_port = allocate_port();
+        let http_port = allocate_port();
 
         let proxy_handle = build_proxy_command(
             upstream,
@@ -98,7 +84,8 @@ impl TestProxy {
         bitcoind_rpc_port: u16,
         args: impl ToArgs,
     ) -> String {
-        let (proxy_port, http_port) = allocate_ports();
+        let proxy_port = allocate_port();
+        let http_port = allocate_port();
 
         let output = build_proxy_command(
             upstream,

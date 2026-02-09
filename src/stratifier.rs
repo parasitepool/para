@@ -39,13 +39,14 @@ impl<W: Workbase> Stratifier<W> {
         workbase_rx: watch::Receiver<Arc<W>>,
         cancel_token: CancellationToken,
         event_tx: Option<mpsc::Sender<Event>>,
+        start_diff: Difficulty,
     ) -> Self {
         let _ = tcp_stream.set_nodelay(true);
 
         let (reader, writer) = tcp_stream.into_split();
 
         let vardiff = Vardiff::new(
-            settings.start_diff(),
+            start_diff,
             settings.vardiff_period(),
             settings.vardiff_window(),
             settings.min_diff(),

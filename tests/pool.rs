@@ -1221,3 +1221,36 @@ async fn bouncer() {
         duplicate_authorize_test
     );
 }
+
+#[tokio::test]
+#[serial(bitcoind)]
+#[timeout(90000)]
+async fn high_diff_port() {
+    let high_diff_port = allocate_port();
+    let pool = TestPool::spawn_with_args(format!(
+        "--start-diff 0.00001 --disable-bouncer --high-diff-port {high_diff_port}",
+    ));
+
+    let normal_client = pool.stratum_client().await;
+    let mut normal_events = normal_client.connect().await.unwrap();
+    normal_client.subscribe().await.unwrap();
+    normal_client.authorize().await.unwrap();
+    let (_, normal_diff) = wait_for_notify(&mut normal_events).await;
+
+    assert_eq!(normal_diff, Difficulty::from(0.00001));
+
+    let high_diff_client = stratum::Client::new(
+        format!("127.0.0.1:{high_diff_port}"),
+        signet_username(),
+        None,
+        USER_AGENT.to_string(),
+        Duration::from_secs(5),
+    );
+
+    let mut high_diff_events = high_diff_client.connect().await.unwrap();
+    high_diff_client.subscribe().await.unwrap();
+    high_diff_client.authorize().await.unwrap();
+    let (_, high_diff) = wait_for_notify(&mut high_diff_events).await;
+
+    assert_eq!(high_diff, Difficulty::from(1_000_000));
+}

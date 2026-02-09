@@ -14,11 +14,23 @@ pub(crate) struct ProxyOptions {
     #[arg(long, help = "Password for upstream authentication.")]
     pub(crate) password: Option<String>,
 
-    #[arg(long, help = "Listen at <ADDRESS> for downstream miners.")]
+    #[arg(
+        long,
+        help = "Listen for stratum messages at <ADDRESS> for downstream miners."
+    )]
     pub(crate) address: Option<String>,
 
-    #[arg(long, help = "Listen on <PORT> for downstream miners.")]
+    #[arg(
+        long,
+        help = "Listen for stratum messages on port <PORT> for downstream miners."
+    )]
     pub(crate) port: Option<u16>,
+
+    #[arg(
+        long,
+        help = "Listen for stratum messages on high diff port <HIGH_DIFF_PORT> with initial difficulty 1000000."
+    )]
+    pub(crate) high_diff_port: Option<u16>,
 
     #[arg(long, help = "Enable HTTP API on <HTTP_PORT>. Disabled if not set.")]
     pub(crate) http_port: Option<u16>,
