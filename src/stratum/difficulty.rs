@@ -344,6 +344,7 @@ mod tests {
         assert_eq!(format!("{}", Difficulty::from(2.9)), "2");
         assert_eq!(format!("{}", Difficulty::from(1000)), "1 K");
         assert_eq!(format!("{}", Difficulty::from(1_000_000)), "1 M");
+        assert_eq!(format!("{}", Difficulty::from(9999)), "9.99 K");
 
         let large = Difficulty::from(150_000_000_000_000u64);
         let s = large.to_string();
