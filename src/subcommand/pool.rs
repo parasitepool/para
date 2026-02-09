@@ -86,13 +86,19 @@ impl Pool {
                     let (stream, addr) = accept?;
                     (stream, addr, settings.start_diff())
                 }
-                accept = async {
+                Some(accept) = async {
                     match &high_diff_listener {
-                        Some(listener) => listener.accept().await,
-                        None => std::future::pending().await,
+                        Some(listener) => Some(listener.accept().await),
+                        None => None,
                     }
                 } => {
-                    let (stream, addr) = accept?;
+                    let (stream, addr) = match accept {
+                        Ok((stream, addr)) => (stream, addr),
+                        Err(err) => {
+                            error!("High diff accept error: {err}");
+                            continue;
+                        }
+                    };
                     (stream, addr, settings.high_diff_start())
                 }
                 _ = cancel_token.cancelled() => {
