@@ -155,8 +155,7 @@ function formatTruncated(n) {
 
 function formatPing(ms) {
   if (ms === null || ms === undefined) return null;
-  if (ms === 0) return '0';
-  return ms.toFixed(2);
+  return String(ms);
 }
 
 function set(id, value, formatter = v => v) {
