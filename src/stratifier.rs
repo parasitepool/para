@@ -940,14 +940,13 @@ impl<W: Workbase> Stratifier<W> {
             .diff_change_job_id
             .is_some_and(|change_id| submit.job_id < change_id);
 
-        let target_diff = if stale {
+        let pool_diff = if stale {
             self.vardiff.old_diff().min(self.vardiff.current_diff())
         } else {
             self.vardiff.current_diff()
         };
 
-        if !target_diff.to_target().is_met_by(hash) {
-            let pool_diff = target_diff.as_f64();
+        if !pool_diff.to_target().is_met_by(hash) {
             let share_diff = Difficulty::from(hash).as_f64();
             let job_height = job.workbase.height();
 
@@ -961,7 +960,7 @@ impl<W: Workbase> Stratifier<W> {
             self.send_event(rejection_event!(
                 session.address.to_string(),
                 session.workername.clone(),
-                pool_diff,
+                pool_diff.as_f64(),
                 share_diff,
                 job_height,
                 StratumError::AboveTarget
@@ -982,9 +981,8 @@ impl<W: Workbase> Stratifier<W> {
 
         let share_diff = Difficulty::from(hash);
 
-        worker.record_accepted(target_diff, share_diff);
+        worker.record_accepted(pool_diff, share_diff);
 
-        let pool_diff = target_diff.as_f64();
         let share_diff_f64 = share_diff.as_f64();
         let job_height = job.workbase.height();
 
@@ -992,7 +990,7 @@ impl<W: Workbase> Stratifier<W> {
             timestamp: None,
             address: session.address.to_string(),
             workername: session.workername.clone(),
-            pool_diff,
+            pool_diff: pool_diff.as_f64(),
             share_diff: share_diff_f64,
             result: true,
             blockheight: Some(job_height),
@@ -1009,7 +1007,7 @@ impl<W: Workbase> Stratifier<W> {
         debug!(
             "Share accepted from {} | diff={} dsps={:.4} shares_since_change={}",
             self.socket_addr,
-            target_diff,
+            pool_diff,
             self.vardiff.dsps(),
             self.vardiff.shares_since_change()
         );
@@ -1022,11 +1020,11 @@ impl<W: Workbase> Stratifier<W> {
 
         if let Some(new_diff) = self
             .vardiff
-            .record_share(target_diff, network_diff, upstream_diff)
+            .record_share(pool_diff, network_diff, upstream_diff)
         {
             debug!(
                 "Adjusting difficulty {} -> {} for {} | dsps={:.4} period={}s",
-                target_diff,
+                pool_diff,
                 new_diff,
                 self.socket_addr,
                 self.vardiff.dsps(),
