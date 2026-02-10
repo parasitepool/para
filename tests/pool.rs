@@ -674,6 +674,98 @@ async fn new_job_shares_rejected_at_old_diff() {
 
 #[tokio::test]
 #[serial(bitcoind)]
+#[timeout(120000)]
+async fn stale_shares_rejected_after_vardiff_ratchet() {
+    let pool = TestPool::spawn_with_args(
+        "--start-diff 0.00001 --vardiff-period 1 --vardiff-window 5 --update-interval 30 --disable-bouncer",
+    );
+
+    let client = pool.stratum_client().await;
+    let mut events = client.connect().await.unwrap();
+
+    let (subscribe, _, _) = client.subscribe().await.unwrap();
+    let enonce1 = subscribe.enonce1;
+
+    client.authorize().await.unwrap();
+
+    let (initial_notify, initial_difficulty) = wait_for_notify(&mut events).await;
+
+    let mut first_increase = false;
+
+    for _ in 0..100 {
+        while let Some(Ok(event)) = events.try_recv() {
+            if let stratum::Event::SetDifficulty(d) = event
+                && d > initial_difficulty
+            {
+                first_increase = true;
+            }
+        }
+
+        if first_increase {
+            break;
+        }
+
+        let enonce2 = Extranonce::random(subscribe.enonce2_size);
+        let (ntime, nonce) = solve_share(&initial_notify, &enonce1, &enonce2, initial_difficulty);
+
+        match client
+            .submit(initial_notify.job_id, enonce2, ntime, nonce, None)
+            .await
+        {
+            Ok(_) => {}
+            Err(ClientError::Stratum { response })
+                if response.error_code == StratumError::Duplicate as i32
+                    || response.error_code == StratumError::AboveTarget as i32
+                    || response.error_code == StratumError::Stale as i32 =>
+            {
+                continue;
+            }
+            Err(e) => panic!("Unexpected error: {:?}", e),
+        }
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    assert!(first_increase, "Vardiff should have increased difficulty");
+
+    let mut got_above_target = false;
+    for _ in 0..200 {
+        while let Some(Ok(_)) = events.try_recv() {}
+
+        let enonce2 = Extranonce::random(subscribe.enonce2_size);
+        let (ntime, nonce) = solve_share(&initial_notify, &enonce1, &enonce2, initial_difficulty);
+
+        match client
+            .submit(initial_notify.job_id, enonce2, ntime, nonce, None)
+            .await
+        {
+            Err(ClientError::Stratum { response })
+                if response.error_code == StratumError::AboveTarget as i32 =>
+            {
+                got_above_target = true;
+                break;
+            }
+            Err(ClientError::Stratum { response })
+                if response.error_code == StratumError::Duplicate as i32
+                    || response.error_code == StratumError::Stale as i32 =>
+            {
+                continue;
+            }
+            Ok(_) => {}
+            Err(e) => panic!("Unexpected error: {:?}", e),
+        }
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    assert!(
+        got_above_target,
+        "Stale shares should eventually be rejected as vardiff ratchets up"
+    );
+}
+
+#[tokio::test]
+#[serial(bitcoind)]
 #[timeout(90000)]
 async fn share_validation() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001 --disable-bouncer");
