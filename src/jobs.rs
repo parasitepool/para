@@ -24,6 +24,10 @@ impl<W: Workbase> Jobs<W> {
         id
     }
 
+    pub(crate) fn peek_next_id(&self) -> JobId {
+        self.next_id
+    }
+
     pub(crate) fn get(&self, id: &JobId) -> Option<Arc<Job<W>>> {
         self.valid.get(id).cloned()
     }
@@ -132,6 +136,17 @@ mod tests {
         if let Some(latest) = &jobs.latest {
             assert!(jobs.valid.contains_key(&latest.job_id));
         }
+    }
+
+    fn check_peek_next_id_does_not_advance<W: TestWorkbaseFactory>() {
+        let mut jobs: Jobs<W> = Jobs::new();
+        let peeked = jobs.peek_next_id();
+        let peeked_again = jobs.peek_next_id();
+        assert_eq!(peeked, peeked_again);
+
+        let consumed = jobs.next_id();
+        assert_eq!(peeked, consumed);
+        assert_ne!(jobs.peek_next_id(), consumed);
     }
 
     fn check_next_id_monotonic_and_wraps<W: TestWorkbaseFactory>() {
@@ -416,6 +431,12 @@ mod tests {
             assert!(jobs.get(id).is_none(), "old job {id:?} should be cleaned");
         }
         assert!(jobs.get(&new_id).is_some());
+    }
+
+    #[test]
+    fn peek_next_id_does_not_advance() {
+        check_peek_next_id_does_not_advance::<BlockTemplate>();
+        check_peek_next_id_does_not_advance::<Notify>();
     }
 
     #[test]

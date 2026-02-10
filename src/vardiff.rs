@@ -83,6 +83,10 @@ impl Vardiff {
         self.current_diff
     }
 
+    pub(crate) fn old_diff(&self) -> Difficulty {
+        self.old_diff
+    }
+
     pub(crate) fn clamp_to_upstream(&mut self, upstream_diff: Difficulty) -> Option<Difficulty> {
         if upstream_diff < self.current_diff {
             debug!(
@@ -126,6 +130,18 @@ impl Vardiff {
         self.shares_since_change = self.shares_since_change.saturating_add(1);
 
         self.evaluate_adjustment(network_diff, upstream_diff, now)
+    }
+
+    pub(crate) fn record_stale_share(&mut self, share_diff: Difficulty) {
+        let now = Instant::now();
+
+        if self.first_share.is_none() {
+            self.first_share = Some(now);
+            self.last_diff_change = now;
+        }
+
+        self.dsps.record(share_diff.as_f64(), now);
+        self.shares_since_change = 0;
     }
 
     fn evaluate_adjustment(
@@ -344,9 +360,6 @@ mod tests {
         let vardiff = Vardiff::new(Difficulty::from(1), secs(1), secs(60), None, None);
         assert_eq!(vardiff.min_shares_for_adjustment, 48);
 
-        let vardiff = Vardiff::new(Difficulty::from(1), secs(5), secs(300), None, None);
-        assert_eq!(vardiff.min_shares_for_adjustment, 48);
-
         let vardiff = Vardiff::new(Difficulty::from(1), secs(1), secs(2), None, None);
         assert_eq!(vardiff.min_shares_for_adjustment, 1);
     }
@@ -550,6 +563,43 @@ mod tests {
             "Should not decrease on first share after change"
         );
         assert_eq!(vardiff.current_diff(), start_diff);
+    }
+
+    #[test]
+    fn min_shares_matches_ckpool_at_runtime_default() {
+        let vardiff = Vardiff::new(
+            Difficulty::from(1),
+            Duration::from_secs_f64(3.33),
+            secs(300),
+            None,
+            None,
+        );
+        assert_eq!(vardiff.min_shares_for_adjustment, 72);
+    }
+
+    #[test]
+    fn stale_share_resets_shares_since_change() {
+        let mut vardiff = Vardiff::new(Difficulty::from(10), secs(5), secs(300), None, None);
+
+        vardiff.record_share(Difficulty::from(10), Difficulty::from(1_000_000), None);
+        vardiff.record_share(Difficulty::from(10), Difficulty::from(1_000_000), None);
+        assert_eq!(vardiff.shares_since_change, 2);
+
+        vardiff.record_stale_share(Difficulty::from(5));
+        assert_eq!(vardiff.shares_since_change, 0);
+    }
+
+    #[test]
+    fn old_diff_tracks_previous_difficulty() {
+        let start_diff = Difficulty::from(100);
+        let mut vardiff = Vardiff::new(start_diff, secs(5), secs(300), None, None);
+
+        assert_eq!(vardiff.old_diff(), start_diff);
+
+        vardiff.clamp_to_upstream(Difficulty::from(50));
+
+        assert_eq!(vardiff.old_diff(), start_diff);
+        assert_eq!(vardiff.current_diff(), Difficulty::from(50));
     }
 
     #[test]

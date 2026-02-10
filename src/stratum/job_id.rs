@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, DeserializeFromStr, SerializeDisplay, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, DeserializeFromStr, SerializeDisplay, Hash)]
 #[repr(transparent)]
 pub struct JobId(u64);
 
@@ -78,6 +78,14 @@ mod tests {
         assert_eq!(s, "\"deadbeef\"");
         let back: JobId = serde_json::from_str(&s).unwrap();
         assert_eq!(back, id);
+    }
+
+    #[test]
+    fn jobid_ordering() {
+        assert!(JobId::new(0) < JobId::new(1));
+        assert!(JobId::new(1) < JobId::new(2));
+        assert!(!(JobId::new(5) < JobId::new(5)));
+        assert!(JobId::new(0) < JobId::new(u64::MAX));
     }
 
     #[test]
