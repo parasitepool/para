@@ -940,7 +940,10 @@ impl<W: Workbase> Stratifier<W> {
         if pool_diff != self.vardiff.current_diff() {
             debug!(
                 "Using stale pool_diff={} (current={}) for job_id={} from {}",
-                pool_diff, self.vardiff.current_diff(), submit.job_id, self.socket_addr
+                pool_diff,
+                self.vardiff.current_diff(),
+                submit.job_id,
+                self.socket_addr
             );
         }
 
