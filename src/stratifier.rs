@@ -857,15 +857,13 @@ impl<W: Workbase> Stratifier<W> {
         };
 
         let hash = header.block_hash();
-        let pool_diff = self.vardiff.pool_diff(submit.job_id);
 
         if self.jobs.is_duplicate(hash) {
-            let share_diff = Difficulty::from(hash);
             let job_height = job.workbase.height();
 
             debug!(
-                "Rejected duplicate share from {}: hash={} share_diff={} height={}",
-                session.username, hash, share_diff, job_height
+                "Rejected duplicate share from {}: hash={} height={}",
+                session.username, hash, job_height
             );
 
             self.send_error(id, StratumError::Duplicate, None).await?;
@@ -873,8 +871,6 @@ impl<W: Workbase> Stratifier<W> {
             self.send_event(rejection_event!(
                 session.address.to_string(),
                 session.workername.clone(),
-                pool_diff.as_f64(),
-                share_diff.as_f64(),
                 job_height,
                 StratumError::Duplicate
             ));
@@ -935,6 +931,7 @@ impl<W: Workbase> Stratifier<W> {
             }
         }
 
+        let pool_diff = self.vardiff.pool_diff(submit.job_id);
         if pool_diff != self.vardiff.current_diff() {
             debug!(
                 "Using stale pool_diff={} (current={}) for job_id={} from {}",
