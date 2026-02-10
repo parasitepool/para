@@ -838,7 +838,7 @@ impl<W: Workbase> Stratifier<W> {
             _ => job.version(),
         };
 
-        let target = job.nbits().to_compact();
+        let nbits = job.nbits().to_compact();
 
         let header = Header {
             version: version.into(),
@@ -852,7 +852,7 @@ impl<W: Workbase> Stratifier<W> {
             )?
             .into(),
             time: submit.ntime.into(),
-            bits: target,
+            bits: nbits,
             nonce: submit.nonce.into(),
         };
 
@@ -880,7 +880,7 @@ impl<W: Workbase> Stratifier<W> {
             return Ok(self.bouncer.reject());
         }
 
-        if let Ok(blockhash) = header.validate_pow(Target::from_compact(target)) {
+        if let Ok(blockhash) = header.validate_pow(Target::from_compact(nbits)) {
             info!("Block with hash {blockhash} meets network difficulty");
 
             match job.workbase.build_block(&job, &submit, header) {
@@ -932,6 +932,7 @@ impl<W: Workbase> Stratifier<W> {
         }
 
         let pool_diff = self.vardiff.pool_diff(submit.job_id);
+
         if pool_diff != self.vardiff.current_diff() {
             debug!(
                 "Using stale pool_diff={} (current={}) for job_id={} from {}",
