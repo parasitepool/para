@@ -76,14 +76,6 @@ impl<W: Workbase> Stratifier<W> {
         }
     }
 
-    fn send_event(&self, event: Event) {
-        if let Some(tx) = &self.event_tx
-            && let Err(e) = tx.try_send(event)
-        {
-            warn!("Failed to send event: {e}");
-        }
-    }
-
     pub(crate) async fn serve(&mut self) -> Result {
         let mut workbase_rx = self.workbase_rx.clone();
         let cancel_token = self.cancel_token.clone();
@@ -1124,6 +1116,14 @@ impl<W: Workbase> Stratifier<W> {
             reject_reason: None,
         })
         .await
+    }
+
+    fn send_event(&self, event: Event) {
+        if let Some(tx) = &self.event_tx
+            && let Err(e) = tx.try_send(event)
+        {
+            warn!("Failed to send event: {e}");
+        }
     }
 }
 

@@ -89,11 +89,6 @@ impl Vardiff {
 
     pub(crate) fn clamp_to_upstream(&mut self, upstream_diff: Difficulty) -> Option<Difficulty> {
         if upstream_diff < self.current_diff {
-            debug!(
-                "Clamping to upstream difficulty: {} -> {}",
-                self.current_diff, upstream_diff
-            );
-
             self.old_diff = self.current_diff;
             self.current_diff = upstream_diff;
             self.shares_since_change = 0;
@@ -228,18 +223,6 @@ impl Vardiff {
     }
 }
 
-impl Default for Vardiff {
-    fn default() -> Self {
-        Self::new(
-            Difficulty::from(1),
-            Duration::from_secs(5),
-            Duration::from_secs(300),
-            None,
-            None,
-        )
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -296,16 +279,6 @@ mod tests {
                 vardiff.record_share(Difficulty::from(10), Difficulty::from(1_000_000), None);
             assert!(result.is_none(), "Should not adjust with few shares");
         }
-    }
-
-    #[test]
-    fn stats_reflect_current_state() {
-        let mut vardiff = Vardiff::default();
-
-        assert_eq!(vardiff.shares_since_change, 0);
-
-        vardiff.record_share(Difficulty::from(42), Difficulty::from(1_000_000), None);
-        assert_eq!(vardiff.shares_since_change, 1);
     }
 
     #[test]
