@@ -4,9 +4,9 @@ use super::*;
 /// Derived from ckpool: 240s min_time / 300s window = 0.8
 const MIN_TIME_WINDOW_RATIO: f64 = 0.8;
 
-/// Minimum shares before considering adjustment, as a multiple of expected shares per window.
-/// Derived from ckpool: 72 shares / (300s window / 5s period) = 72 / 60 = 1.2
-const MIN_SHARES_WINDOW_RATIO: f64 = 1.2;
+/// Minimum shares before considering adjustment, as a fraction of expected shares per window.
+/// Derived from ckpool: min_shares = min_time * target_rate = (window * 0.8) / period
+const MIN_SHARES_WINDOW_RATIO: f64 = 0.8;
 
 /// Only decrease difficulty when rate drops below this fraction of target; copied from ckpool
 const HYSTERESIS_LOW: f64 = 0.5;
@@ -342,13 +342,13 @@ mod tests {
     #[test]
     fn min_shares_derived_from_window_ratio() {
         let vardiff = Vardiff::new(Difficulty::from(1), secs(1), secs(60), None, None);
-        assert_eq!(vardiff.min_shares_for_adjustment, 72);
+        assert_eq!(vardiff.min_shares_for_adjustment, 48);
 
         let vardiff = Vardiff::new(Difficulty::from(1), secs(5), secs(300), None, None);
-        assert_eq!(vardiff.min_shares_for_adjustment, 72);
+        assert_eq!(vardiff.min_shares_for_adjustment, 48);
 
         let vardiff = Vardiff::new(Difficulty::from(1), secs(1), secs(2), None, None);
-        assert_eq!(vardiff.min_shares_for_adjustment, 2);
+        assert_eq!(vardiff.min_shares_for_adjustment, 1);
     }
 
     #[test]
