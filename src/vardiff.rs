@@ -141,7 +141,6 @@ impl Vardiff {
         }
 
         self.dsps.record(share_diff.as_f64(), now);
-        self.shares_since_change = 0;
     }
 
     fn evaluate_adjustment(
@@ -578,7 +577,7 @@ mod tests {
     }
 
     #[test]
-    fn stale_share_resets_shares_since_change() {
+    fn stale_share_does_not_affect_shares_since_change() {
         let mut vardiff = Vardiff::new(Difficulty::from(10), secs(5), secs(300), None, None);
 
         vardiff.record_share(Difficulty::from(10), Difficulty::from(1_000_000), None);
@@ -586,7 +585,18 @@ mod tests {
         assert_eq!(vardiff.shares_since_change, 2);
 
         vardiff.record_stale_share(Difficulty::from(5));
-        assert_eq!(vardiff.shares_since_change, 0);
+        assert_eq!(vardiff.shares_since_change, 2);
+    }
+
+    #[test]
+    fn stale_share_initializes_first_share() {
+        let mut vardiff = Vardiff::new(Difficulty::from(10), secs(5), secs(300), None, None);
+
+        assert!(vardiff.first_share.is_none());
+
+        vardiff.record_stale_share(Difficulty::from(5));
+
+        assert!(vardiff.first_share.is_some());
     }
 
     #[test]
@@ -600,6 +610,28 @@ mod tests {
 
         assert_eq!(vardiff.old_diff(), start_diff);
         assert_eq!(vardiff.current_diff(), Difficulty::from(50));
+
+        let mut vardiff = Vardiff::new(start_diff, secs(5), secs(10), None, None);
+
+        let base = Instant::now();
+        vardiff.first_share = Some(base);
+        vardiff.last_diff_change = base;
+        vardiff.dsps = DecayingAverage::with_start_time(secs(10), base);
+
+        let mut t = base;
+        for _ in 0..100 {
+            t += millis(100);
+            vardiff.dsps.record(100.0, t);
+            vardiff.shares_since_change += 1;
+        }
+
+        let new_diff = vardiff
+            .evaluate_adjustment(Difficulty::from(1_000_000), None, t)
+            .unwrap();
+
+        assert!(new_diff > start_diff);
+        assert_eq!(vardiff.old_diff(), start_diff);
+        assert_eq!(vardiff.current_diff(), new_diff);
     }
 
     #[test]
