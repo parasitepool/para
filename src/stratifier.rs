@@ -949,7 +949,7 @@ impl<W: Workbase> Stratifier<W> {
             .is_some_and(|change_id| submit.job_id < change_id);
 
         let target_diff = if stale {
-            self.vardiff.old_diff()
+            self.vardiff.old_diff().min(self.vardiff.current_diff())
         } else {
             self.vardiff.current_diff()
         };
