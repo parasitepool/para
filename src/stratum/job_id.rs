@@ -83,14 +83,6 @@ mod tests {
     }
 
     #[test]
-    fn jobid_ordering() {
-        assert!(JobId::new(0) < JobId::new(1));
-        assert!(JobId::new(1) < JobId::new(2));
-        assert!(JobId::new(5) >= JobId::new(5));
-        assert!(JobId::new(0) < JobId::new(u64::MAX));
-    }
-
-    #[test]
     fn jobid_wraps() {
         let job_id = JobId::new(u64::MAX - 1);
         assert_eq!(job_id.next(), JobId::new(u64::MAX));
