@@ -141,6 +141,7 @@ impl Vardiff {
         }
 
         self.dsps.record(share_diff.as_f64(), now);
+        self.shares_since_change = 0;
     }
 
     fn evaluate_adjustment(
@@ -577,7 +578,7 @@ mod tests {
     }
 
     #[test]
-    fn stale_share_does_not_affect_shares_since_change() {
+    fn stale_share_resets_shares_since_change() {
         let mut vardiff = Vardiff::new(Difficulty::from(10), secs(5), secs(300), None, None);
 
         vardiff.record_share(Difficulty::from(10), Difficulty::from(1_000_000), None);
@@ -585,7 +586,7 @@ mod tests {
         assert_eq!(vardiff.shares_since_change, 2);
 
         vardiff.record_stale_share(Difficulty::from(5));
-        assert_eq!(vardiff.shares_since_change, 2);
+        assert_eq!(vardiff.shares_since_change, 0);
     }
 
     #[test]
