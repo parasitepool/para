@@ -838,8 +838,6 @@ impl<W: Workbase> Stratifier<W> {
             _ => job.version(),
         };
 
-        let nbits = job.nbits();
-
         let header = Header {
             version: version.into(),
             prev_blockhash: job.prevhash().into(),
@@ -852,15 +850,15 @@ impl<W: Workbase> Stratifier<W> {
             )?
             .into(),
             time: submit.ntime.into(),
-            bits: nbits.to_compact(),
+            bits: job.nbits().to_compact(),
             nonce: submit.nonce.into(),
         };
 
         let hash = header.block_hash();
+        let pool_diff = self.vardiff.pool_diff(submit.job_id);
 
         if self.jobs.is_duplicate(hash) {
-            let pool_diff = Target::from_compact(nbits.into()).difficulty_float();
-            let share_diff = Difficulty::from(hash).as_f64();
+            let share_diff = Difficulty::from(hash);
             let job_height = job.workbase.height();
 
             debug!(
@@ -873,8 +871,8 @@ impl<W: Workbase> Stratifier<W> {
             self.send_event(rejection_event!(
                 session.address.to_string(),
                 session.workername.clone(),
-                pool_diff,
-                share_diff,
+                pool_diff.as_f64(),
+                share_diff.as_f64(),
                 job_height,
                 StratumError::Duplicate
             ));
@@ -884,7 +882,7 @@ impl<W: Workbase> Stratifier<W> {
             return Ok(self.bouncer.reject());
         }
 
-        if let Ok(blockhash) = header.validate_pow(Target::from_compact(nbits.into())) {
+        if let Ok(blockhash) = header.validate_pow(Target::from_compact(job.nbits().into())) {
             info!("Block with hash {blockhash} meets network difficulty");
 
             match job.workbase.build_block(&job, &submit, header) {
@@ -935,8 +933,6 @@ impl<W: Workbase> Stratifier<W> {
             }
         }
 
-        let pool_diff = self.vardiff.pool_diff(submit.job_id);
-
         if pool_diff != self.vardiff.current_diff() {
             debug!(
                 "Using stale pool_diff={} (current={}) for job_id={} from {}",
@@ -948,11 +944,11 @@ impl<W: Workbase> Stratifier<W> {
         }
 
         if !pool_diff.to_target().is_met_by(hash) {
-            let share_diff = Difficulty::from(hash).as_f64();
+            let share_diff = Difficulty::from(hash);
             let job_height = job.workbase.height();
 
             debug!(
-                "Rejected share above target from {}: share_diff={} pool_diff={} height={}",
+                "Rejected share above pool target from {}: share_diff={} pool_diff={} height={}",
                 session.username, share_diff, pool_diff, job_height
             );
 
@@ -962,7 +958,7 @@ impl<W: Workbase> Stratifier<W> {
                 session.address.to_string(),
                 session.workername.clone(),
                 pool_diff.as_f64(),
-                share_diff,
+                share_diff.as_f64(),
                 job_height,
                 StratumError::AboveTarget
             ));
