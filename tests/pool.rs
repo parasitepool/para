@@ -553,6 +553,127 @@ async fn vardiff_adjusts_difficulty() {
 
 #[tokio::test]
 #[serial(bitcoind)]
+#[timeout(120000)]
+async fn new_job_shares_rejected_at_old_diff() {
+    let pool = TestPool::spawn_with_args(
+        "--start-diff 0.00001 --vardiff-period 1 --vardiff-window 5 --update-interval 1 --disable-bouncer",
+    );
+
+    let client = pool.stratum_client().await;
+    let mut events = client.connect().await.unwrap();
+
+    let (subscribe, _, _) = client.subscribe().await.unwrap();
+    let enonce1 = subscribe.enonce1;
+
+    client.authorize().await.unwrap();
+
+    let (mut latest_notify, initial_difficulty) = wait_for_notify(&mut events).await;
+
+    let mut new_difficulty = None;
+
+    for _ in 0..30 {
+        while let Some(Ok(event)) = events.try_recv() {
+            match event {
+                stratum::Event::Notify(n) => latest_notify = n,
+                stratum::Event::SetDifficulty(d) if d > initial_difficulty => {
+                    new_difficulty = Some(d);
+                }
+                _ => {}
+            }
+        }
+
+        if new_difficulty.is_some() {
+            break;
+        }
+
+        let enonce2 = Extranonce::random(subscribe.enonce2_size);
+        let (ntime, nonce) = solve_share(&latest_notify, &enonce1, &enonce2, initial_difficulty);
+
+        match client
+            .submit(latest_notify.job_id, enonce2, ntime, nonce, None)
+            .await
+        {
+            Ok(_) => {}
+            Err(ClientError::Stratum { response })
+                if response.error_code == StratumError::Duplicate as i32
+                    || response.error_code == StratumError::AboveTarget as i32
+                    || response.error_code == StratumError::Stale as i32 =>
+            {
+                continue;
+            }
+            Err(e) => panic!("Unexpected error: {:?}", e),
+        }
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    if new_difficulty.is_none() {
+        new_difficulty = Some(
+            timeout(Duration::from_secs(10), async {
+                loop {
+                    match events.recv().await {
+                        Ok(stratum::Event::SetDifficulty(diff)) if diff > initial_difficulty => {
+                            return diff;
+                        }
+                        Ok(stratum::Event::Notify(n)) => latest_notify = n,
+                        Ok(_) => continue,
+                        Err(e) => panic!("Event channel closed: {:?}", e),
+                    }
+                }
+            })
+            .await
+            .expect("Timeout waiting for difficulty adjustment"),
+        );
+    }
+
+    let new_difficulty = new_difficulty.unwrap();
+
+    assert!(new_difficulty > initial_difficulty);
+
+    let new_notify = timeout(Duration::from_secs(10), async {
+        loop {
+            match events.recv().await {
+                Ok(stratum::Event::Notify(n)) if n.job_id != latest_notify.job_id => return n,
+                Ok(_) => continue,
+                Err(e) => panic!("Event channel closed: {:?}", e),
+            }
+        }
+    })
+    .await
+    .expect("Timeout waiting for new job after difficulty change");
+
+    let mut got_above_target = false;
+    for _ in 0..20 {
+        let enonce2 = Extranonce::random(subscribe.enonce2_size);
+        let (ntime, nonce) = solve_share(&new_notify, &enonce1, &enonce2, initial_difficulty);
+        match client
+            .submit(new_notify.job_id, enonce2, ntime, nonce, None)
+            .await
+        {
+            Err(ClientError::Stratum { response })
+                if response.error_code == StratumError::AboveTarget as i32 =>
+            {
+                got_above_target = true;
+                break;
+            }
+            Ok(_) => continue,
+            Err(ClientError::Stratum { response })
+                if response.error_code == StratumError::Duplicate as i32 =>
+            {
+                continue;
+            }
+            Err(e) => panic!("Unexpected error: {:?}", e),
+        }
+    }
+
+    assert!(
+        got_above_target,
+        "New-job shares at old difficulty should be rejected (AboveTarget)"
+    );
+}
+
+#[tokio::test]
+#[serial(bitcoind)]
 #[timeout(90000)]
 async fn share_validation() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001 --disable-bouncer");
