@@ -336,7 +336,7 @@ impl<W: Workbase> Stratifier<W> {
                     self.socket_addr
                 );
 
-                self.vardiff.record_diff_change(self.jobs.peek_next_id());
+                self.vardiff.record_diff_change_job_id(self.jobs.peek_next_id());
 
                 self.send(Message::Notification {
                     method: "mining.set_difficulty".into(),
@@ -361,7 +361,7 @@ impl<W: Workbase> Stratifier<W> {
         let clean_jobs = self.jobs.insert(new_job.clone());
 
         if clean_jobs {
-            self.vardiff.clear_diff_change();
+            self.vardiff.clear_diff_change_job_id();
         }
 
         debug!(
@@ -1018,7 +1018,7 @@ impl<W: Workbase> Stratifier<W> {
                 self.settings.vardiff_period().as_secs_f64()
             );
 
-            self.vardiff.record_diff_change(self.jobs.peek_next_id());
+            self.vardiff.record_diff_change_job_id(self.jobs.peek_next_id());
 
             self.send(Message::Notification {
                 method: "mining.set_difficulty".into(),

@@ -83,11 +83,11 @@ impl Vardiff {
         self.current_diff
     }
 
-    pub(crate) fn record_diff_change(&mut self, next_job_id: JobId) {
+    pub(crate) fn record_diff_change_job_id(&mut self, next_job_id: JobId) {
         self.diff_change_job_id = Some(next_job_id);
     }
 
-    pub(crate) fn clear_diff_change(&mut self) {
+    pub(crate) fn clear_diff_change_job_id(&mut self) {
         self.diff_change_job_id = None;
     }
 
@@ -576,7 +576,7 @@ mod tests {
 
         assert!(new_diff > start_diff);
 
-        vardiff.record_diff_change(JobId::new(5));
+        vardiff.record_diff_change_job_id(JobId::new(5));
 
         assert_eq!(vardiff.pool_diff(JobId::new(4)), start_diff);
         assert_eq!(vardiff.pool_diff(JobId::new(5)), new_diff);
@@ -589,7 +589,7 @@ mod tests {
         let mut vardiff = Vardiff::new(start_diff, secs(5), secs(300), None, None);
 
         vardiff.clamp_to_upstream(Difficulty::from(50));
-        vardiff.record_diff_change(JobId::new(5));
+        vardiff.record_diff_change_job_id(JobId::new(5));
 
         assert_eq!(vardiff.pool_diff(JobId::new(4)), Difficulty::from(50));
         assert_eq!(vardiff.pool_diff(JobId::new(5)), Difficulty::from(50));
@@ -601,11 +601,11 @@ mod tests {
         let mut vardiff = Vardiff::new(start_diff, secs(5), secs(300), None, None);
 
         vardiff.clamp_to_upstream(Difficulty::from(50));
-        vardiff.record_diff_change(JobId::new(5));
+        vardiff.record_diff_change_job_id(JobId::new(5));
 
         assert_eq!(vardiff.pool_diff(JobId::new(4)), Difficulty::from(50));
 
-        vardiff.clear_diff_change();
+        vardiff.clear_diff_change_job_id();
 
         assert_eq!(vardiff.pool_diff(JobId::new(4)), Difficulty::from(50));
         assert_eq!(vardiff.pool_diff(JobId::new(5)), Difficulty::from(50));
@@ -642,7 +642,7 @@ mod tests {
             .evaluate_adjustment(Difficulty::from(1_000_000), None, t)
             .unwrap();
         assert!(diff_a > Difficulty::from(10));
-        vardiff.record_diff_change(JobId::new(5));
+        vardiff.record_diff_change_job_id(JobId::new(5));
 
         for _ in 0..100 {
             t += millis(100);
@@ -654,7 +654,7 @@ mod tests {
             .evaluate_adjustment(Difficulty::from(1_000_000), None, t)
             .unwrap();
         assert!(diff_b > diff_a);
-        vardiff.record_diff_change(JobId::new(10));
+        vardiff.record_diff_change_job_id(JobId::new(10));
 
         assert_eq!(vardiff.pool_diff(JobId::new(4)), diff_a);
         assert!(diff_a > Difficulty::from(10));
@@ -665,11 +665,11 @@ mod tests {
         let mut vardiff = Vardiff::new(Difficulty::from(100), secs(5), secs(300), None, None);
 
         vardiff.clamp_to_upstream(Difficulty::from(50));
-        vardiff.record_diff_change(JobId::new(5));
+        vardiff.record_diff_change_job_id(JobId::new(5));
 
         assert_eq!(vardiff.pool_diff(JobId::new(6)), Difficulty::from(50));
 
-        vardiff.record_diff_change(JobId::new(10));
+        vardiff.record_diff_change_job_id(JobId::new(10));
 
         assert_eq!(vardiff.pool_diff(JobId::new(6)), Difficulty::from(50));
         assert_eq!(vardiff.pool_diff(JobId::new(10)), Difficulty::from(50));
