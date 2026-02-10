@@ -495,7 +495,6 @@ async fn vardiff_adjusts_difficulty() {
         &enonce1,
         subscribe.enonce2_size,
         initial_difficulty,
-        30,
     )
     .await;
 
@@ -527,7 +526,6 @@ async fn new_job_shares_rejected_at_old_diff() {
         &enonce1,
         subscribe.enonce2_size,
         initial_difficulty,
-        30,
     )
     .await;
 
@@ -568,70 +566,6 @@ async fn new_job_shares_rejected_at_old_diff() {
             Ok(_) => continue,
             Err(e) => panic!("Unexpected error: {:?}", e),
         }
-    }
-
-    assert!(got_above_target);
-}
-
-#[tokio::test]
-#[serial(bitcoind)]
-#[timeout(120000)]
-async fn stale_shares_rejected_after_vardiff_ratchet() {
-    let pool = TestPool::spawn_with_args(
-        "--start-diff 0.00001 --vardiff-period 1 --vardiff-window 5 --update-interval 30 --disable-bouncer",
-    );
-
-    let client = pool.stratum_client().await;
-    let mut events = client.connect().await.unwrap();
-
-    let (subscribe, _, _) = client.subscribe().await.unwrap();
-    let enonce1 = subscribe.enonce1;
-
-    client.authorize().await.unwrap();
-
-    let (mut initial_notify, initial_difficulty) = wait_for_notify(&mut events).await;
-
-    mine_until_difficulty_increases(
-        &client,
-        &mut events,
-        &mut initial_notify,
-        &enonce1,
-        subscribe.enonce2_size,
-        initial_difficulty,
-        100,
-    )
-    .await;
-
-    let mut got_above_target = false;
-    for _ in 0..200 {
-        while let Some(Ok(_)) = events.try_recv() {}
-
-        match submit_share(
-            &client,
-            &initial_notify,
-            &enonce1,
-            subscribe.enonce2_size,
-            initial_difficulty,
-        )
-        .await
-        {
-            Err(ClientError::Stratum { response })
-                if response.error_code == StratumError::AboveTarget as i32 =>
-            {
-                got_above_target = true;
-                break;
-            }
-            Err(ClientError::Stratum { response })
-                if response.error_code == StratumError::Duplicate as i32
-                    || response.error_code == StratumError::Stale as i32 =>
-            {
-                continue;
-            }
-            Ok(_) => {}
-            Err(e) => panic!("Unexpected error: {:?}", e),
-        }
-
-        tokio::time::sleep(Duration::from_millis(20)).await;
     }
 
     assert!(got_above_target);

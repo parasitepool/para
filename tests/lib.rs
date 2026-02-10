@@ -238,9 +238,10 @@ async fn mine_until_difficulty_increases(
     enonce1: &Extranonce,
     enonce2_size: usize,
     initial_difficulty: Difficulty,
-    max_attempts: usize,
 ) -> Difficulty {
-    for _ in 0..max_attempts {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+
+    loop {
         while let Some(Ok(event)) = events.try_recv() {
             match event {
                 stratum::Event::Notify(n) => *notify = n,
@@ -249,6 +250,12 @@ async fn mine_until_difficulty_increases(
             }
         }
 
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "Timeout waiting for difficulty increase above {}",
+            initial_difficulty
+        );
+
         if submit_share(client, notify, enonce1, enonce2_size, initial_difficulty)
             .await
             .is_ok()
@@ -256,19 +263,6 @@ async fn mine_until_difficulty_increases(
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
     }
-
-    timeout(Duration::from_secs(10), async {
-        loop {
-            match events.recv().await {
-                Ok(stratum::Event::SetDifficulty(d)) if d > initial_difficulty => return d,
-                Ok(stratum::Event::Notify(n)) => *notify = n,
-                Ok(_) => continue,
-                Err(e) => panic!("Event channel closed: {:?}", e),
-            }
-        }
-    })
-    .await
-    .expect("Timeout waiting for difficulty adjustment")
 }
 
 #[cfg(target_os = "linux")]
