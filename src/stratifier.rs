@@ -1008,10 +1008,6 @@ impl<W: Workbase> Stratifier<W> {
             self.vardiff.shares_since_change()
         );
 
-        if pool_diff != self.vardiff.current_diff() {
-            return Ok(Consequence::None);
-        }
-
         let upstream_diff = if let Some(ref upstream) = self.upstream {
             Some(upstream.difficulty().await)
         } else {

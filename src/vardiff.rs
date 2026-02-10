@@ -130,6 +130,10 @@ impl Vardiff {
         network_diff: Difficulty,
         upstream_diff: Option<Difficulty>,
     ) -> Option<Difficulty> {
+        if pool_diff != self.current_diff {
+            return None;
+        }
+
         let now = Instant::now();
 
         if self.first_share.is_none() {
@@ -673,6 +677,15 @@ mod tests {
 
         assert_eq!(vardiff.pool_diff(JobId::new(6)), Difficulty::from(50));
         assert_eq!(vardiff.pool_diff(JobId::new(10)), Difficulty::from(50));
+    }
+
+    #[test]
+    fn skips_stale_diff_shares() {
+        let mut vardiff = Vardiff::new(Difficulty::from(100), secs(5), secs(300), None, None);
+
+        vardiff.record_share(Difficulty::from(50), Difficulty::from(1_000_000), None);
+
+        assert_eq!(vardiff.shares_since_change(), 0);
     }
 
     #[test]
