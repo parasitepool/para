@@ -961,6 +961,13 @@ impl<W: Workbase> Stratifier<W> {
             return Ok(self.bouncer.reject());
         }
 
+        let share_diff = Difficulty::from(hash);
+
+        worker.record_accepted(pool_diff, share_diff);
+
+        self.submit_to_upstream(&submit, share_diff, &session.enonce1)
+            .await;
+
         self.send(Message::Response {
             id,
             result: Some(json!(true)),
@@ -969,12 +976,6 @@ impl<W: Workbase> Stratifier<W> {
         })
         .await?;
 
-        let share_diff = Difficulty::from(hash);
-
-        worker.record_accepted(pool_diff, share_diff);
-
-        let job_height = job.workbase.height();
-
         self.send_event(Event::Share(ShareEvent {
             timestamp: None,
             address: session.address.to_string(),
@@ -982,16 +983,11 @@ impl<W: Workbase> Stratifier<W> {
             pool_diff: pool_diff.as_f64(),
             share_diff: share_diff.as_f64(),
             result: true,
-            blockheight: Some(job_height),
+            blockheight: Some(job.workbase.height()),
             reject_reason: None,
         }));
 
-        self.submit_to_upstream(&submit, share_diff, &session.enonce1)
-            .await;
-
         self.bouncer.accept();
-
-        let network_diff = Difficulty::from(job.nbits());
 
         debug!(
             "Share accepted from {} | diff={} dsps={:.4} shares_since_change={}",
@@ -1006,6 +1002,8 @@ impl<W: Workbase> Stratifier<W> {
         } else {
             None
         };
+
+        let network_diff = Difficulty::from(job.nbits());
 
         if let Some(new_diff) = self
             .vardiff
