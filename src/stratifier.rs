@@ -1014,36 +1014,32 @@ impl<W: Workbase> Stratifier<W> {
             self.vardiff.shares_since_change()
         );
 
-        if stale {
-            self.vardiff.record_stale_share(target_diff);
+        let upstream_diff = if let Some(ref upstream) = self.upstream {
+            Some(upstream.difficulty().await)
         } else {
-            let upstream_diff = if let Some(ref upstream) = self.upstream {
-                Some(upstream.difficulty().await)
-            } else {
-                None
-            };
+            None
+        };
 
-            if let Some(new_diff) =
-                self.vardiff
-                    .record_share(target_diff, network_diff, upstream_diff)
-            {
-                debug!(
-                    "Adjusting difficulty {} -> {} for {} | dsps={:.4} period={}s",
-                    target_diff,
-                    new_diff,
-                    self.socket_addr,
-                    self.vardiff.dsps(),
-                    self.settings.vardiff_period().as_secs_f64()
-                );
+        if let Some(new_diff) = self
+            .vardiff
+            .record_share(target_diff, network_diff, upstream_diff)
+        {
+            debug!(
+                "Adjusting difficulty {} -> {} for {} | dsps={:.4} period={}s",
+                target_diff,
+                new_diff,
+                self.socket_addr,
+                self.vardiff.dsps(),
+                self.settings.vardiff_period().as_secs_f64()
+            );
 
-                self.diff_change_job_id = Some(self.jobs.peek_next_id());
+            self.diff_change_job_id = Some(self.jobs.peek_next_id());
 
-                self.send(Message::Notification {
-                    method: "mining.set_difficulty".into(),
-                    params: json!(SetDifficulty(new_diff)),
-                })
-                .await?;
-            }
+            self.send(Message::Notification {
+                method: "mining.set_difficulty".into(),
+                params: json!(SetDifficulty(new_diff)),
+            })
+            .await?;
         }
 
         Ok(Consequence::None)

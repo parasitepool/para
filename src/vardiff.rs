@@ -127,18 +127,6 @@ impl Vardiff {
         self.evaluate_adjustment(network_diff, upstream_diff, now)
     }
 
-    pub(crate) fn record_stale_share(&mut self, share_diff: Difficulty) {
-        let now = Instant::now();
-
-        if self.first_share.is_none() {
-            self.first_share = Some(now);
-            self.last_diff_change = now;
-        }
-
-        self.dsps.record(share_diff.as_f64(), now);
-        self.shares_since_change = 0;
-    }
-
     fn evaluate_adjustment(
         &mut self,
         network_diff: Difficulty,
@@ -548,29 +536,6 @@ mod tests {
             None,
         );
         assert_eq!(vardiff.min_shares_for_adjustment, 72);
-    }
-
-    #[test]
-    fn stale_share_resets_shares_since_change() {
-        let mut vardiff = Vardiff::new(Difficulty::from(10), secs(5), secs(300), None, None);
-
-        vardiff.record_share(Difficulty::from(10), Difficulty::from(1_000_000), None);
-        vardiff.record_share(Difficulty::from(10), Difficulty::from(1_000_000), None);
-        assert_eq!(vardiff.shares_since_change, 2);
-
-        vardiff.record_stale_share(Difficulty::from(5));
-        assert_eq!(vardiff.shares_since_change, 0);
-    }
-
-    #[test]
-    fn stale_share_initializes_first_share() {
-        let mut vardiff = Vardiff::new(Difficulty::from(10), secs(5), secs(300), None, None);
-
-        assert!(vardiff.first_share.is_none());
-
-        vardiff.record_stale_share(Difficulty::from(5));
-
-        assert!(vardiff.first_share.is_some());
     }
 
     #[test]
