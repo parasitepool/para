@@ -134,7 +134,6 @@ impl Vardiff {
         let first_share = self.first_share?;
         let time_since_first = now.duration_since(first_share);
         let time_since_change = now.duration_since(self.last_diff_change);
-
         let enough_shares = self.shares_since_change >= self.min_shares_for_adjustment;
         let enough_time = time_since_change >= self.min_time_for_adjustment;
 
