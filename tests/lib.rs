@@ -216,6 +216,62 @@ async fn wait_for_notify(events: &mut stratum::EventReceiver) -> (stratum::Notif
 }
 
 #[cfg(target_os = "linux")]
+async fn submit_share(
+    client: &stratum::Client,
+    notify: &stratum::Notify,
+    enonce1: &Extranonce,
+    enonce2_size: usize,
+    difficulty: Difficulty,
+) -> Result<Duration, ClientError> {
+    let enonce2 = Extranonce::random(enonce2_size);
+    let (ntime, nonce) = solve_share(notify, enonce1, &enonce2, difficulty);
+    client
+        .submit(notify.job_id, enonce2, ntime, nonce, None)
+        .await
+}
+
+#[cfg(target_os = "linux")]
+async fn mine_until_difficulty_increases(
+    client: &stratum::Client,
+    events: &mut stratum::EventReceiver,
+    notify: &mut stratum::Notify,
+    enonce1: &Extranonce,
+    enonce2_size: usize,
+    initial_difficulty: Difficulty,
+    max_attempts: usize,
+) -> Difficulty {
+    for _ in 0..max_attempts {
+        while let Some(Ok(event)) = events.try_recv() {
+            match event {
+                stratum::Event::Notify(n) => *notify = n,
+                stratum::Event::SetDifficulty(d) if d > initial_difficulty => return d,
+                _ => {}
+            }
+        }
+
+        if submit_share(client, notify, enonce1, enonce2_size, initial_difficulty)
+            .await
+            .is_ok()
+        {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    timeout(Duration::from_secs(10), async {
+        loop {
+            match events.recv().await {
+                Ok(stratum::Event::SetDifficulty(d)) if d > initial_difficulty => return d,
+                Ok(stratum::Event::Notify(n)) => *notify = n,
+                Ok(_) => continue,
+                Err(e) => panic!("Event channel closed: {:?}", e),
+            }
+        }
+    })
+    .await
+    .expect("Timeout waiting for difficulty adjustment")
+}
+
+#[cfg(target_os = "linux")]
 async fn wait_for_job_update(
     events: &mut stratum::EventReceiver,
     old_job_id: JobId,

@@ -27,6 +27,7 @@ pub(crate) struct Vardiff {
     shares_since_change: u32,
     min_diff: Option<Difficulty>,
     max_diff: Option<Difficulty>,
+    diff_change_job_id: Option<JobId>,
 }
 
 impl Vardiff {
@@ -53,6 +54,7 @@ impl Vardiff {
             shares_since_change: 0,
             min_diff,
             max_diff,
+            diff_change_job_id: None,
         }
     }
 
@@ -81,8 +83,24 @@ impl Vardiff {
         self.current_diff
     }
 
-    pub(crate) fn old_diff(&self) -> Difficulty {
-        self.old_diff
+    pub(crate) fn record_diff_change(&mut self, next_job_id: JobId) {
+        self.diff_change_job_id = Some(next_job_id);
+    }
+
+    pub(crate) fn clear_diff_change(&mut self) {
+        self.diff_change_job_id = None;
+    }
+
+    pub(crate) fn pool_diff(&self, job_id: JobId) -> Difficulty {
+        let stale = self
+            .diff_change_job_id
+            .is_some_and(|change_id| job_id < change_id);
+
+        if stale {
+            self.old_diff.min(self.current_diff)
+        } else {
+            self.current_diff
+        }
     }
 
     pub(crate) fn clamp_to_upstream(&mut self, upstream_diff: Difficulty) -> Option<Difficulty> {
@@ -536,17 +554,8 @@ mod tests {
     }
 
     #[test]
-    fn old_diff_tracks_previous_difficulty() {
+    fn pool_diff_uses_old_after_increase() {
         let start_diff = Difficulty::from(100);
-        let mut vardiff = Vardiff::new(start_diff, secs(5), secs(300), None, None);
-
-        assert_eq!(vardiff.old_diff(), start_diff);
-
-        vardiff.clamp_to_upstream(Difficulty::from(50));
-
-        assert_eq!(vardiff.old_diff(), start_diff);
-        assert_eq!(vardiff.current_diff(), Difficulty::from(50));
-
         let mut vardiff = Vardiff::new(start_diff, secs(5), secs(10), None, None);
 
         let base = Instant::now();
@@ -566,8 +575,104 @@ mod tests {
             .unwrap();
 
         assert!(new_diff > start_diff);
-        assert_eq!(vardiff.old_diff(), start_diff);
-        assert_eq!(vardiff.current_diff(), new_diff);
+
+        vardiff.record_diff_change(JobId::new(5));
+
+        assert_eq!(vardiff.pool_diff(JobId::new(4)), start_diff);
+        assert_eq!(vardiff.pool_diff(JobId::new(5)), new_diff);
+        assert_eq!(vardiff.pool_diff(JobId::new(6)), new_diff);
+    }
+
+    #[test]
+    fn pool_diff_uses_min_after_decrease() {
+        let start_diff = Difficulty::from(100);
+        let mut vardiff = Vardiff::new(start_diff, secs(5), secs(300), None, None);
+
+        vardiff.clamp_to_upstream(Difficulty::from(50));
+        vardiff.record_diff_change(JobId::new(5));
+
+        assert_eq!(vardiff.pool_diff(JobId::new(4)), Difficulty::from(50));
+        assert_eq!(vardiff.pool_diff(JobId::new(5)), Difficulty::from(50));
+    }
+
+    #[test]
+    fn pool_diff_clear_resets_boundary() {
+        let start_diff = Difficulty::from(100);
+        let mut vardiff = Vardiff::new(start_diff, secs(5), secs(300), None, None);
+
+        vardiff.clamp_to_upstream(Difficulty::from(50));
+        vardiff.record_diff_change(JobId::new(5));
+
+        assert_eq!(vardiff.pool_diff(JobId::new(4)), Difficulty::from(50));
+
+        vardiff.clear_diff_change();
+
+        assert_eq!(vardiff.pool_diff(JobId::new(4)), Difficulty::from(50));
+        assert_eq!(vardiff.pool_diff(JobId::new(5)), Difficulty::from(50));
+    }
+
+    #[test]
+    fn pool_diff_no_change_returns_current() {
+        let vardiff = Vardiff::new(Difficulty::from(100), secs(5), secs(300), None, None);
+
+        assert_eq!(vardiff.pool_diff(JobId::new(0)), Difficulty::from(100));
+        assert_eq!(
+            vardiff.pool_diff(JobId::new(u64::MAX)),
+            Difficulty::from(100)
+        );
+    }
+
+    #[test]
+    fn pool_diff_ratchets_past_original_after_multiple_increases() {
+        let mut vardiff = Vardiff::new(Difficulty::from(10), secs(5), secs(10), None, None);
+
+        let base = Instant::now();
+        vardiff.first_share = Some(base);
+        vardiff.last_diff_change = base;
+        vardiff.dsps = DecayingAverage::with_start_time(secs(10), base);
+
+        let mut t = base;
+        for _ in 0..100 {
+            t += millis(100);
+            vardiff.dsps.record(100.0, t);
+            vardiff.shares_since_change += 1;
+        }
+
+        let diff_a = vardiff
+            .evaluate_adjustment(Difficulty::from(1_000_000), None, t)
+            .unwrap();
+        assert!(diff_a > Difficulty::from(10));
+        vardiff.record_diff_change(JobId::new(5));
+
+        for _ in 0..100 {
+            t += millis(100);
+            vardiff.dsps.record(diff_a.as_f64() * 10.0, t);
+            vardiff.shares_since_change += 1;
+        }
+
+        let diff_b = vardiff
+            .evaluate_adjustment(Difficulty::from(1_000_000), None, t)
+            .unwrap();
+        assert!(diff_b > diff_a);
+        vardiff.record_diff_change(JobId::new(10));
+
+        assert_eq!(vardiff.pool_diff(JobId::new(4)), diff_a);
+        assert!(diff_a > Difficulty::from(10));
+    }
+
+    #[test]
+    fn pool_diff_boundary_advances_on_second_record() {
+        let mut vardiff = Vardiff::new(Difficulty::from(100), secs(5), secs(300), None, None);
+
+        vardiff.clamp_to_upstream(Difficulty::from(50));
+        vardiff.record_diff_change(JobId::new(5));
+
+        assert_eq!(vardiff.pool_diff(JobId::new(6)), Difficulty::from(50));
+
+        vardiff.record_diff_change(JobId::new(10));
+
+        assert_eq!(vardiff.pool_diff(JobId::new(6)), Difficulty::from(50));
+        assert_eq!(vardiff.pool_diff(JobId::new(10)), Difficulty::from(50));
     }
 
     #[test]

@@ -24,7 +24,6 @@ pub(crate) struct Stratifier<W: Workbase> {
     cancel_token: CancellationToken,
     jobs: Jobs<W>,
     vardiff: Vardiff,
-    diff_change_job_id: Option<JobId>,
     bouncer: Bouncer,
     event_tx: Option<mpsc::Sender<Event>>,
 }
@@ -70,7 +69,6 @@ impl<W: Workbase> Stratifier<W> {
             cancel_token,
             jobs: Jobs::new(),
             vardiff,
-            diff_change_job_id: None,
             bouncer,
             event_tx,
         }
@@ -338,7 +336,7 @@ impl<W: Workbase> Stratifier<W> {
                     self.socket_addr
                 );
 
-                self.diff_change_job_id = Some(self.jobs.peek_next_id());
+                self.vardiff.record_diff_change(self.jobs.peek_next_id());
 
                 self.send(Message::Notification {
                     method: "mining.set_difficulty".into(),
@@ -363,7 +361,7 @@ impl<W: Workbase> Stratifier<W> {
         let clean_jobs = self.jobs.insert(new_job.clone());
 
         if clean_jobs {
-            self.diff_change_job_id = None;
+            self.vardiff.clear_diff_change();
         }
 
         debug!(
@@ -936,15 +934,7 @@ impl<W: Workbase> Stratifier<W> {
             }
         }
 
-        let stale = self
-            .diff_change_job_id
-            .is_some_and(|change_id| submit.job_id < change_id);
-
-        let pool_diff = if stale {
-            self.vardiff.old_diff().min(self.vardiff.current_diff())
-        } else {
-            self.vardiff.current_diff()
-        };
+        let pool_diff = self.vardiff.pool_diff(submit.job_id);
 
         if !pool_diff.to_target().is_met_by(hash) {
             let share_diff = Difficulty::from(hash).as_f64();
@@ -1031,7 +1021,7 @@ impl<W: Workbase> Stratifier<W> {
                 self.settings.vardiff_period().as_secs_f64()
             );
 
-            self.diff_change_job_id = Some(self.jobs.peek_next_id());
+            self.vardiff.record_diff_change(self.jobs.peek_next_id());
 
             self.send(Message::Notification {
                 method: "mining.set_difficulty".into(),

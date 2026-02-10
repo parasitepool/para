@@ -486,69 +486,20 @@ async fn vardiff_adjusts_difficulty() {
 
     client.authorize().await.unwrap();
 
-    let (notify, initial_difficulty) = wait_for_notify(&mut events).await;
+    let (mut notify, initial_difficulty) = wait_for_notify(&mut events).await;
 
-    assert_eq!(
+    let new_difficulty = mine_until_difficulty_increases(
+        &client,
+        &mut events,
+        &mut notify,
+        &enonce1,
+        subscribe.enonce2_size,
         initial_difficulty,
-        Difficulty::from(0.00001),
-        "Start difficulty should match configured value"
-    );
+        30,
+    )
+    .await;
 
-    let mut accepted_shares = 0;
-    for _ in 0..30 {
-        let enonce2 = Extranonce::random(subscribe.enonce2_size);
-        let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, initial_difficulty);
-
-        match client
-            .submit(notify.job_id, enonce2, ntime, nonce, None)
-            .await
-        {
-            Ok(_) => accepted_shares += 1,
-            Err(ClientError::Stratum { response })
-                if response.error_code == StratumError::Duplicate as i32 =>
-            {
-                continue;
-            }
-            Err(ClientError::Stratum { response })
-                if response.error_code == StratumError::AboveTarget as i32 =>
-            {
-                continue;
-            }
-            Err(ClientError::Stratum { response })
-                if response.error_code == StratumError::Stale as i32 =>
-            {
-                continue;
-            }
-            Err(e) => panic!("Unexpected error: {:?}", e),
-        }
-
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-
-    assert!(
-        accepted_shares >= 3,
-        "Need at least 3 accepted shares, got {}",
-        accepted_shares
-    );
-
-    let new_difficulty = timeout(Duration::from_secs(10), async {
-        loop {
-            match events.recv().await {
-                Ok(stratum::Event::SetDifficulty(diff)) => return diff,
-                Ok(_) => continue,
-                Err(e) => panic!("Event channel closed unexpectedly: {:?}", e),
-            }
-        }
-    })
-    .await
-    .expect("Timeout waiting for difficulty adjustment");
-
-    assert!(
-        new_difficulty > initial_difficulty,
-        "Difficulty should increase when shares come faster than target: {} -> {}",
-        initial_difficulty,
-        new_difficulty
-    );
+    assert!(new_difficulty > initial_difficulty);
 }
 
 #[tokio::test]
@@ -567,73 +518,23 @@ async fn new_job_shares_rejected_at_old_diff() {
 
     client.authorize().await.unwrap();
 
-    let (mut latest_notify, initial_difficulty) = wait_for_notify(&mut events).await;
+    let (mut notify, initial_difficulty) = wait_for_notify(&mut events).await;
 
-    let mut new_difficulty = None;
-
-    for _ in 0..30 {
-        while let Some(Ok(event)) = events.try_recv() {
-            match event {
-                stratum::Event::Notify(n) => latest_notify = n,
-                stratum::Event::SetDifficulty(d) if d > initial_difficulty => {
-                    new_difficulty = Some(d);
-                }
-                _ => {}
-            }
-        }
-
-        if new_difficulty.is_some() {
-            break;
-        }
-
-        let enonce2 = Extranonce::random(subscribe.enonce2_size);
-        let (ntime, nonce) = solve_share(&latest_notify, &enonce1, &enonce2, initial_difficulty);
-
-        match client
-            .submit(latest_notify.job_id, enonce2, ntime, nonce, None)
-            .await
-        {
-            Ok(_) => {}
-            Err(ClientError::Stratum { response })
-                if response.error_code == StratumError::Duplicate as i32
-                    || response.error_code == StratumError::AboveTarget as i32
-                    || response.error_code == StratumError::Stale as i32 =>
-            {
-                continue;
-            }
-            Err(e) => panic!("Unexpected error: {:?}", e),
-        }
-
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-
-    if new_difficulty.is_none() {
-        new_difficulty = Some(
-            timeout(Duration::from_secs(10), async {
-                loop {
-                    match events.recv().await {
-                        Ok(stratum::Event::SetDifficulty(diff)) if diff > initial_difficulty => {
-                            return diff;
-                        }
-                        Ok(stratum::Event::Notify(n)) => latest_notify = n,
-                        Ok(_) => continue,
-                        Err(e) => panic!("Event channel closed: {:?}", e),
-                    }
-                }
-            })
-            .await
-            .expect("Timeout waiting for difficulty adjustment"),
-        );
-    }
-
-    let new_difficulty = new_difficulty.unwrap();
-
-    assert!(new_difficulty > initial_difficulty);
+    mine_until_difficulty_increases(
+        &client,
+        &mut events,
+        &mut notify,
+        &enonce1,
+        subscribe.enonce2_size,
+        initial_difficulty,
+        30,
+    )
+    .await;
 
     let new_notify = timeout(Duration::from_secs(10), async {
         loop {
             match events.recv().await {
-                Ok(stratum::Event::Notify(n)) if n.job_id != latest_notify.job_id => return n,
+                Ok(stratum::Event::Notify(n)) if n.job_id != notify.job_id => return n,
                 Ok(_) => continue,
                 Err(e) => panic!("Event channel closed: {:?}", e),
             }
@@ -644,11 +545,14 @@ async fn new_job_shares_rejected_at_old_diff() {
 
     let mut got_above_target = false;
     for _ in 0..20 {
-        let enonce2 = Extranonce::random(subscribe.enonce2_size);
-        let (ntime, nonce) = solve_share(&new_notify, &enonce1, &enonce2, initial_difficulty);
-        match client
-            .submit(new_notify.job_id, enonce2, ntime, nonce, None)
-            .await
+        match submit_share(
+            &client,
+            &new_notify,
+            &enonce1,
+            subscribe.enonce2_size,
+            initial_difficulty,
+        )
+        .await
         {
             Err(ClientError::Stratum { response })
                 if response.error_code == StratumError::AboveTarget as i32 =>
@@ -656,20 +560,17 @@ async fn new_job_shares_rejected_at_old_diff() {
                 got_above_target = true;
                 break;
             }
-            Ok(_) => continue,
             Err(ClientError::Stratum { response })
                 if response.error_code == StratumError::Duplicate as i32 =>
             {
                 continue;
             }
+            Ok(_) => continue,
             Err(e) => panic!("Unexpected error: {:?}", e),
         }
     }
 
-    assert!(
-        got_above_target,
-        "New-job shares at old difficulty should be rejected (AboveTarget)"
-    );
+    assert!(got_above_target);
 }
 
 #[tokio::test]
@@ -688,56 +589,31 @@ async fn stale_shares_rejected_after_vardiff_ratchet() {
 
     client.authorize().await.unwrap();
 
-    let (initial_notify, initial_difficulty) = wait_for_notify(&mut events).await;
+    let (mut initial_notify, initial_difficulty) = wait_for_notify(&mut events).await;
 
-    let mut first_increase = false;
-
-    for _ in 0..100 {
-        while let Some(Ok(event)) = events.try_recv() {
-            if let stratum::Event::SetDifficulty(d) = event
-                && d > initial_difficulty
-            {
-                first_increase = true;
-            }
-        }
-
-        if first_increase {
-            break;
-        }
-
-        let enonce2 = Extranonce::random(subscribe.enonce2_size);
-        let (ntime, nonce) = solve_share(&initial_notify, &enonce1, &enonce2, initial_difficulty);
-
-        match client
-            .submit(initial_notify.job_id, enonce2, ntime, nonce, None)
-            .await
-        {
-            Ok(_) => {}
-            Err(ClientError::Stratum { response })
-                if response.error_code == StratumError::Duplicate as i32
-                    || response.error_code == StratumError::AboveTarget as i32
-                    || response.error_code == StratumError::Stale as i32 =>
-            {
-                continue;
-            }
-            Err(e) => panic!("Unexpected error: {:?}", e),
-        }
-
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-
-    assert!(first_increase, "Vardiff should have increased difficulty");
+    mine_until_difficulty_increases(
+        &client,
+        &mut events,
+        &mut initial_notify,
+        &enonce1,
+        subscribe.enonce2_size,
+        initial_difficulty,
+        100,
+    )
+    .await;
 
     let mut got_above_target = false;
     for _ in 0..200 {
         while let Some(Ok(_)) = events.try_recv() {}
 
-        let enonce2 = Extranonce::random(subscribe.enonce2_size);
-        let (ntime, nonce) = solve_share(&initial_notify, &enonce1, &enonce2, initial_difficulty);
-
-        match client
-            .submit(initial_notify.job_id, enonce2, ntime, nonce, None)
-            .await
+        match submit_share(
+            &client,
+            &initial_notify,
+            &enonce1,
+            subscribe.enonce2_size,
+            initial_difficulty,
+        )
+        .await
         {
             Err(ClientError::Stratum { response })
                 if response.error_code == StratumError::AboveTarget as i32 =>
@@ -758,10 +634,7 @@ async fn stale_shares_rejected_after_vardiff_ratchet() {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
 
-    assert!(
-        got_above_target,
-        "Stale shares should eventually be rejected as vardiff ratchets up"
-    );
+    assert!(got_above_target);
 }
 
 #[tokio::test]
