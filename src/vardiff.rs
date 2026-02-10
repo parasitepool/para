@@ -1,17 +1,16 @@
 use super::*;
 
-/// Minimum time before considering difficulty adjustment, as a fraction of the window.
-/// Derived from ckpool: 240s min_time / 300s window = 0.8
-const MIN_TIME_WINDOW_RATIO: f64 = 0.8;
+/// Minimum window ratio before considering adjustment.
+/// Fraction of expected time (or shares) per window.
+/// Derived from ckpool: 240s / 300s window = 0.8
+const MIN_WINDOW_RATIO: f64 = 0.8;
 
-/// Minimum shares before considering adjustment, as a fraction of expected shares per window.
-/// Derived from ckpool: min_shares = min_time * target_rate = (window * 0.8) / period
-const MIN_SHARES_WINDOW_RATIO: f64 = 0.8;
-
-/// Only decrease difficulty when rate drops below this fraction of target; copied from ckpool
+/// Only decrease difficulty when rate drops below this fraction of target.
+/// Copied from ckpool.
 const HYSTERESIS_LOW: f64 = 0.5;
 
-/// Only increase difficulty when rate exceeds this fraction of target; copied from ckpool.
+/// Only increase difficulty when rate exceeds this fraction of target.
+/// Copied from ckpool.
 const HYSTERESIS_HIGH: f64 = 1.33;
 
 #[derive(Debug, Clone)]
@@ -44,9 +43,8 @@ impl Vardiff {
         Self {
             period,
             window,
-            min_shares_for_adjustment: (expected_shares_per_window * MIN_SHARES_WINDOW_RATIO)
-                as u32,
-            min_time_for_adjustment: Duration::from_secs_f64(window_secs * MIN_TIME_WINDOW_RATIO),
+            min_shares_for_adjustment: (expected_shares_per_window * MIN_WINDOW_RATIO) as u32,
+            min_time_for_adjustment: Duration::from_secs_f64(window_secs * MIN_WINDOW_RATIO),
             dsps: DecayingAverage::new(window),
             current_diff: start_diff,
             old_diff: start_diff,
