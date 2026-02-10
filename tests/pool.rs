@@ -486,69 +486,89 @@ async fn vardiff_adjusts_difficulty() {
 
     client.authorize().await.unwrap();
 
-    let (notify, initial_difficulty) = wait_for_notify(&mut events).await;
+    let (mut notify, initial_difficulty) = wait_for_notify(&mut events).await;
 
-    assert_eq!(
+    let new_difficulty = mine_until_difficulty_increases(
+        &client,
+        &mut events,
+        &mut notify,
+        &enonce1,
+        subscribe.enonce2_size,
         initial_difficulty,
-        Difficulty::from(0.00001),
-        "Start difficulty should match configured value"
+    )
+    .await;
+
+    assert!(new_difficulty > initial_difficulty);
+}
+
+#[tokio::test]
+#[serial(bitcoind)]
+#[timeout(120000)]
+async fn new_job_shares_rejected_at_old_diff() {
+    let pool = TestPool::spawn_with_args(
+        "--start-diff 0.00001 --vardiff-period 1 --vardiff-window 5 --update-interval 1 --disable-bouncer",
     );
 
-    let mut accepted_shares = 0;
-    for _ in 0..30 {
-        let enonce2 = Extranonce::random(subscribe.enonce2_size);
-        let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, initial_difficulty);
+    let client = pool.stratum_client().await;
+    let mut events = client.connect().await.unwrap();
 
-        match client
-            .submit(notify.job_id, enonce2, ntime, nonce, None)
-            .await
+    let (subscribe, _, _) = client.subscribe().await.unwrap();
+    let enonce1 = subscribe.enonce1;
+
+    client.authorize().await.unwrap();
+
+    let (mut notify, initial_difficulty) = wait_for_notify(&mut events).await;
+
+    mine_until_difficulty_increases(
+        &client,
+        &mut events,
+        &mut notify,
+        &enonce1,
+        subscribe.enonce2_size,
+        initial_difficulty,
+    )
+    .await;
+
+    let new_notify = timeout(Duration::from_secs(10), async {
+        loop {
+            match events.recv().await {
+                Ok(stratum::Event::Notify(n)) if n.job_id != notify.job_id => return n,
+                Ok(_) => continue,
+                Err(e) => panic!("Event channel closed: {:?}", e),
+            }
+        }
+    })
+    .await
+    .expect("Timeout waiting for new job after difficulty change");
+
+    let mut got_above_target = false;
+    for _ in 0..20 {
+        match submit_share(
+            &client,
+            &new_notify,
+            &enonce1,
+            subscribe.enonce2_size,
+            initial_difficulty,
+        )
+        .await
         {
-            Ok(_) => accepted_shares += 1,
+            Err(ClientError::Stratum { response })
+                if response.error_code == StratumError::AboveTarget as i32 =>
+            {
+                got_above_target = true;
+                break;
+            }
             Err(ClientError::Stratum { response })
                 if response.error_code == StratumError::Duplicate as i32 =>
             {
                 continue;
             }
-            Err(ClientError::Stratum { response })
-                if response.error_code == StratumError::AboveTarget as i32 =>
-            {
-                continue;
-            }
-            Err(ClientError::Stratum { response })
-                if response.error_code == StratumError::Stale as i32 =>
-            {
-                continue;
-            }
+            Ok(_) => continue,
             Err(e) => panic!("Unexpected error: {:?}", e),
         }
-
-        tokio::time::sleep(Duration::from_millis(20)).await;
     }
 
-    assert!(
-        accepted_shares >= 3,
-        "Need at least 3 accepted shares, got {}",
-        accepted_shares
-    );
-
-    let new_difficulty = timeout(Duration::from_secs(10), async {
-        loop {
-            match events.recv().await {
-                Ok(stratum::Event::SetDifficulty(diff)) => return diff,
-                Ok(_) => continue,
-                Err(e) => panic!("Event channel closed unexpectedly: {:?}", e),
-            }
-        }
-    })
-    .await
-    .expect("Timeout waiting for difficulty adjustment");
-
-    assert!(
-        new_difficulty > initial_difficulty,
-        "Difficulty should increase when shares come faster than target: {} -> {}",
-        initial_difficulty,
-        new_difficulty
-    );
+    assert!(got_above_target);
 }
 
 #[tokio::test]

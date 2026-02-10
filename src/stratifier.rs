@@ -74,14 +74,6 @@ impl<W: Workbase> Stratifier<W> {
         }
     }
 
-    fn send_event(&self, event: Event) {
-        if let Some(tx) = &self.event_tx
-            && let Err(e) = tx.try_send(event)
-        {
-            warn!("Failed to send event: {e}");
-        }
-    }
-
     pub(crate) async fn serve(&mut self) -> Result {
         let mut workbase_rx = self.workbase_rx.clone();
         let cancel_token = self.cancel_token.clone();
@@ -344,6 +336,9 @@ impl<W: Workbase> Stratifier<W> {
                     self.socket_addr
                 );
 
+                self.vardiff
+                    .record_diff_change_job_id(self.jobs.peek_next_id());
+
                 self.send(Message::Notification {
                     method: "mining.set_difficulty".into(),
                     params: json!(SetDifficulty(new_diff)),
@@ -365,6 +360,10 @@ impl<W: Workbase> Stratifier<W> {
         );
 
         let clean_jobs = self.jobs.insert(new_job.clone());
+
+        if clean_jobs {
+            self.vardiff.clear_diff_change_job_id();
+        }
 
         debug!(
             "Template updated, sending mining.notify to {}",
@@ -936,103 +935,111 @@ impl<W: Workbase> Stratifier<W> {
             }
         }
 
-        let current_diff = self.vardiff.current_diff();
+        let pool_diff = self.vardiff.pool_diff(submit.job_id);
 
-        if current_diff.to_target().is_met_by(hash) {
-            self.send(Message::Response {
-                id,
-                result: Some(json!(true)),
-                error: None,
-                reject_reason: None,
-            })
-            .await?;
-
-            let share_diff = Difficulty::from(hash);
-
-            worker.record_accepted(current_diff, share_diff);
-
-            let pool_diff = current_diff.as_f64();
-            let share_diff_f64 = share_diff.as_f64();
-            let job_height = job.workbase.height();
-
-            self.send_event(Event::Share(ShareEvent {
-                timestamp: None,
-                address: session.address.to_string(),
-                workername: session.workername.clone(),
-                pool_diff,
-                share_diff: share_diff_f64,
-                result: true,
-                blockheight: Some(job_height),
-                reject_reason: None,
-            }));
-
-            self.submit_to_upstream(&submit, share_diff, &session.enonce1)
-                .await;
-
-            self.bouncer.accept();
-
-            let network_diff = Difficulty::from(job.nbits());
-
+        if pool_diff != self.vardiff.current_diff() {
             debug!(
-                "Share accepted from {} | diff={} dsps={:.4} shares_since_change={}",
-                self.socket_addr,
-                current_diff,
-                self.vardiff.dsps(),
-                self.vardiff.shares_since_change()
+                "Using stale pool_diff={} (current={}) for job_id={} from {}",
+                pool_diff,
+                self.vardiff.current_diff(),
+                submit.job_id,
+                self.socket_addr
             );
-
-            let upstream_diff = if let Some(ref upstream) = self.upstream {
-                Some(upstream.difficulty().await)
-            } else {
-                None
-            };
-
-            if let Some(new_diff) =
-                self.vardiff
-                    .record_share(current_diff, network_diff, upstream_diff)
-            {
-                debug!(
-                    "Adjusting difficulty {} -> {} for {} | dsps={:.4} period={}s",
-                    current_diff,
-                    new_diff,
-                    self.socket_addr,
-                    self.vardiff.dsps(),
-                    self.settings.vardiff_period().as_secs_f64()
-                );
-
-                self.send(Message::Notification {
-                    method: "mining.set_difficulty".into(),
-                    params: json!(SetDifficulty(new_diff)),
-                })
-                .await?;
-            }
-
-            return Ok(Consequence::None);
         }
 
-        let pool_diff = current_diff.as_f64();
-        let share_diff = Difficulty::from(hash).as_f64();
-        let job_height = job.workbase.height();
+        if !pool_diff.to_target().is_met_by(hash) {
+            let share_diff = Difficulty::from(hash).as_f64();
+            let job_height = job.workbase.height();
+
+            debug!(
+                "Rejected share above target from {}: share_diff={} pool_diff={} height={}",
+                session.username, share_diff, pool_diff, job_height
+            );
+
+            self.send_error(id, StratumError::AboveTarget, None).await?;
+
+            self.send_event(rejection_event!(
+                session.address.to_string(),
+                session.workername.clone(),
+                pool_diff.as_f64(),
+                share_diff,
+                job_height,
+                StratumError::AboveTarget
+            ));
+
+            worker.record_rejected();
+
+            return Ok(self.bouncer.reject());
+        }
+
+        let share_diff = Difficulty::from(hash);
+
+        worker.record_accepted(pool_diff, share_diff);
+
+        self.submit_to_upstream(&submit, share_diff, &session.enonce1)
+            .await;
+
+        self.send(Message::Response {
+            id,
+            result: Some(json!(true)),
+            error: None,
+            reject_reason: None,
+        })
+        .await?;
+
+        self.send_event(Event::Share(ShareEvent {
+            timestamp: None,
+            address: session.address.to_string(),
+            workername: session.workername.clone(),
+            pool_diff: pool_diff.as_f64(),
+            share_diff: share_diff.as_f64(),
+            result: true,
+            blockheight: Some(job.workbase.height()),
+            reject_reason: None,
+        }));
+
+        self.bouncer.accept();
 
         debug!(
-            "Rejected share above target from {}: share_diff={} pool_diff={} height={}",
-            session.username, share_diff, pool_diff, job_height
+            "Share accepted from {} | diff={} dsps={:.4} shares_since_change={}",
+            self.socket_addr,
+            pool_diff,
+            self.vardiff.dsps(),
+            self.vardiff.shares_since_change()
         );
 
-        self.send_error(id, StratumError::AboveTarget, None).await?;
+        let upstream_diff = if let Some(ref upstream) = self.upstream {
+            Some(upstream.difficulty().await)
+        } else {
+            None
+        };
 
-        self.send_event(rejection_event!(
-            session.address.to_string(),
-            session.workername.clone(),
-            pool_diff,
-            share_diff,
-            job_height,
-            StratumError::AboveTarget
-        ));
+        let network_diff = Difficulty::from(job.nbits());
 
-        worker.record_rejected();
+        if let Some(new_diff) = self
+            .vardiff
+            .record_share(pool_diff, network_diff, upstream_diff)
+        {
+            debug!(
+                "Adjusting difficulty {} -> {} for {} | dsps={:.4} period={}s",
+                pool_diff,
+                new_diff,
+                self.socket_addr,
+                self.vardiff.dsps(),
+                self.settings.vardiff_period().as_secs_f64()
+            );
 
-        Ok(self.bouncer.reject())
+            self.vardiff
+                .record_diff_change_job_id(self.jobs.peek_next_id());
+
+            self.send(Message::Notification {
+                method: "mining.set_difficulty".into(),
+                params: json!(SetDifficulty(new_diff)),
+            })
+            .await?;
+        }
+
+        Ok(Consequence::None)
     }
 
     async fn submit_to_upstream(
@@ -1102,6 +1109,14 @@ impl<W: Workbase> Stratifier<W> {
             reject_reason: None,
         })
         .await
+    }
+
+    fn send_event(&self, event: Event) {
+        if let Some(tx) = &self.event_tx
+            && let Err(e) = tx.try_send(event)
+        {
+            warn!("Failed to send event: {e}");
+        }
     }
 }
 
