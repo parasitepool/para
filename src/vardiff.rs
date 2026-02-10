@@ -110,7 +110,7 @@ impl Vardiff {
 
     pub(crate) fn record_share(
         &mut self,
-        share_diff: Difficulty,
+        target_diff: Difficulty,
         network_diff: Difficulty,
         upstream_diff: Option<Difficulty>,
     ) -> Option<Difficulty> {
@@ -121,7 +121,7 @@ impl Vardiff {
             self.last_diff_change = now;
         }
 
-        self.dsps.record(share_diff.as_f64(), now);
+        self.dsps.record(target_diff.as_f64(), now);
         self.shares_since_change = self.shares_since_change.saturating_add(1);
 
         self.evaluate_adjustment(network_diff, upstream_diff, now)
