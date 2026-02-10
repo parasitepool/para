@@ -937,6 +937,13 @@ impl<W: Workbase> Stratifier<W> {
 
         let pool_diff = self.vardiff.pool_diff(submit.job_id);
 
+        if pool_diff != self.vardiff.current_diff() {
+            debug!(
+                "Using stale pool_diff={} (current={}) for job_id={} from {}",
+                pool_diff, self.vardiff.current_diff(), submit.job_id, self.socket_addr
+            );
+        }
+
         if !pool_diff.to_target().is_met_by(hash) {
             let share_diff = Difficulty::from(hash).as_f64();
             let job_height = job.workbase.height();
