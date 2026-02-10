@@ -973,7 +973,6 @@ impl<W: Workbase> Stratifier<W> {
 
         worker.record_accepted(pool_diff, share_diff);
 
-        let share_diff_f64 = share_diff.as_f64();
         let job_height = job.workbase.height();
 
         self.send_event(Event::Share(ShareEvent {
@@ -981,7 +980,7 @@ impl<W: Workbase> Stratifier<W> {
             address: session.address.to_string(),
             workername: session.workername.clone(),
             pool_diff: pool_diff.as_f64(),
-            share_diff: share_diff_f64,
+            share_diff: share_diff.as_f64(),
             result: true,
             blockheight: Some(job_height),
             reject_reason: None,
