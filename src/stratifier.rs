@@ -838,6 +838,8 @@ impl<W: Workbase> Stratifier<W> {
             _ => job.version(),
         };
 
+        let target = job.nbits().to_compact();
+
         let header = Header {
             version: version.into(),
             prev_blockhash: job.prevhash().into(),
@@ -850,7 +852,7 @@ impl<W: Workbase> Stratifier<W> {
             )?
             .into(),
             time: submit.ntime.into(),
-            bits: job.nbits().to_compact(),
+            bits: target,
             nonce: submit.nonce.into(),
         };
 
@@ -882,7 +884,7 @@ impl<W: Workbase> Stratifier<W> {
             return Ok(self.bouncer.reject());
         }
 
-        if let Ok(blockhash) = header.validate_pow(Target::from_compact(job.nbits().into())) {
+        if let Ok(blockhash) = header.validate_pow(Target::from_compact(target)) {
             info!("Block with hash {blockhash} meets network difficulty");
 
             match job.workbase.build_block(&job, &submit, header) {
