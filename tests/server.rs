@@ -378,8 +378,8 @@ fn aggregator_dashboard_with_auth() {
     let mut servers = Vec::new();
     for _ in 0..3 {
         let server = TestServer::spawn_with_args(
-                "--admin-token verysecrettoken --api-token crazysecrettoken",
-            );
+            "--admin-token verysecrettoken --api-token crazysecrettoken",
+        );
         servers.push(server)
     }
 
