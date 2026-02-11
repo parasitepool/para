@@ -101,7 +101,7 @@ impl Vardiff {
 
     pub(crate) fn clamp_to_upstream(&mut self, upstream_diff: Difficulty) -> Option<Difficulty> {
         if upstream_diff < self.current_diff {
-            self.old_diff = self.old_diff.min(self.current_diff);
+            self.old_diff = self.current_diff;
             self.current_diff = upstream_diff;
             self.shares_since_change = 0;
             self.last_diff_change = Instant::now();
