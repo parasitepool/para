@@ -212,19 +212,16 @@ mod tests {
     }
 
     #[test]
-    fn notify_create_job_uses_local_job_id() {
+    fn notify_job_ids() {
         let notify = Arc::new(sample_notify());
         let enonce1 = Extranonce::zeros(4);
         let local_id = JobId::new(42);
 
-        let job = notify.create_job(&enonce1, 4, None, local_id, None).unwrap();
+        let job = notify
+            .create_job(&enonce1, 4, None, local_id, None)
+            .unwrap();
 
         assert_eq!(job.job_id, local_id);
-    }
-
-    #[test]
-    fn notify_upstream_job_id() {
-        let notify = sample_notify();
         assert_eq!(notify.upstream_job_id(), Some(JobId::new(0xbf)));
     }
 }
