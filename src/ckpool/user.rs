@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone, ToSchema)]
 pub struct User {
     pub hashrate1m: HashRate,
     pub hashrate5m: HashRate,
@@ -50,7 +50,7 @@ impl Add for User {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone, ToSchema)]
 pub struct Worker {
     pub workername: String,
     pub hashrate1m: HashRate,
