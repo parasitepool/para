@@ -62,6 +62,33 @@ pub(crate) fn bearer_auth<T: Default>(
     ValidateRequestHeaderLayer::bearer(token)
 }
 
+async fn bearer_auth_any_middleware(
+    Extension(tokens): Extension<BearerTokens>,
+    req: axum::http::Request<axum::body::Body>,
+    next: axum::middleware::Next,
+) -> Response {
+    let authorized = req
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| tokens.0.iter().any(|t| t == v));
+
+    if authorized {
+        next.run(req).await
+    } else {
+        StatusCode::UNAUTHORIZED.into_response()
+    }
+}
+
+#[derive(Clone)]
+struct BearerTokens(Vec<String>);
+
+impl BearerTokens {
+    fn new(tokens: &[&str]) -> Self {
+        Self(tokens.iter().map(|t| format!("Bearer {t}")).collect())
+    }
+}
+
 fn exclusion_list_from_params(params: HashMap<String, String>) -> Vec<String> {
     params
         .get("excluded")
@@ -254,10 +281,12 @@ impl Server {
 
         router = router.route("/status", get(status));
 
-        router = if let Some(token) = config.api_token() {
-            router.layer(bearer_auth(token))
-        } else {
-            router
+        router = match (config.api_token(), config.admin_token()) {
+            (Some(api), Some(admin)) => router
+                .layer(axum::middleware::from_fn(bearer_auth_any_middleware))
+                .layer(Extension(BearerTokens::new(&[api, admin]))),
+            (Some(token), None) | (None, Some(token)) => router.layer(bearer_auth(token)),
+            (None, None) => router,
         };
 
         router = router

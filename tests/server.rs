@@ -358,7 +358,7 @@ fn status_with_auth() {
 
     let response = reqwest::blocking::Client::new()
         .get(format!("{}status", server.url()))
-        .bearer_auth("verysecrettoken")
+        .bearer_auth("wrongtoken")
         .send()
         .unwrap();
 
@@ -371,10 +371,18 @@ fn status_with_auth() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
+
+    let response = reqwest::blocking::Client::new()
+        .get(format!("{}status", server.url()))
+        .bearer_auth("verysecrettoken")
+        .send()
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[test]
-fn aggregator_dashboard_with_auth() {
+fn admin_token_and_api_token_access() {
     let mut servers = Vec::new();
     for _ in 0..3 {
         let server = TestServer::spawn_with_args(
@@ -383,8 +391,6 @@ fn aggregator_dashboard_with_auth() {
         servers.push(server)
     }
 
-    assert_eq!(servers.len(), 3);
-
     let aggregator = TestServer::spawn_with_args(format!(
         "--admin-token verysecrettoken --api-token crazysecrettoken --nodes {} --nodes {} --nodes {}",
         servers[0].url(),
@@ -392,20 +398,49 @@ fn aggregator_dashboard_with_auth() {
         servers[2].url()
     ));
 
-    let response = reqwest::blocking::Client::new()
-        .get(format!("{}aggregator/dashboard", aggregator.url()))
-        .send()
-        .unwrap();
+    #[track_caller]
+    fn case(server: &TestServer, path: &str, token: Option<&str>, expected: StatusCode) {
+        let mut request = reqwest::blocking::Client::new().get(format!("{}{path}", server.url()));
 
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        if let Some(token) = token {
+            request = request.bearer_auth(token);
+        }
 
-    let response = reqwest::blocking::Client::new()
-        .get(format!("{}aggregator/dashboard", aggregator.url()))
-        .bearer_auth("verysecrettoken")
-        .send()
-        .unwrap();
+        assert_eq!(request.send().unwrap().status(), expected);
+    }
 
-    assert_eq!(response.status(), StatusCode::OK);
+    case(&aggregator, "status", None, StatusCode::UNAUTHORIZED);
+    case(
+        &aggregator,
+        "status",
+        Some("crazysecrettoken"),
+        StatusCode::OK,
+    );
+    case(
+        &aggregator,
+        "status",
+        Some("verysecrettoken"),
+        StatusCode::OK,
+    );
+
+    case(
+        &aggregator,
+        "aggregator/dashboard",
+        None,
+        StatusCode::UNAUTHORIZED,
+    );
+    case(
+        &aggregator,
+        "aggregator/dashboard",
+        Some("crazysecrettoken"),
+        StatusCode::UNAUTHORIZED,
+    );
+    case(
+        &aggregator,
+        "aggregator/dashboard",
+        Some("verysecrettoken"),
+        StatusCode::OK,
+    );
 }
 
 #[test]
