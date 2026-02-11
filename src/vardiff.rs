@@ -217,7 +217,7 @@ impl Vardiff {
             self.current_diff, new_diff, diff_rate_ratio, low_threshold, high_threshold
         );
 
-        self.old_diff = self.old_diff.min(self.current_diff);
+        self.old_diff = self.current_diff;
         self.current_diff = new_diff;
         self.shares_since_change = 0;
         self.last_diff_change = now;
@@ -640,8 +640,8 @@ mod tests {
         assert!(diff_b > diff_a);
         vardiff.record_diff_change_job_id(JobId::new(10));
 
-        assert_eq!(vardiff.pool_diff(JobId::new(4)), Difficulty::from(10));
-        assert_eq!(vardiff.pool_diff(JobId::new(9)), Difficulty::from(10));
+        assert_eq!(vardiff.pool_diff(JobId::new(4)), diff_a);
+        assert_eq!(vardiff.pool_diff(JobId::new(9)), diff_a);
         assert_eq!(vardiff.pool_diff(JobId::new(10)), diff_b);
     }
 
@@ -667,6 +667,35 @@ mod tests {
         vardiff.record_share(Difficulty::from(50), Difficulty::from(1_000_000), None);
 
         assert_eq!(vardiff.shares_since_change(), 0);
+    }
+
+    #[test]
+    fn old_diff_ratchets_through_increase_then_clamp() {
+        let mut vardiff = Vardiff::new(Difficulty::from(10), secs(5), secs(10), None, None);
+
+        let base = Instant::now();
+        vardiff.first_share = Some(base);
+        vardiff.last_diff_change = base;
+        vardiff.dsps = DecayingAverage::with_start_time(secs(10), base);
+
+        let mut t = base;
+        for _ in 0..100 {
+            t += millis(100);
+            vardiff.dsps.record(100.0, t);
+            vardiff.shares_since_change += 1;
+        }
+
+        let increased = vardiff
+            .evaluate_adjustment(Difficulty::from(1_000_000), None, t)
+            .unwrap();
+        assert!(increased > Difficulty::from(10));
+        vardiff.record_diff_change_job_id(JobId::new(5));
+
+        vardiff.clamp_to_upstream(Difficulty::from(50));
+        vardiff.record_diff_change_job_id(JobId::new(10));
+
+        assert_eq!(vardiff.pool_diff(JobId::new(4)), Difficulty::from(10));
+        assert_eq!(vardiff.pool_diff(JobId::new(10)), Difficulty::from(50));
     }
 
     #[test]
