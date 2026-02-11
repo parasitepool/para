@@ -361,10 +361,6 @@ impl<W: Workbase> Stratifier<W> {
 
         let clean_jobs = self.jobs.insert(new_job.clone());
 
-        if clean_jobs {
-            self.vardiff.clear_diff_change_job_id();
-        }
-
         debug!(
             "Template updated, sending mining.notify to {}",
             self.socket_addr
@@ -838,7 +834,7 @@ impl<W: Workbase> Stratifier<W> {
             _ => job.version(),
         };
 
-        let nbits = job.nbits();
+        let bits = job.nbits().to_compact();
 
         let header = Header {
             version: version.into(),
@@ -852,20 +848,18 @@ impl<W: Workbase> Stratifier<W> {
             )?
             .into(),
             time: submit.ntime.into(),
-            bits: nbits.to_compact(),
+            bits,
             nonce: submit.nonce.into(),
         };
 
         let hash = header.block_hash();
 
         if self.jobs.is_duplicate(hash) {
-            let pool_diff = Target::from_compact(nbits.into()).difficulty_float();
-            let share_diff = Difficulty::from(hash).as_f64();
             let job_height = job.workbase.height();
 
             debug!(
-                "Rejected duplicate share from {}: hash={} share_diff={} height={}",
-                session.username, hash, share_diff, job_height
+                "Rejected duplicate share from {}: hash={} height={}",
+                session.username, hash, job_height
             );
 
             self.send_error(id, StratumError::Duplicate, None).await?;
@@ -873,8 +867,6 @@ impl<W: Workbase> Stratifier<W> {
             self.send_event(rejection_event!(
                 session.address.to_string(),
                 session.workername.clone(),
-                pool_diff,
-                share_diff,
                 job_height,
                 StratumError::Duplicate
             ));
@@ -884,7 +876,7 @@ impl<W: Workbase> Stratifier<W> {
             return Ok(self.bouncer.reject());
         }
 
-        if let Ok(blockhash) = header.validate_pow(Target::from_compact(nbits.into())) {
+        if let Ok(blockhash) = header.validate_pow(Target::from_compact(bits)) {
             info!("Block with hash {blockhash} meets network difficulty");
 
             match job.workbase.build_block(&job, &submit, header) {
@@ -948,11 +940,11 @@ impl<W: Workbase> Stratifier<W> {
         }
 
         if !pool_diff.to_target().is_met_by(hash) {
-            let share_diff = Difficulty::from(hash).as_f64();
+            let share_diff = Difficulty::from(hash);
             let job_height = job.workbase.height();
 
             debug!(
-                "Rejected share above target from {}: share_diff={} pool_diff={} height={}",
+                "Rejected share above pool target from {}: share_diff={} pool_diff={} height={}",
                 session.username, share_diff, pool_diff, job_height
             );
 
@@ -962,7 +954,7 @@ impl<W: Workbase> Stratifier<W> {
                 session.address.to_string(),
                 session.workername.clone(),
                 pool_diff.as_f64(),
-                share_diff,
+                share_diff.as_f64(),
                 job_height,
                 StratumError::AboveTarget
             ));
@@ -976,7 +968,7 @@ impl<W: Workbase> Stratifier<W> {
 
         worker.record_accepted(pool_diff, share_diff);
 
-        self.submit_to_upstream(&submit, share_diff, &session.enonce1)
+        self.submit_to_upstream(&job, &submit, share_diff, &session.enonce1)
             .await;
 
         self.send(Message::Response {
@@ -1044,6 +1036,7 @@ impl<W: Workbase> Stratifier<W> {
 
     async fn submit_to_upstream(
         &self,
+        job: &Job<W>,
         submit: &Submit,
         share_diff: Difficulty,
         enonce1: &Extranonce,
@@ -1060,7 +1053,7 @@ impl<W: Workbase> Stratifier<W> {
         };
 
         let upstream_submit = UpstreamSubmit {
-            job_id: submit.job_id,
+            job_id: job.upstream_job_id,
             enonce2,
             nonce: submit.nonce,
             ntime: submit.ntime,

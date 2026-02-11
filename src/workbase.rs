@@ -87,6 +87,7 @@ impl Workbase for BlockTemplate {
 
         Ok(Job {
             job_id,
+            upstream_job_id: job_id,
             coinb1,
             coinb2,
             enonce1: enonce1.clone(),
@@ -161,11 +162,12 @@ impl Workbase for Notify {
         enonce1: &Extranonce,
         _enonce2_size: usize,
         _address: Option<&Address>,
-        _job_id: JobId,
+        job_id: JobId,
         version_mask: Option<Version>,
     ) -> Result<Job<Self>> {
         Ok(Job {
-            job_id: self.job_id,
+            job_id,
+            upstream_job_id: self.job_id,
             coinb1: self.coinb1.clone(),
             coinb2: self.coinb2.clone(),
             enonce1: enonce1.clone(),
