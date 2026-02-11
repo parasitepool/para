@@ -970,7 +970,7 @@ impl<W: Workbase> Stratifier<W> {
 
         worker.record_accepted(pool_diff, share_diff);
 
-        self.submit_to_upstream(&submit, share_diff, &session.enonce1)
+        self.submit_to_upstream(&job, &submit, share_diff, &session.enonce1)
             .await;
 
         self.send(Message::Response {
@@ -1041,6 +1041,7 @@ impl<W: Workbase> Stratifier<W> {
 
     async fn submit_to_upstream(
         &self,
+        job: &Job<W>,
         submit: &Submit,
         share_diff: Difficulty,
         enonce1: &Extranonce,
@@ -1057,7 +1058,7 @@ impl<W: Workbase> Stratifier<W> {
         };
 
         let upstream_submit = UpstreamSubmit {
-            job_id: submit.job_id,
+            job_id: job.workbase.upstream_job_id().unwrap_or(submit.job_id),
             enonce2,
             nonce: submit.nonce,
             ntime: submit.ntime,
