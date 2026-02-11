@@ -46,8 +46,8 @@ impl Serialize for Message {
             } => {
                 let len = 3 + reject_reason.is_some() as usize;
                 let mut map = serializer.serialize_map(Some(len))?;
-                map.serialize_entry("id", id)?;
                 map.serialize_entry("result", result)?;
+                map.serialize_entry("id", id)?;
                 map.serialize_entry("error", error)?;
                 if let Some(reason) = reject_reason {
                     map.serialize_entry("reject-reason", reason)?;
@@ -191,7 +191,7 @@ mod tests {
     #[test]
     fn response() {
         case(
-            r#"{"id":8,"result":[[["mining.set_difficulty","b4b6693b72a50c7116db18d6497cac52"],["mining.notify","ae6812eb4cd7735a302a8a9dd95cf71f"]],"08000002",4],"error":null}"#,
+            r#"{"result":[[["mining.set_difficulty","b4b6693b72a50c7116db18d6497cac52"],["mining.notify","ae6812eb4cd7735a302a8a9dd95cf71f"]],"08000002",4],"id":8,"error":null}"#,
             Message::Response {
                 id: Id::Number(8),
                 result: Some(serde_json::json!([
@@ -227,7 +227,7 @@ mod tests {
     #[test]
     fn error_response() {
         case(
-            r#"{"id":10,"result":null,"error":null}"#,
+            r#"{"result":null,"id":10,"error":null}"#,
             Message::Response {
                 reject_reason: None,
                 id: Id::Number(10),
@@ -237,7 +237,7 @@ mod tests {
         );
 
         case(
-            r#"{"id":10,"result":null,"error":[2,"Stale",null]}"#,
+            r#"{"result":null,"id":10,"error":[2,"Stale",null]}"#,
             Message::Response {
                 id: Id::Number(10),
                 result: None,
@@ -303,7 +303,7 @@ mod tests {
         );
 
         case(
-            r#"{"id":4,"result":true,"error":null}"#,
+            r#"{"result":true,"id":4,"error":null}"#,
             Message::Response {
                 reject_reason: None,
                 id: Id::Number(4),
@@ -333,7 +333,7 @@ mod tests {
         );
 
         case(
-            r#"{"id":4,"result":true,"error":null}"#,
+            r#"{"result":true,"id":4,"error":null}"#,
             Message::Response {
                 reject_reason: None,
                 id: Id::Number(4),
@@ -372,7 +372,7 @@ mod tests {
         );
 
         case(
-            r#"{"id":2,"result":true,"error":null}"#,
+            r#"{"result":true,"id":2,"error":null}"#,
             Message::Response {
                 id: Id::Number(2),
                 result: Some(serde_json::json!(true)),
@@ -430,7 +430,7 @@ mod tests {
     #[test]
     fn subscribe_result() {
         case(
-            r#"{"id":1,"result":[[["mining.set_difficulty","b4b6693b72a50c7116db18d6497cac52"],["mining.notify","ae6812eb4cd7735a302a8a9dd95cf71f"]],"08000002",4],"error":null}"#,
+            r#"{"result":[[["mining.set_difficulty","b4b6693b72a50c7116db18d6497cac52"],["mining.notify","ae6812eb4cd7735a302a8a9dd95cf71f"]],"08000002",4],"id":1,"error":null}"#,
             Message::Response {
                 id: Id::Number(1),
                 result: Some(
