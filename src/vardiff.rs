@@ -89,6 +89,7 @@ impl Vardiff {
 
     pub(crate) fn clear_diff_change_job_id(&mut self) {
         self.diff_change_job_id = None;
+        self.old_diff = self.current_diff;
     }
 
     pub(crate) fn pool_diff(&self, job_id: JobId) -> Difficulty {
@@ -105,7 +106,7 @@ impl Vardiff {
 
     pub(crate) fn clamp_to_upstream(&mut self, upstream_diff: Difficulty) -> Option<Difficulty> {
         if upstream_diff < self.current_diff {
-            self.old_diff = self.current_diff;
+            self.old_diff = self.old_diff.min(self.current_diff);
             self.current_diff = upstream_diff;
             self.shares_since_change = 0;
             self.last_diff_change = Instant::now();
@@ -221,7 +222,7 @@ impl Vardiff {
             self.current_diff, new_diff, diff_rate_ratio, low_threshold, high_threshold
         );
 
-        self.old_diff = self.current_diff;
+        self.old_diff = self.old_diff.min(self.current_diff);
         self.current_diff = new_diff;
         self.shares_since_change = 0;
         self.last_diff_change = now;
@@ -660,8 +661,9 @@ mod tests {
         assert!(diff_b > diff_a);
         vardiff.record_diff_change_job_id(JobId::new(10));
 
-        assert_eq!(vardiff.pool_diff(JobId::new(4)), diff_a);
-        assert!(diff_a > Difficulty::from(10));
+        assert_eq!(vardiff.pool_diff(JobId::new(4)), Difficulty::from(10));
+        assert_eq!(vardiff.pool_diff(JobId::new(9)), Difficulty::from(10));
+        assert_eq!(vardiff.pool_diff(JobId::new(10)), diff_b);
     }
 
     #[test]
