@@ -87,11 +87,6 @@ impl Vardiff {
         self.diff_change_job_id = Some(next_job_id);
     }
 
-    pub(crate) fn clear_diff_change_job_id(&mut self) {
-        self.diff_change_job_id = None;
-        self.old_diff = self.current_diff;
-    }
-
     pub(crate) fn pool_diff(&self, job_id: JobId) -> Difficulty {
         let stale = self
             .diff_change_job_id
@@ -595,22 +590,6 @@ mod tests {
 
         vardiff.clamp_to_upstream(Difficulty::from(50));
         vardiff.record_diff_change_job_id(JobId::new(5));
-
-        assert_eq!(vardiff.pool_diff(JobId::new(4)), Difficulty::from(50));
-        assert_eq!(vardiff.pool_diff(JobId::new(5)), Difficulty::from(50));
-    }
-
-    #[test]
-    fn pool_diff_clear_resets_boundary() {
-        let start_diff = Difficulty::from(100);
-        let mut vardiff = Vardiff::new(start_diff, secs(5), secs(300), None, None);
-
-        vardiff.clamp_to_upstream(Difficulty::from(50));
-        vardiff.record_diff_change_job_id(JobId::new(5));
-
-        assert_eq!(vardiff.pool_diff(JobId::new(4)), Difficulty::from(50));
-
-        vardiff.clear_diff_change_job_id();
 
         assert_eq!(vardiff.pool_diff(JobId::new(4)), Difficulty::from(50));
         assert_eq!(vardiff.pool_diff(JobId::new(5)), Difficulty::from(50));

@@ -361,10 +361,6 @@ impl<W: Workbase> Stratifier<W> {
 
         let clean_jobs = self.jobs.insert(new_job.clone());
 
-        if clean_jobs {
-            self.vardiff.clear_diff_change_job_id();
-        }
-
         debug!(
             "Template updated, sending mining.notify to {}",
             self.socket_addr
