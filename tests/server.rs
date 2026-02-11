@@ -346,7 +346,8 @@ fn status_json() {
 
 #[test]
 fn status_with_auth() {
-    let server = TestServer::spawn_with_args("--admin-token verysecrettoken");
+    let server =
+        TestServer::spawn_with_args("--admin-token verysecrettoken --api-token crazysecrettoken");
 
     let response = reqwest::blocking::Client::new()
         .get(format!("{}status", server.url()))
@@ -361,6 +362,14 @@ fn status_with_auth() {
         .send()
         .unwrap();
 
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let response = reqwest::blocking::Client::new()
+        .get(format!("{}status", server.url()))
+        .bearer_auth("crazysecrettoken")
+        .send()
+        .unwrap();
+
     assert_eq!(response.status(), StatusCode::OK);
 }
 
@@ -368,7 +377,9 @@ fn status_with_auth() {
 fn aggregator_dashboard_with_auth() {
     let mut servers = Vec::new();
     for _ in 0..3 {
-        let server = TestServer::spawn_with_args("--admin-token verysecrettoken");
+        let server = TestServer::spawn_with_args(
+                "--admin-token verysecrettoken --api-token crazysecrettoken",
+            );
         servers.push(server)
     }
 

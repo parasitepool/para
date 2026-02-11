@@ -252,6 +252,8 @@ impl Server {
                 HeaderValue::from_static("inline"),
             ));
 
+        router = router.route("/status", get(status));
+
         router = if let Some(token) = config.api_token() {
             router.layer(bearer_auth(token))
         } else {
@@ -260,7 +262,6 @@ impl Server {
 
         router = router
             .route("/", get(Self::home))
-            .route("/status", Self::with_auth(config.clone(), get(status)))
             .route("/static/{*path}", get(Self::static_assets));
 
         #[cfg(feature = "swagger-ui")]
@@ -414,7 +415,7 @@ impl Server {
 #[utoipa::path(
     get,
     path = "/status",
-    security(("admin_token" = [])),
+    security(("api_token" = [])),
     responses(
         (status = 200, description = "Server status", body = StatusHtml),
     ),
