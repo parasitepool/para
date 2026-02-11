@@ -944,8 +944,10 @@ impl<W: Workbase> Stratifier<W> {
             let job_height = job.workbase.height();
 
             debug!(
-                "Rejected share above pool target from {}: share_diff={} pool_diff={} height={}",
-                session.username, share_diff, pool_diff, job_height
+                "Rejected share above pool target from {}: share_diff={} pool_diff={} job_id={} diff_change_job_id={:?} old_diff={} current_diff={} height={}",
+                session.username, share_diff, pool_diff, submit.job_id,
+                self.vardiff.diff_change_job_id(), self.vardiff.old_diff(),
+                self.vardiff.current_diff(), job_height
             );
 
             self.send_error(id, StratumError::AboveTarget, None).await?;
@@ -1012,17 +1014,20 @@ impl<W: Workbase> Stratifier<W> {
             .vardiff
             .record_share(pool_diff, network_diff, upstream_diff)
         {
+            let next_id = self.jobs.peek_next_id();
+
             debug!(
-                "Adjusting difficulty {} -> {} for {} | dsps={:.4} period={}s",
+                "Adjusting difficulty {} -> {} for {} | dsps={:.4} period={}s diff_change_job_id={} old_diff={}",
                 pool_diff,
                 new_diff,
                 self.socket_addr,
                 self.vardiff.dsps(),
-                self.settings.vardiff_period().as_secs_f64()
+                self.settings.vardiff_period().as_secs_f64(),
+                next_id,
+                self.vardiff.old_diff()
             );
 
-            self.vardiff
-                .record_diff_change_job_id(self.jobs.peek_next_id());
+            self.vardiff.record_diff_change_job_id(next_id);
 
             self.send(Message::Notification {
                 method: "mining.set_difficulty".into(),

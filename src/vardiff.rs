@@ -83,6 +83,14 @@ impl Vardiff {
         self.current_diff
     }
 
+    pub(crate) fn old_diff(&self) -> Difficulty {
+        self.old_diff
+    }
+
+    pub(crate) fn diff_change_job_id(&self) -> Option<JobId> {
+        self.diff_change_job_id
+    }
+
     pub(crate) fn record_diff_change_job_id(&mut self, next_job_id: JobId) {
         self.diff_change_job_id = Some(next_job_id);
     }
