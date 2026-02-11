@@ -27,6 +27,8 @@ pub(crate) struct ServerConfig {
     port: Option<u16>,
     #[arg(long, help = "Collect statistics from <NODES>.")]
     nodes: Vec<Url>,
+    #[arg(long, help = "Aggregator node to display separately on dashboard.")]
+    aggregator_node: Option<Url>,
     #[arg(long, help = "Send shares to HTTP <SYNC_ENDPOINT>.")]
     sync_endpoint: Option<String>,
     #[arg(long, help = "Cache <TTL> in seconds.", default_value = "30")]
@@ -106,6 +108,10 @@ impl ServerConfig {
 
     pub(crate) fn nodes(&self) -> Vec<Url> {
         self.nodes.clone()
+    }
+
+    pub(crate) fn aggregator_node(&self) -> Option<Url> {
+        self.aggregator_node.clone()
     }
 
     pub(crate) fn sync_endpoint(&self) -> Option<String> {

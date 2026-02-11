@@ -132,9 +132,20 @@ mempool:
 mempool-down:
   docker compose -f copr/mempool/docker-compose.yml down -v --remove-orphans
 
-server: 
+server:
   RUST_LOG=info cargo run --features swagger-ui -- server \
     --log-dir copr/logs \
+    --port 8080
+
+aggregator admin_token api_token:
+  cargo run --features reload -- server \
+    --nodes https://fkb.parasite.wtf \
+    --nodes https://lax.parasite.wtf \
+    --nodes https://msn.parasite.wtf \
+    --nodes https://sin.parasite.wtf \
+    --aggregator-node https://alpha.parasite.dev \
+    --admin-token {{admin_token}} \
+    --api-token {{api_token}} \
     --port 8080
 
 openapi:

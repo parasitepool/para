@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang=en>
+<head>
+  <meta charset=utf-8>
+  <meta name=viewport content='width=device-width,initial-scale=1.0'>
+  <title>Aggregator</title>
+  <link rel=icon href=/static/parasite.svg type=image/x-icon size=16x16>
+  <link rel=stylesheet href=/static/aggregator.css>
+  <script src=/static/dashboard.js></script>
+</head>
+<body>
+<a href="/"><img src=/static/parasite.svg alt="" class=logo></a>
+<h1>Aggregator</h1>
+
+<div class=aggregator-card id=aggregator-card style="display:none">
+  <h2 id=agg-hostname></h2>
+  <div class=row><span>CPU</span><span><span id=agg-cpu></span>%</span></div>
+  <div class=row><span>Memory</span><span><span id=agg-memory></span>%</span></div>
+  <div class=row><span>Disk</span><span><span id=agg-disk></span>%</span></div>
+  <div class=row><span>Uptime</span><span id=agg-uptime></span></div>
+</div>
+
+<div class=node-grid id=nodes></div>
+
+<a href=https://github.com/parasitepool/para target=_blank rel=noopener><img src=/static/parasite.svg alt="" class=logo></a>
+
+<script>
+const knownNodes = new Set();
+
+function formatUptime(seconds) {
+  if (seconds === null || seconds === undefined) return '-';
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const parts = [];
+  if (days > 0) parts.push(days + (days === 1 ? ' day' : ' days'));
+  if (hours > 0) parts.push(hours + (hours === 1 ? ' hour' : ' hours'));
+  if (minutes > 0 || parts.length === 0) parts.push(minutes + (minutes === 1 ? ' minute' : ' minutes'));
+  return parts.join(', ');
+}
+
+function updateCard(prefix, data) {
+  set(prefix + '-cpu', data.cpu_usage_percent, formatTruncated);
+  set(prefix + '-memory', data.memory_usage_percent, formatTruncated);
+  set(prefix + '-disk', data.disk_usage_percent, formatTruncated);
+  set(prefix + '-uptime', data.uptime, formatUptime);
+}
+
+function createNodeCard(hostname) {
+  const card = document.createElement('div');
+  card.className = 'node-card';
+  card.id = 'node-' + hostname;
+
+  const prefix = 'n-' + hostname;
+
+  card.innerHTML =
+    '<h2>' + hostname + '</h2>' +
+    '<div class=row><span>CPU</span><span><span id="' + prefix + '-cpu"></span>%</span></div>' +
+    '<div class=row><span>Memory</span><span><span id="' + prefix + '-memory"></span>%</span></div>' +
+    '<div class=row><span>Disk</span><span><span id="' + prefix + '-disk"></span>%</span></div>' +
+    '<div class=row><span>Uptime</span><span id="' + prefix + '-uptime"></span></div>' +
+    '<h3>Pool</h3>' +
+    '<div class=row><span>Hashrate</span><span id="' + prefix + '-hashrate"></span></div>' +
+    '<div class=row><span>Workers</span><span id="' + prefix + '-workers"></span></div>' +
+    '<div class=row><span>Best Share</span><span id="' + prefix + '-best_share" class=copyable></span></div>' +
+    '<div class=row><span>SPS</span><span id="' + prefix + '-sps"></span></div>' +
+    '<div class=row><span>Blockheight</span><span id="' + prefix + '-blockheight"></span></div>';
+
+  return card;
+}
+
+function updateNodeCard(hostname, data) {
+  const prefix = 'n-' + hostname;
+  updateCard(prefix, data);
+  set(prefix + '-hashrate', data.hashrate, formatHashrate);
+  set(prefix + '-workers', data.workers);
+  copyable(prefix + '-best_share', formatDifficulty(data.best_share), data.best_share);
+  set(prefix + '-sps', data.sps, formatTruncated);
+  set(prefix + '-blockheight', data.blockheight);
+}
+
+async function refresh() {
+  try {
+    const data = await fetch('/aggregator/api/statuses').then(r => r.json());
+
+    if (data.aggregator) {
+      const card = document.getElementById('aggregator-card');
+      card.style.display = '';
+      set('agg-hostname', data.aggregator.hostname);
+      updateCard('agg', data.aggregator);
+    }
+
+    const container = document.getElementById('nodes');
+    const currentNodes = new Set(Object.keys(data.nodes || {}));
+
+    knownNodes.forEach(hostname => {
+      if (!currentNodes.has(hostname)) {
+        const el = document.getElementById('node-' + hostname);
+        if (el) el.remove();
+        knownNodes.delete(hostname);
+      }
+    });
+
+    for (const [hostname, status] of Object.entries(data.nodes || {})) {
+      if (!knownNodes.has(hostname)) {
+        container.appendChild(createNodeCard(hostname));
+        knownNodes.add(hostname);
+      }
+      updateNodeCard(hostname, status);
+    }
+
+    initCopyables();
+  } catch (e) { console.error('refresh error:', e); }
+}
+
+startPolling(refresh);
+</script>
+</body>
+</html>

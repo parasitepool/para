@@ -1,5 +1,18 @@
 use super::*;
 
+#[derive(Serialize)]
+struct AggregatorNode {
+    hostname: String,
+    #[serde(flatten)]
+    status: StatusHtml,
+}
+
+#[derive(Serialize)]
+struct AggregatorStatuses {
+    aggregator: Option<AggregatorNode>,
+    nodes: BTreeMap<String, StatusHtml>,
+}
+
 pub(crate) struct Aggregator;
 
 impl Aggregator {
@@ -40,6 +53,10 @@ impl Aggregator {
             "/aggregator/dashboard",
             Server::with_auth(config.clone(), get(Self::dashboard)),
         )
+        .route(
+            "/aggregator/api/statuses",
+            Server::with_auth(config.clone(), get(Self::statuses)),
+        )
         .layer(Extension(cache))
         .layer(Extension(client))
         .layer(Extension(config));
@@ -78,8 +95,8 @@ impl Aggregator {
         Extension(config): Extension<Arc<ServerConfig>>,
     ) -> ServerResult<Response> {
         let mut nodes = config.nodes();
-        if let Some(sync_endpoint) = config.sync_endpoint() {
-            nodes.push(Url::from_str(&sync_endpoint).map_err(|err| anyhow!(err))?);
+        if let Some(aggregator_node) = config.aggregator_node() {
+            nodes.push(aggregator_node);
         }
         let admin_token = config.admin_token();
 
@@ -116,17 +133,25 @@ impl Aggregator {
         Ok(Json(min_blockheight.unwrap_or(0)).into_response())
     }
 
-    pub(crate) async fn dashboard(
-        Extension(client): Extension<Client>,
-        Extension(config): Extension<Arc<ServerConfig>>,
-    ) -> ServerResult<Response> {
+    async fn fetch_node_statuses(
+        client: &Client,
+        config: &ServerConfig,
+    ) -> Vec<(String, bool, Result<Status>)> {
         let mut nodes = config.nodes();
-        if let Some(sync_endpoint) = config.sync_endpoint() {
-            nodes.push(Url::from_str(&sync_endpoint).map_err(|err| anyhow!(err))?);
+
+        let aggregator_node = config.aggregator_node();
+
+        if let Some(ref url) = aggregator_node {
+            nodes.push(url.clone());
         }
+
         let admin_token = config.admin_token();
+
         let fetches = nodes.iter().map(|url| {
             let client = client.clone();
+            let is_aggregator = aggregator_node
+                .as_ref()
+                .is_some_and(|agg| agg.host_str() == url.host_str());
             async move {
                 let result = async {
                     let mut request_builder = client.get(url.join("/status")?);
@@ -137,29 +162,56 @@ impl Aggregator {
 
                     let resp = request_builder.send().await?;
 
-                    let status: Result<Status> =
-                        serde_json::from_str(&resp.text().await?).map_err(|err| anyhow!(err));
-
-                    status
+                    serde_json::from_str(&resp.text().await?).map_err(|err| anyhow!(err))
                 }
                 .await;
 
-                (url, result)
+                (
+                    url.host_str().unwrap_or("unknown").to_string(),
+                    is_aggregator,
+                    result,
+                )
             }
         });
 
-        let results: Vec<(&Url, Result<Status>)> = futures::future::join_all(fetches).await;
+        futures::future::join_all(fetches).await
+    }
 
-        let mut checks = BTreeMap::new();
+    async fn statuses(
+        Extension(client): Extension<Client>,
+        Extension(config): Extension<Arc<ServerConfig>>,
+    ) -> ServerResult<Response> {
+        let results = Self::fetch_node_statuses(&client, &config).await;
 
-        for (url, result) in results {
+        let mut aggregator = None;
+        let mut nodes = BTreeMap::new();
+
+        for (hostname, is_aggregator, result) in results {
             if let Ok(status) = result {
-                checks.insert(url.host_str().unwrap_or("unknown").to_string(), status);
+                if is_aggregator {
+                    aggregator = Some(AggregatorNode {
+                        hostname: hostname.clone(),
+                        status,
+                    });
+                } else {
+                    nodes.insert(hostname, status);
+                }
             }
         }
 
-        Ok(AggregatorDashboardHtml { statuses: checks }
-            .page(config.domain())
-            .into_response())
+        Ok(Json(AggregatorStatuses { aggregator, nodes }).into_response())
+    }
+
+    async fn dashboard() -> ServerResult<Response> {
+        #[cfg(feature = "reload")]
+        let body = AggregatorDashboardHtml
+            .reload_from_path()
+            .map(|r| r.to_string())
+            .unwrap_or_else(|_| AggregatorDashboardHtml.to_string());
+
+        #[cfg(not(feature = "reload"))]
+        let body = AggregatorDashboardHtml.to_string();
+
+        Ok(([(CONTENT_TYPE, "text/html;charset=utf-8")], body).into_response())
     }
 }

@@ -1,0 +1,25 @@
+body { font: clamp(14px, 1.5vw, 18px)/1.6 monospace; margin: 0; padding: 30px; background: #111; color: #eee; min-height: 100vh; box-sizing: border-box; display: flex; flex-direction: column; }
+h1 { text-align: center; margin-bottom: 40px; font-size: 1.55em; }
+.logo { display: block; margin: 0 auto 20px; height: 4em; }
+body > a:last-of-type { margin-top: auto; }
+body > a:last-of-type .logo { margin-top: 40px; margin-bottom: 0; }
+.aggregator-card { border: 1px solid #444; padding: 20px 30px; max-width: 1060px; width: 100%; margin: 0 auto 40px; box-sizing: border-box; }
+.aggregator-card h2 { margin: 0 0 15px; font-size: 1.22em; text-align: center; }
+.node-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 30px; max-width: 1060px; margin: 0 auto; }
+.node-card { border: 1px solid #444; padding: 20px 30px; box-sizing: border-box; }
+.node-card h2 { margin: 0 0 15px; font-size: 1.22em; text-align: center; }
+.node-card h3 { margin: 15px 0 10px; font-size: 1.11em; color: #888; border-top: 1px solid #444; padding-top: 15px; text-align: center; }
+.row { display: flex; justify-content: space-between; }
+.connected { color: #4f4; }
+.disconnected { color: #f44; }
+.copyable { cursor: pointer; position: relative; z-index: 10; }
+.copyable:hover { background: #222; border: 1px solid #444; padding: 4px 8px; margin: -5px -9px; z-index: 10; box-shadow: 0 2px 8px rgba(0,0,0,0.8); }
+@media (max-width: 1100px) {
+  .node-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 700px) {
+  body { padding: 10px; }
+  .node-grid { grid-template-columns: 1fr; }
+  .aggregator-card { padding: 15px 20px; }
+  .node-card { padding: 15px 20px; }
+}
