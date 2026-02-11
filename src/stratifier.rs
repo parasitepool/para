@@ -1053,7 +1053,7 @@ impl<W: Workbase> Stratifier<W> {
         };
 
         let upstream_submit = UpstreamSubmit {
-            job_id: job.workbase.upstream_job_id().unwrap_or(submit.job_id),
+            job_id: job.upstream_job_id,
             enonce2,
             nonce: submit.nonce,
             ntime: submit.ntime,

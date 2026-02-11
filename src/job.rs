@@ -3,6 +3,7 @@ use super::*;
 #[derive(Debug)]
 pub(crate) struct Job<W: Workbase> {
     pub(crate) job_id: JobId,
+    pub(crate) upstream_job_id: JobId,
     pub(crate) coinb1: String,
     pub(crate) coinb2: String,
     pub(crate) enonce1: Extranonce,

@@ -22,10 +22,6 @@ pub(crate) trait Workbase: Clone + Send + Sync + 'static {
 
     fn clean_jobs(&self, prev: Option<&Self>) -> bool;
 
-    fn upstream_job_id(&self) -> Option<JobId> {
-        None
-    }
-
     fn build_block(&self, job: &Job<Self>, submit: &Submit, header: Header) -> Result<Block>
     where
         Self: Sized;
@@ -91,6 +87,7 @@ impl Workbase for BlockTemplate {
 
         Ok(Job {
             job_id,
+            upstream_job_id: job_id,
             coinb1,
             coinb2,
             enonce1: enonce1.clone(),
@@ -170,6 +167,7 @@ impl Workbase for Notify {
     ) -> Result<Job<Self>> {
         Ok(Job {
             job_id,
+            upstream_job_id: self.job_id,
             coinb1: self.coinb1.clone(),
             coinb2: self.coinb2.clone(),
             enonce1: enonce1.clone(),
@@ -180,10 +178,6 @@ impl Workbase for Notify {
 
     fn clean_jobs(&self, _prev: Option<&Self>) -> bool {
         self.clean_jobs
-    }
-
-    fn upstream_job_id(&self) -> Option<JobId> {
-        Some(self.job_id)
     }
 
     fn build_block(&self, _job: &Job<Self>, _submit: &Submit, _header: Header) -> Result<Block> {
