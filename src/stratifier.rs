@@ -931,7 +931,7 @@ impl<W: Workbase> Stratifier<W> {
 
         if pool_diff != self.vardiff.current_diff() {
             debug!(
-                "Ignoring stale share pool_diff={} (current={}) for job_id={} from {}",
+                "Using stale pool_diff={} (current={}) for job_id={} from {}",
                 pool_diff,
                 self.vardiff.current_diff(),
                 submit.job_id,
