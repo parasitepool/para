@@ -139,7 +139,10 @@ show-api-docs:
     --address 127.0.0.1 \
     --port 8080 &
   SERVER_PID=$!
-  sleep 3
+  for i in $(seq 1 30); do
+    curl -s http://127.0.0.1:8080/swagger-ui/ >/dev/null 2>&1 && break
+    sleep 1
+  done
   open http://127.0.0.1:8080/swagger-ui/ 2>/dev/null || xdg-open http://127.0.0.1:8080/swagger-ui/ 2>/dev/null
   wait $SERVER_PID
 
