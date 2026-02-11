@@ -39,10 +39,10 @@ impl Aggregator {
         let cache = Arc::new(Cache::new(client.clone(), config.clone()));
 
         let mut router = Router::new()
-            .route("/aggregator/blockheight", get(Self::blockheight))
-            .route("/aggregator/pool/pool.status", get(Self::pool_status))
-            .route("/aggregator/users/{address}", get(Self::user_status))
-            .route("/aggregator/users", get(Self::users));
+            .route("/aggregator/blockheight", get(blockheight))
+            .route("/aggregator/pool/pool.status", get(pool_status))
+            .route("/aggregator/users/{address}", get(user_status))
+            .route("/aggregator/users", get(users));
 
         router = if let Some(token) = config.api_token() {
             router.layer(bearer_auth(token))
@@ -51,7 +51,7 @@ impl Aggregator {
         }
         .route(
             "/aggregator/dashboard",
-            Server::with_auth(config.clone(), get(Self::dashboard)),
+            Server::with_auth(config.clone(), get(dashboard)),
         )
         .route(
             "/aggregator/api/statuses",
@@ -62,75 +62,6 @@ impl Aggregator {
         .layer(Extension(config));
 
         Ok(router)
-    }
-
-    async fn pool_status(Extension(cache): Extension<Arc<Cache>>) -> ServerResult<Response> {
-        Ok(cache
-            .pool_status()
-            .await?
-            .ok_or_not_found(|| "Pool status")?
-            .to_string()
-            .into_response())
-    }
-
-    async fn user_status(
-        Path(address): Path<String>,
-        Extension(cache): Extension<Arc<Cache>>,
-    ) -> ServerResult<Response> {
-        Ok(Json(
-            cache
-                .user_status(address.clone())
-                .await?
-                .ok_or_not_found(|| format!("User {address}"))?,
-        )
-        .into_response())
-    }
-
-    async fn users(Extension(cache): Extension<Arc<Cache>>) -> ServerResult<Response> {
-        Ok(Json(cache.users().await?.ok_or_not_found(|| "Users")?).into_response())
-    }
-
-    async fn blockheight(
-        Extension(client): Extension<Client>,
-        Extension(config): Extension<Arc<ServerConfig>>,
-    ) -> ServerResult<Response> {
-        let mut nodes = config.nodes();
-        if let Some(aggregator_node) = config.aggregator_node() {
-            nodes.push(aggregator_node);
-        }
-        let admin_token = config.admin_token();
-
-        let fetches = nodes.iter().map(|url| {
-            let client = client.clone();
-            async move {
-                async {
-                    let mut request_builder = client.get(url.join("/status")?);
-
-                    if let Some(token) = admin_token {
-                        request_builder = request_builder.bearer_auth(token);
-                    }
-
-                    let resp = request_builder.send().await?;
-                    let status: Status =
-                        serde_json::from_str(&resp.text().await?).map_err(|err| anyhow!(err))?;
-
-                    Ok::<_, Error>(status.blockheight)
-                }
-                .await
-            }
-        });
-
-        let results: Vec<Result<Option<i32>>> = futures::future::join_all(fetches).await;
-
-        let blockheights: Vec<i32> = results
-            .into_iter()
-            .filter_map(|r| r.ok())
-            .flatten()
-            .collect();
-
-        let min_blockheight = blockheights.into_iter().min();
-
-        Ok(Json(min_blockheight.unwrap_or(0)).into_response())
     }
 
     async fn fetch_node_statuses(
@@ -201,17 +132,128 @@ impl Aggregator {
 
         Ok(Json(AggregatorStatuses { aggregator, nodes }).into_response())
     }
+}
 
-    async fn dashboard() -> ServerResult<Response> {
-        #[cfg(feature = "reload")]
-        let body = AggregatorDashboardHtml
-            .reload_from_path()
-            .map(|r| r.to_string())
-            .unwrap_or_else(|_| AggregatorDashboardHtml.to_string());
+#[utoipa::path(
+    get,
+    path = "/aggregator/pool/pool.status",
+    security(("api_token" = [])),
+    responses(
+        (status = 200, description = "Aggregated pool status in ckpool format", content_type = "text/plain", body = String),
+        (status = 404, description = "Pool status not available"),
+    ),
+    tag = "aggregator"
+)]
+pub(crate) async fn pool_status(Extension(cache): Extension<Arc<Cache>>) -> ServerResult<Response> {
+    Ok(cache
+        .pool_status()
+        .await?
+        .ok_or_not_found(|| "Pool status")?
+        .to_string()
+        .into_response())
+}
 
-        #[cfg(not(feature = "reload"))]
-        let body = AggregatorDashboardHtml.to_string();
+#[utoipa::path(
+    get,
+    path = "/aggregator/users/{address}",
+    security(("api_token" = [])),
+    params(
+        ("address" = String, Path, description = "BTC address")
+    ),
+    responses(
+        (status = 200, description = "Aggregated user status", body = ckpool::User),
+        (status = 404, description = "User not found"),
+    ),
+    tag = "aggregator"
+)]
+pub(crate) async fn user_status(
+    Path(address): Path<String>,
+    Extension(cache): Extension<Arc<Cache>>,
+) -> ServerResult<Response> {
+    Ok(Json(
+        cache
+            .user_status(address.clone())
+            .await?
+            .ok_or_not_found(|| format!("User {address}"))?,
+    )
+    .into_response())
+}
 
-        Ok(([(CONTENT_TYPE, "text/html;charset=utf-8")], body).into_response())
+#[utoipa::path(
+    get,
+    path = "/aggregator/users",
+    security(("api_token" = [])),
+    responses(
+        (status = 200, description = "List of all users", body = Vec<String>),
+        (status = 404, description = "Users not available"),
+    ),
+    tag = "aggregator"
+)]
+pub(crate) async fn users(Extension(cache): Extension<Arc<Cache>>) -> ServerResult<Response> {
+    Ok(Json(cache.users().await?.ok_or_not_found(|| "Users")?).into_response())
+}
+
+#[utoipa::path(
+    get,
+    path = "/aggregator/blockheight",
+    security(("api_token" = [])),
+    responses(
+        (status = 200, description = "Minimum blockheight across nodes", body = i32),
+    ),
+    tag = "aggregator"
+)]
+pub(crate) async fn blockheight(
+    Extension(client): Extension<Client>,
+    Extension(config): Extension<Arc<ServerConfig>>,
+) -> ServerResult<Response> {
+    let mut nodes = config.nodes();
+    if let Some(aggregator_node) = config.aggregator_node() {
+        nodes.push(aggregator_node);
     }
+    let admin_token = config.admin_token();
+
+    let fetches = nodes.iter().map(|url| {
+        let client = client.clone();
+        async move {
+            async {
+                let mut request_builder = client.get(url.join("/status")?);
+
+                if let Some(token) = admin_token {
+                    request_builder = request_builder.bearer_auth(token);
+                }
+
+                let resp = request_builder.send().await?;
+                let status: Status =
+                    serde_json::from_str(&resp.text().await?).map_err(|err| anyhow!(err))?;
+
+                Ok::<_, Error>(status.blockheight)
+            }
+            .await
+        }
+    });
+
+    let results: Vec<Result<Option<i32>>> = futures::future::join_all(fetches).await;
+
+    let blockheights: Vec<i32> = results
+        .into_iter()
+        .filter_map(|r| r.ok())
+        .flatten()
+        .collect();
+
+    let min_blockheight = blockheights.into_iter().min();
+
+    Ok(Json(min_blockheight.unwrap_or(0)).into_response())
+}
+
+async fn dashboard() -> ServerResult<Response> {
+    #[cfg(feature = "reload")]
+    let body = AggregatorDashboardHtml
+        .reload_from_path()
+        .map(|r| r.to_string())
+        .unwrap_or_else(|_| AggregatorDashboardHtml.to_string());
+
+    #[cfg(not(feature = "reload"))]
+    let body = AggregatorDashboardHtml.to_string();
+
+    Ok(([(CONTENT_TYPE, "text/html;charset=utf-8")], body).into_response())
 }

@@ -151,6 +151,20 @@ aggregator admin_token api_token:
 openapi:
   cargo run --example openapi > openapi.json
 
+show-api-docs:
+  #!/usr/bin/env bash
+  RUST_LOG=info cargo run --features swagger-ui -- server \
+    --log-dir copr/logs \
+    --address 127.0.0.1 \
+    --port 8080 &
+  SERVER_PID=$!
+  for i in $(seq 1 30); do
+    curl -s http://127.0.0.1:8080/swagger-ui/ >/dev/null 2>&1 && break
+    sleep 1
+  done
+  open http://127.0.0.1:8080/swagger-ui/ 2>/dev/null || xdg-open http://127.0.0.1:8080/swagger-ui/ 2>/dev/null
+  wait $SERVER_PID
+
 install:
   git submodule update --init --recursive
   sudo apt-get install --yes \
