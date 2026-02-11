@@ -132,6 +132,9 @@ mempool:
 mempool-down:
   docker compose -f copr/mempool/docker-compose.yml down -v --remove-orphans
 
+openapi:
+  cargo run --example openapi > openapi.json
+
 show-api-docs:
   #!/usr/bin/env bash
   RUST_LOG=info cargo run --features swagger-ui -- server \
