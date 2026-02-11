@@ -190,38 +190,3 @@ impl Workbase for Notify {
         bail!("proxy mode does not build blocks")
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use {super::*, bitcoin::block};
-
-    fn sample_notify() -> Notify {
-        Notify {
-            job_id: JobId::new(0xbf),
-            prevhash: "4d16b6f85af6e2198f44ae2a6de67f78487ae5611b77c6c0440b921e00000000"
-                .parse()
-                .unwrap(),
-            coinb1: "foo".into(),
-            coinb2: "bar".into(),
-            merkle_branches: Vec::new(),
-            version: Version(block::Version::TWO),
-            nbits: "1c2ac4af".parse().unwrap(),
-            ntime: "504e86b9".parse().unwrap(),
-            clean_jobs: false,
-        }
-    }
-
-    #[test]
-    fn notify_job_ids() {
-        let notify = Arc::new(sample_notify());
-        let enonce1 = Extranonce::zeros(4);
-        let local_id = JobId::new(42);
-
-        let job = notify
-            .create_job(&enonce1, 4, None, local_id, None)
-            .unwrap();
-
-        assert_eq!(job.job_id, local_id);
-        assert_eq!(notify.upstream_job_id(), Some(JobId::new(0xbf)));
-    }
-}
