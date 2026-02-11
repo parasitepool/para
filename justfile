@@ -1,8 +1,9 @@
 set positional-arguments
 
-init:
+init-hermit:
     hermit init --quiet
     hermit install just
+    hermit install clang-format
     hermit install rustup
     rustup default stable
     cargo clean
