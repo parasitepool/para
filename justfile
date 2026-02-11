@@ -1,5 +1,13 @@
 set positional-arguments
 
+init:
+    hermit init --quiet
+    hermit install just
+    hermit install rustup
+    rustup default stable
+    cargo clean
+    cargo build
+
 watch +args='test':
   cargo watch --clear --exec '{{args}}'
 
