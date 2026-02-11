@@ -655,7 +655,8 @@ async fn aggregator_blockheight_no_nodes() {
 
 #[tokio::test]
 async fn aggregator_blockheight_returns_minimum() {
-    let low_node = TestServer::spawn_with_db_args("--admin-token admin_token").await;
+    let low_node =
+        TestServer::spawn_with_db_args("--admin-token admin_token --api-token api_token").await;
     fs::write(low_node.tempdir.path().join("current_id.txt"), "1").unwrap();
     let source_db_url = low_node.database_url().unwrap();
     setup_test_schema(source_db_url.clone()).await.unwrap();
@@ -663,7 +664,8 @@ async fn aggregator_blockheight_returns_minimum() {
         .await
         .unwrap();
 
-    let high_node = TestServer::spawn_with_db_args("--admin-token admin_token").await;
+    let high_node =
+        TestServer::spawn_with_db_args("--admin-token admin_token --api-token api_token").await;
     fs::write(high_node.tempdir.path().join("current_id.txt"), "1").unwrap();
     let source_db_url = high_node.database_url().unwrap();
     setup_test_schema(source_db_url.clone()).await.unwrap();
@@ -672,7 +674,7 @@ async fn aggregator_blockheight_returns_minimum() {
         .unwrap();
 
     let aggregator = TestServer::spawn_with_db_args(format!(
-        "--nodes {} --nodes {} --api-token aggregator_api_token --admin-token admin_token",
+        "--nodes {} --nodes {} --api-token api_token --admin-token admin_token",
         low_node.url(),
         high_node.url()
     ))
@@ -689,7 +691,7 @@ async fn aggregator_blockheight_returns_minimum() {
                 .unwrap(),
         )
         .header(reqwest::header::ACCEPT, "application/json")
-        .bearer_auth("aggregator_api_token")
+        .bearer_auth("api_token")
         .send()
         .await
         .unwrap();
