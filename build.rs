@@ -21,7 +21,7 @@ fn git_commit() -> Option<String> {
             .stdout,
     )
     .ok()
-    .map(|branch| branch.into())
+    .map(|commit| commit.into())
 }
 
 fn main() {
