@@ -1,9 +1,23 @@
 use super::*;
 
+mod client;
+mod user;
+mod worker;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct ClientId(u64);
+
+impl Display for ClientId {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
+
 pub(crate) struct Metatron {
     blocks: AtomicU64,
     started: Instant,
     connections: AtomicU64,
+    client_id_counter: AtomicU64,
     users: DashMap<Address, Arc<User>>,
     sessions: DashMap<Extranonce, SessionSnapshot>,
     extranonces: Extranonces,
@@ -17,6 +31,7 @@ impl Metatron {
             blocks: AtomicU64::new(0),
             started: Instant::now(),
             connections: AtomicU64::new(0),
+            client_id_counter: AtomicU64::new(0),
             users: DashMap::new(),
             sessions: DashMap::new(),
             extranonces,
@@ -32,6 +47,10 @@ impl Metatron {
 
     pub(crate) fn endpoint(&self) -> &str {
         &self.endpoint
+    }
+
+    pub(crate) fn next_client_id(&self) -> ClientId {
+        ClientId(self.client_id_counter.fetch_add(1, Ordering::Relaxed))
     }
 
     pub(crate) fn spawn(self: Arc<Self>, cancel: CancellationToken, tasks: &mut JoinSet<()>) {
@@ -332,12 +351,13 @@ mod tests {
         let metatron = Metatron::new(pool_extranonces(), String::new());
         let addr = test_address();
         let worker = metatron.get_or_create_worker(addr, "rig1");
+        let client = worker.register_client(metatron.next_client_id());
 
         let pool_diff = Difficulty::from(1000.0);
         let share_diff = Difficulty::from(1500.0);
 
-        worker.record_accepted(pool_diff, share_diff);
-        worker.record_accepted(pool_diff, share_diff);
+        client.record_accepted(pool_diff, share_diff);
+        client.record_accepted(pool_diff, share_diff);
 
         assert_eq!(metatron.accepted(), 2);
         assert_eq!(metatron.rejected(), 0);
@@ -348,9 +368,10 @@ mod tests {
         let metatron = Metatron::new(pool_extranonces(), String::new());
         let addr = test_address();
         let worker = metatron.get_or_create_worker(addr, "rig1");
+        let client = worker.register_client(metatron.next_client_id());
 
-        worker.record_rejected();
-        worker.record_rejected();
+        client.record_rejected();
+        client.record_rejected();
 
         assert_eq!(metatron.accepted(), 0);
         assert_eq!(metatron.rejected(), 2);
@@ -453,8 +474,9 @@ mod tests {
         assert_eq!(metatron.total_work(), 0.0);
 
         let foo = metatron.get_or_create_worker(addr.clone(), "foo");
-        foo.record_accepted(pool_diff, Difficulty::from(200.0));
-        foo.record_accepted(pool_diff, Difficulty::from(50.0));
+        let foo_client = foo.register_client(metatron.next_client_id());
+        foo_client.record_accepted(pool_diff, Difficulty::from(200.0));
+        foo_client.record_accepted(pool_diff, Difficulty::from(50.0));
 
         assert!(
             (foo.total_work() - 2.0 * pool_diff_f64).abs() < f64::EPSILON * 2.0 * pool_diff_f64
@@ -465,7 +487,8 @@ mod tests {
         );
 
         let bar = metatron.get_or_create_worker(addr, "bar");
-        bar.record_accepted(pool_diff, Difficulty::from(400.0));
+        let bar_client = bar.register_client(metatron.next_client_id());
+        bar_client.record_accepted(pool_diff, Difficulty::from(400.0));
 
         assert!((bar.total_work() - pool_diff_f64).abs() < f64::EPSILON * pool_diff_f64);
         assert!(

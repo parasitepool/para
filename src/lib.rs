@@ -49,7 +49,7 @@ use {
     jobs::Jobs,
     logs::logs_enabled,
     lru::LruCache,
-    metatron::Metatron,
+    metatron::{ClientId, Metatron},
     metrics::Metrics,
     parking_lot::Mutex,
     reqwest::Url,
@@ -129,6 +129,7 @@ mod arguments;
 mod block_template;
 mod chain;
 pub mod ckpool;
+mod client;
 mod coinbase_builder;
 mod decay;
 mod event_sink;

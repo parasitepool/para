@@ -13,6 +13,7 @@ mod session;
 mod state;
 
 pub(crate) struct Stratifier<W: Workbase> {
+    client_id: ClientId,
     state: State,
     socket_addr: SocketAddr,
     settings: Arc<Settings>,
@@ -26,11 +27,14 @@ pub(crate) struct Stratifier<W: Workbase> {
     vardiff: Vardiff,
     bouncer: Bouncer,
     event_tx: Option<mpsc::Sender<Event>>,
+    client: Option<Arc<client::Client>>,
+    worker: Option<Arc<Worker>>,
 }
 
 impl<W: Workbase> Stratifier<W> {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
+        client_id: ClientId,
         socket_addr: SocketAddr,
         settings: Arc<Settings>,
         metatron: Arc<Metatron>,
@@ -58,6 +62,7 @@ impl<W: Workbase> Stratifier<W> {
         metatron.add_connection();
 
         Self {
+            client_id,
             state: State::new(),
             socket_addr,
             settings,
@@ -71,6 +76,8 @@ impl<W: Workbase> Stratifier<W> {
             vardiff,
             bouncer,
             event_tx,
+            client: None,
+            worker: None,
         }
     }
 
@@ -555,7 +562,7 @@ impl<W: Workbase> Stratifier<W> {
 
         if !self
             .state
-            .authorize(address.clone(), workername, authorize.username)
+            .authorize(address.clone(), workername.clone(), authorize.username)
         {
             self.send_error(
                 id.clone(),
@@ -569,6 +576,19 @@ impl<W: Workbase> Stratifier<W> {
 
             return Ok(self.bouncer.reject());
         }
+
+        let worker = self
+            .metatron
+            .get_or_create_worker(address.clone(), &workername);
+        let client = worker.register_client(self.client_id);
+        debug!(
+            "Registered client {} on {} (connections={})",
+            client.client_id(),
+            self.socket_addr,
+            worker.connection_count()
+        );
+        self.worker = Some(worker);
+        self.client = Some(client);
 
         let workbase = self.workbase_rx.borrow().clone();
 
@@ -627,9 +647,7 @@ impl<W: Workbase> Stratifier<W> {
         submit: Submit,
         session: Arc<Session>,
     ) -> Result<Consequence> {
-        let worker = self
-            .metatron
-            .get_or_create_worker(session.address.clone(), &session.workername);
+        let client = self.client.clone().unwrap();
 
         if submit.username != session.username {
             let job_height = self.workbase_rx.borrow().height();
@@ -656,7 +674,7 @@ impl<W: Workbase> Stratifier<W> {
                 StratumError::WorkerMismatch
             ));
 
-            worker.record_rejected();
+            client.record_rejected();
 
             return Ok(self.bouncer.reject());
         }
@@ -678,7 +696,7 @@ impl<W: Workbase> Stratifier<W> {
                 StratumError::Stale
             ));
 
-            worker.record_rejected();
+            client.record_rejected();
 
             return Ok(self.bouncer.reject());
         };
@@ -714,7 +732,7 @@ impl<W: Workbase> Stratifier<W> {
                 StratumError::InvalidNonce2Length
             ));
 
-            worker.record_rejected();
+            client.record_rejected();
 
             return Ok(self.bouncer.reject());
         }
@@ -751,7 +769,7 @@ impl<W: Workbase> Stratifier<W> {
                 StratumError::NtimeOutOfRange
             ));
 
-            worker.record_rejected();
+            client.record_rejected();
 
             return Ok(self.bouncer.reject());
         }
@@ -780,7 +798,7 @@ impl<W: Workbase> Stratifier<W> {
                         StratumError::InvalidVersionMask
                     ));
 
-                    worker.record_rejected();
+                    client.record_rejected();
 
                     return Ok(self.bouncer.reject());
                 };
@@ -813,7 +831,7 @@ impl<W: Workbase> Stratifier<W> {
                         StratumError::InvalidVersionMask
                     ));
 
-                    worker.record_rejected();
+                    client.record_rejected();
 
                     return Ok(self.bouncer.reject());
                 }
@@ -871,7 +889,7 @@ impl<W: Workbase> Stratifier<W> {
                 StratumError::Duplicate
             ));
 
-            worker.record_rejected();
+            client.record_rejected();
 
             return Ok(self.bouncer.reject());
         }
@@ -884,9 +902,9 @@ impl<W: Workbase> Stratifier<W> {
                     info!("Submitting potential block solve");
 
                     let block_hex = encode::serialize_hex(&block);
-                    let client = self.settings.bitcoin_rpc_client().await?;
+                    let bitcoin_client = self.settings.bitcoin_rpc_client().await?;
 
-                    let success = match client
+                    let success = match bitcoin_client
                         .call_raw::<String>("submitblock", &[json!(block_hex)])
                         .await
                     {
@@ -959,14 +977,14 @@ impl<W: Workbase> Stratifier<W> {
                 StratumError::AboveTarget
             ));
 
-            worker.record_rejected();
+            client.record_rejected();
 
             return Ok(self.bouncer.reject());
         }
 
         let share_diff = Difficulty::from(hash);
 
-        worker.record_accepted(pool_diff, share_diff);
+        client.record_accepted(pool_diff, share_diff);
 
         self.submit_to_upstream(&job, &submit, share_diff, &session.enonce1)
             .await;
