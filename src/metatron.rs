@@ -309,6 +309,35 @@ mod tests {
         worker2.inc_instances();
         assert_eq!(metatron.total_users(), 1);
         assert_eq!(metatron.total_workers(), 2);
+
+        worker2.dec_instances();
+        assert_eq!(worker2.instance_count(), 0);
+        assert_eq!(metatron.total_users(), 1);
+        assert_eq!(metatron.total_workers(), 1);
+
+        worker.dec_instances();
+        assert_eq!(worker.instance_count(), 0);
+        assert_eq!(metatron.total_users(), 0);
+        assert_eq!(metatron.total_workers(), 0);
+    }
+
+    #[test]
+    fn idle_only_counts_connected_workers_without_recent_share() {
+        let metatron = Metatron::new(pool_extranonces(), String::new());
+        let addr = test_address();
+
+        let worker = metatron.get_or_create_worker(addr.clone(), "rig1");
+        worker.inc_instances();
+
+        let worker2 = metatron.get_or_create_worker(addr, "rig2");
+
+        worker.record_accepted(Difficulty::from(1000.0), Difficulty::from(1000.0));
+
+        assert_eq!(metatron.idle(), 0);
+
+        worker2.inc_instances();
+
+        assert_eq!(metatron.idle(), 1);
     }
 
     #[test]
