@@ -29,7 +29,7 @@ use {
     },
     bitcoind_async_client::{
         traits::Reader,
-        {Auth, Client},
+        {Auth, Client as BitcoindClient},
     },
     block_template::BlockTemplate,
     boilerplate::{Boilerplate, Trusted},
@@ -49,7 +49,7 @@ use {
     jobs::Jobs,
     logs::logs_enabled,
     lru::LruCache,
-    metatron::{ClientId, Metatron},
+    metatron::{Client, ClientId, Metatron, Worker},
     metrics::Metrics,
     parking_lot::Mutex,
     reqwest::Url,
@@ -115,11 +115,9 @@ use {
     tracing_appender::non_blocking,
     tracing_subscriber::{EnvFilter, Layer, layer::SubscriberExt, util::SubscriberInitExt},
     upstream::Upstream,
-    user::User,
     utoipa::{OpenApi, ToSchema},
     vardiff::Vardiff,
     workbase::Workbase,
-    worker::Worker,
     zeromq::{Endpoint, Socket, SocketRecv, SubSocket},
     zmq::Zmq,
 };
@@ -129,7 +127,6 @@ mod arguments;
 mod block_template;
 mod chain;
 pub mod ckpool;
-mod client;
 mod coinbase_builder;
 mod decay;
 mod event_sink;
@@ -149,10 +146,8 @@ pub mod stratum;
 pub mod subcommand;
 mod throbber;
 mod upstream;
-mod user;
 mod vardiff;
 mod workbase;
-mod worker;
 mod zmq;
 
 pub const COIN_VALUE: u64 = 100_000_000;

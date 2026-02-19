@@ -315,7 +315,7 @@ pub struct BitcoinStatus {
 }
 
 pub(crate) async fn bitcoin_status(
-    Extension(client): Extension<Arc<Client>>,
+    Extension(client): Extension<Arc<BitcoindClient>>,
 ) -> ServerResult<Json<BitcoinStatus>> {
     #[derive(Debug, Deserialize)]
     struct GetMiningInfoResponse {

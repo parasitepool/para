@@ -27,7 +27,7 @@ pub(crate) struct Stratifier<W: Workbase> {
     vardiff: Vardiff,
     bouncer: Bouncer,
     event_tx: Option<mpsc::Sender<Event>>,
-    client: Option<Arc<client::Client>>,
+    client: Option<Arc<Client>>,
     worker: Option<Arc<Worker>>,
 }
 

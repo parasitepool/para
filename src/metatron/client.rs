@@ -1,5 +1,14 @@
 use super::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct ClientId(pub(crate) u64);
+
+impl Display for ClientId {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
+
 struct Stats {
     dsps_1m: DecayingAverage,
     dsps_5m: DecayingAverage,

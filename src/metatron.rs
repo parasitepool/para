@@ -4,14 +4,11 @@ mod client;
 mod user;
 mod worker;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct ClientId(u64);
-
-impl Display for ClientId {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        Display::fmt(&self.0, f)
-    }
-}
+pub(crate) use {
+    client::{Client, ClientId},
+    user::User,
+    worker::Worker,
+};
 
 pub(crate) struct Metatron {
     blocks: AtomicU64,

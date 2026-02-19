@@ -212,14 +212,14 @@ impl Settings {
         Ok(path.join(".cookie"))
     }
 
-    pub(crate) async fn bitcoin_rpc_client(&self) -> Result<Client> {
+    pub(crate) async fn bitcoin_rpc_client(&self) -> Result<BitcoindClient> {
         let rpc_url = format!("http://{}", self.bitcoin_rpc_url());
 
         let bitcoin_credentials = self.bitcoin_credentials()?;
 
         info!("Connecting to Bitcoin Core at {rpc_url}");
 
-        let client = Client::new(
+        let client = BitcoindClient::new(
             rpc_url.clone(),
             bitcoin_credentials.clone(),
             None,

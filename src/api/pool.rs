@@ -2,7 +2,7 @@ use super::*;
 
 pub(crate) fn router(
     metatron: Arc<Metatron>,
-    bitcoin_client: Arc<Client>,
+    bitcoin_client: Arc<BitcoindClient>,
     chain: Chain,
     logs: Arc<logs::Logs>,
 ) -> Router {
