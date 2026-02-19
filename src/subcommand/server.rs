@@ -137,6 +137,7 @@ impl Modify for SecurityAddon {
         sharediff::highestdiff,
         sharediff::highestdiff_by_user,
         sharediff::highestdiff_all_users,
+        sharediff::get_tera_shares,
         // Payout endpoints
         payouts::payouts_all,
         payouts::payouts_failed,
@@ -151,6 +152,11 @@ impl Modify for SecurityAddon {
         sync_routes::sync_batch,
         // Status endpoints
         status,
+        // Aggregator endpoints
+        aggregator::blockheight,
+        aggregator::pool_status,
+        aggregator::user_status,
+        aggregator::users,
     ),
     components(schemas(
         // Account schemas
@@ -160,6 +166,7 @@ impl Modify for SecurityAddon {
         account::AccountResponse,
         // Database schemas
         database::HighestDiff,
+        database::TeraShare,
         database::Split,
         database::Payout,
         database::PendingPayout,
@@ -173,6 +180,9 @@ impl Modify for SecurityAddon {
         SyncResponse,
         // Status schema
         StatusHtml,
+        // Aggregator schemas
+        ckpool::User,
+        ckpool::Worker,
     )),
     tags(
         (name = "account", description = "Account management endpoints"),
@@ -180,6 +190,7 @@ impl Modify for SecurityAddon {
         (name = "payouts", description = "Payout and split endpoints"),
         (name = "sync", description = "Share synchronization endpoints"),
         (name = "status", description = "Server status endpoints"),
+        (name = "aggregator", description = "Multi-node aggregation endpoints"),
     )
 )]
 pub struct ApiDoc;
