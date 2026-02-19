@@ -19,7 +19,7 @@
       <thead>
         <tr>
           <th>Name</th>
-          <th>Instances</th>
+          <th>Sessions</th>
           <th>Hashrate</th>
           <th>SPS</th>
           <th>Best</th>
@@ -49,7 +49,7 @@ async function refresh() {
     const best_ever = formatDifficulty(user.best_ever);
 
     copyable('address', shortAddr, addr);
-    set('workers_count', user.workers.reduce((sum, w) => sum + (w.instances || 0), 0));
+    set('workers_count', user.workers.reduce((sum, w) => sum + (w.sessions || 0), 0));
     set('hashrate_5m', user.hashrate_5m, formatHashrate);
     set('sps_5m', user.sps_5m, formatTruncated);
     set('authorized', new Date(user.authorized * 1000).toLocaleString());
@@ -65,7 +65,7 @@ async function refresh() {
       const bestShare = formatDifficulty(w.best_ever);
       return `<tr>
         <td>${w.name || '(default)'}</td>
-        <td>${w.instances || 0}</td>
+        <td>${w.sessions || 0}</td>
         <td>${formatHashrate(w.hashrate_5m)}</td>
         <td>${formatTruncated(w.sps_5m)}</td>
         <td>${bestShare || '-'}</td>

@@ -4,7 +4,9 @@ use {
     http_server::{
         self,
         error::{OptionExt, ServerResult},
-        templates::{DashboardHtml, PoolHtml, ProxyHtml, UserHtml, UsersHtml, WorkersHtml},
+        templates::{
+            DashboardHtml, PoolHtml, ProxyHtml, SessionsHtml, UserHtml, UsersHtml, WorkersHtml,
+        },
     },
 };
 
@@ -16,6 +18,7 @@ pub struct PoolStatus {
     pub endpoint: String,
     pub users: u64,
     pub workers: u64,
+    pub sessions: u64,
     pub disconnected: usize,
     pub idle: u64,
     pub hashrate_1m: HashRate,
@@ -43,6 +46,7 @@ pub struct ProxyStatus {
     pub endpoint: String,
     pub users: u64,
     pub workers: u64,
+    pub sessions: u64,
     pub disconnected: usize,
     pub idle: u64,
     pub hashrate_1m: HashRate,
@@ -101,7 +105,7 @@ pub struct UserDetail {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkerDetail {
     pub name: String,
-    pub instances: u64,
+    pub sessions: u64,
     pub hashrate_1m: HashRate,
     pub hashrate_5m: HashRate,
     pub hashrate_15m: HashRate,
@@ -124,8 +128,27 @@ pub struct WorkerDetail {
 pub struct WorkerListDetail {
     pub user: String,
     pub name: String,
-    pub instances: u64,
+    pub sessions: u64,
     pub hashrate_5m: HashRate,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionDetail {
+    pub id: String,
+    pub socket_addr: String,
+    pub connected_at: u64,
+    pub active: bool,
+    pub difficulty: f64,
+    pub accepted: u64,
+    pub rejected: u64,
+    pub last_share: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionListDetail {
+    pub user: String,
+    pub worker: String,
+    pub session: SessionDetail,
 }
 
 pub type BitcoinStatus = http_server::BitcoinStatus;

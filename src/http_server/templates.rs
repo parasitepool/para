@@ -80,6 +80,18 @@ impl DashboardContent for WorkersHtml {
     }
 }
 
+#[derive(Boilerplate)]
+pub(crate) struct SessionsHtml {
+    pub(crate) title: &'static str,
+    pub(crate) api_base: &'static str,
+}
+
+impl DashboardContent for SessionsHtml {
+    fn title(&self) -> &'static str {
+        self.title
+    }
+}
+
 #[cfg(feature = "reload")]
 pub(crate) struct ReloadedContent {
     pub(crate) html: String,

@@ -1,4 +1,4 @@
-use super::*;
+use {super::*, crate::session::Session};
 
 pub(crate) struct Metatron {
     blocks: AtomicU64,
@@ -97,6 +97,32 @@ impl Metatron {
         user.get_or_create_worker(workername)
     }
 
+    pub(crate) fn get_or_create_session(
+        &self,
+        address: Address,
+        workername: &str,
+        enonce1: Extranonce,
+        socket_addr: SocketAddr,
+    ) -> Arc<Session> {
+        let worker = self.get_or_create_worker(address, workername);
+        worker.get_or_create_session(enonce1, socket_addr)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn get_session(&self, enonce1: &Extranonce) -> Option<Arc<Session>> {
+        let mut workers = Vec::new();
+
+        for user in self.users.iter() {
+            for worker in user.workers.iter() {
+                workers.push(worker.value().clone());
+            }
+        }
+
+        workers
+            .into_iter()
+            .find_map(|worker| worker.get_session(enonce1))
+    }
+
     pub(crate) fn store_session(&self, session: SessionSnapshot) {
         info!("Storing session for enonce1 {}", session.enonce1);
         self.sessions.insert(session.enonce1.clone(), session);
@@ -193,20 +219,25 @@ impl Metatron {
 
     pub(crate) fn idle(&self) -> u64 {
         let now = Instant::now();
-        self.users
-            .iter()
-            .map(|user| {
-                user.workers
-                    .iter()
-                    .filter(|worker| {
-                        worker.instance_count() > 0
-                            && worker
-                                .last_share()
-                                .is_none_or(|last| now.duration_since(last).as_secs() > 60)
-                    })
-                    .count() as u64
+        let mut sessions = Vec::new();
+
+        for user in self.users.iter() {
+            for worker in user.workers.iter() {
+                for session in worker.sessions().iter() {
+                    sessions.push(session.value().clone());
+                }
+            }
+        }
+
+        sessions
+            .into_iter()
+            .filter(|session| {
+                session.is_active()
+                    && session
+                        .last_share()
+                        .is_none_or(|last| now.duration_since(last).as_secs() > 60)
             })
-            .sum()
+            .count() as u64
     }
 
     pub(crate) fn total_users(&self) -> u64 {
@@ -214,7 +245,19 @@ impl Metatron {
     }
 
     pub(crate) fn total_workers(&self) -> u64 {
-        self.users.iter().map(|u| u.instance_count()).sum()
+        self.users
+            .iter()
+            .map(|user| {
+                user.workers
+                    .iter()
+                    .filter(|worker| worker.active_session_count() > 0)
+                    .count() as u64
+            })
+            .sum()
+    }
+
+    pub(crate) fn total_sessions(&self) -> u64 {
+        self.users.iter().map(|u| u.active_session_count()).sum()
     }
 
     pub(crate) fn total_work(&self) -> f64 {
@@ -282,43 +325,62 @@ mod tests {
         assert_eq!(metatron.total_blocks(), 0);
         assert_eq!(metatron.total_users(), 0);
         assert_eq!(metatron.total_workers(), 0);
+        assert_eq!(metatron.total_sessions(), 0);
     }
 
     #[test]
-    fn get_or_create_worker_creates_user_and_worker() {
+    fn get_or_create_session_creates_counts() {
         let metatron = Metatron::new(pool_extranonces(), String::new());
         let addr = test_address();
 
-        let worker = metatron.get_or_create_worker(addr.clone(), "rig1");
-        assert_eq!(worker.workername(), "rig1");
-        assert_eq!(worker.instance_count(), 0);
+        let worker = metatron.get_or_create_worker(addr.clone(), "foo");
+        assert_eq!(worker.workername(), "foo");
+        assert_eq!(worker.active_session_count(), 0);
         assert_eq!(metatron.total_users(), 0);
         assert_eq!(metatron.total_workers(), 0);
+        assert_eq!(metatron.total_sessions(), 0);
 
-        worker.inc_instances();
-        assert_eq!(worker.instance_count(), 1);
+        let session = metatron.get_or_create_session(
+            addr.clone(),
+            "foo",
+            "deadbeef".parse().unwrap(),
+            "127.0.0.1:1".parse().unwrap(),
+        );
+        assert_eq!(session.enonce1().to_string(), "deadbeef");
+        assert_eq!(worker.active_session_count(), 1);
         assert_eq!(metatron.total_users(), 1);
         assert_eq!(metatron.total_workers(), 1);
+        assert_eq!(metatron.total_sessions(), 1);
 
-        let worker2 = metatron.get_or_create_worker(addr.clone(), "rig2");
-        assert_eq!(worker2.workername(), "rig2");
-        assert_eq!(worker2.instance_count(), 0);
+        let worker2 = metatron.get_or_create_worker(addr.clone(), "bar");
+        assert_eq!(worker2.workername(), "bar");
+        assert_eq!(worker2.active_session_count(), 0);
         assert_eq!(metatron.total_users(), 1);
         assert_eq!(metatron.total_workers(), 1);
+        assert_eq!(metatron.total_sessions(), 1);
 
-        worker2.inc_instances();
+        let session2 = metatron.get_or_create_session(
+            addr.clone(),
+            "bar",
+            "cafebabe".parse().unwrap(),
+            "127.0.0.1:2".parse().unwrap(),
+        );
+        assert_eq!(worker2.active_session_count(), 1);
         assert_eq!(metatron.total_users(), 1);
         assert_eq!(metatron.total_workers(), 2);
+        assert_eq!(metatron.total_sessions(), 2);
 
-        worker2.dec_instances();
-        assert_eq!(worker2.instance_count(), 0);
+        session2.deactivate();
+        assert_eq!(worker2.active_session_count(), 0);
         assert_eq!(metatron.total_users(), 1);
         assert_eq!(metatron.total_workers(), 1);
+        assert_eq!(metatron.total_sessions(), 1);
 
-        worker.dec_instances();
-        assert_eq!(worker.instance_count(), 0);
+        session.deactivate();
+        assert_eq!(worker.active_session_count(), 0);
         assert_eq!(metatron.total_users(), 0);
         assert_eq!(metatron.total_workers(), 0);
+        assert_eq!(metatron.total_sessions(), 0);
     }
 
     #[test]
@@ -326,18 +388,27 @@ mod tests {
         let metatron = Metatron::new(pool_extranonces(), String::new());
         let addr = test_address();
 
-        let worker = metatron.get_or_create_worker(addr.clone(), "rig1");
-        worker.inc_instances();
+        let session = metatron.get_or_create_session(
+            addr.clone(),
+            "foo",
+            "deadbeef".parse().unwrap(),
+            "127.0.0.1:1".parse().unwrap(),
+        );
 
-        let worker2 = metatron.get_or_create_worker(addr, "rig2");
+        let session2 = metatron.get_or_create_session(
+            addr,
+            "bar",
+            "cafebabe".parse().unwrap(),
+            "127.0.0.1:2".parse().unwrap(),
+        );
 
-        worker.record_accepted(Difficulty::from(1000.0), Difficulty::from(1000.0));
-
-        assert_eq!(metatron.idle(), 0);
-
-        worker2.inc_instances();
+        session.record_accepted(Difficulty::from(1000.0), Difficulty::from(1000.0));
 
         assert_eq!(metatron.idle(), 1);
+
+        session2.record_accepted(Difficulty::from(1000.0), Difficulty::from(1000.0));
+
+        assert_eq!(metatron.idle(), 0);
     }
 
     #[test]

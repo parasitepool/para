@@ -28,7 +28,7 @@ async function refresh() {
       .map(u => {
         const addr = u.address;
         const shortAddr = addr.length > 20 ? addr.slice(0,8) + '...' + addr.slice(-8) : addr;
-        const workerCount = u.workers.reduce((sum, w) => sum + (w.instances || 0), 0);
+        const workerCount = u.workers.reduce((sum, w) => sum + (w.sessions || 0), 0);
         return `<div class=row>
           <a href="/user/${addr}">${shortAddr}</a>
           <span class=divider></span>

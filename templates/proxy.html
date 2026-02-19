@@ -21,6 +21,7 @@
     <div class=row><span>Endpoint</span><span id=endpoint></span></div>
     <div class=row><a href="/users"><span>Users</span></a><span id=users></span></div>
     <div class=row><a href="/workers"><span>Workers</span></a><span id=workers></span></div>
+    <div class=row><a href="/sessions"><span>Sessions</span></a><span id=sessions></span></div>
     <div class=row><span>Hashrate (5m)</span><span id=hashrate_5m></span></div>
     <div class=row><span>SPS (5m)</span><span id=sps_5m></span></div>
     <div class=row><span>Uptime</span><span><span id=uptime_secs></span>s</span></div>
@@ -104,6 +105,7 @@ async function refresh() {
     set('endpoint', proxyData.endpoint);
     set('users', proxyData.users);
     set('workers', proxyData.workers);
+    set('sessions', proxyData.sessions);
     set('hashrate_5m', proxyData.hashrate_5m, formatHashrate);
     set('sps_5m', proxyData.sps_5m, formatTruncated);
     set('uptime_secs', proxyData.uptime_secs);

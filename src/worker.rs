@@ -1,4 +1,4 @@
-use super::*;
+use {super::*, crate::session::Session};
 
 struct Stats {
     dsps_1m: DecayingAverage,
@@ -19,16 +19,17 @@ struct Stats {
 
 pub(crate) struct Worker {
     workername: String,
+    sessions: DashMap<Extranonce, Arc<Session>>,
     stats: Mutex<Stats>,
     accepted: AtomicU64,
     rejected: AtomicU64,
-    instances: AtomicU64,
 }
 
 impl Worker {
     pub(crate) fn new(workername: String) -> Self {
         Self {
             workername,
+            sessions: DashMap::new(),
             stats: Mutex::new(Stats {
                 dsps_1m: DecayingAverage::new(Duration::from_mins(1)),
                 dsps_5m: DecayingAverage::new(Duration::from_mins(5)),
@@ -47,8 +48,40 @@ impl Worker {
             }),
             accepted: AtomicU64::new(0),
             rejected: AtomicU64::new(0),
-            instances: AtomicU64::new(0),
         }
+    }
+
+    pub(crate) fn get_or_create_session(
+        &self,
+        enonce1: Extranonce,
+        socket_addr: SocketAddr,
+    ) -> Arc<Session> {
+        let session = self
+            .sessions
+            .entry(enonce1.clone())
+            .or_insert_with(|| Arc::new(Session::new(enonce1, socket_addr)))
+            .clone();
+        session.activate();
+        session
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn get_session(&self, enonce1: &Extranonce) -> Option<Arc<Session>> {
+        self.sessions
+            .get(enonce1)
+            .map(|entry| entry.value().clone())
+    }
+
+    pub(crate) fn active_session_count(&self) -> u64 {
+        self.sessions
+            .iter()
+            .filter(|entry| entry.value().is_active())
+            .count() as u64
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn session_count(&self) -> usize {
+        self.sessions.len()
     }
 
     pub(crate) fn record_accepted(&self, pool_diff: Difficulty, share_diff: Difficulty) {
@@ -147,15 +180,7 @@ impl Worker {
         self.stats.lock().total_work
     }
 
-    pub(crate) fn inc_instances(&self) {
-        self.instances.fetch_add(1, Ordering::Relaxed);
-    }
-
-    pub(crate) fn dec_instances(&self) {
-        self.instances.fetch_sub(1, Ordering::Relaxed);
-    }
-
-    pub(crate) fn instance_count(&self) -> u64 {
-        self.instances.load(Ordering::Relaxed)
+    pub(crate) fn sessions(&self) -> &DashMap<Extranonce, Arc<Session>> {
+        &self.sessions
     }
 }

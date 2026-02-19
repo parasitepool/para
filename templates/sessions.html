@@ -1,0 +1,65 @@
+<div class=grid>
+  <div class="column column-full">
+    <table id=sessions-table>
+      <thead>
+        <tr>
+          <th>User</th>
+          <th>Worker</th>
+          <th>Session</th>
+          <th>Status</th>
+          <th>Difficulty</th>
+          <th>Accepted</th>
+          <th>Rejected</th>
+          <th>Last Share</th>
+          <th>Connected</th>
+          <th>Socket</th>
+        </tr>
+      </thead>
+      <tbody id=sessions-list></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const apiBase = '{{ self.api_base }}';
+
+async function refresh() {
+  try {
+    const sessions = await fetch(`${apiBase}/sessions`).then(r => r.json()).catch(() => []);
+    const container = document.getElementById('sessions-list');
+
+    if (sessions.length === 0) {
+      container.innerHTML = '';
+      return;
+    }
+
+    container.innerHTML = sessions
+      .sort((a, b) => b.session.accepted - a.session.accepted)
+      .map(entry => {
+        const shortUser = entry.user.length > 20 ? entry.user.slice(0,8) + '...' + entry.user.slice(-8) : entry.user;
+        const shortId = entry.session.id.length > 12 ? entry.session.id.slice(0,6) + '...' + entry.session.id.slice(-6) : entry.session.id;
+        const worker = entry.worker || '(default)';
+        const status = entry.session.active ? 'Active' : 'Inactive';
+        const statusClass = entry.session.active ? 'connected' : 'disconnected';
+        const lastShare = entry.session.last_share != null ? `${entry.session.last_share}s ago` : '-';
+        const connected = entry.session.connected_at != null ? `${entry.session.connected_at}s` : '-';
+        const diff = formatDifficulty(entry.session.difficulty);
+        return `<tr>
+          <td><a href="/user/${entry.user}">${shortUser}</a></td>
+          <td>${worker}</td>
+          <td class=copyable>${shortId}</td>
+          <td class=${statusClass}>${status}</td>
+          <td>${diff || '-'}</td>
+          <td>${entry.session.accepted || 0}</td>
+          <td>${entry.session.rejected || 0}</td>
+          <td>${lastShare}</td>
+          <td>${connected}</td>
+          <td class=copyable>${entry.session.socket_addr || '-'}</td>
+        </tr>`;
+      })
+      .join('');
+  } catch (e) { console.error('refresh error:', e); }
+}
+startPolling(refresh);
+initCopyables();
+</script>

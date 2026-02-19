@@ -5,7 +5,7 @@
         <tr>
           <th>User</th>
           <th>Name</th>
-          <th>Instances</th>
+          <th>Sessions</th>
           <th>Hashrate</th>
         </tr>
       </thead>
@@ -34,7 +34,7 @@ async function refresh() {
         return `<tr>
           <td><a href="/user/${w.user}">${shortUser}</a></td>
           <td>${w.name || '(default)'}</td>
-          <td>${w.instances || 0}</td>
+          <td>${w.sessions || 0}</td>
           <td>${formatHashrate(w.hashrate_5m)}</td>
         </tr>`;
       })

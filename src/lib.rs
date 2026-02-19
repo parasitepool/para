@@ -141,6 +141,7 @@ mod jobs;
 mod logs;
 mod metatron;
 mod metrics;
+mod session;
 pub mod settings;
 mod signal;
 mod stratifier;

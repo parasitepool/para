@@ -17,6 +17,7 @@ pub(crate) struct Stratifier<W: Workbase> {
     socket_addr: SocketAddr,
     settings: Arc<Settings>,
     metatron: Arc<Metatron>,
+    session: Option<Arc<crate::session::Session>>,
     upstream: Option<Arc<Upstream>>,
     reader: FramedRead<OwnedReadHalf, LinesCodec>,
     writer: FramedWrite<OwnedWriteHalf, LinesCodec>,
@@ -60,6 +61,7 @@ impl<W: Workbase> Stratifier<W> {
             socket_addr,
             settings,
             metatron,
+            session: None,
             upstream,
             reader: FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_MESSAGE_SIZE)),
             writer: FramedWrite::new(writer, LinesCodec::new()),
@@ -337,6 +339,10 @@ impl<W: Workbase> Stratifier<W> {
                 self.vardiff
                     .record_diff_change_job_id(self.jobs.peek_next_id());
 
+                if let Some(ref session) = self.session {
+                    session.set_difficulty(new_diff);
+                }
+
                 self.send(Message::Notification {
                     method: "mining.set_difficulty".into(),
                     params: json!(SetDifficulty(new_diff)),
@@ -568,10 +574,13 @@ impl<W: Workbase> Stratifier<W> {
             return Ok(self.bouncer.reject());
         }
 
-        let worker = self
-            .metatron
-            .get_or_create_worker(address.clone(), &workername);
-        worker.inc_instances();
+        let session = self.metatron.get_or_create_session(
+            address.clone(),
+            &workername,
+            enonce1.clone(),
+            self.socket_addr,
+        );
+        self.session = Some(session);
 
         let workbase = self.workbase_rx.borrow().clone();
 
@@ -599,6 +608,10 @@ impl<W: Workbase> Stratifier<W> {
         self.bouncer.accept();
 
         let current_diff = self.vardiff.current_diff();
+
+        if let Some(ref session) = self.session {
+            session.set_difficulty(current_diff);
+        }
 
         debug!(
             "Sending mining.set_difficulty with {current_diff} to {}",
@@ -659,6 +672,9 @@ impl<W: Workbase> Stratifier<W> {
                 StratumError::WorkerMismatch
             ));
 
+            if let Some(ref session) = self.session {
+                session.record_rejected();
+            }
             worker.record_rejected();
 
             return Ok(self.bouncer.reject());
@@ -681,6 +697,9 @@ impl<W: Workbase> Stratifier<W> {
                 StratumError::Stale
             ));
 
+            if let Some(ref session) = self.session {
+                session.record_rejected();
+            }
             worker.record_rejected();
 
             return Ok(self.bouncer.reject());
@@ -717,6 +736,9 @@ impl<W: Workbase> Stratifier<W> {
                 StratumError::InvalidNonce2Length
             ));
 
+            if let Some(ref session) = self.session {
+                session.record_rejected();
+            }
             worker.record_rejected();
 
             return Ok(self.bouncer.reject());
@@ -754,6 +776,9 @@ impl<W: Workbase> Stratifier<W> {
                 StratumError::NtimeOutOfRange
             ));
 
+            if let Some(ref session) = self.session {
+                session.record_rejected();
+            }
             worker.record_rejected();
 
             return Ok(self.bouncer.reject());
@@ -783,6 +808,9 @@ impl<W: Workbase> Stratifier<W> {
                         StratumError::InvalidVersionMask
                     ));
 
+                    if let Some(ref session) = self.session {
+                        session.record_rejected();
+                    }
                     worker.record_rejected();
 
                     return Ok(self.bouncer.reject());
@@ -816,6 +844,9 @@ impl<W: Workbase> Stratifier<W> {
                         StratumError::InvalidVersionMask
                     ));
 
+                    if let Some(ref session) = self.session {
+                        session.record_rejected();
+                    }
                     worker.record_rejected();
 
                     return Ok(self.bouncer.reject());
@@ -874,6 +905,9 @@ impl<W: Workbase> Stratifier<W> {
                 StratumError::Duplicate
             ));
 
+            if let Some(ref session) = self.session {
+                session.record_rejected();
+            }
             worker.record_rejected();
 
             return Ok(self.bouncer.reject());
@@ -962,6 +996,9 @@ impl<W: Workbase> Stratifier<W> {
                 StratumError::AboveTarget
             ));
 
+            if let Some(ref session) = self.session {
+                session.record_rejected();
+            }
             worker.record_rejected();
 
             return Ok(self.bouncer.reject());
@@ -969,6 +1006,9 @@ impl<W: Workbase> Stratifier<W> {
 
         let share_diff = Difficulty::from(hash);
 
+        if let Some(ref session) = self.session {
+            session.record_accepted(pool_diff, share_diff);
+        }
         worker.record_accepted(pool_diff, share_diff);
 
         self.submit_to_upstream(&job, &submit, share_diff, &session.enonce1)
@@ -1026,6 +1066,10 @@ impl<W: Workbase> Stratifier<W> {
 
             self.vardiff
                 .record_diff_change_job_id(self.jobs.peek_next_id());
+
+            if let Some(ref session) = self.session {
+                session.set_difficulty(new_diff);
+            }
 
             self.send(Message::Notification {
                 method: "mining.set_difficulty".into(),
@@ -1118,14 +1162,13 @@ impl<W: Workbase> Stratifier<W> {
 
 impl<W: Workbase> Drop for Stratifier<W> {
     fn drop(&mut self) {
+        if let Some(ref session) = self.session {
+            session.deactivate();
+        }
+
         if let Some(session) = self.state.working() {
             self.metatron
                 .store_session(SessionSnapshot::new(session.enonce1.clone()));
-
-            let worker = self
-                .metatron
-                .get_or_create_worker(session.address.clone(), &session.workername);
-            worker.dec_instances();
         }
 
         debug!("Shutting down stratifier for {}", self.socket_addr,);

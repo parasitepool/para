@@ -10,10 +10,13 @@ pub(crate) fn router(
         .route("/", get(home))
         .route("/users", get(users_page))
         .route("/workers", get(workers_page))
+        .route("/sessions", get(sessions_page))
         .route("/user/{address}", get(user_page))
         .route("/api/pool/status", get(status))
         .route("/api/pool/users", get(users))
         .route("/api/pool/workers", get(workers))
+        .route("/api/pool/sessions", get(sessions))
+        .route("/api/pool/session/{enonce1}", get(session))
         .route("/api/pool/user/{address}", get(user))
         .route("/api/bitcoin/status", get(http_server::bitcoin_status))
         .route("/api/system/status", get(http_server::system_status))
@@ -144,6 +147,51 @@ async fn workers_page(Extension(chain): Extension<Chain>) -> Response {
     ([(CONTENT_TYPE, "text/html;charset=utf-8")], body).into_response()
 }
 
+async fn sessions_page(Extension(chain): Extension<Chain>) -> Response {
+    #[cfg(feature = "reload")]
+    let body = {
+        use http_server::templates::ReloadedContent;
+
+        let content = SessionsHtml {
+            title: "Pool | Sessions",
+            api_base: "/api/pool",
+        }
+        .reload_from_path()
+        .map(|r| r.to_string())
+        .unwrap_or_else(|_| {
+            SessionsHtml {
+                title: "Pool | Sessions",
+                api_base: "/api/pool",
+            }
+            .to_string()
+        });
+
+        let html = DashboardHtml::new(
+            ReloadedContent {
+                html: content,
+                title: "Pool | Sessions",
+            },
+            chain,
+        );
+
+        html.reload_from_path()
+            .map(|r| r.to_string())
+            .unwrap_or_else(|_| html.to_string())
+    };
+
+    #[cfg(not(feature = "reload"))]
+    let body = DashboardHtml::new(
+        SessionsHtml {
+            title: "Pool | Sessions",
+            api_base: "/api/pool",
+        },
+        chain,
+    )
+    .to_string();
+
+    ([(CONTENT_TYPE, "text/html;charset=utf-8")], body).into_response()
+}
+
 async fn user_page(Extension(chain): Extension<Chain>) -> Response {
     #[cfg(feature = "reload")]
     let body = {
@@ -205,6 +253,7 @@ async fn status(State(metatron): State<Arc<Metatron>>) -> Json<PoolStatus> {
         sps_1hr: metatron.sps_1hr(),
         users: metatron.total_users(),
         workers: metatron.total_workers(),
+        sessions: metatron.total_sessions(),
         disconnected: metatron.disconnected(),
         idle: metatron.idle(),
         accepted: metatron.accepted(),
@@ -239,13 +288,49 @@ async fn workers(State(metatron): State<Arc<Metatron>>) -> Json<Vec<WorkerListDe
                     .map(|worker| WorkerListDetail {
                         user: address.clone(),
                         name: worker.workername().to_string(),
-                        instances: worker.instance_count(),
+                        sessions: worker.active_session_count(),
                         hashrate_5m: worker.hashrate_5m(),
                     })
                     .collect::<Vec<_>>()
             })
             .collect(),
     )
+}
+
+async fn sessions(State(metatron): State<Arc<Metatron>>) -> Json<Vec<SessionListDetail>> {
+    let mut entries = Vec::new();
+
+    for user in metatron.users().iter() {
+        let user_address = user.key().to_string();
+        for worker in user.workers.iter() {
+            let worker_name = worker.workername().to_string();
+            for session in worker.sessions().iter() {
+                let detail = session_detail(session.value());
+                entries.push(SessionListDetail {
+                    user: user_address.clone(),
+                    worker: worker_name.clone(),
+                    session: detail,
+                });
+            }
+        }
+    }
+
+    Json(entries)
+}
+
+async fn session(
+    State(metatron): State<Arc<Metatron>>,
+    Path(enonce1): Path<String>,
+) -> ServerResult<Response> {
+    let enonce1 = enonce1
+        .parse::<Extranonce>()
+        .ok_or_not_found(|| format!("Session {enonce1}"))?;
+
+    let session = metatron
+        .get_session(&enonce1)
+        .ok_or_not_found(|| format!("Session {enonce1}"))?;
+
+    Ok(Json(session_detail(&session)).into_response())
 }
 
 async fn user(
@@ -282,7 +367,7 @@ async fn user(
             .workers()
             .map(|worker| WorkerDetail {
                 name: worker.workername().to_string(),
-                instances: worker.instance_count(),
+                sessions: worker.active_session_count(),
                 hashrate_1m: worker.hashrate_1m(),
                 hashrate_5m: worker.hashrate_5m(),
                 hashrate_15m: worker.hashrate_15m(),
@@ -303,4 +388,17 @@ async fn user(
             .collect(),
     })
     .into_response())
+}
+
+fn session_detail(session: &Session) -> SessionDetail {
+    SessionDetail {
+        id: session.enonce1().to_string(),
+        socket_addr: session.socket_addr().to_string(),
+        connected_at: session.connected_at().elapsed().as_secs(),
+        active: session.is_active(),
+        difficulty: session.difficulty().as_f64(),
+        accepted: session.accepted(),
+        rejected: session.rejected(),
+        last_share: session.last_share().map(|time| time.elapsed().as_secs()),
+    }
 }
