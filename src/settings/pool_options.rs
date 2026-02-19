@@ -2,92 +2,35 @@ use super::*;
 
 #[derive(Clone, Debug, Parser)]
 pub(crate) struct PoolOptions {
-    #[arg(long, help = "Listen for stratum messages at <ADDRESS>.")]
-    pub(crate) address: Option<String>,
-
-    #[arg(long, help = "Listen for stratum messages on port <PORT>.")]
-    pub(crate) port: Option<u16>,
+    #[command(flatten)]
+    pub(crate) common: CommonOptions,
 
     #[arg(
         long,
-        help = "Listen for stratum messages on high diff port <HIGH_DIFF_PORT> with initial difficulty 1000000."
+        default_value_t = 10,
+        help = "Block template update interval in seconds."
     )]
-    pub(crate) high_diff_port: Option<u16>,
-
-    #[arg(long, help = "Enable HTTP API on <HTTP_PORT>. Disabled if not set.")]
-    pub(crate) http_port: Option<u16>,
-
-    #[arg(long, help = "Request ACME TLS certificate for <ACME_DOMAIN>.")]
-    pub(crate) acme_domain: Vec<String>,
-
-    #[arg(long, help = "Provide ACME contact <ACME_CONTACT>.")]
-    pub(crate) acme_contact: Vec<String>,
-
-    #[arg(long, help = "Store ACME cache in <ACME_CACHE>.")]
-    pub(crate) acme_cache: Option<PathBuf>,
-
-    #[arg(long, help = "Load Bitcoin Core data dir from <BITCOIN_DATA_DIR>.")]
-    pub(crate) bitcoin_data_dir: Option<PathBuf>,
-
-    #[arg(long, help = "Connect to Bitcoin Core RPC at <BITCOIN_RPC_PORT>.")]
-    pub(crate) bitcoin_rpc_port: Option<u16>,
-
-    #[arg(long, help = "Load Bitcoin Core RPC cookie file from <COOKIE_FILE>.")]
-    pub(crate) bitcoin_rpc_cookie_file: Option<PathBuf>,
+    pub(crate) update_interval: u64,
 
     #[arg(
         long,
-        help = "Authenticate to Bitcoin Core RPC as <BITCOIN_RPC_USERNAME>."
+        default_value_t,
+        help = "Use version rolling with <VERSION_MASK>."
     )]
-    pub(crate) bitcoin_rpc_username: Option<String>,
+    pub(crate) version_mask: Version,
 
     #[arg(
         long,
-        help = "Authenticate to Bitcoin Core RPC with <BITCOIN_RPC_PASSWORD>."
+        default_value = "tcp://127.0.0.1:28332",
+        help = "Subscribe to <ZMQ_BLOCK_NOTIFICATIONS>."
     )]
-    pub(crate) bitcoin_rpc_password: Option<String>,
+    pub(crate) zmq_block_notifications: Endpoint,
 
-    #[arg(long, help = "Block template update interval in seconds.")]
-    pub(crate) update_interval: Option<u64>,
+    #[arg(long, default_value_t = ENONCE1_SIZE, help = "Set enonce1 size in bytes (2-8).")]
+    pub(crate) enonce1_size: usize,
 
-    #[arg(long, help = "Run on <CHAIN>.")]
-    pub(crate) chain: Option<Chain>,
-
-    #[arg(long, alias = "datadir", help = "Store data in <DATA_DIR>.")]
-    pub(crate) data_dir: Option<PathBuf>,
-
-    #[arg(long, help = "Use version rolling with <VERSION_MASK>.")]
-    pub(crate) version_mask: Option<Version>,
-
-    #[arg(long, help = "Give <START_DIFF> to new clients.")]
-    pub(crate) start_diff: Option<Difficulty>,
-
-    #[arg(long, help = "Minimum difficulty for vardiff.")]
-    pub(crate) min_diff: Option<Difficulty>,
-
-    #[arg(long, help = "Maximum difficulty for vardiff.")]
-    pub(crate) max_diff: Option<Difficulty>,
-
-    #[arg(
-        long,
-        help = "Target <VARDIFF_PERIOD> seconds between share submissions."
-    )]
-    pub(crate) vardiff_period: Option<f64>,
-
-    #[arg(
-        long,
-        help = "Average the share submission rate over <VARDIFF_WINDOW> seconds."
-    )]
-    pub(crate) vardiff_window: Option<f64>,
-
-    #[arg(long, help = "Subscribe to <ZMQ_BLOCK_NOTIFICATIONS>.")]
-    pub(crate) zmq_block_notifications: Option<Endpoint>,
-
-    #[arg(long, help = "Set enonce1 size in bytes (2-8).")]
-    pub(crate) enonce1_size: Option<usize>,
-
-    #[arg(long, help = "Set enonce2 size in bytes (2-8).")]
-    pub(crate) enonce2_size: Option<usize>,
+    #[arg(long, default_value_t = MAX_ENONCE_SIZE, help = "Set enonce2 size in bytes (2-8).")]
+    pub(crate) enonce2_size: usize,
 
     #[arg(long, help = "Disable bouncer.")]
     pub(crate) disable_bouncer: bool,
@@ -98,6 +41,7 @@ pub(crate) struct PoolOptions {
         help = "Connect to Postgres at <DATABASE_URL> for event storage."
     )]
     pub(crate) database_url: Option<String>,
+
     #[arg(
         long,
         value_parser = validate_events_file,

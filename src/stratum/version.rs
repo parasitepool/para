@@ -73,6 +73,12 @@ impl Not for Version {
     }
 }
 
+impl Default for Version {
+    fn default() -> Self {
+        "1fffe000".parse().unwrap()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
