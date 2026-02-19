@@ -99,3 +99,6 @@ table tbody tr:hover { background: #1a1a1a; }
   body { padding: 10px; }
   .column { padding: 15px 20px; }
 }
+.git-info { text-align: center; font-size: 0.7em; color: #666; margin-top: 20px; }
+.git-info a { color: inherit; text-decoration: none; }
+.git-info a:hover { text-decoration: underline; }
