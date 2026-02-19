@@ -1140,4 +1140,81 @@ mod tests {
                 .contains("high_diff_port start difficulty")
         );
     }
+
+    #[test]
+    fn shared_defaults_pool_and_proxy() {
+        let pool = Settings::from_pool_options(parse_pool_options("para pool")).unwrap();
+        let proxy = Settings::from_proxy_options(parse_proxy_options(
+            "para proxy --upstream foo:1234 --username bar",
+        ))
+        .unwrap();
+
+        assert_eq!(pool.address, proxy.address);
+        assert_eq!(pool.port, proxy.port);
+        assert_eq!(pool.start_diff, proxy.start_diff);
+        assert_eq!(pool.vardiff_period, proxy.vardiff_period);
+        assert_eq!(pool.vardiff_window, proxy.vardiff_window);
+        assert_eq!(pool.acme_cache, proxy.acme_cache);
+        assert_eq!(pool.chain, proxy.chain);
+        assert_eq!(pool.bitcoin_rpc_port, proxy.bitcoin_rpc_port);
+        assert_eq!(pool.high_diff_port, proxy.high_diff_port);
+        assert_eq!(pool.http_port, proxy.http_port);
+        assert_eq!(pool.min_diff, proxy.min_diff);
+        assert_eq!(pool.max_diff, proxy.max_diff);
+    }
+
+    #[test]
+    fn settings_default_matches_pool_defaults() {
+        let settings_default = Settings::default();
+        let pool_settings = Settings::from_pool_options(parse_pool_options("para pool")).unwrap();
+
+        assert_eq!(settings_default.address, pool_settings.address);
+        assert_eq!(settings_default.port, pool_settings.port);
+        assert_eq!(settings_default.chain, pool_settings.chain);
+        assert_eq!(
+            settings_default.bitcoin_rpc_port,
+            pool_settings.bitcoin_rpc_port
+        );
+        assert_eq!(settings_default.start_diff, pool_settings.start_diff);
+        assert_eq!(
+            settings_default.vardiff_period,
+            pool_settings.vardiff_period
+        );
+        assert_eq!(
+            settings_default.vardiff_window,
+            pool_settings.vardiff_window
+        );
+        assert_eq!(settings_default.version_mask, pool_settings.version_mask);
+        assert_eq!(
+            settings_default.zmq_block_notifications,
+            pool_settings.zmq_block_notifications
+        );
+        assert_eq!(settings_default.enonce1_size, pool_settings.enonce1_size);
+        assert_eq!(settings_default.enonce2_size, pool_settings.enonce2_size);
+        assert_eq!(
+            settings_default.enonce1_extension_size,
+            pool_settings.enonce1_extension_size
+        );
+        assert_eq!(
+            settings_default.update_interval,
+            pool_settings.update_interval
+        );
+        assert_eq!(settings_default.acme_cache, pool_settings.acme_cache);
+        assert_eq!(settings_default.timeout, pool_settings.timeout);
+    }
+
+    #[test]
+    fn proxy_vardiff_defaults() {
+        let options = parse_proxy_options("para proxy --upstream foo:1234 --username bar");
+        let settings = Settings::from_proxy_options(options).unwrap();
+        assert_eq!(settings.vardiff_period, Duration::from_secs_f64(3.33));
+        assert_eq!(settings.vardiff_window, Duration::from_secs(300));
+    }
+
+    #[test]
+    fn proxy_start_diff_default() {
+        let options = parse_proxy_options("para proxy --upstream foo:1234 --username bar");
+        let settings = Settings::from_proxy_options(options).unwrap();
+        assert_eq!(settings.start_diff, Difficulty::default());
+    }
 }
