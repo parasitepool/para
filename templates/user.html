@@ -49,7 +49,7 @@ async function refresh() {
     const best_ever = formatDifficulty(user.best_ever);
 
     copyable('address', shortAddr, addr);
-    set('workers_count', user.workers.length);
+    set('workers_count', user.workers.reduce((sum, w) => sum + (w.instances || 0), 0));
     set('hashrate_5m', user.hashrate_5m, formatHashrate);
     set('sps_5m', user.sps_5m, formatTruncated);
     set('authorized', new Date(user.authorized * 1000).toLocaleString());

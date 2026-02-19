@@ -4,7 +4,7 @@ use {
     http_server::{
         self,
         error::{OptionExt, ServerResult},
-        templates::{DashboardHtml, PoolHtml, ProxyHtml, UserHtml, UsersHtml},
+        templates::{DashboardHtml, PoolHtml, ProxyHtml, UserHtml, UsersHtml, WorkersHtml},
     },
 };
 
@@ -118,6 +118,14 @@ pub struct WorkerDetail {
     pub best_ever: Option<Difficulty>,
     pub last_share: Option<u64>,
     pub total_work: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkerListDetail {
+    pub user: String,
+    pub name: String,
+    pub instances: u64,
+    pub hashrate_5m: HashRate,
 }
 
 pub type BitcoinStatus = http_server::BitcoinStatus;

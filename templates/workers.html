@@ -1,0 +1,45 @@
+<div class=grid>
+  <div class="column column-full">
+    <table id=workers-table>
+      <thead>
+        <tr>
+          <th>User</th>
+          <th>Name</th>
+          <th>Instances</th>
+          <th>Hashrate</th>
+        </tr>
+      </thead>
+      <tbody id=workers-list></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const apiBase = '{{ self.api_base }}';
+
+async function refresh() {
+  try {
+    const workers = await fetch(`${apiBase}/workers`).then(r => r.json()).catch(() => []);
+    const container = document.getElementById('workers-list');
+
+    if (workers.length === 0) {
+      container.innerHTML = '';
+      return;
+    }
+
+    container.innerHTML = workers
+      .sort((a, b) => b.hashrate_5m - a.hashrate_5m)
+      .map(w => {
+        const shortUser = w.user.length > 20 ? w.user.slice(0,8) + '...' + w.user.slice(-8) : w.user;
+        return `<tr>
+          <td><a href="/user/${w.user}">${shortUser}</a></td>
+          <td>${w.name || '(default)'}</td>
+          <td>${w.instances || 0}</td>
+          <td>${formatHashrate(w.hashrate_5m)}</td>
+        </tr>`;
+      })
+      .join('');
+  } catch (e) { console.error('refresh error:', e); }
+}
+startPolling(refresh);
+</script>

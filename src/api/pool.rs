@@ -9,9 +9,11 @@ pub(crate) fn router(
     Router::new()
         .route("/", get(home))
         .route("/users", get(users_page))
+        .route("/workers", get(workers_page))
         .route("/user/{address}", get(user_page))
         .route("/api/pool/status", get(status))
         .route("/api/pool/users", get(users))
+        .route("/api/pool/workers", get(workers))
         .route("/api/pool/user/{address}", get(user))
         .route("/api/bitcoin/status", get(http_server::bitcoin_status))
         .route("/api/system/status", get(http_server::system_status))
@@ -88,6 +90,51 @@ async fn users_page(Extension(chain): Extension<Chain>) -> Response {
     let body = DashboardHtml::new(
         UsersHtml {
             title: "Pool | Users",
+            api_base: "/api/pool",
+        },
+        chain,
+    )
+    .to_string();
+
+    ([(CONTENT_TYPE, "text/html;charset=utf-8")], body).into_response()
+}
+
+async fn workers_page(Extension(chain): Extension<Chain>) -> Response {
+    #[cfg(feature = "reload")]
+    let body = {
+        use http_server::templates::ReloadedContent;
+
+        let content = WorkersHtml {
+            title: "Pool | Workers",
+            api_base: "/api/pool",
+        }
+        .reload_from_path()
+        .map(|r| r.to_string())
+        .unwrap_or_else(|_| {
+            WorkersHtml {
+                title: "Pool | Workers",
+                api_base: "/api/pool",
+            }
+            .to_string()
+        });
+
+        let html = DashboardHtml::new(
+            ReloadedContent {
+                html: content,
+                title: "Pool | Workers",
+            },
+            chain,
+        );
+
+        html.reload_from_path()
+            .map(|r| r.to_string())
+            .unwrap_or_else(|_| html.to_string())
+    };
+
+    #[cfg(not(feature = "reload"))]
+    let body = DashboardHtml::new(
+        WorkersHtml {
+            title: "Pool | Workers",
             api_base: "/api/pool",
         },
         chain,
@@ -176,6 +223,27 @@ async fn users(State(metatron): State<Arc<Metatron>>) -> Json<Vec<String>> {
             .users()
             .iter()
             .map(|entry| entry.key().to_string())
+            .collect(),
+    )
+}
+
+async fn workers(State(metatron): State<Arc<Metatron>>) -> Json<Vec<WorkerListDetail>> {
+    Json(
+        metatron
+            .users()
+            .iter()
+            .flat_map(|user| {
+                let address = user.key().to_string();
+                user.workers
+                    .iter()
+                    .map(|worker| WorkerListDetail {
+                        user: address.clone(),
+                        name: worker.workername().to_string(),
+                        instances: worker.instance_count(),
+                        hashrate_5m: worker.hashrate_5m(),
+                    })
+                    .collect::<Vec<_>>()
+            })
             .collect(),
     )
 }
