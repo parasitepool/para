@@ -44,7 +44,6 @@ async fn proxy() {
 
     assert_eq!(status.users, 0);
     assert_eq!(status.workers, 0);
-    assert_eq!(status.connections, 0);
     assert_eq!(status.accepted, 0);
     assert_eq!(status.rejected, 0);
     assert_eq!(status.upstream_accepted, 0);
@@ -105,7 +104,6 @@ async fn proxy() {
     let status = proxy.get_status().await.unwrap();
     assert_eq!(status.users, 1);
     assert_eq!(status.workers, 1);
-    assert_eq!(status.connections, 1);
     assert_eq!(status.accepted, 1);
     assert_eq!(status.rejected, 0);
     assert_eq!(status.upstream_accepted, 1);

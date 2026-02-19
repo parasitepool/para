@@ -14,11 +14,10 @@ pub mod proxy;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolStatus {
     pub endpoint: String,
-    pub users: usize,
-    pub workers: usize,
-    pub connections: u64,
+    pub users: u64,
+    pub workers: u64,
     pub disconnected: usize,
-    pub idle: usize,
+    pub idle: u64,
     pub hashrate_1m: HashRate,
     pub hashrate_5m: HashRate,
     pub hashrate_15m: HashRate,
@@ -42,11 +41,10 @@ pub struct PoolStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyStatus {
     pub endpoint: String,
-    pub users: usize,
-    pub workers: usize,
-    pub connections: u64,
+    pub users: u64,
+    pub workers: u64,
     pub disconnected: usize,
-    pub idle: usize,
+    pub idle: u64,
     pub hashrate_1m: HashRate,
     pub hashrate_5m: HashRate,
     pub hashrate_15m: HashRate,
@@ -103,6 +101,7 @@ pub struct UserDetail {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkerDetail {
     pub name: String,
+    pub instances: u64,
     pub hashrate_1m: HashRate,
     pub hashrate_5m: HashRate,
     pub hashrate_15m: HashRate,

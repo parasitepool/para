@@ -22,6 +22,7 @@ pub(crate) struct Worker {
     stats: Mutex<Stats>,
     accepted: AtomicU64,
     rejected: AtomicU64,
+    instances: AtomicU64,
 }
 
 impl Worker {
@@ -46,6 +47,7 @@ impl Worker {
             }),
             accepted: AtomicU64::new(0),
             rejected: AtomicU64::new(0),
+            instances: AtomicU64::new(0),
         }
     }
 
@@ -143,5 +145,17 @@ impl Worker {
 
     pub(crate) fn total_work(&self) -> f64 {
         self.stats.lock().total_work
+    }
+
+    pub(crate) fn inc_instances(&self) {
+        self.instances.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn dec_instances(&self) {
+        self.instances.fetch_sub(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn instance_count(&self) -> u64 {
+        self.instances.load(Ordering::Relaxed)
     }
 }

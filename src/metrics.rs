@@ -8,10 +8,10 @@ pub(crate) struct Metrics {
 impl StatusLine for Metrics {
     fn status_line(&self) -> String {
         format!(
-            "sps={:.2}  hashrate={:.2}  connections={}  upstream_enonce1={}  accepted={}  rejected={}",
+            "sps={:.2}  hashrate={:.2}  workers={}  upstream_enonce1={}  accepted={}  rejected={}",
             self.metatron.sps_1m(),
             self.metatron.hashrate_1m(),
-            self.metatron.total_connections(),
+            self.metatron.total_workers(),
             self.upstream.enonce1(),
             self.metatron.accepted(),
             self.metatron.rejected(),

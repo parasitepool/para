@@ -25,8 +25,12 @@ impl User {
             .clone()
     }
 
-    pub(crate) fn worker_count(&self) -> usize {
-        self.workers.len()
+    pub(crate) fn instance_count(&self) -> u64 {
+        self.workers.iter().map(|w| w.instance_count()).sum()
+    }
+
+    pub(crate) fn is_active(&self) -> bool {
+        self.instance_count() > 0
     }
 
     pub(crate) fn hashrate_1m(&self) -> HashRate {

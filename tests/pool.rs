@@ -581,7 +581,6 @@ async fn share_validation() {
     assert_eq!(status.endpoint, pool.stratum_endpoint());
     assert_eq!(status.users, 0);
     assert_eq!(status.workers, 0);
-    assert_eq!(status.connections, 0);
     assert_eq!(status.blocks, 0);
     assert_eq!(status.accepted, 0);
     assert_eq!(status.rejected, 0);
@@ -627,7 +626,6 @@ async fn share_validation() {
     let status = pool.get_status().await.unwrap();
     assert_eq!(status.users, 1);
     assert_eq!(status.workers, 1);
-    assert_eq!(status.connections, 1);
     assert_eq!(status.accepted, 1);
     assert_eq!(status.rejected, 0);
     assert!(status.best_ever.is_some());

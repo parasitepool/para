@@ -3,7 +3,6 @@ use super::*;
 pub(crate) struct Metatron {
     blocks: AtomicU64,
     started: Instant,
-    connections: AtomicU64,
     users: DashMap<Address, Arc<User>>,
     sessions: DashMap<Extranonce, SessionSnapshot>,
     extranonces: Extranonces,
@@ -16,7 +15,6 @@ impl Metatron {
         Self {
             blocks: AtomicU64::new(0),
             started: Instant::now(),
-            connections: AtomicU64::new(0),
             users: DashMap::new(),
             sessions: DashMap::new(),
             extranonces,
@@ -112,14 +110,6 @@ impl Metatron {
         self.blocks.fetch_add(1, Ordering::Relaxed);
     }
 
-    pub(crate) fn add_connection(&self) {
-        self.connections.fetch_add(1, Ordering::Relaxed);
-    }
-
-    pub(crate) fn sub_connection(&self) {
-        self.connections.fetch_sub(1, Ordering::Relaxed);
-    }
-
     pub(crate) fn hashrate_1m(&self) -> HashRate {
         self.users
             .iter()
@@ -197,36 +187,34 @@ impl Metatron {
         self.blocks.load(Ordering::Relaxed)
     }
 
-    pub(crate) fn total_connections(&self) -> u64 {
-        self.connections.load(Ordering::Relaxed)
-    }
-
     pub(crate) fn disconnected(&self) -> usize {
         self.sessions.len()
     }
 
-    pub(crate) fn idle(&self) -> usize {
+    pub(crate) fn idle(&self) -> u64 {
         let now = Instant::now();
         self.users
             .iter()
             .map(|user| {
-                user.workers()
+                user.workers
+                    .iter()
                     .filter(|worker| {
-                        worker
-                            .last_share()
-                            .is_none_or(|last| now.duration_since(last).as_secs() > 60)
+                        worker.instance_count() > 0
+                            && worker
+                                .last_share()
+                                .is_none_or(|last| now.duration_since(last).as_secs() > 60)
                     })
-                    .count()
+                    .count() as u64
             })
             .sum()
     }
 
-    pub(crate) fn total_users(&self) -> usize {
-        self.users.len()
+    pub(crate) fn total_users(&self) -> u64 {
+        self.users.iter().filter(|u| u.is_active()).count() as u64
     }
 
-    pub(crate) fn total_workers(&self) -> usize {
-        self.users.iter().map(|u| u.worker_count()).sum()
+    pub(crate) fn total_workers(&self) -> u64 {
+        self.users.iter().map(|u| u.instance_count()).sum()
     }
 
     pub(crate) fn total_work(&self) -> f64 {
@@ -253,10 +241,9 @@ impl Metatron {
 impl StatusLine for Metatron {
     fn status_line(&self) -> String {
         format!(
-            "sps={:.2}  hashrate={:.2}  connections={}  users={}  workers={}  accepted={}  rejected={}  blocks={}  uptime={}s",
+            "sps={:.2}  hashrate={:.2}  users={}  workers={}  accepted={}  rejected={}  blocks={}  uptime={}s",
             self.sps_1m(),
             self.hashrate_1m(),
-            self.total_connections(),
             self.total_users(),
             self.total_workers(),
             self.accepted(),
@@ -290,25 +277,11 @@ mod tests {
     #[test]
     fn new_metatron_starts_at_zero() {
         let metatron = Metatron::new(pool_extranonces(), String::new());
-        assert_eq!(metatron.total_connections(), 0);
         assert_eq!(metatron.accepted(), 0);
         assert_eq!(metatron.rejected(), 0);
         assert_eq!(metatron.total_blocks(), 0);
         assert_eq!(metatron.total_users(), 0);
         assert_eq!(metatron.total_workers(), 0);
-    }
-
-    #[test]
-    fn connection_count_increments_and_decrements() {
-        let metatron = Metatron::new(pool_extranonces(), String::new());
-        assert_eq!(metatron.total_connections(), 0);
-
-        metatron.add_connection();
-        metatron.add_connection();
-        assert_eq!(metatron.total_connections(), 2);
-
-        metatron.sub_connection();
-        assert_eq!(metatron.total_connections(), 1);
     }
 
     #[test]
@@ -318,11 +291,22 @@ mod tests {
 
         let worker = metatron.get_or_create_worker(addr.clone(), "rig1");
         assert_eq!(worker.workername(), "rig1");
+        assert_eq!(worker.instance_count(), 0);
+        assert_eq!(metatron.total_users(), 0);
+        assert_eq!(metatron.total_workers(), 0);
+
+        worker.inc_instances();
+        assert_eq!(worker.instance_count(), 1);
         assert_eq!(metatron.total_users(), 1);
         assert_eq!(metatron.total_workers(), 1);
 
         let worker2 = metatron.get_or_create_worker(addr.clone(), "rig2");
         assert_eq!(worker2.workername(), "rig2");
+        assert_eq!(worker2.instance_count(), 0);
+        assert_eq!(metatron.total_users(), 1);
+        assert_eq!(metatron.total_workers(), 1);
+
+        worker2.inc_instances();
         assert_eq!(metatron.total_users(), 1);
         assert_eq!(metatron.total_workers(), 2);
     }

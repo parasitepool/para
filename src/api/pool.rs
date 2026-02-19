@@ -158,7 +158,6 @@ async fn status(State(metatron): State<Arc<Metatron>>) -> Json<PoolStatus> {
         sps_1hr: metatron.sps_1hr(),
         users: metatron.total_users(),
         workers: metatron.total_workers(),
-        connections: metatron.total_connections(),
         disconnected: metatron.disconnected(),
         idle: metatron.idle(),
         accepted: metatron.accepted(),
@@ -215,6 +214,7 @@ async fn user(
             .workers()
             .map(|worker| WorkerDetail {
                 name: worker.workername().to_string(),
+                instances: worker.instance_count(),
                 hashrate_1m: worker.hashrate_1m(),
                 hashrate_5m: worker.hashrate_5m(),
                 hashrate_15m: worker.hashrate_15m(),
