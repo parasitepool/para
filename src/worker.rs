@@ -78,10 +78,6 @@ impl Worker {
             .count() as u64
     }
 
-    pub(crate) fn session_count(&self) -> usize {
-        self.sessions.len()
-    }
-
     pub(crate) fn record_accepted(&self, pool_diff: Difficulty, share_diff: Difficulty) {
         let now = Instant::now();
         let mut stats = self.stats.lock();

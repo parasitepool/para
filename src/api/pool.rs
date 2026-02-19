@@ -324,6 +324,7 @@ async fn session(
 ) -> ServerResult<Response> {
     let enonce1 = enonce1
         .parse::<Extranonce>()
+        .ok()
         .ok_or_not_found(|| format!("Session {enonce1}"))?;
 
     let session = metatron
