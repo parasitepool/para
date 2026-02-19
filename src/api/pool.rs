@@ -1,4 +1,4 @@
-use super::*;
+use {super::*, crate::session::Session};
 
 pub(crate) fn router(
     metatron: Arc<Metatron>,

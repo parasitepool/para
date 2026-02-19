@@ -108,7 +108,6 @@ impl Metatron {
         worker.get_or_create_session(enonce1, socket_addr)
     }
 
-    #[allow(dead_code)]
     pub(crate) fn get_session(&self, enonce1: &Extranonce) -> Option<Arc<Session>> {
         let mut workers = Vec::new();
 

@@ -1,6 +1,5 @@
 use super::*;
 
-#[allow(dead_code)]
 pub(crate) struct Session {
     enonce1: Extranonce,
     socket_addr: SocketAddr,
@@ -26,22 +25,18 @@ impl Session {
         }
     }
 
-    #[allow(dead_code)]
     pub(crate) fn enonce1(&self) -> &Extranonce {
         &self.enonce1
     }
 
-    #[allow(dead_code)]
     pub(crate) fn socket_addr(&self) -> SocketAddr {
         self.socket_addr
     }
 
-    #[allow(dead_code)]
     pub(crate) fn connected_at(&self) -> Instant {
         self.connected_at
     }
 
-    #[allow(dead_code)]
     pub(crate) fn difficulty(&self) -> Difficulty {
         *self.difficulty.lock()
     }
@@ -50,12 +45,10 @@ impl Session {
         *self.difficulty.lock() = diff;
     }
 
-    #[allow(dead_code)]
     pub(crate) fn accepted(&self) -> u64 {
         self.accepted.load(Ordering::Relaxed)
     }
 
-    #[allow(dead_code)]
     pub(crate) fn rejected(&self) -> u64 {
         self.rejected.load(Ordering::Relaxed)
     }

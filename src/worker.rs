@@ -65,7 +65,6 @@ impl Worker {
         session
     }
 
-    #[allow(dead_code)]
     pub(crate) fn get_session(&self, enonce1: &Extranonce) -> Option<Arc<Session>> {
         self.sessions
             .get(enonce1)
@@ -79,7 +78,6 @@ impl Worker {
             .count() as u64
     }
 
-    #[allow(dead_code)]
     pub(crate) fn session_count(&self) -> usize {
         self.sessions.len()
     }

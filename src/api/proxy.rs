@@ -1,4 +1,4 @@
-use super::*;
+use {super::*, crate::session::Session};
 
 pub(crate) fn router(
     metrics: Arc<Metrics>,
@@ -10,10 +10,13 @@ pub(crate) fn router(
         .route("/", get(home))
         .route("/users", get(users_page))
         .route("/workers", get(workers_page))
+        .route("/sessions", get(sessions_page))
         .route("/user/{address}", get(user_page))
         .route("/api/proxy/status", get(status))
         .route("/api/proxy/users", get(users))
         .route("/api/proxy/workers", get(workers))
+        .route("/api/proxy/sessions", get(sessions))
+        .route("/api/proxy/session/{enonce1}", get(session))
         .route("/api/proxy/user/{address}", get(user))
         .route("/api/bitcoin/status", get(http_server::bitcoin_status))
         .route("/api/system/status", get(http_server::system_status))
@@ -144,6 +147,51 @@ async fn workers_page(Extension(chain): Extension<Chain>) -> Response {
     ([(CONTENT_TYPE, "text/html;charset=utf-8")], body).into_response()
 }
 
+async fn sessions_page(Extension(chain): Extension<Chain>) -> Response {
+    #[cfg(feature = "reload")]
+    let body = {
+        use http_server::templates::ReloadedContent;
+
+        let content = SessionsHtml {
+            title: "Proxy | Sessions",
+            api_base: "/api/proxy",
+        }
+        .reload_from_path()
+        .map(|r| r.to_string())
+        .unwrap_or_else(|_| {
+            SessionsHtml {
+                title: "Proxy | Sessions",
+                api_base: "/api/proxy",
+            }
+            .to_string()
+        });
+
+        let html = DashboardHtml::new(
+            ReloadedContent {
+                html: content,
+                title: "Proxy | Sessions",
+            },
+            chain,
+        );
+
+        html.reload_from_path()
+            .map(|r| r.to_string())
+            .unwrap_or_else(|_| html.to_string())
+    };
+
+    #[cfg(not(feature = "reload"))]
+    let body = DashboardHtml::new(
+        SessionsHtml {
+            title: "Proxy | Sessions",
+            api_base: "/api/proxy",
+        },
+        chain,
+    )
+    .to_string();
+
+    ([(CONTENT_TYPE, "text/html;charset=utf-8")], body).into_response()
+}
+
 async fn user_page(Extension(chain): Extension<Chain>) -> Response {
     #[cfg(feature = "reload")]
     let body = {
@@ -264,6 +312,43 @@ async fn workers(State(metrics): State<Arc<Metrics>>) -> Json<Vec<WorkerListDeta
     )
 }
 
+async fn sessions(State(metrics): State<Arc<Metrics>>) -> Json<Vec<SessionListDetail>> {
+    let mut entries = Vec::new();
+
+    for user in metrics.metatron.users().iter() {
+        let user_address = user.key().to_string();
+        for worker in user.workers.iter() {
+            let worker_name = worker.workername().to_string();
+            for session in worker.sessions().iter() {
+                let detail = session_detail(session.value());
+                entries.push(SessionListDetail {
+                    user: user_address.clone(),
+                    worker: worker_name.clone(),
+                    session: detail,
+                });
+            }
+        }
+    }
+
+    Json(entries)
+}
+
+async fn session(
+    State(metrics): State<Arc<Metrics>>,
+    Path(enonce1): Path<String>,
+) -> ServerResult<Response> {
+    let enonce1 = enonce1
+        .parse::<Extranonce>()
+        .ok_or_not_found(|| format!("Session {enonce1}"))?;
+
+    let session = metrics
+        .metatron
+        .get_session(&enonce1)
+        .ok_or_not_found(|| format!("Session {enonce1}"))?;
+
+    Ok(Json(session_detail(&session)).into_response())
+}
+
 async fn user(
     State(metrics): State<Arc<Metrics>>,
     Path(address): Path<Address<NetworkUnchecked>>,
@@ -320,4 +405,17 @@ async fn user(
             .collect(),
     })
     .into_response())
+}
+
+fn session_detail(session: &Session) -> SessionDetail {
+    SessionDetail {
+        id: session.enonce1().to_string(),
+        socket_addr: session.socket_addr().to_string(),
+        connected_at: session.connected_at().elapsed().as_secs(),
+        active: session.is_active(),
+        difficulty: session.difficulty().as_f64(),
+        accepted: session.accepted(),
+        rejected: session.rejected(),
+        last_share: session.last_share().map(|time| time.elapsed().as_secs()),
+    }
 }
