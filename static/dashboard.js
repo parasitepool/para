@@ -141,7 +141,7 @@ function formatDifficulty(d) {
 function formatHashrate(h) {
   if (h === null || h === undefined) return null;
   if (h === 0) return '0 H/s';
-  const i = Math.min(Math.floor(Math.log10(h) / 3), SI_PREFIXES.length - 1);
+  const i = Math.max(0, Math.min(Math.floor(Math.log10(h) / 3), SI_PREFIXES.length - 1));
   const scaled = h / Math.pow(1000, i);
   const truncated = Math.floor(scaled * 100) / 100;
   return truncated.toFixed(2) + ' ' + SI_PREFIXES[i] + 'H/s';
