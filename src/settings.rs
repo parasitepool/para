@@ -1,9 +1,12 @@
 use super::*;
 
+mod common_options;
 mod pool_options;
 mod proxy_options;
 
-pub(crate) use {pool_options::PoolOptions, proxy_options::ProxyOptions};
+pub(crate) use {
+    common_options::CommonOptions, pool_options::PoolOptions, proxy_options::ProxyOptions,
+};
 
 #[derive(Clone, Debug)]
 pub(crate) struct Settings {
@@ -52,18 +55,18 @@ impl Default for Settings {
             upstream_password: None,
             timeout: Duration::from_secs(30),
             bitcoin_data_dir: None,
-            bitcoin_rpc_port: Chain::Mainnet.default_rpc_port(),
+            bitcoin_rpc_port: Chain::default().default_rpc_port(),
             bitcoin_rpc_cookie_file: None,
             bitcoin_rpc_username: None,
             bitcoin_rpc_password: None,
-            chain: Chain::Mainnet,
+            chain: Chain::default(),
             acme_domains: vec![],
             acme_contacts: vec![],
             acme_cache: PathBuf::from("acme-cache"),
             data_dir: None,
             update_interval: Duration::from_secs(10),
-            version_mask: "1fffe000".parse().unwrap(),
-            start_diff: Difficulty::from(1.0),
+            version_mask: Version::default(),
+            start_diff: Difficulty::default(),
             min_diff: None,
             max_diff: None,
             vardiff_period: Duration::from_secs_f64(3.33),
@@ -82,49 +85,46 @@ impl Default for Settings {
 
 impl Settings {
     pub(crate) fn from_pool_options(options: PoolOptions) -> Result<Self> {
-        let chain = options.chain.unwrap_or(Chain::Mainnet);
+        let chain = options.common.chain.unwrap_or_default();
+
+        let bitcoin_rpc_port = options
+            .common
+            .bitcoin_rpc_port
+            .unwrap_or_else(|| chain.default_rpc_port());
 
         let settings = Self {
-            address: options.address.unwrap_or_else(|| "0.0.0.0".into()),
-            port: options.port.unwrap_or(42069),
-            http_port: options.http_port,
+            address: options.common.address,
+            port: options.common.port,
+            http_port: options.common.http_port,
             upstream_endpoint: None,
             upstream_username: None,
             upstream_password: None,
             timeout: Duration::from_secs(30),
-            bitcoin_data_dir: options.bitcoin_data_dir,
-            bitcoin_rpc_port: options
-                .bitcoin_rpc_port
-                .unwrap_or_else(|| chain.default_rpc_port()),
-            bitcoin_rpc_cookie_file: options.bitcoin_rpc_cookie_file,
-            bitcoin_rpc_username: options.bitcoin_rpc_username,
-            bitcoin_rpc_password: options.bitcoin_rpc_password,
+            bitcoin_data_dir: options.common.bitcoin_data_dir,
+            bitcoin_rpc_port,
+            bitcoin_rpc_cookie_file: options.common.bitcoin_rpc_cookie_file,
+            bitcoin_rpc_username: options.common.bitcoin_rpc_username,
+            bitcoin_rpc_password: options.common.bitcoin_rpc_password,
             chain,
-            acme_domains: options.acme_domain,
-            acme_contacts: options.acme_contact,
-            acme_cache: options
-                .acme_cache
-                .unwrap_or_else(|| PathBuf::from("acme-cache")),
-            data_dir: options.data_dir,
-            update_interval: Duration::from_secs(options.update_interval.unwrap_or(10)),
-            version_mask: options
-                .version_mask
-                .unwrap_or_else(|| "1fffe000".parse().unwrap()),
-            start_diff: options.start_diff.unwrap_or_else(|| Difficulty::from(1.0)),
-            min_diff: options.min_diff,
-            max_diff: options.max_diff,
-            vardiff_period: Duration::from_secs_f64(options.vardiff_period.unwrap_or(3.33)),
-            vardiff_window: Duration::from_secs_f64(options.vardiff_window.unwrap_or(300.0)),
-            zmq_block_notifications: options
-                .zmq_block_notifications
-                .unwrap_or_else(|| "tcp://127.0.0.1:28332".parse().unwrap()),
-            enonce1_size: options.enonce1_size.unwrap_or(ENONCE1_SIZE),
-            enonce2_size: options.enonce2_size.unwrap_or(MAX_ENONCE_SIZE),
+            acme_domains: options.common.acme_domain,
+            acme_contacts: options.common.acme_contact,
+            acme_cache: options.common.acme_cache,
+            data_dir: options.common.data_dir,
+            update_interval: Duration::from_secs(options.update_interval),
+            version_mask: options.version_mask,
+            start_diff: options.common.start_diff,
+            min_diff: options.common.min_diff,
+            max_diff: options.common.max_diff,
+            vardiff_period: Duration::from_secs_f64(options.common.vardiff_period),
+            vardiff_window: Duration::from_secs_f64(options.common.vardiff_window),
+            zmq_block_notifications: options.zmq_block_notifications,
+            enonce1_size: options.enonce1_size,
+            enonce2_size: options.enonce2_size,
             enonce1_extension_size: ENONCE1_EXTENSION_SIZE,
             disable_bouncer: options.disable_bouncer,
-            database_url: options.database_url.clone(),
-            events_file: options.events_file.clone(),
-            high_diff_port: options.high_diff_port,
+            database_url: options.database_url,
+            events_file: options.events_file,
+            high_diff_port: options.common.high_diff_port,
         };
 
         settings.validate()?;
@@ -132,40 +132,46 @@ impl Settings {
     }
 
     pub(crate) fn from_proxy_options(options: ProxyOptions) -> Result<Self> {
-        let chain = options.chain.unwrap_or_default();
+        let chain = options.common.chain.unwrap_or_default();
+
+        let bitcoin_rpc_port = options
+            .common
+            .bitcoin_rpc_port
+            .unwrap_or_else(|| chain.default_rpc_port());
 
         let settings = Self {
-            address: options.address.unwrap_or_else(|| "0.0.0.0".into()),
-            port: options.port.unwrap_or(42069),
-            http_port: options.http_port,
+            address: options.common.address,
+            port: options.common.port,
+            http_port: options.common.http_port,
             upstream_endpoint: Some(options.upstream),
             upstream_username: Some(options.username),
             upstream_password: options.password,
-            timeout: Duration::from_secs(options.timeout.unwrap_or(30)),
-            bitcoin_data_dir: options.bitcoin_data_dir,
-            bitcoin_rpc_port: options
-                .bitcoin_rpc_port
-                .unwrap_or_else(|| chain.default_rpc_port()),
-            bitcoin_rpc_cookie_file: options.bitcoin_rpc_cookie_file,
-            bitcoin_rpc_username: options.bitcoin_rpc_username,
-            bitcoin_rpc_password: options.bitcoin_rpc_password,
+            timeout: Duration::from_secs(options.timeout),
+            bitcoin_data_dir: options.common.bitcoin_data_dir,
+            bitcoin_rpc_port,
+            bitcoin_rpc_cookie_file: options.common.bitcoin_rpc_cookie_file,
+            bitcoin_rpc_username: options.common.bitcoin_rpc_username,
+            bitcoin_rpc_password: options.common.bitcoin_rpc_password,
             chain,
-            acme_domains: options.acme_domain,
-            acme_contacts: options.acme_contact,
-            acme_cache: options
-                .acme_cache
-                .unwrap_or_else(|| PathBuf::from("acme-cache")),
-            data_dir: options.data_dir,
-            start_diff: options.start_diff.unwrap_or_else(|| Difficulty::from(1.0)),
-            min_diff: options.min_diff,
-            max_diff: options.max_diff,
-            vardiff_period: Duration::from_secs_f64(options.vardiff_period.unwrap_or(3.33)),
-            vardiff_window: Duration::from_secs_f64(options.vardiff_window.unwrap_or(300.0)),
-            enonce1_extension_size: options
-                .enonce1_extension_size
-                .unwrap_or(ENONCE1_EXTENSION_SIZE),
-            high_diff_port: options.high_diff_port,
-            ..Default::default()
+            acme_domains: options.common.acme_domain,
+            acme_contacts: options.common.acme_contact,
+            acme_cache: options.common.acme_cache,
+            data_dir: options.common.data_dir,
+            update_interval: Duration::from_secs(10),
+            version_mask: Version::default(),
+            start_diff: options.common.start_diff,
+            min_diff: options.common.min_diff,
+            max_diff: options.common.max_diff,
+            vardiff_period: Duration::from_secs_f64(options.common.vardiff_period),
+            vardiff_window: Duration::from_secs_f64(options.common.vardiff_window),
+            zmq_block_notifications: "tcp://127.0.0.1:28332".parse().unwrap(),
+            enonce1_size: ENONCE1_SIZE,
+            enonce2_size: MAX_ENONCE_SIZE,
+            enonce1_extension_size: options.enonce1_extension_size,
+            disable_bouncer: false,
+            database_url: None,
+            events_file: None,
+            high_diff_port: options.common.high_diff_port,
         };
 
         settings.validate()?;
@@ -1133,5 +1139,82 @@ mod tests {
                 .to_string()
                 .contains("high_diff_port start difficulty")
         );
+    }
+
+    #[test]
+    fn shared_defaults_pool_and_proxy() {
+        let pool = Settings::from_pool_options(parse_pool_options("para pool")).unwrap();
+        let proxy = Settings::from_proxy_options(parse_proxy_options(
+            "para proxy --upstream foo:1234 --username bar",
+        ))
+        .unwrap();
+
+        assert_eq!(pool.address, proxy.address);
+        assert_eq!(pool.port, proxy.port);
+        assert_eq!(pool.start_diff, proxy.start_diff);
+        assert_eq!(pool.vardiff_period, proxy.vardiff_period);
+        assert_eq!(pool.vardiff_window, proxy.vardiff_window);
+        assert_eq!(pool.acme_cache, proxy.acme_cache);
+        assert_eq!(pool.chain, proxy.chain);
+        assert_eq!(pool.bitcoin_rpc_port, proxy.bitcoin_rpc_port);
+        assert_eq!(pool.high_diff_port, proxy.high_diff_port);
+        assert_eq!(pool.http_port, proxy.http_port);
+        assert_eq!(pool.min_diff, proxy.min_diff);
+        assert_eq!(pool.max_diff, proxy.max_diff);
+    }
+
+    #[test]
+    fn settings_default_matches_pool_defaults() {
+        let settings_default = Settings::default();
+        let pool_settings = Settings::from_pool_options(parse_pool_options("para pool")).unwrap();
+
+        assert_eq!(settings_default.address, pool_settings.address);
+        assert_eq!(settings_default.port, pool_settings.port);
+        assert_eq!(settings_default.chain, pool_settings.chain);
+        assert_eq!(
+            settings_default.bitcoin_rpc_port,
+            pool_settings.bitcoin_rpc_port
+        );
+        assert_eq!(settings_default.start_diff, pool_settings.start_diff);
+        assert_eq!(
+            settings_default.vardiff_period,
+            pool_settings.vardiff_period
+        );
+        assert_eq!(
+            settings_default.vardiff_window,
+            pool_settings.vardiff_window
+        );
+        assert_eq!(settings_default.version_mask, pool_settings.version_mask);
+        assert_eq!(
+            settings_default.zmq_block_notifications,
+            pool_settings.zmq_block_notifications
+        );
+        assert_eq!(settings_default.enonce1_size, pool_settings.enonce1_size);
+        assert_eq!(settings_default.enonce2_size, pool_settings.enonce2_size);
+        assert_eq!(
+            settings_default.enonce1_extension_size,
+            pool_settings.enonce1_extension_size
+        );
+        assert_eq!(
+            settings_default.update_interval,
+            pool_settings.update_interval
+        );
+        assert_eq!(settings_default.acme_cache, pool_settings.acme_cache);
+        assert_eq!(settings_default.timeout, pool_settings.timeout);
+    }
+
+    #[test]
+    fn proxy_vardiff_defaults() {
+        let options = parse_proxy_options("para proxy --upstream foo:1234 --username bar");
+        let settings = Settings::from_proxy_options(options).unwrap();
+        assert_eq!(settings.vardiff_period, Duration::from_secs_f64(3.33));
+        assert_eq!(settings.vardiff_window, Duration::from_secs(300));
+    }
+
+    #[test]
+    fn proxy_start_diff_default() {
+        let options = parse_proxy_options("para proxy --upstream foo:1234 --username bar");
+        let settings = Settings::from_proxy_options(options).unwrap();
+        assert_eq!(settings.start_diff, Difficulty::default());
     }
 }

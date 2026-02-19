@@ -73,6 +73,12 @@ impl Not for Version {
     }
 }
 
+impl Default for Version {
+    fn default() -> Self {
+        "1fffe000".parse().unwrap()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,5 +141,12 @@ mod tests {
     #[test]
     fn version_bip9_with_feature_bits() {
         case("20000002", 0x20000002);
+    }
+
+    #[test]
+    fn version_default_is_valid() {
+        let default_version = Version::default();
+        assert_eq!(default_version.to_string(), "1fffe000");
+        assert_eq!(default_version.0.to_consensus(), 0x1fffe000);
     }
 }

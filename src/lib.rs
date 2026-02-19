@@ -34,7 +34,7 @@ use {
     block_template::BlockTemplate,
     boilerplate::{Boilerplate, Trusted},
     chain::Chain,
-    clap::Parser,
+    clap::{Args, Parser},
     coinbase_builder::CoinbaseBuilder,
     dashmap::DashMap,
     decay::{DecayingAverage, calculate_time_bias},
