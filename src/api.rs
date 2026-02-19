@@ -13,6 +13,7 @@ pub mod proxy;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolStatus {
+    pub git_commit: String,
     pub endpoint: String,
     pub users: usize,
     pub workers: usize,
@@ -41,6 +42,7 @@ pub struct PoolStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyStatus {
+    pub git_commit: String,
     pub endpoint: String,
     pub users: usize,
     pub workers: usize,

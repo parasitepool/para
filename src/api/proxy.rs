@@ -144,6 +144,7 @@ async fn user_page(Extension(chain): Extension<Chain>) -> Response {
 
 async fn status(State(metrics): State<Arc<Metrics>>) -> Json<ProxyStatus> {
     Json(ProxyStatus {
+        git_commit: env!("GIT_COMMIT").to_string(),
         endpoint: metrics.metatron.endpoint().to_string(),
         hashrate_1m: metrics.metatron.hashrate_1m(),
         hashrate_5m: metrics.metatron.hashrate_5m(),

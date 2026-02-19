@@ -144,6 +144,7 @@ async fn user_page(Extension(chain): Extension<Chain>) -> Response {
 
 async fn status(State(metatron): State<Arc<Metatron>>) -> Json<PoolStatus> {
     Json(PoolStatus {
+        git_commit: env!("GIT_COMMIT").to_string(),
         endpoint: metatron.endpoint().to_string(),
         hashrate_1m: metatron.hashrate_1m(),
         hashrate_5m: metatron.hashrate_5m(),

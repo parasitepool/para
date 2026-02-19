@@ -15,5 +15,18 @@
 $$ Trusted(&self.content)
 </div>
 <a href=https://github.com/parasitepool/para target=_blank rel=noopener><img src=/static/parasite.svg alt="" class=logo></a>
+%% if !env!("GIT_BRANCH").is_empty() || !env!("GIT_COMMIT").is_empty() {
+<div class=git-info>
+%% if !env!("GIT_BRANCH").is_empty() {
+<span>{{ env!("GIT_BRANCH") }}</span>
+%% }
+%% if !env!("GIT_BRANCH").is_empty() && !env!("GIT_COMMIT").is_empty() {
+<span> | </span>
+%% }
+%% if !env!("GIT_COMMIT").is_empty() {
+<span><a href="https://github.com/parasitepool/para/commit/{{ env!("GIT_COMMIT") }}" target=_blank rel=noopener>{{ env!("GIT_COMMIT") }}</a></span>
+%% }
+</div>
+%% }
 </body>
 </html>
