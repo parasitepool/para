@@ -1,5 +1,8 @@
 use super::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct ClientId(pub(crate) u64);
+
 struct Stats {
     dsps_1m: DecayingAverage,
     dsps_5m: DecayingAverage,
@@ -17,17 +20,19 @@ struct Stats {
     total_work: f64,
 }
 
-pub(crate) struct Worker {
-    workername: String,
+pub(crate) struct Client {
+    client_id: ClientId,
+    active: AtomicBool,
     stats: Mutex<Stats>,
     accepted: AtomicU64,
     rejected: AtomicU64,
 }
 
-impl Worker {
-    pub(crate) fn new(workername: String) -> Self {
+impl Client {
+    pub(crate) fn new(client_id: ClientId) -> Self {
         Self {
-            workername,
+            client_id,
+            active: AtomicBool::new(true),
             stats: Mutex::new(Stats {
                 dsps_1m: DecayingAverage::new(Duration::from_mins(1)),
                 dsps_5m: DecayingAverage::new(Duration::from_mins(5)),
@@ -47,6 +52,18 @@ impl Worker {
             accepted: AtomicU64::new(0),
             rejected: AtomicU64::new(0),
         }
+    }
+
+    pub(crate) fn client_id(&self) -> ClientId {
+        self.client_id
+    }
+
+    pub(crate) fn is_active(&self) -> bool {
+        self.active.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn deactivate(&self) {
+        self.active.store(false, Ordering::Relaxed);
     }
 
     pub(crate) fn record_accepted(&self, pool_diff: Difficulty, share_diff: Difficulty) {
@@ -75,10 +92,6 @@ impl Worker {
 
     pub(crate) fn record_rejected(&self) {
         self.rejected.fetch_add(1, Ordering::Relaxed);
-    }
-
-    pub(crate) fn workername(&self) -> &str {
-        &self.workername
     }
 
     pub(crate) fn hashrate_1m(&self) -> HashRate {

@@ -13,6 +13,7 @@ mod session;
 mod state;
 
 pub(crate) struct Stratifier<W: Workbase> {
+    client: Arc<Client>,
     state: State,
     socket_addr: SocketAddr,
     settings: Arc<Settings>,
@@ -55,9 +56,10 @@ impl<W: Workbase> Stratifier<W> {
 
         let bouncer = Bouncer::new(settings.disable_bouncer());
 
-        metatron.add_connection();
+        let client = metatron.new_client();
 
         Self {
+            client,
             state: State::new(),
             socket_addr,
             settings,
@@ -627,9 +629,10 @@ impl<W: Workbase> Stratifier<W> {
         submit: Submit,
         session: Arc<Session>,
     ) -> Result<Consequence> {
-        let worker = self
-            .metatron
-            .get_or_create_worker(session.address.clone(), &session.workername);
+        let client = self.client.clone();
+
+        self.metatron
+            .register_client(session.address.clone(), &session.workername, client.clone());
 
         if submit.username != session.username {
             let job_height = self.workbase_rx.borrow().height();
@@ -656,7 +659,7 @@ impl<W: Workbase> Stratifier<W> {
                 StratumError::WorkerMismatch
             ));
 
-            worker.record_rejected();
+            client.record_rejected();
 
             return Ok(self.bouncer.reject());
         }
@@ -678,7 +681,7 @@ impl<W: Workbase> Stratifier<W> {
                 StratumError::Stale
             ));
 
-            worker.record_rejected();
+            client.record_rejected();
 
             return Ok(self.bouncer.reject());
         };
@@ -714,7 +717,7 @@ impl<W: Workbase> Stratifier<W> {
                 StratumError::InvalidNonce2Length
             ));
 
-            worker.record_rejected();
+            client.record_rejected();
 
             return Ok(self.bouncer.reject());
         }
@@ -751,7 +754,7 @@ impl<W: Workbase> Stratifier<W> {
                 StratumError::NtimeOutOfRange
             ));
 
-            worker.record_rejected();
+            client.record_rejected();
 
             return Ok(self.bouncer.reject());
         }
@@ -780,7 +783,7 @@ impl<W: Workbase> Stratifier<W> {
                         StratumError::InvalidVersionMask
                     ));
 
-                    worker.record_rejected();
+                    client.record_rejected();
 
                     return Ok(self.bouncer.reject());
                 };
@@ -813,7 +816,7 @@ impl<W: Workbase> Stratifier<W> {
                         StratumError::InvalidVersionMask
                     ));
 
-                    worker.record_rejected();
+                    client.record_rejected();
 
                     return Ok(self.bouncer.reject());
                 }
@@ -871,7 +874,7 @@ impl<W: Workbase> Stratifier<W> {
                 StratumError::Duplicate
             ));
 
-            worker.record_rejected();
+            client.record_rejected();
 
             return Ok(self.bouncer.reject());
         }
@@ -884,9 +887,9 @@ impl<W: Workbase> Stratifier<W> {
                     info!("Submitting potential block solve");
 
                     let block_hex = encode::serialize_hex(&block);
-                    let client = self.settings.bitcoin_rpc_client().await?;
+                    let bitcoin_client = self.settings.bitcoin_rpc_client().await?;
 
-                    let success = match client
+                    let success = match bitcoin_client
                         .call_raw::<String>("submitblock", &[json!(block_hex)])
                         .await
                     {
@@ -959,14 +962,14 @@ impl<W: Workbase> Stratifier<W> {
                 StratumError::AboveTarget
             ));
 
-            worker.record_rejected();
+            client.record_rejected();
 
             return Ok(self.bouncer.reject());
         }
 
         let share_diff = Difficulty::from(hash);
 
-        worker.record_accepted(pool_diff, share_diff);
+        client.record_accepted(pool_diff, share_diff);
 
         self.submit_to_upstream(&job, &submit, share_diff, &session.enonce1)
             .await;
@@ -1120,7 +1123,7 @@ impl<W: Workbase> Drop for Stratifier<W> {
                 .store_session(SessionSnapshot::new(session.enonce1.clone()));
         }
 
-        self.metatron.sub_connection();
+        self.client.deactivate();
 
         debug!("Shutting down stratifier for {}", self.socket_addr,);
     }

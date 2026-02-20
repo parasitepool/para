@@ -1,7 +1,7 @@
 use super::*;
 
 pub(crate) async fn spawn_generator(
-    rpc: Arc<Client>,
+    rpc: Arc<BitcoindClient>,
     settings: Arc<Settings>,
     cancel: CancellationToken,
     tasks: &mut JoinSet<()>,
@@ -48,7 +48,7 @@ pub(crate) async fn spawn_generator(
 }
 
 async fn get_block_template(
-    bitcoin_rpc_client: &Client,
+    bitcoin_rpc_client: &BitcoindClient,
     settings: &Settings,
 ) -> Result<BlockTemplate> {
     let mut rules = vec!["segwit"];

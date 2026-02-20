@@ -10,7 +10,7 @@
 </head>
 <body>
 <a href="/"><img src=/static/parasite.svg alt="" class=logo></a>
-<h1>{{ self.content.title() }}<sup>{{ self.superscript() }}</sup></h1>
+<h1>{{ self.content.title() }}<sup> {{ self.superscript() }}</sup></h1>
 <div class=wrapper>
 $$ Trusted(&self.content)
 </div>
@@ -24,7 +24,7 @@ $$ Trusted(&self.content)
 <span> | </span>
 %% }
 %% if !env!("GIT_COMMIT").is_empty() {
-<span><a href="https://github.com/parasitepool/para/commit/{{ env!("GIT_COMMIT") }}" target=_blank rel=noopener>{{ env!("GIT_COMMIT") }}</a></span>
+<span><a href="https://github.com/parasitepool/para/commit/{{ env!("GIT_COMMIT") }}" target=_blank rel=noopener>{{ &env!("GIT_COMMIT")[..7] }}</a></span>
 %% }
 </div>
 %% }
