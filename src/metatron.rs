@@ -1,14 +1,13 @@
-use super::*;
-
-mod client;
-mod user;
-mod worker;
-
-pub(crate) use {
+use {
+    super::*,
     client::{Client, ClientId},
     user::User,
     worker::Worker,
 };
+
+pub(crate) mod client;
+mod user;
+mod worker;
 
 pub(crate) struct Metatron {
     blocks: AtomicU64,

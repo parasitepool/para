@@ -49,7 +49,7 @@ use {
     jobs::Jobs,
     logs::logs_enabled,
     lru::LruCache,
-    metatron::{Client, Metatron},
+    metatron::{client::Client, Metatron},
     metrics::Metrics,
     parking_lot::Mutex,
     reqwest::Url,
