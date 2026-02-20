@@ -572,17 +572,6 @@ impl<W: Workbase> Stratifier<W> {
             return Ok(self.bouncer.reject());
         }
 
-        let worker = self
-            .metatron
-            .get_or_create_worker(address.clone(), &workername);
-        worker.register_client(self.client.clone());
-        debug!(
-            "Registered client {} on {} (clients={})",
-            self.client.client_id(),
-            self.socket_addr,
-            worker.client_count()
-        );
-
         let workbase = self.workbase_rx.borrow().clone();
 
         let job = Arc::new(
@@ -641,6 +630,11 @@ impl<W: Workbase> Stratifier<W> {
         session: Arc<Session>,
     ) -> Result<Consequence> {
         let client = self.client.clone();
+
+        let worker = self
+            .metatron
+            .get_or_create_worker(session.address.clone(), &session.workername);
+        worker.register_client(client.clone());
 
         if submit.username != session.username {
             let job_height = self.workbase_rx.borrow().height();
