@@ -142,9 +142,7 @@ impl Proxy {
             let event_tx = event_tx.clone();
 
             tasks.spawn(async move {
-                let client = metatron.new_client();
                 let mut stratifier: Stratifier<Notify> = Stratifier::new(
-                    client,
                     addr,
                     settings,
                     metatron,

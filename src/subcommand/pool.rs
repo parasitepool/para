@@ -122,9 +122,7 @@ impl Pool {
             let event_tx = event_tx.clone();
 
             tasks.spawn(async move {
-                let client = metatron.new_client();
                 let mut stratifier: Stratifier<BlockTemplate> = Stratifier::new(
-                    client,
                     addr,
                     settings.clone(),
                     metatron,

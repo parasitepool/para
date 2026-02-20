@@ -32,7 +32,6 @@ pub(crate) struct Stratifier<W: Workbase> {
 impl<W: Workbase> Stratifier<W> {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        client: Arc<Client>,
         socket_addr: SocketAddr,
         settings: Arc<Settings>,
         metatron: Arc<Metatron>,
@@ -56,6 +55,8 @@ impl<W: Workbase> Stratifier<W> {
         );
 
         let bouncer = Bouncer::new(settings.disable_bouncer());
+
+        let client = metatron.new_client();
 
         Self {
             client,
