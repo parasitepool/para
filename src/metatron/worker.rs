@@ -22,7 +22,10 @@ impl Worker {
     }
 
     pub(crate) fn client_count(&self) -> usize {
-        self.clients.iter().filter(|client| client.is_active()).count()
+        self.clients
+            .iter()
+            .filter(|client| client.is_active())
+            .count()
     }
 
     pub(crate) fn hashrate_1m(&self) -> HashRate {
@@ -99,11 +102,17 @@ impl Worker {
     }
 
     pub(crate) fn best_ever(&self) -> Option<Difficulty> {
-        self.clients.iter().filter_map(|client| client.best_ever()).max()
+        self.clients
+            .iter()
+            .filter_map(|client| client.best_ever())
+            .max()
     }
 
     pub(crate) fn last_share(&self) -> Option<Instant> {
-        self.clients.iter().filter_map(|client| client.last_share()).max()
+        self.clients
+            .iter()
+            .filter_map(|client| client.last_share())
+            .max()
     }
 
     pub(crate) fn total_work(&self) -> f64 {
