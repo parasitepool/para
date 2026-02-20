@@ -19,12 +19,14 @@ impl User {
     }
 
     pub(crate) fn register_client(&self, workername: &str, client: Arc<Client>) {
-        let worker = self
-            .workers
-            .entry(workername.to_string())
-            .or_insert_with(|| Arc::new(Worker::new(workername.to_string())));
-
-        worker.register_client(client);
+        if let Some(worker) = self.workers.get(workername) {
+            worker.register_client(client);
+        } else {
+            self.workers
+                .entry(workername.to_string())
+                .or_insert_with(|| Arc::new(Worker::new(workername.to_string())))
+                .register_client(client);
+        }
     }
 
     pub(crate) fn client_count(&self) -> usize {

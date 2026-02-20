@@ -105,12 +105,14 @@ impl Metatron {
     }
 
     pub(crate) fn register_client(&self, address: Address, workername: &str, client: Arc<Client>) {
-        let user = self
-            .users
-            .entry(address.clone())
-            .or_insert_with(|| Arc::new(User::new(address)));
-
-        user.register_client(workername, client);
+        if let Some(user) = self.users.get(&address) {
+            user.register_client(workername, client);
+        } else {
+            self.users
+                .entry(address.clone())
+                .or_insert_with(|| Arc::new(User::new(address)))
+                .register_client(workername, client);
+        }
     }
 
     pub(crate) fn store_session(&self, session: SessionSnapshot) {
