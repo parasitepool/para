@@ -28,6 +28,7 @@ mod tests {
 
     fn test_snapshot(enonce1: &str) -> SessionSnapshot {
         let session = Arc::new(Session::new(
+            1,
             enonce1.parse().unwrap(),
             "127.0.0.1:1234".parse().unwrap(),
             "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc"

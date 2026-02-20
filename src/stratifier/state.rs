@@ -172,6 +172,7 @@ mod tests {
 
     fn test_session() -> Arc<Session> {
         Arc::new(Session::new(
+            1,
             test_enonce1(),
             "127.0.0.1:1234".parse().unwrap(),
             test_address(),

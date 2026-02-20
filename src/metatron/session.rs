@@ -1,24 +1,5 @@
 use super::*;
 
-static SESSION_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-struct Stats {
-    dsps_1m: DecayingAverage,
-    dsps_5m: DecayingAverage,
-    dsps_15m: DecayingAverage,
-    dsps_1hr: DecayingAverage,
-    dsps_6hr: DecayingAverage,
-    dsps_1d: DecayingAverage,
-    dsps_7d: DecayingAverage,
-    sps_1m: DecayingAverage,
-    sps_5m: DecayingAverage,
-    sps_15m: DecayingAverage,
-    sps_1hr: DecayingAverage,
-    best_ever: Option<Difficulty>,
-    last_share: Option<Instant>,
-    total_work: f64,
-}
-
 pub(crate) struct Session {
     id: u64,
     enonce1: Extranonce,
@@ -39,7 +20,9 @@ pub(crate) struct Session {
 }
 
 impl Session {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
+        id: u64,
         enonce1: Extranonce,
         socket_addr: SocketAddr,
         address: Address,
@@ -49,7 +32,7 @@ impl Session {
         version_mask: Option<Version>,
     ) -> Self {
         Self {
-            id: SESSION_COUNTER.fetch_add(1, Ordering::Relaxed),
+            id,
             enonce1,
             socket_addr,
             address,

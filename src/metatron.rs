@@ -1,6 +1,7 @@
-use {super::*, session::Session, user::User, worker::Worker};
+use {super::*, session::Session, stats::Stats, user::User, worker::Worker};
 
 pub(crate) mod session;
+mod stats;
 mod user;
 mod worker;
 
@@ -290,6 +291,7 @@ mod tests {
 
     fn test_session(enonce1: &str) -> Arc<Session> {
         Arc::new(Session::new(
+            1,
             enonce1.parse().unwrap(),
             "127.0.0.1:1234".parse().unwrap(),
             test_address(),

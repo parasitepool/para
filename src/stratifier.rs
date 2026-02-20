@@ -536,6 +536,7 @@ impl<W: Workbase> Stratifier<W> {
         let auth = self.state.authorized()?;
 
         let session = Arc::new(Session::new(
+            1, //TODO
             auth.enonce1.clone(),
             self.socket_addr,
             auth.address.clone(),
