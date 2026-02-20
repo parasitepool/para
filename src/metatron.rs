@@ -1,18 +1,12 @@
-use {
-    super::*,
-    client::{Client, ClientId},
-    user::User,
-    worker::Worker,
-};
+use {super::*, session::Session, user::User, worker::Worker};
 
-pub(crate) mod client;
+pub(crate) mod session;
 mod user;
 mod worker;
 
 pub(crate) struct Metatron {
     blocks: AtomicU64,
     started: Instant,
-    client_id_counter: AtomicU64,
     users: DashMap<Address, Arc<User>>,
     sessions: DashMap<Extranonce, SessionSnapshot>,
     extranonces: Extranonces,
@@ -25,7 +19,6 @@ impl Metatron {
         Self {
             blocks: AtomicU64::new(0),
             started: Instant::now(),
-            client_id_counter: AtomicU64::new(0),
             users: DashMap::new(),
             sessions: DashMap::new(),
             extranonces,
@@ -41,11 +34,6 @@ impl Metatron {
 
     pub(crate) fn endpoint(&self) -> &str {
         &self.endpoint
-    }
-
-    pub(crate) fn new_client(&self) -> Arc<Client> {
-        let client_id = ClientId(self.client_id_counter.fetch_add(1, Ordering::Relaxed));
-        Arc::new(Client::new(client_id))
     }
 
     pub(crate) fn spawn(self: Arc<Self>, cancel: CancellationToken, tasks: &mut JoinSet<()>) {
@@ -104,20 +92,25 @@ impl Metatron {
         &self.extranonces
     }
 
-    pub(crate) fn register_client(&self, address: Address, workername: &str, client: Arc<Client>) {
+    pub(crate) fn register_session(
+        &self,
+        address: Address,
+        workername: &str,
+        session: Arc<Session>,
+    ) {
         if let Some(user) = self.users.get(&address) {
-            user.register_client(workername, client);
+            user.register_session(workername, session);
         } else {
             self.users
                 .entry(address.clone())
                 .or_insert_with(|| Arc::new(User::new(address)))
-                .register_client(workername, client);
+                .register_session(workername, session);
         }
     }
 
-    pub(crate) fn store_session(&self, session: SessionSnapshot) {
-        info!("Storing session for enonce1 {}", session.enonce1);
-        self.sessions.insert(session.enonce1.clone(), session);
+    pub(crate) fn store_session(&self, snapshot: SessionSnapshot) {
+        info!("Storing session for enonce1 {}", snapshot.enonce1());
+        self.sessions.insert(snapshot.enonce1().clone(), snapshot);
     }
 
     pub(crate) fn take_session(&self, enonce1: &Extranonce) -> Option<SessionSnapshot> {
@@ -205,8 +198,8 @@ impl Metatron {
         self.blocks.load(Ordering::Relaxed)
     }
 
-    pub(crate) fn total_clients(&self) -> usize {
-        self.users.iter().map(|user| user.client_count()).sum()
+    pub(crate) fn total_sessions(&self) -> usize {
+        self.users.iter().map(|user| user.session_count()).sum()
     }
 
     pub(crate) fn disconnected(&self) -> usize {
@@ -261,10 +254,10 @@ impl Metatron {
 impl StatusLine for Metatron {
     fn status_line(&self) -> String {
         format!(
-            "sps={:.2}  hashrate={:.2}  clients={}  users={}  workers={}  accepted={}  rejected={}  blocks={}  uptime={}s",
+            "sps={:.2}  hashrate={:.2}  sessions={}  users={}  workers={}  accepted={}  rejected={}  blocks={}  uptime={}s",
             self.sps_1m(),
             self.hashrate_1m(),
-            self.total_clients(),
+            self.total_sessions(),
             self.total_users(),
             self.total_workers(),
             self.accepted(),
@@ -295,10 +288,22 @@ mod tests {
         Extranonces::Pool(PoolExtranonces::new(ENONCE1_SIZE, 8).unwrap())
     }
 
+    fn test_session(enonce1: &str) -> Arc<Session> {
+        Arc::new(Session::new(
+            enonce1.parse().unwrap(),
+            "127.0.0.1:1234".parse().unwrap(),
+            test_address(),
+            "foo".into(),
+            Username::new("tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.foo"),
+            "test/1.0".into(),
+            None,
+        ))
+    }
+
     #[test]
     fn new_metatron_starts_at_zero() {
         let metatron = Metatron::new(pool_extranonces(), String::new());
-        assert_eq!(metatron.total_clients(), 0);
+        assert_eq!(metatron.total_sessions(), 0);
         assert_eq!(metatron.accepted(), 0);
         assert_eq!(metatron.rejected(), 0);
         assert_eq!(metatron.total_blocks(), 0);
@@ -307,34 +312,34 @@ mod tests {
     }
 
     #[test]
-    fn client_count_tracks_active_clients() {
+    fn session_count_tracks_active_sessions() {
         let metatron = Metatron::new(pool_extranonces(), String::new());
         let addr = test_address();
-        assert_eq!(metatron.total_clients(), 0);
+        assert_eq!(metatron.total_sessions(), 0);
 
-        let c1 = metatron.new_client();
-        metatron.register_client(addr.clone(), "foo", c1.clone());
-        let c2 = metatron.new_client();
-        metatron.register_client(addr, "foo", c2.clone());
-        assert_eq!(metatron.total_clients(), 2);
+        let s1 = test_session("deadbeef");
+        metatron.register_session(addr.clone(), "foo", s1.clone());
+        let s2 = test_session("cafebabe");
+        metatron.register_session(addr, "foo", s2.clone());
+        assert_eq!(metatron.total_sessions(), 2);
 
-        c1.deactivate();
-        assert_eq!(metatron.total_clients(), 1);
+        s1.deactivate();
+        assert_eq!(metatron.total_sessions(), 1);
 
-        c2.deactivate();
-        assert_eq!(metatron.total_clients(), 0);
+        s2.deactivate();
+        assert_eq!(metatron.total_sessions(), 0);
     }
 
     #[test]
-    fn register_client_creates_user_and_worker() {
+    fn register_session_creates_user_and_worker() {
         let metatron = Metatron::new(pool_extranonces(), String::new());
         let addr = test_address();
 
-        metatron.register_client(addr.clone(), "rig1", metatron.new_client());
+        metatron.register_session(addr.clone(), "rig1", test_session("deadbeef"));
         assert_eq!(metatron.total_users(), 1);
         assert_eq!(metatron.total_workers(), 1);
 
-        metatron.register_client(addr.clone(), "rig2", metatron.new_client());
+        metatron.register_session(addr.clone(), "rig2", test_session("cafebabe"));
         assert_eq!(metatron.total_users(), 1);
         assert_eq!(metatron.total_workers(), 2);
     }
@@ -343,14 +348,14 @@ mod tests {
     fn record_accepted_updates_stats() {
         let metatron = Metatron::new(pool_extranonces(), String::new());
         let addr = test_address();
-        let client = metatron.new_client();
-        metatron.register_client(addr, "rig1", client.clone());
+        let session = test_session("deadbeef");
+        metatron.register_session(addr, "rig1", session.clone());
 
         let pool_diff = Difficulty::from(1000.0);
         let share_diff = Difficulty::from(1500.0);
 
-        client.record_accepted(pool_diff, share_diff);
-        client.record_accepted(pool_diff, share_diff);
+        session.record_accepted(pool_diff, share_diff);
+        session.record_accepted(pool_diff, share_diff);
 
         assert_eq!(metatron.accepted(), 2);
         assert_eq!(metatron.rejected(), 0);
@@ -360,11 +365,11 @@ mod tests {
     fn record_rejected_updates_stats() {
         let metatron = Metatron::new(pool_extranonces(), String::new());
         let addr = test_address();
-        let client = metatron.new_client();
-        metatron.register_client(addr, "rig1", client.clone());
+        let session = test_session("deadbeef");
+        metatron.register_session(addr, "rig1", session.clone());
 
-        client.record_rejected();
-        client.record_rejected();
+        session.record_rejected();
+        session.record_rejected();
 
         assert_eq!(metatron.accepted(), 0);
         assert_eq!(metatron.rejected(), 2);
@@ -466,19 +471,19 @@ mod tests {
 
         assert_eq!(metatron.total_work(), 0.0);
 
-        let foo_client = metatron.new_client();
-        metatron.register_client(addr.clone(), "foo", foo_client.clone());
-        foo_client.record_accepted(pool_diff, Difficulty::from(200.0));
-        foo_client.record_accepted(pool_diff, Difficulty::from(50.0));
+        let foo_session = test_session("deadbeef");
+        metatron.register_session(addr.clone(), "foo", foo_session.clone());
+        foo_session.record_accepted(pool_diff, Difficulty::from(200.0));
+        foo_session.record_accepted(pool_diff, Difficulty::from(50.0));
 
         assert!(
             (metatron.total_work() - 2.0 * pool_diff_f64).abs()
                 < f64::EPSILON * 2.0 * pool_diff_f64
         );
 
-        let bar_client = metatron.new_client();
-        metatron.register_client(addr, "bar", bar_client.clone());
-        bar_client.record_accepted(pool_diff, Difficulty::from(400.0));
+        let bar_session = test_session("cafebabe");
+        metatron.register_session(addr, "bar", bar_session.clone());
+        bar_session.record_accepted(pool_diff, Difficulty::from(400.0));
 
         assert!(
             (metatron.total_work() - 3.0 * pool_diff_f64).abs()

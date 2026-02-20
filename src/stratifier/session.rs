@@ -1,17 +1,20 @@
 use super::*;
 
-#[derive(Debug, Clone)]
 pub(crate) struct SessionSnapshot {
-    pub(crate) enonce1: Extranonce,
+    session: Arc<Session>,
     stored_at: Instant,
 }
 
 impl SessionSnapshot {
-    pub(crate) fn new(enonce1: Extranonce) -> Self {
+    pub(crate) fn new(session: Arc<Session>) -> Self {
         Self {
-            enonce1,
+            session,
             stored_at: Instant::now(),
         }
+    }
+
+    pub(crate) fn enonce1(&self) -> &Extranonce {
+        self.session.enonce1()
     }
 
     pub(crate) fn is_expired(&self, ttl: Duration) -> bool {
@@ -24,14 +27,26 @@ mod tests {
     use super::*;
 
     fn test_snapshot(enonce1: &str) -> SessionSnapshot {
-        SessionSnapshot::new(enonce1.parse().unwrap())
+        let session = Arc::new(Session::new(
+            enonce1.parse().unwrap(),
+            "127.0.0.1:1234".parse().unwrap(),
+            "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc"
+                .parse::<Address<NetworkUnchecked>>()
+                .unwrap()
+                .assume_checked(),
+            "foo".into(),
+            Username::new("tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.foo"),
+            "test/1.0".into(),
+            None,
+        ));
+        SessionSnapshot::new(session)
     }
 
     #[test]
     fn new_snapshot_has_expected_fields() {
         let snapshot = test_snapshot("deadbeef");
 
-        assert_eq!(snapshot.enonce1.to_string(), "deadbeef");
+        assert_eq!(snapshot.enonce1().to_string(), "deadbeef");
     }
 
     #[test]

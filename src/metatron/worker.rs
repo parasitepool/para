@@ -2,120 +2,123 @@ use {super::*, dashmap::DashMap};
 
 pub(crate) struct Worker {
     workername: String,
-    clients: DashMap<ClientId, Arc<Client>>,
+    sessions: DashMap<u64, Arc<Session>>,
 }
 
 impl Worker {
     pub(crate) fn new(workername: String) -> Self {
         Self {
             workername,
-            clients: DashMap::new(),
+            sessions: DashMap::new(),
         }
     }
 
-    pub(crate) fn register_client(&self, client: Arc<Client>) {
-        self.clients.insert(client.client_id(), client);
+    pub(crate) fn register_session(&self, session: Arc<Session>) {
+        self.sessions.insert(session.id(), session);
     }
 
     pub(crate) fn workername(&self) -> &str {
         &self.workername
     }
 
-    pub(crate) fn client_count(&self) -> usize {
-        self.clients
+    pub(crate) fn session_count(&self) -> usize {
+        self.sessions
             .iter()
-            .filter(|client| client.is_active())
+            .filter(|session| session.is_active())
             .count()
     }
 
     pub(crate) fn hashrate_1m(&self) -> HashRate {
-        self.clients
+        self.sessions
             .iter()
-            .map(|client| client.hashrate_1m())
+            .map(|session| session.hashrate_1m())
             .fold(HashRate::ZERO, |acc, r| acc + r)
     }
 
     pub(crate) fn hashrate_5m(&self) -> HashRate {
-        self.clients
+        self.sessions
             .iter()
-            .map(|client| client.hashrate_5m())
+            .map(|session| session.hashrate_5m())
             .fold(HashRate::ZERO, |acc, r| acc + r)
     }
 
     pub(crate) fn hashrate_15m(&self) -> HashRate {
-        self.clients
+        self.sessions
             .iter()
-            .map(|client| client.hashrate_15m())
+            .map(|session| session.hashrate_15m())
             .fold(HashRate::ZERO, |acc, r| acc + r)
     }
 
     pub(crate) fn hashrate_1hr(&self) -> HashRate {
-        self.clients
+        self.sessions
             .iter()
-            .map(|client| client.hashrate_1hr())
+            .map(|session| session.hashrate_1hr())
             .fold(HashRate::ZERO, |acc, r| acc + r)
     }
 
     pub(crate) fn hashrate_6hr(&self) -> HashRate {
-        self.clients
+        self.sessions
             .iter()
-            .map(|client| client.hashrate_6hr())
+            .map(|session| session.hashrate_6hr())
             .fold(HashRate::ZERO, |acc, r| acc + r)
     }
 
     pub(crate) fn hashrate_1d(&self) -> HashRate {
-        self.clients
+        self.sessions
             .iter()
-            .map(|client| client.hashrate_1d())
+            .map(|session| session.hashrate_1d())
             .fold(HashRate::ZERO, |acc, r| acc + r)
     }
 
     pub(crate) fn hashrate_7d(&self) -> HashRate {
-        self.clients
+        self.sessions
             .iter()
-            .map(|client| client.hashrate_7d())
+            .map(|session| session.hashrate_7d())
             .fold(HashRate::ZERO, |acc, r| acc + r)
     }
 
     pub(crate) fn sps_1m(&self) -> f64 {
-        self.clients.iter().map(|client| client.sps_1m()).sum()
+        self.sessions.iter().map(|session| session.sps_1m()).sum()
     }
 
     pub(crate) fn sps_5m(&self) -> f64 {
-        self.clients.iter().map(|client| client.sps_5m()).sum()
+        self.sessions.iter().map(|session| session.sps_5m()).sum()
     }
 
     pub(crate) fn sps_15m(&self) -> f64 {
-        self.clients.iter().map(|client| client.sps_15m()).sum()
+        self.sessions.iter().map(|session| session.sps_15m()).sum()
     }
 
     pub(crate) fn sps_1hr(&self) -> f64 {
-        self.clients.iter().map(|client| client.sps_1hr()).sum()
+        self.sessions.iter().map(|session| session.sps_1hr()).sum()
     }
 
     pub(crate) fn accepted(&self) -> u64 {
-        self.clients.iter().map(|client| client.accepted()).sum()
+        self.sessions.iter().map(|session| session.accepted()).sum()
     }
 
     pub(crate) fn rejected(&self) -> u64 {
-        self.clients.iter().map(|client| client.rejected()).sum()
+        self.sessions.iter().map(|session| session.rejected()).sum()
     }
 
     pub(crate) fn best_ever(&self) -> Option<Difficulty> {
-        self.clients
+        self.sessions
             .iter()
-            .filter_map(|client| client.best_ever())
+            .filter_map(|session| session.best_ever())
             .max()
     }
 
     pub(crate) fn last_share(&self) -> Option<Instant> {
-        self.clients
+        self.sessions
             .iter()
-            .filter_map(|client| client.last_share())
+            .filter_map(|session| session.last_share())
             .max()
     }
 
     pub(crate) fn total_work(&self) -> f64 {
-        self.clients.iter().map(|client| client.total_work()).sum()
+        self.sessions
+            .iter()
+            .map(|session| session.total_work())
+            .sum()
     }
 }

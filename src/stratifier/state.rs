@@ -1,28 +1,27 @@
 use super::*;
 
 #[derive(Debug, Clone)]
-pub(crate) struct Session {
-    pub(crate) enonce1: Extranonce,
-    #[allow(dead_code)]
-    pub(crate) user_agent: String,
-    pub(crate) version_mask: Option<Version>,
-    pub(crate) username: Username,
-    pub(crate) address: Address,
-    pub(crate) workername: String,
-}
-
-#[derive(Debug, Clone)]
 pub(crate) struct Subscription {
     pub(crate) enonce1: Extranonce,
     pub(crate) user_agent: String,
     pub(crate) version_mask: Option<Version>,
 }
 
-#[derive(Debug, Clone)]
+pub(crate) struct Authorization {
+    pub(crate) enonce1: Extranonce,
+    pub(crate) address: Address,
+    pub(crate) workername: String,
+    pub(crate) username: Username,
+    pub(crate) user_agent: String,
+    pub(crate) version_mask: Option<Version>,
+}
+
+#[derive(Clone)]
 pub(crate) enum State {
     Init,
     Configured { version_mask: Version },
     Subscribed(Subscription),
+    Authorized(Arc<Authorization>),
     Working(Arc<Session>),
     Dropped,
 }
@@ -72,25 +71,38 @@ impl State {
         }
     }
 
-    pub(crate) fn authorize(
-        &mut self,
-        address: Address,
-        workername: String,
-        username: Username,
-    ) -> bool {
+    pub(crate) fn authorize(&mut self, auth: Arc<Authorization>) -> bool {
         match self {
-            State::Subscribed(subscription) => {
-                *self = State::Working(Arc::new(Session {
-                    enonce1: subscription.enonce1.clone(),
-                    user_agent: subscription.user_agent.clone(),
-                    version_mask: subscription.version_mask,
-                    username,
-                    address,
-                    workername,
-                }));
+            State::Subscribed(_) => {
+                *self = State::Authorized(auth);
                 true
             }
             _ => false,
+        }
+    }
+
+    pub(crate) fn authorized(&self) -> Option<Arc<Authorization>> {
+        match self {
+            State::Authorized(auth) => Some(auth.clone()),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn promote(&mut self, session: Arc<Session>) -> bool {
+        match self {
+            State::Authorized(_) => {
+                *self = State::Working(session);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn identity(&self) -> Option<(Extranonce, Address)> {
+        match self {
+            State::Authorized(auth) => Some((auth.enonce1.clone(), auth.address.clone())),
+            State::Working(session) => Some((session.enonce1().clone(), session.address().clone())),
+            _ => None,
         }
     }
 
@@ -99,7 +111,8 @@ impl State {
             State::Init | State::Dropped => None,
             State::Configured { version_mask } => Some(*version_mask),
             State::Subscribed(subscription) => subscription.version_mask,
-            State::Working(session) => session.version_mask,
+            State::Authorized(auth) => auth.version_mask,
+            State::Working(session) => session.version_mask(),
         }
     }
 
@@ -124,6 +137,7 @@ impl Display for State {
             State::Init => write!(f, "Init"),
             State::Configured { .. } => write!(f, "Configured"),
             State::Subscribed { .. } => write!(f, "Subscribed"),
+            State::Authorized { .. } => write!(f, "Authorized"),
             State::Working { .. } => write!(f, "Working"),
             State::Dropped => write!(f, "Dropped"),
         }
@@ -145,8 +159,27 @@ mod tests {
             .assume_checked()
     }
 
-    fn test_username() -> Username {
-        Username::new("tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker1")
+    fn test_authorization() -> Arc<Authorization> {
+        Arc::new(Authorization {
+            enonce1: test_enonce1(),
+            address: test_address(),
+            workername: "bar".into(),
+            username: Username::new("tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.bar"),
+            user_agent: "foo".into(),
+            version_mask: None,
+        })
+    }
+
+    fn test_session() -> Arc<Session> {
+        Arc::new(Session::new(
+            test_enonce1(),
+            "127.0.0.1:1234".parse().unwrap(),
+            test_address(),
+            "bar".into(),
+            Username::new("tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.bar"),
+            "foo".into(),
+            None,
+        ))
     }
 
     #[test]
@@ -197,61 +230,96 @@ mod tests {
     }
 
     #[test]
-    fn authorize_transitions_to_working() {
+    fn authorize_transitions_to_authorized() {
         let mut state = State::new();
 
         assert!(state.subscribe(test_enonce1(), "foo".into()));
-        assert!(state.authorize(test_address(), "bar".into(), test_username()));
+        assert!(state.authorize(test_authorization()));
 
         assert!(state.subscribed().is_none());
+        assert!(state.working().is_none());
 
-        let session = state.working().unwrap();
-        assert_eq!(session.address, test_address());
-        assert_eq!(session.workername, "bar");
+        let auth = state.authorized().unwrap();
+        assert_eq!(auth.address, test_address());
+        assert_eq!(auth.workername, "bar");
     }
 
     #[test]
     fn authorize_in_init_fails() {
         let mut state = State::new();
 
-        assert!(!state.authorize(test_address(), "worker1".into(), test_username()));
+        assert!(!state.authorize(test_authorization()));
         assert!(state.can_subscribe());
     }
 
     #[test]
-    fn authorize_in_working_fails() {
+    fn authorize_in_authorized_fails() {
         let mut state = State::new();
 
         assert!(state.subscribe(test_enonce1(), "test/1.0".into()));
 
-        assert!(state.authorize(test_address(), "worker1".into(), test_username()));
-        assert!(!state.authorize(test_address(), "worker2".into(), test_username()));
+        assert!(state.authorize(test_authorization()));
+        assert!(!state.authorize(test_authorization()));
+        assert!(state.authorized().is_some());
+    }
+
+    #[test]
+    fn promote_transitions_to_working() {
+        let mut state = State::new();
+
+        assert!(state.subscribe(test_enonce1(), "foo".into()));
+        assert!(state.authorize(test_authorization()));
+        assert!(state.promote(test_session()));
+
+        assert!(state.authorized().is_none());
         assert!(state.working().is_some());
     }
 
     #[test]
-    fn resubscribe_from_working_is_rejected() {
+    fn resubscribe_from_authorized_is_rejected() {
         let mut state = State::new();
 
         assert!(state.subscribe(test_enonce1(), "test/1.0".into()));
-        assert!(state.authorize(test_address(), "worker1".into(), test_username()));
-
-        assert!(state.working().is_some());
+        assert!(state.authorize(test_authorization()));
 
         let new_enonce1: Extranonce = "cafebabe".parse().unwrap();
         assert!(!state.subscribe(new_enonce1.clone(), "test/2.0".into()));
 
-        assert!(state.working().is_some());
+        assert!(state.authorized().is_some());
     }
 
     #[test]
-    fn configure_fails_in_working() {
+    fn configure_fails_in_authorized() {
         let mut state = State::new();
         let mask = Version::from(0x1fffe000);
 
         assert!(state.subscribe(test_enonce1(), "foo".into()));
-        assert!(state.authorize(test_address(), "bar".into(), test_username()));
+        assert!(state.authorize(test_authorization()));
         assert!(!state.configure(mask));
+    }
+
+    #[test]
+    fn identity_returns_none_before_authorize() {
+        let state = State::new();
+        assert!(state.identity().is_none());
+    }
+
+    #[test]
+    fn identity_works_in_authorized_and_working() {
+        let mut state = State::new();
+
+        assert!(state.subscribe(test_enonce1(), "foo".into()));
+        assert!(state.authorize(test_authorization()));
+
+        let (enonce1, address) = state.identity().unwrap();
+        assert_eq!(enonce1, test_enonce1());
+        assert_eq!(address, test_address());
+
+        assert!(state.promote(test_session()));
+
+        let (enonce1, address) = state.identity().unwrap();
+        assert_eq!(enonce1, test_enonce1());
+        assert_eq!(address, test_address());
     }
 
     #[test]
@@ -265,7 +333,10 @@ mod tests {
         assert!(state.subscribe(test_enonce1(), "test/1.0".into()));
         assert_eq!(state.to_string(), "Subscribed");
 
-        assert!(state.authorize(test_address(), "worker1".into(), test_username()));
+        assert!(state.authorize(test_authorization()));
+        assert_eq!(state.to_string(), "Authorized");
+
+        assert!(state.promote(test_session()));
         assert_eq!(state.to_string(), "Working");
     }
 }

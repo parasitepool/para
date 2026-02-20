@@ -1,7 +1,6 @@
 use super::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct ClientId(pub(crate) u64);
+static SESSION_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 struct Stats {
     dsps_1m: DecayingAverage,
@@ -20,18 +19,45 @@ struct Stats {
     total_work: f64,
 }
 
-pub(crate) struct Client {
-    client_id: ClientId,
+pub(crate) struct Session {
+    id: u64,
+    enonce1: Extranonce,
+    #[allow(dead_code)]
+    socket_addr: SocketAddr,
+    address: Address,
+    workername: String,
+    username: Username,
+    #[allow(dead_code)]
+    user_agent: String,
+    version_mask: Option<Version>,
+    #[allow(dead_code)]
+    connected_at: Instant,
     active: AtomicBool,
     stats: Mutex<Stats>,
     accepted: AtomicU64,
     rejected: AtomicU64,
 }
 
-impl Client {
-    pub(crate) fn new(client_id: ClientId) -> Self {
+impl Session {
+    pub(crate) fn new(
+        enonce1: Extranonce,
+        socket_addr: SocketAddr,
+        address: Address,
+        workername: String,
+        username: Username,
+        user_agent: String,
+        version_mask: Option<Version>,
+    ) -> Self {
         Self {
-            client_id,
+            id: SESSION_COUNTER.fetch_add(1, Ordering::Relaxed),
+            enonce1,
+            socket_addr,
+            address,
+            workername,
+            username,
+            user_agent,
+            version_mask,
+            connected_at: Instant::now(),
             active: AtomicBool::new(true),
             stats: Mutex::new(Stats {
                 dsps_1m: DecayingAverage::new(Duration::from_mins(1)),
@@ -54,8 +80,43 @@ impl Client {
         }
     }
 
-    pub(crate) fn client_id(&self) -> ClientId {
-        self.client_id
+    pub(crate) fn id(&self) -> u64 {
+        self.id
+    }
+
+    pub(crate) fn enonce1(&self) -> &Extranonce {
+        &self.enonce1
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn socket_addr(&self) -> SocketAddr {
+        self.socket_addr
+    }
+
+    pub(crate) fn address(&self) -> &Address {
+        &self.address
+    }
+
+    pub(crate) fn workername(&self) -> &str {
+        &self.workername
+    }
+
+    pub(crate) fn username(&self) -> &Username {
+        &self.username
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn user_agent(&self) -> &str {
+        &self.user_agent
+    }
+
+    pub(crate) fn version_mask(&self) -> Option<Version> {
+        self.version_mask
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn connected_at(&self) -> Instant {
+        self.connected_at
     }
 
     pub(crate) fn is_active(&self) -> bool {
