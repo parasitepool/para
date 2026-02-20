@@ -73,7 +73,7 @@ impl Worker {
     pub(crate) fn hashrate_7d(&self) -> HashRate {
         self.clients
             .iter()
-            .map(|cient| cient.hashrate_7d())
+            .map(|client| client.hashrate_7d())
             .fold(HashRate::ZERO, |acc, r| acc + r)
     }
 
