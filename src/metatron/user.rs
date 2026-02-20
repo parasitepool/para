@@ -28,7 +28,7 @@ impl User {
     }
 
     pub(crate) fn client_count(&self) -> usize {
-        self.workers.iter().map(|w| w.client_count()).sum()
+        self.workers.iter().map(|worker| worker.client_count()).sum()
     }
 
     pub(crate) fn worker_count(&self) -> usize {
