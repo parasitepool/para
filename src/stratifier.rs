@@ -13,7 +13,7 @@ mod session;
 mod state;
 
 pub(crate) struct Stratifier<W: Workbase> {
-    client_id: ClientId,
+    client: Arc<Client>,
     state: State,
     socket_addr: SocketAddr,
     settings: Arc<Settings>,
@@ -27,14 +27,12 @@ pub(crate) struct Stratifier<W: Workbase> {
     vardiff: Vardiff,
     bouncer: Bouncer,
     event_tx: Option<mpsc::Sender<Event>>,
-    client: Option<Arc<Client>>,
-    worker: Option<Arc<Worker>>,
 }
 
 impl<W: Workbase> Stratifier<W> {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        client_id: ClientId,
+        client: Arc<Client>,
         socket_addr: SocketAddr,
         settings: Arc<Settings>,
         metatron: Arc<Metatron>,
@@ -60,7 +58,7 @@ impl<W: Workbase> Stratifier<W> {
         let bouncer = Bouncer::new(settings.disable_bouncer());
 
         Self {
-            client_id,
+            client,
             state: State::new(),
             socket_addr,
             settings,
@@ -74,8 +72,6 @@ impl<W: Workbase> Stratifier<W> {
             vardiff,
             bouncer,
             event_tx,
-            client: None,
-            worker: None,
         }
     }
 
@@ -578,15 +574,13 @@ impl<W: Workbase> Stratifier<W> {
         let worker = self
             .metatron
             .get_or_create_worker(address.clone(), &workername);
-        let client = worker.register_client(self.client_id);
+        worker.register_client(self.client.clone());
         debug!(
             "Registered client {} on {} (clients={})",
-            client.client_id(),
+            self.client.client_id(),
             self.socket_addr,
             worker.client_count()
         );
-        self.worker = Some(worker);
-        self.client = Some(client);
 
         let workbase = self.workbase_rx.borrow().clone();
 
@@ -645,7 +639,7 @@ impl<W: Workbase> Stratifier<W> {
         submit: Submit,
         session: Arc<Session>,
     ) -> Result<Consequence> {
-        let client = self.client.clone().unwrap();
+        let client = self.client.clone();
 
         if submit.username != session.username {
             let job_height = self.workbase_rx.borrow().height();
@@ -1136,9 +1130,7 @@ impl<W: Workbase> Drop for Stratifier<W> {
                 .store_session(SessionSnapshot::new(session.enonce1.clone()));
         }
 
-        if let Some(ref client) = self.client {
-            client.deactivate();
-        }
+        self.client.deactivate();
 
         debug!("Shutting down stratifier for {}", self.socket_addr,);
     }
