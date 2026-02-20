@@ -204,7 +204,7 @@ impl Metatron {
     }
 
     pub(crate) fn total_clients(&self) -> usize {
-        self.users.iter().map(|u| u.client_count()).sum()
+        self.users.iter().map(|user| user.client_count()).sum()
     }
 
     pub(crate) fn disconnected(&self) -> usize {
@@ -232,11 +232,11 @@ impl Metatron {
     }
 
     pub(crate) fn total_workers(&self) -> usize {
-        self.users.iter().map(|u| u.worker_count()).sum()
+        self.users.iter().map(|user| user.worker_count()).sum()
     }
 
     pub(crate) fn total_work(&self) -> f64 {
-        self.users.iter().map(|u| u.total_work()).sum()
+        self.users.iter().map(|user| user.total_work()).sum()
     }
 
     pub(crate) fn last_share(&self) -> Option<Instant> {
