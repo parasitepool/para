@@ -105,13 +105,13 @@ impl Metatron {
         &self.extranonces
     }
 
-    pub(crate) fn get_or_create_worker(&self, address: Address, workername: &str) -> Arc<Worker> {
+    pub(crate) fn register_client(&self, address: Address, workername: &str, client: Arc<Client>) {
         let user = self
             .users
             .entry(address.clone())
             .or_insert_with(|| Arc::new(User::new(address)));
 
-        user.get_or_create_worker(workername)
+        user.register_client(workername, client);
     }
 
     pub(crate) fn store_session(&self, session: SessionSnapshot) {
@@ -311,11 +311,10 @@ mod tests {
         let addr = test_address();
         assert_eq!(metatron.total_clients(), 0);
 
-        let worker = metatron.get_or_create_worker(addr, "foo");
         let c1 = metatron.new_client();
-        worker.register_client(c1.clone());
+        metatron.register_client(addr.clone(), "foo", c1.clone());
         let c2 = metatron.new_client();
-        worker.register_client(c2.clone());
+        metatron.register_client(addr, "foo", c2.clone());
         assert_eq!(metatron.total_clients(), 2);
 
         c1.deactivate();
@@ -326,17 +325,15 @@ mod tests {
     }
 
     #[test]
-    fn get_or_create_worker_creates_user_and_worker() {
+    fn register_client_creates_user_and_worker() {
         let metatron = Metatron::new(pool_extranonces(), String::new());
         let addr = test_address();
 
-        let worker = metatron.get_or_create_worker(addr.clone(), "rig1");
-        assert_eq!(worker.workername(), "rig1");
+        metatron.register_client(addr.clone(), "rig1", metatron.new_client());
         assert_eq!(metatron.total_users(), 1);
         assert_eq!(metatron.total_workers(), 1);
 
-        let worker2 = metatron.get_or_create_worker(addr.clone(), "rig2");
-        assert_eq!(worker2.workername(), "rig2");
+        metatron.register_client(addr.clone(), "rig2", metatron.new_client());
         assert_eq!(metatron.total_users(), 1);
         assert_eq!(metatron.total_workers(), 2);
     }
@@ -345,9 +342,8 @@ mod tests {
     fn record_accepted_updates_stats() {
         let metatron = Metatron::new(pool_extranonces(), String::new());
         let addr = test_address();
-        let worker = metatron.get_or_create_worker(addr, "rig1");
         let client = metatron.new_client();
-        worker.register_client(client.clone());
+        metatron.register_client(addr, "rig1", client.clone());
 
         let pool_diff = Difficulty::from(1000.0);
         let share_diff = Difficulty::from(1500.0);
@@ -363,9 +359,8 @@ mod tests {
     fn record_rejected_updates_stats() {
         let metatron = Metatron::new(pool_extranonces(), String::new());
         let addr = test_address();
-        let worker = metatron.get_or_create_worker(addr, "rig1");
         let client = metatron.new_client();
-        worker.register_client(client.clone());
+        metatron.register_client(addr, "rig1", client.clone());
 
         client.record_rejected();
         client.record_rejected();
@@ -470,26 +465,20 @@ mod tests {
 
         assert_eq!(metatron.total_work(), 0.0);
 
-        let foo = metatron.get_or_create_worker(addr.clone(), "foo");
         let foo_client = metatron.new_client();
-        foo.register_client(foo_client.clone());
+        metatron.register_client(addr.clone(), "foo", foo_client.clone());
         foo_client.record_accepted(pool_diff, Difficulty::from(200.0));
         foo_client.record_accepted(pool_diff, Difficulty::from(50.0));
 
-        assert!(
-            (foo.total_work() - 2.0 * pool_diff_f64).abs() < f64::EPSILON * 2.0 * pool_diff_f64
-        );
         assert!(
             (metatron.total_work() - 2.0 * pool_diff_f64).abs()
                 < f64::EPSILON * 2.0 * pool_diff_f64
         );
 
-        let bar = metatron.get_or_create_worker(addr, "bar");
         let bar_client = metatron.new_client();
-        bar.register_client(bar_client.clone());
+        metatron.register_client(addr, "bar", bar_client.clone());
         bar_client.record_accepted(pool_diff, Difficulty::from(400.0));
 
-        assert!((bar.total_work() - pool_diff_f64).abs() < f64::EPSILON * pool_diff_f64);
         assert!(
             (metatron.total_work() - 3.0 * pool_diff_f64).abs()
                 < f64::EPSILON * 3.0 * pool_diff_f64

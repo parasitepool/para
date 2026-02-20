@@ -13,7 +13,7 @@ impl Worker {
         }
     }
 
-    pub(crate) fn register_client(&self, client: Arc<client::Client>) {
+    pub(crate) fn register_client(&self, client: Arc<Client>) {
         self.clients.insert(client.client_id(), client);
     }
 

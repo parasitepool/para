@@ -557,7 +557,7 @@ impl<W: Workbase> Stratifier<W> {
 
         if !self
             .state
-            .authorize(address.clone(), workername.clone(), authorize.username)
+            .authorize(address.clone(), workername, authorize.username)
         {
             self.send_error(
                 id.clone(),
@@ -631,10 +631,8 @@ impl<W: Workbase> Stratifier<W> {
     ) -> Result<Consequence> {
         let client = self.client.clone();
 
-        let worker = self
-            .metatron
-            .get_or_create_worker(session.address.clone(), &session.workername);
-        worker.register_client(client.clone());
+        self.metatron
+            .register_client(session.address.clone(), &session.workername, client.clone());
 
         if submit.username != session.username {
             let job_height = self.workbase_rx.borrow().height();
