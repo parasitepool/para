@@ -13,12 +13,11 @@ pub(crate) use {
 pub(crate) struct Metatron {
     blocks: AtomicU64,
     started: Instant,
-    connections: AtomicU64,
     client_id_counter: AtomicU64,
     users: DashMap<Address, Arc<User>>,
     sessions: DashMap<Extranonce, SessionSnapshot>,
     extranonces: Extranonces,
-    counter: AtomicU64,
+    enonce_counter: AtomicU64,
     endpoint: String,
 }
 
@@ -27,12 +26,11 @@ impl Metatron {
         Self {
             blocks: AtomicU64::new(0),
             started: Instant::now(),
-            connections: AtomicU64::new(0),
             client_id_counter: AtomicU64::new(0),
             users: DashMap::new(),
             sessions: DashMap::new(),
             extranonces,
-            counter: AtomicU64::new(
+            enonce_counter: AtomicU64::new(
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
@@ -77,7 +75,7 @@ impl Metatron {
     }
 
     pub(crate) fn next_enonce1(&self) -> Extranonce {
-        let counter = self.counter.fetch_add(1, Ordering::Relaxed);
+        let counter = self.enonce_counter.fetch_add(1, Ordering::Relaxed);
 
         match &self.extranonces {
             Extranonces::Pool(pool) => {
@@ -126,14 +124,6 @@ impl Metatron {
 
     pub(crate) fn add_block(&self) {
         self.blocks.fetch_add(1, Ordering::Relaxed);
-    }
-
-    pub(crate) fn add_connection(&self) {
-        self.connections.fetch_add(1, Ordering::Relaxed);
-    }
-
-    pub(crate) fn sub_connection(&self) {
-        self.connections.fetch_sub(1, Ordering::Relaxed);
     }
 
     pub(crate) fn hashrate_1m(&self) -> HashRate {
@@ -213,8 +203,8 @@ impl Metatron {
         self.blocks.load(Ordering::Relaxed)
     }
 
-    pub(crate) fn total_connections(&self) -> u64 {
-        self.connections.load(Ordering::Relaxed)
+    pub(crate) fn total_clients(&self) -> usize {
+        self.users.iter().map(|u| u.client_count()).sum()
     }
 
     pub(crate) fn disconnected(&self) -> usize {
@@ -269,10 +259,10 @@ impl Metatron {
 impl StatusLine for Metatron {
     fn status_line(&self) -> String {
         format!(
-            "sps={:.2}  hashrate={:.2}  connections={}  users={}  workers={}  accepted={}  rejected={}  blocks={}  uptime={}s",
+            "sps={:.2}  hashrate={:.2}  clients={}  users={}  workers={}  accepted={}  rejected={}  blocks={}  uptime={}s",
             self.sps_1m(),
             self.hashrate_1m(),
-            self.total_connections(),
+            self.total_clients(),
             self.total_users(),
             self.total_workers(),
             self.accepted(),
@@ -306,7 +296,7 @@ mod tests {
     #[test]
     fn new_metatron_starts_at_zero() {
         let metatron = Metatron::new(pool_extranonces(), String::new());
-        assert_eq!(metatron.total_connections(), 0);
+        assert_eq!(metatron.total_clients(), 0);
         assert_eq!(metatron.accepted(), 0);
         assert_eq!(metatron.rejected(), 0);
         assert_eq!(metatron.total_blocks(), 0);
@@ -315,16 +305,21 @@ mod tests {
     }
 
     #[test]
-    fn connection_count_increments_and_decrements() {
+    fn client_count_tracks_active_clients() {
         let metatron = Metatron::new(pool_extranonces(), String::new());
-        assert_eq!(metatron.total_connections(), 0);
+        let addr = test_address();
+        assert_eq!(metatron.total_clients(), 0);
 
-        metatron.add_connection();
-        metatron.add_connection();
-        assert_eq!(metatron.total_connections(), 2);
+        let worker = metatron.get_or_create_worker(addr, "foo");
+        let c1 = worker.register_client(metatron.next_client_id());
+        let c2 = worker.register_client(metatron.next_client_id());
+        assert_eq!(metatron.total_clients(), 2);
 
-        metatron.sub_connection();
-        assert_eq!(metatron.total_connections(), 1);
+        c1.deactivate();
+        assert_eq!(metatron.total_clients(), 1);
+
+        c2.deactivate();
+        assert_eq!(metatron.total_clients(), 0);
     }
 
     #[test]

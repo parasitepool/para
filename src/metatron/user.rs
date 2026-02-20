@@ -25,6 +25,10 @@ impl User {
             .clone()
     }
 
+    pub(crate) fn client_count(&self) -> usize {
+        self.workers.iter().map(|w| w.client_count()).sum()
+    }
+
     pub(crate) fn worker_count(&self) -> usize {
         self.workers.len()
     }

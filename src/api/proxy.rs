@@ -158,7 +158,7 @@ async fn status(State(metrics): State<Arc<Metrics>>) -> Json<ProxyStatus> {
         sps_1hr: metrics.metatron.sps_1hr(),
         users: metrics.metatron.total_users(),
         workers: metrics.metatron.total_workers(),
-        connections: metrics.metatron.total_connections(),
+        clients: metrics.metatron.total_clients(),
         disconnected: metrics.metatron.disconnected(),
         idle: metrics.metatron.idle(),
         accepted: metrics.metatron.accepted(),
@@ -225,11 +225,13 @@ async fn user(
         best_ever: user.best_ever(),
         last_share: user.last_share().map(|time| time.elapsed().as_secs()),
         total_work: user.total_work(),
+        clients: user.client_count(),
         authorized: user.authorized,
         workers: user
             .workers()
             .map(|worker| WorkerDetail {
                 name: worker.workername().to_string(),
+                clients: worker.client_count(),
                 hashrate_1m: worker.hashrate_1m(),
                 hashrate_5m: worker.hashrate_5m(),
                 hashrate_15m: worker.hashrate_15m(),

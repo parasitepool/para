@@ -2,7 +2,7 @@ use {super::*, dashmap::DashMap};
 
 pub(crate) struct Worker {
     workername: String,
-    clients: DashMap<ClientId, Arc<client::Client>>,
+    clients: DashMap<ClientId, Arc<Client>>,
 }
 
 impl Worker {
@@ -23,8 +23,8 @@ impl Worker {
         &self.workername
     }
 
-    pub(crate) fn connection_count(&self) -> usize {
-        self.clients.len()
+    pub(crate) fn client_count(&self) -> usize {
+        self.clients.iter().filter(|c| c.is_active()).count()
     }
 
     pub(crate) fn hashrate_1m(&self) -> HashRate {

@@ -28,6 +28,7 @@ struct Stats {
 
 pub(crate) struct Client {
     client_id: ClientId,
+    active: AtomicBool,
     stats: Mutex<Stats>,
     accepted: AtomicU64,
     rejected: AtomicU64,
@@ -37,6 +38,7 @@ impl Client {
     pub(crate) fn new(client_id: ClientId) -> Self {
         Self {
             client_id,
+            active: AtomicBool::new(true),
             stats: Mutex::new(Stats {
                 dsps_1m: DecayingAverage::new(Duration::from_mins(1)),
                 dsps_5m: DecayingAverage::new(Duration::from_mins(5)),
@@ -60,6 +62,14 @@ impl Client {
 
     pub(crate) fn client_id(&self) -> ClientId {
         self.client_id
+    }
+
+    pub(crate) fn is_active(&self) -> bool {
+        self.active.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn deactivate(&self) {
+        self.active.store(false, Ordering::Relaxed);
     }
 
     pub(crate) fn record_accepted(&self, pool_diff: Difficulty, share_diff: Difficulty) {

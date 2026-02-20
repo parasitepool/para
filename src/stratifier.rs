@@ -59,8 +59,6 @@ impl<W: Workbase> Stratifier<W> {
 
         let bouncer = Bouncer::new(settings.disable_bouncer());
 
-        metatron.add_connection();
-
         Self {
             client_id,
             state: State::new(),
@@ -582,10 +580,10 @@ impl<W: Workbase> Stratifier<W> {
             .get_or_create_worker(address.clone(), &workername);
         let client = worker.register_client(self.client_id);
         debug!(
-            "Registered client {} on {} (connections={})",
+            "Registered client {} on {} (clients={})",
             client.client_id(),
             self.socket_addr,
-            worker.connection_count()
+            worker.client_count()
         );
         self.worker = Some(worker);
         self.client = Some(client);
@@ -1138,7 +1136,9 @@ impl<W: Workbase> Drop for Stratifier<W> {
                 .store_session(SessionSnapshot::new(session.enonce1.clone()));
         }
 
-        self.metatron.sub_connection();
+        if let Some(ref client) = self.client {
+            client.deactivate();
+        }
 
         debug!("Shutting down stratifier for {}", self.socket_addr,);
     }
