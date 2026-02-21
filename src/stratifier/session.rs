@@ -30,14 +30,12 @@ mod tests {
         let session = Arc::new(Session::new(
             1,
             enonce1.parse().unwrap(),
-            "127.0.0.1:1234".parse().unwrap(),
             "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc"
                 .parse::<Address<NetworkUnchecked>>()
                 .unwrap()
                 .assume_checked(),
             "foo".into(),
             Username::new("tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.foo"),
-            "test/1.0".into(),
             None,
         ));
         SessionSnapshot::new(session)

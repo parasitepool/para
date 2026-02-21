@@ -12,6 +12,7 @@ pub(crate) struct Metatron {
     sessions: DashMap<Extranonce, SessionSnapshot>,
     extranonces: Extranonces,
     enonce_counter: AtomicU64,
+    session_id_counter: AtomicU64,
     endpoint: String,
 }
 
@@ -29,6 +30,7 @@ impl Metatron {
                     .unwrap_or_default()
                     .as_millis() as u64,
             ),
+            session_id_counter: AtomicU64::new(0),
             endpoint,
         }
     }
@@ -91,6 +93,11 @@ impl Metatron {
 
     pub(crate) fn extranonces(&self) -> &Extranonces {
         &self.extranonces
+    }
+
+    pub(crate) fn new_session(&self) -> Session {
+        self.session_id_counter.fetch_add(1, Ordering::Relaxed));
+        Arc::new(Session::new(client_id))
     }
 
     pub(crate) fn register_session(
@@ -291,13 +298,11 @@ mod tests {
 
     fn test_session(enonce1: &str) -> Arc<Session> {
         Arc::new(Session::new(
-            1,
+
             enonce1.parse().unwrap(),
-            "127.0.0.1:1234".parse().unwrap(),
             test_address(),
             "foo".into(),
             Username::new("tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.foo"),
-            "test/1.0".into(),
             None,
         ))
     }

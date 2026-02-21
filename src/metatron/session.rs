@@ -1,46 +1,34 @@
 use super::*;
 
 pub(crate) struct Session {
-    id: u64,
-    enonce1: Extranonce,
-    #[allow(dead_code)]
-    socket_addr: SocketAddr,
-    address: Address,
-    workername: String,
-    username: Username,
-    #[allow(dead_code)]
-    user_agent: String,
-    version_mask: Option<Version>,
-    #[allow(dead_code)]
-    connected_at: Instant,
-    active: AtomicBool,
-    stats: Mutex<Stats>,
-    accepted: AtomicU64,
-    rejected: AtomicU64,
+    pub(crate) id: u64,
+    pub(crate) enonce1: Extranonce,
+    pub(crate) address: Address,
+    pub(crate) workername: String,
+    pub(crate) username: Username,
+    pub(crate) version_mask: Option<Version>,
+    pub(crate) active: AtomicBool,
+    pub(crate) stats: Mutex<Stats>,
+    pub(crate) accepted: AtomicU64,
+    pub(crate) rejected: AtomicU64,
 }
 
 impl Session {
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         id: u64,
         enonce1: Extranonce,
-        socket_addr: SocketAddr,
         address: Address,
         workername: String,
         username: Username,
-        user_agent: String,
         version_mask: Option<Version>,
     ) -> Self {
         Self {
             id,
             enonce1,
-            socket_addr,
             address,
             workername,
             username,
-            user_agent,
             version_mask,
-            connected_at: Instant::now(),
             active: AtomicBool::new(true),
             stats: Mutex::new(Stats {
                 dsps_1m: DecayingAverage::new(Duration::from_mins(1)),
@@ -71,11 +59,6 @@ impl Session {
         &self.enonce1
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn socket_addr(&self) -> SocketAddr {
-        self.socket_addr
-    }
-
     pub(crate) fn address(&self) -> &Address {
         &self.address
     }
@@ -88,18 +71,8 @@ impl Session {
         &self.username
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn user_agent(&self) -> &str {
-        &self.user_agent
-    }
-
     pub(crate) fn version_mask(&self) -> Option<Version> {
         self.version_mask
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn connected_at(&self) -> Instant {
-        self.connected_at
     }
 
     pub(crate) fn is_active(&self) -> bool {

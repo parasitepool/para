@@ -9,10 +9,9 @@ pub(crate) struct Subscription {
 
 pub(crate) struct Authorization {
     pub(crate) enonce1: Extranonce,
+    pub(crate) username: Username,
     pub(crate) address: Address,
     pub(crate) workername: String,
-    pub(crate) username: Username,
-    pub(crate) user_agent: String,
     pub(crate) version_mask: Option<Version>,
 }
 
@@ -84,6 +83,14 @@ impl State {
     pub(crate) fn authorized(&self) -> Option<Arc<Authorization>> {
         match self {
             State::Authorized(auth) => Some(auth.clone()),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn can_submit(&self) -> Option<(Address, Extranonce)> {
+        match self {
+            State::Authorized(auth) => Some((auth.address.clone(), auth.enonce1.clone())), // TODO
+            State::Working(session) => Some((session.address.clone(), session.enonce1.clone())),
             _ => None,
         }
     }
@@ -165,7 +172,6 @@ mod tests {
             address: test_address(),
             workername: "bar".into(),
             username: Username::new("tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.bar"),
-            user_agent: "foo".into(),
             version_mask: None,
         })
     }
@@ -174,11 +180,9 @@ mod tests {
         Arc::new(Session::new(
             1,
             test_enonce1(),
-            "127.0.0.1:1234".parse().unwrap(),
             test_address(),
             "bar".into(),
             Username::new("tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.bar"),
-            "foo".into(),
             None,
         ))
     }
