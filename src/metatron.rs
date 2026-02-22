@@ -129,9 +129,11 @@ impl Metatron {
                             let expired = session
                                 .deactivated_at()
                                 .is_some_and(|at| at.elapsed() >= SESSION_TTL);
+
                             if expired {
                                 self.retire_session(session);
                             }
+
                             !expired
                         });
 

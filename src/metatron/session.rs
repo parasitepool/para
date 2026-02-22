@@ -73,8 +73,10 @@ impl Session {
 
     pub(crate) fn record_accepted(&self, pool_diff: Difficulty, share_diff: Difficulty) {
         let now = Instant::now();
-        let mut stats = self.stats.lock();
         let diff = pool_diff.as_f64();
+        let mut stats = self.stats.lock();
+
+        stats.accepted += 1;
         stats.dsps_1m.record(diff, now);
         stats.dsps_5m.record(diff, now);
         stats.dsps_15m.record(diff, now);
@@ -88,10 +90,10 @@ impl Session {
         stats.sps_1hr.record(1.0, now);
         stats.total_work += diff;
         stats.last_share = Some(now);
+
         if stats.best_ever.is_none_or(|best| share_diff > best) {
             stats.best_ever = Some(share_diff);
         }
-        stats.accepted += 1;
     }
 
     pub(crate) fn record_rejected(&self) {
