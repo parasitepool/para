@@ -37,6 +37,7 @@ reload = ["boilerplate/reload"]
 
 [dependencies]
 anyhow.workspace = true
+async-trait = "0.1.89"
 axum = { version = "0.8.3", features = ["http2", "ws"] }
 axum-server = "0.7.3"
 backon = "1.6.0"
@@ -59,7 +60,6 @@ parking_lot = "0.12.5"
 primitive-types = "0.14.0"
 rand.workspace = true
 reqwest = { version = "0.12.22", features = ["rustls-tls", "blocking", "json"] }
-async-trait = "0.1.89"
 rust-embed = "8.7.1"
 rustls = { version = "0.23.26", features = ["ring"] }
 rustls-acme = { version = "0.14.0", features = ["axum"] }
