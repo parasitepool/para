@@ -10,7 +10,7 @@ pub(crate) use session::SessionSnapshot;
 
 mod bouncer;
 mod session;
-mod state;
+pub(crate) mod state;
 
 pub(crate) struct Stratifier<W: Workbase> {
     state: State,
@@ -153,22 +153,9 @@ impl<W: Workbase> Stratifier<W> {
                         "mining.submit" => {
                             let session = match &self.state {
                                 State::Authorized(auth) => {
-                                    let session = Arc::new(Session::new(
-                                      1, //TODO
-                                      auth.enonce1.clone(),
-                                      auth.address.clone(),
-                                      auth.workername.clone(),
-                                      auth.username.clone(),
-                                      auth.version_mask,
-                                  ));
-
-                                  self.metatron
-                                      .register_session(auth.address.clone(), &auth.workername, session.clone());
-
-                                  self.state = State::Working(session.clone());
-
+                                    let session = self.metatron.new_session(auth.clone());
+                                    self.state = State::Working(session.clone());
                                     session
-
                                 },
                                 State::Working(session) => session.clone(),
                                 _ => {

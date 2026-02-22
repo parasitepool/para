@@ -18,14 +18,14 @@ impl User {
         }
     }
 
-    pub(crate) fn register_session(&self, workername: &str, session: Arc<Session>) {
+    pub(crate) fn new_session(&self, workername: &str, session: Arc<Session>) {
         if let Some(worker) = self.workers.get(workername) {
-            worker.register_session(session);
+            worker.new_session(session);
         } else {
             self.workers
                 .entry(workername.to_string())
                 .or_insert_with(|| Arc::new(Worker::new(workername.to_string())))
-                .register_session(session);
+                .new_session(session);
         }
     }
 

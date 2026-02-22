@@ -13,7 +13,7 @@ impl Worker {
         }
     }
 
-    pub(crate) fn register_session(&self, session: Arc<Session>) {
+    pub(crate) fn new_session(&self, session: Arc<Session>) {
         self.sessions.insert(session.id(), session);
     }
 

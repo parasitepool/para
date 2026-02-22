@@ -1,4 +1,7 @@
-use {super::*, session::Session, stats::Stats, user::User, worker::Worker};
+use {
+    super::*, session::Session, stats::Stats, stratifier::state::Authorization, user::User,
+    worker::Worker,
+};
 
 pub(crate) mod session;
 mod stats;
@@ -95,25 +98,28 @@ impl Metatron {
         &self.extranonces
     }
 
-    // pub(crate) fn new_session(&self) -> Session {
-    // self.session_id_counter.fetch_add(1, Ordering::Relaxed));
-    // Arc::new(Session::new(client_id))
-    // }
+    pub(crate) fn new_session(&self, auth: Arc<Authorization>) -> Arc<Session> {
+        let id = self.session_id_counter.fetch_add(1, Ordering::Relaxed);
 
-    pub(crate) fn register_session(
-        &self,
-        address: Address,
-        workername: &str,
-        session: Arc<Session>,
-    ) {
-        if let Some(user) = self.users.get(&address) {
-            user.register_session(workername, session);
+        let session = Arc::new(Session::new(
+            id,
+            auth.enonce1.clone(),
+            auth.address.clone(),
+            auth.workername.clone(),
+            auth.username.clone(),
+            auth.version_mask,
+        ));
+
+        if let Some(user) = self.users.get(&auth.address) {
+            user.new_session(&auth.workername, session.clone());
         } else {
             self.users
-                .entry(address.clone())
-                .or_insert_with(|| Arc::new(User::new(address)))
-                .register_session(workername, session);
+                .entry(auth.address.clone())
+                .or_insert_with(|| Arc::new(User::new(auth.address.clone())))
+                .new_session(&auth.workername, session.clone());
         }
+
+        session
     }
 
     pub(crate) fn store_session(&self, snapshot: SessionSnapshot) {
