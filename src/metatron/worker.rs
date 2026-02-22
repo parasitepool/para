@@ -1,17 +1,9 @@
 use {super::*, dashmap::DashMap};
 
-struct LifetimeStats {
-    total_work: f64,
-    accepted: u64,
-    rejected: u64,
-    best_ever: Option<Difficulty>,
-    last_share: Option<Instant>,
-}
-
 pub(crate) struct Worker {
     workername: String,
     sessions: DashMap<u64, Arc<Session>>,
-    lifetime: Mutex<LifetimeStats>,
+    lifetime: Mutex<Stats>,
 }
 
 impl Worker {
@@ -19,13 +11,7 @@ impl Worker {
         Self {
             workername,
             sessions: DashMap::new(),
-            lifetime: Mutex::new(LifetimeStats {
-                total_work: 0.0,
-                accepted: 0,
-                rejected: 0,
-                best_ever: None,
-                last_share: None,
-            }),
+            lifetime: Mutex::new(Stats::new()),
         }
     }
 
@@ -35,22 +21,9 @@ impl Worker {
 
     pub(crate) fn retire_session(&self, id: u64) {
         if let Some((_, session)) = self.sessions.remove(&id) {
-            let mut lifetime = self.lifetime.lock();
-            lifetime.total_work += session.total_work();
-            lifetime.accepted += session.accepted();
-            lifetime.rejected += session.rejected();
-            let best = session.best_ever();
-            if best.is_some_and(|diff| {
-                lifetime
-                    .best_ever
-                    .is_none_or(|lifetime_diff| diff > lifetime_diff)
-            }) {
-                lifetime.best_ever = best;
-            }
-            let last = session.last_share();
-            if last.is_some_and(|l| lifetime.last_share.is_none_or(|prev| l > prev)) {
-                lifetime.last_share = last;
-            }
+            let now = Instant::now();
+            let session_stats = session.stats.lock();
+            self.lifetime.lock().absorb(&session_stats, now);
         }
     }
 
@@ -66,68 +39,97 @@ impl Worker {
     }
 
     pub(crate) fn hashrate_1m(&self) -> HashRate {
-        self.sessions
+        let now = Instant::now();
+        let from_sessions = self
+            .sessions
             .iter()
             .map(|session| session.hashrate_1m())
-            .fold(HashRate::ZERO, |acc, r| acc + r)
+            .fold(HashRate::ZERO, |acc, r| acc + r);
+        from_sessions + HashRate::from_dsps(self.lifetime.lock().dsps_1m.value_at(now))
     }
 
     pub(crate) fn hashrate_5m(&self) -> HashRate {
-        self.sessions
+        let now = Instant::now();
+        let from_sessions = self
+            .sessions
             .iter()
             .map(|session| session.hashrate_5m())
-            .fold(HashRate::ZERO, |acc, r| acc + r)
+            .fold(HashRate::ZERO, |acc, r| acc + r);
+        from_sessions + HashRate::from_dsps(self.lifetime.lock().dsps_5m.value_at(now))
     }
 
     pub(crate) fn hashrate_15m(&self) -> HashRate {
-        self.sessions
+        let now = Instant::now();
+        let from_sessions = self
+            .sessions
             .iter()
             .map(|session| session.hashrate_15m())
-            .fold(HashRate::ZERO, |acc, r| acc + r)
+            .fold(HashRate::ZERO, |acc, r| acc + r);
+        from_sessions + HashRate::from_dsps(self.lifetime.lock().dsps_15m.value_at(now))
     }
 
     pub(crate) fn hashrate_1hr(&self) -> HashRate {
-        self.sessions
+        let now = Instant::now();
+        let from_sessions = self
+            .sessions
             .iter()
             .map(|session| session.hashrate_1hr())
-            .fold(HashRate::ZERO, |acc, r| acc + r)
+            .fold(HashRate::ZERO, |acc, r| acc + r);
+        from_sessions + HashRate::from_dsps(self.lifetime.lock().dsps_1hr.value_at(now))
     }
 
     pub(crate) fn hashrate_6hr(&self) -> HashRate {
-        self.sessions
+        let now = Instant::now();
+        let from_sessions = self
+            .sessions
             .iter()
             .map(|session| session.hashrate_6hr())
-            .fold(HashRate::ZERO, |acc, r| acc + r)
+            .fold(HashRate::ZERO, |acc, r| acc + r);
+        from_sessions + HashRate::from_dsps(self.lifetime.lock().dsps_6hr.value_at(now))
     }
 
     pub(crate) fn hashrate_1d(&self) -> HashRate {
-        self.sessions
+        let now = Instant::now();
+        let from_sessions = self
+            .sessions
             .iter()
             .map(|session| session.hashrate_1d())
-            .fold(HashRate::ZERO, |acc, r| acc + r)
+            .fold(HashRate::ZERO, |acc, r| acc + r);
+        from_sessions + HashRate::from_dsps(self.lifetime.lock().dsps_1d.value_at(now))
     }
 
     pub(crate) fn hashrate_7d(&self) -> HashRate {
-        self.sessions
+        let now = Instant::now();
+        let from_sessions = self
+            .sessions
             .iter()
             .map(|session| session.hashrate_7d())
-            .fold(HashRate::ZERO, |acc, r| acc + r)
+            .fold(HashRate::ZERO, |acc, r| acc + r);
+        from_sessions + HashRate::from_dsps(self.lifetime.lock().dsps_7d.value_at(now))
     }
 
     pub(crate) fn sps_1m(&self) -> f64 {
-        self.sessions.iter().map(|session| session.sps_1m()).sum()
+        let now = Instant::now();
+        let from_sessions: f64 = self.sessions.iter().map(|session| session.sps_1m()).sum();
+        from_sessions + self.lifetime.lock().sps_1m.value_at(now)
     }
 
     pub(crate) fn sps_5m(&self) -> f64 {
-        self.sessions.iter().map(|session| session.sps_5m()).sum()
+        let now = Instant::now();
+        let from_sessions: f64 = self.sessions.iter().map(|session| session.sps_5m()).sum();
+        from_sessions + self.lifetime.lock().sps_5m.value_at(now)
     }
 
     pub(crate) fn sps_15m(&self) -> f64 {
-        self.sessions.iter().map(|session| session.sps_15m()).sum()
+        let now = Instant::now();
+        let from_sessions: f64 = self.sessions.iter().map(|session| session.sps_15m()).sum();
+        from_sessions + self.lifetime.lock().sps_15m.value_at(now)
     }
 
     pub(crate) fn sps_1hr(&self) -> f64 {
-        self.sessions.iter().map(|session| session.sps_1hr()).sum()
+        let now = Instant::now();
+        let from_sessions: f64 = self.sessions.iter().map(|session| session.sps_1hr()).sum();
+        from_sessions + self.lifetime.lock().sps_1hr.value_at(now)
     }
 
     pub(crate) fn accepted(&self) -> u64 {

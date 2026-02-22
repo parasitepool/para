@@ -10,8 +10,6 @@ pub(crate) struct Session {
     pub(crate) active: AtomicBool,
     pub(crate) deactivated_at: Mutex<Option<Instant>>,
     pub(crate) stats: Mutex<Stats>,
-    pub(crate) accepted: AtomicU64,
-    pub(crate) rejected: AtomicU64,
 }
 
 impl Session {
@@ -32,24 +30,7 @@ impl Session {
             version_mask,
             active: AtomicBool::new(true),
             deactivated_at: Mutex::new(None),
-            stats: Mutex::new(Stats {
-                dsps_1m: DecayingAverage::new(Duration::from_mins(1)),
-                dsps_5m: DecayingAverage::new(Duration::from_mins(5)),
-                dsps_15m: DecayingAverage::new(Duration::from_mins(15)),
-                dsps_1hr: DecayingAverage::new(Duration::from_hours(1)),
-                dsps_6hr: DecayingAverage::new(Duration::from_hours(6)),
-                dsps_1d: DecayingAverage::new(Duration::from_hours(24)),
-                dsps_7d: DecayingAverage::new(Duration::from_hours(24 * 7)),
-                sps_1m: DecayingAverage::new(Duration::from_mins(1)),
-                sps_5m: DecayingAverage::new(Duration::from_mins(5)),
-                sps_15m: DecayingAverage::new(Duration::from_mins(15)),
-                sps_1hr: DecayingAverage::new(Duration::from_hours(1)),
-                best_ever: None,
-                last_share: None,
-                total_work: 0.0,
-            }),
-            accepted: AtomicU64::new(0),
-            rejected: AtomicU64::new(0),
+            stats: Mutex::new(Stats::new()),
         }
     }
 
@@ -110,12 +91,11 @@ impl Session {
         if stats.best_ever.is_none_or(|best| share_diff > best) {
             stats.best_ever = Some(share_diff);
         }
-        drop(stats);
-        self.accepted.fetch_add(1, Ordering::Relaxed);
+        stats.accepted += 1;
     }
 
     pub(crate) fn record_rejected(&self) {
-        self.rejected.fetch_add(1, Ordering::Relaxed);
+        self.stats.lock().rejected += 1;
     }
 
     pub(crate) fn hashrate_1m(&self) -> HashRate {
@@ -163,11 +143,11 @@ impl Session {
     }
 
     pub(crate) fn accepted(&self) -> u64 {
-        self.accepted.load(Ordering::Relaxed)
+        self.stats.lock().accepted
     }
 
     pub(crate) fn rejected(&self) -> u64 {
-        self.rejected.load(Ordering::Relaxed)
+        self.stats.lock().rejected
     }
 
     pub(crate) fn best_ever(&self) -> Option<Difficulty> {
