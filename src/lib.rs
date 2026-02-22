@@ -90,9 +90,9 @@ use {
     },
     stratifier::{SessionSnapshot, Stratifier},
     stratum::{
-        Authorize, Configure, Difficulty, Extranonce, Id, JobId, MerkleNode, Message, Nbits, Nonce,
-        Notify, Ntime, PrevHash, SetDifficulty, StratumError, Submit, Subscribe, SubscribeResult,
-        Username, Version, format_si, merkle_root, parse_si,
+        Authorize, Configure, Difficulty, Extranonce, Id, JobId, MAX_MESSAGE_SIZE, MerkleNode,
+        Message, Nbits, Nonce, Notify, Ntime, PrevHash, SetDifficulty, StratumError, Submit,
+        Subscribe, SubscribeResult, Username, Version, format_si, merkle_root, parse_si,
     },
     subcommand::server::account::Account,
     sysinfo::{Disks, System},
@@ -155,7 +155,6 @@ pub const MIN_ENONCE_SIZE: usize = 2;
 pub const MAX_ENONCE_SIZE: usize = 8;
 pub const ENONCE1_SIZE: usize = 4;
 pub const ENONCE1_EXTENSION_SIZE: usize = 2;
-pub const MAX_MESSAGE_SIZE: usize = 32 * 1024;
 pub const SHARE_CHANNEL_CAPACITY: usize = 100_000;
 pub const SUBSCRIPTION_ID: &str = "deadbeef";
 pub const LRU_CACHE_SIZE: usize = 256;
