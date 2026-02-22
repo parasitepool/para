@@ -8,7 +8,6 @@ use {
     },
     byteorder::{BigEndian, ByteOrder, LittleEndian},
     derive_more::Display,
-    error::{InternalError, Result},
     hex::FromHex,
     rand::RngCore,
     serde::{
@@ -27,8 +26,37 @@ use {
     },
 };
 
+pub use {
+    authorize::Authorize,
+    configure::{Configure, ConfigureResponse},
+    difficulty::Difficulty,
+    error::{InternalError, Result, StratumError, StratumErrorResponse},
+    event::Event,
+    extranonce::Extranonce,
+    job_id::JobId,
+    merkle::{MerkleNode, merkle_branches, merkle_root},
+    message::{Id, Message},
+    nbits::Nbits,
+    nonce::Nonce,
+    notify::Notify,
+    ntime::Ntime,
+    prevhash::PrevHash,
+    set_difficulty::SetDifficulty,
+    si::{format_si, parse_si},
+    submit::Submit,
+    subscribe::{Subscribe, SubscribeResult},
+    suggest_difficulty::SuggestDifficulty,
+    username::Username,
+    version::Version,
+};
+
+#[cfg(feature = "client")]
+pub use client::{Client, ClientError, EventReceiver};
+
+#[cfg(feature = "client")]
+pub const MAX_MESSAGE_SIZE: usize = 32 * 1024;
+
 mod authorize;
-mod client;
 mod configure;
 mod difficulty;
 mod error;
@@ -50,27 +78,5 @@ mod suggest_difficulty;
 mod username;
 mod version;
 
-pub use {
-    authorize::Authorize,
-    client::{Client, ClientError, EventReceiver},
-    configure::{Configure, ConfigureResponse},
-    difficulty::Difficulty,
-    error::{StratumError, StratumErrorResponse},
-    event::Event,
-    extranonce::Extranonce,
-    job_id::JobId,
-    merkle::{MerkleNode, merkle_branches, merkle_root},
-    message::{Id, Message},
-    nbits::Nbits,
-    nonce::Nonce,
-    notify::Notify,
-    ntime::Ntime,
-    prevhash::PrevHash,
-    set_difficulty::SetDifficulty,
-    si::{format_si, parse_si},
-    submit::Submit,
-    subscribe::{Subscribe, SubscribeResult},
-    suggest_difficulty::SuggestDifficulty,
-    username::Username,
-    version::Version,
-};
+#[cfg(feature = "client")]
+mod client;

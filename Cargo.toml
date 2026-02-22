@@ -37,6 +37,7 @@ reload = ["boilerplate/reload"]
 
 [dependencies]
 anyhow.workspace = true
+async-trait = "0.1.89"
 axum = { version = "0.8.3", features = ["http2", "ws"] }
 axum-server = "0.7.3"
 backon = "1.6.0"
@@ -67,9 +68,10 @@ serde_json.workspace = true
 serde_with = "3.14.0"
 snafu = "0.8.9"
 sqlx = { version =  "0.8.5", features = ["postgres", "runtime-tokio"] }
+stratum = { path = "crates/stratum", features = ["client"] }
 sysinfo = "0.37.0"
-tokio.workspace = true
 tokio-util = "0.7.15"
+tokio.workspace = true
 tower-http = { version = "0.6.2", features = ["auth", "fs", "set-header"] }
 tracing = "0.1.41"
 tracing-appender = "0.2.3"
@@ -77,7 +79,6 @@ tracing-subscriber = { version =  "0.3.19", features = ["env-filter", "fmt"] }
 utoipa = "5.4.0"
 utoipa-swagger-ui = { version =  "9.0.2", features = ["axum"], optional = true }
 zeromq = "0.4.1"
-async-trait = "0.1.89"
 
 [dev-dependencies]
 chrono = "0.4.41"

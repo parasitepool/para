@@ -1,0 +1,34 @@
+[package]
+name = "stratum"
+version = "0.0.2"
+description = "Stratum protocol types, helpers and client"
+repository = "https://github.com/parasitepool/para/tree/master/crates/stratum"
+readme = "README.md"
+license = "CC0-1.0"
+
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+client = ["tokio", "futures", "tokio-util", "tracing"]
+
+[dependencies]
+bitcoin.workspace = true
+byteorder = "1.5.0"
+derive_more = { version = "2.0.1", features = ["display"] }
+futures = { version = "0.3.31", optional = true }
+hex = "0.4.3"
+primitive-types = "0.14.0"
+rand.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_with = "3.14.0"
+snafu = "0.8.9"
+tokio = { workspace = true, features = ["io-util", "net", "time", "rt", "sync", "macros"], optional = true }
+tokio-util = { version = "0.7.15", features = ["codec"], optional = true }
+tracing = { version = "0.1.41", optional = true }
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
