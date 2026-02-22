@@ -142,7 +142,7 @@ mod metrics;
 pub mod settings;
 mod signal;
 mod stratifier;
-pub mod stratum;
+pub use stratum;
 pub mod subcommand;
 mod throbber;
 mod upstream;
