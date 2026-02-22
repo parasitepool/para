@@ -23,7 +23,7 @@ impl Worker {
         if let Some((_, session)) = self.sessions.remove(&id) {
             let now = Instant::now();
             let snapshot = session.stats.lock().clone();
-            self.lifetime.lock().absorb(&snapshot, now);
+            self.lifetime.lock().absorb(snapshot, now);
         }
     }
 
