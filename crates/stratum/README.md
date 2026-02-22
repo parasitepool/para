@@ -13,9 +13,9 @@
 </div>
 <br>
 
-`stratum` is a Rust library for the Stratum mining protocol. It provides
-types for protocol messages and an optional async client for connecting to
-mining pools. This is experimental software with no warranty. See
+`stratum` is a Rust library for the Stratum mining protocol. It provides types
+for protocol messages, some helpers, and an optional async client for connecting
+to mining pools. This is experimental software with no warranty. See
 [LICENSE](LICENSE) for more details.
 
 Stratum Messages
@@ -47,6 +47,15 @@ Types
 | `Username`   | Worker identity with Bitcoin address parsing   |
 | `Version`    | Block version with bitmask operations          |
 
+Helpers
+-------
+
+| Function          | Description                                         |
+|-------------------|-----------------------------------------------------|
+| `format_si`       | Format a value with SI prefixes (K, M, G, T, ...)  |
+| `parse_si`        | Parse SI-prefixed values (e.g., "1.5 TH/s")        |
+| `merkle_root`     | Compute merkle root from coinbase and branches     |
+| `merkle_branches` | Build merkle branches from non-coinbase txids      |
 
 Feature Flags
 -------------
