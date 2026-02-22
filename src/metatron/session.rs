@@ -182,3 +182,52 @@ impl Session {
         self.stats.lock().total_work
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_session(id: u64, enonce1: &str) -> Session {
+        Session::new(
+            id,
+            enonce1.parse().unwrap(),
+            "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc"
+                .parse::<Address<bitcoin::address::NetworkUnchecked>>()
+                .unwrap()
+                .assume_checked(),
+            "foo".into(),
+            Username::new("tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.foo"),
+            None,
+        )
+    }
+
+    #[test]
+    fn new_session_is_active() {
+        let session = test_session(0, "deadbeef");
+
+        assert!(session.is_active());
+        assert!(session.deactivated_at().is_none());
+    }
+
+    #[test]
+    fn deactivate_sets_deactivated_at() {
+        let session = test_session(0, "deadbeef");
+
+        session.deactivate();
+
+        assert!(!session.is_active());
+        assert!(session.deactivated_at().is_some());
+    }
+
+    #[test]
+    fn deactivated_at_is_recent() {
+        let before = Instant::now();
+        let session = test_session(0, "deadbeef");
+        session.deactivate();
+        let after = Instant::now();
+
+        let at = session.deactivated_at().unwrap();
+        assert!(at >= before);
+        assert!(at <= after);
+    }
+}

@@ -39,11 +39,13 @@ impl Worker {
             lifetime.total_work += session.total_work();
             lifetime.accepted += session.accepted();
             lifetime.rejected += session.rejected();
-            if session
-                .best_ever()
-                .is_some_and(|d| lifetime.best_ever.is_none_or(|best| d > best))
-            {
-                lifetime.best_ever = session.best_ever();
+            let best = session.best_ever();
+            if best.is_some_and(|diff| {
+                lifetime
+                    .best_ever
+                    .is_none_or(|lifetime_diff| diff > lifetime_diff)
+            }) {
+                lifetime.best_ever = best;
             }
             let last = session.last_share();
             if last.is_some_and(|l| lifetime.last_share.is_none_or(|prev| l > prev)) {

@@ -156,14 +156,17 @@ impl<W: Workbase> Stratifier<W> {
                                 },
                                 State::Working(session) => session.clone(),
                                 _ => {
-
-                                self.send_error(id.clone(), StratumError::Unauthorized, None)
+                                    self.send_error(
+                                        id.clone(),
+                                        StratumError::Unauthorized,
+                                        None,
+                                    )
                                     .await?;
 
-                                let consequence = self.bouncer.reject();
-                                self.handle_protocol_consequence(consequence).await;
+                                    let consequence = self.bouncer.reject();
+                                    self.handle_protocol_consequence(consequence).await;
 
-                                continue
+                                    continue
                                 }
                             };
 
@@ -481,14 +484,12 @@ impl<W: Workbase> Stratifier<W> {
         }
 
         let (enonce1, enonce2_size) = if let Some(ref requested_enonce1) = subscribe.enonce1 {
-            let enonce1 = self
-                .metatron
-                .take_disconnected(requested_enonce1)
-                .unwrap_or_else(|| self.metatron.next_enonce1());
-
-            if enonce1 == *requested_enonce1 {
-                info!("Resuming session with enonce1 {enonce1}");
-            }
+            let enonce1 = if self.metatron.take_disconnected(requested_enonce1) {
+                info!("Resuming session with enonce1 {requested_enonce1}");
+                requested_enonce1.clone()
+            } else {
+                self.metatron.next_enonce1()
+            };
 
             (enonce1, self.metatron.enonce2_size())
         } else {

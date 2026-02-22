@@ -1,12 +1,25 @@
-use {
-    super::*, session::Session, stats::Stats, stratifier::state::Authorization, user::User,
-    worker::Worker,
-};
+use {super::*, session::Session, stratifier::state::Authorization, user::User, worker::Worker};
 
 pub(crate) mod session;
-mod stats;
 mod user;
 mod worker;
+
+pub(crate) struct Stats {
+    pub(crate) dsps_1m: DecayingAverage,
+    pub(crate) dsps_5m: DecayingAverage,
+    pub(crate) dsps_15m: DecayingAverage,
+    pub(crate) dsps_1hr: DecayingAverage,
+    pub(crate) dsps_6hr: DecayingAverage,
+    pub(crate) dsps_1d: DecayingAverage,
+    pub(crate) dsps_7d: DecayingAverage,
+    pub(crate) sps_1m: DecayingAverage,
+    pub(crate) sps_5m: DecayingAverage,
+    pub(crate) sps_15m: DecayingAverage,
+    pub(crate) sps_1hr: DecayingAverage,
+    pub(crate) best_ever: Option<Difficulty>,
+    pub(crate) last_share: Option<Instant>,
+    pub(crate) total_work: f64,
+}
 
 pub(crate) struct Metatron {
     blocks: AtomicU64,
@@ -137,12 +150,12 @@ impl Metatron {
         self.disconnected.insert(session.enonce1().clone(), session);
     }
 
-    pub(crate) fn take_disconnected(&self, enonce1: &Extranonce) -> Option<Extranonce> {
+    pub(crate) fn take_disconnected(&self, enonce1: &Extranonce) -> bool {
         if let Some((_, session)) = self.disconnected.remove(enonce1) {
             self.retire_session(&session);
-            Some(session.enonce1().clone())
+            true
         } else {
-            None
+            false
         }
     }
 
@@ -514,6 +527,121 @@ mod tests {
         assert!(
             (metatron.total_work() - 3.0 * pool_diff_f64).abs()
                 < f64::EPSILON * 3.0 * pool_diff_f64
+        );
+    }
+
+    #[test]
+    fn store_and_take_disconnected() {
+        let metatron = Metatron::new(pool_extranonces(), String::new());
+        let session = metatron.new_session(test_auth("deadbeef", "foo"));
+        session.deactivate();
+
+        metatron.store_disconnected(session);
+        assert_eq!(metatron.disconnected(), 1);
+
+        let enonce1: Extranonce = "deadbeef".parse().unwrap();
+        assert!(metatron.take_disconnected(&enonce1));
+        assert_eq!(metatron.disconnected(), 0);
+    }
+
+    #[test]
+    fn take_disconnected_missing_returns_false() {
+        let metatron = Metatron::new(pool_extranonces(), String::new());
+        let enonce1: Extranonce = "deadbeef".parse().unwrap();
+
+        assert!(!metatron.take_disconnected(&enonce1));
+    }
+
+    #[test]
+    fn take_disconnected_retires_from_worker() {
+        let metatron = Metatron::new(pool_extranonces(), String::new());
+        let session = metatron.new_session(test_auth("deadbeef", "foo"));
+
+        let pool_diff = Difficulty::from(100.0);
+        session.record_accepted(pool_diff, Difficulty::from(200.0));
+        session.deactivate();
+
+        metatron.store_disconnected(session);
+
+        let enonce1: Extranonce = "deadbeef".parse().unwrap();
+        assert!(metatron.take_disconnected(&enonce1));
+
+        assert_eq!(metatron.accepted(), 1);
+        assert!((metatron.total_work() - pool_diff.as_f64()).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn retire_session_folds_stats() {
+        let metatron = Metatron::new(pool_extranonces(), String::new());
+        let session = metatron.new_session(test_auth("deadbeef", "foo"));
+
+        let pool_diff = Difficulty::from(100.0);
+        session.record_accepted(pool_diff, Difficulty::from(200.0));
+        session.record_accepted(pool_diff, Difficulty::from(50.0));
+        session.record_rejected();
+        session.deactivate();
+
+        metatron.store_disconnected(session);
+
+        let enonce1: Extranonce = "deadbeef".parse().unwrap();
+        metatron.take_disconnected(&enonce1);
+
+        assert_eq!(metatron.total_sessions(), 0);
+        assert_eq!(metatron.accepted(), 2);
+        assert_eq!(metatron.rejected(), 1);
+        assert_eq!(metatron.best_ever(), Some(Difficulty::from(200.0)));
+        assert!(metatron.last_share().is_some());
+        assert!((metatron.total_work() - 2.0 * pool_diff.as_f64()).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn retire_accumulates_across_multiple_sessions() {
+        let metatron = Metatron::new(pool_extranonces(), String::new());
+        let s1 = metatron.new_session(test_auth("deadbeef", "foo"));
+        let s2 = metatron.new_session(test_auth("cafebabe", "foo"));
+
+        let pool_diff = Difficulty::from(100.0);
+        s1.record_accepted(pool_diff, Difficulty::from(50.0));
+        s2.record_accepted(pool_diff, Difficulty::from(300.0));
+        s1.deactivate();
+        s2.deactivate();
+
+        metatron.store_disconnected(s1);
+        metatron.store_disconnected(s2);
+
+        let e1: Extranonce = "deadbeef".parse().unwrap();
+        let e2: Extranonce = "cafebabe".parse().unwrap();
+        metatron.take_disconnected(&e1);
+        metatron.take_disconnected(&e2);
+
+        assert_eq!(metatron.accepted(), 2);
+        assert_eq!(metatron.best_ever(), Some(Difficulty::from(300.0)));
+        assert!(
+            (metatron.total_work() - 2.0 * pool_diff.as_f64()).abs()
+                < f64::EPSILON * 2.0 * pool_diff.as_f64()
+        );
+    }
+
+    #[test]
+    fn stats_combine_active_sessions_and_lifetime() {
+        let metatron = Metatron::new(pool_extranonces(), String::new());
+        let s1 = metatron.new_session(test_auth("deadbeef", "foo"));
+        let s2 = metatron.new_session(test_auth("cafebabe", "foo"));
+
+        let pool_diff = Difficulty::from(100.0);
+        s1.record_accepted(pool_diff, Difficulty::from(50.0));
+        s2.record_accepted(pool_diff, Difficulty::from(200.0));
+        s1.deactivate();
+
+        metatron.store_disconnected(s1);
+        let e1: Extranonce = "deadbeef".parse().unwrap();
+        metatron.take_disconnected(&e1);
+
+        assert_eq!(metatron.accepted(), 2);
+        assert_eq!(metatron.best_ever(), Some(Difficulty::from(200.0)));
+        assert!(
+            (metatron.total_work() - 2.0 * pool_diff.as_f64()).abs()
+                < f64::EPSILON * 2.0 * pool_diff.as_f64()
         );
     }
 }
