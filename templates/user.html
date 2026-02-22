@@ -3,7 +3,7 @@
     <h2>Info</h2>
     <div class=row><span>Address</span><span id=address class=copyable></span></div>
     <div class=row><span>Workers</span><span id=workers_count></span></div>
-    <div class=row><span>Clients</span><span id=clients></span></div>
+    <div class=row><span>Sessions</span><span id=sessions></span></div>
     <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
     <div class=row><span>SPS</span><span id=sps_1m></span></div>
     <div class=row><span>Authorized</span><span id=authorized></span></div>
@@ -20,7 +20,7 @@
       <thead>
         <tr>
           <th>Name</th>
-          <th>Clients</th>
+          <th>Sessions</th>
           <th>Hashrate</th>
           <th>SPS</th>
           <th>Best</th>
@@ -51,7 +51,7 @@ async function refresh() {
 
     copyable('address', shortAddr, addr);
     set('workers_count', user.workers.length);
-    set('clients', user.clients);
+    set('sessions', user.sessions);
     set('hashrate_1m', user.hashrate_1m, formatHashrate);
     set('sps_1m', user.sps_1m, formatTruncated);
     set('authorized', new Date(user.authorized * 1000).toLocaleString());
@@ -67,7 +67,7 @@ async function refresh() {
       const bestShare = formatDifficulty(w.best_ever);
       return `<tr>
         <td>${w.name || '(default)'}</td>
-        <td>${w.clients}</td>
+        <td>${w.sessions}</td>
         <td>${formatHashrate(w.hashrate_1m)}</td>
         <td>${formatTruncated(w.sps_1m)}</td>
         <td>${bestShare || '-'}</td>

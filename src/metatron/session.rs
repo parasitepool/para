@@ -1,38 +1,37 @@
 use super::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct ClientId(pub(crate) u64);
-
-struct Stats {
-    dsps_1m: DecayingAverage,
-    dsps_5m: DecayingAverage,
-    dsps_15m: DecayingAverage,
-    dsps_1hr: DecayingAverage,
-    dsps_6hr: DecayingAverage,
-    dsps_1d: DecayingAverage,
-    dsps_7d: DecayingAverage,
-    sps_1m: DecayingAverage,
-    sps_5m: DecayingAverage,
-    sps_15m: DecayingAverage,
-    sps_1hr: DecayingAverage,
-    best_ever: Option<Difficulty>,
-    last_share: Option<Instant>,
-    total_work: f64,
+pub(crate) struct Session {
+    pub(crate) id: u64,
+    pub(crate) enonce1: Extranonce,
+    pub(crate) address: Address,
+    pub(crate) workername: String,
+    pub(crate) username: Username,
+    pub(crate) version_mask: Option<Version>,
+    pub(crate) active: AtomicBool,
+    pub(crate) deactivated_at: Mutex<Option<Instant>>,
+    pub(crate) stats: Mutex<Stats>,
+    pub(crate) accepted: AtomicU64,
+    pub(crate) rejected: AtomicU64,
 }
 
-pub(crate) struct Client {
-    client_id: ClientId,
-    active: AtomicBool,
-    stats: Mutex<Stats>,
-    accepted: AtomicU64,
-    rejected: AtomicU64,
-}
-
-impl Client {
-    pub(crate) fn new(client_id: ClientId) -> Self {
+impl Session {
+    pub(crate) fn new(
+        id: u64,
+        enonce1: Extranonce,
+        address: Address,
+        workername: String,
+        username: Username,
+        version_mask: Option<Version>,
+    ) -> Self {
         Self {
-            client_id,
+            id,
+            enonce1,
+            address,
+            workername,
+            username,
+            version_mask,
             active: AtomicBool::new(true),
+            deactivated_at: Mutex::new(None),
             stats: Mutex::new(Stats {
                 dsps_1m: DecayingAverage::new(Duration::from_mins(1)),
                 dsps_5m: DecayingAverage::new(Duration::from_mins(5)),
@@ -54,8 +53,28 @@ impl Client {
         }
     }
 
-    pub(crate) fn client_id(&self) -> ClientId {
-        self.client_id
+    pub(crate) fn id(&self) -> u64 {
+        self.id
+    }
+
+    pub(crate) fn enonce1(&self) -> &Extranonce {
+        &self.enonce1
+    }
+
+    pub(crate) fn address(&self) -> &Address {
+        &self.address
+    }
+
+    pub(crate) fn workername(&self) -> &str {
+        &self.workername
+    }
+
+    pub(crate) fn username(&self) -> &Username {
+        &self.username
+    }
+
+    pub(crate) fn version_mask(&self) -> Option<Version> {
+        self.version_mask
     }
 
     pub(crate) fn is_active(&self) -> bool {
@@ -64,6 +83,11 @@ impl Client {
 
     pub(crate) fn deactivate(&self) {
         self.active.store(false, Ordering::Relaxed);
+        *self.deactivated_at.lock() = Some(Instant::now());
+    }
+
+    pub(crate) fn deactivated_at(&self) -> Option<Instant> {
+        *self.deactivated_at.lock()
     }
 
     pub(crate) fn record_accepted(&self, pool_diff: Difficulty, share_diff: Difficulty) {

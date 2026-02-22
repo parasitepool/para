@@ -1,121 +1,175 @@
 use {super::*, dashmap::DashMap};
 
+struct LifetimeStats {
+    total_work: f64,
+    accepted: u64,
+    rejected: u64,
+    best_ever: Option<Difficulty>,
+    last_share: Option<Instant>,
+}
+
 pub(crate) struct Worker {
     workername: String,
-    clients: DashMap<ClientId, Arc<Client>>,
+    sessions: DashMap<u64, Arc<Session>>,
+    lifetime: Mutex<LifetimeStats>,
 }
 
 impl Worker {
     pub(crate) fn new(workername: String) -> Self {
         Self {
             workername,
-            clients: DashMap::new(),
+            sessions: DashMap::new(),
+            lifetime: Mutex::new(LifetimeStats {
+                total_work: 0.0,
+                accepted: 0,
+                rejected: 0,
+                best_ever: None,
+                last_share: None,
+            }),
         }
     }
 
-    pub(crate) fn register_client(&self, client: Arc<Client>) {
-        self.clients.insert(client.client_id(), client);
+    pub(crate) fn new_session(&self, session: Arc<Session>) {
+        self.sessions.insert(session.id(), session);
+    }
+
+    pub(crate) fn retire_session(&self, id: u64) {
+        if let Some((_, session)) = self.sessions.remove(&id) {
+            let mut lifetime = self.lifetime.lock();
+            lifetime.total_work += session.total_work();
+            lifetime.accepted += session.accepted();
+            lifetime.rejected += session.rejected();
+            if session
+                .best_ever()
+                .is_some_and(|d| lifetime.best_ever.is_none_or(|best| d > best))
+            {
+                lifetime.best_ever = session.best_ever();
+            }
+            let last = session.last_share();
+            if last.is_some_and(|l| lifetime.last_share.is_none_or(|prev| l > prev)) {
+                lifetime.last_share = last;
+            }
+        }
     }
 
     pub(crate) fn workername(&self) -> &str {
         &self.workername
     }
 
-    pub(crate) fn client_count(&self) -> usize {
-        self.clients
+    pub(crate) fn session_count(&self) -> usize {
+        self.sessions
             .iter()
-            .filter(|client| client.is_active())
+            .filter(|session| session.is_active())
             .count()
     }
 
     pub(crate) fn hashrate_1m(&self) -> HashRate {
-        self.clients
+        self.sessions
             .iter()
-            .map(|client| client.hashrate_1m())
+            .map(|session| session.hashrate_1m())
             .fold(HashRate::ZERO, |acc, r| acc + r)
     }
 
     pub(crate) fn hashrate_5m(&self) -> HashRate {
-        self.clients
+        self.sessions
             .iter()
-            .map(|client| client.hashrate_5m())
+            .map(|session| session.hashrate_5m())
             .fold(HashRate::ZERO, |acc, r| acc + r)
     }
 
     pub(crate) fn hashrate_15m(&self) -> HashRate {
-        self.clients
+        self.sessions
             .iter()
-            .map(|client| client.hashrate_15m())
+            .map(|session| session.hashrate_15m())
             .fold(HashRate::ZERO, |acc, r| acc + r)
     }
 
     pub(crate) fn hashrate_1hr(&self) -> HashRate {
-        self.clients
+        self.sessions
             .iter()
-            .map(|client| client.hashrate_1hr())
+            .map(|session| session.hashrate_1hr())
             .fold(HashRate::ZERO, |acc, r| acc + r)
     }
 
     pub(crate) fn hashrate_6hr(&self) -> HashRate {
-        self.clients
+        self.sessions
             .iter()
-            .map(|client| client.hashrate_6hr())
+            .map(|session| session.hashrate_6hr())
             .fold(HashRate::ZERO, |acc, r| acc + r)
     }
 
     pub(crate) fn hashrate_1d(&self) -> HashRate {
-        self.clients
+        self.sessions
             .iter()
-            .map(|client| client.hashrate_1d())
+            .map(|session| session.hashrate_1d())
             .fold(HashRate::ZERO, |acc, r| acc + r)
     }
 
     pub(crate) fn hashrate_7d(&self) -> HashRate {
-        self.clients
+        self.sessions
             .iter()
-            .map(|client| client.hashrate_7d())
+            .map(|session| session.hashrate_7d())
             .fold(HashRate::ZERO, |acc, r| acc + r)
     }
 
     pub(crate) fn sps_1m(&self) -> f64 {
-        self.clients.iter().map(|client| client.sps_1m()).sum()
+        self.sessions.iter().map(|session| session.sps_1m()).sum()
     }
 
     pub(crate) fn sps_5m(&self) -> f64 {
-        self.clients.iter().map(|client| client.sps_5m()).sum()
+        self.sessions.iter().map(|session| session.sps_5m()).sum()
     }
 
     pub(crate) fn sps_15m(&self) -> f64 {
-        self.clients.iter().map(|client| client.sps_15m()).sum()
+        self.sessions.iter().map(|session| session.sps_15m()).sum()
     }
 
     pub(crate) fn sps_1hr(&self) -> f64 {
-        self.clients.iter().map(|client| client.sps_1hr()).sum()
+        self.sessions.iter().map(|session| session.sps_1hr()).sum()
     }
 
     pub(crate) fn accepted(&self) -> u64 {
-        self.clients.iter().map(|client| client.accepted()).sum()
+        let from_sessions: u64 = self.sessions.iter().map(|session| session.accepted()).sum();
+        from_sessions + self.lifetime.lock().accepted
     }
 
     pub(crate) fn rejected(&self) -> u64 {
-        self.clients.iter().map(|client| client.rejected()).sum()
+        let from_sessions: u64 = self.sessions.iter().map(|session| session.rejected()).sum();
+        from_sessions + self.lifetime.lock().rejected
     }
 
     pub(crate) fn best_ever(&self) -> Option<Difficulty> {
-        self.clients
+        let from_sessions = self
+            .sessions
             .iter()
-            .filter_map(|client| client.best_ever())
-            .max()
+            .filter_map(|session| session.best_ever())
+            .max();
+        let from_lifetime = self.lifetime.lock().best_ever;
+        match (from_sessions, from_lifetime) {
+            (Some(a), Some(b)) => Some(a.max(b)),
+            (a, b) => a.or(b),
+        }
     }
 
     pub(crate) fn last_share(&self) -> Option<Instant> {
-        self.clients
+        let from_sessions = self
+            .sessions
             .iter()
-            .filter_map(|client| client.last_share())
-            .max()
+            .filter_map(|session| session.last_share())
+            .max();
+        let from_lifetime = self.lifetime.lock().last_share;
+        match (from_sessions, from_lifetime) {
+            (Some(a), Some(b)) => Some(a.max(b)),
+            (a, b) => a.or(b),
+        }
     }
 
     pub(crate) fn total_work(&self) -> f64 {
-        self.clients.iter().map(|client| client.total_work()).sum()
+        let from_sessions: f64 = self
+            .sessions
+            .iter()
+            .map(|session| session.total_work())
+            .sum();
+        from_sessions + self.lifetime.lock().total_work
     }
 }
