@@ -18,30 +18,38 @@ types for protocol messages and an optional async client for connecting to
 mining pools. This is experimental software with no warranty. See
 [LICENSE](LICENSE) for more details.
 
-Setup
+Stratum Messages
+----------------
+
+| Message                  | Type         | Status |
+|--------------------------|--------------|--------|
+| `mining.authorize`       | Request      | ✅     |
+| `mining.configure`       | Request      | ✅     |
+| `mining.subscribe`       | Request      | ✅     |
+| `mining.suggest_difficulty` | Request   | ✅     |
+| `mining.submit`          | Request      | ✅     |
+| `mining.notify`          | Notification | ✅     |
+| `mining.set_difficulty`  | Notification | ✅     |
+
+Types
 -----
 
-### Requirements
+| Type         | Description                                    |
+|--------------|------------------------------------------------|
+| `Difficulty` | Mining difficulty with target conversion       |
+| `Extranonce` | Extra nonce bytes with hex encoding            |
+| `JobId`      | Job identifier (hex-encoded u64)               |
+| `MerkleNode` | Merkle tree node with natural big-endian hex   |
+| `Nbits`      | Compact target (nBits) from block header       |
+| `Nonce`      | 32-bit nonce (hex-encoded)                     |
+| `Ntime`      | Block timestamp (hex-encoded u32)               |
+| `PrevHash`   | Previous block hash (word-swapped encoding)    |
+| `Username`   | Worker identity with Bitcoin address parsing    |
+| `Version`   | Block version with bitmask operations          |
 
-* [Rust](https://rust-lang.org/tools/install/) 1.91.0 or later
 
-Install Rust with `curl`:
-
-```
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
-
-Usage
------
-
-Add to your `Cargo.toml`:
-
-```toml
-[dependencies]
-stratum = "0.0.1"
-```
-
-### Feature Flags
+Feature Flags
+-------------
 
 | Flag    | Description                           | Default |
 |---------|---------------------------------------|---------|
@@ -51,7 +59,7 @@ To enable the client:
 
 ```toml
 [dependencies]
-stratum = { version = "0.0.1", features = ["client"] }
+stratum = { version = "0.0.2", features = ["client"] }
 ```
 
 Examples
@@ -104,35 +112,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
-
-Stratum Messages
-----------------
-
-| Message                  | Type         | Status |
-|--------------------------|--------------|--------|
-| `mining.authorize`       | Request      | ✅     |
-| `mining.configure`       | Request      | ✅     |
-| `mining.subscribe`       | Request      | ✅     |
-| `mining.suggest_difficulty` | Request   | ✅     |
-| `mining.submit`          | Request      | ✅     |
-| `mining.notify`          | Notification | ✅     |
-| `mining.set_difficulty`  | Notification | ✅     |
-
-Types
------
-
-| Type         | Description                                    |
-|--------------|------------------------------------------------|
-| `Difficulty` | Mining difficulty with target conversion       |
-| `Extranonce` | Extra nonce bytes with hex encoding            |
-| `JobId`      | Job identifier (hex-encoded u64)               |
-| `MerkleNode` | Merkle tree node with natural big-endian hex   |
-| `Nbits`      | Compact target (nBits) from block header       |
-| `Nonce`      | 32-bit nonce (hex-encoded)                     |
-| `Ntime`      | Block timestamp (hex-encoded u32)               |
-| `PrevHash`   | Previous block hash (word-swapped encoding)    |
-| `Username`   | Worker identity with Bitcoin address parsing    |
-| `Version`   | Block version with bitmask operations          |
 
 License
 -------
