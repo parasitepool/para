@@ -22,8 +22,8 @@ impl Worker {
     pub(crate) fn retire_session(&self, id: u64) {
         if let Some((_, session)) = self.sessions.remove(&id) {
             let now = Instant::now();
-            let session_stats = session.stats.lock();
-            self.lifetime.lock().absorb(&session_stats, now);
+            let snapshot = session.stats.lock().clone();
+            self.lifetime.lock().absorb(&snapshot, now);
         }
     }
 

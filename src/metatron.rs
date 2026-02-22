@@ -4,6 +4,7 @@ pub(crate) mod session;
 mod user;
 mod worker;
 
+#[derive(Clone)]
 pub(crate) struct Stats {
     pub(crate) dsps_1m: DecayingAverage,
     pub(crate) dsps_5m: DecayingAverage,
