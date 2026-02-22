@@ -59,6 +59,7 @@ parking_lot = "0.12.5"
 primitive-types = "0.14.0"
 rand.workspace = true
 reqwest = { version = "0.12.22", features = ["rustls-tls", "blocking", "json"] }
+async-trait = "0.1.89"
 rust-embed = "8.7.1"
 rustls = { version = "0.23.26", features = ["ring"] }
 rustls-acme = { version = "0.14.0", features = ["axum"] }
@@ -67,9 +68,10 @@ serde_json.workspace = true
 serde_with = "3.14.0"
 snafu = "0.8.9"
 sqlx = { version =  "0.8.5", features = ["postgres", "runtime-tokio"] }
+stratum = { path = "crates/stratum", features = ["client"] }
 sysinfo = "0.37.0"
-tokio.workspace = true
 tokio-util = "0.7.15"
+tokio.workspace = true
 tower-http = { version = "0.6.2", features = ["auth", "fs", "set-header"] }
 tracing = "0.1.41"
 tracing-appender = "0.2.3"
@@ -77,8 +79,6 @@ tracing-subscriber = { version =  "0.3.19", features = ["env-filter", "fmt"] }
 utoipa = "5.4.0"
 utoipa-swagger-ui = { version =  "9.0.2", features = ["axum"], optional = true }
 zeromq = "0.4.1"
-async-trait = "0.1.89"
-stratum = { path = "crates/stratum", features = ["client"] }
 
 [dev-dependencies]
 chrono = "0.4.41"
