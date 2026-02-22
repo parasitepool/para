@@ -80,28 +80,11 @@ impl State {
         }
     }
 
-    pub(crate) fn authorized(&self) -> Option<Arc<Authorization>> {
-        match self {
-            State::Authorized(auth) => Some(auth.clone()),
-            _ => None,
-        }
-    }
-
     pub(crate) fn can_submit(&self) -> Option<(Address, Extranonce)> {
         match self {
             State::Authorized(auth) => Some((auth.address.clone(), auth.enonce1.clone())), // TODO
             State::Working(session) => Some((session.address.clone(), session.enonce1.clone())),
             _ => None,
-        }
-    }
-
-    pub(crate) fn promote(&mut self, session: Arc<Session>) -> bool {
-        match self {
-            State::Authorized(_) => {
-                *self = State::Working(session);
-                true
-            }
-            _ => false,
         }
     }
 
@@ -235,49 +218,11 @@ mod tests {
     }
 
     #[test]
-    fn authorize_transitions_to_authorized() {
-        let mut state = State::new();
-
-        assert!(state.subscribe(test_enonce1(), "foo".into()));
-        assert!(state.authorize(test_authorization()));
-
-        assert!(state.subscribed().is_none());
-        assert!(state.working().is_none());
-
-        let auth = state.authorized().unwrap();
-        assert_eq!(auth.address, test_address());
-        assert_eq!(auth.workername, "bar");
-    }
-
-    #[test]
     fn authorize_in_init_fails() {
         let mut state = State::new();
 
         assert!(!state.authorize(test_authorization()));
         assert!(state.can_subscribe());
-    }
-
-    #[test]
-    fn authorize_in_authorized_fails() {
-        let mut state = State::new();
-
-        assert!(state.subscribe(test_enonce1(), "test/1.0".into()));
-
-        assert!(state.authorize(test_authorization()));
-        assert!(!state.authorize(test_authorization()));
-        assert!(state.authorized().is_some());
-    }
-
-    #[test]
-    fn promote_transitions_to_working() {
-        let mut state = State::new();
-
-        assert!(state.subscribe(test_enonce1(), "foo".into()));
-        assert!(state.authorize(test_authorization()));
-        assert!(state.promote(test_session()));
-
-        assert!(state.authorized().is_none());
-        assert!(state.working().is_some());
     }
 
     #[test]
@@ -289,8 +234,6 @@ mod tests {
 
         let new_enonce1: Extranonce = "cafebabe".parse().unwrap();
         assert!(!state.subscribe(new_enonce1.clone(), "test/2.0".into()));
-
-        assert!(state.authorized().is_some());
     }
 
     #[test]
@@ -320,8 +263,6 @@ mod tests {
         assert_eq!(enonce1, test_enonce1());
         assert_eq!(address, test_address());
 
-        assert!(state.promote(test_session()));
-
         let (enonce1, address) = state.identity().unwrap();
         assert_eq!(enonce1, test_enonce1());
         assert_eq!(address, test_address());
@@ -340,8 +281,5 @@ mod tests {
 
         assert!(state.authorize(test_authorization()));
         assert_eq!(state.to_string(), "Authorized");
-
-        assert!(state.promote(test_session()));
-        assert_eq!(state.to_string(), "Working");
     }
 }

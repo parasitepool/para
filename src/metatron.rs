@@ -95,10 +95,10 @@ impl Metatron {
         &self.extranonces
     }
 
-    pub(crate) fn new_session(&self) -> Session {
-        self.session_id_counter.fetch_add(1, Ordering::Relaxed));
-        Arc::new(Session::new(client_id))
-    }
+    // pub(crate) fn new_session(&self) -> Session {
+    // self.session_id_counter.fetch_add(1, Ordering::Relaxed));
+    // Arc::new(Session::new(client_id))
+    // }
 
     pub(crate) fn register_session(
         &self,
@@ -298,7 +298,7 @@ mod tests {
 
     fn test_session(enonce1: &str) -> Arc<Session> {
         Arc::new(Session::new(
-
+            1, // TODO
             enonce1.parse().unwrap(),
             test_address(),
             "foo".into(),

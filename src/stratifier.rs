@@ -151,24 +151,46 @@ impl<W: Workbase> Stratifier<W> {
                             self.handle_protocol_consequence(consequence).await;
                         }
                         "mining.submit" => {
-                            let Some((address, enonce1)) =  self.state.can_submit() else {
+                            let session = match &self.state {
+                                State::Authorized(auth) => {
+                                    let session = Arc::new(Session::new(
+                                      1, //TODO
+                                      auth.enonce1.clone(),
+                                      auth.address.clone(),
+                                      auth.workername.clone(),
+                                      auth.username.clone(),
+                                      auth.version_mask,
+                                  ));
+
+                                  self.metatron
+                                      .register_session(auth.address.clone(), &auth.workername, session.clone());
+
+                                  self.state = State::Working(session.clone());
+
+                                    session
+
+                                },
+                                State::Working(session) => session.clone(),
+                                _ => {
+
                                 self.send_error(id.clone(), StratumError::Unauthorized, None)
                                     .await?;
 
                                 let consequence = self.bouncer.reject();
                                 self.handle_protocol_consequence(consequence).await;
 
-                                continue;
+                                continue
+                                }
                             };
 
                             let submit = serde_json::from_value::<Submit>(params.clone())
                                 .context(format!("failed to deserialize {method} from {params}"))?;
 
                             let consequence = self
-                                .submit(id, submit)
+                                .submit(id, submit, session.clone())
                                 .await?;
 
-                            self.handle_submit_consequence(consequence, &address, &enonce1).await;
+                            self.handle_submit_consequence(consequence, session.address(), session.enonce1()).await;
                         }
                         method => {
                             warn!("Unknown method {method} with {params} from {}", self.socket_addr);
@@ -629,24 +651,12 @@ impl<W: Workbase> Stratifier<W> {
         Ok(Consequence::None)
     }
 
-    async fn submit(&mut self, id: Id, submit: Submit) -> Result<Consequence> {
-        let auth = self.state.authorized().unwrap();
-
-        let session = Arc::new(Session::new(
-            1, //TODO
-            auth.enonce1.clone(),
-            auth.address.clone(),
-            auth.workername.clone(),
-            auth.username.clone(),
-            auth.version_mask,
-        ));
-
-        self.metatron
-            .register_session(auth.address.clone(), &auth.workername, session.clone());
-
-        self.state.promote(session.clone());
-        let session = self.state.working().unwrap();
-
+    async fn submit(
+        &mut self,
+        id: Id,
+        submit: Submit,
+        session: Arc<Session>,
+    ) -> Result<Consequence> {
         if submit.username != *session.username() {
             let job_height = self.workbase_rx.borrow().height();
 
