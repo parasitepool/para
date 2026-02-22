@@ -13,7 +13,7 @@
 </div>
 <br>
 
-`stratum` is a Rust library for the Stratum v1 mining protocol. It provides
+`stratum` is a Rust library for the Stratum mining protocol. It provides
 types for protocol messages and an optional async client for connecting to
 mining pools. This is experimental software with no warranty. See
 [LICENSE](LICENSE) for more details.
@@ -21,15 +21,15 @@ mining pools. This is experimental software with no warranty. See
 Stratum Messages
 ----------------
 
-| Message                  | Type         | Status |
-|--------------------------|--------------|--------|
-| `mining.authorize`       | Request      | ✅     |
-| `mining.configure`       | Request      | ✅     |
-| `mining.subscribe`       | Request      | ✅     |
-| `mining.suggest_difficulty` | Request   | ✅     |
-| `mining.submit`          | Request      | ✅     |
-| `mining.notify`          | Notification | ✅     |
-| `mining.set_difficulty`  | Notification | ✅     |
+| Message                     | Type         | Status |
+|-----------------------------|--------------|--------|
+| `mining.authorize`          | Request      | ✅     |
+| `mining.configure`          | Request      | ✅     |
+| `mining.subscribe`          | Request      | ✅     |
+| `mining.suggest_difficulty` | Request      | ✅     |
+| `mining.submit`             | Request      | ✅     |
+| `mining.notify`             | Notification | ✅     |
+| `mining.set_difficulty`     | Notification | ✅     |
 
 Types
 -----
@@ -42,10 +42,10 @@ Types
 | `MerkleNode` | Merkle tree node with natural big-endian hex   |
 | `Nbits`      | Compact target (nBits) from block header       |
 | `Nonce`      | 32-bit nonce (hex-encoded)                     |
-| `Ntime`      | Block timestamp (hex-encoded u32)               |
+| `Ntime`      | Block timestamp (hex-encoded u32)              |
 | `PrevHash`   | Previous block hash (word-swapped encoding)    |
-| `Username`   | Worker identity with Bitcoin address parsing    |
-| `Version`   | Block version with bitmask operations          |
+| `Username`   | Worker identity with Bitcoin address parsing   |
+| `Version`    | Block version with bitmask operations          |
 
 
 Feature Flags
@@ -54,13 +54,6 @@ Feature Flags
 | Flag    | Description                           | Default |
 |---------|---------------------------------------|---------|
 | `client`| Async Stratum client (requires tokio) | Off     |
-
-To enable the client:
-
-```toml
-[dependencies]
-stratum = { version = "0.0.2", features = ["client"] }
-```
 
 Examples
 --------
@@ -112,8 +105,3 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
-
-License
--------
-
-CC0-1.0
