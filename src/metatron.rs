@@ -302,15 +302,16 @@ mod tests {
         Extranonces::Pool(PoolExtranonces::new(ENONCE1_SIZE, 8).unwrap())
     }
 
-    fn test_session(enonce1: &str) -> Arc<Session> {
-        Arc::new(Session::new(
-            1, // TODO
-            enonce1.parse().unwrap(),
-            test_address(),
-            "foo".into(),
-            Username::new("tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.foo"),
-            None,
-        ))
+    fn test_auth(enonce1: &str, workername: &str) -> Arc<Authorization> {
+        Arc::new(Authorization {
+            enonce1: enonce1.parse().unwrap(),
+            address: test_address(),
+            workername: workername.into(),
+            username: Username::new(format!(
+                "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.{workername}"
+            )),
+            version_mask: None,
+        })
     }
 
     #[test]
@@ -327,13 +328,10 @@ mod tests {
     #[test]
     fn session_count_tracks_active_sessions() {
         let metatron = Metatron::new(pool_extranonces(), String::new());
-        let addr = test_address();
         assert_eq!(metatron.total_sessions(), 0);
 
-        let s1 = test_session("deadbeef");
-        metatron.register_session(addr.clone(), "foo", s1.clone());
-        let s2 = test_session("cafebabe");
-        metatron.register_session(addr, "foo", s2.clone());
+        let s1 = metatron.new_session(test_auth("deadbeef", "foo"));
+        let s2 = metatron.new_session(test_auth("cafebabe", "foo"));
         assert_eq!(metatron.total_sessions(), 2);
 
         s1.deactivate();
@@ -344,15 +342,14 @@ mod tests {
     }
 
     #[test]
-    fn register_session_creates_user_and_worker() {
+    fn new_session_creates_user_and_worker() {
         let metatron = Metatron::new(pool_extranonces(), String::new());
-        let addr = test_address();
 
-        metatron.register_session(addr.clone(), "rig1", test_session("deadbeef"));
+        metatron.new_session(test_auth("deadbeef", "rig1"));
         assert_eq!(metatron.total_users(), 1);
         assert_eq!(metatron.total_workers(), 1);
 
-        metatron.register_session(addr.clone(), "rig2", test_session("cafebabe"));
+        metatron.new_session(test_auth("cafebabe", "rig2"));
         assert_eq!(metatron.total_users(), 1);
         assert_eq!(metatron.total_workers(), 2);
     }
@@ -360,9 +357,7 @@ mod tests {
     #[test]
     fn record_accepted_updates_stats() {
         let metatron = Metatron::new(pool_extranonces(), String::new());
-        let addr = test_address();
-        let session = test_session("deadbeef");
-        metatron.register_session(addr, "rig1", session.clone());
+        let session = metatron.new_session(test_auth("deadbeef", "rig1"));
 
         let pool_diff = Difficulty::from(1000.0);
         let share_diff = Difficulty::from(1500.0);
@@ -377,9 +372,7 @@ mod tests {
     #[test]
     fn record_rejected_updates_stats() {
         let metatron = Metatron::new(pool_extranonces(), String::new());
-        let addr = test_address();
-        let session = test_session("deadbeef");
-        metatron.register_session(addr, "rig1", session.clone());
+        let session = metatron.new_session(test_auth("deadbeef", "rig1"));
 
         session.record_rejected();
         session.record_rejected();
@@ -478,14 +471,12 @@ mod tests {
     #[test]
     fn total_work_accumulates() {
         let metatron = Metatron::new(pool_extranonces(), String::new());
-        let addr = test_address();
         let pool_diff = Difficulty::from(100.0);
         let pool_diff_f64 = pool_diff.as_f64();
 
         assert_eq!(metatron.total_work(), 0.0);
 
-        let foo_session = test_session("deadbeef");
-        metatron.register_session(addr.clone(), "foo", foo_session.clone());
+        let foo_session = metatron.new_session(test_auth("deadbeef", "foo"));
         foo_session.record_accepted(pool_diff, Difficulty::from(200.0));
         foo_session.record_accepted(pool_diff, Difficulty::from(50.0));
 
@@ -494,8 +485,7 @@ mod tests {
                 < f64::EPSILON * 2.0 * pool_diff_f64
         );
 
-        let bar_session = test_session("cafebabe");
-        metatron.register_session(addr, "bar", bar_session.clone());
+        let bar_session = metatron.new_session(test_auth("cafebabe", "bar"));
         bar_session.record_accepted(pool_diff, Difficulty::from(400.0));
 
         assert!(

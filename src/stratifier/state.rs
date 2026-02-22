@@ -80,14 +80,6 @@ impl State {
         }
     }
 
-    pub(crate) fn can_submit(&self) -> Option<(Address, Extranonce)> {
-        match self {
-            State::Authorized(auth) => Some((auth.address.clone(), auth.enonce1.clone())), // TODO
-            State::Working(session) => Some((session.address.clone(), session.enonce1.clone())),
-            _ => None,
-        }
-    }
-
     pub(crate) fn identity(&self) -> Option<(Extranonce, Address)> {
         match self {
             State::Authorized(auth) => Some((auth.enonce1.clone(), auth.address.clone())),
@@ -157,17 +149,6 @@ mod tests {
             username: Username::new("tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.bar"),
             version_mask: None,
         })
-    }
-
-    fn test_session() -> Arc<Session> {
-        Arc::new(Session::new(
-            1,
-            test_enonce1(),
-            test_address(),
-            "bar".into(),
-            Username::new("tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.bar"),
-            None,
-        ))
     }
 
     #[test]
