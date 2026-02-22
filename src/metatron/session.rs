@@ -8,6 +8,7 @@ pub(crate) struct Session {
     pub(crate) username: Username,
     pub(crate) version_mask: Option<Version>,
     pub(crate) active: AtomicBool,
+    pub(crate) deactivated_at: Mutex<Option<Instant>>,
     pub(crate) stats: Mutex<Stats>,
     pub(crate) accepted: AtomicU64,
     pub(crate) rejected: AtomicU64,
@@ -30,6 +31,7 @@ impl Session {
             username,
             version_mask,
             active: AtomicBool::new(true),
+            deactivated_at: Mutex::new(None),
             stats: Mutex::new(Stats {
                 dsps_1m: DecayingAverage::new(Duration::from_mins(1)),
                 dsps_5m: DecayingAverage::new(Duration::from_mins(5)),
@@ -81,6 +83,11 @@ impl Session {
 
     pub(crate) fn deactivate(&self) {
         self.active.store(false, Ordering::Relaxed);
+        *self.deactivated_at.lock() = Some(Instant::now());
+    }
+
+    pub(crate) fn deactivated_at(&self) -> Option<Instant> {
+        *self.deactivated_at.lock()
     }
 
     pub(crate) fn record_accepted(&self, pool_diff: Difficulty, share_diff: Difficulty) {

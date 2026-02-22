@@ -6,10 +6,7 @@ use {
     upstream::UpstreamSubmit,
 };
 
-pub(crate) use session::SessionSnapshot;
-
 mod bouncer;
-mod session;
 pub(crate) mod state;
 
 pub(crate) struct Stratifier<W: Workbase> {
@@ -484,12 +481,14 @@ impl<W: Workbase> Stratifier<W> {
         }
 
         let (enonce1, enonce2_size) = if let Some(ref requested_enonce1) = subscribe.enonce1 {
-            let enonce1 = if let Some(snapshot) = self.metatron.take_session(requested_enonce1) {
-                info!("Resuming session with enonce1 {}", snapshot.enonce1());
-                snapshot.enonce1().clone()
-            } else {
-                self.metatron.next_enonce1()
-            };
+            let enonce1 = self
+                .metatron
+                .take_disconnected(requested_enonce1)
+                .unwrap_or_else(|| self.metatron.next_enonce1());
+
+            if enonce1 == *requested_enonce1 {
+                info!("Resuming session with enonce1 {enonce1}");
+            }
 
             (enonce1, self.metatron.enonce2_size())
         } else {
@@ -1142,9 +1141,8 @@ impl<W: Workbase> Stratifier<W> {
 impl<W: Workbase> Drop for Stratifier<W> {
     fn drop(&mut self) {
         if let Some(session) = self.state.working() {
-            self.metatron
-                .store_session(SessionSnapshot::new(session.clone()));
             session.deactivate();
+            self.metatron.store_disconnected(session.clone());
         }
 
         debug!("Shutting down stratifier for {}", self.socket_addr,);

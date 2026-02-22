@@ -12,7 +12,7 @@ pub(crate) struct Metatron {
     blocks: AtomicU64,
     started: Instant,
     users: DashMap<Address, Arc<User>>,
-    sessions: DashMap<Extranonce, SessionSnapshot>,
+    disconnected: DashMap<Extranonce, Arc<Session>>,
     extranonces: Extranonces,
     enonce_counter: AtomicU64,
     session_id_counter: AtomicU64,
@@ -25,7 +25,7 @@ impl Metatron {
             blocks: AtomicU64::new(0),
             started: Instant::now(),
             users: DashMap::new(),
-            sessions: DashMap::new(),
+            disconnected: DashMap::new(),
             extranonces,
             enonce_counter: AtomicU64::new(
                 std::time::SystemTime::now()
@@ -58,8 +58,15 @@ impl Metatron {
                     }
 
                     _ = cleanup_interval.tick() => {
-                        self.sessions
-                            .retain(|_, session| !session.is_expired(SESSION_TTL));
+                        self.disconnected.retain(|_, session| {
+                            let expired = session
+                                .deactivated_at()
+                                .is_some_and(|at| at.elapsed() >= SESSION_TTL);
+                            if expired {
+                                self.retire_session(session);
+                            }
+                            !expired
+                        });
 
                         info!("{}", self.status_line());
                     }
@@ -122,13 +129,29 @@ impl Metatron {
         session
     }
 
-    pub(crate) fn store_session(&self, snapshot: SessionSnapshot) {
-        info!("Storing session for enonce1 {}", snapshot.enonce1());
-        self.sessions.insert(snapshot.enonce1().clone(), snapshot);
+    pub(crate) fn store_disconnected(&self, session: Arc<Session>) {
+        info!(
+            "Storing disconnected session for enonce1 {}",
+            session.enonce1()
+        );
+        self.disconnected.insert(session.enonce1().clone(), session);
     }
 
-    pub(crate) fn take_session(&self, enonce1: &Extranonce) -> Option<SessionSnapshot> {
-        self.sessions.remove(enonce1).map(|(_, session)| session)
+    pub(crate) fn take_disconnected(&self, enonce1: &Extranonce) -> Option<Extranonce> {
+        if let Some((_, session)) = self.disconnected.remove(enonce1) {
+            self.retire_session(&session);
+            Some(session.enonce1().clone())
+        } else {
+            None
+        }
+    }
+
+    fn retire_session(&self, session: &Session) {
+        if let Some(user) = self.users.get(session.address())
+            && let Some(worker) = user.workers.get(session.workername())
+        {
+            worker.retire_session(session.id());
+        }
     }
 
     pub(crate) fn add_block(&self) {
@@ -217,7 +240,7 @@ impl Metatron {
     }
 
     pub(crate) fn disconnected(&self) -> usize {
-        self.sessions.len()
+        self.disconnected.len()
     }
 
     pub(crate) fn idle(&self) -> usize {
