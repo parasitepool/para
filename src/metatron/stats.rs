@@ -60,14 +60,14 @@ impl Stats {
 
         if other
             .best_ever
-            .is_some_and(|diff| self.best_ever.is_none_or(|prev_diff| diff > prev_diff))
+            .is_some_and(|other_diff| self.best_ever.is_none_or(|diff| other_diff > diff))
         {
             self.best_ever = other.best_ever;
         }
 
         if other
             .last_share
-            .is_some_and(|last| self.last_share.is_none_or(|prev_last| last > prev_last))
+            .is_some_and(|other_last| self.last_share.is_none_or(|last| other_last > last))
         {
             self.last_share = other.last_share;
         }
