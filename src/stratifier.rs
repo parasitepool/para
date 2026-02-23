@@ -1110,8 +1110,14 @@ impl<W: Workbase> Stratifier<W> {
 impl<W: Workbase> Drop for Stratifier<W> {
     fn drop(&mut self) {
         if let Some(session) = self.state.working() {
-            session.disconnect();
-            self.metatron.store_disconnected(session.clone());
+            info!(
+                "Storing session for {} with workername {} and enonce1 {}",
+                self.socket_addr,
+                session.workername(),
+                session.enonce1()
+            );
+
+            self.metatron.retire_session(session);
         }
 
         debug!("Shutting down stratifier for {}", self.socket_addr,);

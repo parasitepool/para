@@ -12,7 +12,7 @@ pub(crate) struct Metatron {
     blocks: AtomicU64,
     started: Instant,
     users: DashMap<Address, Arc<User>>,
-    disconnected: DashMap<Extranonce, Arc<Session>>,
+    disconnected: DashMap<Extranonce, (Arc<Session>, Instant)>,
     extranonces: Extranonces,
     enonce_counter: AtomicU64,
     session_id_counter: AtomicU64,
@@ -58,16 +58,8 @@ impl Metatron {
                     }
 
                     _ = cleanup_interval.tick() => {
-                        self.disconnected.retain(|_, session| {
-                            let expired = session
-                                .deactivated_at()
-                                .is_some_and(|at| at.elapsed() >= SESSION_TTL);
-
-                            if expired {
-                                self.retire_session(session);
-                            }
-
-                            !expired
+                        self.disconnected.retain(|_, (_, disconnected_at)| {
+                            disconnected_at.elapsed() < SESSION_TTL
                         });
 
                         info!("{}", self.status_line());
@@ -131,29 +123,19 @@ impl Metatron {
         session
     }
 
-    pub(crate) fn store_disconnected(&self, session: Arc<Session>) {
-        info!(
-            "Storing disconnected session for enonce1 {}",
-            session.enonce1()
-        );
-        self.disconnected.insert(session.enonce1().clone(), session);
-    }
-
-    pub(crate) fn take_disconnected(&self, enonce1: &Extranonce) -> bool {
-        if let Some((_, session)) = self.disconnected.remove(enonce1) {
-            self.retire_session(&session);
-            true
-        } else {
-            false
-        }
-    }
-
-    fn retire_session(&self, session: &Session) {
+    pub(crate) fn retire_session(&self, session: Arc<Session>) {
         if let Some(user) = self.users.get(session.address())
             && let Some(worker) = user.workers.get(session.workername())
         {
             worker.retire_session(session.id());
         }
+
+        self.disconnected
+            .insert(session.enonce1().clone(), (session, Instant::now()));
+    }
+
+    pub(crate) fn take_disconnected(&self, enonce1: &Extranonce) -> bool {
+        self.disconnected.remove(enonce1).is_some()
     }
 
     pub(crate) fn add_block(&self) {
@@ -311,11 +293,6 @@ impl StatusLine for Metatron {
 mod tests {
     use super::*;
 
-    fn proxy_extranonces() -> Extranonces {
-        let upstream_enonce1 = Extranonce::from_bytes(&[0xde, 0xad, 0xbe, 0xef]);
-        Extranonces::Proxy(ProxyExtranonces::new(upstream_enonce1, 8, 2).unwrap())
-    }
-
     fn test_address() -> Address {
         "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc"
             .parse::<Address<bitcoin::address::NetworkUnchecked>>()
@@ -359,10 +336,10 @@ mod tests {
         let s2 = metatron.new_session(test_auth("cafebabe", "foo"));
         assert_eq!(metatron.total_sessions(), 2);
 
-        s1.disconnect();
+        metatron.retire_session(s1);
         assert_eq!(metatron.total_sessions(), 1);
 
-        s2.disconnect();
+        metatron.retire_session(s2);
         assert_eq!(metatron.total_sessions(), 0);
     }
 
@@ -380,30 +357,16 @@ mod tests {
     }
 
     #[test]
-    fn record_accepted_updates_stats() {
+    fn record_share_updates_stats() {
         let metatron = Metatron::new(pool_extranonces(), String::new());
-        let session = metatron.new_session(test_auth("deadbeef", "rig1"));
+        let session = metatron.new_session(test_auth("deadbeef", "foo"));
 
-        let pool_diff = Difficulty::from(1000.0);
-        let share_diff = Difficulty::from(1500.0);
-
-        session.record_accepted(pool_diff, share_diff);
-        session.record_accepted(pool_diff, share_diff);
+        session.record_accepted(Difficulty::from(1000.0), Difficulty::from(1500.0));
+        session.record_accepted(Difficulty::from(1000.0), Difficulty::from(1500.0));
+        session.record_rejected();
 
         assert_eq!(metatron.accepted(), 2);
-        assert_eq!(metatron.rejected(), 0);
-    }
-
-    #[test]
-    fn record_rejected_updates_stats() {
-        let metatron = Metatron::new(pool_extranonces(), String::new());
-        let session = metatron.new_session(test_auth("deadbeef", "rig1"));
-
-        session.record_rejected();
-        session.record_rejected();
-
-        assert_eq!(metatron.accepted(), 0);
-        assert_eq!(metatron.rejected(), 2);
+        assert_eq!(metatron.rejected(), 1);
     }
 
     #[test]
@@ -414,24 +377,16 @@ mod tests {
     }
 
     #[test]
-    fn next_enonce1_is_sequential() {
+    fn pool_enonce1() {
         let metatron = Metatron::new(pool_extranonces(), String::new());
         let e1 = metatron.next_enonce1();
         let e2 = metatron.next_enonce1();
-        let e3 = metatron.next_enonce1();
+
+        assert_eq!(e1.len(), ENONCE1_SIZE);
 
         let v1 = u32::from_le_bytes(e1.as_bytes().try_into().unwrap());
         let v2 = u32::from_le_bytes(e2.as_bytes().try_into().unwrap());
-        let v3 = u32::from_le_bytes(e3.as_bytes().try_into().unwrap());
-
         assert_eq!(v2, v1 + 1);
-        assert_eq!(v3, v2 + 1);
-    }
-
-    #[test]
-    fn next_enonce1_has_correct_size() {
-        let metatron = Metatron::new(pool_extranonces(), String::new());
-        assert_eq!(metatron.next_enonce1().len(), ENONCE1_SIZE);
     }
 
     #[test]
@@ -445,30 +400,19 @@ mod tests {
     }
 
     #[test]
-    fn proxy_mode_next_enonce1_extends_upstream() {
+    fn proxy_enonce1() {
         let upstream_enonce1 = Extranonce::from_bytes(&[0xde, 0xad, 0xbe, 0xef]);
         let extranonces =
             Extranonces::Proxy(ProxyExtranonces::new(upstream_enonce1.clone(), 8, 2).unwrap());
         let metatron = Metatron::new(extranonces, String::new());
 
-        let e1 = metatron.next_enonce1();
-
-        assert_eq!(e1.len(), 6);
-        assert_eq!(&e1.as_bytes()[..4], upstream_enonce1.as_bytes());
-    }
-
-    #[test]
-    fn proxy_mode_enonce2_size_reduced() {
-        let metatron = Metatron::new(proxy_extranonces(), String::new());
         assert_eq!(metatron.enonce2_size(), 6);
-    }
-
-    #[test]
-    fn proxy_mode_next_enonce1_is_sequential() {
-        let metatron = Metatron::new(proxy_extranonces(), String::new());
 
         let e1 = metatron.next_enonce1();
         let e2 = metatron.next_enonce1();
+
+        assert_eq!(e1.len(), 6);
+        assert_eq!(&e1.as_bytes()[..4], upstream_enonce1.as_bytes());
 
         let ext1 = u16::from_le_bytes(e1.as_bytes()[4..6].try_into().unwrap());
         let ext2 = u16::from_le_bytes(e2.as_bytes()[4..6].try_into().unwrap());
@@ -522,41 +466,16 @@ mod tests {
     #[test]
     fn store_and_take_disconnected() {
         let metatron = Metatron::new(pool_extranonces(), String::new());
-        let session = metatron.new_session(test_auth("deadbeef", "foo"));
-        session.disconnect();
 
-        metatron.store_disconnected(session);
+        let enonce1: Extranonce = "deadbeef".parse().unwrap();
+        assert!(!metatron.take_disconnected(&enonce1));
+
+        let session = metatron.new_session(test_auth("deadbeef", "foo"));
+        metatron.retire_session(session);
         assert_eq!(metatron.disconnected(), 1);
 
-        let enonce1: Extranonce = "deadbeef".parse().unwrap();
         assert!(metatron.take_disconnected(&enonce1));
         assert_eq!(metatron.disconnected(), 0);
-    }
-
-    #[test]
-    fn take_disconnected_missing_returns_false() {
-        let metatron = Metatron::new(pool_extranonces(), String::new());
-        let enonce1: Extranonce = "deadbeef".parse().unwrap();
-
-        assert!(!metatron.take_disconnected(&enonce1));
-    }
-
-    #[test]
-    fn take_disconnected_retires_from_worker() {
-        let metatron = Metatron::new(pool_extranonces(), String::new());
-        let session = metatron.new_session(test_auth("deadbeef", "foo"));
-
-        let pool_diff = Difficulty::from(100.0);
-        session.record_accepted(pool_diff, Difficulty::from(200.0));
-        session.disconnect();
-
-        metatron.store_disconnected(session);
-
-        let enonce1: Extranonce = "deadbeef".parse().unwrap();
-        assert!(metatron.take_disconnected(&enonce1));
-
-        assert_eq!(metatron.accepted(), 1);
-        assert!((metatron.total_work() - pool_diff.as_f64()).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -568,12 +487,7 @@ mod tests {
         session.record_accepted(pool_diff, Difficulty::from(200.0));
         session.record_accepted(pool_diff, Difficulty::from(50.0));
         session.record_rejected();
-        session.disconnect();
-
-        metatron.store_disconnected(session);
-
-        let enonce1: Extranonce = "deadbeef".parse().unwrap();
-        metatron.take_disconnected(&enonce1);
+        metatron.retire_session(session);
 
         assert_eq!(metatron.total_sessions(), 0);
         assert_eq!(metatron.accepted(), 2);
@@ -592,16 +506,8 @@ mod tests {
         let pool_diff = Difficulty::from(100.0);
         s1.record_accepted(pool_diff, Difficulty::from(50.0));
         s2.record_accepted(pool_diff, Difficulty::from(300.0));
-        s1.disconnect();
-        s2.disconnect();
-
-        metatron.store_disconnected(s1);
-        metatron.store_disconnected(s2);
-
-        let e1: Extranonce = "deadbeef".parse().unwrap();
-        let e2: Extranonce = "cafebabe".parse().unwrap();
-        metatron.take_disconnected(&e1);
-        metatron.take_disconnected(&e2);
+        metatron.retire_session(s1);
+        metatron.retire_session(s2);
 
         assert_eq!(metatron.accepted(), 2);
         assert_eq!(metatron.best_ever(), Some(Difficulty::from(300.0)));
@@ -620,11 +526,7 @@ mod tests {
         let pool_diff = Difficulty::from(100.0);
         s1.record_accepted(pool_diff, Difficulty::from(50.0));
         s2.record_accepted(pool_diff, Difficulty::from(200.0));
-        s1.disconnect();
-
-        metatron.store_disconnected(s1);
-        let e1: Extranonce = "deadbeef".parse().unwrap();
-        metatron.take_disconnected(&e1);
+        metatron.retire_session(s1);
 
         assert_eq!(metatron.accepted(), 2);
         assert_eq!(metatron.best_ever(), Some(Difficulty::from(200.0)));

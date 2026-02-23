@@ -7,8 +7,6 @@ pub(crate) struct Session {
     pub(crate) workername: String,
     pub(crate) username: Username,
     pub(crate) version_mask: Option<Version>,
-    pub(crate) active: AtomicBool,
-    pub(crate) disconnected_at: Mutex<Option<Instant>>,
     pub(crate) stats: Mutex<Stats>,
 }
 
@@ -28,8 +26,6 @@ impl Session {
             workername,
             username,
             version_mask,
-            active: AtomicBool::new(true),
-            disconnected_at: Mutex::new(None),
             stats: Mutex::new(Stats::new()),
         }
     }
@@ -56,19 +52,6 @@ impl Session {
 
     pub(crate) fn version_mask(&self) -> Option<Version> {
         self.version_mask
-    }
-
-    pub(crate) fn is_active(&self) -> bool {
-        self.active.load(Ordering::Relaxed)
-    }
-
-    pub(crate) fn disconnect(&self) {
-        self.active.store(false, Ordering::Relaxed);
-        *self.disconnected_at.lock() = Some(Instant::now());
-    }
-
-    pub(crate) fn deactivated_at(&self) -> Option<Instant> {
-        *self.disconnected_at.lock()
     }
 
     pub(crate) fn record_accepted(&self, pool_diff: Difficulty, share_diff: Difficulty) {
@@ -162,54 +145,5 @@ impl Session {
 
     pub(crate) fn total_work(&self) -> f64 {
         self.stats.lock().total_work
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn test_session(id: u64, enonce1: &str) -> Session {
-        Session::new(
-            id,
-            enonce1.parse().unwrap(),
-            "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc"
-                .parse::<Address<bitcoin::address::NetworkUnchecked>>()
-                .unwrap()
-                .assume_checked(),
-            "foo".into(),
-            Username::new("tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.foo"),
-            None,
-        )
-    }
-
-    #[test]
-    fn new_session_is_active() {
-        let session = test_session(0, "deadbeef");
-
-        assert!(session.is_active());
-        assert!(session.deactivated_at().is_none());
-    }
-
-    #[test]
-    fn deactivate_sets_deactivated_at() {
-        let session = test_session(0, "deadbeef");
-
-        session.disconnect();
-
-        assert!(!session.is_active());
-        assert!(session.deactivated_at().is_some());
-    }
-
-    #[test]
-    fn deactivated_at_is_recent() {
-        let before = Instant::now();
-        let session = test_session(0, "deadbeef");
-        session.disconnect();
-        let after = Instant::now();
-
-        let at = session.deactivated_at().unwrap();
-        assert!(at >= before);
-        assert!(at <= after);
     }
 }

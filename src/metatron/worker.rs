@@ -21,9 +21,8 @@ impl Worker {
 
     pub(crate) fn retire_session(&self, id: u64) {
         if let Some((_, session)) = self.sessions.remove(&id) {
-            let now = Instant::now();
             let snapshot = session.stats.lock().clone();
-            self.lifetime.lock().absorb(snapshot, now);
+            self.lifetime.lock().absorb(snapshot, Instant::now());
         }
     }
 
@@ -32,21 +31,17 @@ impl Worker {
     }
 
     pub(crate) fn session_count(&self) -> usize {
-        self.sessions
-            .iter()
-            .filter(|session| session.is_active())
-            .count()
+        self.sessions.len()
     }
 
     pub(crate) fn hashrate_1m(&self) -> HashRate {
-        let now = Instant::now();
         let from_sessions = self
             .sessions
             .iter()
             .map(|session| session.hashrate_1m())
             .fold(HashRate::ZERO, |acc, r| acc + r);
 
-        from_sessions + HashRate::from_dsps(self.lifetime.lock().dsps_1m.value_at(now))
+        from_sessions + HashRate::from_dsps(self.lifetime.lock().dsps_1m.value_at(Instant::now()))
     }
 
     pub(crate) fn hashrate_5m(&self) -> HashRate {
