@@ -1,8 +1,6 @@
 use {
     super::*,
-    crate::stratum::{
-        Client, Difficulty, Event, MerkleNode, Notify, SubscribeResult, Username, merkle_root,
-    },
+    stratum::{Client, Event},
 };
 
 #[derive(Debug, Parser)]

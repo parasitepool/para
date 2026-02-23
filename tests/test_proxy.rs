@@ -1,7 +1,7 @@
 use {
     super::*,
     api::{BitcoinStatus, ProxyStatus, SystemStatus, UserDetail},
-    para::{USER_AGENT, stratum},
+    para::USER_AGENT,
 };
 
 pub(crate) struct TestProxy {

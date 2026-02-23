@@ -54,10 +54,6 @@ use {
     ntest::timeout,
     para::{
         ENONCE1_EXTENSION_SIZE, USER_AGENT, api,
-        stratum::{
-            self, ClientError, Difficulty, Extranonce, JobId, Nonce, Notify, Ntime, StratumError,
-            Username, Version,
-        },
         subcommand::{
             miner::Share,
             server::{
@@ -75,6 +71,10 @@ use {
         process::ChildStdout,
         sync::atomic::{AtomicUsize, Ordering},
         time::Instant,
+    },
+    stratum::{
+        self, ClientError, Difficulty, Extranonce, JobId, Nonce, Notify, Ntime, StratumError,
+        Username, Version,
     },
     tempfile::tempdir,
     test_ckpool::TestCkpool,
