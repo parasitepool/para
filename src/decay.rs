@@ -61,7 +61,7 @@ impl DecayingAverage {
         self.last_update = now;
     }
 
-    pub(crate) fn absorb(&mut self, other: &Self, now: Instant) {
+    pub(crate) fn absorb(&mut self, other: Self, now: Instant) {
         self.value = self.value_at(now) + other.value_at(now);
         self.last_update = now;
     }
@@ -272,7 +272,7 @@ mod tests {
         let now = start + secs(3);
         let expected = a.value_at(now) + b.value_at(now);
 
-        a.absorb(&b, now);
+        a.absorb(b, now);
 
         assert!(
             (a.value_at(now) - expected).abs() < 1e-10,

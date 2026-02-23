@@ -46,17 +46,17 @@ impl Stats {
         self.accepted += other.accepted;
         self.rejected += other.rejected;
         self.total_work += other.total_work;
-        self.dsps_1m.absorb(&other.dsps_1m, now);
-        self.dsps_5m.absorb(&other.dsps_5m, now);
-        self.dsps_15m.absorb(&other.dsps_15m, now);
-        self.dsps_1hr.absorb(&other.dsps_1hr, now);
-        self.dsps_6hr.absorb(&other.dsps_6hr, now);
-        self.dsps_1d.absorb(&other.dsps_1d, now);
-        self.dsps_7d.absorb(&other.dsps_7d, now);
-        self.sps_1m.absorb(&other.sps_1m, now);
-        self.sps_5m.absorb(&other.sps_5m, now);
-        self.sps_15m.absorb(&other.sps_15m, now);
-        self.sps_1hr.absorb(&other.sps_1hr, now);
+        self.dsps_1m.absorb(other.dsps_1m, now);
+        self.dsps_5m.absorb(other.dsps_5m, now);
+        self.dsps_15m.absorb(other.dsps_15m, now);
+        self.dsps_1hr.absorb(other.dsps_1hr, now);
+        self.dsps_6hr.absorb(other.dsps_6hr, now);
+        self.dsps_1d.absorb(other.dsps_1d, now);
+        self.dsps_7d.absorb(other.dsps_7d, now);
+        self.sps_1m.absorb(other.sps_1m, now);
+        self.sps_5m.absorb(other.sps_5m, now);
+        self.sps_15m.absorb(other.sps_15m, now);
+        self.sps_1hr.absorb(other.sps_1hr, now);
 
         if other
             .best_ever
