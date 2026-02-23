@@ -3,7 +3,7 @@
     <h2>Stats</h2>
     <div class=row><a href="/users"><span>Users</span></a><span id=users></span></div>
     <div class=row><span>Workers</span><span id=workers></span></div>
-    <div class=row><span>Clients</span><span id=clients></span></div>
+    <div class=row><span>Sessions</span><span id=sessions></span></div>
     <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
     <div class=row><span>SPS</span><span id=sps_1m></span></div>
     <div class=row><span>Uptime</span><span><span id=uptime_secs></span>s</span></div>
@@ -66,7 +66,7 @@ async function refresh() {
     // Pool data
     set('users', poolData.users);
     set('workers', poolData.workers);
-    set('clients', poolData.clients);
+    set('sessions', poolData.sessions);
     set('hashrate_1m', poolData.hashrate_1m, formatHashrate);
     set('sps_1m', poolData.sps_1m, formatTruncated);
     set('uptime_secs', poolData.uptime_secs);

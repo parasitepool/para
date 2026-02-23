@@ -140,7 +140,7 @@ function formatDifficulty(d) {
 
 function formatHashrate(h) {
   if (h === null || h === undefined) return null;
-  if (h === 0) return '0 H/s';
+  if (h < 1) return '0 H/s';
   const i = Math.max(0, Math.min(Math.floor(Math.log10(h) / 3), SI_PREFIXES.length - 1));
   const scaled = h / Math.pow(1000, i);
   const truncated = Math.floor(scaled * 100) / 100;
@@ -149,6 +149,7 @@ function formatHashrate(h) {
 
 function formatTruncated(n) {
   if (n === null || n === undefined) return '-';
+  if (Math.abs(n) < 0.005) return '0.00';
   const truncated = Math.floor(n * 100) / 100;
   return truncated.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
 }

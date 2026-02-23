@@ -2,18 +2,14 @@ use {
     super::*,
     crate::event_sink::{BlockFoundEvent, Event, ShareEvent},
     bouncer::{Bouncer, Consequence},
-    state::{Session, State},
+    state::{Authorization, Identity, State, Subscription},
     upstream::UpstreamSubmit,
 };
 
-pub(crate) use session::SessionSnapshot;
-
 mod bouncer;
-mod session;
-mod state;
+pub(crate) mod state;
 
 pub(crate) struct Stratifier<W: Workbase> {
-    client: Arc<Client>,
     state: State,
     socket_addr: SocketAddr,
     settings: Arc<Settings>,
@@ -56,10 +52,7 @@ impl<W: Workbase> Stratifier<W> {
 
         let bouncer = Bouncer::new(settings.disable_bouncer());
 
-        let client = metatron.new_client();
-
         Self {
-            client,
             state: State::new(),
             socket_addr,
             settings,
@@ -82,10 +75,6 @@ impl<W: Workbase> Stratifier<W> {
         let mut idle_check = interval(self.bouncer.check_interval());
 
         loop {
-            if matches!(self.state, State::Dropped) {
-                break;
-            }
-
             tokio::select! {
                 _ = cancel_token.cancelled() => {
                     info!("Disconnecting from {}", self.socket_addr);
@@ -98,7 +87,6 @@ impl<W: Workbase> Stratifier<W> {
                             self.socket_addr,
                             self.bouncer.last_interaction_since().as_secs()
                         );
-                        self.state.drop();
                         break
                     }
                 }
@@ -127,7 +115,9 @@ impl<W: Workbase> Stratifier<W> {
 
                             let consequence = self.subscribe(id, subscribe).await?;
 
-                            self.handle_protocol_consequence(consequence).await;
+                            if self.handle_protocol_consequence(consequence).await {
+                                break;
+                            }
                         }
                         "mining.authorize" => {
                             let Some(subscription) = self.state.subscribed() else {
@@ -142,7 +132,9 @@ impl<W: Workbase> Stratifier<W> {
                                 .await?;
 
                                 let consequence = self.bouncer.reject();
-                                self.handle_protocol_consequence(consequence).await;
+                                if self.handle_protocol_consequence(consequence).await {
+                                    break;
+                                }
 
                                 continue;
                             };
@@ -150,19 +142,35 @@ impl<W: Workbase> Stratifier<W> {
                             let authorize = serde_json::from_value::<Authorize>(params.clone())
                                 .context(format!("failed to deserialize {method} from {params}"))?;
 
-                            let consequence = self.authorize(id, authorize, subscription.enonce1).await?;
+                            let consequence = self.authorize(id, authorize, subscription).await?;
 
-                            self.handle_protocol_consequence(consequence).await;
+                            if self.handle_protocol_consequence(consequence).await {
+                                break;
+                            }
                         }
                         "mining.submit" => {
-                            let Some(session) = self.state.working() else {
-                                self.send_error(id.clone(), StratumError::Unauthorized, None)
+                            let session = match &self.state {
+                                State::Authorized(auth) => {
+                                    let session = self.metatron.new_session(auth.clone());
+                                    self.state = State::Working(session.clone());
+                                    session
+                                },
+                                State::Working(session) => session.clone(),
+                                _ => {
+                                    self.send_error(
+                                        id.clone(),
+                                        StratumError::Unauthorized,
+                                        None,
+                                    )
                                     .await?;
 
-                                let consequence = self.bouncer.reject();
-                                self.handle_protocol_consequence(consequence).await;
+                                    let consequence = self.bouncer.reject();
+                                    if self.handle_protocol_consequence(consequence).await {
+                                        break;
+                                    }
 
-                                continue;
+                                    continue;
+                                }
                             };
 
                             let submit = serde_json::from_value::<Submit>(params.clone())
@@ -172,7 +180,9 @@ impl<W: Workbase> Stratifier<W> {
                                 .submit(id, submit, session.clone())
                                 .await?;
 
-                            self.handle_submit_consequence(consequence, &session.address, &session.enonce1).await;
+                            if self.handle_submit_consequence(consequence, session.address(), session.enonce1()).await {
+                                break;
+                            }
                         }
                         method => {
                             warn!("Unknown method {method} with {params} from {}", self.socket_addr);
@@ -186,9 +196,9 @@ impl<W: Workbase> Stratifier<W> {
                         break;
                     }
 
-                    if let Some(session)= self.state.working() {
+                    if let Some(identity) = self.state.identity() {
                         let workbase = workbase_rx.borrow_and_update().clone();
-                        self.workbase_update(workbase, session).await?;
+                        self.workbase_update(workbase, identity).await?;
                     } else {
                         let _ = workbase_rx.borrow_and_update();
                         continue;
@@ -206,9 +216,9 @@ impl<W: Workbase> Stratifier<W> {
         consequence: Consequence,
         address: &Address,
         enonce1: &Extranonce,
-    ) {
+    ) -> bool {
         match consequence {
-            Consequence::None => {}
+            Consequence::None => false,
             Consequence::Warn => {
                 warn!(
                     "Warning {} - {} consecutive rejects for {}s, sending fresh job",
@@ -246,6 +256,8 @@ impl<W: Workbase> Stratifier<W> {
                         warn!("Failed to create job: {err}");
                     }
                 }
+
+                false
             }
             Consequence::Reconnect => {
                 warn!(
@@ -264,6 +276,8 @@ impl<W: Workbase> Stratifier<W> {
                         params: json!([]),
                     })
                     .await;
+
+                false
             }
             Consequence::Drop => {
                 warn!(
@@ -275,14 +289,14 @@ impl<W: Workbase> Stratifier<W> {
                         .map(|d| d.as_secs())
                         .unwrap_or(0)
                 );
-                self.state.drop();
+                true
             }
         }
     }
 
-    async fn handle_protocol_consequence(&mut self, consequence: Consequence) {
+    async fn handle_protocol_consequence(&mut self, consequence: Consequence) -> bool {
         match consequence {
-            Consequence::None => {}
+            Consequence::None => false,
             Consequence::Warn => {
                 warn!(
                     "Warning {} - {} consecutive rejects for {}s",
@@ -293,6 +307,7 @@ impl<W: Workbase> Stratifier<W> {
                         .map(|duration| duration.as_secs())
                         .unwrap_or(0)
                 );
+                false
             }
             Consequence::Reconnect => {
                 warn!(
@@ -310,6 +325,7 @@ impl<W: Workbase> Stratifier<W> {
                         params: json!([]),
                     })
                     .await;
+                false
             }
             Consequence::Drop => {
                 warn!(
@@ -321,12 +337,12 @@ impl<W: Workbase> Stratifier<W> {
                         .map(|d| d.as_secs())
                         .unwrap_or(0)
                 );
-                self.state.drop();
+                true
             }
         }
     }
 
-    async fn workbase_update(&mut self, workbase: Arc<W>, session: Arc<Session>) -> Result {
+    async fn workbase_update(&mut self, workbase: Arc<W>, identity: Identity) -> Result {
         if let Some(ref upstream) = self.upstream {
             let upstream_diff = upstream.difficulty().await;
 
@@ -352,9 +368,9 @@ impl<W: Workbase> Stratifier<W> {
         let new_job = Arc::new(
             workbase
                 .create_job(
-                    &session.enonce1,
+                    identity.enonce1(),
                     self.metatron.enonce2_size(),
-                    Some(&session.address),
+                    Some(identity.address()),
                     self.jobs.next_id(),
                     self.state.version_mask(),
                 )
@@ -474,9 +490,9 @@ impl<W: Workbase> Stratifier<W> {
         }
 
         let (enonce1, enonce2_size) = if let Some(ref requested_enonce1) = subscribe.enonce1 {
-            let enonce1 = if let Some(session) = self.metatron.take_session(requested_enonce1) {
-                info!("Resuming session with enonce1 {}", session.enonce1);
-                session.enonce1
+            let enonce1 = if self.metatron.take_disconnected(requested_enonce1) {
+                info!("Resuming session with enonce1 {requested_enonce1}");
+                requested_enonce1.clone()
             } else {
                 self.metatron.next_enonce1()
             };
@@ -531,7 +547,7 @@ impl<W: Workbase> Stratifier<W> {
         &mut self,
         id: Id,
         authorize: Authorize,
-        enonce1: Extranonce,
+        subscription: Subscription,
     ) -> Result<Consequence> {
         let address = match authorize
             .username
@@ -555,10 +571,15 @@ impl<W: Workbase> Stratifier<W> {
 
         let workername = authorize.username.workername().to_string();
 
-        if !self
-            .state
-            .authorize(address.clone(), workername, authorize.username)
-        {
+        let auth = Arc::new(Authorization {
+            enonce1: subscription.enonce1.clone(),
+            address: address.clone(),
+            workername: workername.clone(),
+            username: authorize.username,
+            version_mask: subscription.version_mask,
+        });
+
+        if !self.state.authorize(auth) {
             self.send_error(
                 id.clone(),
                 StratumError::MethodNotAllowed,
@@ -577,7 +598,7 @@ impl<W: Workbase> Stratifier<W> {
         let job = Arc::new(
             workbase
                 .create_job(
-                    &enonce1,
+                    &subscription.enonce1,
                     self.metatron.enonce2_size(),
                     Some(&address),
                     self.jobs.next_id(),
@@ -629,59 +650,53 @@ impl<W: Workbase> Stratifier<W> {
         submit: Submit,
         session: Arc<Session>,
     ) -> Result<Consequence> {
-        let client = self.client.clone();
-
-        self.metatron
-            .register_client(session.address.clone(), &session.workername, client.clone());
-
-        if submit.username != session.username {
-            let job_height = self.workbase_rx.borrow().height();
+        if submit.username != *session.username() {
+            debug!(
+                "Rejected worker mismatch from {}: authorized={} submitted={}",
+                session.username(),
+                session.username(),
+                submit.username
+            );
 
             self.send_error(
                 id,
                 StratumError::WorkerMismatch,
                 Some(json!({
-                    "authorized": session.username.as_str(),
+                    "authorized": session.username().as_str(),
                     "submitted": submit.username.as_str(),
                 })),
             )
             .await?;
 
-            debug!(
-                "Rejected worker mismatch from {}: authorized={} submitted={}",
-                session.username, session.username, submit.username
-            );
-
             self.send_event(rejection_event!(
-                session.address.to_string(),
-                session.workername.clone(),
-                job_height,
+                session.address().to_string(),
+                session.workername().to_string(),
+                self.workbase_rx.borrow().height(),
                 StratumError::WorkerMismatch
             ));
 
-            client.record_rejected();
+            session.record_rejected();
 
             return Ok(self.bouncer.reject());
         }
 
         let Some(job) = self.jobs.get(&submit.job_id) else {
-            let job_height = self.workbase_rx.borrow().height();
-
             debug!(
-                "Rejected stale share from {}: job_id={} height={}",
-                session.username, submit.job_id, job_height
+                "Rejected stale share from {}: job_id={}",
+                session.username(),
+                submit.job_id,
             );
 
             self.send_error(id, StratumError::Stale, None).await?;
 
             self.send_event(rejection_event!(
-                session.address.to_string(),
-                session.workername.clone(),
-                job_height,
+                session.address().to_string(),
+                session.workername().to_string(),
+                self.workbase_rx.borrow().height(),
                 StratumError::Stale
             ));
 
-            client.record_rejected();
+            session.record_rejected();
 
             return Ok(self.bouncer.reject());
         };
@@ -689,15 +704,12 @@ impl<W: Workbase> Stratifier<W> {
         let expected_extranonce2_size = self.metatron.enonce2_size();
 
         if submit.enonce2.len() != expected_extranonce2_size {
-            let job_height = job.workbase.height();
-
             warn!(
-                "Rejected invalid extranonce2 length from {} ({}): got {} bytes, expected {} height={}",
-                session.username,
+                "Rejected invalid extranonce2 length from {} ({}): got {} bytes, expected {}",
+                session.username(),
                 self.socket_addr,
                 submit.enonce2.len(),
                 expected_extranonce2_size,
-                job_height
             );
 
             self.send_error(
@@ -711,13 +723,13 @@ impl<W: Workbase> Stratifier<W> {
             .await?;
 
             self.send_event(rejection_event!(
-                session.address.to_string(),
-                session.workername.clone(),
-                job_height,
+                session.address().to_string(),
+                session.workername().to_string(),
+                job.workbase.height(),
                 StratumError::InvalidNonce2Length
             ));
 
-            client.record_rejected();
+            session.record_rejected();
 
             return Ok(self.bouncer.reject());
         }
@@ -725,15 +737,12 @@ impl<W: Workbase> Stratifier<W> {
         let job_ntime = job.ntime().0;
         let submit_ntime = submit.ntime.0;
         if submit_ntime < job_ntime || submit_ntime > job_ntime + MAX_NTIME_OFFSET {
-            let job_height = job.workbase.height();
-
             debug!(
-                "Rejected ntime out of range from {}: job_ntime={} submit_ntime={} max_ntime={} height={}",
-                session.username,
+                "Rejected ntime out of range from {}: job_ntime={} submit_ntime={} max_ntime={}",
+                session.username(),
                 job_ntime,
                 submit_ntime,
                 job_ntime + MAX_NTIME_OFFSET,
-                job_height
             );
 
             self.send_error(
@@ -748,13 +757,13 @@ impl<W: Workbase> Stratifier<W> {
             .await?;
 
             self.send_event(rejection_event!(
-                session.address.to_string(),
-                session.workername.clone(),
-                job_height,
+                session.address().to_string(),
+                session.workername().to_string(),
+                job.workbase.height(),
                 StratumError::NtimeOutOfRange
             ));
 
-            client.record_rejected();
+            session.record_rejected();
 
             return Ok(self.bouncer.reject());
         }
@@ -762,11 +771,9 @@ impl<W: Workbase> Stratifier<W> {
         let version = match submit.version_bits {
             Some(version_bits) if version_bits != Version::from(0) => {
                 let Some(version_mask) = job.version_mask else {
-                    let job_height = job.workbase.height();
-
                     debug!(
-                        "Rejected invalid version mask from {}: version rolling not negotiated height={}",
-                        session.username, job_height
+                        "Rejected invalid version mask from {}: version rolling not negotiated",
+                        session.username(),
                     );
 
                     self.send_error(
@@ -777,13 +784,13 @@ impl<W: Workbase> Stratifier<W> {
                     .await?;
 
                     self.send_event(rejection_event!(
-                        session.address.to_string(),
-                        session.workername.clone(),
-                        job_height,
+                        session.address().to_string(),
+                        session.workername().to_string(),
+                        job.workbase.height(),
                         StratumError::InvalidVersionMask
                     ));
 
-                    client.record_rejected();
+                    session.record_rejected();
 
                     return Ok(self.bouncer.reject());
                 };
@@ -791,11 +798,11 @@ impl<W: Workbase> Stratifier<W> {
                 let disallowed = version_bits & !version_mask;
 
                 if disallowed != Version::from(0) {
-                    let job_height = job.workbase.height();
-
                     debug!(
-                        "Rejected invalid version mask from {}: disallowed={} mask={} height={}",
-                        session.username, disallowed, version_mask, job_height
+                        "Rejected invalid version mask from {}: disallowed={} mask={}",
+                        session.username(),
+                        disallowed,
+                        version_mask,
                     );
 
                     self.send_error(
@@ -810,13 +817,13 @@ impl<W: Workbase> Stratifier<W> {
                     .await?;
 
                     self.send_event(rejection_event!(
-                        session.address.to_string(),
-                        session.workername.clone(),
-                        job_height,
+                        session.address().to_string(),
+                        session.workername().to_string(),
+                        job.workbase.height(),
                         StratumError::InvalidVersionMask
                     ));
 
-                    client.record_rejected();
+                    session.record_rejected();
 
                     return Ok(self.bouncer.reject());
                 }
@@ -858,23 +865,22 @@ impl<W: Workbase> Stratifier<W> {
         let hash = header.block_hash();
 
         if self.jobs.is_duplicate(hash) {
-            let job_height = job.workbase.height();
-
             debug!(
-                "Rejected duplicate share from {}: hash={} height={}",
-                session.username, hash, job_height
+                "Rejected duplicate share from {}: hash={}",
+                session.username(),
+                hash,
             );
 
             self.send_error(id, StratumError::Duplicate, None).await?;
 
             self.send_event(rejection_event!(
-                session.address.to_string(),
-                session.workername.clone(),
-                job_height,
+                session.address().to_string(),
+                session.workername().to_string(),
+                job.workbase.height(),
                 StratumError::Duplicate
             ));
 
-            client.record_rejected();
+            session.record_rejected();
 
             return Ok(self.bouncer.reject());
         }
@@ -908,19 +914,14 @@ impl<W: Workbase> Stratifier<W> {
                         info!("SUCCESSFULLY mined block {}", block.block_hash());
                         self.metatron.add_block();
 
-                        let job_height = job.workbase.height();
-                        let blockhash_str = blockhash.to_string();
-                        let diff = Difficulty::from(job.nbits()).as_f64();
-                        let coinbase_value = job.workbase.coinbase_value();
-
                         self.send_event(Event::BlockFound(BlockFoundEvent {
                             timestamp: None,
-                            blockheight: job_height,
-                            blockhash: blockhash_str,
-                            address: session.address.to_string(),
-                            workername: session.workername.clone(),
-                            diff,
-                            coinbase_value,
+                            blockheight: job.workbase.height(),
+                            blockhash: blockhash.to_string(),
+                            address: session.address().to_string(),
+                            workername: session.workername().to_string(),
+                            diff: Difficulty::from(job.nbits()).as_f64(),
+                            coinbase_value: job.workbase.coinbase_value(),
                         }));
                     }
                 }
@@ -944,34 +945,35 @@ impl<W: Workbase> Stratifier<W> {
 
         if !pool_diff.to_target().is_met_by(hash) {
             let share_diff = Difficulty::from(hash);
-            let job_height = job.workbase.height();
 
             debug!(
-                "Rejected share above pool target from {}: share_diff={} pool_diff={} height={}",
-                session.username, share_diff, pool_diff, job_height
+                "Rejected share above pool target from {}: share_diff={} pool_diff={}",
+                session.username(),
+                share_diff,
+                pool_diff,
             );
 
             self.send_error(id, StratumError::AboveTarget, None).await?;
 
             self.send_event(rejection_event!(
-                session.address.to_string(),
-                session.workername.clone(),
+                session.address().to_string(),
+                session.workername().to_string(),
                 pool_diff.as_f64(),
                 share_diff.as_f64(),
-                job_height,
+                job.workbase.height(),
                 StratumError::AboveTarget
             ));
 
-            client.record_rejected();
+            session.record_rejected();
 
             return Ok(self.bouncer.reject());
         }
 
         let share_diff = Difficulty::from(hash);
 
-        client.record_accepted(pool_diff, share_diff);
+        session.record_accepted(pool_diff, share_diff);
 
-        self.submit_to_upstream(&job, &submit, share_diff, &session.enonce1)
+        self.submit_to_upstream(&job, &submit, share_diff, session.enonce1())
             .await;
 
         self.send(Message::Response {
@@ -984,8 +986,8 @@ impl<W: Workbase> Stratifier<W> {
 
         self.send_event(Event::Share(ShareEvent {
             timestamp: None,
-            address: session.address.to_string(),
-            workername: session.workername.clone(),
+            address: session.address().to_string(),
+            workername: session.workername().to_string(),
             pool_diff: pool_diff.as_f64(),
             share_diff: share_diff.as_f64(),
             result: true,
@@ -1119,11 +1121,15 @@ impl<W: Workbase> Stratifier<W> {
 impl<W: Workbase> Drop for Stratifier<W> {
     fn drop(&mut self) {
         if let Some(session) = self.state.working() {
-            self.metatron
-                .store_session(SessionSnapshot::new(session.enonce1.clone()));
-        }
+            info!(
+                "Retiring session for {} with workername {} and enonce1 {}",
+                self.socket_addr,
+                session.workername(),
+                session.enonce1()
+            );
 
-        self.client.deactivate();
+            self.metatron.retire_session(session);
+        }
 
         debug!("Shutting down stratifier for {}", self.socket_addr,);
     }

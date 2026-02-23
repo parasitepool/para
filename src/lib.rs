@@ -49,7 +49,7 @@ use {
     jobs::Jobs,
     logs::logs_enabled,
     lru::LruCache,
-    metatron::{Metatron, client::Client},
+    metatron::{Metatron, session::Session},
     metrics::Metrics,
     parking_lot::Mutex,
     reqwest::Url,
@@ -88,7 +88,7 @@ use {
         thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     },
-    stratifier::{SessionSnapshot, Stratifier},
+    stratifier::Stratifier,
     stratum::{
         Authorize, Configure, Difficulty, Extranonce, Id, JobId, MerkleNode, Message, Nbits, Nonce,
         Notify, Ntime, PrevHash, SetDifficulty, StratumError, Submit, Subscribe, SubscribeResult,

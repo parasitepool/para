@@ -1,22 +1,21 @@
 use {
-    super::*,
-    client::{Client, ClientId},
-    user::User,
+    super::*, session::Session, stats::Stats, stratifier::state::Authorization, user::User,
     worker::Worker,
 };
 
-pub(crate) mod client;
+pub(crate) mod session;
+mod stats;
 mod user;
 mod worker;
 
 pub(crate) struct Metatron {
     blocks: AtomicU64,
     started: Instant,
-    client_id_counter: AtomicU64,
     users: DashMap<Address, Arc<User>>,
-    sessions: DashMap<Extranonce, SessionSnapshot>,
+    disconnected: DashMap<Extranonce, (Arc<Session>, Instant)>,
     extranonces: Extranonces,
     enonce_counter: AtomicU64,
+    session_id_counter: AtomicU64,
     endpoint: String,
 }
 
@@ -25,9 +24,8 @@ impl Metatron {
         Self {
             blocks: AtomicU64::new(0),
             started: Instant::now(),
-            client_id_counter: AtomicU64::new(0),
             users: DashMap::new(),
-            sessions: DashMap::new(),
+            disconnected: DashMap::new(),
             extranonces,
             enonce_counter: AtomicU64::new(
                 std::time::SystemTime::now()
@@ -35,17 +33,13 @@ impl Metatron {
                     .unwrap_or_default()
                     .as_millis() as u64,
             ),
+            session_id_counter: AtomicU64::new(0),
             endpoint,
         }
     }
 
     pub(crate) fn endpoint(&self) -> &str {
         &self.endpoint
-    }
-
-    pub(crate) fn new_client(&self) -> Arc<Client> {
-        let client_id = ClientId(self.client_id_counter.fetch_add(1, Ordering::Relaxed));
-        Arc::new(Client::new(client_id))
     }
 
     pub(crate) fn spawn(self: Arc<Self>, cancel: CancellationToken, tasks: &mut JoinSet<()>) {
@@ -64,8 +58,9 @@ impl Metatron {
                     }
 
                     _ = cleanup_interval.tick() => {
-                        self.sessions
-                            .retain(|_, session| !session.is_expired(SESSION_TTL));
+                        self.disconnected.retain(|_, (_, disconnected_at)| {
+                            disconnected_at.elapsed() < SESSION_TTL
+                        });
 
                         info!("{}", self.status_line());
                     }
@@ -104,24 +99,39 @@ impl Metatron {
         &self.extranonces
     }
 
-    pub(crate) fn register_client(&self, address: Address, workername: &str, client: Arc<Client>) {
-        if let Some(user) = self.users.get(&address) {
-            user.register_client(workername, client);
-        } else {
-            self.users
-                .entry(address.clone())
-                .or_insert_with(|| Arc::new(User::new(address)))
-                .register_client(workername, client);
+    pub(crate) fn new_session(&self, auth: Arc<Authorization>) -> Arc<Session> {
+        let id = self.session_id_counter.fetch_add(1, Ordering::Relaxed);
+
+        let session = Arc::new(Session::new(
+            id,
+            auth.enonce1.clone(),
+            auth.address.clone(),
+            auth.workername.clone(),
+            auth.username.clone(),
+            auth.version_mask,
+        ));
+
+        self.users
+            .entry(auth.address.clone())
+            .or_insert_with(|| Arc::new(User::new(auth.address.clone())))
+            .new_session(&auth.workername, session.clone());
+
+        session
+    }
+
+    pub(crate) fn retire_session(&self, session: Arc<Session>) {
+        if let Some(user) = self.users.get(session.address())
+            && let Some(worker) = user.workers.get(session.workername())
+        {
+            worker.retire_session(session.id());
         }
+
+        self.disconnected
+            .insert(session.enonce1().clone(), (session, Instant::now()));
     }
 
-    pub(crate) fn store_session(&self, session: SessionSnapshot) {
-        info!("Storing session for enonce1 {}", session.enonce1);
-        self.sessions.insert(session.enonce1.clone(), session);
-    }
-
-    pub(crate) fn take_session(&self, enonce1: &Extranonce) -> Option<SessionSnapshot> {
-        self.sessions.remove(enonce1).map(|(_, session)| session)
+    pub(crate) fn take_disconnected(&self, enonce1: &Extranonce) -> bool {
+        self.disconnected.remove(enonce1).is_some()
     }
 
     pub(crate) fn add_block(&self) {
@@ -205,12 +215,12 @@ impl Metatron {
         self.blocks.load(Ordering::Relaxed)
     }
 
-    pub(crate) fn total_clients(&self) -> usize {
-        self.users.iter().map(|user| user.client_count()).sum()
+    pub(crate) fn total_sessions(&self) -> usize {
+        self.users.iter().map(|user| user.session_count()).sum()
     }
 
     pub(crate) fn disconnected(&self) -> usize {
-        self.sessions.len()
+        self.disconnected.len()
     }
 
     pub(crate) fn idle(&self) -> usize {
@@ -261,10 +271,10 @@ impl Metatron {
 impl StatusLine for Metatron {
     fn status_line(&self) -> String {
         format!(
-            "sps={:.2}  hashrate={:.2}  clients={}  users={}  workers={}  accepted={}  rejected={}  blocks={}  uptime={}s",
+            "sps={:.2}  hashrate={:.2}  sessions={}  users={}  workers={}  accepted={}  rejected={}  blocks={}  uptime={}s",
             self.sps_1m(),
             self.hashrate_1m(),
-            self.total_clients(),
+            self.total_sessions(),
             self.total_users(),
             self.total_workers(),
             self.accepted(),
@@ -279,11 +289,6 @@ impl StatusLine for Metatron {
 mod tests {
     use super::*;
 
-    fn proxy_extranonces() -> Extranonces {
-        let upstream_enonce1 = Extranonce::from_bytes(&[0xde, 0xad, 0xbe, 0xef]);
-        Extranonces::Proxy(ProxyExtranonces::new(upstream_enonce1, 8, 2).unwrap())
-    }
-
     fn test_address() -> Address {
         "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc"
             .parse::<Address<bitcoin::address::NetworkUnchecked>>()
@@ -295,10 +300,22 @@ mod tests {
         Extranonces::Pool(PoolExtranonces::new(ENONCE1_SIZE, 8).unwrap())
     }
 
+    fn test_auth(enonce1: &str, workername: &str) -> Arc<Authorization> {
+        Arc::new(Authorization {
+            enonce1: enonce1.parse().unwrap(),
+            address: test_address(),
+            workername: workername.into(),
+            username: Username::new(format!(
+                "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.{workername}"
+            )),
+            version_mask: None,
+        })
+    }
+
     #[test]
     fn new_metatron_starts_at_zero() {
         let metatron = Metatron::new(pool_extranonces(), String::new());
-        assert_eq!(metatron.total_clients(), 0);
+        assert_eq!(metatron.total_sessions(), 0);
         assert_eq!(metatron.accepted(), 0);
         assert_eq!(metatron.rejected(), 0);
         assert_eq!(metatron.total_blocks(), 0);
@@ -307,67 +324,45 @@ mod tests {
     }
 
     #[test]
-    fn client_count_tracks_active_clients() {
+    fn session_count_tracks_active_sessions() {
         let metatron = Metatron::new(pool_extranonces(), String::new());
-        let addr = test_address();
-        assert_eq!(metatron.total_clients(), 0);
+        assert_eq!(metatron.total_sessions(), 0);
 
-        let c1 = metatron.new_client();
-        metatron.register_client(addr.clone(), "foo", c1.clone());
-        let c2 = metatron.new_client();
-        metatron.register_client(addr, "foo", c2.clone());
-        assert_eq!(metatron.total_clients(), 2);
+        let s1 = metatron.new_session(test_auth("deadbeef", "foo"));
+        let s2 = metatron.new_session(test_auth("cafebabe", "foo"));
+        assert_eq!(metatron.total_sessions(), 2);
 
-        c1.deactivate();
-        assert_eq!(metatron.total_clients(), 1);
+        metatron.retire_session(s1);
+        assert_eq!(metatron.total_sessions(), 1);
 
-        c2.deactivate();
-        assert_eq!(metatron.total_clients(), 0);
+        metatron.retire_session(s2);
+        assert_eq!(metatron.total_sessions(), 0);
     }
 
     #[test]
-    fn register_client_creates_user_and_worker() {
+    fn new_session_creates_user_and_worker() {
         let metatron = Metatron::new(pool_extranonces(), String::new());
-        let addr = test_address();
 
-        metatron.register_client(addr.clone(), "rig1", metatron.new_client());
+        metatron.new_session(test_auth("deadbeef", "rig1"));
         assert_eq!(metatron.total_users(), 1);
         assert_eq!(metatron.total_workers(), 1);
 
-        metatron.register_client(addr.clone(), "rig2", metatron.new_client());
+        metatron.new_session(test_auth("cafebabe", "rig2"));
         assert_eq!(metatron.total_users(), 1);
         assert_eq!(metatron.total_workers(), 2);
     }
 
     #[test]
-    fn record_accepted_updates_stats() {
+    fn record_share_updates_stats() {
         let metatron = Metatron::new(pool_extranonces(), String::new());
-        let addr = test_address();
-        let client = metatron.new_client();
-        metatron.register_client(addr, "rig1", client.clone());
+        let session = metatron.new_session(test_auth("deadbeef", "foo"));
 
-        let pool_diff = Difficulty::from(1000.0);
-        let share_diff = Difficulty::from(1500.0);
-
-        client.record_accepted(pool_diff, share_diff);
-        client.record_accepted(pool_diff, share_diff);
+        session.record_accepted(Difficulty::from(1000.0), Difficulty::from(1500.0));
+        session.record_accepted(Difficulty::from(1000.0), Difficulty::from(1500.0));
+        session.record_rejected();
 
         assert_eq!(metatron.accepted(), 2);
-        assert_eq!(metatron.rejected(), 0);
-    }
-
-    #[test]
-    fn record_rejected_updates_stats() {
-        let metatron = Metatron::new(pool_extranonces(), String::new());
-        let addr = test_address();
-        let client = metatron.new_client();
-        metatron.register_client(addr, "rig1", client.clone());
-
-        client.record_rejected();
-        client.record_rejected();
-
-        assert_eq!(metatron.accepted(), 0);
-        assert_eq!(metatron.rejected(), 2);
+        assert_eq!(metatron.rejected(), 1);
     }
 
     #[test]
@@ -378,24 +373,16 @@ mod tests {
     }
 
     #[test]
-    fn next_enonce1_is_sequential() {
+    fn pool_enonce1() {
         let metatron = Metatron::new(pool_extranonces(), String::new());
         let e1 = metatron.next_enonce1();
         let e2 = metatron.next_enonce1();
-        let e3 = metatron.next_enonce1();
+
+        assert_eq!(e1.len(), ENONCE1_SIZE);
 
         let v1 = u32::from_le_bytes(e1.as_bytes().try_into().unwrap());
         let v2 = u32::from_le_bytes(e2.as_bytes().try_into().unwrap());
-        let v3 = u32::from_le_bytes(e3.as_bytes().try_into().unwrap());
-
         assert_eq!(v2, v1 + 1);
-        assert_eq!(v3, v2 + 1);
-    }
-
-    #[test]
-    fn next_enonce1_has_correct_size() {
-        let metatron = Metatron::new(pool_extranonces(), String::new());
-        assert_eq!(metatron.next_enonce1().len(), ENONCE1_SIZE);
     }
 
     #[test]
@@ -409,30 +396,19 @@ mod tests {
     }
 
     #[test]
-    fn proxy_mode_next_enonce1_extends_upstream() {
+    fn proxy_enonce1() {
         let upstream_enonce1 = Extranonce::from_bytes(&[0xde, 0xad, 0xbe, 0xef]);
         let extranonces =
             Extranonces::Proxy(ProxyExtranonces::new(upstream_enonce1.clone(), 8, 2).unwrap());
         let metatron = Metatron::new(extranonces, String::new());
 
-        let e1 = metatron.next_enonce1();
-
-        assert_eq!(e1.len(), 6);
-        assert_eq!(&e1.as_bytes()[..4], upstream_enonce1.as_bytes());
-    }
-
-    #[test]
-    fn proxy_mode_enonce2_size_reduced() {
-        let metatron = Metatron::new(proxy_extranonces(), String::new());
         assert_eq!(metatron.enonce2_size(), 6);
-    }
-
-    #[test]
-    fn proxy_mode_next_enonce1_is_sequential() {
-        let metatron = Metatron::new(proxy_extranonces(), String::new());
 
         let e1 = metatron.next_enonce1();
         let e2 = metatron.next_enonce1();
+
+        assert_eq!(e1.len(), 6);
+        assert_eq!(&e1.as_bytes()[..4], upstream_enonce1.as_bytes());
 
         let ext1 = u16::from_le_bytes(e1.as_bytes()[4..6].try_into().unwrap());
         let ext2 = u16::from_le_bytes(e2.as_bytes()[4..6].try_into().unwrap());
@@ -460,29 +436,99 @@ mod tests {
     #[test]
     fn total_work_accumulates() {
         let metatron = Metatron::new(pool_extranonces(), String::new());
-        let addr = test_address();
         let pool_diff = Difficulty::from(100.0);
         let pool_diff_f64 = pool_diff.as_f64();
 
         assert_eq!(metatron.total_work(), 0.0);
 
-        let foo_client = metatron.new_client();
-        metatron.register_client(addr.clone(), "foo", foo_client.clone());
-        foo_client.record_accepted(pool_diff, Difficulty::from(200.0));
-        foo_client.record_accepted(pool_diff, Difficulty::from(50.0));
+        let foo_session = metatron.new_session(test_auth("deadbeef", "foo"));
+        foo_session.record_accepted(pool_diff, Difficulty::from(200.0));
+        foo_session.record_accepted(pool_diff, Difficulty::from(50.0));
 
         assert!(
             (metatron.total_work() - 2.0 * pool_diff_f64).abs()
                 < f64::EPSILON * 2.0 * pool_diff_f64
         );
 
-        let bar_client = metatron.new_client();
-        metatron.register_client(addr, "bar", bar_client.clone());
-        bar_client.record_accepted(pool_diff, Difficulty::from(400.0));
+        let bar_session = metatron.new_session(test_auth("cafebabe", "bar"));
+        bar_session.record_accepted(pool_diff, Difficulty::from(400.0));
 
         assert!(
             (metatron.total_work() - 3.0 * pool_diff_f64).abs()
                 < f64::EPSILON * 3.0 * pool_diff_f64
+        );
+    }
+
+    #[test]
+    fn store_and_take_disconnected() {
+        let metatron = Metatron::new(pool_extranonces(), String::new());
+
+        let enonce1: Extranonce = "deadbeef".parse().unwrap();
+        assert!(!metatron.take_disconnected(&enonce1));
+
+        let session = metatron.new_session(test_auth("deadbeef", "foo"));
+        metatron.retire_session(session);
+        assert_eq!(metatron.disconnected(), 1);
+
+        assert!(metatron.take_disconnected(&enonce1));
+        assert_eq!(metatron.disconnected(), 0);
+    }
+
+    #[test]
+    fn retire_session_folds_stats() {
+        let metatron = Metatron::new(pool_extranonces(), String::new());
+        let session = metatron.new_session(test_auth("deadbeef", "foo"));
+
+        let pool_diff = Difficulty::from(100.0);
+        session.record_accepted(pool_diff, Difficulty::from(200.0));
+        session.record_accepted(pool_diff, Difficulty::from(50.0));
+        session.record_rejected();
+        metatron.retire_session(session);
+
+        assert_eq!(metatron.total_sessions(), 0);
+        assert_eq!(metatron.accepted(), 2);
+        assert_eq!(metatron.rejected(), 1);
+        assert_eq!(metatron.best_ever(), Some(Difficulty::from(200.0)));
+        assert!(metatron.last_share().is_some());
+        assert!((metatron.total_work() - 2.0 * pool_diff.as_f64()).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn retire_accumulates_across_multiple_sessions() {
+        let metatron = Metatron::new(pool_extranonces(), String::new());
+        let s1 = metatron.new_session(test_auth("deadbeef", "foo"));
+        let s2 = metatron.new_session(test_auth("cafebabe", "foo"));
+
+        let pool_diff = Difficulty::from(100.0);
+        s1.record_accepted(pool_diff, Difficulty::from(50.0));
+        s2.record_accepted(pool_diff, Difficulty::from(300.0));
+        metatron.retire_session(s1);
+        metatron.retire_session(s2);
+
+        assert_eq!(metatron.accepted(), 2);
+        assert_eq!(metatron.best_ever(), Some(Difficulty::from(300.0)));
+        assert!(
+            (metatron.total_work() - 2.0 * pool_diff.as_f64()).abs()
+                < f64::EPSILON * 2.0 * pool_diff.as_f64()
+        );
+    }
+
+    #[test]
+    fn stats_combine_active_sessions_and_lifetime() {
+        let metatron = Metatron::new(pool_extranonces(), String::new());
+        let s1 = metatron.new_session(test_auth("deadbeef", "foo"));
+        let s2 = metatron.new_session(test_auth("cafebabe", "foo"));
+
+        let pool_diff = Difficulty::from(100.0);
+        s1.record_accepted(pool_diff, Difficulty::from(50.0));
+        s2.record_accepted(pool_diff, Difficulty::from(200.0));
+        metatron.retire_session(s1);
+
+        assert_eq!(metatron.accepted(), 2);
+        assert_eq!(metatron.best_ever(), Some(Difficulty::from(200.0)));
+        assert!(
+            (metatron.total_work() - 2.0 * pool_diff.as_f64()).abs()
+                < f64::EPSILON * 2.0 * pool_diff.as_f64()
         );
     }
 }
