@@ -18,21 +18,17 @@ impl User {
         }
     }
 
-    pub(crate) fn register_client(&self, workername: &str, client: Arc<Client>) {
-        if let Some(worker) = self.workers.get(workername) {
-            worker.register_client(client);
-        } else {
-            self.workers
-                .entry(workername.to_string())
-                .or_insert_with(|| Arc::new(Worker::new(workername.to_string())))
-                .register_client(client);
-        }
+    pub(crate) fn new_session(&self, workername: &str, session: Arc<Session>) {
+        self.workers
+            .entry(workername.to_string())
+            .or_insert_with(|| Arc::new(Worker::new(workername.to_string())))
+            .new_session(session);
     }
 
-    pub(crate) fn client_count(&self) -> usize {
+    pub(crate) fn session_count(&self) -> usize {
         self.workers
             .iter()
-            .map(|worker| worker.client_count())
+            .map(|worker| worker.session_count())
             .sum()
     }
 

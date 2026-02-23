@@ -61,6 +61,11 @@ impl DecayingAverage {
         self.last_update = now;
     }
 
+    pub(crate) fn absorb(&mut self, other: Self, now: Instant) {
+        self.value = self.value_at(now) + other.value_at(now);
+        self.last_update = now;
+    }
+
     pub(crate) fn value_at(&self, now: Instant) -> f64 {
         let elapsed = now
             .saturating_duration_since(self.last_update)
@@ -253,6 +258,33 @@ mod tests {
             after_two_tc,
             expected
         );
+    }
+
+    #[test]
+    fn absorb_combines_values() {
+        let start = Instant::now();
+        let mut a = DecayingAverage::with_start_time(secs(60), start);
+        let mut b = DecayingAverage::with_start_time(secs(60), start);
+
+        a.record(100.0, start + secs(1));
+        b.record(200.0, start + secs(2));
+
+        let now = start + secs(3);
+        let expected = a.value_at(now) + b.value_at(now);
+
+        a.absorb(b, now);
+
+        assert!(
+            (a.value_at(now) - expected).abs() < 1e-10,
+            "absorb: {} ≈ {}",
+            a.value_at(now),
+            expected
+        );
+
+        let later = now + secs(60);
+        let decayed = a.value_at(later);
+        assert!(decayed < a.value_at(now));
+        assert!(decayed > 0.0);
     }
 
     #[test]

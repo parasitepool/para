@@ -1,75 +1,69 @@
 use super::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct ClientId(pub(crate) u64);
-
-struct Stats {
-    dsps_1m: DecayingAverage,
-    dsps_5m: DecayingAverage,
-    dsps_15m: DecayingAverage,
-    dsps_1hr: DecayingAverage,
-    dsps_6hr: DecayingAverage,
-    dsps_1d: DecayingAverage,
-    dsps_7d: DecayingAverage,
-    sps_1m: DecayingAverage,
-    sps_5m: DecayingAverage,
-    sps_15m: DecayingAverage,
-    sps_1hr: DecayingAverage,
-    best_ever: Option<Difficulty>,
-    last_share: Option<Instant>,
-    total_work: f64,
-}
-
-pub(crate) struct Client {
-    client_id: ClientId,
-    active: AtomicBool,
+pub(crate) struct Session {
+    id: u64,
+    enonce1: Extranonce,
+    address: Address,
+    workername: String,
+    username: Username,
+    version_mask: Option<Version>,
     stats: Mutex<Stats>,
-    accepted: AtomicU64,
-    rejected: AtomicU64,
 }
 
-impl Client {
-    pub(crate) fn new(client_id: ClientId) -> Self {
+impl Session {
+    pub(crate) fn new(
+        id: u64,
+        enonce1: Extranonce,
+        address: Address,
+        workername: String,
+        username: Username,
+        version_mask: Option<Version>,
+    ) -> Self {
         Self {
-            client_id,
-            active: AtomicBool::new(true),
-            stats: Mutex::new(Stats {
-                dsps_1m: DecayingAverage::new(Duration::from_mins(1)),
-                dsps_5m: DecayingAverage::new(Duration::from_mins(5)),
-                dsps_15m: DecayingAverage::new(Duration::from_mins(15)),
-                dsps_1hr: DecayingAverage::new(Duration::from_hours(1)),
-                dsps_6hr: DecayingAverage::new(Duration::from_hours(6)),
-                dsps_1d: DecayingAverage::new(Duration::from_hours(24)),
-                dsps_7d: DecayingAverage::new(Duration::from_hours(24 * 7)),
-                sps_1m: DecayingAverage::new(Duration::from_mins(1)),
-                sps_5m: DecayingAverage::new(Duration::from_mins(5)),
-                sps_15m: DecayingAverage::new(Duration::from_mins(15)),
-                sps_1hr: DecayingAverage::new(Duration::from_hours(1)),
-                best_ever: None,
-                last_share: None,
-                total_work: 0.0,
-            }),
-            accepted: AtomicU64::new(0),
-            rejected: AtomicU64::new(0),
+            id,
+            enonce1,
+            address,
+            workername,
+            username,
+            version_mask,
+            stats: Mutex::new(Stats::new()),
         }
     }
 
-    pub(crate) fn client_id(&self) -> ClientId {
-        self.client_id
+    pub(crate) fn id(&self) -> u64 {
+        self.id
     }
 
-    pub(crate) fn is_active(&self) -> bool {
-        self.active.load(Ordering::Relaxed)
+    pub(crate) fn enonce1(&self) -> &Extranonce {
+        &self.enonce1
     }
 
-    pub(crate) fn deactivate(&self) {
-        self.active.store(false, Ordering::Relaxed);
+    pub(crate) fn address(&self) -> &Address {
+        &self.address
+    }
+
+    pub(crate) fn workername(&self) -> &str {
+        &self.workername
+    }
+
+    pub(crate) fn username(&self) -> &Username {
+        &self.username
+    }
+
+    pub(crate) fn version_mask(&self) -> Option<Version> {
+        self.version_mask
+    }
+
+    pub(crate) fn snapshot_stats(&self) -> Stats {
+        self.stats.lock().clone()
     }
 
     pub(crate) fn record_accepted(&self, pool_diff: Difficulty, share_diff: Difficulty) {
         let now = Instant::now();
-        let mut stats = self.stats.lock();
         let diff = pool_diff.as_f64();
+        let mut stats = self.stats.lock();
+
+        stats.accepted += 1;
         stats.dsps_1m.record(diff, now);
         stats.dsps_5m.record(diff, now);
         stats.dsps_15m.record(diff, now);
@@ -83,15 +77,14 @@ impl Client {
         stats.sps_1hr.record(1.0, now);
         stats.total_work += diff;
         stats.last_share = Some(now);
+
         if stats.best_ever.is_none_or(|best| share_diff > best) {
             stats.best_ever = Some(share_diff);
         }
-        drop(stats);
-        self.accepted.fetch_add(1, Ordering::Relaxed);
     }
 
     pub(crate) fn record_rejected(&self) {
-        self.rejected.fetch_add(1, Ordering::Relaxed);
+        self.stats.lock().rejected += 1;
     }
 
     pub(crate) fn hashrate_1m(&self) -> HashRate {
@@ -139,11 +132,11 @@ impl Client {
     }
 
     pub(crate) fn accepted(&self) -> u64 {
-        self.accepted.load(Ordering::Relaxed)
+        self.stats.lock().accepted
     }
 
     pub(crate) fn rejected(&self) -> u64 {
-        self.rejected.load(Ordering::Relaxed)
+        self.stats.lock().rejected
     }
 
     pub(crate) fn best_ever(&self) -> Option<Difficulty> {

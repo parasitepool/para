@@ -16,7 +16,7 @@ pub struct PoolStatus {
     pub endpoint: String,
     pub users: usize,
     pub workers: usize,
-    pub clients: usize,
+    pub sessions: usize,
     pub disconnected: usize,
     pub idle: usize,
     pub hashrate_1m: HashRate,
@@ -44,7 +44,7 @@ pub struct ProxyStatus {
     pub endpoint: String,
     pub users: usize,
     pub workers: usize,
-    pub clients: usize,
+    pub sessions: usize,
     pub disconnected: usize,
     pub idle: usize,
     pub hashrate_1m: HashRate,
@@ -96,7 +96,7 @@ pub struct UserDetail {
     pub best_ever: Option<Difficulty>,
     pub last_share: Option<u64>,
     pub total_work: f64,
-    pub clients: usize,
+    pub sessions: usize,
     pub authorized: u64,
     pub workers: Vec<WorkerDetail>,
 }
@@ -104,7 +104,7 @@ pub struct UserDetail {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkerDetail {
     pub name: String,
-    pub clients: usize,
+    pub sessions: usize,
     pub hashrate_1m: HashRate,
     pub hashrate_5m: HashRate,
     pub hashrate_15m: HashRate,

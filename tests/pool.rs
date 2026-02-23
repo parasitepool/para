@@ -581,7 +581,7 @@ async fn share_validation() {
     assert_eq!(status.endpoint, pool.stratum_endpoint());
     assert_eq!(status.users, 0);
     assert_eq!(status.workers, 0);
-    assert_eq!(status.clients, 0);
+    assert_eq!(status.sessions, 0);
     assert_eq!(status.blocks, 0);
     assert_eq!(status.accepted, 0);
     assert_eq!(status.rejected, 0);
@@ -627,7 +627,7 @@ async fn share_validation() {
     let status = pool.get_status().await.unwrap();
     assert_eq!(status.users, 1);
     assert_eq!(status.workers, 1);
-    assert_eq!(status.clients, 1);
+    assert_eq!(status.sessions, 1);
     assert_eq!(status.accepted, 1);
     assert_eq!(status.rejected, 0);
     assert!(status.best_ever.is_some());
@@ -1273,4 +1273,37 @@ async fn high_diff_port() {
     let (_, high_diff) = wait_for_notify(&mut high_diff_events).await;
 
     assert_eq!(high_diff, Difficulty::from(1_000_000));
+}
+
+#[tokio::test]
+#[serial(bitcoind)]
+#[timeout(90000)]
+async fn idle_drop_retires_session() {
+    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
+
+    let client = pool.stratum_client().await;
+    let mut events = client.connect().await.unwrap();
+
+    let (subscribe, _, _) = client.subscribe().await.unwrap();
+    let enonce1 = subscribe.enonce1;
+    let enonce2_size = subscribe.enonce2_size;
+
+    client.authorize().await.unwrap();
+
+    let (notify, difficulty) = wait_for_notify(&mut events).await;
+
+    let enonce2 = Extranonce::random(enonce2_size);
+    let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, difficulty);
+    client
+        .submit(notify.job_id, enonce2, ntime, nonce, None)
+        .await
+        .unwrap();
+
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(status.sessions, 1);
+
+    tokio::time::sleep(Duration::from_secs(8)).await;
+
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(status.sessions, 0);
 }

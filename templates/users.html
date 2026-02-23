@@ -30,7 +30,7 @@ async function refresh() {
         const shortAddr = addr.length > 20 ? addr.slice(0,8) + '...' + addr.slice(-8) : addr;
         return `<div class=user-row>
           <a href="/user/${addr}">${shortAddr}</a>
-          <span>${u.workers.length} | ${u.clients} | ${formatHashrate(u.hashrate_1m)}</span>
+          <span>${u.workers.length} | ${u.sessions} | ${formatHashrate(u.hashrate_1m)}</span>
         </div>`;
       })
       .join('');
