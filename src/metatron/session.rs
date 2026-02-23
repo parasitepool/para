@@ -1,13 +1,13 @@
 use super::*;
 
 pub(crate) struct Session {
-    pub(crate) id: u64,
-    pub(crate) enonce1: Extranonce,
-    pub(crate) address: Address,
-    pub(crate) workername: String,
-    pub(crate) username: Username,
-    pub(crate) version_mask: Option<Version>,
-    pub(crate) stats: Mutex<Stats>,
+    id: u64,
+    enonce1: Extranonce,
+    address: Address,
+    workername: String,
+    username: Username,
+    version_mask: Option<Version>,
+    stats: Mutex<Stats>,
 }
 
 impl Session {
@@ -52,6 +52,10 @@ impl Session {
 
     pub(crate) fn version_mask(&self) -> Option<Version> {
         self.version_mask
+    }
+
+    pub(crate) fn snapshot_stats(&self) -> Stats {
+        self.stats.lock().clone()
     }
 
     pub(crate) fn record_accepted(&self, pool_diff: Difficulty, share_diff: Difficulty) {

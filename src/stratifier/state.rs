@@ -265,6 +265,16 @@ mod tests {
         assert_eq!(identity.enonce1(), &test_enonce1());
         assert_eq!(identity.address(), &test_address());
 
+        let session = Arc::new(Session::new(
+            0,
+            test_enonce1(),
+            test_address(),
+            "bar".into(),
+            Username::new("tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.bar"),
+            None,
+        ));
+        state = State::Working(session);
+
         let identity = state.identity().unwrap();
         assert_eq!(identity.enonce1(), &test_enonce1());
         assert_eq!(identity.address(), &test_address());
