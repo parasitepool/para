@@ -119,7 +119,7 @@ impl User {
     pub(crate) fn total_work(&self) -> TotalWork {
         self.workers
             .iter()
-            .map(|w| w.total_work())
+            .map(|worker| worker.total_work())
             .fold(TotalWork::ZERO, |acc, w| acc + w)
     }
 
