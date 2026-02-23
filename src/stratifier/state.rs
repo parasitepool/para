@@ -7,6 +7,27 @@ pub(crate) struct Subscription {
     pub(crate) version_mask: Option<Version>,
 }
 
+pub(crate) enum Identity {
+    Authorized(Arc<Authorization>),
+    Working(Arc<Session>),
+}
+
+impl Identity {
+    pub(crate) fn enonce1(&self) -> &Extranonce {
+        match self {
+            Identity::Authorized(auth) => &auth.enonce1,
+            Identity::Working(session) => session.enonce1(),
+        }
+    }
+
+    pub(crate) fn address(&self) -> &Address {
+        match self {
+            Identity::Authorized(auth) => &auth.address,
+            Identity::Working(session) => session.address(),
+        }
+    }
+}
+
 pub(crate) struct Authorization {
     pub(crate) enonce1: Extranonce,
     pub(crate) username: Username,
@@ -80,10 +101,10 @@ impl State {
         }
     }
 
-    pub(crate) fn identity(&self) -> Option<(Extranonce, Address)> {
+    pub(crate) fn identity(&self) -> Option<Identity> {
         match self {
-            State::Authorized(auth) => Some((auth.enonce1.clone(), auth.address.clone())),
-            State::Working(session) => Some((session.enonce1().clone(), session.address().clone())),
+            State::Authorized(auth) => Some(Identity::Authorized(Arc::clone(auth))),
+            State::Working(session) => Some(Identity::Working(Arc::clone(session))),
             _ => None,
         }
     }
@@ -240,13 +261,13 @@ mod tests {
         assert!(state.subscribe(test_enonce1(), "foo".into()));
         assert!(state.authorize(test_authorization()));
 
-        let (enonce1, address) = state.identity().unwrap();
-        assert_eq!(enonce1, test_enonce1());
-        assert_eq!(address, test_address());
+        let identity = state.identity().unwrap();
+        assert_eq!(identity.enonce1(), &test_enonce1());
+        assert_eq!(identity.address(), &test_address());
 
-        let (enonce1, address) = state.identity().unwrap();
-        assert_eq!(enonce1, test_enonce1());
-        assert_eq!(address, test_address());
+        let identity = state.identity().unwrap();
+        assert_eq!(identity.enonce1(), &test_enonce1());
+        assert_eq!(identity.address(), &test_address());
     }
 
     #[test]

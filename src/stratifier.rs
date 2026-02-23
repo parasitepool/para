@@ -191,9 +191,9 @@ impl<W: Workbase> Stratifier<W> {
                         break;
                     }
 
-                    if let Some((enonce1, address)) = self.state.identity() {
+                    if let Some(identity) = self.state.identity() {
                         let workbase = workbase_rx.borrow_and_update().clone();
-                        self.workbase_update(workbase, &enonce1, &address).await?;
+                        self.workbase_update(workbase, identity.enonce1(), identity.address()).await?;
                     } else {
                         let _ = workbase_rx.borrow_and_update();
                         continue;
@@ -651,7 +651,7 @@ impl<W: Workbase> Stratifier<W> {
                 session.username(),
                 submit.username
             );
-            
+
             self.send_error(
                 id,
                 StratumError::WorkerMismatch,
