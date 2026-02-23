@@ -43,16 +43,11 @@ pub(crate) enum State {
     Subscribed(Subscription),
     Authorized(Arc<Authorization>),
     Working(Arc<Session>),
-    Dropped,
 }
 
 impl State {
     pub(crate) fn new() -> Self {
         State::Init
-    }
-
-    pub(crate) fn drop(&mut self) {
-        *self = State::Dropped;
     }
 
     pub(crate) fn configure(&mut self, version_mask: Version) -> bool {
@@ -111,7 +106,7 @@ impl State {
 
     pub(crate) fn version_mask(&self) -> Option<Version> {
         match self {
-            State::Init | State::Dropped => None,
+            State::Init => None,
             State::Configured { version_mask } => Some(*version_mask),
             State::Subscribed(subscription) => subscription.version_mask,
             State::Authorized(auth) => auth.version_mask,
@@ -142,7 +137,6 @@ impl Display for State {
             State::Subscribed { .. } => write!(f, "Subscribed"),
             State::Authorized { .. } => write!(f, "Authorized"),
             State::Working { .. } => write!(f, "Working"),
-            State::Dropped => write!(f, "Dropped"),
         }
     }
 }

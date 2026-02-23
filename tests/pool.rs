@@ -1274,3 +1274,36 @@ async fn high_diff_port() {
 
     assert_eq!(high_diff, Difficulty::from(1_000_000));
 }
+
+#[tokio::test]
+#[serial(bitcoind)]
+#[timeout(90000)]
+async fn idle_drop_retires_session() {
+    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
+
+    let client = pool.stratum_client().await;
+    let mut events = client.connect().await.unwrap();
+
+    let (subscribe, _, _) = client.subscribe().await.unwrap();
+    let enonce1 = subscribe.enonce1;
+    let enonce2_size = subscribe.enonce2_size;
+
+    client.authorize().await.unwrap();
+
+    let (notify, difficulty) = wait_for_notify(&mut events).await;
+
+    let enonce2 = Extranonce::random(enonce2_size);
+    let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, difficulty);
+    client
+        .submit(notify.job_id, enonce2, ntime, nonce, None)
+        .await
+        .unwrap();
+
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(status.sessions, 1);
+
+    tokio::time::sleep(Duration::from_secs(8)).await;
+
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(status.sessions, 0);
+}

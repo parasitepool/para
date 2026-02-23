@@ -75,10 +75,6 @@ impl<W: Workbase> Stratifier<W> {
         let mut idle_check = interval(self.bouncer.check_interval());
 
         loop {
-            if matches!(self.state, State::Dropped) {
-                break;
-            }
-
             tokio::select! {
                 _ = cancel_token.cancelled() => {
                     info!("Disconnecting from {}", self.socket_addr);
@@ -91,7 +87,6 @@ impl<W: Workbase> Stratifier<W> {
                             self.socket_addr,
                             self.bouncer.last_interaction_since().as_secs()
                         );
-                        self.state.drop();
                         break
                     }
                 }
@@ -120,7 +115,9 @@ impl<W: Workbase> Stratifier<W> {
 
                             let consequence = self.subscribe(id, subscribe).await?;
 
-                            self.handle_protocol_consequence(consequence).await;
+                            if self.handle_protocol_consequence(consequence).await {
+                                break;
+                            }
                         }
                         "mining.authorize" => {
                             let Some(subscription) = self.state.subscribed() else {
@@ -135,7 +132,9 @@ impl<W: Workbase> Stratifier<W> {
                                 .await?;
 
                                 let consequence = self.bouncer.reject();
-                                self.handle_protocol_consequence(consequence).await;
+                                if self.handle_protocol_consequence(consequence).await {
+                                    break;
+                                }
 
                                 continue;
                             };
@@ -145,7 +144,9 @@ impl<W: Workbase> Stratifier<W> {
 
                             let consequence = self.authorize(id, authorize, subscription).await?;
 
-                            self.handle_protocol_consequence(consequence).await;
+                            if self.handle_protocol_consequence(consequence).await {
+                                break;
+                            }
                         }
                         "mining.submit" => {
                             let session = match &self.state {
@@ -164,7 +165,9 @@ impl<W: Workbase> Stratifier<W> {
                                     .await?;
 
                                     let consequence = self.bouncer.reject();
-                                    self.handle_protocol_consequence(consequence).await;
+                                    if self.handle_protocol_consequence(consequence).await {
+                                        break;
+                                    }
 
                                     continue;
                                 }
@@ -177,7 +180,9 @@ impl<W: Workbase> Stratifier<W> {
                                 .submit(id, submit, session.clone())
                                 .await?;
 
-                            self.handle_submit_consequence(consequence, session.address(), session.enonce1()).await;
+                            if self.handle_submit_consequence(consequence, session.address(), session.enonce1()).await {
+                                break;
+                            }
                         }
                         method => {
                             warn!("Unknown method {method} with {params} from {}", self.socket_addr);
@@ -211,9 +216,9 @@ impl<W: Workbase> Stratifier<W> {
         consequence: Consequence,
         address: &Address,
         enonce1: &Extranonce,
-    ) {
+    ) -> bool {
         match consequence {
-            Consequence::None => {}
+            Consequence::None => false,
             Consequence::Warn => {
                 warn!(
                     "Warning {} - {} consecutive rejects for {}s, sending fresh job",
@@ -251,6 +256,8 @@ impl<W: Workbase> Stratifier<W> {
                         warn!("Failed to create job: {err}");
                     }
                 }
+
+                false
             }
             Consequence::Reconnect => {
                 warn!(
@@ -269,6 +276,8 @@ impl<W: Workbase> Stratifier<W> {
                         params: json!([]),
                     })
                     .await;
+
+                false
             }
             Consequence::Drop => {
                 warn!(
@@ -280,14 +289,14 @@ impl<W: Workbase> Stratifier<W> {
                         .map(|d| d.as_secs())
                         .unwrap_or(0)
                 );
-                self.state.drop();
+                true
             }
         }
     }
 
-    async fn handle_protocol_consequence(&mut self, consequence: Consequence) {
+    async fn handle_protocol_consequence(&mut self, consequence: Consequence) -> bool {
         match consequence {
-            Consequence::None => {}
+            Consequence::None => false,
             Consequence::Warn => {
                 warn!(
                     "Warning {} - {} consecutive rejects for {}s",
@@ -298,6 +307,7 @@ impl<W: Workbase> Stratifier<W> {
                         .map(|duration| duration.as_secs())
                         .unwrap_or(0)
                 );
+                false
             }
             Consequence::Reconnect => {
                 warn!(
@@ -315,6 +325,7 @@ impl<W: Workbase> Stratifier<W> {
                         params: json!([]),
                     })
                     .await;
+                false
             }
             Consequence::Drop => {
                 warn!(
@@ -326,7 +337,7 @@ impl<W: Workbase> Stratifier<W> {
                         .map(|d| d.as_secs())
                         .unwrap_or(0)
                 );
-                self.state.drop();
+                true
             }
         }
     }
