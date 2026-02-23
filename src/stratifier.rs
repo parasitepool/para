@@ -2,7 +2,7 @@ use {
     super::*,
     crate::event_sink::{BlockFoundEvent, Event, ShareEvent},
     bouncer::{Bouncer, Consequence},
-    state::{Authorization, State},
+    state::{Authorization, Identity, State},
     upstream::UpstreamSubmit,
 };
 
@@ -193,7 +193,7 @@ impl<W: Workbase> Stratifier<W> {
 
                     if let Some(identity) = self.state.identity() {
                         let workbase = workbase_rx.borrow_and_update().clone();
-                        self.workbase_update(workbase, identity.enonce1(), identity.address()).await?;
+                        self.workbase_update(workbase, identity).await?;
                     } else {
                         let _ = workbase_rx.borrow_and_update();
                         continue;
@@ -331,12 +331,7 @@ impl<W: Workbase> Stratifier<W> {
         }
     }
 
-    async fn workbase_update(
-        &mut self,
-        workbase: Arc<W>,
-        enonce1: &Extranonce,
-        address: &Address,
-    ) -> Result {
+    async fn workbase_update(&mut self, workbase: Arc<W>, identity: Identity) -> Result {
         if let Some(ref upstream) = self.upstream {
             let upstream_diff = upstream.difficulty().await;
 
@@ -362,9 +357,9 @@ impl<W: Workbase> Stratifier<W> {
         let new_job = Arc::new(
             workbase
                 .create_job(
-                    enonce1,
+                    identity.enonce1(),
                     self.metatron.enonce2_size(),
-                    Some(address),
+                    Some(identity.address()),
                     self.jobs.next_id(),
                     self.state.version_mask(),
                 )
