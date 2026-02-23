@@ -2,7 +2,7 @@ use {
     super::*,
     crate::event_sink::{BlockFoundEvent, Event, ShareEvent},
     bouncer::{Bouncer, Consequence},
-    state::{Authorization, Identity, State},
+    state::{Authorization, Identity, State, Subscription},
     upstream::UpstreamSubmit,
 };
 
@@ -536,7 +536,7 @@ impl<W: Workbase> Stratifier<W> {
         &mut self,
         id: Id,
         authorize: Authorize,
-        subscription: state::Subscription,
+        subscription: Subscription,
     ) -> Result<Consequence> {
         let address = match authorize
             .username
