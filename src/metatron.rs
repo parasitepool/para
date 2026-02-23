@@ -111,14 +111,10 @@ impl Metatron {
             auth.version_mask,
         ));
 
-        if let Some(user) = self.users.get(&auth.address) {
-            user.new_session(&auth.workername, session.clone());
-        } else {
-            self.users
-                .entry(auth.address.clone())
-                .or_insert_with(|| Arc::new(User::new(auth.address.clone())))
-                .new_session(&auth.workername, session.clone());
-        }
+        self.users
+            .entry(auth.address.clone())
+            .or_insert_with(|| Arc::new(User::new(auth.address.clone())))
+            .new_session(&auth.workername, session.clone());
 
         session
     }

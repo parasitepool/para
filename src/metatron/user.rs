@@ -19,14 +19,10 @@ impl User {
     }
 
     pub(crate) fn new_session(&self, workername: &str, session: Arc<Session>) {
-        if let Some(worker) = self.workers.get(workername) {
-            worker.new_session(session);
-        } else {
-            self.workers
-                .entry(workername.to_string())
-                .or_insert_with(|| Arc::new(Worker::new(workername.to_string())))
-                .new_session(session);
-        }
+        self.workers
+            .entry(workername.to_string())
+            .or_insert_with(|| Arc::new(Worker::new(workername.to_string())))
+            .new_session(session);
     }
 
     pub(crate) fn session_count(&self) -> usize {
