@@ -359,10 +359,10 @@ mod tests {
         let s2 = metatron.new_session(test_auth("cafebabe", "foo"));
         assert_eq!(metatron.total_sessions(), 2);
 
-        s1.deactivate();
+        s1.disconnect();
         assert_eq!(metatron.total_sessions(), 1);
 
-        s2.deactivate();
+        s2.disconnect();
         assert_eq!(metatron.total_sessions(), 0);
     }
 
@@ -523,7 +523,7 @@ mod tests {
     fn store_and_take_disconnected() {
         let metatron = Metatron::new(pool_extranonces(), String::new());
         let session = metatron.new_session(test_auth("deadbeef", "foo"));
-        session.deactivate();
+        session.disconnect();
 
         metatron.store_disconnected(session);
         assert_eq!(metatron.disconnected(), 1);
@@ -548,7 +548,7 @@ mod tests {
 
         let pool_diff = Difficulty::from(100.0);
         session.record_accepted(pool_diff, Difficulty::from(200.0));
-        session.deactivate();
+        session.disconnect();
 
         metatron.store_disconnected(session);
 
@@ -568,7 +568,7 @@ mod tests {
         session.record_accepted(pool_diff, Difficulty::from(200.0));
         session.record_accepted(pool_diff, Difficulty::from(50.0));
         session.record_rejected();
-        session.deactivate();
+        session.disconnect();
 
         metatron.store_disconnected(session);
 
@@ -592,8 +592,8 @@ mod tests {
         let pool_diff = Difficulty::from(100.0);
         s1.record_accepted(pool_diff, Difficulty::from(50.0));
         s2.record_accepted(pool_diff, Difficulty::from(300.0));
-        s1.deactivate();
-        s2.deactivate();
+        s1.disconnect();
+        s2.disconnect();
 
         metatron.store_disconnected(s1);
         metatron.store_disconnected(s2);
@@ -620,7 +620,7 @@ mod tests {
         let pool_diff = Difficulty::from(100.0);
         s1.record_accepted(pool_diff, Difficulty::from(50.0));
         s2.record_accepted(pool_diff, Difficulty::from(200.0));
-        s1.deactivate();
+        s1.disconnect();
 
         metatron.store_disconnected(s1);
         let e1: Extranonce = "deadbeef".parse().unwrap();

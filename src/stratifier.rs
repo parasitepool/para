@@ -1110,7 +1110,7 @@ impl<W: Workbase> Stratifier<W> {
 impl<W: Workbase> Drop for Stratifier<W> {
     fn drop(&mut self) {
         if let Some(session) = self.state.working() {
-            session.deactivate();
+            session.disconnect();
             self.metatron.store_disconnected(session.clone());
         }
 

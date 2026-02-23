@@ -8,7 +8,7 @@ pub(crate) struct Session {
     pub(crate) username: Username,
     pub(crate) version_mask: Option<Version>,
     pub(crate) active: AtomicBool,
-    pub(crate) deactivated_at: Mutex<Option<Instant>>,
+    pub(crate) disconnected_at: Mutex<Option<Instant>>,
     pub(crate) stats: Mutex<Stats>,
 }
 
@@ -29,7 +29,7 @@ impl Session {
             username,
             version_mask,
             active: AtomicBool::new(true),
-            deactivated_at: Mutex::new(None),
+            disconnected_at: Mutex::new(None),
             stats: Mutex::new(Stats::new()),
         }
     }
@@ -62,13 +62,13 @@ impl Session {
         self.active.load(Ordering::Relaxed)
     }
 
-    pub(crate) fn deactivate(&self) {
+    pub(crate) fn disconnect(&self) {
         self.active.store(false, Ordering::Relaxed);
-        *self.deactivated_at.lock() = Some(Instant::now());
+        *self.disconnected_at.lock() = Some(Instant::now());
     }
 
     pub(crate) fn deactivated_at(&self) -> Option<Instant> {
-        *self.deactivated_at.lock()
+        *self.disconnected_at.lock()
     }
 
     pub(crate) fn record_accepted(&self, pool_diff: Difficulty, share_diff: Difficulty) {
@@ -195,7 +195,7 @@ mod tests {
     fn deactivate_sets_deactivated_at() {
         let session = test_session(0, "deadbeef");
 
-        session.deactivate();
+        session.disconnect();
 
         assert!(!session.is_active());
         assert!(session.deactivated_at().is_some());
@@ -205,7 +205,7 @@ mod tests {
     fn deactivated_at_is_recent() {
         let before = Instant::now();
         let session = test_session(0, "deadbeef");
-        session.deactivate();
+        session.disconnect();
         let after = Instant::now();
 
         let at = session.deactivated_at().unwrap();
