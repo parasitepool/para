@@ -169,6 +169,7 @@ async fn status(State(metrics): State<Arc<Metrics>>) -> Json<ProxyStatus> {
             .last_share()
             .map(|time| time.elapsed().as_secs()),
         total_work: metrics.metatron.total_work(),
+        ph_days: metrics.metatron.total_work().into(),
         uptime_secs: metrics.metatron.uptime().as_secs(),
         upstream_endpoint: metrics.upstream.endpoint().to_string(),
         upstream_connected: metrics.upstream.is_connected(),
@@ -225,6 +226,7 @@ async fn user(
         best_ever: user.best_ever(),
         last_share: user.last_share().map(|time| time.elapsed().as_secs()),
         total_work: user.total_work(),
+        ph_days: user.total_work().into(),
         sessions: user.session_count(),
         authorized: user.authorized,
         workers: user
@@ -248,6 +250,7 @@ async fn user(
                 best_ever: worker.best_ever(),
                 last_share: worker.last_share().map(|time| time.elapsed().as_secs()),
                 total_work: worker.total_work(),
+                ph_days: worker.total_work().into(),
             })
             .collect(),
     })

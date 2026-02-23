@@ -35,7 +35,8 @@ pub struct PoolStatus {
     pub blocks: u64,
     pub best_ever: Option<Difficulty>,
     pub last_share: Option<u64>,
-    pub total_work: f64,
+    pub total_work: TotalWork,
+    pub ph_days: PhDays,
     pub uptime_secs: u64,
 }
 
@@ -62,7 +63,8 @@ pub struct ProxyStatus {
     pub rejected: u64,
     pub best_ever: Option<Difficulty>,
     pub last_share: Option<u64>,
-    pub total_work: f64,
+    pub total_work: TotalWork,
+    pub ph_days: PhDays,
     pub uptime_secs: u64,
     pub upstream_endpoint: String,
     pub upstream_connected: bool,
@@ -95,7 +97,8 @@ pub struct UserDetail {
     pub rejected: u64,
     pub best_ever: Option<Difficulty>,
     pub last_share: Option<u64>,
-    pub total_work: f64,
+    pub total_work: TotalWork,
+    pub ph_days: PhDays,
     pub sessions: usize,
     pub authorized: u64,
     pub workers: Vec<WorkerDetail>,
@@ -120,7 +123,8 @@ pub struct WorkerDetail {
     pub rejected: u64,
     pub best_ever: Option<Difficulty>,
     pub last_share: Option<u64>,
-    pub total_work: f64,
+    pub total_work: TotalWork,
+    pub ph_days: PhDays,
 }
 
 pub type BitcoinStatus = http_server::BitcoinStatus;

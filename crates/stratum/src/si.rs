@@ -37,6 +37,8 @@ pub fn format_si(value: f64, unit: &str, f: &mut Formatter<'_>) -> fmt::Result {
 
     if suffix.is_empty() {
         write!(f, "{trimmed}")
+    } else if unit.is_empty() {
+        write!(f, "{trimmed}{suffix}")
     } else {
         write!(f, "{trimmed} {suffix}")
     }
@@ -115,18 +117,18 @@ mod tests {
         case(1.0, "", "1");
         case(42.0, "", "42");
         case(999.0, "", "999");
-        case(1e3, "", "1 K");
-        case(1.5e3, "", "1.5 K");
-        case(1e6, "", "1 M");
-        case(1e9, "", "1 G");
-        case(1e12, "", "1 T");
-        case(1e15, "", "1 P");
-        case(1e18, "", "1 E");
+        case(1e3, "", "1K");
+        case(1.5e3, "", "1.5K");
+        case(1e6, "", "1M");
+        case(1e9, "", "1G");
+        case(1e12, "", "1T");
+        case(1e15, "", "1P");
+        case(1e18, "", "1E");
         case(1.567e12, "H/s", "1.56 TH/s");
-        case(123.456e12, "", "123.45 T");
-        case(9999.0, "", "9.99 K");
-        case(999_999.0, "", "999.99 K");
-        case(9_999_999.0, "", "9.99 M");
+        case(123.456e12, "", "123.45T");
+        case(9999.0, "", "9.99K");
+        case(999_999.0, "", "999.99K");
+        case(9_999_999.0, "", "9.99M");
     }
 
     #[test]

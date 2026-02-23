@@ -135,7 +135,7 @@ function formatDifficulty(d) {
   const i = Math.min(Math.floor(Math.log10(d) / 3), SI_PREFIXES.length - 1);
   const scaled = d / Math.pow(10, i * 3);
   const truncated = Math.floor(scaled * 100) / 100;
-  return truncated.toFixed(2) + ' ' + SI_PREFIXES[i];
+  return truncated.toFixed(2) + SI_PREFIXES[i];
 }
 
 function formatHashrate(h) {
@@ -145,6 +145,11 @@ function formatHashrate(h) {
   const scaled = h / Math.pow(1000, i);
   const truncated = Math.floor(scaled * 100) / 100;
   return truncated.toFixed(2) + ' ' + SI_PREFIXES[i] + 'H/s';
+}
+
+function formatPhDays(v) {
+  if (v === null || v === undefined) return null;
+  return v.toFixed(2) + ' PHd';
 }
 
 function formatTruncated(n) {

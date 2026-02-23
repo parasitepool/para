@@ -52,6 +52,7 @@ use {
     metatron::{Metatron, session::Session},
     metrics::Metrics,
     parking_lot::Mutex,
+    ph_days::PhDays,
     reqwest::Url,
     rust_embed::RustEmbed,
     rustls_acme::{
@@ -111,6 +112,7 @@ use {
         codec::{FramedRead, FramedWrite, LinesCodec},
         sync::CancellationToken,
     },
+    total_work::TotalWork,
     tracing::{Subscriber, debug, error, info, warn},
     tracing_appender::non_blocking,
     tracing_subscriber::{EnvFilter, Layer, layer::SubscriberExt, util::SubscriberInitExt},
@@ -139,11 +141,13 @@ mod jobs;
 mod logs;
 mod metatron;
 mod metrics;
+mod ph_days;
 pub mod settings;
 mod signal;
 mod stratifier;
 pub mod subcommand;
 mod throbber;
+mod total_work;
 mod upstream;
 mod vardiff;
 mod workbase;

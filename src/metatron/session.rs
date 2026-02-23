@@ -75,7 +75,7 @@ impl Session {
         stats.sps_5m.record(1.0, now);
         stats.sps_15m.record(1.0, now);
         stats.sps_1hr.record(1.0, now);
-        stats.total_work += diff;
+        stats.total_work += TotalWork::from_difficulty(diff);
         stats.last_share = Some(now);
 
         if stats.best_ever.is_none_or(|best| share_diff > best) {
@@ -147,7 +147,7 @@ impl Session {
         self.stats.lock().last_share
     }
 
-    pub(crate) fn total_work(&self) -> f64 {
+    pub(crate) fn total_work(&self) -> TotalWork {
         self.stats.lock().total_work
     }
 }

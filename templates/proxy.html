@@ -30,6 +30,9 @@
     <div class=row><span>Rejected</span><span id=rejected></span></div>
     <div class=row><span>Best</span><span id=best_ever class=copyable></span></div>
     <div class=row><span>Last</span><span><span id=last_share></span>s ago</span></div>
+    <h3>Work</h3>
+    <div class=row><span>Total Work</span><span id=total_work class=copyable></span></div>
+    <div class=row><span>PHd</span><span id=ph_days class=copyable></span></div>
   </div>
 
   <div class=column>
@@ -113,6 +116,10 @@ async function refresh() {
     set('rejected', proxyData.rejected);
     set('last_share', proxyData.last_share);
     copyable('best_ever', best_ever, proxyData.best_ever);
+
+    const total_work = formatDifficulty(proxyData.total_work);
+    copyable('total_work', total_work, proxyData.total_work);
+    copyable('ph_days', formatPhDays(proxyData.ph_days), proxyData.ph_days);
 
     // Bitcoin data
     set('btc_height', bitcoinData.height);

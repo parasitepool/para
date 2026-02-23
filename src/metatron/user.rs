@@ -116,8 +116,11 @@ impl User {
             .max()
     }
 
-    pub(crate) fn total_work(&self) -> f64 {
-        self.workers.iter().map(|w| w.total_work()).sum()
+    pub(crate) fn total_work(&self) -> TotalWork {
+        self.workers
+            .iter()
+            .map(|w| w.total_work())
+            .fold(TotalWork::ZERO, |acc, w| acc + w)
     }
 
     pub(crate) fn last_share(&self) -> Option<Instant> {
