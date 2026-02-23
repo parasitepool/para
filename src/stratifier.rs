@@ -645,8 +645,13 @@ impl<W: Workbase> Stratifier<W> {
         session: Arc<Session>,
     ) -> Result<Consequence> {
         if submit.username != *session.username() {
-            let job_height = self.workbase_rx.borrow().height();
-
+            debug!(
+                "Rejected worker mismatch from {}: authorized={} submitted={}",
+                session.username(),
+                session.username(),
+                submit.username
+            );
+            
             self.send_error(
                 id,
                 StratumError::WorkerMismatch,
@@ -657,17 +662,10 @@ impl<W: Workbase> Stratifier<W> {
             )
             .await?;
 
-            debug!(
-                "Rejected worker mismatch from {}: authorized={} submitted={}",
-                session.username(),
-                session.username(),
-                submit.username
-            );
-
             self.send_event(rejection_event!(
                 session.address().to_string(),
                 session.workername().to_string(),
-                job_height,
+                self.workbase_rx.borrow().height(),
                 StratumError::WorkerMismatch
             ));
 
@@ -677,13 +675,10 @@ impl<W: Workbase> Stratifier<W> {
         }
 
         let Some(job) = self.jobs.get(&submit.job_id) else {
-            let job_height = self.workbase_rx.borrow().height();
-
             debug!(
-                "Rejected stale share from {}: job_id={} height={}",
+                "Rejected stale share from {}: job_id={}",
                 session.username(),
                 submit.job_id,
-                job_height
             );
 
             self.send_error(id, StratumError::Stale, None).await?;
@@ -691,7 +686,7 @@ impl<W: Workbase> Stratifier<W> {
             self.send_event(rejection_event!(
                 session.address().to_string(),
                 session.workername().to_string(),
-                job_height,
+                self.workbase_rx.borrow().height(),
                 StratumError::Stale
             ));
 
@@ -703,15 +698,12 @@ impl<W: Workbase> Stratifier<W> {
         let expected_extranonce2_size = self.metatron.enonce2_size();
 
         if submit.enonce2.len() != expected_extranonce2_size {
-            let job_height = job.workbase.height();
-
             warn!(
-                "Rejected invalid extranonce2 length from {} ({}): got {} bytes, expected {} height={}",
+                "Rejected invalid extranonce2 length from {} ({}): got {} bytes, expected {}",
                 session.username(),
                 self.socket_addr,
                 submit.enonce2.len(),
                 expected_extranonce2_size,
-                job_height
             );
 
             self.send_error(
@@ -727,7 +719,7 @@ impl<W: Workbase> Stratifier<W> {
             self.send_event(rejection_event!(
                 session.address().to_string(),
                 session.workername().to_string(),
-                job_height,
+                job.workbase.height(),
                 StratumError::InvalidNonce2Length
             ));
 
@@ -739,15 +731,12 @@ impl<W: Workbase> Stratifier<W> {
         let job_ntime = job.ntime().0;
         let submit_ntime = submit.ntime.0;
         if submit_ntime < job_ntime || submit_ntime > job_ntime + MAX_NTIME_OFFSET {
-            let job_height = job.workbase.height();
-
             debug!(
-                "Rejected ntime out of range from {}: job_ntime={} submit_ntime={} max_ntime={} height={}",
+                "Rejected ntime out of range from {}: job_ntime={} submit_ntime={} max_ntime={}",
                 session.username(),
                 job_ntime,
                 submit_ntime,
                 job_ntime + MAX_NTIME_OFFSET,
-                job_height
             );
 
             self.send_error(
@@ -764,7 +753,7 @@ impl<W: Workbase> Stratifier<W> {
             self.send_event(rejection_event!(
                 session.address().to_string(),
                 session.workername().to_string(),
-                job_height,
+                job.workbase.height(),
                 StratumError::NtimeOutOfRange
             ));
 
@@ -776,12 +765,9 @@ impl<W: Workbase> Stratifier<W> {
         let version = match submit.version_bits {
             Some(version_bits) if version_bits != Version::from(0) => {
                 let Some(version_mask) = job.version_mask else {
-                    let job_height = job.workbase.height();
-
                     debug!(
-                        "Rejected invalid version mask from {}: version rolling not negotiated height={}",
+                        "Rejected invalid version mask from {}: version rolling not negotiated",
                         session.username(),
-                        job_height
                     );
 
                     self.send_error(
@@ -794,7 +780,7 @@ impl<W: Workbase> Stratifier<W> {
                     self.send_event(rejection_event!(
                         session.address().to_string(),
                         session.workername().to_string(),
-                        job_height,
+                        job.workbase.height(),
                         StratumError::InvalidVersionMask
                     ));
 
@@ -806,14 +792,11 @@ impl<W: Workbase> Stratifier<W> {
                 let disallowed = version_bits & !version_mask;
 
                 if disallowed != Version::from(0) {
-                    let job_height = job.workbase.height();
-
                     debug!(
-                        "Rejected invalid version mask from {}: disallowed={} mask={} height={}",
+                        "Rejected invalid version mask from {}: disallowed={} mask={}",
                         session.username(),
                         disallowed,
                         version_mask,
-                        job_height
                     );
 
                     self.send_error(
@@ -830,7 +813,7 @@ impl<W: Workbase> Stratifier<W> {
                     self.send_event(rejection_event!(
                         session.address().to_string(),
                         session.workername().to_string(),
-                        job_height,
+                        job.workbase.height(),
                         StratumError::InvalidVersionMask
                     ));
 
@@ -876,13 +859,10 @@ impl<W: Workbase> Stratifier<W> {
         let hash = header.block_hash();
 
         if self.jobs.is_duplicate(hash) {
-            let job_height = job.workbase.height();
-
             debug!(
-                "Rejected duplicate share from {}: hash={} height={}",
+                "Rejected duplicate share from {}: hash={}",
                 session.username(),
                 hash,
-                job_height
             );
 
             self.send_error(id, StratumError::Duplicate, None).await?;
@@ -890,7 +870,7 @@ impl<W: Workbase> Stratifier<W> {
             self.send_event(rejection_event!(
                 session.address().to_string(),
                 session.workername().to_string(),
-                job_height,
+                job.workbase.height(),
                 StratumError::Duplicate
             ));
 
@@ -928,19 +908,14 @@ impl<W: Workbase> Stratifier<W> {
                         info!("SUCCESSFULLY mined block {}", block.block_hash());
                         self.metatron.add_block();
 
-                        let job_height = job.workbase.height();
-                        let blockhash_str = blockhash.to_string();
-                        let diff = Difficulty::from(job.nbits()).as_f64();
-                        let coinbase_value = job.workbase.coinbase_value();
-
                         self.send_event(Event::BlockFound(BlockFoundEvent {
                             timestamp: None,
-                            blockheight: job_height,
-                            blockhash: blockhash_str,
+                            blockheight: job.workbase.height(),
+                            blockhash: blockhash.to_string(),
                             address: session.address().to_string(),
                             workername: session.workername().to_string(),
-                            diff,
-                            coinbase_value,
+                            diff: Difficulty::from(job.nbits()).as_f64(),
+                            coinbase_value: job.workbase.coinbase_value(),
                         }));
                     }
                 }
@@ -964,14 +939,12 @@ impl<W: Workbase> Stratifier<W> {
 
         if !pool_diff.to_target().is_met_by(hash) {
             let share_diff = Difficulty::from(hash);
-            let job_height = job.workbase.height();
 
             debug!(
-                "Rejected share above pool target from {}: share_diff={} pool_diff={} height={}",
+                "Rejected share above pool target from {}: share_diff={} pool_diff={}",
                 session.username(),
                 share_diff,
                 pool_diff,
-                job_height
             );
 
             self.send_error(id, StratumError::AboveTarget, None).await?;
@@ -981,7 +954,7 @@ impl<W: Workbase> Stratifier<W> {
                 session.workername().to_string(),
                 pool_diff.as_f64(),
                 share_diff.as_f64(),
-                job_height,
+                job.workbase.height(),
                 StratumError::AboveTarget
             ));
 
