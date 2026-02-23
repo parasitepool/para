@@ -5,6 +5,8 @@
     <div class=row><span>Workers</span><span id=workers_count></span></div>
     <div class=row><span>Sessions</span><span id=sessions></span></div>
     <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
+    <div class=row><span>Total Work</span><span id=total_work class=copyable></span></div>
+    <div class=row><span>PHd</span><span id=ph_days class=copyable></span></div>
     <div class=row><span>SPS</span><span id=sps_1m></span></div>
     <div class=row><span>Authorized</span><span id=authorized></span></div>
     <h3>Shares</h3>
@@ -24,6 +26,7 @@
           <th>Hashrate</th>
           <th>SPS</th>
           <th>Best</th>
+          <th>PHd</th>
           <th>Last</th>
         </tr>
       </thead>
@@ -60,6 +63,10 @@ async function refresh() {
     set('last_share', user.last_share);
     copyable('best_ever', best_ever, user.best_ever);
 
+    const user_total_work = formatDifficulty(user.total_work);
+    copyable('total_work', user_total_work, user.total_work);
+    copyable('ph_days', formatPhDays(user.ph_days), user.ph_days);
+
     const container = document.getElementById('workers-list');
     const workers = user.workers.sort((a, b) => b.hashrate_1m - a.hashrate_1m);
     container.innerHTML = workers.map(w => {
@@ -71,6 +78,7 @@ async function refresh() {
         <td>${formatHashrate(w.hashrate_1m)}</td>
         <td>${formatTruncated(w.sps_1m)}</td>
         <td>${bestShare || '-'}</td>
+        <td>${formatPhDays(w.ph_days) || '-'}</td>
         <td>${lastShare}</td>
       </tr>`;
     }).join('');

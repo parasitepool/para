@@ -5,6 +5,8 @@
     <div class=row><span>Workers</span><span id=workers></span></div>
     <div class=row><span>Sessions</span><span id=sessions></span></div>
     <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
+    <div class=row><span>Total Work</span><span id=total_work class=copyable></span></div>
+    <div class=row><span>PHd</span><span id=ph_days class=copyable></span></div>
     <div class=row><span>SPS</span><span id=sps_1m></span></div>
     <div class=row><span>Uptime</span><span><span id=uptime_secs></span>s</span></div>
     <div class=row><span>Blocks</span><span id=blocks></span></div>
@@ -75,6 +77,10 @@ async function refresh() {
     set('rejected', poolData.rejected);
     set('last_share', poolData.last_share);
     copyable('best_ever', best_ever, poolData.best_ever);
+
+    const total_work = formatDifficulty(poolData.total_work);
+    copyable('total_work', total_work, poolData.total_work);
+    copyable('ph_days', formatPhDays(poolData.ph_days), poolData.ph_days);
 
     // Bitcoin data
     set('btc_height', bitcoinData.height);

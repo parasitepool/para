@@ -167,6 +167,7 @@ async fn status(State(metatron): State<Arc<Metatron>>) -> Json<PoolStatus> {
         best_ever: metatron.best_ever(),
         last_share: metatron.last_share().map(|time| time.elapsed().as_secs()),
         total_work: metatron.total_work(),
+        ph_days: metatron.total_work().into(),
         uptime_secs: metatron.uptime().as_secs(),
     })
 }
@@ -210,6 +211,7 @@ async fn user(
         best_ever: user.best_ever(),
         last_share: user.last_share().map(|time| time.elapsed().as_secs()),
         total_work: user.total_work(),
+        ph_days: user.total_work().into(),
         sessions: user.session_count(),
         authorized: user.authorized,
         workers: user
@@ -233,6 +235,7 @@ async fn user(
                 best_ever: worker.best_ever(),
                 last_share: worker.last_share().map(|time| time.elapsed().as_secs()),
                 total_work: worker.total_work(),
+                ph_days: worker.total_work().into(),
             })
             .collect(),
     })

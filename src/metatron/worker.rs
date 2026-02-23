@@ -154,11 +154,11 @@ impl Worker {
             .max()
     }
 
-    pub(crate) fn total_work(&self) -> f64 {
+    pub(crate) fn total_work(&self) -> TotalWork {
         self.sessions
             .iter()
             .map(|session| session.total_work())
-            .sum::<f64>()
+            .fold(TotalWork::ZERO, |acc, w| acc + w)
             + self.lifetime.lock().total_work
     }
 }
