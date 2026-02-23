@@ -166,7 +166,7 @@ impl<W: Workbase> Stratifier<W> {
                                     let consequence = self.bouncer.reject();
                                     self.handle_protocol_consequence(consequence).await;
 
-                                    continue
+                                    continue;
                                 }
                             };
 

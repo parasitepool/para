@@ -228,6 +228,15 @@ mod tests {
     }
 
     #[test]
+    fn reauthorize_from_authorized_fails() {
+        let mut state = State::new();
+
+        assert!(state.subscribe(test_enonce1(), "foo".into()));
+        assert!(state.authorize(test_authorization()));
+        assert!(!state.authorize(test_authorization()));
+    }
+
+    #[test]
     fn resubscribe_from_authorized_is_rejected() {
         let mut state = State::new();
 
