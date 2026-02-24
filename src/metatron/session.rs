@@ -75,7 +75,7 @@ impl Session {
         stats.sps_5m.record(1.0, now);
         stats.sps_15m.record(1.0, now);
         stats.sps_1hr.record(1.0, now);
-        stats.accepted_work += TotalWork::from_difficulty(diff);
+        stats.accepted_work += TotalWork::from_difficulty(pool_diff);
         stats.last_share = Some(now);
 
         if stats.best_ever.is_none_or(|best| share_diff > best) {
@@ -86,6 +86,6 @@ impl Session {
     pub(crate) fn record_rejected(&self, pool_diff: Difficulty) {
         let mut stats = self.stats.lock();
         stats.rejected_shares += 1;
-        stats.rejected_work += TotalWork::from_difficulty(pool_diff.as_f64());
+        stats.rejected_work += TotalWork::from_difficulty(pool_diff);
     }
 }
