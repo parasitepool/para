@@ -22,14 +22,15 @@
     <div class=row><a href="/users"><span>Users</span></a><span id=users></span></div>
     <div class=row><span>Workers</span><span id=workers></span></div>
     <div class=row><span>Sessions</span><span id=sessions></span></div>
-    <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
-    <div class=row><span>Accepted Work</span><span id=accepted_work class=copyable></span></div>
-    <div class=row><span>PHd</span><span id=ph_days class=copyable></span></div>
     <div class=row><span>SPS</span><span id=sps_1m></span></div>
+    <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
+    <div class=row><span>PHd</span><span id=ph_days class=copyable></span></div>
     <div class=row><span>Uptime</span><span><span id=uptime_secs></span>s</span></div>
     <h3>Shares</h3>
     <div class=row><span>Accepted</span><span id=accepted></span></div>
     <div class=row><span>Rejected</span><span id=rejected></span></div>
+    <div class=row><span>Accepted Work</span><span id=accepted_work class=copyable></span></div>
+    <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
     <div class=row><span>Best</span><span id=best_ever class=copyable></span></div>
     <div class=row><span>Last</span><span><span id=last_share></span>s ago</span></div>
   </div>
@@ -118,6 +119,8 @@ async function refresh() {
 
     const accepted_work = formatDifficulty(proxyData.accepted_work);
     copyable('accepted_work', accepted_work, proxyData.accepted_work);
+    const rejected_work = formatDifficulty(proxyData.rejected_work);
+    copyable('rejected_work', rejected_work, proxyData.rejected_work);
     copyable('ph_days', formatPhDays(proxyData.ph_days), proxyData.ph_days);
 
     // Bitcoin data
