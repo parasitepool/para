@@ -28,6 +28,7 @@ use {
 
 pub use {
     authorize::Authorize,
+    client_reconnect::ClientReconnect,
     configure::{Configure, ConfigureResponse},
     difficulty::Difficulty,
     error::{InternalError, Result, StratumError, StratumErrorResponse},
@@ -57,6 +58,7 @@ pub use client::{Client, ClientError, EventReceiver};
 pub const MAX_MESSAGE_SIZE: usize = 32 * 1024;
 
 mod authorize;
+mod client_reconnect;
 mod configure;
 mod difficulty;
 mod error;
