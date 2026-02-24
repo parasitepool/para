@@ -169,8 +169,4 @@ impl Worker {
             .fold(TotalWork::ZERO, |acc, w| acc + w)
             + self.lifetime.lock().rejected_work
     }
-
-    pub(crate) fn total_work(&self) -> TotalWork {
-        self.accepted_work() + self.rejected_work()
-    }
 }

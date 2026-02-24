@@ -168,7 +168,6 @@ async fn status(State(metrics): State<Arc<Metrics>>) -> Json<ProxyStatus> {
             .metatron
             .last_share()
             .map(|time| time.elapsed().as_secs()),
-        total_work: metrics.metatron.total_work(),
         accepted_work: metrics.metatron.accepted_work(),
         rejected_work: metrics.metatron.rejected_work(),
         ph_days: metrics.metatron.accepted_work().into(),
@@ -227,7 +226,6 @@ async fn user(
         rejected_shares: user.rejected_shares(),
         best_ever: user.best_ever(),
         last_share: user.last_share().map(|time| time.elapsed().as_secs()),
-        total_work: user.total_work(),
         accepted_work: user.accepted_work(),
         rejected_work: user.rejected_work(),
         ph_days: user.accepted_work().into(),
@@ -253,7 +251,6 @@ async fn user(
                 rejected_shares: worker.rejected_shares(),
                 best_ever: worker.best_ever(),
                 last_share: worker.last_share().map(|time| time.elapsed().as_secs()),
-                total_work: worker.total_work(),
                 accepted_work: worker.accepted_work(),
                 rejected_work: worker.rejected_work(),
                 ph_days: worker.accepted_work().into(),

@@ -261,10 +261,6 @@ impl Metatron {
             .fold(TotalWork::ZERO, |acc, w| acc + w)
     }
 
-    pub(crate) fn total_work(&self) -> TotalWork {
-        self.accepted_work() + self.rejected_work()
-    }
-
     pub(crate) fn last_share(&self) -> Option<Instant> {
         self.users.iter().filter_map(|user| user.last_share()).max()
     }
@@ -448,23 +444,23 @@ mod tests {
     }
 
     #[test]
-    fn total_work_accumulates() {
+    fn accepted_work_accumulates() {
         let metatron = Metatron::new(pool_extranonces(), String::new());
         let pool_diff = Difficulty::from(100.0);
         let expected = TotalWork::from_difficulty(pool_diff.as_f64());
 
-        assert_eq!(metatron.total_work(), TotalWork::ZERO);
+        assert_eq!(metatron.accepted_work(), TotalWork::ZERO);
 
         let foo_session = metatron.new_session(test_auth("deadbeef", "foo"));
         foo_session.record_accepted(pool_diff, Difficulty::from(200.0));
         foo_session.record_accepted(pool_diff, Difficulty::from(50.0));
 
-        assert_eq!(metatron.total_work(), expected + expected);
+        assert_eq!(metatron.accepted_work(), expected + expected);
 
         let bar_session = metatron.new_session(test_auth("cafebabe", "bar"));
         bar_session.record_accepted(pool_diff, Difficulty::from(400.0));
 
-        assert_eq!(metatron.total_work(), expected + expected + expected);
+        assert_eq!(metatron.accepted_work(), expected + expected + expected);
     }
 
     #[test]
@@ -501,7 +497,6 @@ mod tests {
         let expected = TotalWork::from_difficulty(pool_diff.as_f64());
         assert_eq!(metatron.accepted_work(), expected + expected);
         assert_eq!(metatron.rejected_work(), expected);
-        assert_eq!(metatron.total_work(), expected + expected + expected);
     }
 
     #[test]
@@ -519,7 +514,7 @@ mod tests {
         assert_eq!(metatron.accepted_shares(), 2);
         assert_eq!(metatron.best_ever(), Some(Difficulty::from(300.0)));
         let expected = TotalWork::from_difficulty(pool_diff.as_f64());
-        assert_eq!(metatron.total_work(), expected + expected);
+        assert_eq!(metatron.accepted_work(), expected + expected);
     }
 
     #[test]
@@ -536,6 +531,6 @@ mod tests {
         assert_eq!(metatron.accepted_shares(), 2);
         assert_eq!(metatron.best_ever(), Some(Difficulty::from(200.0)));
         let expected = TotalWork::from_difficulty(pool_diff.as_f64());
-        assert_eq!(metatron.total_work(), expected + expected);
+        assert_eq!(metatron.accepted_work(), expected + expected);
     }
 }

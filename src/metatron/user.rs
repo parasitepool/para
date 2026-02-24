@@ -136,10 +136,6 @@ impl User {
             .fold(TotalWork::ZERO, |acc, w| acc + w)
     }
 
-    pub(crate) fn total_work(&self) -> TotalWork {
-        self.accepted_work() + self.rejected_work()
-    }
-
     pub(crate) fn last_share(&self) -> Option<Instant> {
         self.workers
             .iter()

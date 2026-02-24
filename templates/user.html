@@ -5,7 +5,7 @@
     <div class=row><span>Workers</span><span id=workers_count></span></div>
     <div class=row><span>Sessions</span><span id=sessions></span></div>
     <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
-    <div class=row><span>Total Work</span><span id=total_work class=copyable></span></div>
+    <div class=row><span>Accepted Work</span><span id=accepted_work class=copyable></span></div>
     <div class=row><span>PHd</span><span id=ph_days class=copyable></span></div>
     <div class=row><span>SPS</span><span id=sps_1m></span></div>
     <div class=row><span>Authorized</span><span id=authorized></span></div>
@@ -63,8 +63,8 @@ async function refresh() {
     set('last_share', user.last_share);
     copyable('best_ever', best_ever, user.best_ever);
 
-    const user_total_work = formatDifficulty(user.total_work);
-    copyable('total_work', user_total_work, user.total_work);
+    const accepted_work = formatDifficulty(user.accepted_work);
+    copyable('accepted_work', accepted_work, user.accepted_work);
     copyable('ph_days', formatPhDays(user.ph_days), user.ph_days);
 
     const container = document.getElementById('workers-list');

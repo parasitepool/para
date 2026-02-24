@@ -487,6 +487,12 @@ async fn vardiff_adjusts_difficulty() {
     client.authorize().await.unwrap();
 
     let (mut notify, initial_difficulty) = wait_for_notify(&mut events).await;
+    let old_job_id = notify.job_id;
+    let user_address = signet_username()
+        .parse_address()
+        .unwrap()
+        .assume_checked()
+        .to_string();
 
     let new_difficulty = mine_until_difficulty_increases(
         &client,
@@ -499,41 +505,6 @@ async fn vardiff_adjusts_difficulty() {
     .await;
 
     assert!(new_difficulty > initial_difficulty);
-}
-
-#[tokio::test]
-#[serial(bitcoind)]
-#[timeout(120000)]
-async fn pre_job_rejections_use_pool_diff() {
-    let pool = TestPool::spawn_with_args(
-        "--start-diff 0.00001 --vardiff-period 1 --vardiff-window 5 --disable-bouncer",
-    );
-
-    let client = pool.stratum_client().await;
-    let mut events = client.connect().await.unwrap();
-
-    let (subscribe, _, _) = client.subscribe().await.unwrap();
-    let enonce1 = subscribe.enonce1;
-
-    client.authorize().await.unwrap();
-
-    let (mut notify, initial_diff) = wait_for_notify(&mut events).await;
-    let old_job_id = notify.job_id;
-    let user_address = signet_username()
-        .parse_address()
-        .unwrap()
-        .assume_checked()
-        .to_string();
-
-    mine_until_difficulty_increases(
-        &client,
-        &mut events,
-        &mut notify,
-        &enonce1,
-        subscribe.enonce2_size,
-        initial_diff,
-    )
-    .await;
 
     pool.mine_block().await;
     pool.wait_for_blocks(1, Duration::from_secs(10))
@@ -559,7 +530,7 @@ async fn pre_job_rejections_use_pool_diff() {
 
     let after_stale = pool.get_user(&user_address).await.unwrap();
     let stale_delta = (after_stale.rejected_work - baseline.rejected_work).as_f64();
-    assert_eq!(stale_delta, initial_diff.as_f64());
+    assert_eq!(stale_delta, initial_difficulty.as_f64());
 
     assert_stratum_error(
         client
@@ -577,7 +548,7 @@ async fn pre_job_rejections_use_pool_diff() {
 
     let after_mismatch = pool.get_user(&user_address).await.unwrap();
     let mismatch_delta = (after_mismatch.rejected_work - after_stale.rejected_work).as_f64();
-    assert_eq!(mismatch_delta, initial_diff.as_f64());
+    assert_eq!(mismatch_delta, initial_difficulty.as_f64());
 }
 
 #[tokio::test]
