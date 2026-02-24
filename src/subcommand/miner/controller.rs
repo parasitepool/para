@@ -311,7 +311,7 @@ impl Controller {
                         }
 
                         let enonce2 = {
-                            let mut guard = enonce2.lock().await;
+                            let mut guard = enonce2.lock();
                             let enonce2 = guard.clone();
                             guard.increment_wrapping();
                             enonce2
@@ -335,7 +335,7 @@ impl Controller {
                             nonce: 0,
                         };
 
-                        let pool_target = { pool_difficulty.lock().await.to_target() };
+                        let pool_target = { pool_difficulty.lock().to_target() };
 
                         let mut hasher = Hasher {
                             version: notify.version,
@@ -389,7 +389,7 @@ impl Controller {
     }
 
     async fn handle_set_difficulty(&mut self, difficulty: Difficulty) {
-        *self.pool_difficulty.lock().await = difficulty;
+        *self.pool_difficulty.lock() = difficulty;
         info!("Updated pool difficulty: {difficulty}");
         info!(
             "Updated pool target:\t{}",

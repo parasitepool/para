@@ -348,7 +348,7 @@ impl<W: Workbase> Stratifier<W> {
 
     async fn workbase_update(&mut self, workbase: Arc<W>, identity: Identity) -> Result {
         if let Some(ref upstream) = self.upstream {
-            let upstream_diff = upstream.difficulty().await;
+            let upstream_diff = upstream.difficulty();
 
             if let Some(new_diff) = self.vardiff.clamp_to_upstream(upstream_diff) {
                 debug!(
@@ -1009,11 +1009,7 @@ impl<W: Workbase> Stratifier<W> {
             self.vardiff.shares_since_change()
         );
 
-        let upstream_diff = if let Some(ref upstream) = self.upstream {
-            Some(upstream.difficulty().await)
-        } else {
-            None
-        };
+        let upstream_diff = self.upstream.as_ref().map(|upstream| upstream.difficulty());
 
         let network_diff = Difficulty::from(job.nbits());
 

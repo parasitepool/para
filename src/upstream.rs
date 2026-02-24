@@ -18,8 +18,8 @@ pub(crate) struct Upstream {
     enonce1: Extranonce,
     enonce2_size: usize,
     connected: Arc<AtomicBool>,
-    ping: Arc<tokio::sync::RwLock<Duration>>,
-    difficulty: Arc<tokio::sync::RwLock<Difficulty>>,
+    ping: Arc<RwLock<Duration>>,
+    difficulty: Arc<RwLock<Difficulty>>,
     accepted: Arc<AtomicU64>,
     rejected: Arc<AtomicU64>,
     filtered: Arc<AtomicU64>,
@@ -94,8 +94,8 @@ impl Upstream {
                 enonce1: subscribe.enonce1,
                 enonce2_size: subscribe.enonce2_size,
                 connected: Arc::new(AtomicBool::new(false)),
-                ping: Arc::new(tokio::sync::RwLock::new(Duration::from_secs(1))),
-                difficulty: Arc::new(tokio::sync::RwLock::new(Difficulty::from(1))),
+                ping: Arc::new(RwLock::new(Duration::from_secs(1))),
+                difficulty: Arc::new(RwLock::new(Difficulty::from(1))),
                 accepted: Arc::new(AtomicU64::new(0)),
                 rejected: Arc::new(AtomicU64::new(0)),
                 filtered: Arc::new(AtomicU64::new(0)),
@@ -118,7 +118,7 @@ impl Upstream {
             .await
             .context("failed to authorize with upstream")?;
 
-        self.set_ping(duration).await;
+        self.set_ping(duration);
 
         info!(
             "Authorized to upstream {} with {}",
@@ -135,7 +135,7 @@ impl Upstream {
             match events.recv().await {
                 Ok(Event::SetDifficulty(diff)) => {
                     info!("Received initial difficulty: {}", diff);
-                    *self.difficulty.write().await = diff;
+                    *self.difficulty.write() = diff;
                     initial_difficulty = Some(diff);
                 }
                 Ok(Event::Notify(notify)) => {
@@ -188,7 +188,7 @@ impl Upstream {
                             }
                             Ok(Event::SetDifficulty(diff)) => {
                                 info!("Received set_difficulty: {}", diff);
-                                *upstream_difficulty.write().await = diff;
+                                *upstream_difficulty.write() = diff;
                             }
                             Ok(Event::Reconnect(_)) | Ok(Event::Disconnected) => {
                                 warn!("Disconnected from upstream");
@@ -212,7 +212,7 @@ impl Upstream {
     }
 
     pub(crate) async fn submit_share(&self, submit: UpstreamSubmit) {
-        let upstream_diff = *self.difficulty.read().await;
+        let upstream_diff = *self.difficulty.read();
         if submit.share_diff < upstream_diff {
             debug!(
                 "Share below upstream difficulty: share_diff={} < upstream_diff={}",
@@ -245,7 +245,7 @@ impl Upstream {
             {
                 Ok(duration) => {
                     accepted.fetch_add(1, Ordering::Relaxed);
-                    let mut ping = ping.write().await;
+                    let mut ping = ping.write();
                     *ping = duration;
 
                     debug!("Upstream accepted share");
@@ -273,8 +273,8 @@ impl Upstream {
         self.enonce2_size
     }
 
-    pub(crate) async fn difficulty(&self) -> Difficulty {
-        *self.difficulty.read().await
+    pub(crate) fn difficulty(&self) -> Difficulty {
+        *self.difficulty.read()
     }
 
     pub(crate) fn is_connected(&self) -> bool {
@@ -309,12 +309,11 @@ impl Upstream {
         self.version_mask
     }
 
-    async fn set_ping(&self, duration: Duration) {
-        let mut ping = self.ping.write().await;
-        *ping = duration;
+    fn set_ping(&self, duration: Duration) {
+        *self.ping.write() = duration;
     }
 
-    pub(crate) async fn ping_ms(&self) -> u128 {
-        self.ping.read().await.as_millis()
+    pub(crate) fn ping_ms(&self) -> u128 {
+        self.ping.read().as_millis()
     }
 }
