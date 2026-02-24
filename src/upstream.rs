@@ -192,13 +192,13 @@ impl Upstream {
                             }
                             Ok(Event::Reconnect(_)) | Ok(Event::Disconnected) => {
                                 warn!("Disconnected from upstream");
-                                connected.store(false, Ordering::SeqCst);
+                                connected.store(false, Ordering::Relaxed);
                                 disconnect_notify.notify_waiters();
                                 break;
                             }
                             Err(err) => {
                                 error!("Upstream event error: {}", err);
-                                connected.store(false, Ordering::SeqCst);
+                                connected.store(false, Ordering::Relaxed);
                                 disconnect_notify.notify_waiters();
                                 break;
                             }
