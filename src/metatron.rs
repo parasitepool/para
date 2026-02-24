@@ -161,6 +161,7 @@ impl Metatron {
 
     pub(crate) fn idle(&self) -> usize {
         let now = Instant::now();
+
         self.users
             .iter()
             .map(|user| {
