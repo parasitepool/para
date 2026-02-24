@@ -4,6 +4,6 @@ use super::*;
 pub enum Event {
     Notify(Notify),
     SetDifficulty(Difficulty),
-    Reconnect(ClientReconnect),
+    Reconnect(Reconnect),
     Disconnected,
 }

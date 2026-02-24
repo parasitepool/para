@@ -264,7 +264,7 @@ impl ClientActor {
                     }
                     Err(e) => warn!("Failed to parse mining.set_difficulty: {}", e),
                 },
-                "client.reconnect" => match serde_json::from_value::<ClientReconnect>(params) {
+                "client.reconnect" => match serde_json::from_value::<Reconnect>(params) {
                     Ok(reconnect) => {
                         if self.events.send(Event::Reconnect(reconnect)).is_err() {
                             debug!("Reconnect event dropped: no subscribers");

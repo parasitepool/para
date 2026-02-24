@@ -28,7 +28,6 @@ use {
 
 pub use {
     authorize::Authorize,
-    client_reconnect::ClientReconnect,
     configure::{Configure, ConfigureResponse},
     difficulty::Difficulty,
     error::{InternalError, Result, StratumError, StratumErrorResponse},
@@ -42,6 +41,7 @@ pub use {
     notify::Notify,
     ntime::Ntime,
     prevhash::PrevHash,
+    reconnect::Reconnect,
     set_difficulty::SetDifficulty,
     si::{format_si, parse_si},
     submit::Submit,
@@ -58,7 +58,6 @@ pub use client::{Client, ClientError, EventReceiver};
 pub const MAX_MESSAGE_SIZE: usize = 32 * 1024;
 
 mod authorize;
-mod client_reconnect;
 mod configure;
 mod difficulty;
 mod error;
@@ -72,6 +71,7 @@ mod nonce;
 mod notify;
 mod ntime;
 mod prevhash;
+mod reconnect;
 mod set_difficulty;
 mod si;
 mod submit;

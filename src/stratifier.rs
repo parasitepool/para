@@ -195,7 +195,7 @@ impl<W: Workbase> Stratifier<W> {
                         warn!("Upstream disconnected, sending client.reconnect to {}", self.socket_addr);
                         let _ = self.send(Message::Notification {
                             method: "client.reconnect".into(),
-                            params: json!(ClientReconnect::default()),
+                            params: json!(Reconnect::default()),
                         }).await;
                         break;
                     }
@@ -277,7 +277,7 @@ impl<W: Workbase> Stratifier<W> {
                 let _ = self
                     .send(Message::Notification {
                         method: "client.reconnect".into(),
-                        params: json!(ClientReconnect::default()),
+                        params: json!(Reconnect::default()),
                     })
                     .await;
 
@@ -326,7 +326,7 @@ impl<W: Workbase> Stratifier<W> {
                 let _ = self
                     .send(Message::Notification {
                         method: "client.reconnect".into(),
-                        params: json!(ClientReconnect::default()),
+                        params: json!(Reconnect::default()),
                     })
                     .await;
                 false
