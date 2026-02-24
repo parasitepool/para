@@ -530,7 +530,7 @@ impl<W: Workbase> Stratifier<W> {
             ("mining.notify".to_string(), SUBSCRIPTION_ID.to_string()),
         ];
 
-        let result = SubscribeResult {
+        let result = SubscribeResponse {
             subscriptions,
             enonce1: enonce1.clone(),
             enonce2_size,

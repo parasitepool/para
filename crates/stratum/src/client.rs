@@ -224,14 +224,14 @@ impl Client {
         Ok((response, duration, bytes_read))
     }
 
-    pub async fn subscribe(&self) -> Result<(SubscribeResult, Duration, usize)> {
+    pub async fn subscribe(&self) -> Result<(SubscribeResponse, Duration, usize)> {
         self.subscribe_with_enonce1(None).await
     }
 
     pub async fn subscribe_with_enonce1(
         &self,
         enonce1: Option<Extranonce>,
-    ) -> Result<(SubscribeResult, Duration, usize)> {
+    ) -> Result<(SubscribeResponse, Duration, usize)> {
         let (rx, instant) = self
             .send_request(
                 "mining.subscribe",
@@ -246,7 +246,7 @@ impl Client {
         let (message, bytes_read, duration) = self.await_response(rx, instant).await?;
         let result = self.handle_response(message, "mining.subscribe")?;
 
-        let subscribe_result: SubscribeResult =
+        let subscribe_result: SubscribeResponse =
             serde_json::from_value(result).context(error::SerializationSnafu)?;
 
         Ok((subscribe_result, duration, bytes_read))

@@ -17,6 +17,7 @@ use {
     },
     serde_json::Value,
     serde_with::{DeserializeFromStr, SerializeDisplay},
+    smallvec::{SmallVec, smallvec},
     snafu::{ResultExt, Snafu},
     std::{
         fmt::{self, Display, Formatter},
@@ -45,7 +46,7 @@ pub use {
     set_difficulty::SetDifficulty,
     si::{format_si, parse_si},
     submit::Submit,
-    subscribe::{Subscribe, SubscribeResult},
+    subscribe::{Subscribe, SubscribeResponse},
     suggest_difficulty::SuggestDifficulty,
     username::Username,
     version::Version,

@@ -1,5 +1,6 @@
 use super::*;
 
+/// mining.authorize
 #[derive(Debug, PartialEq)]
 pub struct Authorize {
     pub username: Username,

@@ -1,5 +1,6 @@
 use super::*;
 
+/// mining.submit
 #[derive(Debug, PartialEq, Clone)]
 pub struct Submit {
     pub username: Username,

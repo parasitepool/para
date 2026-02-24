@@ -1,5 +1,6 @@
 use super::*;
 
+/// mining.notify
 #[derive(Debug, PartialEq, Clone)]
 pub struct Notify {
     pub job_id: JobId,

@@ -1,21 +1,21 @@
 use super::*;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Extranonce(Vec<u8>);
+pub struct Extranonce(SmallVec<[u8; 8]>);
 
 impl Extranonce {
     pub fn random(size: usize) -> Self {
-        let mut v = vec![0u8; size];
+        let mut v = smallvec![0u8; size];
         rand::rng().fill_bytes(&mut v);
         Self(v)
     }
 
     pub fn zeros(size: usize) -> Self {
-        Self(vec![0u8; size])
+        Self(smallvec![0u8; size])
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Self {
-        Self(bytes.to_vec())
+        Self(SmallVec::from_slice(bytes))
     }
 
     pub fn increment_wrapping(&mut self) {
@@ -46,7 +46,7 @@ impl Extranonce {
 
     pub fn from_hex(s: &str) -> Result<Self, InternalError> {
         let bytes = hex::decode(s).context(error::HexParseSnafu)?;
-        Ok(Self(bytes))
+        Ok(Self(SmallVec::from_vec(bytes)))
     }
 }
 

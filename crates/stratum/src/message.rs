@@ -398,7 +398,7 @@ mod tests {
             Message::Response {
                 id: Id::Number(1),
                 result: Some(
-                    serde_json::to_value(SubscribeResult {
+                    serde_json::to_value(SubscribeResponse {
                         subscriptions: vec![
                             (
                                 "mining.set_difficulty".into(),

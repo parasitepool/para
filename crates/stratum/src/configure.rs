@@ -1,5 +1,6 @@
 use super::*;
 
+/// mining.configure
 #[derive(Debug, PartialEq, Clone)]
 pub struct Configure {
     pub extensions: Vec<String>,
@@ -29,6 +30,7 @@ struct ConfigureOptions {
     version_rolling_min_bit_count: Option<u32>,
 }
 
+/// mining.configure response
 #[derive(Debug, Default, Clone, PartialEq, Deserialize)]
 pub struct ConfigureResponse {
     #[serde(rename = "version-rolling", default)]

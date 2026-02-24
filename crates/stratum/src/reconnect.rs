@@ -1,5 +1,6 @@
 use super::*;
 
+/// client.reconnect
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Reconnect {
     pub hostname: Option<String>,

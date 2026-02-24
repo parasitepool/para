@@ -1,5 +1,6 @@
 use super::*;
 
+/// mining.set_difficulty
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SetDifficulty(pub Difficulty);
 
