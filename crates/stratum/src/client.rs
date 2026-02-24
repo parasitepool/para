@@ -246,10 +246,10 @@ impl Client {
         let (message, bytes_read, duration) = self.await_response(rx, instant).await?;
         let result = self.handle_response(message, "mining.subscribe")?;
 
-        let subscribe_result: SubscribeResponse =
+        let subscribe_response: SubscribeResponse =
             serde_json::from_value(result).context(error::SerializationSnafu)?;
 
-        Ok((subscribe_result, duration, bytes_read))
+        Ok((subscribe_response, duration, bytes_read))
     }
 
     pub async fn authorize(&self) -> Result<(Duration, usize)> {
