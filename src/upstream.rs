@@ -24,6 +24,7 @@ pub(crate) struct Upstream {
     rejected: Arc<AtomicU64>,
     filtered: Arc<AtomicU64>,
     version_mask: Option<Version>,
+    disconnect_notify: Arc<tokio::sync::Notify>,
 }
 
 impl Upstream {
@@ -99,6 +100,7 @@ impl Upstream {
                 rejected: Arc::new(AtomicU64::new(0)),
                 filtered: Arc::new(AtomicU64::new(0)),
                 version_mask,
+                disconnect_notify: Arc::new(tokio::sync::Notify::new()),
             },
             events,
         ))
@@ -164,6 +166,7 @@ impl Upstream {
 
         let connected = self.connected.clone();
         let upstream_difficulty = self.difficulty.clone();
+        let disconnect_notify = self.disconnect_notify.clone();
 
         tasks.spawn(async move {
             loop {
@@ -190,11 +193,13 @@ impl Upstream {
                             Ok(Event::Disconnected) => {
                                 warn!("Disconnected from upstream");
                                 connected.store(false, Ordering::SeqCst);
+                                disconnect_notify.notify_waiters();
                                 break;
                             }
                             Err(err) => {
                                 error!("Upstream event error: {}", err);
                                 connected.store(false, Ordering::SeqCst);
+                                disconnect_notify.notify_waiters();
                                 break;
                             }
                         }
@@ -274,6 +279,10 @@ impl Upstream {
 
     pub(crate) fn is_connected(&self) -> bool {
         self.connected.load(Ordering::Relaxed)
+    }
+
+    pub(crate) async fn disconnected(&self) {
+        self.disconnect_notify.notified().await;
     }
 
     pub(crate) fn endpoint(&self) -> &str {

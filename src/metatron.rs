@@ -13,7 +13,7 @@ pub(crate) struct Metatron {
     started: Instant,
     users: DashMap<Address, Arc<User>>,
     disconnected: DashMap<Extranonce, (Arc<Session>, Instant)>,
-    extranonces: Extranonces,
+    extranonces: std::sync::RwLock<Extranonces>,
     enonce_counter: AtomicU64,
     session_id_counter: AtomicU64,
     endpoint: String,
@@ -26,7 +26,7 @@ impl Metatron {
             started: Instant::now(),
             users: DashMap::new(),
             disconnected: DashMap::new(),
-            extranonces,
+            extranonces: std::sync::RwLock::new(extranonces),
             enonce_counter: AtomicU64::new(
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -71,8 +71,9 @@ impl Metatron {
 
     pub(crate) fn next_enonce1(&self) -> Extranonce {
         let counter = self.enonce_counter.fetch_add(1, Ordering::Relaxed);
+        let extranonces = self.extranonces.read().unwrap();
 
-        match &self.extranonces {
+        match &*extranonces {
             Extranonces::Pool(pool) => {
                 let bytes = counter.to_le_bytes();
                 Extranonce::from_bytes(&bytes[..pool.enonce1_size()])
@@ -92,11 +93,15 @@ impl Metatron {
     }
 
     pub(crate) fn enonce2_size(&self) -> usize {
-        self.extranonces.enonce2_size()
+        self.extranonces.read().unwrap().enonce2_size()
     }
 
-    pub(crate) fn extranonces(&self) -> &Extranonces {
-        &self.extranonces
+    pub(crate) fn extranonces(&self) -> std::sync::RwLockReadGuard<'_, Extranonces> {
+        self.extranonces.read().unwrap()
+    }
+
+    pub(crate) fn update_extranonces(&self, extranonces: Extranonces) {
+        *self.extranonces.write().unwrap() = extranonces;
     }
 
     pub(crate) fn new_session(&self, auth: Arc<Authorization>) -> Arc<Session> {

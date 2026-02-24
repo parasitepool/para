@@ -440,8 +440,15 @@ async fn proxy_relays_job_updates_and_new_blocks() {
 #[tokio::test]
 #[serial(bitcoind)]
 #[timeout(120000)]
-async fn proxy_exits_on_upstream_disconnect() {
+async fn proxy_reconnects_on_upstream_disconnect() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001");
+    let pool_port: u16 = pool
+        .stratum_endpoint()
+        .split(':')
+        .next_back()
+        .unwrap()
+        .parse()
+        .unwrap();
 
     let proxy = TestProxy::spawn_with_args(
         &pool.stratum_endpoint(),
@@ -472,6 +479,52 @@ async fn proxy_exits_on_upstream_disconnect() {
             .is_err(),
         "Miner should be disconnected after upstream loss"
     );
+
+    timeout(Duration::from_secs(10), async {
+        loop {
+            if let Ok(status) = proxy.get_status().await
+                && !status.upstream_connected
+            {
+                break;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("Timeout waiting for proxy to detect disconnect");
+
+    thread::sleep(Duration::from_millis(500));
+
+    let _pool2 = TestPool::spawn_on_stratum_port(pool_port, "--start-diff 0.00001");
+
+    timeout(Duration::from_secs(30), async {
+        loop {
+            if let Ok(status) = proxy.get_status().await
+                && status.upstream_connected
+            {
+                break;
+            }
+            sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("Timeout waiting for proxy to reconnect");
+
+    let client2 = proxy.stratum_client();
+    let mut events2 = client2.connect().await.unwrap();
+
+    let (subscribe2, _, _) = client2.subscribe().await.unwrap();
+    client2.authorize().await.unwrap();
+
+    let (notify2, difficulty2) = wait_for_notify(&mut events2).await;
+
+    let enonce2 = Extranonce::random(subscribe2.enonce2_size);
+    let (ntime, nonce) = solve_share(&notify2, &subscribe2.enonce1, &enonce2, difficulty2);
+
+    client2
+        .submit(notify2.job_id, enonce2, ntime, nonce, None)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
