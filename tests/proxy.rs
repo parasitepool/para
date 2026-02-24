@@ -566,3 +566,92 @@ async fn proxy_high_diff_port() {
 
     assert_eq!(high_diff, Difficulty::from(1_000_000));
 }
+
+#[tokio::test]
+#[serial(bitcoind)]
+#[timeout(120000)]
+async fn miner_reconnects_on_upstream_disconnect() {
+    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
+    let pool_port: u16 = pool
+        .stratum_endpoint()
+        .split(':')
+        .next_back()
+        .unwrap()
+        .parse()
+        .unwrap();
+
+    let proxy = TestProxy::spawn_with_args(
+        &pool.stratum_endpoint(),
+        signet_username().as_str(),
+        pool.bitcoind_rpc_port(),
+        "--start-diff 0.00001",
+    );
+
+    let mut miner = CommandBuilder::new(format!(
+        "miner {} --mode continuous --username {} --cpu-cores 1",
+        proxy.stratum_endpoint(),
+        signet_username()
+    ))
+    .spawn();
+
+    timeout(Duration::from_secs(30), async {
+        loop {
+            if let Ok(status) = proxy.get_status().await
+                && status.sessions >= 1
+            {
+                break;
+            }
+            sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("Timeout waiting for miner to connect");
+
+    drop(pool);
+
+    timeout(Duration::from_secs(10), async {
+        loop {
+            if let Ok(status) = proxy.get_status().await
+                && !status.upstream_connected
+            {
+                break;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("Timeout waiting for proxy to detect disconnect");
+
+    thread::sleep(Duration::from_millis(500));
+
+    let _pool2 = TestPool::spawn_on_stratum_port(pool_port, "--start-diff 0.00001");
+
+    timeout(Duration::from_secs(30), async {
+        loop {
+            if let Ok(status) = proxy.get_status().await
+                && status.upstream_connected
+            {
+                break;
+            }
+            sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("Timeout waiting for proxy to reconnect");
+
+    timeout(Duration::from_secs(30), async {
+        loop {
+            if let Ok(status) = proxy.get_status().await
+                && status.sessions >= 1
+            {
+                break;
+            }
+            sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("Timeout waiting for miner to reconnect");
+
+    miner.kill().unwrap();
+    miner.wait().unwrap();
+}

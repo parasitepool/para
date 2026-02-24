@@ -145,7 +145,7 @@ impl Upstream {
                     );
                     first_notify = Some(notify);
                 }
-                Ok(Event::Disconnected) => {
+                Ok(Event::Reconnect(_)) | Ok(Event::Disconnected) => {
                     self.connected.store(false, Ordering::Relaxed);
                     bail!("Disconnected from upstream before initialization complete");
                 }
@@ -190,7 +190,7 @@ impl Upstream {
                                 info!("Received set_difficulty: {}", diff);
                                 *upstream_difficulty.write().await = diff;
                             }
-                            Ok(Event::Disconnected) => {
+                            Ok(Event::Reconnect(_)) | Ok(Event::Disconnected) => {
                                 warn!("Disconnected from upstream");
                                 connected.store(false, Ordering::SeqCst);
                                 disconnect_notify.notify_waiters();
