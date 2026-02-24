@@ -1,24 +1,24 @@
 use super::*;
 
 pub(crate) struct Metrics {
-    upstream: std::sync::RwLock<Arc<Upstream>>,
+    upstream: RwLock<Arc<Upstream>>,
     pub(crate) metatron: Arc<Metatron>,
 }
 
 impl Metrics {
     pub(crate) fn new(upstream: Arc<Upstream>, metatron: Arc<Metatron>) -> Self {
         Self {
-            upstream: std::sync::RwLock::new(upstream),
+            upstream: RwLock::new(upstream),
             metatron,
         }
     }
 
     pub(crate) fn upstream(&self) -> Arc<Upstream> {
-        self.upstream.read().unwrap().clone()
+        self.upstream.read().clone()
     }
 
     pub(crate) fn update_upstream(&self, upstream: Arc<Upstream>) {
-        *self.upstream.write().unwrap() = upstream;
+        *self.upstream.write() = upstream;
     }
 }
 

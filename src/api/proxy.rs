@@ -143,8 +143,8 @@ async fn user_page(Extension(chain): Extension<Chain>) -> Response {
 }
 
 async fn status(State(metrics): State<Arc<Metrics>>) -> Json<ProxyStatus> {
-    let upstream = metrics.upstream();
     let now = Instant::now();
+    let upstream = metrics.upstream();
     let stats = metrics.metatron.snapshot();
 
     Json(ProxyStatus {
