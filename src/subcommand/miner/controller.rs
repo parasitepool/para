@@ -81,10 +81,7 @@ impl Controller {
         let mut backoff = Duration::from_secs(1);
 
         loop {
-            match controller
-                .event_loop(events, cancel_token.clone())
-                .await?
-            {
+            match controller.event_loop(events, cancel_token.clone()).await? {
                 Action::Shutdown => break,
                 Action::Reconnect => {
                     controller.cancel_hashers();

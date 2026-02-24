@@ -555,8 +555,7 @@ mod tests {
     #[test]
     fn update_extranonces_preserves_stats() {
         let old_enonce1 = Extranonce::from_bytes(&[0xaa, 0xbb, 0xcc, 0xdd]);
-        let extranonces =
-            Extranonces::Proxy(ProxyExtranonces::new(old_enonce1, 8, 2).unwrap());
+        let extranonces = Extranonces::Proxy(ProxyExtranonces::new(old_enonce1, 8, 2).unwrap());
         let metatron = Metatron::new(extranonces, String::new());
 
         let session = metatron.new_session(test_auth("deadbeef", "foo"));
@@ -565,8 +564,7 @@ mod tests {
         metatron.retire_session(session);
 
         let new_enonce1 = Extranonce::from_bytes(&[0x11, 0x22, 0x33, 0x44]);
-        let new_extranonces =
-            Extranonces::Proxy(ProxyExtranonces::new(new_enonce1, 8, 2).unwrap());
+        let new_extranonces = Extranonces::Proxy(ProxyExtranonces::new(new_enonce1, 8, 2).unwrap());
         metatron.update_extranonces(new_extranonces);
 
         assert_eq!(metatron.accepted(), 1);

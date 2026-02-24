@@ -111,17 +111,23 @@ mod tests {
             assert_eq!(parsed, expected);
         }
 
-        case(r#"["foo"]"#, ClientReconnect {
-            hostname: Some("foo".into()),
-            port: None,
-            wait_time: None,
-        });
+        case(
+            r#"["foo"]"#,
+            ClientReconnect {
+                hostname: Some("foo".into()),
+                port: None,
+                wait_time: None,
+            },
+        );
 
-        case(r#"["foo", 3333]"#, ClientReconnect {
-            hostname: Some("foo".into()),
-            port: Some(3333),
-            wait_time: None,
-        });
+        case(
+            r#"["foo", 3333]"#,
+            ClientReconnect {
+                hostname: Some("foo".into()),
+                port: Some(3333),
+                wait_time: None,
+            },
+        );
     }
 
     #[test]
