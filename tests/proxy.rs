@@ -439,96 +439,6 @@ async fn proxy_relays_job_updates_and_new_blocks() {
 
 #[tokio::test]
 #[serial(bitcoind)]
-#[timeout(120000)]
-async fn proxy_reconnects_on_upstream_disconnect() {
-    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
-    let pool_port: u16 = pool
-        .stratum_endpoint()
-        .split(':')
-        .next_back()
-        .unwrap()
-        .parse()
-        .unwrap();
-
-    let proxy = TestProxy::spawn_with_args(
-        &pool.stratum_endpoint(),
-        signet_username().as_str(),
-        pool.bitcoind_rpc_port(),
-        "--start-diff 0.00001",
-    );
-
-    let client = proxy.stratum_client();
-    let mut events = client.connect().await.unwrap();
-
-    let (subscribe, _, _) = client.subscribe().await.unwrap();
-    client.authorize().await.unwrap();
-    let (notify, difficulty) = wait_for_notify(&mut events).await;
-
-    let status = proxy.get_status().await.unwrap();
-    assert!(status.upstream_connected);
-
-    drop(pool);
-
-    let enonce2 = Extranonce::random(subscribe.enonce2_size);
-    let (ntime, nonce) = solve_share(&notify, &subscribe.enonce1, &enonce2, difficulty);
-
-    assert!(
-        client
-            .submit(notify.job_id, enonce2, ntime, nonce, None)
-            .await
-            .is_err(),
-        "Miner should be disconnected after upstream loss"
-    );
-
-    timeout(Duration::from_secs(10), async {
-        loop {
-            if let Ok(status) = proxy.get_status().await
-                && !status.upstream_connected
-            {
-                break;
-            }
-            sleep(Duration::from_millis(100)).await;
-        }
-    })
-    .await
-    .expect("Timeout waiting for proxy to detect disconnect");
-
-    thread::sleep(Duration::from_millis(500));
-
-    let _pool2 = TestPool::spawn_on_stratum_port(pool_port, "--start-diff 0.00001");
-
-    timeout(Duration::from_secs(30), async {
-        loop {
-            if let Ok(status) = proxy.get_status().await
-                && status.upstream_connected
-            {
-                break;
-            }
-            sleep(Duration::from_millis(200)).await;
-        }
-    })
-    .await
-    .expect("Timeout waiting for proxy to reconnect");
-
-    let client2 = proxy.stratum_client();
-    let mut events2 = client2.connect().await.unwrap();
-
-    let (subscribe2, _, _) = client2.subscribe().await.unwrap();
-    client2.authorize().await.unwrap();
-
-    let (notify2, difficulty2) = wait_for_notify(&mut events2).await;
-
-    let enonce2 = Extranonce::random(subscribe2.enonce2_size);
-    let (ntime, nonce) = solve_share(&notify2, &subscribe2.enonce1, &enonce2, difficulty2);
-
-    client2
-        .submit(notify2.job_id, enonce2, ntime, nonce, None)
-        .await
-        .unwrap();
-}
-
-#[tokio::test]
-#[serial(bitcoind)]
 #[timeout(90000)]
 async fn proxy_high_diff_port() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001");
@@ -570,15 +480,9 @@ async fn proxy_high_diff_port() {
 #[tokio::test]
 #[serial(bitcoind)]
 #[timeout(120000)]
-async fn miner_reconnects_on_upstream_disconnect() {
+async fn reconnects_on_upstream_disconnect() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001");
-    let pool_port: u16 = pool
-        .stratum_endpoint()
-        .split(':')
-        .next_back()
-        .unwrap()
-        .parse()
-        .unwrap();
+    let pool_port = pool.pool_port();
 
     let proxy = TestProxy::spawn_with_args(
         &pool.stratum_endpoint(),
@@ -624,7 +528,7 @@ async fn miner_reconnects_on_upstream_disconnect() {
 
     thread::sleep(Duration::from_millis(500));
 
-    let _pool2 = TestPool::spawn_on_stratum_port(pool_port, "--start-diff 0.00001");
+    let _pool2 = TestPool::spawn_on_port(pool_port, "--start-diff 0.00001");
 
     timeout(Duration::from_secs(30), async {
         loop {
@@ -651,6 +555,22 @@ async fn miner_reconnects_on_upstream_disconnect() {
     })
     .await
     .expect("Timeout waiting for miner to reconnect");
+
+    let client = proxy.stratum_client();
+    let mut events = client.connect().await.unwrap();
+
+    let (subscribe, _, _) = client.subscribe().await.unwrap();
+    client.authorize().await.unwrap();
+
+    let (notify, difficulty) = wait_for_notify(&mut events).await;
+
+    let enonce2 = Extranonce::random(subscribe.enonce2_size);
+    let (ntime, nonce) = solve_share(&notify, &subscribe.enonce1, &enonce2, difficulty);
+
+    client
+        .submit(notify.job_id, enonce2, ntime, nonce, None)
+        .await
+        .unwrap();
 
     miner.kill().unwrap();
     miner.wait().unwrap();
