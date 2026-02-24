@@ -119,6 +119,7 @@ impl Proxy {
             extranonces,
             format!("{}:{}", settings.address(), settings.port()),
         ));
+
         metatron.clone().spawn(cancel_token.clone(), &mut tasks);
 
         let metrics = Arc::new(Metrics::new(upstream.clone(), metatron.clone()));
