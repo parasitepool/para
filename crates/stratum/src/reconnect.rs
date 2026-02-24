@@ -41,13 +41,13 @@ impl<'de> Deserialize<'de> for Reconnect {
         let port = values
             .get(1)
             .and_then(Value::as_u64)
-            .map(|p| p as u16)
+            .and_then(|p| u16::try_from(p).ok())
             .filter(|&p| p != 0);
 
         let wait_time = values
             .get(2)
             .and_then(Value::as_u64)
-            .map(|w| w as u32)
+            .and_then(|w| u32::try_from(w).ok())
             .filter(|&w| w != 0);
 
         Ok(Reconnect {
