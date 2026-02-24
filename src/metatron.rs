@@ -501,11 +501,9 @@ mod tests {
         let new_extranonces = Extranonces::Proxy(ProxyExtranonces::new(new_enonce1, 8, 2).unwrap());
         metatron.update_extranonces(new_extranonces);
 
-        assert_eq!(metatron.accepted(), 1);
-        assert_eq!(metatron.best_ever(), Some(Difficulty::from(200.0)));
-        assert_eq!(
-            metatron.total_work(),
-            TotalWork::from_difficulty(pool_diff.as_f64())
-        );
+        let stats = metatron.snapshot();
+        assert_eq!(stats.accepted_shares, 1);
+        assert_eq!(stats.best_ever, Some(Difficulty::from(200.0)));
+        assert_eq!(stats.accepted_work, TotalWork::from_difficulty(pool_diff));
     }
 }
