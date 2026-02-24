@@ -53,7 +53,7 @@ use {
     harness::bitcoind::Bitcoind,
     ntest::timeout,
     para::{
-        ENONCE1_EXTENSION_SIZE, USER_AGENT, api,
+        ENONCE1_EXTENSION_SIZE, ENONCE1_SIZE, MAX_ENONCE_SIZE, USER_AGENT, api,
         subcommand::{
             miner::Share,
             server::{

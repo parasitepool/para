@@ -491,6 +491,10 @@ async fn reconnects_on_upstream_disconnect() {
         "--start-diff 0.00001",
     );
 
+    let original_status = proxy.get_status().await.unwrap();
+    assert_eq!(original_status.upstream_enonce1.len(), ENONCE1_SIZE);
+    assert_eq!(original_status.upstream_enonce2_size, MAX_ENONCE_SIZE);
+
     let mut miner = CommandBuilder::new(format!(
         "miner {} --mode continuous --username {} --cpu-cores 1",
         proxy.stratum_endpoint(),
@@ -528,7 +532,10 @@ async fn reconnects_on_upstream_disconnect() {
 
     thread::sleep(Duration::from_millis(500));
 
-    let _pool2 = TestPool::spawn_on_port(pool_port, "--start-diff 0.00001");
+    let _pool2 = TestPool::spawn_on_port(
+        pool_port,
+        "--start-diff 0.00001 --enonce1-size 6 --enonce2-size 4",
+    );
 
     timeout(Duration::from_secs(30), async {
         loop {
@@ -542,6 +549,14 @@ async fn reconnects_on_upstream_disconnect() {
     })
     .await
     .expect("Timeout waiting for proxy to reconnect");
+
+    let reconnected_status = proxy.get_status().await.unwrap();
+    assert_eq!(reconnected_status.upstream_enonce1.len(), 6);
+    assert_eq!(reconnected_status.upstream_enonce2_size, 4);
+    assert_ne!(
+        reconnected_status.upstream_enonce1,
+        original_status.upstream_enonce1,
+    );
 
     timeout(Duration::from_secs(30), async {
         loop {
@@ -560,6 +575,14 @@ async fn reconnects_on_upstream_disconnect() {
     let mut events = client.connect().await.unwrap();
 
     let (subscribe, _, _) = client.subscribe().await.unwrap();
+
+    assert_eq!(
+        &subscribe.enonce1.as_bytes()[..6],
+        reconnected_status.upstream_enonce1.as_bytes(),
+    );
+    assert_eq!(subscribe.enonce1.len(), 6 + ENONCE1_EXTENSION_SIZE,);
+    assert_eq!(subscribe.enonce2_size, 4 - ENONCE1_EXTENSION_SIZE,);
+
     client.authorize().await.unwrap();
 
     let (notify, difficulty) = wait_for_notify(&mut events).await;

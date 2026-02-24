@@ -69,14 +69,7 @@ impl Controller {
         info!("Controller initialized with {} CPU cores", cpu_cores);
 
         controller.spawn_hashers();
-
-        if !integration_test() && !logs_enabled() {
-            spawn_throbber(
-                controller.metrics.clone(),
-                cancel_token.clone(),
-                &mut controller.hashers,
-            );
-        }
+        controller.maybe_spawn_throbber(&cancel_token);
 
         let mut backoff = Duration::from_secs(1);
 
@@ -136,14 +129,7 @@ impl Controller {
 
                     backoff = Duration::from_secs(1);
                     controller.spawn_hashers();
-
-                    if !integration_test() && !logs_enabled() {
-                        spawn_throbber(
-                            controller.metrics.clone(),
-                            cancel_token.clone(),
-                            &mut controller.hashers,
-                        );
-                    }
+                    controller.maybe_spawn_throbber(&cancel_token);
                 }
             }
         }
@@ -418,6 +404,16 @@ impl Controller {
             "Updated pool target:\t{}",
             target_as_block_hash(difficulty.to_target())
         );
+    }
+
+    fn maybe_spawn_throbber(&mut self, cancel_token: &CancellationToken) {
+        if !integration_test() && !logs_enabled() {
+            spawn_throbber(
+                self.metrics.clone(),
+                cancel_token.clone(),
+                &mut self.hashers,
+            );
+        }
     }
 
     fn cancel_hashers(&mut self) -> CancellationToken {
