@@ -576,8 +576,7 @@ async fn pre_job_rejections_use_pool_diff() {
     );
 
     let after_mismatch = pool.get_user(&user_address).await.unwrap();
-    let mismatch_delta =
-        (after_mismatch.rejected_work - after_stale.rejected_work).as_f64();
+    let mismatch_delta = (after_mismatch.rejected_work - after_stale.rejected_work).as_f64();
     assert_eq!(mismatch_delta, initial_diff.as_f64());
 }
 
