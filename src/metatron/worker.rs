@@ -21,7 +21,7 @@ impl Worker {
 
     pub(crate) fn retire_session(&self, id: u64) {
         if let Some((_, session)) = self.sessions.remove(&id) {
-            let snapshot = session.snapshot_stats();
+            let snapshot = session.snapshot();
             self.lifetime.lock().absorb(snapshot, Instant::now());
         }
     }
@@ -36,10 +36,12 @@ impl Worker {
 
     pub(crate) fn snapshot(&self) -> Stats {
         let now = Instant::now();
-        let mut combined = self.lifetime.lock().clone();
-        for session in self.sessions.iter() {
-            combined.absorb(session.snapshot_stats(), now);
-        }
-        combined
+
+        self.sessions
+            .iter()
+            .fold(self.lifetime.lock().clone(), |mut combined, session| {
+                combined.absorb(session.snapshot(), now);
+                combined
+            })
     }
 }

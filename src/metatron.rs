@@ -140,11 +140,11 @@ impl Metatron {
 
     pub(crate) fn snapshot(&self) -> Stats {
         let now = Instant::now();
-        let mut combined = Stats::new();
-        for user in self.users.iter() {
+
+        self.users.iter().fold(Stats::new(), |mut combined, user| {
             combined.absorb(user.snapshot(), now);
-        }
-        combined
+            combined
+        })
     }
 
     pub(crate) fn total_blocks(&self) -> u64 {

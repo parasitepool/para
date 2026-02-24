@@ -54,7 +54,7 @@ impl Session {
         self.version_mask
     }
 
-    pub(crate) fn snapshot_stats(&self) -> Stats {
+    pub(crate) fn snapshot(&self) -> Stats {
         self.stats.lock().clone()
     }
 

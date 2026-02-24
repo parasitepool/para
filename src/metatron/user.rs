@@ -38,11 +38,13 @@ impl User {
 
     pub(crate) fn snapshot(&self) -> Stats {
         let now = Instant::now();
-        let mut combined = Stats::new();
-        for worker in self.workers.iter() {
-            combined.absorb(worker.snapshot(), now);
-        }
-        combined
+
+        self.workers
+            .iter()
+            .fold(Stats::new(), |mut combined, worker| {
+                combined.absorb(worker.snapshot(), now);
+                combined
+            })
     }
 
     pub(crate) fn workers(&self) -> impl Iterator<Item = Arc<Worker>> {
