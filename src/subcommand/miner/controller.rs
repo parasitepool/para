@@ -90,6 +90,8 @@ impl Controller {
                     while controller.hashers.join_next().await.is_some() {}
                     controller.client.disconnect().await;
 
+                    let mut max_backoff_attempts = 0u32;
+
                     events = loop {
                         info!("Reconnecting in {}s...", backoff.as_secs());
 
@@ -101,6 +103,15 @@ impl Controller {
                         }
 
                         backoff = (backoff * 2).min(Duration::from_secs(60));
+
+                        if backoff >= Duration::from_secs(60) {
+                            max_backoff_attempts += 1;
+                            if max_backoff_attempts >= 3 {
+                                bail!(
+                                    "Upstream unreachable after {max_backoff_attempts} attempts at max backoff"
+                                );
+                            }
+                        }
 
                         match controller.connect(disable_version_rolling).await {
                             Ok(new_events) => break new_events,

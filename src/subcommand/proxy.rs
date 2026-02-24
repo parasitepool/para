@@ -15,6 +15,8 @@ async fn connect_upstream(
     tasks: &mut JoinSet<()>,
     backoff: &mut Duration,
 ) -> Option<(Arc<Upstream>, watch::Receiver<Arc<Notify>>)> {
+    let mut max_backoff_attempts = 0u32;
+
     loop {
         match Upstream::connect(settings.clone()).await {
             Ok((upstream, events)) => {
@@ -46,6 +48,16 @@ async fn connect_upstream(
         }
 
         *backoff = (*backoff * 2).min(Duration::from_secs(60));
+
+        if *backoff >= Duration::from_secs(60) {
+            max_backoff_attempts += 1;
+            if max_backoff_attempts >= 3 {
+                error!(
+                    "Upstream unreachable after {max_backoff_attempts} attempts at max backoff, exiting"
+                );
+                return None;
+            }
+        }
     }
 }
 
