@@ -36,98 +36,15 @@ impl User {
         self.workers.len()
     }
 
-    pub(crate) fn hashrate_1m(&self) -> HashRate {
+    pub(crate) fn snapshot(&self) -> Stats {
+        let now = Instant::now();
+
         self.workers
             .iter()
-            .map(|worker| worker.hashrate_1m())
-            .fold(HashRate::ZERO, |acc, r| acc + r)
-    }
-
-    pub(crate) fn hashrate_5m(&self) -> HashRate {
-        self.workers
-            .iter()
-            .map(|worker| worker.hashrate_5m())
-            .fold(HashRate::ZERO, |acc, r| acc + r)
-    }
-
-    pub(crate) fn hashrate_15m(&self) -> HashRate {
-        self.workers
-            .iter()
-            .map(|worker| worker.hashrate_15m())
-            .fold(HashRate::ZERO, |acc, r| acc + r)
-    }
-
-    pub(crate) fn hashrate_1hr(&self) -> HashRate {
-        self.workers
-            .iter()
-            .map(|worker| worker.hashrate_1hr())
-            .fold(HashRate::ZERO, |acc, r| acc + r)
-    }
-
-    pub(crate) fn hashrate_6hr(&self) -> HashRate {
-        self.workers
-            .iter()
-            .map(|worker| worker.hashrate_6hr())
-            .fold(HashRate::ZERO, |acc, r| acc + r)
-    }
-
-    pub(crate) fn hashrate_1d(&self) -> HashRate {
-        self.workers
-            .iter()
-            .map(|worker| worker.hashrate_1d())
-            .fold(HashRate::ZERO, |acc, r| acc + r)
-    }
-
-    pub(crate) fn hashrate_7d(&self) -> HashRate {
-        self.workers
-            .iter()
-            .map(|worker| worker.hashrate_7d())
-            .fold(HashRate::ZERO, |acc, r| acc + r)
-    }
-
-    pub(crate) fn sps_1m(&self) -> f64 {
-        self.workers.iter().map(|worker| worker.sps_1m()).sum()
-    }
-
-    pub(crate) fn sps_5m(&self) -> f64 {
-        self.workers.iter().map(|worker| worker.sps_5m()).sum()
-    }
-
-    pub(crate) fn sps_15m(&self) -> f64 {
-        self.workers.iter().map(|worker| worker.sps_15m()).sum()
-    }
-
-    pub(crate) fn sps_1hr(&self) -> f64 {
-        self.workers.iter().map(|worker| worker.sps_1hr()).sum()
-    }
-
-    pub(crate) fn accepted(&self) -> u64 {
-        self.workers.iter().map(|worker| worker.accepted()).sum()
-    }
-
-    pub(crate) fn rejected(&self) -> u64 {
-        self.workers.iter().map(|worker| worker.rejected()).sum()
-    }
-
-    pub(crate) fn best_ever(&self) -> Option<Difficulty> {
-        self.workers
-            .iter()
-            .filter_map(|worker| worker.best_ever())
-            .max()
-    }
-
-    pub(crate) fn total_work(&self) -> TotalWork {
-        self.workers
-            .iter()
-            .map(|worker| worker.total_work())
-            .fold(TotalWork::ZERO, |acc, w| acc + w)
-    }
-
-    pub(crate) fn last_share(&self) -> Option<Instant> {
-        self.workers
-            .iter()
-            .filter_map(|worker| worker.last_share())
-            .max()
+            .fold(Stats::new(), |mut combined, worker| {
+                combined.absorb(worker.snapshot(), now);
+                combined
+            })
     }
 
     pub(crate) fn workers(&self) -> impl Iterator<Item = Arc<Worker>> {

@@ -144,33 +144,36 @@ async fn user_page(Extension(chain): Extension<Chain>) -> Response {
 
 async fn status(State(metrics): State<Arc<Metrics>>) -> Json<ProxyStatus> {
     let upstream = metrics.upstream();
+    let now = Instant::now();
+    let stats = metrics.metatron.snapshot();
+
     Json(ProxyStatus {
         endpoint: metrics.metatron.endpoint().to_string(),
-        hashrate_1m: metrics.metatron.hashrate_1m(),
-        hashrate_5m: metrics.metatron.hashrate_5m(),
-        hashrate_15m: metrics.metatron.hashrate_15m(),
-        hashrate_1hr: metrics.metatron.hashrate_1hr(),
-        hashrate_6hr: metrics.metatron.hashrate_6hr(),
-        hashrate_1d: metrics.metatron.hashrate_1d(),
-        hashrate_7d: metrics.metatron.hashrate_7d(),
-        sps_1m: metrics.metatron.sps_1m(),
-        sps_5m: metrics.metatron.sps_5m(),
-        sps_15m: metrics.metatron.sps_15m(),
-        sps_1hr: metrics.metatron.sps_1hr(),
+        hashrate_1m: stats.hashrate_1m(now),
+        hashrate_5m: stats.hashrate_5m(now),
+        hashrate_15m: stats.hashrate_15m(now),
+        hashrate_1hr: stats.hashrate_1hr(now),
+        hashrate_6hr: stats.hashrate_6hr(now),
+        hashrate_1d: stats.hashrate_1d(now),
+        hashrate_7d: stats.hashrate_7d(now),
+        sps_1m: stats.sps_1m(now),
+        sps_5m: stats.sps_5m(now),
+        sps_15m: stats.sps_15m(now),
+        sps_1hr: stats.sps_1hr(now),
         users: metrics.metatron.total_users(),
         workers: metrics.metatron.total_workers(),
         sessions: metrics.metatron.total_sessions(),
         disconnected: metrics.metatron.disconnected(),
         idle: metrics.metatron.idle(),
-        accepted: metrics.metatron.accepted(),
-        rejected: metrics.metatron.rejected(),
-        best_ever: metrics.metatron.best_ever(),
-        last_share: metrics
-            .metatron
-            .last_share()
-            .map(|time| time.elapsed().as_secs()),
-        total_work: metrics.metatron.total_work(),
-        ph_days: metrics.metatron.total_work().into(),
+        accepted_shares: stats.accepted_shares,
+        rejected_shares: stats.rejected_shares,
+        best_ever: stats.best_ever,
+        last_share: stats
+            .last_share
+            .map(|time| now.duration_since(time).as_secs()),
+        accepted_work: stats.accepted_work,
+        rejected_work: stats.rejected_work,
+        ph_days: stats.accepted_work.into(),
         uptime_secs: metrics.metatron.uptime().as_secs(),
         upstream_endpoint: upstream.endpoint().to_string(),
         upstream_connected: upstream.is_connected(),
@@ -203,57 +206,72 @@ async fn user(
 ) -> ServerResult<Response> {
     let address = address.assume_checked();
 
+    let now = Instant::now();
+
     let user = metrics
         .metatron
         .users()
         .get(&address)
         .ok_or_not_found(|| format!("User {address}"))?;
 
-    Ok(Json(UserDetail {
-        address: user.address.to_string(),
-        hashrate_1m: user.hashrate_1m(),
-        hashrate_5m: user.hashrate_5m(),
-        hashrate_15m: user.hashrate_15m(),
-        hashrate_1hr: user.hashrate_1hr(),
-        hashrate_6hr: user.hashrate_6hr(),
-        hashrate_1d: user.hashrate_1d(),
-        hashrate_7d: user.hashrate_7d(),
-        sps_1m: user.sps_1m(),
-        sps_5m: user.sps_5m(),
-        sps_15m: user.sps_15m(),
-        sps_1hr: user.sps_1hr(),
-        accepted: user.accepted(),
-        rejected: user.rejected(),
-        best_ever: user.best_ever(),
-        last_share: user.last_share().map(|time| time.elapsed().as_secs()),
-        total_work: user.total_work(),
-        ph_days: user.total_work().into(),
-        sessions: user.session_count(),
-        authorized: user.authorized,
-        workers: user
-            .workers()
-            .map(|worker| WorkerDetail {
+    let workers: Vec<WorkerDetail> = user
+        .workers()
+        .map(|worker| {
+            let stats = worker.snapshot();
+            WorkerDetail {
                 name: worker.workername().to_string(),
                 sessions: worker.session_count(),
-                hashrate_1m: worker.hashrate_1m(),
-                hashrate_5m: worker.hashrate_5m(),
-                hashrate_15m: worker.hashrate_15m(),
-                hashrate_1hr: worker.hashrate_1hr(),
-                hashrate_6hr: worker.hashrate_6hr(),
-                hashrate_1d: worker.hashrate_1d(),
-                hashrate_7d: worker.hashrate_7d(),
-                sps_1m: worker.sps_1m(),
-                sps_5m: worker.sps_5m(),
-                sps_15m: worker.sps_15m(),
-                sps_1hr: worker.sps_1hr(),
-                accepted: worker.accepted(),
-                rejected: worker.rejected(),
-                best_ever: worker.best_ever(),
-                last_share: worker.last_share().map(|time| time.elapsed().as_secs()),
-                total_work: worker.total_work(),
-                ph_days: worker.total_work().into(),
-            })
-            .collect(),
+                hashrate_1m: stats.hashrate_1m(now),
+                hashrate_5m: stats.hashrate_5m(now),
+                hashrate_15m: stats.hashrate_15m(now),
+                hashrate_1hr: stats.hashrate_1hr(now),
+                hashrate_6hr: stats.hashrate_6hr(now),
+                hashrate_1d: stats.hashrate_1d(now),
+                hashrate_7d: stats.hashrate_7d(now),
+                sps_1m: stats.sps_1m(now),
+                sps_5m: stats.sps_5m(now),
+                sps_15m: stats.sps_15m(now),
+                sps_1hr: stats.sps_1hr(now),
+                accepted_shares: stats.accepted_shares,
+                rejected_shares: stats.rejected_shares,
+                accepted_work: stats.accepted_work,
+                rejected_work: stats.rejected_work,
+                ph_days: stats.accepted_work.into(),
+                best_ever: stats.best_ever,
+                last_share: stats
+                    .last_share
+                    .map(|time| now.duration_since(time).as_secs()),
+            }
+        })
+        .collect();
+
+    let user_stats = user.snapshot();
+
+    Ok(Json(UserDetail {
+        address: user.address.to_string(),
+        hashrate_1m: user_stats.hashrate_1m(now),
+        hashrate_5m: user_stats.hashrate_5m(now),
+        hashrate_15m: user_stats.hashrate_15m(now),
+        hashrate_1hr: user_stats.hashrate_1hr(now),
+        hashrate_6hr: user_stats.hashrate_6hr(now),
+        hashrate_1d: user_stats.hashrate_1d(now),
+        hashrate_7d: user_stats.hashrate_7d(now),
+        sps_1m: user_stats.sps_1m(now),
+        sps_5m: user_stats.sps_5m(now),
+        sps_15m: user_stats.sps_15m(now),
+        sps_1hr: user_stats.sps_1hr(now),
+        accepted_shares: user_stats.accepted_shares,
+        rejected_shares: user_stats.rejected_shares,
+        best_ever: user_stats.best_ever,
+        last_share: user_stats
+            .last_share
+            .map(|time| now.duration_since(time).as_secs()),
+        accepted_work: user_stats.accepted_work,
+        rejected_work: user_stats.rejected_work,
+        ph_days: user_stats.accepted_work.into(),
+        sessions: user.session_count(),
+        authorized: user.authorized,
+        workers,
     })
     .into_response())
 }

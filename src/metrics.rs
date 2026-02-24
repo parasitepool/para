@@ -25,14 +25,16 @@ impl Metrics {
 impl StatusLine for Metrics {
     fn status_line(&self) -> String {
         let upstream = self.upstream();
+        let now = Instant::now();
+        let stats = self.metatron.snapshot();
         format!(
             "sps={:.2}  hashrate={:.2}  sessions={}  upstream_enonce1={}  accepted={}  rejected={}",
-            self.metatron.sps_1m(),
-            self.metatron.hashrate_1m(),
+            stats.sps_1m(now),
+            stats.hashrate_1m(now),
             self.metatron.total_sessions(),
             upstream.enonce1(),
-            self.metatron.accepted(),
-            self.metatron.rejected(),
+            stats.accepted_shares,
+            stats.rejected_shares,
         )
     }
 }

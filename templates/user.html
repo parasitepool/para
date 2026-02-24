@@ -4,14 +4,15 @@
     <div class=row><span>Address</span><span id=address class=copyable></span></div>
     <div class=row><span>Workers</span><span id=workers_count></span></div>
     <div class=row><span>Sessions</span><span id=sessions></span></div>
-    <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
-    <div class=row><span>Total Work</span><span id=total_work class=copyable></span></div>
-    <div class=row><span>PHd</span><span id=ph_days class=copyable></span></div>
     <div class=row><span>SPS</span><span id=sps_1m></span></div>
+    <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
+    <div class=row><span>PHd</span><span id=ph_days class=copyable></span></div>
     <div class=row><span>Authorized</span><span id=authorized></span></div>
     <h3>Shares</h3>
     <div class=row><span>Accepted</span><span id=accepted></span></div>
     <div class=row><span>Rejected</span><span id=rejected></span></div>
+    <div class=row><span>Accepted Work</span><span id=accepted_work class=copyable></span></div>
+    <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
     <div class=row><span>Best</span><span id=best_ever class=copyable></span></div>
     <div class=row><span>Last</span><span><span id=last_share></span>s ago</span></div>
   </div>
@@ -58,13 +59,15 @@ async function refresh() {
     set('hashrate_1m', user.hashrate_1m, formatHashrate);
     set('sps_1m', user.sps_1m, formatTruncated);
     set('authorized', new Date(user.authorized * 1000).toLocaleString());
-    set('accepted', user.accepted);
-    set('rejected', user.rejected);
+    set('accepted', user.accepted_shares);
+    set('rejected', user.rejected_shares);
     set('last_share', user.last_share);
     copyable('best_ever', best_ever, user.best_ever);
 
-    const user_total_work = formatDifficulty(user.total_work);
-    copyable('total_work', user_total_work, user.total_work);
+    const accepted_work = formatDifficulty(user.accepted_work);
+    copyable('accepted_work', accepted_work, user.accepted_work);
+    const rejected_work = formatDifficulty(user.rejected_work);
+    copyable('rejected_work', rejected_work, user.rejected_work);
     copyable('ph_days', formatPhDays(user.ph_days), user.ph_days);
 
     const container = document.getElementById('workers-list');

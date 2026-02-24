@@ -4,15 +4,16 @@
     <div class=row><a href="/users"><span>Users</span></a><span id=users></span></div>
     <div class=row><span>Workers</span><span id=workers></span></div>
     <div class=row><span>Sessions</span><span id=sessions></span></div>
-    <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
-    <div class=row><span>Total Work</span><span id=total_work class=copyable></span></div>
-    <div class=row><span>PHd</span><span id=ph_days class=copyable></span></div>
     <div class=row><span>SPS</span><span id=sps_1m></span></div>
+    <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
+    <div class=row><span>PHd</span><span id=ph_days class=copyable></span></div>
     <div class=row><span>Uptime</span><span><span id=uptime_secs></span>s</span></div>
     <div class=row><span>Blocks</span><span id=blocks></span></div>
     <h3>Shares</h3>
     <div class=row><span>Accepted</span><span id=accepted></span></div>
     <div class=row><span>Rejected</span><span id=rejected></span></div>
+    <div class=row><span>Accepted Work</span><span id=accepted_work class=copyable></span></div>
+    <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
     <div class=row><span>Best</span><span id=best_ever class=copyable></span></div>
     <div class=row><span>Last</span><span><span id=last_share></span>s ago</span></div>
   </div>
@@ -73,13 +74,15 @@ async function refresh() {
     set('sps_1m', poolData.sps_1m, formatTruncated);
     set('uptime_secs', poolData.uptime_secs);
     set('blocks', poolData.blocks);
-    set('accepted', poolData.accepted);
-    set('rejected', poolData.rejected);
+    set('accepted', poolData.accepted_shares);
+    set('rejected', poolData.rejected_shares);
     set('last_share', poolData.last_share);
     copyable('best_ever', best_ever, poolData.best_ever);
 
-    const total_work = formatDifficulty(poolData.total_work);
-    copyable('total_work', total_work, poolData.total_work);
+    const accepted_work = formatDifficulty(poolData.accepted_work);
+    copyable('accepted_work', accepted_work, poolData.accepted_work);
+    const rejected_work = formatDifficulty(poolData.rejected_work);
+    copyable('rejected_work', rejected_work, poolData.rejected_work);
     copyable('ph_days', formatPhDays(poolData.ph_days), poolData.ph_days);
 
     // Bitcoin data
