@@ -41,6 +41,7 @@ pub use {
     notify::Notify,
     ntime::Ntime,
     prevhash::PrevHash,
+    reconnect::Reconnect,
     set_difficulty::SetDifficulty,
     si::{format_si, parse_si},
     submit::Submit,
@@ -70,6 +71,7 @@ mod nonce;
 mod notify;
 mod ntime;
 mod prevhash;
+mod reconnect;
 mod set_difficulty;
 mod si;
 mod submit;

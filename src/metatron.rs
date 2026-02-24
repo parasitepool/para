@@ -13,7 +13,7 @@ pub(crate) struct Metatron {
     started: Instant,
     users: DashMap<Address, Arc<User>>,
     disconnected: DashMap<Extranonce, (Arc<Session>, Instant)>,
-    extranonces: Extranonces,
+    extranonces: RwLock<Extranonces>,
     enonce_counter: AtomicU64,
     session_id_counter: AtomicU64,
     endpoint: String,
@@ -26,7 +26,7 @@ impl Metatron {
             started: Instant::now(),
             users: DashMap::new(),
             disconnected: DashMap::new(),
-            extranonces,
+            extranonces: RwLock::new(extranonces),
             enonce_counter: AtomicU64::new(
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -71,8 +71,9 @@ impl Metatron {
 
     pub(crate) fn next_enonce1(&self) -> Extranonce {
         let counter = self.enonce_counter.fetch_add(1, Ordering::Relaxed);
+        let extranonces = self.extranonces.read();
 
-        match &self.extranonces {
+        match &*extranonces {
             Extranonces::Pool(pool) => {
                 let bytes = counter.to_le_bytes();
                 Extranonce::from_bytes(&bytes[..pool.enonce1_size()])
@@ -92,11 +93,15 @@ impl Metatron {
     }
 
     pub(crate) fn enonce2_size(&self) -> usize {
-        self.extranonces.enonce2_size()
+        self.extranonces.read().enonce2_size()
     }
 
-    pub(crate) fn extranonces(&self) -> &Extranonces {
-        &self.extranonces
+    pub(crate) fn extranonces(&self) -> parking_lot::RwLockReadGuard<'_, Extranonces> {
+        self.extranonces.read()
+    }
+
+    pub(crate) fn update_extranonces(&self, extranonces: Extranonces) {
+        *self.extranonces.write() = extranonces;
     }
 
     pub(crate) fn new_session(&self, auth: Arc<Authorization>) -> Arc<Session> {
@@ -458,5 +463,47 @@ mod tests {
         assert_eq!(stats.best_ever, Some(Difficulty::from(200.0)));
         let expected = TotalWork::from_difficulty(pool_diff);
         assert_eq!(stats.accepted_work, expected + expected);
+    }
+
+    #[test]
+    fn update_extranonces_changes_enonce_derivation() {
+        let old_enonce1 = Extranonce::from_bytes(&[0xaa, 0xbb, 0xcc, 0xdd]);
+        let extranonces =
+            Extranonces::Proxy(ProxyExtranonces::new(old_enonce1.clone(), 8, 2).unwrap());
+        let metatron = Metatron::new(extranonces, String::new());
+
+        let before = metatron.next_enonce1();
+        assert_eq!(&before.as_bytes()[..4], old_enonce1.as_bytes());
+        assert_eq!(metatron.enonce2_size(), 6);
+
+        let new_enonce1 = Extranonce::from_bytes(&[0x11, 0x22, 0x33, 0x44]);
+        let new_extranonces =
+            Extranonces::Proxy(ProxyExtranonces::new(new_enonce1.clone(), 8, 2).unwrap());
+        metatron.update_extranonces(new_extranonces);
+
+        let after = metatron.next_enonce1();
+        assert_eq!(&after.as_bytes()[..4], new_enonce1.as_bytes());
+        assert_eq!(metatron.enonce2_size(), 6);
+    }
+
+    #[test]
+    fn update_extranonces_preserves_stats() {
+        let old_enonce1 = Extranonce::from_bytes(&[0xaa, 0xbb, 0xcc, 0xdd]);
+        let extranonces = Extranonces::Proxy(ProxyExtranonces::new(old_enonce1, 8, 2).unwrap());
+        let metatron = Metatron::new(extranonces, String::new());
+
+        let session = metatron.new_session(test_auth("deadbeef", "foo"));
+        let pool_diff = Difficulty::from(100.0);
+        session.record_accepted(pool_diff, Difficulty::from(200.0));
+        metatron.retire_session(session);
+
+        let new_enonce1 = Extranonce::from_bytes(&[0x11, 0x22, 0x33, 0x44]);
+        let new_extranonces = Extranonces::Proxy(ProxyExtranonces::new(new_enonce1, 8, 2).unwrap());
+        metatron.update_extranonces(new_extranonces);
+
+        let stats = metatron.snapshot();
+        assert_eq!(stats.accepted_shares, 1);
+        assert_eq!(stats.best_ever, Some(Difficulty::from(200.0)));
+        assert_eq!(stats.accepted_work, TotalWork::from_difficulty(pool_diff));
     }
 }

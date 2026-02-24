@@ -1,7 +1,7 @@
 use {
     super::*,
     backon::{ExponentialBuilder, Retryable},
-    dashmap::DashMap,
+    tokio::sync::Mutex,
 };
 
 async fn fetch_for<T, P>(client: Client, base: Url, path: String, parse: P) -> (Url, Result<T>)

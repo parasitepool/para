@@ -192,7 +192,11 @@ impl<W: Workbase> Stratifier<W> {
 
                 changed = workbase_rx.changed() => {
                     if changed.is_err() {
-                        warn!("Template receiver dropped, closing connection with {}", self.socket_addr);
+                        warn!("Upstream disconnected, sending client.reconnect to {}", self.socket_addr);
+                        let _ = self.send(Message::Notification {
+                            method: "client.reconnect".into(),
+                            params: json!(Reconnect::default()),
+                        }).await;
                         break;
                     }
 
@@ -273,7 +277,7 @@ impl<W: Workbase> Stratifier<W> {
                 let _ = self
                     .send(Message::Notification {
                         method: "client.reconnect".into(),
-                        params: json!([]),
+                        params: json!(Reconnect::default()),
                     })
                     .await;
 
@@ -322,7 +326,7 @@ impl<W: Workbase> Stratifier<W> {
                 let _ = self
                     .send(Message::Notification {
                         method: "client.reconnect".into(),
-                        params: json!([]),
+                        params: json!(Reconnect::default()),
                     })
                     .await;
                 false
@@ -344,7 +348,7 @@ impl<W: Workbase> Stratifier<W> {
 
     async fn workbase_update(&mut self, workbase: Arc<W>, identity: Identity) -> Result {
         if let Some(ref upstream) = self.upstream {
-            let upstream_diff = upstream.difficulty().await;
+            let upstream_diff = upstream.difficulty();
 
             if let Some(new_diff) = self.vardiff.clamp_to_upstream(upstream_diff) {
                 debug!(
@@ -1005,11 +1009,7 @@ impl<W: Workbase> Stratifier<W> {
             self.vardiff.shares_since_change()
         );
 
-        let upstream_diff = if let Some(ref upstream) = self.upstream {
-            Some(upstream.difficulty().await)
-        } else {
-            None
-        };
+        let upstream_diff = self.upstream.as_ref().map(|upstream| upstream.difficulty());
 
         let network_diff = Difficulty::from(job.nbits());
 
@@ -1050,10 +1050,13 @@ impl<W: Workbase> Stratifier<W> {
             return;
         };
 
-        let enonce2 = match self.metatron.extranonces() {
-            Extranonces::Pool(_) => submit.enonce2.clone(),
-            Extranonces::Proxy(proxy) => {
-                proxy.reconstruct_enonce2_for_upstream(enonce1, &submit.enonce2)
+        let enonce2 = {
+            let extranonces = self.metatron.extranonces();
+            match &*extranonces {
+                Extranonces::Pool(_) => submit.enonce2.clone(),
+                Extranonces::Proxy(proxy) => {
+                    proxy.reconstruct_enonce2_for_upstream(enonce1, &submit.enonce2)
+                }
             }
         };
 

@@ -14,13 +14,21 @@ impl TestPool {
         Self::spawn_with_args("")
     }
 
+    pub(crate) fn spawn_on_port(port: u16, args: impl ToArgs) -> Self {
+        Self::spawn_inner(Some(port), args)
+    }
+
     pub(crate) fn spawn_with_args(args: impl ToArgs) -> Self {
+        Self::spawn_inner(None, args)
+    }
+
+    fn spawn_inner(port: Option<u16>, args: impl ToArgs) -> Self {
         let tempdir = Arc::new(TempDir::new().unwrap());
 
         let bitcoind_port = allocate_port();
         let rpc_port = allocate_port();
         let zmq_port = allocate_port();
-        let pool_port = allocate_port();
+        let pool_port = port.unwrap_or_else(allocate_port);
         let http_port = allocate_port();
 
         let bitcoind_handle =
@@ -66,6 +74,10 @@ impl TestPool {
             bitcoind_rpc_port: rpc_port,
             _tempdir: tempdir,
         }
+    }
+
+    pub(crate) fn pool_port(&self) -> u16 {
+        self.pool_port
     }
 
     pub(crate) fn stratum_endpoint(&self) -> String {

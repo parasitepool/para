@@ -24,6 +24,7 @@ pub(crate) struct Upstream {
     rejected: Arc<AtomicU64>,
     filtered: Arc<AtomicU64>,
     version_mask: Option<Version>,
+    disconnect_notify: Arc<tokio::sync::Notify>,
 }
 
 impl Upstream {
@@ -99,6 +100,7 @@ impl Upstream {
                 rejected: Arc::new(AtomicU64::new(0)),
                 filtered: Arc::new(AtomicU64::new(0)),
                 version_mask,
+                disconnect_notify: Arc::new(tokio::sync::Notify::new()),
             },
             events,
         ))
@@ -116,7 +118,7 @@ impl Upstream {
             .await
             .context("failed to authorize with upstream")?;
 
-        self.set_ping(duration).await;
+        self.set_ping(duration);
 
         info!(
             "Authorized to upstream {} with {}",
@@ -133,7 +135,7 @@ impl Upstream {
             match events.recv().await {
                 Ok(Event::SetDifficulty(diff)) => {
                     info!("Received initial difficulty: {}", diff);
-                    *self.difficulty.write().await = diff;
+                    *self.difficulty.write() = diff;
                     initial_difficulty = Some(diff);
                 }
                 Ok(Event::Notify(notify)) => {
@@ -143,7 +145,7 @@ impl Upstream {
                     );
                     first_notify = Some(notify);
                 }
-                Ok(Event::Disconnected) => {
+                Ok(Event::Reconnect(_)) | Ok(Event::Disconnected) => {
                     self.connected.store(false, Ordering::Relaxed);
                     bail!("Disconnected from upstream before initialization complete");
                 }
@@ -164,6 +166,7 @@ impl Upstream {
 
         let connected = self.connected.clone();
         let upstream_difficulty = self.difficulty.clone();
+        let disconnect_notify = self.disconnect_notify.clone();
 
         tasks.spawn(async move {
             loop {
@@ -185,16 +188,18 @@ impl Upstream {
                             }
                             Ok(Event::SetDifficulty(diff)) => {
                                 info!("Received set_difficulty: {}", diff);
-                                *upstream_difficulty.write().await = diff;
+                                *upstream_difficulty.write() = diff;
                             }
-                            Ok(Event::Disconnected) => {
+                            Ok(Event::Reconnect(_)) | Ok(Event::Disconnected) => {
                                 warn!("Disconnected from upstream");
-                                connected.store(false, Ordering::SeqCst);
+                                connected.store(false, Ordering::Relaxed);
+                                disconnect_notify.notify_waiters();
                                 break;
                             }
                             Err(err) => {
                                 error!("Upstream event error: {}", err);
-                                connected.store(false, Ordering::SeqCst);
+                                connected.store(false, Ordering::Relaxed);
+                                disconnect_notify.notify_waiters();
                                 break;
                             }
                         }
@@ -207,7 +212,7 @@ impl Upstream {
     }
 
     pub(crate) async fn submit_share(&self, submit: UpstreamSubmit) {
-        let upstream_diff = *self.difficulty.read().await;
+        let upstream_diff = *self.difficulty.read();
         if submit.share_diff < upstream_diff {
             debug!(
                 "Share below upstream difficulty: share_diff={} < upstream_diff={}",
@@ -240,7 +245,7 @@ impl Upstream {
             {
                 Ok(duration) => {
                     accepted.fetch_add(1, Ordering::Relaxed);
-                    let mut ping = ping.write().await;
+                    let mut ping = ping.write();
                     *ping = duration;
 
                     debug!("Upstream accepted share");
@@ -268,12 +273,16 @@ impl Upstream {
         self.enonce2_size
     }
 
-    pub(crate) async fn difficulty(&self) -> Difficulty {
-        *self.difficulty.read().await
+    pub(crate) fn difficulty(&self) -> Difficulty {
+        *self.difficulty.read()
     }
 
     pub(crate) fn is_connected(&self) -> bool {
         self.connected.load(Ordering::Relaxed)
+    }
+
+    pub(crate) async fn disconnected(&self) {
+        self.disconnect_notify.notified().await;
     }
 
     pub(crate) fn endpoint(&self) -> &str {
@@ -300,12 +309,11 @@ impl Upstream {
         self.version_mask
     }
 
-    async fn set_ping(&self, duration: Duration) {
-        let mut ping = self.ping.write().await;
-        *ping = duration;
+    fn set_ping(&self, duration: Duration) {
+        *self.ping.write() = duration;
     }
 
-    pub(crate) async fn ping_ms(&self) -> u128 {
-        self.ping.read().await.as_millis()
+    pub(crate) fn ping_ms(&self) -> u128 {
+        self.ping.read().as_millis()
     }
 }

@@ -9,6 +9,58 @@ pub(crate) struct Proxy {
     pub(crate) options: ProxyOptions,
 }
 
+async fn connect_upstream(
+    settings: &Arc<Settings>,
+    cancel_token: &CancellationToken,
+    tasks: &mut JoinSet<()>,
+    backoff: &mut Duration,
+) -> Option<(Arc<Upstream>, watch::Receiver<Arc<Notify>>)> {
+    let mut max_backoff_attempts = 0u32;
+
+    loop {
+        match Upstream::connect(settings.clone()).await {
+            Ok((upstream, events)) => {
+                let upstream = Arc::new(upstream);
+                match upstream
+                    .clone()
+                    .spawn(events, cancel_token.clone(), tasks)
+                    .await
+                {
+                    Ok(workbase_rx) => {
+                        *backoff = Duration::from_secs(1);
+                        return Some((upstream, workbase_rx));
+                    }
+                    Err(e) => {
+                        warn!("Failed to start upstream event loop: {e}");
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Failed to connect to upstream: {e}");
+            }
+        }
+
+        warn!("Retrying in {}s...", backoff.as_secs());
+
+        tokio::select! {
+            _ = sleep(*backoff) => {}
+            _ = cancel_token.cancelled() => return None
+        }
+
+        *backoff = (*backoff * 2).min(Duration::from_secs(60));
+
+        if *backoff >= Duration::from_secs(60) {
+            max_backoff_attempts += 1;
+            if max_backoff_attempts >= 3 {
+                error!(
+                    "Upstream unreachable after {max_backoff_attempts} attempts at max backoff, exiting"
+                );
+                return None;
+            }
+        }
+    }
+}
+
 impl Proxy {
     pub(crate) async fn run(
         &self,
@@ -23,46 +75,6 @@ impl Proxy {
         );
 
         let bitcoin_client = Arc::new(settings.bitcoin_rpc_client().await?);
-
-        let (upstream, events) = Upstream::connect(settings.clone()).await?;
-
-        let upstream = Arc::new(upstream);
-
-        let workbase_rx = upstream
-            .clone()
-            .spawn(events, cancel_token.clone(), &mut tasks)
-            .await
-            .context("failed to start upstream event loop")?;
-
-        let extranonces = Extranonces::Proxy(
-            ProxyExtranonces::new(
-                upstream.enonce1().clone(),
-                upstream.enonce2_size(),
-                settings.enonce1_extension_size(),
-            )
-            .context("upstream extranonce configuration incompatible with proxy mode")?,
-        );
-        let metatron = Arc::new(Metatron::new(
-            extranonces,
-            format!("{}:{}", settings.address(), settings.port()),
-        ));
-        metatron.clone().spawn(cancel_token.clone(), &mut tasks);
-
-        let metrics = Arc::new(Metrics {
-            upstream: upstream.clone(),
-            metatron: metatron.clone(),
-        });
-
-        http_server::spawn(
-            &settings,
-            api::proxy::router(metrics.clone(), bitcoin_client, settings.chain(), logs),
-            cancel_token.clone(),
-            &mut tasks,
-        )?;
-
-        let event_tx = build_event_sink(&settings, cancel_token.clone(), &mut tasks)
-            .await
-            .context("failed to build record sink")?;
 
         let address = settings.address();
         let port = settings.port();
@@ -86,81 +98,135 @@ impl Proxy {
             None
         };
 
+        let mut backoff = Duration::from_secs(1);
+
+        let Some((mut upstream, mut workbase_rx)) =
+            connect_upstream(&settings, &cancel_token, &mut tasks, &mut backoff).await
+        else {
+            return Ok(());
+        };
+
+        let extranonces = Extranonces::Proxy(
+            ProxyExtranonces::new(
+                upstream.enonce1().clone(),
+                upstream.enonce2_size(),
+                settings.enonce1_extension_size(),
+            )
+            .context("upstream extranonce configuration incompatible with proxy mode")?,
+        );
+
+        let metatron = Arc::new(Metatron::new(
+            extranonces,
+            format!("{}:{}", settings.address(), settings.port()),
+        ));
+
+        metatron.clone().spawn(cancel_token.clone(), &mut tasks);
+
+        let metrics = Arc::new(Metrics::new(upstream.clone(), metatron.clone()));
+
+        http_server::spawn(
+            &settings,
+            api::proxy::router(metrics.clone(), bitcoin_client, settings.chain(), logs),
+            cancel_token.clone(),
+            &mut tasks,
+        )?;
+
+        let event_tx = build_event_sink(&settings, cancel_token.clone(), &mut tasks)
+            .await
+            .context("failed to build record sink")?;
+
         if !integration_test() && !logs_enabled() {
-            spawn_throbber(metrics, cancel_token.clone(), &mut tasks);
+            spawn_throbber(metrics.clone(), cancel_token.clone(), &mut tasks);
         }
 
         loop {
-            let (stream, addr, start_diff) = tokio::select! {
-                accept = listener.accept() => {
-                    let (stream, addr) = match accept {
-                        Ok((stream, addr)) => (stream, addr),
-                        Err(err) => {
-                            error!("Accept error: {err}");
-                            continue;
-                        }
-                    };
-                    (stream, addr, settings.start_diff())
-                }
-                Some(accept) = async {
-                    match &high_diff_listener {
-                        Some(listener) => Some(listener.accept().await),
-                        None => None,
+            loop {
+                let (stream, addr, start_diff) = tokio::select! {
+                    accept = listener.accept() => {
+                        let (stream, addr) = match accept {
+                            Ok((stream, addr)) => (stream, addr),
+                            Err(err) => {
+                                error!("Accept error: {err}");
+                                continue;
+                            }
+                        };
+                        (stream, addr, settings.start_diff())
                     }
-                } => {
-                    let (stream, addr) = match accept {
-                        Ok((stream, addr)) => (stream, addr),
-                        Err(err) => {
-                            error!("High diff accept error: {err}");
-                            continue;
+                    Some(accept) = async {
+                        match &high_diff_listener {
+                            Some(listener) => Some(listener.accept().await),
+                            None => None,
                         }
-                    };
-                    (stream, addr, settings.high_diff_start())
-                }
-                _ = async {
-                    while upstream.is_connected() {
-                        tokio::time::sleep(Duration::from_secs(1)).await;
+                    } => {
+                        let (stream, addr) = match accept {
+                            Ok((stream, addr)) => (stream, addr),
+                            Err(err) => {
+                                error!("High diff accept error: {err}");
+                                continue;
+                            }
+                        };
+                        (stream, addr, settings.high_diff_start())
                     }
-                } => {
-                    warn!("Upstream connection lost, shutting down");
-                    cancel_token.cancel();
-                    break;
-                }
-                _ = cancel_token.cancelled() => {
-                    info!("Shutting down proxy");
-                    break;
-                }
+                    _ = upstream.disconnected() => {
+                        warn!("Upstream connection lost, reconnecting...");
+                        break;
+                    }
+                    _ = cancel_token.cancelled() => {
+                        info!("Shutting down proxy");
+                        while tasks.join_next().await.is_some() {}
+                        info!("All proxy tasks stopped");
+                        return Ok(());
+                    }
+                };
+
+                debug!("Spawning stratifier task for {addr}");
+
+                let workbase_rx = workbase_rx.clone();
+                let settings = settings.clone();
+                let metatron = metatron.clone();
+                let upstream = upstream.clone();
+                let conn_cancel_token = cancel_token.child_token();
+                let event_tx = event_tx.clone();
+
+                tasks.spawn(async move {
+                    let mut stratifier: Stratifier<Notify> = Stratifier::new(
+                        addr,
+                        settings,
+                        metatron,
+                        Some(upstream),
+                        stream,
+                        workbase_rx,
+                        conn_cancel_token,
+                        event_tx,
+                        start_diff,
+                    );
+
+                    if let Err(err) = stratifier.serve().await {
+                        error!("Stratifier error for {addr}: {err}");
+                    }
+                });
+            }
+
+            let Some((new_upstream, new_workbase_rx)) =
+                connect_upstream(&settings, &cancel_token, &mut tasks, &mut backoff).await
+            else {
+                break;
             };
 
-            debug!("Spawning stratifier task for {addr}");
+            let new_extranonces = Extranonces::Proxy(
+                ProxyExtranonces::new(
+                    new_upstream.enonce1().clone(),
+                    new_upstream.enonce2_size(),
+                    settings.enonce1_extension_size(),
+                )
+                .context("upstream extranonce configuration incompatible with proxy mode")?,
+            );
 
-            let workbase_rx = workbase_rx.clone();
-            let settings = settings.clone();
-            let metatron = metatron.clone();
-            let upstream = upstream.clone();
-            let conn_cancel_token = cancel_token.child_token();
-            let event_tx = event_tx.clone();
-
-            tasks.spawn(async move {
-                let mut stratifier: Stratifier<Notify> = Stratifier::new(
-                    addr,
-                    settings,
-                    metatron,
-                    Some(upstream),
-                    stream,
-                    workbase_rx,
-                    conn_cancel_token,
-                    event_tx,
-                    start_diff,
-                );
-
-                if let Err(err) = stratifier.serve().await {
-                    error!("Stratifier error for {addr}: {err}");
-                }
-            });
+            metatron.update_extranonces(new_extranonces);
+            metrics.update_upstream(new_upstream.clone());
+            upstream = new_upstream;
+            workbase_rx = new_workbase_rx;
         }
-
-        info!("Waiting for {} tasks to complete...", tasks.len());
 
         while tasks.join_next().await.is_some() {}
 

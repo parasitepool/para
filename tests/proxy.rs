@@ -439,43 +439,6 @@ async fn proxy_relays_job_updates_and_new_blocks() {
 
 #[tokio::test]
 #[serial(bitcoind)]
-#[timeout(120000)]
-async fn proxy_exits_on_upstream_disconnect() {
-    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
-
-    let proxy = TestProxy::spawn_with_args(
-        &pool.stratum_endpoint(),
-        signet_username().as_str(),
-        pool.bitcoind_rpc_port(),
-        "--start-diff 0.00001",
-    );
-
-    let client = proxy.stratum_client();
-    let mut events = client.connect().await.unwrap();
-
-    let (subscribe, _, _) = client.subscribe().await.unwrap();
-    client.authorize().await.unwrap();
-    let (notify, difficulty) = wait_for_notify(&mut events).await;
-
-    let status = proxy.get_status().await.unwrap();
-    assert!(status.upstream_connected);
-
-    drop(pool);
-
-    let enonce2 = Extranonce::random(subscribe.enonce2_size);
-    let (ntime, nonce) = solve_share(&notify, &subscribe.enonce1, &enonce2, difficulty);
-
-    assert!(
-        client
-            .submit(notify.job_id, enonce2, ntime, nonce, None)
-            .await
-            .is_err(),
-        "Miner should be disconnected after upstream loss"
-    );
-}
-
-#[tokio::test]
-#[serial(bitcoind)]
 #[timeout(90000)]
 async fn proxy_high_diff_port() {
     let pool = TestPool::spawn_with_args("--start-diff 0.00001");
@@ -512,4 +475,126 @@ async fn proxy_high_diff_port() {
     let (_, high_diff) = wait_for_notify(&mut high_diff_events).await;
 
     assert_eq!(high_diff, Difficulty::from(1_000_000));
+}
+
+#[tokio::test]
+#[serial(bitcoind)]
+#[timeout(120000)]
+async fn reconnects_on_upstream_disconnect() {
+    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
+    let pool_port = pool.pool_port();
+
+    let proxy = TestProxy::spawn_with_args(
+        &pool.stratum_endpoint(),
+        signet_username().as_str(),
+        pool.bitcoind_rpc_port(),
+        "--start-diff 0.00001",
+    );
+
+    let original_status = proxy.get_status().await.unwrap();
+    assert_eq!(original_status.upstream_enonce1.len(), ENONCE1_SIZE);
+    assert_eq!(original_status.upstream_enonce2_size, MAX_ENONCE_SIZE);
+
+    let mut miner = CommandBuilder::new(format!(
+        "miner {} --mode continuous --username {} --cpu-cores 1",
+        proxy.stratum_endpoint(),
+        signet_username()
+    ))
+    .spawn();
+
+    timeout(Duration::from_secs(30), async {
+        loop {
+            if let Ok(status) = proxy.get_status().await
+                && status.sessions >= 1
+            {
+                break;
+            }
+            sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("Timeout waiting for miner to connect");
+
+    drop(pool);
+
+    timeout(Duration::from_secs(10), async {
+        loop {
+            if let Ok(status) = proxy.get_status().await
+                && !status.upstream_connected
+            {
+                break;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("Timeout waiting for proxy to detect disconnect");
+
+    thread::sleep(Duration::from_millis(500));
+
+    let _pool2 = TestPool::spawn_on_port(
+        pool_port,
+        "--start-diff 0.00001 --enonce1-size 6 --enonce2-size 4",
+    );
+
+    timeout(Duration::from_secs(30), async {
+        loop {
+            if let Ok(status) = proxy.get_status().await
+                && status.upstream_connected
+            {
+                break;
+            }
+            sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("Timeout waiting for proxy to reconnect");
+
+    let reconnected_status = proxy.get_status().await.unwrap();
+    assert_eq!(reconnected_status.upstream_enonce1.len(), 6);
+    assert_eq!(reconnected_status.upstream_enonce2_size, 4);
+    assert_ne!(
+        reconnected_status.upstream_enonce1,
+        original_status.upstream_enonce1,
+    );
+
+    timeout(Duration::from_secs(30), async {
+        loop {
+            if let Ok(status) = proxy.get_status().await
+                && status.sessions >= 1
+            {
+                break;
+            }
+            sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("Timeout waiting for miner to reconnect");
+
+    let client = proxy.stratum_client();
+    let mut events = client.connect().await.unwrap();
+
+    let (subscribe, _, _) = client.subscribe().await.unwrap();
+
+    assert_eq!(
+        &subscribe.enonce1.as_bytes()[..6],
+        reconnected_status.upstream_enonce1.as_bytes(),
+    );
+    assert_eq!(subscribe.enonce1.len(), 6 + ENONCE1_EXTENSION_SIZE,);
+    assert_eq!(subscribe.enonce2_size, 4 - ENONCE1_EXTENSION_SIZE,);
+
+    client.authorize().await.unwrap();
+
+    let (notify, difficulty) = wait_for_notify(&mut events).await;
+
+    let enonce2 = Extranonce::random(subscribe.enonce2_size);
+    let (ntime, nonce) = solve_share(&notify, &subscribe.enonce1, &enonce2, difficulty);
+
+    client
+        .submit(notify.job_id, enonce2, ntime, nonce, None)
+        .await
+        .unwrap();
+
+    miner.kill().unwrap();
+    miner.wait().unwrap();
 }

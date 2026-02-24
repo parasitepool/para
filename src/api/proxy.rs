@@ -144,6 +144,7 @@ async fn user_page(Extension(chain): Extension<Chain>) -> Response {
 
 async fn status(State(metrics): State<Arc<Metrics>>) -> Json<ProxyStatus> {
     let now = Instant::now();
+    let upstream = metrics.upstream();
     let stats = metrics.metatron.snapshot();
 
     Json(ProxyStatus {
@@ -174,17 +175,17 @@ async fn status(State(metrics): State<Arc<Metrics>>) -> Json<ProxyStatus> {
         rejected_work: stats.rejected_work,
         ph_days: stats.accepted_work.into(),
         uptime_secs: metrics.metatron.uptime().as_secs(),
-        upstream_endpoint: metrics.upstream.endpoint().to_string(),
-        upstream_connected: metrics.upstream.is_connected(),
-        upstream_ping: metrics.upstream.ping_ms().await,
-        upstream_difficulty: metrics.upstream.difficulty().await,
-        upstream_username: metrics.upstream.username().clone(),
-        upstream_enonce1: metrics.upstream.enonce1().clone(),
-        upstream_enonce2_size: metrics.upstream.enonce2_size(),
-        upstream_version_mask: metrics.upstream.version_mask(),
-        upstream_accepted: metrics.upstream.accepted(),
-        upstream_rejected: metrics.upstream.rejected(),
-        upstream_filtered: metrics.upstream.filtered(),
+        upstream_endpoint: upstream.endpoint().to_string(),
+        upstream_connected: upstream.is_connected(),
+        upstream_ping: upstream.ping_ms(),
+        upstream_difficulty: upstream.difficulty(),
+        upstream_username: upstream.username().clone(),
+        upstream_enonce1: upstream.enonce1().clone(),
+        upstream_enonce2_size: upstream.enonce2_size(),
+        upstream_version_mask: upstream.version_mask(),
+        upstream_accepted: upstream.accepted(),
+        upstream_rejected: upstream.rejected(),
+        upstream_filtered: upstream.filtered(),
     })
 }
 
