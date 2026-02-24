@@ -675,7 +675,7 @@ impl<W: Workbase> Stratifier<W> {
                 StratumError::WorkerMismatch
             ));
 
-            session.record_rejected(self.vardiff.current_diff());
+            session.record_rejected(self.vardiff.pool_diff(submit.job_id));
 
             return Ok(self.bouncer.reject());
         }
@@ -696,7 +696,7 @@ impl<W: Workbase> Stratifier<W> {
                 StratumError::Stale
             ));
 
-            session.record_rejected(self.vardiff.current_diff());
+            session.record_rejected(self.vardiff.pool_diff(submit.job_id));
 
             return Ok(self.bouncer.reject());
         };
