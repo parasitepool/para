@@ -27,7 +27,7 @@ impl StatusLine for Metrics {
         let now = Instant::now();
         let upstream = self.upstream();
         let stats = self.metatron.snapshot();
-        
+
         format!(
             "sps={:.2}  hashrate={:.2}  sessions={}  upstream_enonce1={}  accepted={}  rejected={}",
             stats.sps_1m(now),
