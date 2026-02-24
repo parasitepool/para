@@ -132,7 +132,7 @@ impl Template {
 
     fn interpret_template(
         &self,
-        subscription: &SubscribeResult,
+        subscription: &SubscribeResponse,
         notify: &Notify,
         pool_difficulty: Option<Difficulty>,
     ) -> Result<Output> {

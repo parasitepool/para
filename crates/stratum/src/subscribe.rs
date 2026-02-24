@@ -1,5 +1,6 @@
 use super::*;
 
+/// mining.subscribe
 #[derive(Debug, PartialEq)]
 pub struct Subscribe {
     pub user_agent: String,
@@ -55,14 +56,15 @@ impl<'de> Deserialize<'de> for Subscribe {
     }
 }
 
+/// mining.subscribe response
 #[derive(Debug, PartialEq, Clone)]
-pub struct SubscribeResult {
+pub struct SubscribeResponse {
     pub subscriptions: Vec<(String, String)>,
     pub enonce1: Extranonce,
     pub enonce2_size: usize,
 }
 
-impl Serialize for SubscribeResult {
+impl Serialize for SubscribeResponse {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -75,7 +77,7 @@ impl Serialize for SubscribeResult {
     }
 }
 
-impl<'de> Deserialize<'de> for SubscribeResult {
+impl<'de> Deserialize<'de> for SubscribeResponse {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -83,7 +85,7 @@ impl<'de> Deserialize<'de> for SubscribeResult {
         let (subscriptions, enonce1, enonce2_size) =
             <(Vec<(String, String)>, Extranonce, usize)>::deserialize(deserializer)?;
 
-        Ok(SubscribeResult {
+        Ok(SubscribeResponse {
             subscriptions,
             enonce1,
             enonce2_size,
@@ -212,7 +214,7 @@ mod tests {
 
     #[test]
     fn subscribe_result_roundtrip() {
-        let sr = SubscribeResult {
+        let sr = SubscribeResponse {
             subscriptions: vec![
                 (
                     "mining.set_difficulty".into(),
@@ -238,25 +240,25 @@ mod tests {
             ]
         "#;
 
-        case::<SubscribeResult>(json, sr);
+        case::<SubscribeResponse>(json, sr);
     }
 
     #[test]
     fn subscribe_result_empty_subscriptions() {
-        let sr = SubscribeResult {
+        let sr = SubscribeResponse {
             subscriptions: vec![],
             enonce1: "deadbeef".parse().unwrap(),
             enonce2_size: 8,
         };
 
         let json = r#"[[], "deadbeef", 8]"#;
-        case::<SubscribeResult>(json, sr);
+        case::<SubscribeResponse>(json, sr);
     }
 
     #[test]
     fn subscribe_result_serialize_shape() {
         let enonce1 = Extranonce::random(8);
-        let sr = SubscribeResult {
+        let sr = SubscribeResponse {
             subscriptions: vec![("mining.notify".into(), "tag".into())],
             enonce1: enonce1.clone(),
             enonce2_size: 16,

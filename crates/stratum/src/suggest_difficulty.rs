@@ -1,5 +1,6 @@
 use super::*;
 
+/// mining.suggest_difficulty
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SuggestDifficulty(pub Difficulty);
 
