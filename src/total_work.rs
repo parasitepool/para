@@ -1,13 +1,13 @@
 use super::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
-pub struct TotalWork(f64);
+pub struct TotalWork(pub(crate) f64);
 
 impl TotalWork {
     pub const ZERO: Self = Self(0.0);
 
-    pub fn from_difficulty(difficulty: f64) -> Self {
-        Self(difficulty)
+    pub fn from_difficulty(difficulty: Difficulty) -> Self {
+        Self(difficulty.as_f64())
     }
 
     pub fn as_f64(self) -> f64 {
@@ -60,8 +60,8 @@ mod tests {
 
     #[test]
     fn arithmetic() {
-        let a = TotalWork::from_difficulty(100.0);
-        let b = TotalWork::from_difficulty(200.0);
+        let a = TotalWork(100.0);
+        let b = TotalWork(200.0);
         assert_eq!((a + b).0, 300.0);
         assert_eq!((b - a).0, 100.0);
 

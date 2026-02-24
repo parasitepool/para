@@ -487,6 +487,12 @@ async fn vardiff_adjusts_difficulty() {
     client.authorize().await.unwrap();
 
     let (mut notify, initial_difficulty) = wait_for_notify(&mut events).await;
+    let old_job_id = notify.job_id;
+    let user_address = signet_username()
+        .parse_address()
+        .unwrap()
+        .assume_checked()
+        .to_string();
 
     let new_difficulty = mine_until_difficulty_increases(
         &client,
@@ -499,6 +505,50 @@ async fn vardiff_adjusts_difficulty() {
     .await;
 
     assert!(new_difficulty > initial_difficulty);
+
+    pool.mine_block().await;
+    pool.wait_for_blocks(1, Duration::from_secs(10))
+        .await
+        .expect("block");
+
+    wait_for_new_block(&mut events, notify.job_id).await;
+
+    let baseline = pool.get_user(&user_address).await.unwrap();
+
+    assert_stratum_error(
+        client
+            .submit(
+                old_job_id,
+                Extranonce::random(subscribe.enonce2_size),
+                Ntime::from(0),
+                Nonce::from(0),
+                None,
+            )
+            .await,
+        StratumError::Stale,
+    );
+
+    let after_stale = pool.get_user(&user_address).await.unwrap();
+    let stale_delta = (after_stale.rejected_work - baseline.rejected_work).as_f64();
+    assert_eq!(stale_delta, initial_difficulty.as_f64());
+
+    assert_stratum_error(
+        client
+            .submit_with_username(
+                Username::from("different_address.different_worker"),
+                old_job_id,
+                Extranonce::random(subscribe.enonce2_size),
+                Ntime::from(0),
+                Nonce::from(0),
+                None,
+            )
+            .await,
+        StratumError::WorkerMismatch,
+    );
+
+    let after_mismatch = pool.get_user(&user_address).await.unwrap();
+    let mismatch_delta = (after_mismatch.rejected_work - after_stale.rejected_work).as_f64();
+    assert_eq!(mismatch_delta, initial_difficulty.as_f64());
 }
 
 #[tokio::test]
@@ -583,8 +633,8 @@ async fn share_validation() {
     assert_eq!(status.workers, 0);
     assert_eq!(status.sessions, 0);
     assert_eq!(status.blocks, 0);
-    assert_eq!(status.accepted, 0);
-    assert_eq!(status.rejected, 0);
+    assert_eq!(status.accepted_shares, 0);
+    assert_eq!(status.rejected_shares, 0);
     assert!(status.best_ever.is_none());
     assert!(status.last_share.is_none());
 
@@ -628,20 +678,20 @@ async fn share_validation() {
     assert_eq!(status.users, 1);
     assert_eq!(status.workers, 1);
     assert_eq!(status.sessions, 1);
-    assert_eq!(status.accepted, 1);
-    assert_eq!(status.rejected, 0);
+    assert_eq!(status.accepted_shares, 1);
+    assert_eq!(status.rejected_shares, 0);
     assert!(status.best_ever.is_some());
     assert!(status.last_share.is_some());
 
     let user = pool.get_user(&user_address).await.unwrap();
     assert_eq!(user.address, user_address);
-    assert_eq!(user.accepted, 1);
-    assert_eq!(user.rejected, 0);
+    assert_eq!(user.accepted_shares, 1);
+    assert_eq!(user.rejected_shares, 0);
     assert!(user.best_ever.is_some());
     assert!(user.last_share.is_some());
     assert_eq!(user.workers.len(), 1);
-    assert_eq!(user.workers[0].accepted, 1);
-    assert_eq!(user.workers[0].rejected, 0);
+    assert_eq!(user.workers[0].accepted_shares, 1);
+    assert_eq!(user.workers[0].rejected_shares, 0);
     assert!(user.workers[0].best_ever.is_some());
     assert!(user.workers[0].last_share.is_some());
 
@@ -654,14 +704,14 @@ async fn share_validation() {
     );
 
     let status = pool.get_status().await.unwrap();
-    assert_eq!(status.accepted, 1);
-    assert_eq!(status.rejected, 1);
+    assert_eq!(status.accepted_shares, 1);
+    assert_eq!(status.rejected_shares, 1);
 
     let user = pool.get_user(&user_address).await.unwrap();
-    assert_eq!(user.accepted, 1);
-    assert_eq!(user.rejected, 1);
-    assert_eq!(user.workers[0].accepted, 1);
-    assert_eq!(user.workers[0].rejected, 1);
+    assert_eq!(user.accepted_shares, 1);
+    assert_eq!(user.rejected_shares, 1);
+    assert_eq!(user.workers[0].accepted_shares, 1);
+    assert_eq!(user.workers[0].rejected_shares, 1);
 
     // Invalid enonce2 length (too short)
     assert_stratum_error(
@@ -678,8 +728,8 @@ async fn share_validation() {
     );
 
     let status = pool.get_status().await.unwrap();
-    assert_eq!(status.accepted, 1);
-    assert_eq!(status.rejected, 2);
+    assert_eq!(status.accepted_shares, 1);
+    assert_eq!(status.rejected_shares, 2);
 
     // Invalid enonce2 length (too long)
     assert_stratum_error(
@@ -696,8 +746,8 @@ async fn share_validation() {
     );
 
     let status = pool.get_status().await.unwrap();
-    assert_eq!(status.accepted, 1);
-    assert_eq!(status.rejected, 3);
+    assert_eq!(status.accepted_shares, 1);
+    assert_eq!(status.rejected_shares, 3);
 
     // Invalid job id (stale)
     assert_stratum_error(
@@ -714,8 +764,8 @@ async fn share_validation() {
     );
 
     let status = pool.get_status().await.unwrap();
-    assert_eq!(status.accepted, 1);
-    assert_eq!(status.rejected, 4);
+    assert_eq!(status.accepted_shares, 1);
+    assert_eq!(status.rejected_shares, 4);
 
     // Share above target
     assert_stratum_error(
@@ -732,8 +782,8 @@ async fn share_validation() {
     );
 
     let status = pool.get_status().await.unwrap();
-    assert_eq!(status.accepted, 1);
-    assert_eq!(status.rejected, 5);
+    assert_eq!(status.accepted_shares, 1);
+    assert_eq!(status.rejected_shares, 5);
 
     // Worker mismatch rejected
     assert_stratum_error(
@@ -751,12 +801,12 @@ async fn share_validation() {
     );
 
     let status = pool.get_status().await.unwrap();
-    assert_eq!(status.accepted, 1);
-    assert_eq!(status.rejected, 6);
+    assert_eq!(status.accepted_shares, 1);
+    assert_eq!(status.rejected_shares, 6);
 
     let user = pool.get_user(&user_address).await.unwrap();
-    assert_eq!(user.accepted, 1);
-    assert_eq!(user.rejected, 6);
+    assert_eq!(user.accepted_shares, 1);
+    assert_eq!(user.rejected_shares, 6);
 
     // Ntime before job's ntime rejected
     let job_ntime: u32 = notify.ntime.into();
@@ -774,8 +824,8 @@ async fn share_validation() {
     );
 
     let status = pool.get_status().await.unwrap();
-    assert_eq!(status.accepted, 1);
-    assert_eq!(status.rejected, 7);
+    assert_eq!(status.accepted_shares, 1);
+    assert_eq!(status.rejected_shares, 7);
 
     // Ntime too far in future rejected (> 7000 seconds)
     assert_stratum_error(
@@ -792,12 +842,12 @@ async fn share_validation() {
     );
 
     let status = pool.get_status().await.unwrap();
-    assert_eq!(status.accepted, 1);
-    assert_eq!(status.rejected, 8);
+    assert_eq!(status.accepted_shares, 1);
+    assert_eq!(status.rejected_shares, 8);
 
     let user = pool.get_user(&user_address).await.unwrap();
-    assert_eq!(user.accepted, 1);
-    assert_eq!(user.rejected, 8);
+    assert_eq!(user.accepted_shares, 1);
+    assert_eq!(user.rejected_shares, 8);
 
     // Version bits submitted without negotiation -> InvalidVersionMask
     let enonce2_vr = Extranonce::random(enonce2_size);
@@ -816,8 +866,8 @@ async fn share_validation() {
     );
 
     let status = pool.get_status().await.unwrap();
-    assert_eq!(status.accepted, 1);
-    assert_eq!(status.rejected, 9);
+    assert_eq!(status.accepted_shares, 1);
+    assert_eq!(status.rejected_shares, 9);
 
     // Stale after new block
     let old_job_id = notify.job_id;
@@ -840,14 +890,14 @@ async fn share_validation() {
     );
 
     let status = pool.get_status().await.unwrap();
-    assert_eq!(status.rejected, baseline.rejected + 1);
+    assert_eq!(status.rejected_shares, baseline.rejected_shares + 1);
     assert_eq!(status.blocks, 1);
 
     let user = pool.get_user(&user_address).await.unwrap();
-    assert_eq!(user.rejected, user_baseline.rejected + 1);
+    assert_eq!(user.rejected_shares, user_baseline.rejected_shares + 1);
     assert_eq!(
-        user.workers[0].rejected,
-        user_baseline.workers[0].rejected + 1
+        user.workers[0].rejected_shares,
+        user_baseline.workers[0].rejected_shares + 1
     );
 
     // Version rolling validation (new connection with configure)

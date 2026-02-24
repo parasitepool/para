@@ -127,7 +127,7 @@ impl TestPool {
             }
 
             match self.get_status().await {
-                Ok(status) if status.accepted >= min_shares => return Ok(status),
+                Ok(status) if status.accepted_shares >= min_shares => return Ok(status),
                 Ok(_) => tokio::time::sleep(Duration::from_millis(100)).await,
                 Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
             }

@@ -21,7 +21,7 @@ mod tests {
 
     #[test]
     fn conversion() {
-        let work = TotalWork::from_difficulty(86_400.0 * 1e15 / HASHES_PER_DIFF_1 as f64);
+        let work = TotalWork(86_400.0 * 1e15 / HASHES_PER_DIFF_1 as f64);
         let phd = PhDays::from(work);
         assert!((phd.0 - 1.0).abs() < 1e-9);
     }
