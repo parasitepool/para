@@ -111,8 +111,8 @@ async function refresh() {
     set('hashrate_1m', proxyData.hashrate_1m, formatHashrate);
     set('sps_1m', proxyData.sps_1m, formatTruncated);
     set('uptime_secs', proxyData.uptime_secs);
-    set('accepted', proxyData.accepted);
-    set('rejected', proxyData.rejected);
+    set('accepted', proxyData.accepted_shares);
+    set('rejected', proxyData.rejected_shares);
     set('last_share', proxyData.last_share);
     copyable('best_ever', best_ever, proxyData.best_ever);
 

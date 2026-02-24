@@ -58,8 +58,8 @@ async function refresh() {
     set('hashrate_1m', user.hashrate_1m, formatHashrate);
     set('sps_1m', user.sps_1m, formatTruncated);
     set('authorized', new Date(user.authorized * 1000).toLocaleString());
-    set('accepted', user.accepted);
-    set('rejected', user.rejected);
+    set('accepted', user.accepted_shares);
+    set('rejected', user.rejected_shares);
     set('last_share', user.last_share);
     copyable('best_ever', best_ever, user.best_ever);
 

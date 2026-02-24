@@ -2,11 +2,12 @@ use super::*;
 
 #[derive(Clone)]
 pub(crate) struct Stats {
-    pub(crate) accepted: u64,
-    pub(crate) rejected: u64,
+    pub(crate) accepted_shares: u64,
+    pub(crate) rejected_shares: u64,
+    pub(crate) accepted_work: TotalWork,
+    pub(crate) rejected_work: TotalWork,
     pub(crate) last_share: Option<Instant>,
     pub(crate) best_ever: Option<Difficulty>,
-    pub(crate) total_work: TotalWork,
     pub(crate) dsps_1m: DecayingAverage,
     pub(crate) dsps_5m: DecayingAverage,
     pub(crate) dsps_15m: DecayingAverage,
@@ -23,11 +24,12 @@ pub(crate) struct Stats {
 impl Stats {
     pub(crate) fn new() -> Self {
         Self {
-            accepted: 0,
-            rejected: 0,
+            accepted_shares: 0,
+            rejected_shares: 0,
+            accepted_work: TotalWork::ZERO,
+            rejected_work: TotalWork::ZERO,
             last_share: None,
             best_ever: None,
-            total_work: TotalWork::ZERO,
             dsps_1m: DecayingAverage::new(Duration::from_mins(1)),
             dsps_5m: DecayingAverage::new(Duration::from_mins(5)),
             dsps_15m: DecayingAverage::new(Duration::from_mins(15)),
@@ -43,9 +45,10 @@ impl Stats {
     }
 
     pub(crate) fn absorb(&mut self, other: Stats, now: Instant) {
-        self.accepted += other.accepted;
-        self.rejected += other.rejected;
-        self.total_work += other.total_work;
+        self.accepted_shares += other.accepted_shares;
+        self.rejected_shares += other.rejected_shares;
+        self.accepted_work += other.accepted_work;
+        self.rejected_work += other.rejected_work;
         self.dsps_1m.absorb(other.dsps_1m, now);
         self.dsps_5m.absorb(other.dsps_5m, now);
         self.dsps_15m.absorb(other.dsps_15m, now);

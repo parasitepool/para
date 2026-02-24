@@ -63,7 +63,7 @@ impl Session {
         let diff = pool_diff.as_f64();
         let mut stats = self.stats.lock();
 
-        stats.accepted += 1;
+        stats.accepted_shares += 1;
         stats.dsps_1m.record(diff, now);
         stats.dsps_5m.record(diff, now);
         stats.dsps_15m.record(diff, now);
@@ -75,7 +75,7 @@ impl Session {
         stats.sps_5m.record(1.0, now);
         stats.sps_15m.record(1.0, now);
         stats.sps_1hr.record(1.0, now);
-        stats.total_work += TotalWork::from_difficulty(diff);
+        stats.accepted_work += TotalWork::from_difficulty(diff);
         stats.last_share = Some(now);
 
         if stats.best_ever.is_none_or(|best| share_diff > best) {
@@ -83,8 +83,10 @@ impl Session {
         }
     }
 
-    pub(crate) fn record_rejected(&self) {
-        self.stats.lock().rejected += 1;
+    pub(crate) fn record_rejected(&self, pool_diff: Difficulty) {
+        let mut stats = self.stats.lock();
+        stats.rejected_shares += 1;
+        stats.rejected_work += TotalWork::from_difficulty(pool_diff.as_f64());
     }
 
     pub(crate) fn hashrate_1m(&self) -> HashRate {
@@ -131,12 +133,12 @@ impl Session {
         self.stats.lock().sps_1hr.value_at(Instant::now())
     }
 
-    pub(crate) fn accepted(&self) -> u64 {
-        self.stats.lock().accepted
+    pub(crate) fn accepted_shares(&self) -> u64 {
+        self.stats.lock().accepted_shares
     }
 
-    pub(crate) fn rejected(&self) -> u64 {
-        self.stats.lock().rejected
+    pub(crate) fn rejected_shares(&self) -> u64 {
+        self.stats.lock().rejected_shares
     }
 
     pub(crate) fn best_ever(&self) -> Option<Difficulty> {
@@ -147,7 +149,11 @@ impl Session {
         self.stats.lock().last_share
     }
 
-    pub(crate) fn total_work(&self) -> TotalWork {
-        self.stats.lock().total_work
+    pub(crate) fn accepted_work(&self) -> TotalWork {
+        self.stats.lock().accepted_work
+    }
+
+    pub(crate) fn rejected_work(&self) -> TotalWork {
+        self.stats.lock().rejected_work
     }
 }

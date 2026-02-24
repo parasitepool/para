@@ -101,12 +101,18 @@ impl User {
         self.workers.iter().map(|worker| worker.sps_1hr()).sum()
     }
 
-    pub(crate) fn accepted(&self) -> u64 {
-        self.workers.iter().map(|worker| worker.accepted()).sum()
+    pub(crate) fn accepted_shares(&self) -> u64 {
+        self.workers
+            .iter()
+            .map(|worker| worker.accepted_shares())
+            .sum()
     }
 
-    pub(crate) fn rejected(&self) -> u64 {
-        self.workers.iter().map(|worker| worker.rejected()).sum()
+    pub(crate) fn rejected_shares(&self) -> u64 {
+        self.workers
+            .iter()
+            .map(|worker| worker.rejected_shares())
+            .sum()
     }
 
     pub(crate) fn best_ever(&self) -> Option<Difficulty> {
@@ -116,11 +122,22 @@ impl User {
             .max()
     }
 
-    pub(crate) fn total_work(&self) -> TotalWork {
+    pub(crate) fn accepted_work(&self) -> TotalWork {
         self.workers
             .iter()
-            .map(|worker| worker.total_work())
+            .map(|worker| worker.accepted_work())
             .fold(TotalWork::ZERO, |acc, w| acc + w)
+    }
+
+    pub(crate) fn rejected_work(&self) -> TotalWork {
+        self.workers
+            .iter()
+            .map(|worker| worker.rejected_work())
+            .fold(TotalWork::ZERO, |acc, w| acc + w)
+    }
+
+    pub(crate) fn total_work(&self) -> TotalWork {
+        self.accepted_work() + self.rejected_work()
     }
 
     pub(crate) fn last_share(&self) -> Option<Instant> {

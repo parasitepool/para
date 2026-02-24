@@ -73,8 +73,8 @@ async function refresh() {
     set('sps_1m', poolData.sps_1m, formatTruncated);
     set('uptime_secs', poolData.uptime_secs);
     set('blocks', poolData.blocks);
-    set('accepted', poolData.accepted);
-    set('rejected', poolData.rejected);
+    set('accepted', poolData.accepted_shares);
+    set('rejected', poolData.rejected_shares);
     set('last_share', poolData.last_share);
     copyable('best_ever', best_ever, poolData.best_ever);
 

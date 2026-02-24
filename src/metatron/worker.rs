@@ -122,20 +122,20 @@ impl Worker {
             + self.lifetime.lock().sps_1hr.value_at(Instant::now())
     }
 
-    pub(crate) fn accepted(&self) -> u64 {
+    pub(crate) fn accepted_shares(&self) -> u64 {
         self.sessions
             .iter()
-            .map(|session| session.accepted())
+            .map(|session| session.accepted_shares())
             .sum::<u64>()
-            + self.lifetime.lock().accepted
+            + self.lifetime.lock().accepted_shares
     }
 
-    pub(crate) fn rejected(&self) -> u64 {
+    pub(crate) fn rejected_shares(&self) -> u64 {
         self.sessions
             .iter()
-            .map(|session| session.rejected())
+            .map(|session| session.rejected_shares())
             .sum::<u64>()
-            + self.lifetime.lock().rejected
+            + self.lifetime.lock().rejected_shares
     }
 
     pub(crate) fn best_ever(&self) -> Option<Difficulty> {
@@ -154,11 +154,23 @@ impl Worker {
             .max()
     }
 
-    pub(crate) fn total_work(&self) -> TotalWork {
+    pub(crate) fn accepted_work(&self) -> TotalWork {
         self.sessions
             .iter()
-            .map(|session| session.total_work())
+            .map(|session| session.accepted_work())
             .fold(TotalWork::ZERO, |acc, w| acc + w)
-            + self.lifetime.lock().total_work
+            + self.lifetime.lock().accepted_work
+    }
+
+    pub(crate) fn rejected_work(&self) -> TotalWork {
+        self.sessions
+            .iter()
+            .map(|session| session.rejected_work())
+            .fold(TotalWork::ZERO, |acc, w| acc + w)
+            + self.lifetime.lock().rejected_work
+    }
+
+    pub(crate) fn total_work(&self) -> TotalWork {
+        self.accepted_work() + self.rejected_work()
     }
 }

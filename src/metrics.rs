@@ -13,8 +13,8 @@ impl StatusLine for Metrics {
             self.metatron.hashrate_1m(),
             self.metatron.total_sessions(),
             self.upstream.enonce1(),
-            self.metatron.accepted(),
-            self.metatron.rejected(),
+            self.metatron.accepted_shares(),
+            self.metatron.rejected_shares(),
         )
     }
 }

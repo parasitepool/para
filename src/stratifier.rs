@@ -675,7 +675,7 @@ impl<W: Workbase> Stratifier<W> {
                 StratumError::WorkerMismatch
             ));
 
-            session.record_rejected();
+            session.record_rejected(self.vardiff.current_diff());
 
             return Ok(self.bouncer.reject());
         }
@@ -696,10 +696,12 @@ impl<W: Workbase> Stratifier<W> {
                 StratumError::Stale
             ));
 
-            session.record_rejected();
+            session.record_rejected(self.vardiff.current_diff());
 
             return Ok(self.bouncer.reject());
         };
+
+        let pool_diff = self.vardiff.pool_diff(submit.job_id);
 
         let expected_extranonce2_size = self.metatron.enonce2_size();
 
@@ -729,7 +731,7 @@ impl<W: Workbase> Stratifier<W> {
                 StratumError::InvalidNonce2Length
             ));
 
-            session.record_rejected();
+            session.record_rejected(pool_diff);
 
             return Ok(self.bouncer.reject());
         }
@@ -763,7 +765,7 @@ impl<W: Workbase> Stratifier<W> {
                 StratumError::NtimeOutOfRange
             ));
 
-            session.record_rejected();
+            session.record_rejected(pool_diff);
 
             return Ok(self.bouncer.reject());
         }
@@ -790,7 +792,7 @@ impl<W: Workbase> Stratifier<W> {
                         StratumError::InvalidVersionMask
                     ));
 
-                    session.record_rejected();
+                    session.record_rejected(pool_diff);
 
                     return Ok(self.bouncer.reject());
                 };
@@ -823,7 +825,7 @@ impl<W: Workbase> Stratifier<W> {
                         StratumError::InvalidVersionMask
                     ));
 
-                    session.record_rejected();
+                    session.record_rejected(pool_diff);
 
                     return Ok(self.bouncer.reject());
                 }
@@ -880,7 +882,7 @@ impl<W: Workbase> Stratifier<W> {
                 StratumError::Duplicate
             ));
 
-            session.record_rejected();
+            session.record_rejected(pool_diff);
 
             return Ok(self.bouncer.reject());
         }
@@ -931,8 +933,6 @@ impl<W: Workbase> Stratifier<W> {
             }
         }
 
-        let pool_diff = self.vardiff.pool_diff(submit.job_id);
-
         if pool_diff != self.vardiff.current_diff() {
             debug!(
                 "Using stale pool_diff={} (current={}) for job_id={} from {}",
@@ -964,7 +964,7 @@ impl<W: Workbase> Stratifier<W> {
                 StratumError::AboveTarget
             ));
 
-            session.record_rejected();
+            session.record_rejected(pool_diff);
 
             return Ok(self.bouncer.reject());
         }
