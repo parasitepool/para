@@ -88,7 +88,12 @@ impl Controller {
                     controller.notify_tx.send_replace(None);
                     controller.hashers.abort_all();
                     while controller.hashers.join_next().await.is_some() {}
-                    controller.client.disconnect().await;
+                    tokio::select! {
+                        _ = controller.client.disconnect() => {}
+                        _ = cancel_token.cancelled() => {
+                            return Ok(controller.shares);
+                        }
+                    }
 
                     let mut max_backoff_attempts = 0u32;
 
@@ -113,11 +118,18 @@ impl Controller {
                             }
                         }
 
-                        match controller.connect(disable_version_rolling).await {
-                            Ok(new_events) => break new_events,
-                            Err(err) => {
-                                warn!("Reconnect failed: {err}");
-                                controller.client.disconnect().await;
+                        tokio::select! {
+                            result = controller.connect(disable_version_rolling) => {
+                                match result {
+                                    Ok(new_events) => break new_events,
+                                    Err(err) => {
+                                        warn!("Reconnect failed: {err}");
+                                        controller.client.disconnect().await;
+                                    }
+                                }
+                            }
+                            _ = cancel_token.cancelled() => {
+                                return Ok(controller.shares);
                             }
                         }
                     };

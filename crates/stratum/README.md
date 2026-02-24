@@ -30,7 +30,7 @@ Stratum Messages
 | `mining.submit`             | Request      | ✅     |
 | `mining.notify`             | Notification | ✅     |
 | `mining.set_difficulty`     | Notification | ✅     |
-| `client.reconnect`         | Notification | ✅     |
+| `client.reconnect`          | Notification | ✅     |
 
 Types
 -----
