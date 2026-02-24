@@ -222,7 +222,7 @@ impl Controller {
                             self.handle_notify(notify).await?;
                         }
                         Ok(stratum::Event::SetDifficulty(difficulty)) => {
-                            self.handle_set_difficulty(difficulty).await;
+                            self.handle_set_difficulty(difficulty);
                         }
                         Ok(stratum::Event::Reconnect(_)) => {
                             info!("Received client.reconnect from server");
@@ -399,7 +399,7 @@ impl Controller {
         Ok(())
     }
 
-    async fn handle_set_difficulty(&mut self, difficulty: Difficulty) {
+    fn handle_set_difficulty(&mut self, difficulty: Difficulty) {
         *self.pool_difficulty.lock() = difficulty;
         info!("Updated pool difficulty: {difficulty}");
         info!(
