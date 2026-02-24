@@ -138,77 +138,13 @@ impl Metatron {
         self.blocks.fetch_add(1, Ordering::Relaxed);
     }
 
-    pub(crate) fn hashrate_1m(&self) -> HashRate {
-        self.users
-            .iter()
-            .map(|user| user.hashrate_1m())
-            .fold(HashRate::ZERO, |acc, r| acc + r)
-    }
-
-    pub(crate) fn hashrate_5m(&self) -> HashRate {
-        self.users
-            .iter()
-            .map(|user| user.hashrate_5m())
-            .fold(HashRate::ZERO, |acc, r| acc + r)
-    }
-
-    pub(crate) fn hashrate_15m(&self) -> HashRate {
-        self.users
-            .iter()
-            .map(|user| user.hashrate_15m())
-            .fold(HashRate::ZERO, |acc, r| acc + r)
-    }
-
-    pub(crate) fn hashrate_1hr(&self) -> HashRate {
-        self.users
-            .iter()
-            .map(|user| user.hashrate_1hr())
-            .fold(HashRate::ZERO, |acc, r| acc + r)
-    }
-
-    pub(crate) fn hashrate_6hr(&self) -> HashRate {
-        self.users
-            .iter()
-            .map(|user| user.hashrate_6hr())
-            .fold(HashRate::ZERO, |acc, r| acc + r)
-    }
-
-    pub(crate) fn hashrate_1d(&self) -> HashRate {
-        self.users
-            .iter()
-            .map(|user| user.hashrate_1d())
-            .fold(HashRate::ZERO, |acc, r| acc + r)
-    }
-
-    pub(crate) fn hashrate_7d(&self) -> HashRate {
-        self.users
-            .iter()
-            .map(|user| user.hashrate_7d())
-            .fold(HashRate::ZERO, |acc, r| acc + r)
-    }
-
-    pub(crate) fn sps_1m(&self) -> f64 {
-        self.users.iter().map(|user| user.sps_1m()).sum()
-    }
-
-    pub(crate) fn sps_5m(&self) -> f64 {
-        self.users.iter().map(|user| user.sps_5m()).sum()
-    }
-
-    pub(crate) fn sps_15m(&self) -> f64 {
-        self.users.iter().map(|user| user.sps_15m()).sum()
-    }
-
-    pub(crate) fn sps_1hr(&self) -> f64 {
-        self.users.iter().map(|user| user.sps_1hr()).sum()
-    }
-
-    pub(crate) fn accepted_shares(&self) -> u64 {
-        self.users.iter().map(|user| user.accepted_shares()).sum()
-    }
-
-    pub(crate) fn rejected_shares(&self) -> u64 {
-        self.users.iter().map(|user| user.rejected_shares()).sum()
+    pub(crate) fn snapshot(&self) -> Stats {
+        let now = Instant::now();
+        let mut combined = Stats::new();
+        for user in self.users.iter() {
+            combined.absorb(user.snapshot(), now);
+        }
+        combined
     }
 
     pub(crate) fn total_blocks(&self) -> u64 {
@@ -231,7 +167,8 @@ impl Metatron {
                 user.workers()
                     .filter(|worker| {
                         worker
-                            .last_share()
+                            .snapshot()
+                            .last_share
                             .is_none_or(|last| now.duration_since(last).as_secs() > 60)
                     })
                     .count()
@@ -247,28 +184,6 @@ impl Metatron {
         self.users.iter().map(|user| user.worker_count()).sum()
     }
 
-    pub(crate) fn accepted_work(&self) -> TotalWork {
-        self.users
-            .iter()
-            .map(|user| user.accepted_work())
-            .fold(TotalWork::ZERO, |acc, w| acc + w)
-    }
-
-    pub(crate) fn rejected_work(&self) -> TotalWork {
-        self.users
-            .iter()
-            .map(|user| user.rejected_work())
-            .fold(TotalWork::ZERO, |acc, w| acc + w)
-    }
-
-    pub(crate) fn last_share(&self) -> Option<Instant> {
-        self.users.iter().filter_map(|user| user.last_share()).max()
-    }
-
-    pub(crate) fn best_ever(&self) -> Option<Difficulty> {
-        self.users.iter().filter_map(|user| user.best_ever()).max()
-    }
-
     pub(crate) fn uptime(&self) -> Duration {
         self.started.elapsed()
     }
@@ -280,15 +195,17 @@ impl Metatron {
 
 impl StatusLine for Metatron {
     fn status_line(&self) -> String {
+        let now = Instant::now();
+        let stats = self.snapshot();
         format!(
             "sps={:.2}  hashrate={:.2}  sessions={}  users={}  workers={}  accepted={}  rejected={}  blocks={}  uptime={}s",
-            self.sps_1m(),
-            self.hashrate_1m(),
+            stats.sps_1m(now),
+            stats.hashrate_1m(now),
             self.total_sessions(),
             self.total_users(),
             self.total_workers(),
-            self.accepted_shares(),
-            self.rejected_shares(),
+            stats.accepted_shares,
+            stats.rejected_shares,
             self.total_blocks(),
             self.uptime().as_secs()
         )
@@ -325,9 +242,10 @@ mod tests {
     #[test]
     fn new_metatron_starts_at_zero() {
         let metatron = Metatron::new(pool_extranonces(), String::new());
+        let stats = metatron.snapshot();
         assert_eq!(metatron.total_sessions(), 0);
-        assert_eq!(metatron.accepted_shares(), 0);
-        assert_eq!(metatron.rejected_shares(), 0);
+        assert_eq!(stats.accepted_shares, 0);
+        assert_eq!(stats.rejected_shares, 0);
         assert_eq!(metatron.total_blocks(), 0);
         assert_eq!(metatron.total_users(), 0);
         assert_eq!(metatron.total_workers(), 0);
@@ -371,8 +289,9 @@ mod tests {
         session.record_accepted(Difficulty::from(1000.0), Difficulty::from(1500.0));
         session.record_rejected(Difficulty::from(500.0));
 
-        assert_eq!(metatron.accepted_shares(), 2);
-        assert_eq!(metatron.rejected_shares(), 1);
+        let stats = metatron.snapshot();
+        assert_eq!(stats.accepted_shares, 2);
+        assert_eq!(stats.rejected_shares, 1);
     }
 
     #[test]
@@ -449,18 +368,21 @@ mod tests {
         let pool_diff = Difficulty::from(100.0);
         let expected = TotalWork::from_difficulty(pool_diff.as_f64());
 
-        assert_eq!(metatron.accepted_work(), TotalWork::ZERO);
+        assert_eq!(metatron.snapshot().accepted_work, TotalWork::ZERO);
 
         let foo_session = metatron.new_session(test_auth("deadbeef", "foo"));
         foo_session.record_accepted(pool_diff, Difficulty::from(200.0));
         foo_session.record_accepted(pool_diff, Difficulty::from(50.0));
 
-        assert_eq!(metatron.accepted_work(), expected + expected);
+        assert_eq!(metatron.snapshot().accepted_work, expected + expected);
 
         let bar_session = metatron.new_session(test_auth("cafebabe", "bar"));
         bar_session.record_accepted(pool_diff, Difficulty::from(400.0));
 
-        assert_eq!(metatron.accepted_work(), expected + expected + expected);
+        assert_eq!(
+            metatron.snapshot().accepted_work,
+            expected + expected + expected
+        );
     }
 
     #[test]
@@ -489,14 +411,15 @@ mod tests {
         session.record_rejected(pool_diff);
         metatron.retire_session(session);
 
+        let stats = metatron.snapshot();
         assert_eq!(metatron.total_sessions(), 0);
-        assert_eq!(metatron.accepted_shares(), 2);
-        assert_eq!(metatron.rejected_shares(), 1);
-        assert_eq!(metatron.best_ever(), Some(Difficulty::from(200.0)));
-        assert!(metatron.last_share().is_some());
+        assert_eq!(stats.accepted_shares, 2);
+        assert_eq!(stats.rejected_shares, 1);
+        assert_eq!(stats.best_ever, Some(Difficulty::from(200.0)));
+        assert!(stats.last_share.is_some());
         let expected = TotalWork::from_difficulty(pool_diff.as_f64());
-        assert_eq!(metatron.accepted_work(), expected + expected);
-        assert_eq!(metatron.rejected_work(), expected);
+        assert_eq!(stats.accepted_work, expected + expected);
+        assert_eq!(stats.rejected_work, expected);
     }
 
     #[test]
@@ -511,10 +434,11 @@ mod tests {
         metatron.retire_session(s1);
         metatron.retire_session(s2);
 
-        assert_eq!(metatron.accepted_shares(), 2);
-        assert_eq!(metatron.best_ever(), Some(Difficulty::from(300.0)));
+        let stats = metatron.snapshot();
+        assert_eq!(stats.accepted_shares, 2);
+        assert_eq!(stats.best_ever, Some(Difficulty::from(300.0)));
         let expected = TotalWork::from_difficulty(pool_diff.as_f64());
-        assert_eq!(metatron.accepted_work(), expected + expected);
+        assert_eq!(stats.accepted_work, expected + expected);
     }
 
     #[test]
@@ -528,9 +452,10 @@ mod tests {
         s2.record_accepted(pool_diff, Difficulty::from(200.0));
         metatron.retire_session(s1);
 
-        assert_eq!(metatron.accepted_shares(), 2);
-        assert_eq!(metatron.best_ever(), Some(Difficulty::from(200.0)));
+        let stats = metatron.snapshot();
+        assert_eq!(stats.accepted_shares, 2);
+        assert_eq!(stats.best_ever, Some(Difficulty::from(200.0)));
         let expected = TotalWork::from_difficulty(pool_diff.as_f64());
-        assert_eq!(metatron.accepted_work(), expected + expected);
+        assert_eq!(stats.accepted_work, expected + expected);
     }
 }

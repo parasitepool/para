@@ -75,4 +75,48 @@ impl Stats {
             self.last_share = other.last_share;
         }
     }
+
+    pub(crate) fn hashrate_1m(&self, now: Instant) -> HashRate {
+        HashRate::from_dsps(self.dsps_1m.value_at(now))
+    }
+
+    pub(crate) fn hashrate_5m(&self, now: Instant) -> HashRate {
+        HashRate::from_dsps(self.dsps_5m.value_at(now))
+    }
+
+    pub(crate) fn hashrate_15m(&self, now: Instant) -> HashRate {
+        HashRate::from_dsps(self.dsps_15m.value_at(now))
+    }
+
+    pub(crate) fn hashrate_1hr(&self, now: Instant) -> HashRate {
+        HashRate::from_dsps(self.dsps_1hr.value_at(now))
+    }
+
+    pub(crate) fn hashrate_6hr(&self, now: Instant) -> HashRate {
+        HashRate::from_dsps(self.dsps_6hr.value_at(now))
+    }
+
+    pub(crate) fn hashrate_1d(&self, now: Instant) -> HashRate {
+        HashRate::from_dsps(self.dsps_1d.value_at(now))
+    }
+
+    pub(crate) fn hashrate_7d(&self, now: Instant) -> HashRate {
+        HashRate::from_dsps(self.dsps_7d.value_at(now))
+    }
+
+    pub(crate) fn sps_1m(&self, now: Instant) -> f64 {
+        self.sps_1m.value_at(now)
+    }
+
+    pub(crate) fn sps_5m(&self, now: Instant) -> f64 {
+        self.sps_5m.value_at(now)
+    }
+
+    pub(crate) fn sps_15m(&self, now: Instant) -> f64 {
+        self.sps_15m.value_at(now)
+    }
+
+    pub(crate) fn sps_1hr(&self, now: Instant) -> f64 {
+        self.sps_1hr.value_at(now)
+    }
 }
