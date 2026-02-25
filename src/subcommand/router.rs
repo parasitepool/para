@@ -156,6 +156,7 @@ impl Router {
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn assign_slot(
     slots: &[Arc<UpstreamSlot>],
     idx: usize,
