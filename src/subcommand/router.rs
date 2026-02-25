@@ -1,4 +1,4 @@
-use {super::*, crate::event_sink::build_event_sink, tokio::sync::RwLock as TokioRwLock};
+use {super::*, crate::event_sink::build_event_sink};
 
 #[derive(Parser, Debug)]
 pub(crate) struct Router {
@@ -9,7 +9,7 @@ pub(crate) struct Router {
 struct UpstreamSlot {
     target: UpstreamTarget,
     metatron: Arc<Metatron>,
-    state: TokioRwLock<Option<ActiveUpstream>>,
+    state: RwLock<Option<ActiveUpstream>>,
 }
 
 struct ActiveUpstream {
@@ -38,20 +38,6 @@ impl Router {
 
         info!("Router listening for downstream miners on {address}:{port}");
 
-        let high_diff_listener = if let Some(high_diff_port) = settings.high_diff_port() {
-            let listener = TcpListener::bind((address, high_diff_port))
-                .await
-                .with_context(|| {
-                    format!("failed to bind high diff listener to {address}:{high_diff_port}")
-                })?;
-
-            info!("High diff stratum server listening on {address}:{high_diff_port}");
-
-            Some(listener)
-        } else {
-            None
-        };
-
         let timeout = settings.timeout();
         let enonce1_extension_size = settings.enonce1_extension_size();
         let endpoint = format!("{}:{}", settings.address(), settings.port());
@@ -68,7 +54,7 @@ impl Router {
                 Arc::new(UpstreamSlot {
                     target: target.clone(),
                     metatron,
-                    state: TokioRwLock::new(None),
+                    state: RwLock::new(None),
                 })
             })
             .collect();
@@ -98,32 +84,18 @@ impl Router {
 
         let counter = AtomicU64::new(0);
 
+        let start_diff = settings.start_diff();
+
         loop {
-            let (stream, addr, start_diff) = tokio::select! {
+            let (stream, addr) = tokio::select! {
                 accept = listener.accept() => {
-                    let (stream, addr) = match accept {
+                    match accept {
                         Ok((stream, addr)) => (stream, addr),
                         Err(err) => {
                             error!("Accept error: {err}");
                             continue;
                         }
-                    };
-                    (stream, addr, settings.start_diff())
-                }
-                Some(accept) = async {
-                    match &high_diff_listener {
-                        Some(listener) => Some(listener.accept().await),
-                        None => None,
                     }
-                } => {
-                    let (stream, addr) = match accept {
-                        Ok((stream, addr)) => (stream, addr),
-                        Err(err) => {
-                            error!("High diff accept error: {err}");
-                            continue;
-                        }
-                    };
-                    (stream, addr, settings.high_diff_start())
                 }
                 _ = cancel_token.cancelled() => {
                     info!("Shutting down router");
@@ -135,7 +107,7 @@ impl Router {
 
             let idx = counter.fetch_add(1, Ordering::Relaxed) as usize;
 
-            let assigned = assign_slot(&slots, idx).await;
+            let assigned = assign_slot(&slots, idx);
 
             let Some((metatron, upstream, workbase_rx)) = assigned else {
                 info!("All upstreams disconnected, waiting for reconnect...");
@@ -148,7 +120,7 @@ impl Router {
                     }
                 }
 
-                let Some((metatron, upstream, workbase_rx)) = assign_slot(&slots, idx).await else {
+                let Some((metatron, upstream, workbase_rx)) = assign_slot(&slots, idx) else {
                     warn!("No upstream available after notify, dropping connection from {addr}");
                     continue;
                 };
@@ -184,13 +156,13 @@ impl Router {
     }
 }
 
-async fn assign_slot(
+fn assign_slot(
     slots: &[Arc<UpstreamSlot>],
     idx: usize,
 ) -> Option<(Arc<Metatron>, Arc<Upstream>, watch::Receiver<Arc<Notify>>)> {
     for i in 0..slots.len() {
         let slot = &slots[(idx + i) % slots.len()];
-        let state = slot.state.read().await;
+        let state = slot.state.read();
         if let Some(active) = &*state {
             return Some((
                 slot.metatron.clone(),
@@ -291,7 +263,7 @@ async fn slot_connect_loop(
                         slot.metatron.update_extranonces(extranonces);
 
                         {
-                            let mut state = slot.state.write().await;
+                            let mut state = slot.state.write();
                             *state = Some(ActiveUpstream {
                                 upstream: upstream.clone(),
                                 workbase_rx,
@@ -306,7 +278,7 @@ async fn slot_connect_loop(
                         warn!("Upstream {} disconnected", slot.target);
 
                         {
-                            let mut state = slot.state.write().await;
+                            let mut state = slot.state.write();
                             *state = None;
                         }
 

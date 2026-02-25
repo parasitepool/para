@@ -91,20 +91,6 @@ impl Proxy {
 
         info!("Stratum server listening for downstream miners on {address}:{port}");
 
-        let high_diff_listener = if let Some(high_diff_port) = settings.high_diff_port() {
-            let listener = TcpListener::bind((address, high_diff_port))
-                .await
-                .with_context(|| {
-                    format!("failed to bind high diff listener to {address}:{high_diff_port}")
-                })?;
-
-            info!("High diff stratum server listening on {address}:{high_diff_port}");
-
-            Some(listener)
-        } else {
-            None
-        };
-
         let mut backoff = Duration::from_secs(1);
 
         let Some((mut upstream, mut workbase_rx)) =
@@ -148,31 +134,15 @@ impl Proxy {
 
         loop {
             loop {
-                let (stream, addr, start_diff) = tokio::select! {
+                let (stream, addr) = tokio::select! {
                     accept = listener.accept() => {
-                        let (stream, addr) = match accept {
+                        match accept {
                             Ok((stream, addr)) => (stream, addr),
                             Err(err) => {
                                 error!("Accept error: {err}");
                                 continue;
                             }
-                        };
-                        (stream, addr, settings.start_diff())
-                    }
-                    Some(accept) = async {
-                        match &high_diff_listener {
-                            Some(listener) => Some(listener.accept().await),
-                            None => None,
                         }
-                    } => {
-                        let (stream, addr) = match accept {
-                            Ok((stream, addr)) => (stream, addr),
-                            Err(err) => {
-                                error!("High diff accept error: {err}");
-                                continue;
-                            }
-                        };
-                        (stream, addr, settings.high_diff_start())
                     }
                     _ = upstream.disconnected() => {
                         warn!("Upstream connection lost, reconnecting...");
@@ -194,6 +164,7 @@ impl Proxy {
                 let upstream = upstream.clone();
                 let conn_cancel_token = cancel_token.child_token();
                 let event_tx = event_tx.clone();
+                let start_diff = settings.start_diff();
 
                 tasks.spawn(async move {
                     let mut stratifier: Stratifier<Notify> = Stratifier::new(
