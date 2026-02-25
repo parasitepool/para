@@ -49,8 +49,11 @@ impl Router {
             .map(|target| {
                 let extranonces =
                     Extranonces::Pool(PoolExtranonces::new(ENONCE1_SIZE, MAX_ENONCE_SIZE).unwrap());
+
                 let metatron = Arc::new(Metatron::new(extranonces, endpoint.clone()));
+
                 metatron.clone().spawn(cancel_token.clone(), &mut tasks);
+
                 Arc::new(UpstreamSlot {
                     target: target.clone(),
                     metatron,
