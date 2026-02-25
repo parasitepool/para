@@ -76,13 +76,25 @@ proxy:
     --bitcoin-rpc-port 38332 \
     --address 0.0.0.0 \
     --port 42070 \
-    --username tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.proxy \
-    --password x \
+    --upstream tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.proxy:x@127.0.0.1:42069 \
     --http-port 8081 \
     --start-diff 0.00001 \
     --vardiff-window 10 \
-    --vardiff-period 1 \
-    --upstream 127.0.0.1:42069 
+    --vardiff-period 1
+
+router:
+  cargo run --features reload -- \
+    router \
+    --chain signet \
+    --bitcoin-rpc-username satoshi \
+    --bitcoin-rpc-password nakamoto \
+    --bitcoin-rpc-port 38332 \
+    --address 0.0.0.0 \
+    --port 42070 \
+    --upstream tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.router:x@127.0.0.1:42069 \
+    --start-diff 0.00001 \
+    --vardiff-window 10 \
+    --vardiff-period 1
 
 # Mine to anyone-can-spend P2WSH(OP_TRUE)
 miner port='42069': 
@@ -115,8 +127,7 @@ proxy-mainnet:
     --port 42070 \
     --start-diff 0.001 \
     --http-port 8081 \
-    --username bc1qyr294wemhvcp69dheccp2nat2yemtxfd6sc96e.proxy \
-    --upstream parasite.wtf:42069 
+    --upstream bc1qyr294wemhvcp69dheccp2nat2yemtxfd6sc96e.proxy@parasite.wtf:42069
 
 miner-mainnet stratum_endpoint='127.0.0.1:42069': 
   cargo run --release -- miner \

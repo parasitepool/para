@@ -21,8 +21,7 @@ fn build_proxy_command(
     CommandBuilder::new(format!(
         "proxy \
             --chain signet \
-            --upstream {upstream} \
-            --username {username} \
+            --upstream {username}@{upstream} \
             --address 127.0.0.1 \
             --port {proxy_port} \
             --http-port {http_port} \

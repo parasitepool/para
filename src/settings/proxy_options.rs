@@ -5,14 +5,8 @@ pub(crate) struct ProxyOptions {
     #[command(flatten)]
     pub(crate) common: CommonOptions,
 
-    #[arg(long, help = "Upstream stratum endpoint <HOST:PORT>.")]
-    pub(crate) upstream: String,
-
-    #[arg(long, help = "Username for upstream authentication.")]
-    pub(crate) username: Username,
-
-    #[arg(long, help = "Password for upstream authentication.")]
-    pub(crate) password: Option<String>,
+    #[arg(long, help = "Upstream <USER[:PASS]@HOST:PORT>.")]
+    pub(crate) upstream: UpstreamTarget,
 
     #[arg(
         long,
