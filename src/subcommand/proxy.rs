@@ -10,7 +10,10 @@ pub(crate) struct Proxy {
 }
 
 async fn connect_upstream(
-    settings: &Arc<Settings>,
+    endpoint: &str,
+    username: &Username,
+    password: Option<String>,
+    timeout: Duration,
     cancel_token: &CancellationToken,
     tasks: &mut JoinSet<()>,
     backoff: &mut Duration,
@@ -18,14 +21,7 @@ async fn connect_upstream(
     let mut max_backoff_attempts = 0u32;
 
     loop {
-        match Upstream::connect(
-            settings.upstream().ok()?,
-            settings.upstream_username().ok()?.clone(),
-            settings.upstream_password(),
-            settings.timeout(),
-        )
-        .await
-        {
+        match Upstream::connect(endpoint, username.clone(), password.clone(), timeout).await {
             Ok((upstream, events)) => {
                 let upstream = Arc::new(upstream);
                 match upstream
@@ -93,8 +89,21 @@ impl Proxy {
 
         let mut backoff = Duration::from_secs(1);
 
-        let Some((mut upstream, mut workbase_rx)) =
-            connect_upstream(&settings, &cancel_token, &mut tasks, &mut backoff).await
+        let endpoint = settings.upstream()?;
+        let username = settings.upstream_username()?;
+        let password = settings.upstream_password();
+        let timeout = settings.timeout();
+
+        let Some((mut upstream, mut workbase_rx)) = connect_upstream(
+            endpoint,
+            username,
+            password.clone(),
+            timeout,
+            &cancel_token,
+            &mut tasks,
+            &mut backoff,
+        )
+        .await
         else {
             return Ok(());
         };
@@ -185,8 +194,16 @@ impl Proxy {
                 });
             }
 
-            let Some((new_upstream, new_workbase_rx)) =
-                connect_upstream(&settings, &cancel_token, &mut tasks, &mut backoff).await
+            let Some((new_upstream, new_workbase_rx)) = connect_upstream(
+                endpoint,
+                username,
+                password.clone(),
+                timeout,
+                &cancel_token,
+                &mut tasks,
+                &mut backoff,
+            )
+            .await
             else {
                 break;
             };
