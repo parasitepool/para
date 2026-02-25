@@ -4,12 +4,13 @@ use {
     http_server::{
         self,
         error::{OptionExt, ServerResult},
-        templates::{DashboardHtml, PoolHtml, ProxyHtml, UserHtml, UsersHtml},
+        templates::{DashboardHtml, PoolHtml, ProxyHtml, RouterHtml, UserHtml, UsersHtml},
     },
 };
 
 pub mod pool;
 pub mod proxy;
+pub mod router;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolStatus {
@@ -129,6 +130,30 @@ pub struct WorkerDetail {
     pub accepted_work: TotalWork,
     pub rejected_work: TotalWork,
     pub ph_days: PhDays,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RouterStatus {
+    pub upstreams: Vec<UpstreamStatus>,
+    pub total_sessions: usize,
+    pub total_hashrate_1m: HashRate,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpstreamStatus {
+    pub index: usize,
+    pub endpoint: String,
+    pub username: String,
+    pub connected: bool,
+    pub hashrate_1m: HashRate,
+    pub sessions: Vec<UpstreamSessionStatus>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpstreamSessionStatus {
+    pub id: u64,
+    pub worker_name: String,
+    pub hashrate_1m: HashRate,
 }
 
 pub type BitcoinStatus = http_server::BitcoinStatus;

@@ -1,4 +1,7 @@
-use {super::*, crate::event_sink::build_event_sink};
+use {
+    super::*,
+    crate::{api, http_server},
+};
 
 #[derive(Parser, Debug)]
 pub(crate) struct Router {
@@ -6,22 +9,56 @@ pub(crate) struct Router {
     pub(crate) options: RouterOptions,
 }
 
-struct UpstreamSlot {
-    target: UpstreamTarget,
-    metatron: Arc<Metatron>,
-    state: RwLock<Option<ActiveUpstream>>,
+pub(crate) struct UpstreamSlot {
+    pub(crate) target: UpstreamTarget,
+    pub(crate) metatron: Arc<Metatron>,
+    pub(crate) state: RwLock<Option<ActiveUpstream>>,
 }
 
-struct ActiveUpstream {
-    upstream: Arc<Upstream>,
+pub(crate) struct ActiveUpstream {
+    pub(crate) upstream: Arc<Upstream>,
     workbase_rx: watch::Receiver<Arc<Notify>>,
+}
+
+#[derive(Clone)]
+pub(crate) struct RouterSlots(pub(crate) Arc<Vec<Arc<UpstreamSlot>>>);
+
+impl StatusLine for RouterSlots {
+    fn status_line(&self) -> String {
+        let now = Instant::now();
+        let mut total_sessions = 0;
+        let mut total_hashrate = 0.0;
+        let mut connected = 0;
+
+        for slot in self.0.iter() {
+            let stats = slot.metatron.snapshot();
+            total_sessions += slot.metatron.total_sessions();
+            total_hashrate += stats.hashrate_1m(now).0;
+            if slot
+                .state
+                .read()
+                .as_ref()
+                .is_some_and(|active| active.upstream.is_connected())
+            {
+                connected += 1;
+            }
+        }
+
+        format!(
+            "upstreams={}/{}  sessions={}  hashrate={:.2}",
+            connected,
+            self.0.len(),
+            total_sessions,
+            HashRate(total_hashrate),
+        )
+    }
 }
 
 impl Router {
     pub(crate) async fn run(
         &self,
         cancel_token: CancellationToken,
-        _logs: Arc<logs::Logs>,
+        logs: Arc<logs::Logs>,
     ) -> Result {
         let mut tasks = JoinSet::new();
 
@@ -29,6 +66,8 @@ impl Router {
             Settings::from_router_options(self.options.clone())
                 .context("failed to create settings")?,
         );
+
+        let bitcoin_client = Arc::new(settings.bitcoin_rpc_client().await?);
 
         let address = settings.address();
         let port = settings.port();
@@ -62,9 +101,26 @@ impl Router {
             })
             .collect();
 
+        let router_slots = RouterSlots(Arc::new(slots));
+
+        http_server::spawn(
+            &settings,
+            api::router::router(router_slots.clone(), bitcoin_client, settings.chain(), logs),
+            cancel_token.clone(),
+            &mut tasks,
+        )?;
+
+        if !integration_test() && !logs_enabled() {
+            spawn_throbber(
+                Arc::new(router_slots.clone()),
+                cancel_token.clone(),
+                &mut tasks,
+            );
+        }
+
         let slot_connected = Arc::new(tokio::sync::Notify::new());
 
-        for slot in &slots {
+        for slot in router_slots.0.iter() {
             let slot = slot.clone();
             let cancel_token = cancel_token.clone();
             let slot_connected = slot_connected.clone();
@@ -80,10 +136,6 @@ impl Router {
                 .await;
             });
         }
-
-        let event_tx = build_event_sink(&settings, cancel_token.clone(), &mut tasks)
-            .await
-            .context("failed to build event sink")?;
 
         let counter = AtomicU64::new(0);
 
@@ -110,7 +162,7 @@ impl Router {
 
             let idx = counter.fetch_add(1, Ordering::Relaxed) as usize;
 
-            let assigned = assign_slot(&slots, idx);
+            let assigned = assign_slot(&router_slots.0, idx);
 
             let Some((metatron, upstream, workbase_rx)) = assigned else {
                 info!("All upstreams disconnected, waiting for reconnect...");
@@ -123,7 +175,8 @@ impl Router {
                     }
                 }
 
-                let Some((metatron, upstream, workbase_rx)) = assign_slot(&slots, idx) else {
+                let Some((metatron, upstream, workbase_rx)) = assign_slot(&router_slots.0, idx)
+                else {
                     warn!("No upstream available after notify, dropping connection from {addr}");
                     continue;
                 };
@@ -136,7 +189,6 @@ impl Router {
                     stream,
                     workbase_rx,
                     &cancel_token,
-                    &event_tx,
                     start_diff,
                     &mut tasks,
                 );
@@ -151,7 +203,6 @@ impl Router {
                 stream,
                 workbase_rx,
                 &cancel_token,
-                &event_tx,
                 start_diff,
                 &mut tasks,
             );
@@ -187,7 +238,6 @@ fn spawn_stratifier(
     stream: TcpStream,
     workbase_rx: watch::Receiver<Arc<Notify>>,
     cancel_token: &CancellationToken,
-    event_tx: &Option<mpsc::Sender<crate::event_sink::Event>>,
     start_diff: Difficulty,
     tasks: &mut JoinSet<()>,
 ) {
@@ -195,7 +245,6 @@ fn spawn_stratifier(
 
     let settings = settings.clone();
     let conn_cancel_token = cancel_token.child_token();
-    let event_tx = event_tx.clone();
 
     tasks.spawn(async move {
         let mut stratifier: Stratifier<Notify> = Stratifier::new(
@@ -206,7 +255,7 @@ fn spawn_stratifier(
             stream,
             workbase_rx,
             conn_cancel_token,
-            event_tx,
+            None,
             start_diff,
         );
 
@@ -277,9 +326,16 @@ async fn slot_connect_loop(
                         info!("Upstream {} connected", slot.target);
                         slot_connected.notify_waiters();
 
-                        upstream.disconnected().await;
-
-                        warn!("Upstream {} disconnected", slot.target);
+                        tokio::select! {
+                            _ = upstream.disconnected() => {
+                                warn!("Upstream {} disconnected", slot.target);
+                            }
+                            _ = cancel_token.cancelled() => {
+                                let mut state = slot.state.write();
+                                *state = None;
+                                return;
+                            }
+                        }
 
                         {
                             let mut state = slot.state.write();

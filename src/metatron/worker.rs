@@ -34,6 +34,10 @@ impl Worker {
         self.sessions.len()
     }
 
+    pub(crate) fn sessions(&self) -> impl Iterator<Item = Arc<Session>> + '_ {
+        self.sessions.iter().map(|entry| entry.value().clone())
+    }
+
     pub(crate) fn snapshot(&self) -> Stats {
         let now = Instant::now();
 

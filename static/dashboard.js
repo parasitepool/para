@@ -188,6 +188,8 @@ function copyable(id, formatted, raw) {
 
 function initCopyables() {
   document.querySelectorAll('.copyable').forEach(el => {
+    if (el.dataset.copyInit) return;
+    el.dataset.copyInit = '1';
     el.addEventListener('click', async () => {
       const full = el.dataset.full;
       if (!full || full === 'undefined') return;

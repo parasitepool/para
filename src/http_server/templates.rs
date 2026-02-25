@@ -68,6 +68,15 @@ impl DashboardContent for UserHtml {
     }
 }
 
+#[derive(Boilerplate)]
+pub(crate) struct RouterHtml;
+
+impl DashboardContent for RouterHtml {
+    fn title(&self) -> &'static str {
+        "Router"
+    }
+}
+
 #[cfg(feature = "reload")]
 pub(crate) struct ReloadedContent {
     pub(crate) html: String,
