@@ -18,7 +18,14 @@ async fn connect_upstream(
     let mut max_backoff_attempts = 0u32;
 
     loop {
-        match Upstream::connect(settings.clone()).await {
+        match Upstream::connect(
+            settings.upstream().ok()?,
+            settings.upstream_username().ok()?.clone(),
+            settings.upstream_password(),
+            settings.timeout(),
+        )
+        .await
+        {
             Ok((upstream, events)) => {
                 let upstream = Arc::new(upstream);
                 match upstream

@@ -67,7 +67,7 @@ use {
     },
     serde_json::json,
     serde_with::{DeserializeFromStr, SerializeDisplay},
-    settings::{PoolOptions, ProxyOptions, Settings},
+    settings::{PoolOptions, ProxyOptions, RouterOptions, Settings},
     snafu::Snafu,
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
     std::{
@@ -117,6 +117,7 @@ use {
     tracing_appender::non_blocking,
     tracing_subscriber::{EnvFilter, Layer, layer::SubscriberExt, util::SubscriberInitExt},
     upstream::Upstream,
+    upstream_target::UpstreamTarget,
     utoipa::{OpenApi, ToSchema},
     vardiff::Vardiff,
     workbase::Workbase,
@@ -149,6 +150,7 @@ pub mod subcommand;
 mod throbber;
 mod total_work;
 mod upstream;
+mod upstream_target;
 mod vardiff;
 mod workbase;
 mod zmq;

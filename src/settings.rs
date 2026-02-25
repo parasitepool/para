@@ -3,9 +3,11 @@ use super::*;
 mod common_options;
 mod pool_options;
 mod proxy_options;
+mod router_options;
 
 pub(crate) use {
     common_options::CommonOptions, pool_options::PoolOptions, proxy_options::ProxyOptions,
+    router_options::RouterOptions,
 };
 
 #[derive(Clone, Debug)]
@@ -146,6 +148,53 @@ impl Settings {
             upstream_endpoint: Some(options.upstream),
             upstream_username: Some(options.username),
             upstream_password: options.password,
+            timeout: Duration::from_secs(options.timeout),
+            bitcoin_data_dir: options.common.bitcoin_data_dir,
+            bitcoin_rpc_port,
+            bitcoin_rpc_cookie_file: options.common.bitcoin_rpc_cookie_file,
+            bitcoin_rpc_username: options.common.bitcoin_rpc_username,
+            bitcoin_rpc_password: options.common.bitcoin_rpc_password,
+            chain,
+            acme_domains: options.common.acme_domain,
+            acme_contacts: options.common.acme_contact,
+            acme_cache: options.common.acme_cache,
+            data_dir: options.common.data_dir,
+            update_interval: Duration::from_secs(10),
+            version_mask: Version::default(),
+            start_diff: options.common.start_diff,
+            min_diff: options.common.min_diff,
+            max_diff: options.common.max_diff,
+            vardiff_period: Duration::from_secs_f64(options.common.vardiff_period),
+            vardiff_window: Duration::from_secs_f64(options.common.vardiff_window),
+            zmq_block_notifications: "tcp://127.0.0.1:28332".parse().unwrap(),
+            enonce1_size: ENONCE1_SIZE,
+            enonce2_size: MAX_ENONCE_SIZE,
+            enonce1_extension_size: options.enonce1_extension_size,
+            disable_bouncer: false,
+            database_url: None,
+            events_file: None,
+            high_diff_port: options.common.high_diff_port,
+        };
+
+        settings.validate()?;
+        Ok(settings)
+    }
+
+    pub(crate) fn from_router_options(options: RouterOptions) -> Result<Self> {
+        let chain = options.common.chain.unwrap_or_default();
+
+        let bitcoin_rpc_port = options
+            .common
+            .bitcoin_rpc_port
+            .unwrap_or_else(|| chain.default_rpc_port());
+
+        let settings = Self {
+            address: options.common.address,
+            port: options.common.port,
+            http_port: options.common.http_port,
+            upstream_endpoint: None,
+            upstream_username: None,
+            upstream_password: None,
             timeout: Duration::from_secs(options.timeout),
             bitcoin_data_dir: options.common.bitcoin_data_dir,
             bitcoin_rpc_port,
