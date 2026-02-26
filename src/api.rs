@@ -10,6 +10,7 @@ use {
 
 pub mod pool;
 pub mod proxy;
+pub mod router;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolStatus {
@@ -129,6 +130,30 @@ pub struct WorkerDetail {
     pub accepted_work: TotalWork,
     pub rejected_work: TotalWork,
     pub ph_days: PhDays,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RouterStatus {
+    pub slots: Vec<SlotStatus>,
+    pub total_sessions: usize,
+    pub total_hashrate_1m: HashRate,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlotStatus {
+    pub index: usize,
+    pub endpoint: String,
+    pub username: String,
+    pub connected: bool,
+    pub hashrate_1m: HashRate,
+    pub sessions: Vec<SlotSessionStatus>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlotSessionStatus {
+    pub id: u64,
+    pub worker_name: String,
+    pub hashrate_1m: HashRate,
 }
 
 pub type BitcoinStatus = http_server::BitcoinStatus;

@@ -1,9 +1,10 @@
 use super::*;
 
 pub mod miner;
-mod ping;
-pub(crate) mod pool;
-mod proxy;
+pub mod ping;
+pub mod pool;
+pub mod proxy;
+pub mod router;
 pub mod server;
 pub mod sync;
 pub mod template;
@@ -16,8 +17,10 @@ pub(crate) enum Subcommand {
     Ping(ping::Ping),
     #[command(about = "Run a toy solo pool")]
     Pool(pool::Pool),
-    #[command(about = "Run a stratum proxy")]
+    #[command(about = "Run a toy stratum proxy")]
     Proxy(proxy::Proxy),
+    #[command(about = "Run a toy hashrate router")]
+    Router(router::Router),
     #[command(about = "Run API server")]
     Server(server::Server),
     #[command(about = "Sync shares via HTTP")]
@@ -37,6 +40,7 @@ impl Subcommand {
             Self::Ping(ping) => ping.run(cancel_token).await,
             Self::Pool(pool) => pool.run(cancel_token, logs).await,
             Self::Proxy(proxy) => proxy.run(cancel_token, logs).await,
+            Self::Router(router) => router.run(cancel_token, logs).await,
             Self::Server(server) => {
                 let handle = Handle::new();
 

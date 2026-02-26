@@ -1,12 +1,12 @@
 use super::*;
 
 #[derive(Clone, Debug, Parser)]
-pub(crate) struct ProxyOptions {
+pub(crate) struct RouterOptions {
     #[command(flatten)]
     pub(crate) common: CommonOptions,
 
-    #[arg(long, help = "Upstream <USER[:PASS]@HOST:PORT>.")]
-    pub(crate) upstream: UpstreamTarget,
+    #[arg(long, required = true, help = "Upstream <USER[:PASS]@HOST:PORT>.")]
+    pub(crate) upstream: Vec<UpstreamTarget>,
 
     #[arg(
         long,

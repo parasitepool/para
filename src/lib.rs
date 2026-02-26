@@ -54,6 +54,7 @@ use {
     parking_lot::{Mutex, RwLock},
     ph_days::PhDays,
     reqwest::Url,
+    router::StratumRouter,
     rust_embed::RustEmbed,
     rustls_acme::{
         AcmeConfig,
@@ -67,7 +68,7 @@ use {
     },
     serde_json::json,
     serde_with::{DeserializeFromStr, SerializeDisplay},
-    settings::{PoolOptions, ProxyOptions, Settings},
+    settings::{PoolOptions, ProxyOptions, RouterOptions, Settings},
     snafu::Snafu,
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
     std::{
@@ -117,6 +118,7 @@ use {
     tracing_appender::non_blocking,
     tracing_subscriber::{EnvFilter, Layer, layer::SubscriberExt, util::SubscriberInitExt},
     upstream::Upstream,
+    upstream_target::UpstreamTarget,
     utoipa::{OpenApi, ToSchema},
     vardiff::Vardiff,
     workbase::Workbase,
@@ -142,6 +144,7 @@ mod logs;
 mod metatron;
 mod metrics;
 mod ph_days;
+mod router;
 pub mod settings;
 mod signal;
 mod stratifier;
@@ -149,6 +152,7 @@ pub mod subcommand;
 mod throbber;
 mod total_work;
 mod upstream;
+mod upstream_target;
 mod vardiff;
 mod workbase;
 mod zmq;

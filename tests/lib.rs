@@ -80,6 +80,7 @@ use {
     test_ckpool::TestCkpool,
     test_pool::TestPool,
     test_proxy::TestProxy,
+    test_router::TestRouter,
     tokio::{sync::mpsc, time::sleep},
 };
 
@@ -92,6 +93,8 @@ mod test_pool;
 mod test_proxy;
 #[cfg(target_os = "linux")]
 mod test_psql;
+#[cfg(target_os = "linux")]
+mod test_router;
 mod test_server;
 mod to_args;
 
@@ -108,6 +111,8 @@ mod ping;
 mod pool;
 #[cfg(target_os = "linux")]
 mod proxy;
+#[cfg(target_os = "linux")]
+mod router;
 mod server;
 #[cfg(target_os = "linux")]
 mod server_with_db;

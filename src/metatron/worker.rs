@@ -1,4 +1,4 @@
-use {super::*, dashmap::DashMap};
+use super::*;
 
 pub(crate) struct Worker {
     workername: String,
@@ -32,6 +32,10 @@ impl Worker {
 
     pub(crate) fn session_count(&self) -> usize {
         self.sessions.len()
+    }
+
+    pub(crate) fn sessions(&self) -> impl Iterator<Item = Arc<Session>> {
+        self.sessions.iter().map(|entry| entry.value().clone())
     }
 
     pub(crate) fn snapshot(&self) -> Stats {

@@ -3,9 +3,11 @@ use super::*;
 mod common_options;
 mod pool_options;
 mod proxy_options;
+mod router_options;
 
 pub(crate) use {
     common_options::CommonOptions, pool_options::PoolOptions, proxy_options::ProxyOptions,
+    router_options::RouterOptions,
 };
 
 #[derive(Clone, Debug)]
@@ -13,9 +15,7 @@ pub(crate) struct Settings {
     address: String,
     port: u16,
     http_port: Option<u16>,
-    upstream_endpoint: Option<String>,
-    upstream_username: Option<Username>,
-    upstream_password: Option<String>,
+    upstream_targets: Vec<UpstreamTarget>,
     timeout: Duration,
     bitcoin_data_dir: Option<PathBuf>,
     bitcoin_rpc_port: u16,
@@ -50,9 +50,7 @@ impl Default for Settings {
             address: "0.0.0.0".into(),
             port: 42069,
             http_port: None,
-            upstream_endpoint: None,
-            upstream_username: None,
-            upstream_password: None,
+            upstream_targets: Vec::new(),
             timeout: Duration::from_secs(30),
             bitcoin_data_dir: None,
             bitcoin_rpc_port: Chain::default().default_rpc_port(),
@@ -96,9 +94,7 @@ impl Settings {
             address: options.common.address,
             port: options.common.port,
             http_port: options.common.http_port,
-            upstream_endpoint: None,
-            upstream_username: None,
-            upstream_password: None,
+            upstream_targets: Vec::new(),
             timeout: Duration::from_secs(30),
             bitcoin_data_dir: options.common.bitcoin_data_dir,
             bitcoin_rpc_port,
@@ -143,9 +139,52 @@ impl Settings {
             address: options.common.address,
             port: options.common.port,
             http_port: options.common.http_port,
-            upstream_endpoint: Some(options.upstream),
-            upstream_username: Some(options.username),
-            upstream_password: options.password,
+            upstream_targets: vec![options.upstream],
+            timeout: Duration::from_secs(options.timeout),
+            bitcoin_data_dir: options.common.bitcoin_data_dir,
+            bitcoin_rpc_port,
+            bitcoin_rpc_cookie_file: options.common.bitcoin_rpc_cookie_file,
+            bitcoin_rpc_username: options.common.bitcoin_rpc_username,
+            bitcoin_rpc_password: options.common.bitcoin_rpc_password,
+            chain,
+            acme_domains: options.common.acme_domain,
+            acme_contacts: options.common.acme_contact,
+            acme_cache: options.common.acme_cache,
+            data_dir: options.common.data_dir,
+            update_interval: Duration::from_secs(10),
+            version_mask: Version::default(),
+            start_diff: options.common.start_diff,
+            min_diff: options.common.min_diff,
+            max_diff: options.common.max_diff,
+            vardiff_period: Duration::from_secs_f64(options.common.vardiff_period),
+            vardiff_window: Duration::from_secs_f64(options.common.vardiff_window),
+            zmq_block_notifications: "tcp://127.0.0.1:28332".parse().unwrap(),
+            enonce1_size: ENONCE1_SIZE,
+            enonce2_size: MAX_ENONCE_SIZE,
+            enonce1_extension_size: options.enonce1_extension_size,
+            disable_bouncer: false,
+            database_url: None,
+            events_file: None,
+            high_diff_port: options.common.high_diff_port,
+        };
+
+        settings.validate()?;
+        Ok(settings)
+    }
+
+    pub(crate) fn from_router_options(options: RouterOptions) -> Result<Self> {
+        let chain = options.common.chain.unwrap_or_default();
+
+        let bitcoin_rpc_port = options
+            .common
+            .bitcoin_rpc_port
+            .unwrap_or_else(|| chain.default_rpc_port());
+
+        let settings = Self {
+            address: options.common.address,
+            port: options.common.port,
+            http_port: options.common.http_port,
+            upstream_targets: options.upstream,
             timeout: Duration::from_secs(options.timeout),
             bitcoin_data_dir: options.common.bitcoin_data_dir,
             bitcoin_rpc_port,
@@ -402,20 +441,8 @@ impl Settings {
         self.http_port
     }
 
-    pub(crate) fn upstream(&self) -> Result<&str> {
-        self.upstream_endpoint
-            .as_deref()
-            .context("upstream not configured (required for proxy mode)")
-    }
-
-    pub(crate) fn upstream_username(&self) -> Result<&Username> {
-        self.upstream_username
-            .as_ref()
-            .context("upstream username not configured (required for proxy mode)")
-    }
-
-    pub(crate) fn upstream_password(&self) -> Option<String> {
-        self.upstream_password.clone()
+    pub(crate) fn upstream_targets(&self) -> &[UpstreamTarget] {
+        &self.upstream_targets
     }
 
     pub(crate) fn timeout(&self) -> Duration {
@@ -517,6 +544,16 @@ mod tests {
         match Arguments::try_parse_from(args.split_whitespace()) {
             Ok(arguments) => match arguments.subcommand {
                 crate::subcommand::Subcommand::Proxy(proxy) => proxy.options,
+                subcommand => panic!("unexpected subcommand: {subcommand:?}"),
+            },
+            Err(err) => panic!("error parsing arguments: {err}"),
+        }
+    }
+
+    fn parse_router_options(args: &str) -> RouterOptions {
+        match Arguments::try_parse_from(args.split_whitespace()) {
+            Ok(arguments) => match arguments.subcommand {
+                crate::subcommand::Subcommand::Router(router) => router.options,
                 subcommand => panic!("unexpected subcommand: {subcommand:?}"),
             },
             Err(err) => panic!("error parsing arguments: {err}"),
@@ -872,19 +909,15 @@ mod tests {
             check(&proxy);
         }
 
-        case(
-            "para pool",
-            "para proxy --upstream foo:1234 --username bar",
-            |s| {
-                assert!(s.acme_domains.is_empty());
-                assert!(s.acme_contacts.is_empty());
-                assert_eq!(s.acme_cache, PathBuf::from("acme-cache"));
-            },
-        );
+        case("para pool", "para proxy --upstream bar@foo:1234", |s| {
+            assert!(s.acme_domains.is_empty());
+            assert!(s.acme_contacts.is_empty());
+            assert_eq!(s.acme_cache, PathBuf::from("acme-cache"));
+        });
 
         case(
             "para pool --acme-domain foo.bar --acme-domain baz.qux",
-            "para proxy --upstream foo:1234 --username bar --acme-domain foo.bar --acme-domain baz.qux",
+            "para proxy --upstream bar@foo:1234 --acme-domain foo.bar --acme-domain baz.qux",
             |s| {
                 assert_eq!(s.acme_domains, vec!["foo.bar", "baz.qux"]);
             },
@@ -892,7 +925,7 @@ mod tests {
 
         case(
             "para pool --acme-contact foo@bar --acme-contact baz@qux",
-            "para proxy --upstream foo:1234 --username bar --acme-contact foo@bar --acme-contact baz@qux",
+            "para proxy --upstream bar@foo:1234 --acme-contact foo@bar --acme-contact baz@qux",
             |s| {
                 assert_eq!(s.acme_contacts, vec!["foo@bar", "baz@qux"]);
             },
@@ -900,7 +933,7 @@ mod tests {
 
         case(
             "para pool --acme-cache /foo/bar",
-            "para proxy --upstream foo:1234 --username bar --acme-cache /foo/bar",
+            "para proxy --upstream bar@foo:1234 --acme-cache /foo/bar",
             |s| {
                 assert_eq!(s.acme_cache, PathBuf::from("/foo/bar"));
             },
@@ -908,7 +941,7 @@ mod tests {
 
         case(
             "para pool --data-dir /foo",
-            "para proxy --upstream foo:1234 --username bar --data-dir /foo",
+            "para proxy --upstream bar@foo:1234 --data-dir /foo",
             |s| {
                 assert_eq!(s.acme_cache_path(), PathBuf::from("/foo/acme-cache"));
             },
@@ -917,15 +950,14 @@ mod tests {
 
     #[test]
     fn proxy_defaults_are_sane() {
-        let options = parse_proxy_options("para proxy --upstream foo:1234 --username bar");
+        let options = parse_proxy_options("para proxy --upstream bar@foo:1234");
         let settings = Settings::from_proxy_options(options).unwrap();
 
-        assert_eq!(settings.upstream_endpoint, Some("foo:1234".into()));
-        assert_eq!(
-            settings.upstream_username.as_ref().map(|u| u.to_string()),
-            Some("bar".into())
-        );
-        assert_eq!(settings.upstream_password, None);
+        let upstream = settings.upstream_targets().first().unwrap();
+
+        assert_eq!(upstream.endpoint(), "foo:1234");
+        assert_eq!(upstream.username().to_string(), "bar".to_string());
+        assert_eq!(upstream.password(), None);
         assert_eq!(settings.address, "0.0.0.0");
         assert_eq!(settings.port, 42069);
         assert_eq!(settings.http_port, None);
@@ -935,7 +967,7 @@ mod tests {
     #[test]
     fn proxy_override_address_and_port() {
         let options = parse_proxy_options(
-            "para proxy --upstream foo:1234 --username bar --address 127.0.0.1 --port 9999",
+            "para proxy --upstream bar@foo:1234 --address 127.0.0.1 --port 9999",
         );
         let settings = Settings::from_proxy_options(options).unwrap();
 
@@ -945,8 +977,7 @@ mod tests {
 
     #[test]
     fn proxy_override_http_port() {
-        let options =
-            parse_proxy_options("para proxy --upstream foo:1234 --username bar --http-port 8080");
+        let options = parse_proxy_options("para proxy --upstream bar@foo:1234 --http-port 8080");
         let settings = Settings::from_proxy_options(options).unwrap();
 
         assert_eq!(settings.http_port, Some(8080));
@@ -954,8 +985,7 @@ mod tests {
 
     #[test]
     fn proxy_override_timeout() {
-        let options =
-            parse_proxy_options("para proxy --upstream foo:1234 --username bar --timeout 60");
+        let options = parse_proxy_options("para proxy --upstream bar@foo:1234 --timeout 60");
         let settings = Settings::from_proxy_options(options).unwrap();
 
         assert_eq!(settings.timeout, Duration::from_secs(60));
@@ -963,60 +993,52 @@ mod tests {
 
     #[test]
     fn proxy_password_override() {
-        let options =
-            parse_proxy_options("para proxy --upstream foo:1234 --username bar --password baz");
+        let options = parse_proxy_options("para proxy --upstream bar:baz@foo:1234");
         let settings = Settings::from_proxy_options(options).unwrap();
 
-        assert_eq!(settings.upstream_password, Some("baz".into()));
+        assert_eq!(settings.upstream_targets[0].password(), Some("baz"));
     }
 
     #[test]
     fn proxy_username_with_worker() {
-        let options = parse_proxy_options("para proxy --upstream foo:1234 --username bar.baz");
+        let options = parse_proxy_options("para proxy --upstream bar.baz@foo:1234");
         let settings = Settings::from_proxy_options(options).unwrap();
 
-        assert_eq!(
-            settings.upstream_username.as_ref().map(|u| u.to_string()),
-            Some("bar.baz".into())
-        );
+        assert_eq!(settings.upstream_targets[0].username().as_str(), "bar.baz");
     }
 
     #[test]
     fn proxy_enonce1_extension_size_default() {
-        let options = parse_proxy_options("para proxy --upstream foo:1234 --username bar");
+        let options = parse_proxy_options("para proxy --upstream bar@foo:1234");
         let settings = Settings::from_proxy_options(options).unwrap();
         assert_eq!(settings.enonce1_extension_size, ENONCE1_EXTENSION_SIZE);
     }
 
     #[test]
     fn proxy_enonce1_extension_size_override() {
-        let options = parse_proxy_options(
-            "para proxy --upstream foo:1234 --username bar --enonce1-extension-size 3",
-        );
+        let options =
+            parse_proxy_options("para proxy --upstream bar@foo:1234 --enonce1-extension-size 3");
         let settings = Settings::from_proxy_options(options).unwrap();
         assert_eq!(settings.enonce1_extension_size, 3);
     }
 
     #[test]
     fn proxy_enonce1_extension_size_boundaries() {
-        let options = parse_proxy_options(
-            "para proxy --upstream foo:1234 --username bar --enonce1-extension-size 1",
-        );
+        let options =
+            parse_proxy_options("para proxy --upstream bar@foo:1234 --enonce1-extension-size 1");
         let settings = Settings::from_proxy_options(options).unwrap();
         assert_eq!(settings.enonce1_extension_size, 1);
 
-        let options = parse_proxy_options(
-            "para proxy --upstream foo:1234 --username bar --enonce1-extension-size 6",
-        );
+        let options =
+            parse_proxy_options("para proxy --upstream bar@foo:1234 --enonce1-extension-size 6");
         let settings = Settings::from_proxy_options(options).unwrap();
         assert_eq!(settings.enonce1_extension_size, 6);
     }
 
     #[test]
     fn proxy_enonce1_extension_size_too_small() {
-        let options = parse_proxy_options(
-            "para proxy --upstream foo:1234 --username bar --enonce1-extension-size 0",
-        );
+        let options =
+            parse_proxy_options("para proxy --upstream bar@foo:1234 --enonce1-extension-size 0");
         let err = Settings::from_proxy_options(options).unwrap_err();
         assert!(
             err.to_string()
@@ -1026,9 +1048,8 @@ mod tests {
 
     #[test]
     fn proxy_enonce1_extension_size_too_large() {
-        let options = parse_proxy_options(
-            "para proxy --upstream foo:1234 --username bar --enonce1-extension-size 7",
-        );
+        let options =
+            parse_proxy_options("para proxy --upstream bar@foo:1234 --enonce1-extension-size 7");
         let err = Settings::from_proxy_options(options).unwrap_err();
         assert!(
             err.to_string()
@@ -1046,15 +1067,11 @@ mod tests {
             assert_eq!(proxy.high_diff_port, expected);
         }
 
-        case(
-            "para pool",
-            "para proxy --upstream foo:1234 --username bar",
-            None,
-        );
+        case("para pool", "para proxy --upstream bar@foo:1234", None);
 
         case(
             "para pool --high-diff-port 3333",
-            "para proxy --upstream foo:1234 --username bar --high-diff-port 3333",
+            "para proxy --upstream bar@foo:1234 --high-diff-port 3333",
             Some(3333),
         );
     }
@@ -1063,7 +1080,7 @@ mod tests {
     fn high_diff_port_equals_port_fails() {
         let pool = parse_pool_options("para pool --port 3333 --high-diff-port 3333");
         let proxy = parse_proxy_options(
-            "para proxy --upstream foo:1234 --username bar --port 3333 --high-diff-port 3333",
+            "para proxy --upstream bar@foo:1234 --port 3333 --high-diff-port 3333",
         );
         assert!(
             Settings::from_pool_options(pool)
@@ -1083,7 +1100,7 @@ mod tests {
     fn high_diff_port_equals_http_port_fails() {
         let pool = parse_pool_options("para pool --http-port 8080 --high-diff-port 8080");
         let proxy = parse_proxy_options(
-            "para proxy --upstream foo:1234 --username bar --http-port 8080 --high-diff-port 8080",
+            "para proxy --upstream bar@foo:1234 --http-port 8080 --high-diff-port 8080",
         );
         assert!(
             Settings::from_pool_options(pool)
@@ -1103,7 +1120,7 @@ mod tests {
     fn high_diff_port_above_max_diff_fails() {
         let pool = parse_pool_options("para pool --high-diff-port 3333 --max-diff 100");
         let proxy = parse_proxy_options(
-            "para proxy --upstream foo:1234 --username bar --high-diff-port 3333 --max-diff 100",
+            "para proxy --upstream bar@foo:1234 --high-diff-port 3333 --max-diff 100",
         );
         assert!(
             Settings::from_pool_options(pool)
@@ -1125,7 +1142,7 @@ mod tests {
             "para pool --high-diff-port 3333 --min-diff 2000000 --start-diff 2000000",
         );
         let proxy = parse_proxy_options(
-            "para proxy --upstream foo:1234 --username bar --high-diff-port 3333 --min-diff 2000000 --start-diff 2000000",
+            "para proxy --upstream bar@foo:1234 --high-diff-port 3333 --min-diff 2000000 --start-diff 2000000",
         );
         assert!(
             Settings::from_pool_options(pool)
@@ -1142,25 +1159,30 @@ mod tests {
     }
 
     #[test]
-    fn shared_defaults_pool_and_proxy() {
+    fn shared_defaults_pool_proxy_and_router() {
         let pool = Settings::from_pool_options(parse_pool_options("para pool")).unwrap();
-        let proxy = Settings::from_proxy_options(parse_proxy_options(
-            "para proxy --upstream foo:1234 --username bar",
+        let proxy =
+            Settings::from_proxy_options(parse_proxy_options("para proxy --upstream bar@foo:1234"))
+                .unwrap();
+        let router = Settings::from_router_options(parse_router_options(
+            "para router --upstream bar@foo:1234",
         ))
         .unwrap();
 
-        assert_eq!(pool.address, proxy.address);
-        assert_eq!(pool.port, proxy.port);
-        assert_eq!(pool.start_diff, proxy.start_diff);
-        assert_eq!(pool.vardiff_period, proxy.vardiff_period);
-        assert_eq!(pool.vardiff_window, proxy.vardiff_window);
-        assert_eq!(pool.acme_cache, proxy.acme_cache);
-        assert_eq!(pool.chain, proxy.chain);
-        assert_eq!(pool.bitcoin_rpc_port, proxy.bitcoin_rpc_port);
-        assert_eq!(pool.high_diff_port, proxy.high_diff_port);
-        assert_eq!(pool.http_port, proxy.http_port);
-        assert_eq!(pool.min_diff, proxy.min_diff);
-        assert_eq!(pool.max_diff, proxy.max_diff);
+        for settings in [&proxy, &router] {
+            assert_eq!(pool.address, settings.address);
+            assert_eq!(pool.port, settings.port);
+            assert_eq!(pool.start_diff, settings.start_diff);
+            assert_eq!(pool.vardiff_period, settings.vardiff_period);
+            assert_eq!(pool.vardiff_window, settings.vardiff_window);
+            assert_eq!(pool.acme_cache, settings.acme_cache);
+            assert_eq!(pool.chain, settings.chain);
+            assert_eq!(pool.bitcoin_rpc_port, settings.bitcoin_rpc_port);
+            assert_eq!(pool.high_diff_port, settings.high_diff_port);
+            assert_eq!(pool.http_port, settings.http_port);
+            assert_eq!(pool.min_diff, settings.min_diff);
+            assert_eq!(pool.max_diff, settings.max_diff);
+        }
     }
 
     #[test]
@@ -1205,7 +1227,7 @@ mod tests {
 
     #[test]
     fn proxy_vardiff_defaults() {
-        let options = parse_proxy_options("para proxy --upstream foo:1234 --username bar");
+        let options = parse_proxy_options("para proxy --upstream bar@foo:1234");
         let settings = Settings::from_proxy_options(options).unwrap();
         assert_eq!(settings.vardiff_period, Duration::from_secs_f64(3.33));
         assert_eq!(settings.vardiff_window, Duration::from_secs(300));
@@ -1213,8 +1235,110 @@ mod tests {
 
     #[test]
     fn proxy_start_diff_default() {
-        let options = parse_proxy_options("para proxy --upstream foo:1234 --username bar");
+        let options = parse_proxy_options("para proxy --upstream bar@foo:1234");
         let settings = Settings::from_proxy_options(options).unwrap();
+        assert_eq!(settings.start_diff, Difficulty::default());
+    }
+
+    #[test]
+    fn router_defaults_are_sane() {
+        let options = parse_router_options("para router --upstream bar@foo:1234");
+        let settings = Settings::from_router_options(options).unwrap();
+
+        assert_eq!(settings.address, "0.0.0.0");
+        assert_eq!(settings.port, 42069);
+        assert_eq!(settings.http_port, None);
+        assert_eq!(settings.timeout, Duration::from_secs(30));
+        assert_eq!(settings.chain, Chain::Mainnet);
+        assert_eq!(settings.bitcoin_rpc_port, settings.chain.default_rpc_port());
+        assert_eq!(settings.enonce1_extension_size, ENONCE1_EXTENSION_SIZE);
+        assert_eq!(settings.start_diff, Difficulty::default());
+        assert_eq!(settings.min_diff, None);
+        assert_eq!(settings.max_diff, None);
+        assert_eq!(settings.high_diff_port, None);
+    }
+
+    #[test]
+    fn router_override_address_and_port() {
+        let options = parse_router_options(
+            "para router --upstream bar@foo:1234 --address 127.0.0.1 --port 9999",
+        );
+        let settings = Settings::from_router_options(options).unwrap();
+
+        assert_eq!(settings.address, "127.0.0.1");
+        assert_eq!(settings.port, 9999);
+    }
+
+    #[test]
+    fn router_override_timeout() {
+        let options = parse_router_options("para router --upstream bar@foo:1234 --timeout 60");
+        let settings = Settings::from_router_options(options).unwrap();
+
+        assert_eq!(settings.timeout, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn router_enonce1_extension_size_default() {
+        let options = parse_router_options("para router --upstream bar@foo:1234");
+        let settings = Settings::from_router_options(options).unwrap();
+        assert_eq!(settings.enonce1_extension_size, ENONCE1_EXTENSION_SIZE);
+    }
+
+    #[test]
+    fn router_enonce1_extension_size_override() {
+        let options =
+            parse_router_options("para router --upstream bar@foo:1234 --enonce1-extension-size 3");
+        let settings = Settings::from_router_options(options).unwrap();
+        assert_eq!(settings.enonce1_extension_size, 3);
+    }
+
+    #[test]
+    fn router_enonce1_extension_size_boundaries() {
+        let options =
+            parse_router_options("para router --upstream bar@foo:1234 --enonce1-extension-size 1");
+        let settings = Settings::from_router_options(options).unwrap();
+        assert_eq!(settings.enonce1_extension_size, 1);
+
+        let options =
+            parse_router_options("para router --upstream bar@foo:1234 --enonce1-extension-size 6");
+        let settings = Settings::from_router_options(options).unwrap();
+        assert_eq!(settings.enonce1_extension_size, 6);
+    }
+
+    #[test]
+    fn router_enonce1_extension_size_too_small() {
+        let options =
+            parse_router_options("para router --upstream bar@foo:1234 --enonce1-extension-size 0");
+        let err = Settings::from_router_options(options).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("enonce1_extension_size (0) must be >= 1")
+        );
+    }
+
+    #[test]
+    fn router_enonce1_extension_size_too_large() {
+        let options =
+            parse_router_options("para router --upstream bar@foo:1234 --enonce1-extension-size 7");
+        let err = Settings::from_router_options(options).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("enonce1_extension_size (7) must be <=")
+        );
+    }
+
+    #[test]
+    fn router_vardiff_defaults() {
+        let options = parse_router_options("para router --upstream bar@foo:1234");
+        let settings = Settings::from_router_options(options).unwrap();
+        assert_eq!(settings.vardiff_period, Duration::from_secs_f64(3.33));
+        assert_eq!(settings.vardiff_window, Duration::from_secs(300));
+    }
+
+    #[test]
+    fn router_start_diff_default() {
+        let options = parse_router_options("para router --upstream bar@foo:1234");
+        let settings = Settings::from_router_options(options).unwrap();
         assert_eq!(settings.start_diff, Difficulty::default());
     }
 }
