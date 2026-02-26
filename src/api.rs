@@ -134,23 +134,23 @@ pub struct WorkerDetail {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RouterStatus {
-    pub upstreams: Vec<UpstreamStatus>,
+    pub slots: Vec<SlotStatus>,
     pub total_sessions: usize,
     pub total_hashrate_1m: HashRate,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UpstreamStatus {
+pub struct SlotStatus {
     pub index: usize,
     pub endpoint: String,
     pub username: String,
     pub connected: bool,
     pub hashrate_1m: HashRate,
-    pub sessions: Vec<UpstreamSessionStatus>,
+    pub sessions: Vec<SlotSessionStatus>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UpstreamSessionStatus {
+pub struct SlotSessionStatus {
     pub id: u64,
     pub worker_name: String,
     pub hashrate_1m: HashRate,

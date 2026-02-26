@@ -20,7 +20,7 @@ async fn router_round_robin() {
     );
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.upstreams.len(), 2);
+    assert_eq!(status.slots.len(), 2);
     assert_eq!(status.total_sessions, 0);
 
     let mut miners = Vec::new();
@@ -50,15 +50,15 @@ async fn router_round_robin() {
     .expect("Timeout waiting for 3 sessions");
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.upstreams[0].sessions.len(), 2);
-    assert_eq!(status.upstreams[1].sessions.len(), 1);
+    assert_eq!(status.slots[0].sessions.len(), 2);
+    assert_eq!(status.slots[1].sessions.len(), 1);
 
     drop(pool_a);
 
     timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(status) = router.get_status().await
-                && status.upstreams.len() == 1
+                && status.slots.len() == 1
                 && status.total_sessions >= 3
             {
                 break;
@@ -70,7 +70,7 @@ async fn router_round_robin() {
     .expect("Timeout waiting for miners to reconnect to remaining upstream");
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.upstreams.len(), 1);
+    assert_eq!(status.slots.len(), 1);
     assert_eq!(status.total_sessions, 3);
 
     drop(pool_b);

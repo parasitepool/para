@@ -20,7 +20,9 @@ impl StratumRouter {
         if slots.is_empty() {
             return None;
         }
+
         let idx = self.counter.fetch_add(1, Ordering::Relaxed) as usize % slots.len();
+
         Some(slots[idx].clone())
     }
 
@@ -49,7 +51,7 @@ impl StratumRouter {
                 timeout,
                 enonce1_extension_size,
                 endpoint,
-                cancel_token,
+                cancel_token.child_token(),
                 tasks,
             )
             .await

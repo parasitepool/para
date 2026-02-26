@@ -18,7 +18,7 @@ async fn status(State(router): State<Arc<StratumRouter>>) -> Json<RouterStatus> 
     let now = Instant::now();
 
     let slots = router.slots();
-    let mut upstreams = Vec::with_capacity(slots.len());
+    let mut slot_statuses = Vec::with_capacity(slots.len());
     let mut total_sessions = 0;
     let mut total_hashrate = HashRate(0.0);
 
@@ -33,7 +33,7 @@ async fn status(State(router): State<Arc<StratumRouter>>) -> Json<RouterStatus> 
             for worker in user.workers() {
                 for session in worker.sessions() {
                     let session_stats = session.snapshot();
-                    sessions.push(UpstreamSessionStatus {
+                    sessions.push(SlotSessionStatus {
                         id: session.id(),
                         worker_name: session.workername().to_string(),
                         hashrate_1m: session_stats.hashrate_1m(now),
@@ -45,7 +45,7 @@ async fn status(State(router): State<Arc<StratumRouter>>) -> Json<RouterStatus> 
         total_sessions += sessions.len();
         total_hashrate.0 += hashrate_1m.0;
 
-        upstreams.push(UpstreamStatus {
+        slot_statuses.push(SlotStatus {
             index,
             endpoint: slot.upstream.endpoint().to_string(),
             username: slot.upstream.username().to_string(),
@@ -56,7 +56,7 @@ async fn status(State(router): State<Arc<StratumRouter>>) -> Json<RouterStatus> 
     }
 
     Json(RouterStatus {
-        upstreams,
+        slots: slot_statuses,
         total_sessions,
         total_hashrate_1m: total_hashrate,
     })

@@ -13,13 +13,11 @@ impl Slot {
         timeout: Duration,
         enonce1_extension_size: usize,
         endpoint: &str,
-        cancel_token: &CancellationToken,
+        slot_cancel: CancellationToken,
         tasks: &mut JoinSet<()>,
     ) -> Result<Arc<Self>> {
         let (upstream, events) = Upstream::connect(target, timeout).await?;
         let upstream = Arc::new(upstream);
-
-        let slot_cancel = cancel_token.child_token();
 
         let workbase_rx = upstream
             .clone()
@@ -37,7 +35,7 @@ impl Slot {
             endpoint.to_string(),
         ));
 
-        metatron.clone().spawn(cancel_token.clone(), tasks);
+        metatron.clone().spawn(slot_cancel.clone(), tasks);
 
         info!("Upstream {target} connected");
 

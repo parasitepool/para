@@ -86,7 +86,7 @@ impl Router {
             };
 
             let settings = settings.clone();
-            let conn_cancel_token = slot.cancel_token.child_token();
+            let cancel_token = slot.cancel_token.child_token();
 
             debug!("Spawning stratifier task for {addr}");
 
@@ -98,7 +98,7 @@ impl Router {
                     Some(slot.upstream.clone()),
                     stream,
                     slot.workbase_rx.clone(),
-                    conn_cancel_token,
+                    cancel_token,
                     None,
                     start_diff,
                 );
