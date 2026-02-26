@@ -68,6 +68,10 @@ impl TestRouter {
         format!("http://127.0.0.1:{}", self.http_port)
     }
 
+    pub(crate) fn try_wait(&mut self) -> std::io::Result<Option<std::process::ExitStatus>> {
+        self.router_handle.try_wait()
+    }
+
     pub(crate) async fn get_status(&self) -> reqwest::Result<RouterStatus> {
         reqwest::Client::new()
             .get(format!("{}/api/router/status", self.api_endpoint()))

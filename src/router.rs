@@ -40,7 +40,7 @@ impl Router {
         endpoint: &str,
         cancel_token: &CancellationToken,
         tasks: &mut JoinSet<()>,
-    ) -> Arc<Self> {
+    ) -> Result<Arc<Self>, Error> {
         let mut slots = Vec::new();
 
         for target in targets {
@@ -61,13 +61,16 @@ impl Router {
             }
         }
 
-        Arc::new(Self::new(slots))
+        ensure!(!slots.is_empty(), "all upstream connections failed");
+
+        Ok(Arc::new(Self::new(slots)))
     }
 
-    pub(crate) fn spawn(self: &Arc<Self>, tasks: &mut JoinSet<()>) {
+    pub(crate) fn spawn(self: &Arc<Self>, cancel: CancellationToken, tasks: &mut JoinSet<()>) {
         for slot in &self.slots() {
             let slot = slot.clone();
             let router = self.clone();
+            let cancel = cancel.clone();
             tasks.spawn(async move {
                 slot.upstream.disconnected().await;
                 warn!(
@@ -76,6 +79,10 @@ impl Router {
                 );
                 slot.cancel_token.cancel();
                 router.remove_slot(&slot);
+                if router.slots().is_empty() {
+                    error!("All upstreams disconnected, shutting down");
+                    cancel.cancel();
+                }
             });
         }
     }

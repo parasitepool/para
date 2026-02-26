@@ -10,7 +10,7 @@ async fn router_round_robin() {
     let username_a = "tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.foo";
     let username_b = "tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.bar";
 
-    let router = TestRouter::spawn(
+    let mut router = TestRouter::spawn(
         &[
             (username_a, &pool_a.stratum_endpoint()),
             (username_b, &pool_b.stratum_endpoint()),
@@ -77,20 +77,14 @@ async fn router_round_robin() {
 
     timeout(Duration::from_secs(30), async {
         loop {
-            if let Ok(status) = router.get_status().await
-                && status.total_sessions == 0
-            {
+            if router.try_wait().unwrap().is_some() {
                 break;
             }
             sleep(Duration::from_millis(200)).await;
         }
     })
     .await
-    .expect("Timeout waiting for all sessions to be cancelled");
-
-    let status = router.get_status().await.unwrap();
-    assert_eq!(status.upstreams.len(), 0);
-    assert_eq!(status.total_sessions, 0);
+    .expect("Timeout waiting for router to exit");
 
     for mut miner in miners {
         miner.kill().unwrap();

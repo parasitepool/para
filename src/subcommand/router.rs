@@ -44,9 +44,9 @@ impl Router {
             &cancel_token,
             &mut tasks,
         )
-        .await;
+        .await?;
 
-        router.spawn(&mut tasks);
+        router.spawn(cancel_token.clone(), &mut tasks);
 
         http_server::spawn(
             &settings,
