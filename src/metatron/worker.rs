@@ -1,4 +1,4 @@
-use {super::*, dashmap::DashMap};
+use super::*;
 
 pub(crate) struct Worker {
     workername: String,
