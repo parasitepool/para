@@ -4,7 +4,7 @@ use {
     http_server::{
         self,
         error::{OptionExt, ServerResult},
-        templates::{DashboardHtml, PoolHtml, ProxyHtml, RouterHtml, UserHtml, UsersHtml},
+        templates::{DashboardHtml, PoolHtml, ProxyHtml, UserHtml, UsersHtml},
     },
 };
 
