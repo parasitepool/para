@@ -72,16 +72,21 @@ impl Router {
             let router = self.clone();
             let cancel = cancel.clone();
             tasks.spawn(async move {
-                slot.upstream.disconnected().await;
-                warn!(
-                    "Upstream {} disconnected, removing slot",
-                    slot.upstream.endpoint()
-                );
-                slot.cancel_token.cancel();
-                router.remove_slot(&slot);
-                if router.slots().is_empty() {
-                    error!("All upstreams disconnected, shutting down");
-                    cancel.cancel();
+                tokio::select! {
+                    biased;
+                    _ = cancel.cancelled() => {}
+                    _ = slot.upstream.disconnected() => {
+                        warn!(
+                            "Upstream {} disconnected, removing slot",
+                            slot.upstream.endpoint()
+                        );
+                        slot.cancel_token.cancel();
+                        router.remove_slot(&slot);
+                        if router.slots().is_empty() {
+                            error!("All upstreams disconnected, shutting down");
+                            cancel.cancel();
+                        }
+                    }
                 }
             });
         }
