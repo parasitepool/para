@@ -9,61 +9,6 @@ pub(crate) struct Proxy {
     pub(crate) options: ProxyOptions,
 }
 
-async fn connect_upstream(
-    endpoint: &str,
-    username: &Username,
-    password: Option<String>,
-    timeout: Duration,
-    cancel_token: &CancellationToken,
-    tasks: &mut JoinSet<()>,
-    backoff: &mut Duration,
-) -> Option<(Arc<Upstream>, watch::Receiver<Arc<Notify>>)> {
-    let mut max_backoff_attempts = 0u32;
-
-    loop {
-        match Upstream::connect(endpoint, username.clone(), password.clone(), timeout).await {
-            Ok((upstream, events)) => {
-                let upstream = Arc::new(upstream);
-                match upstream
-                    .clone()
-                    .spawn(events, cancel_token.clone(), tasks)
-                    .await
-                {
-                    Ok(workbase_rx) => {
-                        *backoff = Duration::from_secs(1);
-                        return Some((upstream, workbase_rx));
-                    }
-                    Err(e) => {
-                        warn!("Failed to start upstream event loop: {e}");
-                    }
-                }
-            }
-            Err(e) => {
-                warn!("Failed to connect to upstream: {e}");
-            }
-        }
-
-        warn!("Retrying in {}s...", backoff.as_secs());
-
-        tokio::select! {
-            _ = sleep(*backoff) => {}
-            _ = cancel_token.cancelled() => return None
-        }
-
-        *backoff = (*backoff * 2).min(Duration::from_secs(60));
-
-        if *backoff >= Duration::from_secs(60) {
-            max_backoff_attempts += 1;
-            if max_backoff_attempts >= 3 {
-                error!(
-                    "Upstream unreachable after {max_backoff_attempts} attempts at max backoff, exiting"
-                );
-                return None;
-            }
-        }
-    }
-}
-
 impl Proxy {
     pub(crate) async fn run(
         &self,
@@ -85,19 +30,14 @@ impl Proxy {
             .await
             .with_context(|| format!("failed to bind to {address}:{port}"))?;
 
-        info!("Stratum server listening for downstream miners on {address}:{port}");
+        info!("Stratum proxy listening for downstream miners on {address}:{port}");
 
         let mut backoff = Duration::from_secs(1);
-
-        let endpoint = settings.upstream()?;
-        let username = settings.upstream_username()?;
-        let password = settings.upstream_password();
+        let upstream_target = settings.upstreams()[0].clone(); //TODO
         let timeout = settings.timeout();
 
         let Some((mut upstream, mut workbase_rx)) = connect_upstream(
-            endpoint,
-            username,
-            password.clone(),
+            upstream_target.clone(), // TODO
             timeout,
             &cancel_token,
             &mut tasks,
@@ -195,9 +135,7 @@ impl Proxy {
             }
 
             let Some((new_upstream, new_workbase_rx)) = connect_upstream(
-                endpoint,
-                username,
-                password.clone(),
+                upstream_target.clone(),
                 timeout,
                 &cancel_token,
                 &mut tasks,
@@ -228,5 +166,58 @@ impl Proxy {
         info!("All proxy tasks stopped");
 
         Ok(())
+    }
+}
+
+async fn connect_upstream(
+    target: UpstreamTarget,
+    timeout: Duration,
+    cancel_token: &CancellationToken,
+    tasks: &mut JoinSet<()>,
+    backoff: &mut Duration,
+) -> Option<(Arc<Upstream>, watch::Receiver<Arc<Notify>>)> {
+    let mut max_backoff_attempts = 0u32;
+
+    loop {
+        match Upstream::connect(target.clone(), timeout).await {
+            Ok((upstream, events)) => {
+                let upstream = Arc::new(upstream);
+                match upstream
+                    .clone()
+                    .spawn(events, cancel_token.clone(), tasks)
+                    .await
+                {
+                    Ok(workbase_rx) => {
+                        *backoff = Duration::from_secs(1);
+                        return Some((upstream, workbase_rx));
+                    }
+                    Err(e) => {
+                        warn!("Failed to start upstream event loop: {e}");
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Failed to connect to upstream: {e}");
+            }
+        }
+
+        warn!("Retrying in {}s...", backoff.as_secs());
+
+        tokio::select! {
+            _ = sleep(*backoff) => {}
+            _ = cancel_token.cancelled() => return None
+        }
+
+        *backoff = (*backoff * 2).min(Duration::from_secs(60));
+
+        if *backoff >= Duration::from_secs(60) {
+            max_backoff_attempts += 1;
+            if max_backoff_attempts >= 3 {
+                error!(
+                    "Upstream unreachable after {max_backoff_attempts} attempts at max backoff, exiting"
+                );
+                return None;
+            }
+        }
     }
 }

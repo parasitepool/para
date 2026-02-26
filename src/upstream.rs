@@ -29,24 +29,29 @@ pub(crate) struct Upstream {
 
 impl Upstream {
     pub(crate) async fn connect(
-        endpoint: &str,
-        username: Username,
-        password: Option<String>,
+        target: UpstreamTarget,
         timeout: Duration,
     ) -> Result<(Self, EventReceiver)> {
-        let upstream_addr = resolve_stratum_endpoint(endpoint)
+        let upstream_addr = resolve_stratum_endpoint(target.endpoint())
             .await
-            .with_context(|| format!("failed to resolve upstream endpoint `{endpoint}`"))?;
+            .with_context(|| {
+                format!(
+                    "failed to resolve upstream endpoint `{}`",
+                    target.endpoint()
+                )
+            })?;
 
         info!(
             "Connecting to upstream {} ({}) as {}",
-            endpoint, upstream_addr, username
+            target.endpoint(),
+            upstream_addr,
+            target.username()
         );
 
         let client = Client::new(
             upstream_addr.to_string(),
-            username.clone(),
-            password,
+            target.username().clone(),
+            target.password().map(String::from), // TODO
             USER_AGENT.into(),
             timeout,
         );
@@ -93,7 +98,7 @@ impl Upstream {
         Ok((
             Self {
                 client,
-                endpoint: endpoint.to_string(),
+                endpoint: target.endpoint().to_string(),
                 enonce1: subscribe.enonce1,
                 enonce2_size: subscribe.enonce2_size,
                 connected: Arc::new(AtomicBool::new(false)),

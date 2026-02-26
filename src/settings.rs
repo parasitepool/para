@@ -15,9 +15,7 @@ pub(crate) struct Settings {
     address: String,
     port: u16,
     http_port: Option<u16>,
-    upstream_endpoint: Option<String>,
-    upstream_username: Option<Username>,
-    upstream_password: Option<String>,
+    upstreams: Vec<UpstreamTarget>,
     timeout: Duration,
     bitcoin_data_dir: Option<PathBuf>,
     bitcoin_rpc_port: u16,
@@ -52,9 +50,7 @@ impl Default for Settings {
             address: "0.0.0.0".into(),
             port: 42069,
             http_port: None,
-            upstream_endpoint: None,
-            upstream_username: None,
-            upstream_password: None,
+            upstreams: Vec::new(),
             timeout: Duration::from_secs(30),
             bitcoin_data_dir: None,
             bitcoin_rpc_port: Chain::default().default_rpc_port(),
@@ -98,9 +94,7 @@ impl Settings {
             address: options.common.address,
             port: options.common.port,
             http_port: options.common.http_port,
-            upstream_endpoint: None,
-            upstream_username: None,
-            upstream_password: None,
+            upstreams: Vec::new(),
             timeout: Duration::from_secs(30),
             bitcoin_data_dir: options.common.bitcoin_data_dir,
             bitcoin_rpc_port,
@@ -145,9 +139,7 @@ impl Settings {
             address: options.common.address,
             port: options.common.port,
             http_port: options.common.http_port,
-            upstream_endpoint: Some(options.upstream.endpoint),
-            upstream_username: Some(options.upstream.username),
-            upstream_password: options.upstream.password,
+            upstreams: vec![options.upstream],
             timeout: Duration::from_secs(options.timeout),
             bitcoin_data_dir: options.common.bitcoin_data_dir,
             bitcoin_rpc_port,
@@ -192,9 +184,7 @@ impl Settings {
             address: options.common.address,
             port: options.common.port,
             http_port: options.common.http_port,
-            upstream_endpoint: None,
-            upstream_username: None,
-            upstream_password: None,
+            upstreams: options.upstream,
             timeout: Duration::from_secs(options.timeout),
             bitcoin_data_dir: options.common.bitcoin_data_dir,
             bitcoin_rpc_port,
@@ -451,20 +441,8 @@ impl Settings {
         self.http_port
     }
 
-    pub(crate) fn upstream(&self) -> Result<&str> {
-        self.upstream_endpoint
-            .as_deref()
-            .context("upstream not configured (required for proxy mode)")
-    }
-
-    pub(crate) fn upstream_username(&self) -> Result<&Username> {
-        self.upstream_username
-            .as_ref()
-            .context("upstream username not configured (required for proxy mode)")
-    }
-
-    pub(crate) fn upstream_password(&self) -> Option<String> {
-        self.upstream_password.clone()
+    pub(crate) fn upstreams(&self) -> &[UpstreamTarget] {
+        self.upstreams.as_ref()
     }
 
     pub(crate) fn timeout(&self) -> Duration {
@@ -975,12 +953,11 @@ mod tests {
         let options = parse_proxy_options("para proxy --upstream bar@foo:1234");
         let settings = Settings::from_proxy_options(options).unwrap();
 
-        assert_eq!(settings.upstream_endpoint, Some("foo:1234".into()));
-        assert_eq!(
-            settings.upstream_username.as_ref().map(|u| u.to_string()),
-            Some("bar".into())
-        );
-        assert_eq!(settings.upstream_password, None);
+        let upstream = settings.upstreams()[0].clone(); // TODO
+
+        assert_eq!(upstream.endpoint(), "foo:1234");
+        assert_eq!(upstream.username().to_string(), "bar".to_string());
+        assert_eq!(upstream.password(), None);
         assert_eq!(settings.address, "0.0.0.0");
         assert_eq!(settings.port, 42069);
         assert_eq!(settings.http_port, None);
@@ -1019,7 +996,7 @@ mod tests {
         let options = parse_proxy_options("para proxy --upstream bar:baz@foo:1234");
         let settings = Settings::from_proxy_options(options).unwrap();
 
-        assert_eq!(settings.upstream_password, Some("baz".into()));
+        assert_eq!(settings.upstreams[0].password(), Some("baz"));
     }
 
     #[test]
@@ -1027,10 +1004,7 @@ mod tests {
         let options = parse_proxy_options("para proxy --upstream bar.baz@foo:1234");
         let settings = Settings::from_proxy_options(options).unwrap();
 
-        assert_eq!(
-            settings.upstream_username.as_ref().map(|u| u.to_string()),
-            Some("bar.baz".into())
-        );
+        assert_eq!(settings.upstreams[0].username().as_str(), "bar.baz");
     }
 
     #[test]
