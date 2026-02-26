@@ -7,6 +7,49 @@ pub(crate) struct Slot {
     pub(crate) cancel_token: CancellationToken,
 }
 
+impl Slot {
+    pub(crate) async fn connect(
+        target: &UpstreamTarget,
+        timeout: Duration,
+        enonce1_extension_size: usize,
+        endpoint: &str,
+        cancel_token: &CancellationToken,
+        tasks: &mut JoinSet<()>,
+    ) -> Result<Arc<Self>> {
+        let (upstream, events) = Upstream::connect(target.clone(), timeout).await?;
+        let upstream = Arc::new(upstream);
+
+        let slot_cancel = cancel_token.child_token();
+
+        let workbase_rx = upstream
+            .clone()
+            .spawn(events, slot_cancel.clone(), tasks)
+            .await?;
+
+        let proxy_extranonces = ProxyExtranonces::new(
+            upstream.enonce1().clone(),
+            upstream.enonce2_size(),
+            enonce1_extension_size,
+        )?;
+
+        let metatron = Arc::new(Metatron::new(
+            Extranonces::Proxy(proxy_extranonces),
+            endpoint.to_string(),
+        ));
+
+        metatron.clone().spawn(cancel_token.clone(), tasks);
+
+        info!("Upstream {target} connected");
+
+        Ok(Arc::new(Self {
+            upstream,
+            metatron,
+            workbase_rx,
+            cancel_token: slot_cancel,
+        }))
+    }
+}
+
 pub(crate) struct Router {
     slots: RwLock<Vec<Arc<Slot>>>,
     counter: AtomicU64,
@@ -36,6 +79,53 @@ impl Router {
 
     pub(crate) fn slots(&self) -> Vec<Arc<Slot>> {
         self.slots.read().clone()
+    }
+
+    pub(crate) async fn connect(
+        targets: &[UpstreamTarget],
+        timeout: Duration,
+        enonce1_extension_size: usize,
+        endpoint: &str,
+        cancel_token: &CancellationToken,
+        tasks: &mut JoinSet<()>,
+    ) -> Arc<Self> {
+        let mut slots = Vec::new();
+
+        for target in targets {
+            match Slot::connect(
+                target,
+                timeout,
+                enonce1_extension_size,
+                endpoint,
+                cancel_token,
+                tasks,
+            )
+            .await
+            {
+                Ok(slot) => slots.push(slot),
+                Err(err) => {
+                    warn!("Skipping upstream {target}: {err}");
+                }
+            }
+        }
+
+        Arc::new(Self::new(slots))
+    }
+
+    pub(crate) fn spawn(self: &Arc<Self>, tasks: &mut JoinSet<()>) {
+        for slot in &self.slots() {
+            let slot = slot.clone();
+            let router = self.clone();
+            tasks.spawn(async move {
+                slot.upstream.disconnected().await;
+                warn!(
+                    "Upstream {} disconnected, removing slot",
+                    slot.upstream.endpoint()
+                );
+                slot.cancel_token.cancel();
+                router.remove_slot(&slot);
+            });
+        }
     }
 }
 
