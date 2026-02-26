@@ -2,12 +2,12 @@ use {super::*, slot::Slot};
 
 mod slot;
 
-pub(crate) struct Router {
+pub(crate) struct StratumRouter {
     slots: RwLock<Vec<Arc<Slot>>>,
     counter: AtomicU64,
 }
 
-impl Router {
+impl StratumRouter {
     pub(crate) fn new(slots: Vec<Arc<Slot>>) -> Self {
         Self {
             slots: RwLock::new(slots),
@@ -93,7 +93,7 @@ impl Router {
     }
 }
 
-impl StatusLine for Router {
+impl StatusLine for StratumRouter {
     fn status_line(&self) -> String {
         let now = Instant::now();
         let slots = self.slots();

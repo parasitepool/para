@@ -1,7 +1,7 @@
 use super::*;
 
 pub(crate) fn router(
-    state: Arc<crate::router::Router>,
+    state: Arc<StratumRouter>,
     bitcoin_client: Arc<BitcoindClient>,
     chain: Chain,
 ) -> Router {
@@ -14,7 +14,7 @@ pub(crate) fn router(
         .layer(Extension(chain))
 }
 
-async fn status(State(router): State<Arc<crate::router::Router>>) -> Json<RouterStatus> {
+async fn status(State(router): State<Arc<StratumRouter>>) -> Json<RouterStatus> {
     let now = Instant::now();
 
     let slots = router.slots();

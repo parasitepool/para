@@ -36,7 +36,7 @@ impl Router {
         let enonce1_extension_size = settings.enonce1_extension_size();
         let endpoint = format!("{}:{}", settings.address(), settings.port());
 
-        let router = crate::router::Router::connect(
+        let router = StratumRouter::connect(
             settings.upstream_targets(),
             timeout,
             enonce1_extension_size,
