@@ -442,7 +442,7 @@ impl Settings {
     }
 
     pub(crate) fn upstream(&self) -> &UpstreamTarget {
-        assert_eq!(self.upstreams.len(), 1);
+        debug_assert_eq!(self.upstreams.len(), 1);
         &self.upstreams[0]
     }
 

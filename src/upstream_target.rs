@@ -49,7 +49,11 @@ impl FromStr for UpstreamTarget {
 
 impl Display for UpstreamTarget {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{}@{}", self.username, self.endpoint)
+        if let Some(password) = &self.password {
+            write!(f, "{}:{}@{}", self.username, password, self.endpoint)
+        } else {
+            write!(f, "{}@{}", self.username, self.endpoint)
+        }
     }
 }
 
@@ -75,7 +79,6 @@ mod tests {
             Some("x"),
             "bar.com:3333",
         );
-        case("foo@bar:3333", "foo", None, "bar:3333");
     }
 
     #[test]
@@ -107,6 +110,9 @@ mod tests {
     #[test]
     fn display() {
         let target: UpstreamTarget = "foo:x@bar:3333".parse().unwrap();
+        assert_eq!(target.to_string(), "foo:x@bar:3333");
+
+        let target: UpstreamTarget = "foo@bar:3333".parse().unwrap();
         assert_eq!(target.to_string(), "foo@bar:3333");
     }
 }
