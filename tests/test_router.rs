@@ -1,7 +1,4 @@
-use {
-    super::*,
-    api::RouterStatus,
-};
+use {super::*, api::RouterStatus};
 
 pub(crate) struct TestRouter {
     router_handle: Child,

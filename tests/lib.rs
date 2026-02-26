@@ -92,9 +92,9 @@ mod test_pool;
 #[cfg(target_os = "linux")]
 mod test_proxy;
 #[cfg(target_os = "linux")]
-mod test_router;
-#[cfg(target_os = "linux")]
 mod test_psql;
+#[cfg(target_os = "linux")]
+mod test_router;
 mod test_server;
 mod to_args;
 
