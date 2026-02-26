@@ -15,7 +15,7 @@ pub(crate) struct Settings {
     address: String,
     port: u16,
     http_port: Option<u16>,
-    upstreams: Vec<UpstreamTarget>,
+    upstream_targets: Vec<UpstreamTarget>,
     timeout: Duration,
     bitcoin_data_dir: Option<PathBuf>,
     bitcoin_rpc_port: u16,
@@ -50,7 +50,7 @@ impl Default for Settings {
             address: "0.0.0.0".into(),
             port: 42069,
             http_port: None,
-            upstreams: Vec::new(),
+            upstream_targets: Vec::new(),
             timeout: Duration::from_secs(30),
             bitcoin_data_dir: None,
             bitcoin_rpc_port: Chain::default().default_rpc_port(),
@@ -94,7 +94,7 @@ impl Settings {
             address: options.common.address,
             port: options.common.port,
             http_port: options.common.http_port,
-            upstreams: Vec::new(),
+            upstream_targets: Vec::new(),
             timeout: Duration::from_secs(30),
             bitcoin_data_dir: options.common.bitcoin_data_dir,
             bitcoin_rpc_port,
@@ -139,7 +139,7 @@ impl Settings {
             address: options.common.address,
             port: options.common.port,
             http_port: options.common.http_port,
-            upstreams: vec![options.upstream],
+            upstream_targets: vec![options.upstream],
             timeout: Duration::from_secs(options.timeout),
             bitcoin_data_dir: options.common.bitcoin_data_dir,
             bitcoin_rpc_port,
@@ -184,7 +184,7 @@ impl Settings {
             address: options.common.address,
             port: options.common.port,
             http_port: options.common.http_port,
-            upstreams: options.upstream,
+            upstream_targets: options.upstream,
             timeout: Duration::from_secs(options.timeout),
             bitcoin_data_dir: options.common.bitcoin_data_dir,
             bitcoin_rpc_port,
@@ -441,9 +441,8 @@ impl Settings {
         self.http_port
     }
 
-    pub(crate) fn upstream(&self) -> &UpstreamTarget {
-        debug_assert_eq!(self.upstreams.len(), 1);
-        &self.upstreams[0]
+    pub(crate) fn upstream_targets(&self) -> &[UpstreamTarget] {
+        &self.upstream_targets
     }
 
     pub(crate) fn timeout(&self) -> Duration {
@@ -954,7 +953,7 @@ mod tests {
         let options = parse_proxy_options("para proxy --upstream bar@foo:1234");
         let settings = Settings::from_proxy_options(options).unwrap();
 
-        let upstream = settings.upstream();
+        let upstream = settings.upstream_targets().first().unwrap();
 
         assert_eq!(upstream.endpoint(), "foo:1234");
         assert_eq!(upstream.username().to_string(), "bar".to_string());
@@ -997,7 +996,7 @@ mod tests {
         let options = parse_proxy_options("para proxy --upstream bar:baz@foo:1234");
         let settings = Settings::from_proxy_options(options).unwrap();
 
-        assert_eq!(settings.upstreams[0].password(), Some("baz"));
+        assert_eq!(settings.upstream_targets[0].password(), Some("baz"));
     }
 
     #[test]
@@ -1005,7 +1004,7 @@ mod tests {
         let options = parse_proxy_options("para proxy --upstream bar.baz@foo:1234");
         let settings = Settings::from_proxy_options(options).unwrap();
 
-        assert_eq!(settings.upstreams[0].username().as_str(), "bar.baz");
+        assert_eq!(settings.upstream_targets[0].username().as_str(), "bar.baz");
     }
 
     #[test]

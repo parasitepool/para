@@ -33,8 +33,11 @@ impl Proxy {
         info!("Stratum proxy listening for downstream miners on {address}:{port}");
 
         let mut backoff = Duration::from_secs(1);
-        let upstream_target = settings.upstream();
         let timeout = settings.timeout();
+        let upstream_target = settings
+            .upstream_targets()
+            .first()
+            .context("no upstream target configured")?;
 
         let Some((mut upstream, mut workbase_rx)) = connect_upstream(
             upstream_target,

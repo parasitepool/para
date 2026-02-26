@@ -37,7 +37,7 @@ impl Router {
         let endpoint = format!("{}:{}", settings.address(), settings.port());
 
         let router = crate::router::Router::connect(
-            &self.options.upstream,
+            settings.upstream_targets(),
             timeout,
             enonce1_extension_size,
             &endpoint,
