@@ -441,8 +441,9 @@ impl Settings {
         self.http_port
     }
 
-    pub(crate) fn upstreams(&self) -> &[UpstreamTarget] {
-        self.upstreams.as_ref()
+    pub(crate) fn upstream(&self) -> &UpstreamTarget {
+        assert_eq!(self.upstreams.len(), 1);
+        &self.upstreams[0]
     }
 
     pub(crate) fn timeout(&self) -> Duration {
@@ -953,7 +954,7 @@ mod tests {
         let options = parse_proxy_options("para proxy --upstream bar@foo:1234");
         let settings = Settings::from_proxy_options(options).unwrap();
 
-        let upstream = settings.upstreams()[0].clone(); // TODO
+        let upstream = settings.upstream();
 
         assert_eq!(upstream.endpoint(), "foo:1234");
         assert_eq!(upstream.username().to_string(), "bar".to_string());

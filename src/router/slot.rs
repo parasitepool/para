@@ -16,7 +16,7 @@ impl Slot {
         cancel_token: &CancellationToken,
         tasks: &mut JoinSet<()>,
     ) -> Result<Arc<Self>> {
-        let (upstream, events) = Upstream::connect(target.clone(), timeout).await?;
+        let (upstream, events) = Upstream::connect(target, timeout).await?;
         let upstream = Arc::new(upstream);
 
         let slot_cancel = cancel_token.child_token();

@@ -29,7 +29,7 @@ pub(crate) struct Upstream {
 
 impl Upstream {
     pub(crate) async fn connect(
-        target: UpstreamTarget,
+        target: &UpstreamTarget,
         timeout: Duration,
     ) -> Result<(Self, EventReceiver)> {
         let upstream_addr = resolve_stratum_endpoint(target.endpoint())
@@ -51,7 +51,7 @@ impl Upstream {
         let client = Client::new(
             upstream_addr.to_string(),
             target.username().clone(),
-            target.password().map(String::from), // TODO
+            target.password().map(String::from),
             USER_AGENT.into(),
             timeout,
         );

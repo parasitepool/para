@@ -33,11 +33,11 @@ impl Proxy {
         info!("Stratum proxy listening for downstream miners on {address}:{port}");
 
         let mut backoff = Duration::from_secs(1);
-        let upstream_target = settings.upstreams()[0].clone(); //TODO
+        let upstream_target = settings.upstream();
         let timeout = settings.timeout();
 
         let Some((mut upstream, mut workbase_rx)) = connect_upstream(
-            upstream_target.clone(), // TODO
+            upstream_target,
             timeout,
             &cancel_token,
             &mut tasks,
@@ -135,7 +135,7 @@ impl Proxy {
             }
 
             let Some((new_upstream, new_workbase_rx)) = connect_upstream(
-                upstream_target.clone(),
+                upstream_target,
                 timeout,
                 &cancel_token,
                 &mut tasks,
@@ -170,7 +170,7 @@ impl Proxy {
 }
 
 async fn connect_upstream(
-    target: UpstreamTarget,
+    target: &UpstreamTarget,
     timeout: Duration,
     cancel_token: &CancellationToken,
     tasks: &mut JoinSet<()>,
@@ -179,7 +179,7 @@ async fn connect_upstream(
     let mut max_backoff_attempts = 0u32;
 
     loop {
-        match Upstream::connect(target.clone(), timeout).await {
+        match Upstream::connect(target, timeout).await {
             Ok((upstream, events)) => {
                 let upstream = Arc::new(upstream);
                 match upstream
