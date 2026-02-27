@@ -1,0 +1,142 @@
+<div class="grid grid-stack">
+  <div class=column>
+    <h2>Upstream</h2>
+    <div class=row><span>Endpoint</span><span id=endpoint></span></div>
+    <div class=row><span>Status</span><span id=status></span></div>
+    <div class=row><span>Ping</span><span><span id=ping_ms></span>ms</span></div>
+    <div class=row><span>Username</span><span id=username class=copyable></span></div>
+    <div class=row><span>Difficulty</span><span id=difficulty class=copyable></span></div>
+    <div class=row><span>Extranonce1</span><span id=enonce1></span></div>
+    <div class=row><span>Extranonce2 Size</span><span id=enonce2_size></span></div>
+    <div class=row><span>Version Mask</span><span id=version_mask></span></div>
+    <h3>Shares</h3>
+    <div class=row><span>Accepted</span><span id=upstream_accepted></span></div>
+    <div class=row><span>Rejected</span><span id=upstream_rejected></span></div>
+    <div class=row><span>Filtered</span><span id=upstream_filtered></span></div>
+    <div class=row><span>Forwarded</span><span><span id=forward_ratio></span>%</span></div>
+  </div>
+
+  <div class=column>
+    <h2>Downstream</h2>
+    <div class=row><span>Users</span><span id=users></span></div>
+    <div class=row><span>Workers</span><span id=workers></span></div>
+    <div class=row><span>Sessions</span><span id=sessions></span></div>
+    <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
+    <div class=row><span>SPS</span><span id=sps_1m></span></div>
+    <div class=row><span>PHd</span><span id=ph_days class=copyable></span></div>
+    <div class=row><span>Uptime</span><span><span id=uptime_secs></span>s</span></div>
+    <h3>Shares</h3>
+    <div class=row><span>Accepted</span><span id=accepted></span></div>
+    <div class=row><span>Rejected</span><span id=rejected></span></div>
+    <div class=row><span>Accepted Work</span><span id=accepted_work class=copyable></span></div>
+    <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
+    <div class=row><span>Best</span><span id=best_ever class=copyable></span></div>
+    <div class=row><span>Last</span><span><span id=last_share></span>s ago</span></div>
+  </div>
+
+  <div class="column column-full">
+    <h2>Sessions</h2>
+    <table id=sessions-table>
+      <thead>
+        <tr>
+          <th>Username</th>
+          <th>Hashrate</th>
+          <th>SPS</th>
+          <th>Best</th>
+          <th>PHd</th>
+          <th>Last</th>
+        </tr>
+      </thead>
+      <tbody id=sessions-list></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const upstreamId = window.location.pathname.split('/').filter(Boolean).pop();
+
+async function refresh() {
+  try {
+    const data = await fetch(`/api/router/upstream/${upstreamId}`).then(r => r.json()).catch(() => null);
+
+    if (!data) {
+      document.querySelector('.grid').innerHTML = '<div class="column column-full"><h2>Upstream Not Found</h2></div>';
+      return;
+    }
+
+    const username = data.username;
+    const shortUser = username?.length > 15 ? username.slice(0, 6) + '...' + username.slice(-6) : username;
+    const difficulty = formatDifficulty(data.difficulty);
+    const bestEver = formatDifficulty(data.best_ever);
+    const forwarded = (data.accepted || 0) + (data.rejected || 0);
+    const total = forwarded + (data.filtered || 0);
+    const forwardRatio = total > 0 ? formatTruncated((forwarded / total) * 100) : '-';
+
+    set('endpoint', data.endpoint);
+    set('status', data.connected ? 'Connected' : 'Disconnected');
+    setClass('status', data.connected ? 'connected' : 'disconnected');
+    set('ping_ms', data.ping_ms, formatPing);
+    copyable('username', shortUser, data.username);
+    copyable('difficulty', difficulty, data.difficulty);
+    set('enonce1', data.enonce1);
+    set('enonce2_size', data.enonce2_size);
+    set('version_mask', data.version_mask);
+    set('upstream_accepted', data.accepted);
+    set('upstream_rejected', data.rejected);
+    set('upstream_filtered', data.filtered);
+    set('forward_ratio', forwardRatio);
+
+    set('users', data.users);
+    set('workers', data.workers);
+    set('sessions', data.session_count);
+    set('hashrate_1m', data.hashrate_1m, formatHashrate);
+    set('sps_1m', data.sps_1m, formatTruncated);
+    set('uptime_secs', data.uptime_secs);
+    set('accepted', data.accepted_shares);
+    set('rejected', data.rejected_shares);
+    set('last_share', data.last_share);
+    copyable('best_ever', bestEver, data.best_ever);
+
+    const acceptedWork = formatDifficulty(data.accepted_work);
+    copyable('accepted_work', acceptedWork, data.accepted_work);
+    const rejectedWork = formatDifficulty(data.rejected_work);
+    copyable('rejected_work', rejectedWork, data.rejected_work);
+    copyable('ph_days', formatPhDays(data.ph_days), data.ph_days);
+
+    const sessions = (data.sessions || []).sort((a, b) => b.hashrate_1m - a.hashrate_1m);
+    document.getElementById('sessions-list').innerHTML = sessions.map(session => {
+      const sessionUser = session.username || '';
+      const shortSessionUser = sessionUser.length > 15
+        ? sessionUser.slice(0, 6) + '...' + sessionUser.slice(-6)
+        : sessionUser;
+      const lastShare = session.last_share != null ? `${session.last_share}s ago` : '-';
+      const bestShare = formatDifficulty(session.best_ever);
+      return `<tr>
+        <td><span class="copyable hover-expand session-username">${shortSessionUser}</span></td>
+        <td>${formatHashrate(session.hashrate_1m)}</td>
+        <td>${formatTruncated(session.sps_1m)}</td>
+        <td>${bestShare || '-'}</td>
+        <td>${formatPhDays(session.ph_days) || '-'}</td>
+        <td>${lastShare}</td>
+      </tr>`;
+    }).join('');
+
+    document.querySelectorAll('#sessions-list .session-username').forEach((el, i) => {
+      const full = sessions[i]?.username || '';
+      const formatted = full.length > 15 ? full.slice(0, 6) + '...' + full.slice(-6) : full;
+      el.dataset.full = full;
+      el.dataset.formatted = formatted;
+      el.addEventListener('click', async () => {
+        if (!full) return;
+        try {
+          await navigator.clipboard.writeText(full);
+          el.textContent = 'Copied!';
+          setTimeout(() => { el.textContent = formatted; }, 1000);
+        } catch (e) { console.error('Copy failed:', e); }
+      });
+    });
+  } catch (e) { console.error('refresh error:', e); }
+}
+startPolling(refresh);
+initCopyables();
+</script>

@@ -13,7 +13,7 @@ impl RouterCli {
     pub(crate) async fn run(
         &self,
         cancel_token: CancellationToken,
-        _logs: Arc<logs::Logs>,
+        logs: Arc<logs::Logs>,
     ) -> Result {
         let mut tasks = JoinSet::new();
 
@@ -50,7 +50,7 @@ impl RouterCli {
 
         http_server::spawn(
             &settings,
-            api::router::router(router.clone(), bitcoin_client, settings.chain()),
+            api::router::router(router.clone(), bitcoin_client, settings.chain(), logs),
             cancel_token.clone(),
             &mut tasks,
         )?;

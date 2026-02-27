@@ -25,7 +25,22 @@ table tbody tr:hover { background: #1a1a1a; }
 .connected { color: #4f4; }
 .disconnected { color: #f44; }
 .copyable { cursor: pointer; position: relative; z-index: 10; }
-.copyable:hover { background: #222; border: 1px solid #444; padding: 4px 8px; margin: -5px -9px; z-index: 10; box-shadow: 0 2px 8px rgba(0,0,0,0.8); }
+.copyable:hover { background: #222; outline: 1px solid #444; z-index: 10; box-shadow: 0 2px 8px rgba(0,0,0,0.8); }
+.copyable.hover-expand:hover::after {
+  content: attr(data-full);
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  background: #111;
+  border: 1px solid #444;
+  padding: 4px 8px;
+  white-space: nowrap;
+  color: #eee;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.8);
+  z-index: 1000;
+  pointer-events: none;
+}
 .wrapper { width: fit-content; margin: 0 auto; }
 #log-show {
   display: block;

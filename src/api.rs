@@ -4,7 +4,9 @@ use {
     http_server::{
         self,
         error::{OptionExt, ServerResult},
-        templates::{DashboardHtml, PoolHtml, ProxyHtml, UserHtml, UsersHtml},
+        templates::{
+            DashboardHtml, PoolHtml, ProxyHtml, RouterHtml, UpstreamHtml, UserHtml, UsersHtml,
+        },
     },
 };
 
@@ -138,6 +140,14 @@ pub struct RouterStatus {
     pub session_count: usize,
     pub hashrate_1m: HashRate,
     pub ph_days: PhDays,
+    pub sps_1m: f64,
+    pub accepted_shares: u64,
+    pub rejected_shares: u64,
+    pub best_ever: Option<Difficulty>,
+    pub last_share: Option<u64>,
+    pub accepted_work: TotalWork,
+    pub rejected_work: TotalWork,
+    pub uptime_secs: u64,
     pub slots: Vec<SlotStatus>,
 }
 
