@@ -1,6 +1,6 @@
 use {
     super::*,
-    stratum::{Client, ClientError, Event, EventReceiver},
+    stratum::{Client, ClientError, Event},
 };
 
 pub(crate) struct UpstreamSubmit {
@@ -26,7 +26,7 @@ pub(crate) struct Upstream {
     filtered: Arc<AtomicU64>,
     version_mask: Option<Version>,
     disconnect_notify: Arc<tokio::sync::Notify>,
-    workbase_rx: OnceLock<watch::Receiver<Arc<Notify>>>,
+    workbase_rx: watch::Receiver<Arc<Notify>>,
 }
 
 impl Upstream {
@@ -34,7 +34,9 @@ impl Upstream {
         id: u32,
         target: &UpstreamTarget,
         timeout: Duration,
-    ) -> Result<(Self, EventReceiver)> {
+        cancel: CancellationToken,
+        tasks: &mut JoinSet<()>,
+    ) -> Result<Arc<Self>> {
         let upstream_addr = resolve_stratum_endpoint(target.endpoint())
             .await
             .with_context(|| {
@@ -59,7 +61,7 @@ impl Upstream {
             timeout,
         );
 
-        let events = client
+        let mut events = client
             .connect()
             .await
             .context("failed to connect to upstream")?;
@@ -98,48 +100,16 @@ impl Upstream {
             subscribe.enonce1, subscribe.enonce2_size
         );
 
-        Ok((
-            Self {
-                id,
-                client,
-                endpoint: target.endpoint().to_string(),
-                enonce1: subscribe.enonce1,
-                enonce2_size: subscribe.enonce2_size,
-                connected: Arc::new(AtomicBool::new(false)),
-                ping: Arc::new(RwLock::new(Duration::from_secs(1))),
-                difficulty: Arc::new(RwLock::new(Difficulty::from(1))),
-                accepted: Arc::new(AtomicU64::new(0)),
-                rejected: Arc::new(AtomicU64::new(0)),
-                filtered: Arc::new(AtomicU64::new(0)),
-                version_mask,
-                disconnect_notify: Arc::new(tokio::sync::Notify::new()),
-                workbase_rx: OnceLock::new(),
-            },
-            events,
-        ))
-    }
-
-    pub(crate) async fn spawn(
-        self: Arc<Self>,
-        mut events: EventReceiver,
-        cancel: CancellationToken,
-        tasks: &mut JoinSet<()>,
-    ) -> Result {
-        let (duration, _) = self
-            .client
+        let (ping, _) = client
             .authorize()
             .await
             .context("failed to authorize with upstream")?;
 
-        self.set_ping(duration);
-
         info!(
             "Authorized to upstream {} with {}",
-            self.client.address(),
-            self.client.username()
+            client.address(),
+            client.username()
         );
-
-        self.connected.store(true, Ordering::Relaxed);
 
         let mut initial_difficulty: Option<Difficulty> = None;
         let mut first_notify: Option<Notify> = None;
@@ -148,7 +118,6 @@ impl Upstream {
             match events.recv().await {
                 Ok(Event::SetDifficulty(diff)) => {
                     info!("Received initial difficulty: {}", diff);
-                    *self.difficulty.write() = diff;
                     initial_difficulty = Some(diff);
                 }
                 Ok(Event::Notify(notify)) => {
@@ -159,11 +128,9 @@ impl Upstream {
                     first_notify = Some(notify);
                 }
                 Ok(Event::Reconnect(_)) | Ok(Event::Disconnected) => {
-                    self.connected.store(false, Ordering::Relaxed);
                     bail!("Disconnected from upstream before initialization complete");
                 }
                 Err(e) => {
-                    self.connected.store(false, Ordering::Relaxed);
                     bail!("Upstream error during initialization: {e}");
                 }
             }
@@ -173,13 +140,16 @@ impl Upstream {
             }
         }
 
-        let first_notify = first_notify.expect("checked above");
+        let (workbase_tx, workbase_rx) =
+            watch::channel(Arc::new(first_notify.expect("checked above")));
 
-        let (workbase_tx, workbase_rx) = watch::channel(Arc::new(first_notify));
+        let connected = Arc::new(AtomicBool::new(true));
+        let difficulty = Arc::new(RwLock::new(initial_difficulty.expect("checked above")));
+        let disconnect_notify = Arc::new(tokio::sync::Notify::new());
 
-        let connected = self.connected.clone();
-        let upstream_difficulty = self.difficulty.clone();
-        let disconnect_notify = self.disconnect_notify.clone();
+        let bg_connected = connected.clone();
+        let bg_difficulty = difficulty.clone();
+        let bg_disconnect = disconnect_notify.clone();
 
         tasks.spawn(async move {
             loop {
@@ -201,18 +171,18 @@ impl Upstream {
                             }
                             Ok(Event::SetDifficulty(diff)) => {
                                 info!("Received set_difficulty: {}", diff);
-                                *upstream_difficulty.write() = diff;
+                                *bg_difficulty.write() = diff;
                             }
                             Ok(Event::Reconnect(_)) | Ok(Event::Disconnected) => {
                                 warn!("Disconnected from upstream");
-                                connected.store(false, Ordering::Relaxed);
-                                disconnect_notify.notify_waiters();
+                                bg_connected.store(false, Ordering::Relaxed);
+                                bg_disconnect.notify_waiters();
                                 break;
                             }
                             Err(err) => {
                                 error!("Upstream event error: {}", err);
-                                connected.store(false, Ordering::Relaxed);
-                                disconnect_notify.notify_waiters();
+                                bg_connected.store(false, Ordering::Relaxed);
+                                bg_disconnect.notify_waiters();
                                 break;
                             }
                         }
@@ -221,15 +191,26 @@ impl Upstream {
             }
         });
 
-        self.workbase_rx
-            .set(workbase_rx)
-            .expect("spawn called twice");
-
-        Ok(())
+        Ok(Arc::new(Self {
+            id,
+            client,
+            endpoint: target.endpoint().to_string(),
+            enonce1: subscribe.enonce1,
+            enonce2_size: subscribe.enonce2_size,
+            connected,
+            ping: Arc::new(RwLock::new(ping)),
+            difficulty,
+            accepted: Arc::new(AtomicU64::new(0)),
+            rejected: Arc::new(AtomicU64::new(0)),
+            filtered: Arc::new(AtomicU64::new(0)),
+            version_mask,
+            disconnect_notify,
+            workbase_rx,
+        }))
     }
 
     pub(crate) fn workbase_rx(&self) -> watch::Receiver<Arc<Notify>> {
-        self.workbase_rx.get().expect("spawn not called").clone()
+        self.workbase_rx.clone()
     }
 
     pub(crate) async fn submit_share(&self, submit: UpstreamSubmit) {
@@ -332,10 +313,6 @@ impl Upstream {
 
     pub(crate) fn version_mask(&self) -> Option<Version> {
         self.version_mask
-    }
-
-    fn set_ping(&self, duration: Duration) {
-        *self.ping.write() = duration;
     }
 
     pub(crate) fn ping_ms(&self) -> u128 {

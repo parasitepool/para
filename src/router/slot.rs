@@ -16,13 +16,8 @@ impl Slot {
         slot_cancel: CancellationToken,
         tasks: &mut JoinSet<()>,
     ) -> Result<Arc<Self>> {
-        let (upstream, events) = Upstream::connect(upstream_id, target, timeout).await?;
-        let upstream = Arc::new(upstream);
-
-        upstream
-            .clone()
-            .spawn(events, slot_cancel.clone(), tasks)
-            .await?;
+        let upstream =
+            Upstream::connect(upstream_id, target, timeout, slot_cancel.clone(), tasks).await?;
 
         let proxy_extranonces = ProxyExtranonces::new(
             upstream.enonce1().clone(),

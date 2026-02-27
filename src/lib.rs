@@ -87,7 +87,7 @@ use {
         process,
         str::FromStr,
         sync::{
-            Arc, LazyLock, OnceLock,
+            Arc, LazyLock,
             atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
         },
         thread,

@@ -182,22 +182,10 @@ async fn connect_upstream(
     let mut max_backoff_attempts = 0u32;
 
     loop {
-        match Upstream::connect(0, target, timeout).await {
-            Ok((upstream, events)) => {
-                let upstream = Arc::new(upstream);
-                match upstream
-                    .clone()
-                    .spawn(events, cancel_token.clone(), tasks)
-                    .await
-                {
-                    Ok(()) => {
-                        *backoff = Duration::from_secs(1);
-                        return Some(upstream);
-                    }
-                    Err(e) => {
-                        warn!("Failed to start upstream event loop: {e}");
-                    }
-                }
+        match Upstream::connect(0, target, timeout, cancel_token.clone(), tasks).await {
+            Ok(upstream) => {
+                *backoff = Duration::from_secs(1);
+                return Some(upstream);
             }
             Err(e) => {
                 warn!("Failed to connect to upstream: {e}");
