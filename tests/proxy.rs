@@ -44,7 +44,7 @@ async fn proxy() {
 
     assert_eq!(status.users, 0);
     assert_eq!(status.workers, 0);
-    assert_eq!(status.sessions, 0);
+    assert_eq!(status.session_count, 0);
     assert_eq!(status.accepted_shares, 0);
     assert_eq!(status.rejected_shares, 0);
     assert_eq!(status.upstream_accepted, 0);
@@ -105,7 +105,7 @@ async fn proxy() {
     let status = proxy.get_status().await.unwrap();
     assert_eq!(status.users, 1);
     assert_eq!(status.workers, 1);
-    assert_eq!(status.sessions, 1);
+    assert_eq!(status.session_count, 1);
     assert_eq!(status.accepted_shares, 1);
     assert_eq!(status.rejected_shares, 0);
     assert_eq!(status.upstream_accepted, 1);
@@ -465,7 +465,7 @@ async fn reconnects_on_upstream_disconnect() {
     timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(status) = proxy.get_status().await
-                && status.sessions >= 1
+                && status.session_count >= 1
             {
                 break;
             }
@@ -521,7 +521,7 @@ async fn reconnects_on_upstream_disconnect() {
     timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(status) = proxy.get_status().await
-                && status.sessions >= 1
+                && status.session_count >= 1
             {
                 break;
             }

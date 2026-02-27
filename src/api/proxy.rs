@@ -162,7 +162,7 @@ async fn status(State(metrics): State<Arc<Metrics>>) -> Json<ProxyStatus> {
         sps_1hr: stats.sps_1hr(now),
         users: metrics.metatron.total_users(),
         workers: metrics.metatron.total_workers(),
-        sessions: metrics.metatron.session_count(),
+        session_count: metrics.metatron.session_count(),
         disconnected: metrics.metatron.disconnected(),
         idle: metrics.metatron.idle(),
         accepted_shares: stats.accepted_shares,
@@ -220,7 +220,7 @@ async fn user(
             let stats = worker.snapshot();
             WorkerDetail {
                 name: worker.workername().to_string(),
-                sessions: worker.session_count(),
+                session_count: worker.session_count(),
                 hashrate_1m: stats.hashrate_1m(now),
                 hashrate_5m: stats.hashrate_5m(now),
                 hashrate_15m: stats.hashrate_15m(now),
@@ -269,7 +269,7 @@ async fn user(
         accepted_work: user_stats.accepted_work,
         rejected_work: user_stats.rejected_work,
         ph_days: user_stats.accepted_work.into(),
-        sessions: user.session_count(),
+        session_count: user.session_count(),
         authorized: user.authorized,
         workers,
     })
