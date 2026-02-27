@@ -55,7 +55,7 @@ async function refresh() {
 
     copyable('address', shortAddr, addr);
     set('workers_count', user.workers.length);
-    set('sessions', user.sessions);
+    set('sessions', user.session_count);
     set('hashrate_1m', user.hashrate_1m, formatHashrate);
     set('sps_1m', user.sps_1m, formatTruncated);
     set('authorized', new Date(user.authorized * 1000).toLocaleString());
@@ -77,7 +77,7 @@ async function refresh() {
       const bestShare = formatDifficulty(w.best_ever);
       return `<tr>
         <td>${w.name || '(default)'}</td>
-        <td>${w.sessions}</td>
+        <td>${w.session_count}</td>
         <td>${formatHashrate(w.hashrate_1m)}</td>
         <td>${formatTruncated(w.sps_1m)}</td>
         <td>${bestShare || '-'}</td>

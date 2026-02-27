@@ -69,7 +69,7 @@ async function refresh() {
     // Pool data
     set('users', poolData.users);
     set('workers', poolData.workers);
-    set('sessions', poolData.sessions);
+    set('sessions', poolData.session_count);
     set('hashrate_1m', poolData.hashrate_1m, formatHashrate);
     set('sps_1m', poolData.sps_1m, formatTruncated);
     set('uptime_secs', poolData.uptime_secs);

@@ -4,7 +4,9 @@ use {
     http_server::{
         self,
         error::{OptionExt, ServerResult},
-        templates::{DashboardHtml, PoolHtml, ProxyHtml, UserHtml, UsersHtml},
+        templates::{
+            DashboardHtml, PoolHtml, ProxyHtml, RouterHtml, UpstreamHtml, UserHtml, UsersHtml,
+        },
     },
 };
 
@@ -17,7 +19,7 @@ pub struct PoolStatus {
     pub endpoint: String,
     pub users: usize,
     pub workers: usize,
-    pub sessions: usize,
+    pub session_count: usize,
     pub disconnected: usize,
     pub idle: usize,
     pub hashrate_1m: HashRate,
@@ -47,7 +49,7 @@ pub struct ProxyStatus {
     pub endpoint: String,
     pub users: usize,
     pub workers: usize,
-    pub sessions: usize,
+    pub session_count: usize,
     pub disconnected: usize,
     pub idle: usize,
     pub hashrate_1m: HashRate,
@@ -103,7 +105,7 @@ pub struct UserDetail {
     pub accepted_work: TotalWork,
     pub rejected_work: TotalWork,
     pub ph_days: PhDays,
-    pub sessions: usize,
+    pub session_count: usize,
     pub authorized: u64,
     pub workers: Vec<WorkerDetail>,
 }
@@ -111,7 +113,7 @@ pub struct UserDetail {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkerDetail {
     pub name: String,
-    pub sessions: usize,
+    pub session_count: usize,
     pub hashrate_1m: HashRate,
     pub hashrate_5m: HashRate,
     pub hashrate_15m: HashRate,
@@ -134,23 +136,29 @@ pub struct WorkerDetail {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RouterStatus {
-    pub total_sessions: usize,
-    pub total_upstreams: usize,
-    pub total_hashrate_1m: HashRate,
-    pub total_ph_days: PhDays,
+    pub upstream_count: usize,
+    pub session_count: usize,
+    pub hashrate_1m: HashRate,
+    pub ph_days: PhDays,
+    pub sps_1m: f64,
+    pub accepted_shares: u64,
+    pub rejected_shares: u64,
+    pub best_ever: Option<Difficulty>,
+    pub last_share: Option<u64>,
+    pub accepted_work: TotalWork,
+    pub rejected_work: TotalWork,
+    pub uptime_secs: u64,
     pub slots: Vec<SlotStatus>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SlotStatus {
-    pub index: usize,
     pub upstream_id: u32,
     pub endpoint: String,
     pub username: String,
-    pub connected: bool,
     pub hashrate_1m: HashRate,
+    pub session_count: usize,
     pub ph_days: PhDays,
-    pub sessions: usize,
     pub hashrate_min: HashRate,
     pub hashrate_max: HashRate,
     pub hashrate_avg: HashRate,
@@ -173,7 +181,7 @@ pub struct UpstreamDetail {
     pub filtered: u64,
     pub users: usize,
     pub workers: usize,
-    pub sessions: usize,
+    pub session_count: usize,
     pub disconnected: usize,
     pub idle: usize,
     pub hashrate_1m: HashRate,
@@ -195,7 +203,7 @@ pub struct UpstreamDetail {
     pub rejected_work: TotalWork,
     pub ph_days: PhDays,
     pub uptime_secs: u64,
-    pub session_list: Vec<SessionDetail>,
+    pub sessions: Vec<SessionDetail>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -207,6 +215,13 @@ pub struct SessionDetail {
     pub username: String,
     pub enonce1: Extranonce,
     pub version_mask: Option<Version>,
+    pub accepted_shares: u64,
+    pub rejected_shares: u64,
+    pub accepted_work: TotalWork,
+    pub rejected_work: TotalWork,
+    pub best_ever: Option<Difficulty>,
+    pub last_share: Option<u64>,
+    pub ph_days: PhDays,
     pub hashrate_1m: HashRate,
     pub hashrate_5m: HashRate,
     pub hashrate_15m: HashRate,
@@ -218,13 +233,6 @@ pub struct SessionDetail {
     pub sps_5m: f64,
     pub sps_15m: f64,
     pub sps_1hr: f64,
-    pub accepted_shares: u64,
-    pub rejected_shares: u64,
-    pub best_ever: Option<Difficulty>,
-    pub last_share: Option<u64>,
-    pub accepted_work: TotalWork,
-    pub rejected_work: TotalWork,
-    pub ph_days: PhDays,
 }
 
 pub type BitcoinStatus = http_server::BitcoinStatus;

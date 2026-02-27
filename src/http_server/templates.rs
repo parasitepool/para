@@ -45,6 +45,24 @@ impl DashboardContent for ProxyHtml {
 }
 
 #[derive(Boilerplate)]
+pub(crate) struct RouterHtml;
+
+impl DashboardContent for RouterHtml {
+    fn title(&self) -> &'static str {
+        "Router"
+    }
+}
+
+#[derive(Boilerplate)]
+pub(crate) struct UpstreamHtml;
+
+impl DashboardContent for UpstreamHtml {
+    fn title(&self) -> &'static str {
+        "Router | Upstream"
+    }
+}
+
+#[derive(Boilerplate)]
 pub(crate) struct UsersHtml {
     pub(crate) title: &'static str,
     pub(crate) api_base: &'static str,

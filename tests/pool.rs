@@ -631,7 +631,7 @@ async fn share_validation() {
     assert_eq!(status.endpoint, pool.stratum_endpoint());
     assert_eq!(status.users, 0);
     assert_eq!(status.workers, 0);
-    assert_eq!(status.sessions, 0);
+    assert_eq!(status.session_count, 0);
     assert_eq!(status.blocks, 0);
     assert_eq!(status.accepted_shares, 0);
     assert_eq!(status.rejected_shares, 0);
@@ -677,7 +677,7 @@ async fn share_validation() {
     let status = pool.get_status().await.unwrap();
     assert_eq!(status.users, 1);
     assert_eq!(status.workers, 1);
-    assert_eq!(status.sessions, 1);
+    assert_eq!(status.session_count, 1);
     assert_eq!(status.accepted_shares, 1);
     assert_eq!(status.rejected_shares, 0);
     assert!(status.best_ever.is_some());
@@ -1350,10 +1350,10 @@ async fn idle_drop_retires_session() {
         .unwrap();
 
     let status = pool.get_status().await.unwrap();
-    assert_eq!(status.sessions, 1);
+    assert_eq!(status.session_count, 1);
 
     tokio::time::sleep(Duration::from_secs(8)).await;
 
     let status = pool.get_status().await.unwrap();
-    assert_eq!(status.sessions, 0);
+    assert_eq!(status.session_count, 0);
 }

@@ -32,7 +32,7 @@ impl StatusLine for Metrics {
             "sps={:.2}  hashrate={:.2}  sessions={}  upstream_enonce1={}  accepted={}  rejected={}",
             stats.sps_1m(now),
             stats.hashrate_1m(now),
-            self.metatron.total_sessions(),
+            self.metatron.session_count(),
             upstream.enonce1(),
             stats.accepted_shares,
             stats.rejected_shares,

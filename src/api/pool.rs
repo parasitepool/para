@@ -161,7 +161,7 @@ async fn status(State(metatron): State<Arc<Metatron>>) -> Json<PoolStatus> {
         sps_1hr: stats.sps_1hr(now),
         users: metatron.total_users(),
         workers: metatron.total_workers(),
-        sessions: metatron.total_sessions(),
+        session_count: metatron.session_count(),
         disconnected: metatron.disconnected(),
         idle: metatron.idle(),
         accepted_shares: stats.accepted_shares,
@@ -207,7 +207,7 @@ async fn user(
             let stats = worker.snapshot();
             WorkerDetail {
                 name: worker.workername().to_string(),
-                sessions: worker.session_count(),
+                session_count: worker.session_count(),
                 hashrate_1m: stats.hashrate_1m(now),
                 hashrate_5m: stats.hashrate_5m(now),
                 hashrate_15m: stats.hashrate_15m(now),
@@ -256,7 +256,7 @@ async fn user(
         accepted_work: user_stats.accepted_work,
         rejected_work: user_stats.rejected_work,
         ph_days: user_stats.accepted_work.into(),
-        sessions: user.session_count(),
+        session_count: user.session_count(),
         authorized: user.authorized,
         workers,
     })

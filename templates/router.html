@@ -1,0 +1,200 @@
+<style>
+  #upstreams-list {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .slot-card {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .slot-pane {
+    border: 1px solid #333;
+    padding: 12px;
+    background: #111;
+    min-width: 0;
+  }
+
+  .slot-pane h2 {
+    margin: 0 0 10px;
+    color: #888;
+    font-size: 1.22em;
+    text-align: center;
+    border-bottom: 1px solid #333;
+    padding-bottom: 8px;
+  }
+
+  .slot-link {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .slot-link:hover {
+    text-decoration: underline;
+  }
+
+  .slot-pane .row span:last-child,
+  .slot-pane .row a {
+    overflow-wrap: anywhere;
+  }
+
+  @media (max-width: 1140px) {
+    #upstreams-list {
+      width: 100%;
+      max-width: 100%;
+    }
+
+    .slot-card {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+
+<div class="grid grid-stack">
+  <div class="column column-full">
+    <h2>Info</h2>
+    <div class=row><span>Upstreams</span><span id=upstream_count></span></div>
+    <div class=row><span>Sessions</span><span id=session_count></span></div>
+    <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
+    <div class=row><span>SPS</span><span id=sps_1m></span></div>
+    <div class=row><span>PHd</span><span id=ph_days class=copyable></span></div>
+    <div class=row><span>Uptime</span><span><span id=uptime_secs></span>s</span></div>
+    <div class=row><span>Accepted</span><span id=accepted></span></div>
+    <div class=row><span>Rejected</span><span id=rejected></span></div>
+    <div class=row><span>Accepted Work</span><span id=accepted_work class=copyable></span></div>
+    <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
+    <div class=row><span>Best</span><span id=best_ever class=copyable></span></div>
+    <div class=row><span>Last</span><span><span id=last_share></span>s ago</span></div>
+  </div>
+
+  <div class="column column-full">
+    <h2>Slots</h2>
+    <div id=upstreams-list></div>
+  </div>
+
+  <div class=column>
+    <h2>Bitcoin</h2>
+    <div class=row><span>Block Height</span><a id=btc_height_link target=_blank rel=noopener><span id=btc_height></span></a></div>
+    <div class=row><span>Network Difficulty</span><span id=network_difficulty class=copyable></span></div>
+    <div class=row><span>Network Hashrate</span><span id=network_hashrate></span></div>
+    <div class=row><span>Mempool Transactions</span><span id=mempool_txs></span></div>
+  </div>
+
+  <div class=column>
+    <h2>System</h2>
+    <div class=row><span>CPU</span><span><span id=cpu_usage_percent></span>%</span></div>
+    <div class=row><span>Memory</span><span><span id=memory_usage_percent></span>%</span></div>
+    <div class=row><span>Disk</span><span><span id=disk_usage_percent></span>%</span></div>
+    <div class=row><span>Uptime</span><span><span id=uptime></span>s</span></div>
+  </div>
+</div>
+
+<button id=log-show>Show Logs</button>
+<div id=log-controls class=hidden>
+  <input type=search id=log-filter placeholder="Filter logs..." autocomplete=off data-1p-ignore data-lpignore=true data-bwignore=true>
+  <button id=log-pause>Pause</button>
+  <button id=log-clear>Clear</button>
+  <span id=log-level-controls>
+    <button id=log-level-toggle>INFO</button>
+    <span id=log-level-options class=hidden>
+      <button class=log-level data-level=off>OFF</button>
+      <button class=log-level data-level=error>ERROR</button>
+      <button class=log-level data-level=warn>WARN</button>
+      <button class=log-level data-level=info>INFO</button>
+      <button class=log-level data-level=debug>DEBUG</button>
+    </span>
+  </span>
+  <button id=log-hide>Hide</button>
+</div>
+<div id=logs class=hidden></div>
+
+<script>
+async function refresh() {
+  try {
+    const [routerData, systemData, bitcoinData] = await Promise.all([
+      fetch('/api/router/status').then(r => r.json()).catch(() => ({})),
+      fetch('/api/system/status').then(r => r.json()).catch(() => ({})),
+      fetch('/api/bitcoin/status').then(r => r.json()).catch(() => ({}))
+    ]);
+
+    const bestEver = formatDifficulty(routerData.best_ever);
+    const acceptedWork = formatDifficulty(routerData.accepted_work);
+    const rejectedWork = formatDifficulty(routerData.rejected_work);
+    const networkDifficulty = formatDifficulty(bitcoinData.network_difficulty);
+
+    set('upstream_count', routerData.upstream_count);
+    set('session_count', routerData.session_count);
+    set('hashrate_1m', routerData.hashrate_1m, formatHashrate);
+    set('sps_1m', routerData.sps_1m, formatTruncated);
+    set('uptime_secs', routerData.uptime_secs);
+    set('accepted', routerData.accepted_shares);
+    set('rejected', routerData.rejected_shares);
+    set('last_share', routerData.last_share);
+    copyable('ph_days', formatPhDays(routerData.ph_days), routerData.ph_days);
+    copyable('accepted_work', acceptedWork, routerData.accepted_work);
+    copyable('rejected_work', rejectedWork, routerData.rejected_work);
+    copyable('best_ever', bestEver, routerData.best_ever);
+
+    set('btc_height', bitcoinData.height);
+    const heightLink = document.getElementById('btc_height_link');
+    if (heightLink && bitcoinData.height !== null && bitcoinData.height !== undefined) {
+      heightLink.href = `https://mempool.space/block/${bitcoinData.height}`;
+    }
+    copyable('network_difficulty', networkDifficulty, bitcoinData.network_difficulty);
+    set('network_hashrate', bitcoinData.network_hashrate, formatHashrate);
+    set('mempool_txs', bitcoinData.mempool_txs);
+
+    set('cpu_usage_percent', systemData.cpu_usage_percent, formatTruncated);
+    set('memory_usage_percent', systemData.memory_usage_percent, formatTruncated);
+    set('disk_usage_percent', systemData.disk_usage_percent, formatTruncated);
+    set('uptime', systemData.uptime);
+
+    const container = document.getElementById('upstreams-list');
+    const slots = routerData.slots || [];
+    container.innerHTML = slots.map(slot => {
+      const username = slot.username || '';
+      const shortUser = username.length > 15 ? username.slice(0, 6) + '...' + username.slice(-6) : username;
+      const phDays = formatPhDays(slot.ph_days);
+      return `<div class="slot-card">
+        <div class=slot-pane>
+          <div class=row><a class=slot-link href="/upstream/${slot.upstream_id}">ID</a><span>${slot.upstream_id}</span></div>
+          <div class=row><span>Endpoint</span><span>${slot.endpoint}</span></div>
+          <div class=row><span>Username</span><span class="copyable hover-expand slot-username" data-full="${username}" data-formatted="${shortUser}">${shortUser}</span></div>
+        </div>
+        <div class=slot-pane>
+          <div class=row><a class=slot-link href="/upstream/${slot.upstream_id}">Sessions</a><span>${slot.session_count}</span></div>
+          <div class=row><span>Hashrate</span><span>${formatHashrate(slot.hashrate_1m)}</span></div>
+          <div class=row><span>PHd</span><span>${phDays || '-'}</span></div>
+          <div class=row><span>Min</span><span>${formatHashrate(slot.hashrate_min)}</span></div>
+          <div class=row><span>Max</span><span>${formatHashrate(slot.hashrate_max)}</span></div>
+          <div class=row><span>Avg</span><span>${formatHashrate(slot.hashrate_avg)}</span></div>
+          <div class=row><span>Median</span><span>${formatHashrate(slot.hashrate_median)}</span></div>
+        </div>
+      </div>`;
+    }).join('');
+
+  } catch (e) { console.error('refresh error:', e); }
+}
+document.getElementById('upstreams-list').addEventListener('click', async (e) => {
+  const el = e.target.closest('.slot-username');
+  if (!el) return;
+  const full = el.dataset.full;
+  if (!full) return;
+  try {
+    await navigator.clipboard.writeText(full);
+    el.textContent = 'Copied!';
+    setTimeout(() => { el.textContent = el.dataset.formatted; }, 1000);
+  } catch (e) { console.error('Copy failed:', e); }
+});
+startPolling(refresh);
+connectWs();
+setupLogToggle();
+initCopyables();
+</script>
