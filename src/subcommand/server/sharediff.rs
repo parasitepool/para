@@ -3,8 +3,11 @@ use {
     crate::subcommand::server::database::{HighestDiff, TeraShare},
 };
 
-pub(crate) fn share_difficulty_router(config: Arc<ServerConfig>, database: Database) -> Router {
-    let mut router = Router::new()
+pub(crate) fn share_difficulty_router(
+    config: Arc<ServerConfig>,
+    database: Database,
+) -> axum::Router {
+    let mut router = axum::Router::new()
         .route("/highestdiff/{blockheight}", get(highestdiff))
         .route(
             "/highestdiff/{blockheight}/user/{username}",

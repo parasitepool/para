@@ -3,7 +3,6 @@ use super::*;
 pub(crate) struct Slot {
     pub(crate) upstream: Arc<Upstream>,
     pub(crate) metatron: Arc<Metatron>,
-    pub(crate) workbase_rx: watch::Receiver<Arc<Notify>>,
     pub(crate) cancel_token: CancellationToken,
 }
 
@@ -19,7 +18,7 @@ impl Slot {
         let (upstream, events) = Upstream::connect(target, timeout).await?;
         let upstream = Arc::new(upstream);
 
-        let workbase_rx = upstream
+        upstream
             .clone()
             .spawn(events, slot_cancel.clone(), tasks)
             .await?;
@@ -42,7 +41,6 @@ impl Slot {
         Ok(Arc::new(Self {
             upstream,
             metatron,
-            workbase_rx,
             cancel_token: slot_cancel,
         }))
     }

@@ -25,6 +25,7 @@ pub(crate) struct Upstream {
     filtered: Arc<AtomicU64>,
     version_mask: Option<Version>,
     disconnect_notify: Arc<tokio::sync::Notify>,
+    workbase_rx: OnceLock<watch::Receiver<Arc<Notify>>>,
 }
 
 impl Upstream {
@@ -109,6 +110,7 @@ impl Upstream {
                 filtered: Arc::new(AtomicU64::new(0)),
                 version_mask,
                 disconnect_notify: Arc::new(tokio::sync::Notify::new()),
+                workbase_rx: OnceLock::new(),
             },
             events,
         ))
@@ -119,7 +121,7 @@ impl Upstream {
         mut events: EventReceiver,
         cancel: CancellationToken,
         tasks: &mut JoinSet<()>,
-    ) -> Result<watch::Receiver<Arc<Notify>>> {
+    ) -> Result {
         let (duration, _) = self
             .client
             .authorize()
@@ -216,7 +218,15 @@ impl Upstream {
             }
         });
 
-        Ok(workbase_rx)
+        self.workbase_rx
+            .set(workbase_rx)
+            .expect("spawn called twice");
+
+        Ok(())
+    }
+
+    pub(crate) fn workbase_rx(&self) -> watch::Receiver<Arc<Notify>> {
+        self.workbase_rx.get().expect("spawn not called").clone()
     }
 
     pub(crate) async fn submit_share(&self, submit: UpstreamSubmit) {

@@ -6,8 +6,8 @@ use {
     },
 };
 
-pub(crate) fn payouts_router(config: Arc<ServerConfig>, database: Database) -> Router {
-    let mut router = Router::new()
+pub(crate) fn payouts_router(config: Arc<ServerConfig>, database: Database) -> axum::Router {
+    let mut router = axum::Router::new()
         .route("/payouts", get(payouts_all))
         .route("/payouts/failed", get(payouts_failed))
         .route("/payouts/simulate", get(payouts_simulate))

@@ -3,7 +3,7 @@ use {
     arguments::Arguments,
     async_trait::async_trait,
     axum::{
-        Extension, Json, Router,
+        Extension, Json,
         extract::{DefaultBodyLimit, FromRequestParts},
         http::{
             self, HeaderValue, StatusCode,
@@ -54,7 +54,7 @@ use {
     parking_lot::{Mutex, RwLock},
     ph_days::PhDays,
     reqwest::Url,
-    router::StratumRouter,
+    router::Router,
     rust_embed::RustEmbed,
     rustls_acme::{
         AcmeConfig,
@@ -84,7 +84,7 @@ use {
         process,
         str::FromStr,
         sync::{
-            Arc, LazyLock,
+            Arc, LazyLock, OnceLock,
             atomic::{AtomicBool, AtomicU64, Ordering},
         },
         thread,

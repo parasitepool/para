@@ -250,7 +250,7 @@ impl Server {
             shutdown_handle.shutdown();
         });
 
-        let mut router = Router::new()
+        let mut router = axum::Router::new()
             .nest_service("/pool/", ServeDir::new(pool_dir))
             .nest_service("/users/", ServeDir::new(user_dir))
             .route("/users", get(Self::users))

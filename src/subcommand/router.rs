@@ -4,12 +4,12 @@ use {
 };
 
 #[derive(Parser, Debug)]
-pub(crate) struct Router {
+pub(crate) struct RouterCli {
     #[command(flatten)]
     pub(crate) options: RouterOptions,
 }
 
-impl Router {
+impl RouterCli {
     pub(crate) async fn run(
         &self,
         cancel_token: CancellationToken,
@@ -36,7 +36,7 @@ impl Router {
         let enonce1_extension_size = settings.enonce1_extension_size();
         let endpoint = format!("{}:{}", settings.address(), settings.port());
 
-        let router = StratumRouter::connect(
+        let router = Router::connect(
             settings.upstream_targets(),
             timeout,
             enonce1_extension_size,
@@ -97,7 +97,7 @@ impl Router {
                     slot.metatron.clone(),
                     Some(slot.upstream.clone()),
                     stream,
-                    slot.workbase_rx.clone(),
+                    slot.upstream.workbase_rx(),
                     cancel_token,
                     None,
                     start_diff,

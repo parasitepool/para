@@ -1,7 +1,7 @@
 use super::*;
 
-pub(crate) fn sync_router(config: Arc<ServerConfig>, database: Database) -> Router {
-    let mut router = Router::new()
+pub(crate) fn sync_router(config: Arc<ServerConfig>, database: Database) -> axum::Router {
+    let mut router = axum::Router::new()
         .route(
             "/sync/batch",
             post(sync_batch).layer(DefaultBodyLimit::max(50 * MEBIBYTE)),
