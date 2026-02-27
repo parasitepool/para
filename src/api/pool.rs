@@ -161,7 +161,7 @@ async fn status(State(metatron): State<Arc<Metatron>>) -> Json<PoolStatus> {
         sps_1hr: stats.sps_1hr(now),
         users: metatron.total_users(),
         workers: metatron.total_workers(),
-        sessions: metatron.total_sessions(),
+        sessions: metatron.session_count(),
         disconnected: metatron.disconnected(),
         idle: metatron.idle(),
         accepted_shares: stats.accepted_shares,

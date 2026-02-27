@@ -162,7 +162,7 @@ async fn status(State(metrics): State<Arc<Metrics>>) -> Json<ProxyStatus> {
         sps_1hr: stats.sps_1hr(now),
         users: metrics.metatron.total_users(),
         workers: metrics.metatron.total_workers(),
-        sessions: metrics.metatron.total_sessions(),
+        sessions: metrics.metatron.session_count(),
         disconnected: metrics.metatron.disconnected(),
         idle: metrics.metatron.idle(),
         accepted_shares: stats.accepted_shares,

@@ -21,7 +21,7 @@ async fn router_round_robin() {
 
     let status = router.get_status().await.unwrap();
     assert_eq!(status.slots.len(), 2);
-    assert_eq!(status.total_sessions, 0);
+    assert_eq!(status.session_count, 0);
 
     let mut miners = Vec::new();
 
@@ -39,7 +39,7 @@ async fn router_round_robin() {
     timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(status) = router.get_status().await
-                && status.total_sessions >= 3
+                && status.session_count >= 3
             {
                 break;
             }
@@ -50,8 +50,8 @@ async fn router_round_robin() {
     .expect("Timeout waiting for 3 sessions");
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.slots[0].sessions, 2);
-    assert_eq!(status.slots[1].sessions, 1);
+    assert_eq!(status.slots[0].session_count, 2);
+    assert_eq!(status.slots[1].session_count, 1);
 
     drop(pool_a);
 
@@ -59,7 +59,7 @@ async fn router_round_robin() {
         loop {
             if let Ok(status) = router.get_status().await
                 && status.slots.len() == 1
-                && status.total_sessions >= 3
+                && status.session_count >= 3
             {
                 break;
             }
@@ -71,7 +71,7 @@ async fn router_round_robin() {
 
     let status = router.get_status().await.unwrap();
     assert_eq!(status.slots.len(), 1);
-    assert_eq!(status.total_sessions, 3);
+    assert_eq!(status.session_count, 3);
 
     drop(pool_b);
 
