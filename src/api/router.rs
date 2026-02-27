@@ -7,7 +7,7 @@ pub(crate) fn router(
 ) -> axum::Router {
     axum::Router::new()
         .route("/api/router/status", get(status))
-        .route("/api/router/upstream/{upstream_id}", get(upstream_detail))
+        .route("/api/router/upstream/{upstream_id}", get(upstream))
         .route("/api/bitcoin/status", get(http_server::bitcoin_status))
         .route("/api/system/status", get(http_server::system_status))
         .with_state(state)
@@ -15,7 +15,84 @@ pub(crate) fn router(
         .layer(Extension(chain))
 }
 
-async fn upstream_detail(
+async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
+    let now = Instant::now();
+
+    let slots = router.slots();
+    let mut slot_statuses = Vec::with_capacity(slots.len());
+    let mut total_sessions = 0;
+    let mut total_hashrate = HashRate(0.0);
+    let mut total_accepted_work = TotalWork::ZERO;
+
+    for (index, slot) in slots.iter().enumerate() {
+        let stats = slot.metatron.snapshot();
+        let hashrate_1m = stats.hashrate_1m(now);
+        let sessions_count = slot.metatron.total_sessions();
+
+        let mut session_hashrates = Vec::new();
+        for user in slot.metatron.users().iter() {
+            for worker in user.workers() {
+                for session in worker.sessions() {
+                    let session_stats = session.snapshot();
+                    session_hashrates.push(session_stats.hashrate_1m(now));
+                }
+            }
+        }
+
+        session_hashrates
+            .sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+        let hashrate_min = session_hashrates.first().copied().unwrap_or(HashRate(0.0));
+        let hashrate_max = session_hashrates.last().copied().unwrap_or(HashRate(0.0));
+
+        let hashrate_avg = if session_hashrates.is_empty() {
+            HashRate(0.0)
+        } else {
+            let sum: f64 = session_hashrates.iter().map(|h| h.0).sum();
+            HashRate(sum / session_hashrates.len() as f64)
+        };
+
+        let hashrate_median = if session_hashrates.is_empty() {
+            HashRate(0.0)
+        } else {
+            let mid = session_hashrates.len() / 2;
+            if session_hashrates.len() % 2 == 0 {
+                HashRate((session_hashrates[mid - 1].0 + session_hashrates[mid].0) / 2.0)
+            } else {
+                session_hashrates[mid]
+            }
+        };
+
+        total_sessions += sessions_count;
+        total_hashrate.0 += hashrate_1m.0;
+        total_accepted_work += stats.accepted_work;
+
+        slot_statuses.push(SlotStatus {
+            index,
+            upstream_id: slot.upstream.id(),
+            endpoint: slot.upstream.endpoint().to_string(),
+            username: slot.upstream.username().to_string(),
+            connected: slot.upstream.is_connected(),
+            hashrate_1m,
+            ph_days: PhDays::from(stats.accepted_work),
+            sessions: sessions_count,
+            hashrate_min,
+            hashrate_max,
+            hashrate_avg,
+            hashrate_median,
+        });
+    }
+
+    Json(RouterStatus {
+        slots: slot_statuses,
+        total_sessions,
+        total_upstreams: slots.len(),
+        total_hashrate_1m: total_hashrate,
+        total_ph_days: PhDays::from(total_accepted_work),
+    })
+}
+
+async fn upstream(
     State(router): State<Arc<Router>>,
     Path(upstream_id): Path<u32>,
 ) -> ServerResult<Response> {
@@ -104,81 +181,4 @@ async fn upstream_detail(
         session_list,
     })
     .into_response())
-}
-
-async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
-    let now = Instant::now();
-
-    let slots = router.slots();
-    let mut slot_statuses = Vec::with_capacity(slots.len());
-    let mut total_sessions = 0;
-    let mut total_hashrate = HashRate(0.0);
-    let mut total_accepted_work = TotalWork::ZERO;
-
-    for (index, slot) in slots.iter().enumerate() {
-        let stats = slot.metatron.snapshot();
-        let hashrate_1m = stats.hashrate_1m(now);
-        let sessions_count = slot.metatron.total_sessions();
-
-        let mut session_hashrates = Vec::new();
-        for user in slot.metatron.users().iter() {
-            for worker in user.workers() {
-                for session in worker.sessions() {
-                    let session_stats = session.snapshot();
-                    session_hashrates.push(session_stats.hashrate_1m(now));
-                }
-            }
-        }
-
-        session_hashrates
-            .sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-
-        let hashrate_min = session_hashrates.first().copied().unwrap_or(HashRate(0.0));
-        let hashrate_max = session_hashrates.last().copied().unwrap_or(HashRate(0.0));
-
-        let hashrate_avg = if session_hashrates.is_empty() {
-            HashRate(0.0)
-        } else {
-            let sum: f64 = session_hashrates.iter().map(|h| h.0).sum();
-            HashRate(sum / session_hashrates.len() as f64)
-        };
-
-        let hashrate_median = if session_hashrates.is_empty() {
-            HashRate(0.0)
-        } else {
-            let mid = session_hashrates.len() / 2;
-            if session_hashrates.len() % 2 == 0 {
-                HashRate((session_hashrates[mid - 1].0 + session_hashrates[mid].0) / 2.0)
-            } else {
-                session_hashrates[mid]
-            }
-        };
-
-        total_sessions += sessions_count;
-        total_hashrate.0 += hashrate_1m.0;
-        total_accepted_work += stats.accepted_work;
-
-        slot_statuses.push(SlotStatus {
-            index,
-            upstream_id: slot.upstream.id(),
-            endpoint: slot.upstream.endpoint().to_string(),
-            username: slot.upstream.username().to_string(),
-            connected: slot.upstream.is_connected(),
-            hashrate_1m,
-            ph_days: PhDays::from(stats.accepted_work),
-            sessions: sessions_count,
-            hashrate_min,
-            hashrate_max,
-            hashrate_avg,
-            hashrate_median,
-        });
-    }
-
-    Json(RouterStatus {
-        slots: slot_statuses,
-        total_sessions,
-        total_upstreams: slots.len(),
-        total_hashrate_1m: total_hashrate,
-        total_ph_days: PhDays::from(total_accepted_work),
-    })
 }

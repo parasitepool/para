@@ -114,7 +114,7 @@ impl Upstream {
         let mut initial_difficulty: Option<Difficulty> = None;
         let mut first_notify: Option<Notify> = None;
 
-        loop {
+        let (initial_difficulty, first_notify) = loop {
             match events.recv().await {
                 Ok(Event::SetDifficulty(diff)) => {
                     info!("Received initial difficulty: {}", diff);
@@ -135,17 +135,17 @@ impl Upstream {
                 }
             }
 
-            if initial_difficulty.is_some() && first_notify.is_some() {
-                break;
+            if let Some(diff) = initial_difficulty
+                && let Some(notify) = first_notify.take()
+            {
+                break (diff, notify);
             }
-        }
+        };
 
-        let (workbase_tx, workbase_rx) =
-            watch::channel(Arc::new(first_notify.expect("checked above")));
-
+        let difficulty = Arc::new(RwLock::new(initial_difficulty));
         let connected = Arc::new(AtomicBool::new(true));
-        let difficulty = Arc::new(RwLock::new(initial_difficulty.expect("checked above")));
         let disconnect_notify = Arc::new(tokio::sync::Notify::new());
+        let (workbase_tx, workbase_rx) = watch::channel(Arc::new(first_notify));
 
         let connected_clone = connected.clone();
         let difficulty_clone = difficulty.clone();
