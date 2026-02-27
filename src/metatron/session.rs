@@ -1,7 +1,27 @@
 use super::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SessionId(u64);
+
+impl SessionId {
+    pub fn new(upstream_id: u32, counter: u32) -> Self {
+        Self((upstream_id as u64) << 32 | counter as u64)
+    }
+
+    pub fn upstream_id(self) -> u32 {
+        (self.0 >> 32) as u32
+    }
+}
+
+impl Display for SessionId {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
+
 pub(crate) struct Session {
-    id: u64,
+    id: SessionId,
     enonce1: Extranonce,
     address: Address,
     workername: String,
@@ -12,7 +32,7 @@ pub(crate) struct Session {
 
 impl Session {
     pub(crate) fn new(
-        id: u64,
+        id: SessionId,
         enonce1: Extranonce,
         address: Address,
         workername: String,
@@ -30,7 +50,7 @@ impl Session {
         }
     }
 
-    pub(crate) fn id(&self) -> u64 {
+    pub(crate) fn id(&self) -> SessionId {
         self.id
     }
 
@@ -87,5 +107,32 @@ impl Session {
         let mut stats = self.stats.lock();
         stats.rejected_shares += 1;
         stats.rejected_work += TotalWork::from_difficulty(pool_diff);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_id_round_trip() {
+        #[track_caller]
+        fn case(upstream_id: u32, counter: u32) {
+            let id = SessionId::new(upstream_id, counter);
+            assert_eq!(id.upstream_id(), upstream_id);
+        }
+
+        case(0, 0);
+        case(0, 1);
+        case(1, 0);
+        case(7, 42);
+        case(u32::MAX, u32::MAX);
+    }
+
+    #[test]
+    fn session_id_uniqueness() {
+        let a = SessionId::new(0, 1);
+        let b = SessionId::new(1, 0);
+        assert_ne!(a, b);
     }
 }

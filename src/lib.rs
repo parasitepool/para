@@ -3,7 +3,7 @@ use {
     arguments::Arguments,
     async_trait::async_trait,
     axum::{
-        Extension, Json, Router,
+        Extension, Json,
         extract::{DefaultBodyLimit, FromRequestParts},
         http::{
             self, HeaderValue, StatusCode,
@@ -49,12 +49,15 @@ use {
     jobs::Jobs,
     logs::logs_enabled,
     lru::LruCache,
-    metatron::{Metatron, session::Session},
+    metatron::{
+        Metatron,
+        session::{Session, SessionId},
+    },
     metrics::Metrics,
     parking_lot::{Mutex, RwLock},
     ph_days::PhDays,
     reqwest::Url,
-    router::StratumRouter,
+    router::Router,
     rust_embed::RustEmbed,
     rustls_acme::{
         AcmeConfig,
@@ -85,7 +88,7 @@ use {
         str::FromStr,
         sync::{
             Arc, LazyLock,
-            atomic::{AtomicBool, AtomicU64, Ordering},
+            atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
         },
         thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},

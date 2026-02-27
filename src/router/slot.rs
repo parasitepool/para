@@ -3,12 +3,12 @@ use super::*;
 pub(crate) struct Slot {
     pub(crate) upstream: Arc<Upstream>,
     pub(crate) metatron: Arc<Metatron>,
-    pub(crate) workbase_rx: watch::Receiver<Arc<Notify>>,
     pub(crate) cancel_token: CancellationToken,
 }
 
 impl Slot {
     pub(crate) async fn connect(
+        upstream_id: u32,
         target: &UpstreamTarget,
         timeout: Duration,
         enonce1_extension_size: usize,
@@ -16,13 +16,8 @@ impl Slot {
         slot_cancel: CancellationToken,
         tasks: &mut JoinSet<()>,
     ) -> Result<Arc<Self>> {
-        let (upstream, events) = Upstream::connect(target, timeout).await?;
-        let upstream = Arc::new(upstream);
-
-        let workbase_rx = upstream
-            .clone()
-            .spawn(events, slot_cancel.clone(), tasks)
-            .await?;
+        let upstream =
+            Upstream::connect(upstream_id, target, timeout, slot_cancel.clone(), tasks).await?;
 
         let proxy_extranonces = ProxyExtranonces::new(
             upstream.enonce1().clone(),
@@ -33,6 +28,7 @@ impl Slot {
         let metatron = Arc::new(Metatron::new(
             Extranonces::Proxy(proxy_extranonces),
             endpoint.to_string(),
+            upstream_id,
         ));
 
         metatron.clone().spawn(slot_cancel.clone(), tasks);
@@ -42,7 +38,6 @@ impl Slot {
         Ok(Arc::new(Self {
             upstream,
             metatron,
-            workbase_rx,
             cancel_token: slot_cancel,
         }))
     }

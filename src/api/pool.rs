@@ -5,8 +5,8 @@ pub(crate) fn router(
     bitcoin_client: Arc<BitcoindClient>,
     chain: Chain,
     logs: Arc<logs::Logs>,
-) -> Router {
-    Router::new()
+) -> axum::Router {
+    axum::Router::new()
         .route("/", get(home))
         .route("/users", get(users_page))
         .route("/user/{address}", get(user_page))

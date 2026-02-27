@@ -26,7 +26,7 @@ pub struct HttpConfig {
 
 pub fn spawn(
     settings: &Settings,
-    router: Router,
+    router: axum::Router,
     cancel_token: CancellationToken,
     tasks: &mut JoinSet<()>,
 ) -> Result<()> {
@@ -66,7 +66,7 @@ pub fn spawn(
 
 pub fn spawn_with_handle(
     config: HttpConfig,
-    router: Router,
+    router: axum::Router,
     handle: Handle,
 ) -> Result<JoinHandle<io::Result<()>>> {
     let (listener, tls_enabled) = bind_listener(&config)?;
@@ -106,7 +106,7 @@ fn bind_listener(config: &HttpConfig) -> Result<(std::net::TcpListener, bool)> {
 
 async fn serve(
     listener: std::net::TcpListener,
-    router: Router,
+    router: axum::Router,
     handle: Handle,
     tls_enabled: bool,
     config: HttpConfig,

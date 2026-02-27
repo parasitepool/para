@@ -39,7 +39,7 @@ impl Proxy {
             .first()
             .context("no upstream target configured")?;
 
-        let Some((mut upstream, mut workbase_rx)) = connect_upstream(
+        let Some(mut upstream) = connect_upstream(
             upstream_target,
             timeout,
             &cancel_token,
@@ -63,6 +63,7 @@ impl Proxy {
         let metatron = Arc::new(Metatron::new(
             extranonces,
             format!("{}:{}", settings.address(), settings.port()),
+            0,
         ));
 
         metatron.clone().spawn(cancel_token.clone(), &mut tasks);
@@ -110,7 +111,6 @@ impl Proxy {
 
                 debug!("Spawning stratifier task for {addr}");
 
-                let workbase_rx = workbase_rx.clone();
                 let settings = settings.clone();
                 let metatron = metatron.clone();
                 let upstream = upstream.clone();
@@ -119,6 +119,7 @@ impl Proxy {
                 let start_diff = settings.start_diff();
 
                 tasks.spawn(async move {
+                    let workbase_rx = upstream.workbase_rx();
                     let mut stratifier: Stratifier<Notify> = Stratifier::new(
                         addr,
                         settings,
@@ -137,7 +138,7 @@ impl Proxy {
                 });
             }
 
-            let Some((new_upstream, new_workbase_rx)) = connect_upstream(
+            let Some(new_upstream) = connect_upstream(
                 upstream_target,
                 timeout,
                 &cancel_token,
@@ -161,7 +162,6 @@ impl Proxy {
             metatron.update_extranonces(new_extranonces);
             metrics.update_upstream(new_upstream.clone());
             upstream = new_upstream;
-            workbase_rx = new_workbase_rx;
         }
 
         while tasks.join_next().await.is_some() {}
@@ -178,26 +178,14 @@ async fn connect_upstream(
     cancel_token: &CancellationToken,
     tasks: &mut JoinSet<()>,
     backoff: &mut Duration,
-) -> Option<(Arc<Upstream>, watch::Receiver<Arc<Notify>>)> {
+) -> Option<Arc<Upstream>> {
     let mut max_backoff_attempts = 0u32;
 
     loop {
-        match Upstream::connect(target, timeout).await {
-            Ok((upstream, events)) => {
-                let upstream = Arc::new(upstream);
-                match upstream
-                    .clone()
-                    .spawn(events, cancel_token.clone(), tasks)
-                    .await
-                {
-                    Ok(workbase_rx) => {
-                        *backoff = Duration::from_secs(1);
-                        return Some((upstream, workbase_rx));
-                    }
-                    Err(e) => {
-                        warn!("Failed to start upstream event loop: {e}");
-                    }
-                }
+        match Upstream::connect(0, target, timeout, cancel_token.clone(), tasks).await {
+            Ok(upstream) => {
+                *backoff = Duration::from_secs(1);
+                return Some(upstream);
             }
             Err(e) => {
                 warn!("Failed to connect to upstream: {e}");

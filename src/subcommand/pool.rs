@@ -41,6 +41,7 @@ impl Pool {
         let metatron = Arc::new(Metatron::new(
             extranonces,
             format!("{}:{}", settings.address(), settings.port()),
+            0,
         ));
         metatron.clone().spawn(cancel_token.clone(), &mut tasks);
 

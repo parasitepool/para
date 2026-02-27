@@ -2,12 +2,12 @@ use {super::*, slot::Slot};
 
 mod slot;
 
-pub(crate) struct StratumRouter {
+pub(crate) struct Router {
     slots: RwLock<Vec<Arc<Slot>>>,
     counter: AtomicU64,
 }
 
-impl StratumRouter {
+impl Router {
     pub(crate) fn new(slots: Vec<Arc<Slot>>) -> Self {
         Self {
             slots: RwLock::new(slots),
@@ -35,6 +35,14 @@ impl StratumRouter {
         self.slots.read().clone()
     }
 
+    pub(crate) fn slot_by_upstream_id(&self, id: u32) -> Option<Arc<Slot>> {
+        self.slots
+            .read()
+            .iter()
+            .find(|s| s.upstream.id() == id)
+            .cloned()
+    }
+
     pub(crate) async fn connect(
         targets: &[UpstreamTarget],
         timeout: Duration,
@@ -45,8 +53,9 @@ impl StratumRouter {
     ) -> Result<Arc<Self>, Error> {
         let mut slots = Vec::new();
 
-        for target in targets {
+        for (upstream_id, target) in targets.iter().enumerate() {
             match Slot::connect(
+                upstream_id as u32,
                 target,
                 timeout,
                 enonce1_extension_size,
@@ -95,7 +104,7 @@ impl StratumRouter {
     }
 }
 
-impl StatusLine for StratumRouter {
+impl StatusLine for Router {
     fn status_line(&self) -> String {
         let now = Instant::now();
         let slots = self.slots();

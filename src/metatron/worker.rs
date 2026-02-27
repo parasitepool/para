@@ -2,7 +2,7 @@ use super::*;
 
 pub(crate) struct Worker {
     workername: String,
-    sessions: DashMap<u64, Arc<Session>>,
+    sessions: DashMap<SessionId, Arc<Session>>,
     lifetime: Mutex<Stats>,
 }
 
@@ -19,7 +19,7 @@ impl Worker {
         self.sessions.insert(session.id(), session);
     }
 
-    pub(crate) fn retire_session(&self, id: u64) {
+    pub(crate) fn retire_session(&self, id: SessionId) {
         if let Some((_, session)) = self.sessions.remove(&id) {
             let snapshot = session.snapshot();
             self.lifetime.lock().absorb(snapshot, Instant::now());

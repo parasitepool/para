@@ -32,8 +32,8 @@ pub struct AccountResponse {
     pub remark: Option<String>,
 }
 
-pub(crate) fn account_router(config: Arc<ServerConfig>, database: Database) -> Router {
-    let mut router = Router::new()
+pub(crate) fn account_router(config: Arc<ServerConfig>, database: Database) -> axum::Router {
+    let mut router = axum::Router::new()
         .route("/account/{address}", get(account_lookup))
         .route("/account/update", post(account_update))
         .route("/account/metadata", post(account_metadata_update));

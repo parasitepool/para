@@ -143,7 +143,7 @@ impl Display for State {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use {super::*, crate::metatron::session::SessionId};
 
     fn test_enonce1() -> Extranonce {
         "deadbeef".parse().unwrap()
@@ -269,7 +269,7 @@ mod tests {
         assert_eq!(identity.address(), &test_address());
 
         let session = Arc::new(Session::new(
-            0,
+            SessionId::new(0, 0),
             test_enonce1(),
             test_address(),
             "bar".into(),
