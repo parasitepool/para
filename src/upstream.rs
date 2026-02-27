@@ -147,9 +147,9 @@ impl Upstream {
         let difficulty = Arc::new(RwLock::new(initial_difficulty.expect("checked above")));
         let disconnect_notify = Arc::new(tokio::sync::Notify::new());
 
-        let bg_connected = connected.clone();
-        let bg_difficulty = difficulty.clone();
-        let bg_disconnect = disconnect_notify.clone();
+        let connected_clone = connected.clone();
+        let difficulty_clone = difficulty.clone();
+        let disconnect_clone = disconnect_notify.clone();
 
         tasks.spawn(async move {
             loop {
@@ -171,18 +171,18 @@ impl Upstream {
                             }
                             Ok(Event::SetDifficulty(diff)) => {
                                 info!("Received set_difficulty: {}", diff);
-                                *bg_difficulty.write() = diff;
+                                *difficulty_clone.write() = diff;
                             }
                             Ok(Event::Reconnect(_)) | Ok(Event::Disconnected) => {
                                 warn!("Disconnected from upstream");
-                                bg_connected.store(false, Ordering::Relaxed);
-                                bg_disconnect.notify_waiters();
+                                connected_clone.store(false, Ordering::Relaxed);
+                                disconnect_clone.notify_waiters();
                                 break;
                             }
                             Err(err) => {
                                 error!("Upstream event error: {}", err);
-                                bg_connected.store(false, Ordering::Relaxed);
-                                bg_disconnect.notify_waiters();
+                                connected_clone.store(false, Ordering::Relaxed);
+                                disconnect_clone.notify_waiters();
                                 break;
                             }
                         }
