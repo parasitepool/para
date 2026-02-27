@@ -112,7 +112,7 @@ async function refresh() {
       const lastShare = session.last_share != null ? `${session.last_share}s ago` : '-';
       const bestShare = formatDifficulty(session.best_ever);
       return `<tr>
-        <td><span class="copyable hover-expand session-username">${shortSessionUser}</span></td>
+        <td><span class="copyable hover-expand session-username" data-full="${sessionUser}" data-formatted="${shortSessionUser}">${shortSessionUser}</span></td>
         <td>${formatHashrate(session.hashrate_1m)}</td>
         <td>${formatTruncated(session.sps_1m)}</td>
         <td>${bestShare || '-'}</td>
@@ -121,22 +121,20 @@ async function refresh() {
       </tr>`;
     }).join('');
 
-    document.querySelectorAll('#sessions-list .session-username').forEach((el, i) => {
-      const full = sessions[i]?.username || '';
-      const formatted = full.length > 15 ? full.slice(0, 6) + '...' + full.slice(-6) : full;
-      el.dataset.full = full;
-      el.dataset.formatted = formatted;
-      el.addEventListener('click', async () => {
-        if (!full) return;
-        try {
-          await navigator.clipboard.writeText(full);
-          el.textContent = 'Copied!';
-          setTimeout(() => { el.textContent = formatted; }, 1000);
-        } catch (e) { console.error('Copy failed:', e); }
-      });
-    });
   } catch (e) { console.error('refresh error:', e); }
 }
+document.getElementById('sessions-list').addEventListener('click', async (e) => {
+  const el = e.target.closest('.session-username');
+  if (!el) return;
+  const full = el.dataset.full;
+  if (!full) return;
+  try {
+    await navigator.clipboard.writeText(full);
+    const formatted = el.dataset.formatted;
+    el.textContent = 'Copied!';
+    setTimeout(() => { el.textContent = formatted; }, 1000);
+  } catch (e) { console.error('Copy failed:', e); }
+});
 startPolling(refresh);
 initCopyables();
 </script>

@@ -180,20 +180,19 @@ async function refresh() {
       </div>`;
     }).join('');
 
-    document.querySelectorAll('#upstreams-list .slot-username').forEach(el => {
-      el.addEventListener('click', async () => {
-        const full = el.dataset.full;
-        if (!full) return;
-        try {
-          await navigator.clipboard.writeText(full);
-          el.textContent = 'Copied!';
-          setTimeout(() => { el.textContent = el.dataset.formatted; }, 1000);
-        } catch (e) { console.error('Copy failed:', e); }
-      });
-
-    });
   } catch (e) { console.error('refresh error:', e); }
 }
+document.getElementById('upstreams-list').addEventListener('click', async (e) => {
+  const el = e.target.closest('.slot-username');
+  if (!el) return;
+  const full = el.dataset.full;
+  if (!full) return;
+  try {
+    await navigator.clipboard.writeText(full);
+    el.textContent = 'Copied!';
+    setTimeout(() => { el.textContent = el.dataset.formatted; }, 1000);
+  } catch (e) { console.error('Copy failed:', e); }
+});
 startPolling(refresh);
 connectWs();
 setupLogToggle();
