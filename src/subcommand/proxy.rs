@@ -63,6 +63,7 @@ impl Proxy {
         let metatron = Arc::new(Metatron::new(
             extranonces,
             format!("{}:{}", settings.address(), settings.port()),
+            0,
         ));
 
         metatron.clone().spawn(cancel_token.clone(), &mut tasks);
@@ -181,7 +182,7 @@ async fn connect_upstream(
     let mut max_backoff_attempts = 0u32;
 
     loop {
-        match Upstream::connect(target, timeout).await {
+        match Upstream::connect(0, target, timeout).await {
             Ok((upstream, events)) => {
                 let upstream = Arc::new(upstream);
                 match upstream

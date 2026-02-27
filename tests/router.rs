@@ -50,8 +50,8 @@ async fn router_round_robin() {
     .expect("Timeout waiting for 3 sessions");
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.slots[0].sessions.len(), 2);
-    assert_eq!(status.slots[1].sessions.len(), 1);
+    assert_eq!(status.slots[0].sessions, 2);
+    assert_eq!(status.slots[1].sessions, 1);
 
     drop(pool_a);
 

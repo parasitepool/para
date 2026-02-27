@@ -134,26 +134,97 @@ pub struct WorkerDetail {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RouterStatus {
-    pub slots: Vec<SlotStatus>,
     pub total_sessions: usize,
+    pub total_upstreams: usize,
     pub total_hashrate_1m: HashRate,
+    pub total_ph_days: PhDays,
+    pub slots: Vec<SlotStatus>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SlotStatus {
     pub index: usize,
+    pub upstream_id: u32,
     pub endpoint: String,
     pub username: String,
     pub connected: bool,
     pub hashrate_1m: HashRate,
-    pub sessions: Vec<SlotSessionStatus>,
+    pub ph_days: PhDays,
+    pub sessions: usize,
+    pub hashrate_min: HashRate,
+    pub hashrate_max: HashRate,
+    pub hashrate_avg: HashRate,
+    pub hashrate_median: HashRate,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SlotSessionStatus {
-    pub id: u64,
-    pub worker_name: String,
+pub struct UpstreamDetail {
+    pub upstream_id: u32,
+    pub endpoint: String,
+    pub username: String,
+    pub connected: bool,
+    pub ping_ms: u128,
+    pub difficulty: Difficulty,
+    pub enonce1: Extranonce,
+    pub enonce2_size: usize,
+    pub version_mask: Option<Version>,
+    pub accepted: u64,
+    pub rejected: u64,
+    pub filtered: u64,
+    pub users: usize,
+    pub workers: usize,
+    pub sessions: usize,
+    pub disconnected: usize,
+    pub idle: usize,
     pub hashrate_1m: HashRate,
+    pub hashrate_5m: HashRate,
+    pub hashrate_15m: HashRate,
+    pub hashrate_1hr: HashRate,
+    pub hashrate_6hr: HashRate,
+    pub hashrate_1d: HashRate,
+    pub hashrate_7d: HashRate,
+    pub sps_1m: f64,
+    pub sps_5m: f64,
+    pub sps_15m: f64,
+    pub sps_1hr: f64,
+    pub accepted_shares: u64,
+    pub rejected_shares: u64,
+    pub best_ever: Option<Difficulty>,
+    pub last_share: Option<u64>,
+    pub accepted_work: TotalWork,
+    pub rejected_work: TotalWork,
+    pub ph_days: PhDays,
+    pub uptime_secs: u64,
+    pub session_list: Vec<SessionDetail>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionDetail {
+    pub id: SessionId,
+    pub upstream_id: u32,
+    pub address: String,
+    pub workername: String,
+    pub username: String,
+    pub enonce1: Extranonce,
+    pub version_mask: Option<Version>,
+    pub hashrate_1m: HashRate,
+    pub hashrate_5m: HashRate,
+    pub hashrate_15m: HashRate,
+    pub hashrate_1hr: HashRate,
+    pub hashrate_6hr: HashRate,
+    pub hashrate_1d: HashRate,
+    pub hashrate_7d: HashRate,
+    pub sps_1m: f64,
+    pub sps_5m: f64,
+    pub sps_15m: f64,
+    pub sps_1hr: f64,
+    pub accepted_shares: u64,
+    pub rejected_shares: u64,
+    pub best_ever: Option<Difficulty>,
+    pub last_share: Option<u64>,
+    pub accepted_work: TotalWork,
+    pub rejected_work: TotalWork,
+    pub ph_days: PhDays,
 }
 
 pub type BitcoinStatus = http_server::BitcoinStatus;

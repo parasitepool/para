@@ -8,6 +8,7 @@ pub(crate) struct Slot {
 
 impl Slot {
     pub(crate) async fn connect(
+        upstream_id: u32,
         target: &UpstreamTarget,
         timeout: Duration,
         enonce1_extension_size: usize,
@@ -15,7 +16,7 @@ impl Slot {
         slot_cancel: CancellationToken,
         tasks: &mut JoinSet<()>,
     ) -> Result<Arc<Self>> {
-        let (upstream, events) = Upstream::connect(target, timeout).await?;
+        let (upstream, events) = Upstream::connect(upstream_id, target, timeout).await?;
         let upstream = Arc::new(upstream);
 
         upstream
@@ -32,6 +33,7 @@ impl Slot {
         let metatron = Arc::new(Metatron::new(
             Extranonces::Proxy(proxy_extranonces),
             endpoint.to_string(),
+            upstream_id,
         ));
 
         metatron.clone().spawn(slot_cancel.clone(), tasks);

@@ -35,6 +35,14 @@ impl Router {
         self.slots.read().clone()
     }
 
+    pub(crate) fn slot_by_upstream_id(&self, id: u32) -> Option<Arc<Slot>> {
+        self.slots
+            .read()
+            .iter()
+            .find(|s| s.upstream.id() == id)
+            .cloned()
+    }
+
     pub(crate) async fn connect(
         targets: &[UpstreamTarget],
         timeout: Duration,
@@ -45,8 +53,9 @@ impl Router {
     ) -> Result<Arc<Self>, Error> {
         let mut slots = Vec::new();
 
-        for target in targets {
+        for (upstream_id, target) in targets.iter().enumerate() {
             match Slot::connect(
+                upstream_id as u32,
                 target,
                 timeout,
                 enonce1_extension_size,

@@ -13,6 +13,7 @@ pub(crate) struct UpstreamSubmit {
 }
 
 pub(crate) struct Upstream {
+    id: u32,
     client: Client,
     endpoint: String,
     enonce1: Extranonce,
@@ -30,6 +31,7 @@ pub(crate) struct Upstream {
 
 impl Upstream {
     pub(crate) async fn connect(
+        id: u32,
         target: &UpstreamTarget,
         timeout: Duration,
     ) -> Result<(Self, EventReceiver)> {
@@ -98,6 +100,7 @@ impl Upstream {
 
         Ok((
             Self {
+                id,
                 client,
                 endpoint: target.endpoint().to_string(),
                 enonce1: subscribe.enonce1,
@@ -281,6 +284,10 @@ impl Upstream {
                 }
             }
         });
+    }
+
+    pub(crate) fn id(&self) -> u32 {
+        self.id
     }
 
     pub(crate) fn enonce1(&self) -> &Extranonce {

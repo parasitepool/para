@@ -1,7 +1,27 @@
 use super::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SessionId(u64);
+
+impl SessionId {
+    pub fn new(upstream_id: u32, counter: u32) -> Self {
+        Self((upstream_id as u64) << 32 | counter as u64)
+    }
+
+    pub fn upstream_id(self) -> u32 {
+        (self.0 >> 32) as u32
+    }
+}
+
+impl Display for SessionId {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
+
 pub(crate) struct Session {
-    id: u64,
+    id: SessionId,
     enonce1: Extranonce,
     address: Address,
     workername: String,
@@ -12,7 +32,7 @@ pub(crate) struct Session {
 
 impl Session {
     pub(crate) fn new(
-        id: u64,
+        id: SessionId,
         enonce1: Extranonce,
         address: Address,
         workername: String,
@@ -30,7 +50,7 @@ impl Session {
         }
     }
 
-    pub(crate) fn id(&self) -> u64 {
+    pub(crate) fn id(&self) -> SessionId {
         self.id
     }
 

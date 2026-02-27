@@ -1,5 +1,9 @@
 use {
-    super::*, session::Session, stats::Stats, stratifier::state::Authorization, user::User,
+    super::*,
+    session::{Session, SessionId},
+    stats::Stats,
+    stratifier::state::Authorization,
+    user::User,
     worker::Worker,
 };
 
@@ -15,12 +19,13 @@ pub(crate) struct Metatron {
     disconnected: DashMap<Extranonce, (Arc<Session>, Instant)>,
     extranonces: RwLock<Extranonces>,
     enonce_counter: AtomicU64,
-    session_id_counter: AtomicU64,
+    upstream_id: u32,
+    session_id_counter: AtomicU32,
     endpoint: String,
 }
 
 impl Metatron {
-    pub(crate) fn new(extranonces: Extranonces, endpoint: String) -> Self {
+    pub(crate) fn new(extranonces: Extranonces, endpoint: String, upstream_id: u32) -> Self {
         Self {
             blocks: AtomicU64::new(0),
             started: Instant::now(),
@@ -33,7 +38,8 @@ impl Metatron {
                     .unwrap_or_default()
                     .as_millis() as u64,
             ),
-            session_id_counter: AtomicU64::new(0),
+            upstream_id,
+            session_id_counter: AtomicU32::new(0),
             endpoint,
         }
     }
@@ -105,7 +111,8 @@ impl Metatron {
     }
 
     pub(crate) fn new_session(&self, auth: Arc<Authorization>) -> Arc<Session> {
-        let id = self.session_id_counter.fetch_add(1, Ordering::Relaxed);
+        let counter = self.session_id_counter.fetch_add(1, Ordering::Relaxed);
+        let id = SessionId::new(self.upstream_id, counter);
 
         let session = Arc::new(Session::new(
             id,
@@ -247,7 +254,7 @@ mod tests {
 
     #[test]
     fn new_metatron_starts_at_zero() {
-        let metatron = Metatron::new(pool_extranonces(), String::new());
+        let metatron = Metatron::new(pool_extranonces(), String::new(), 0);
         let stats = metatron.snapshot();
         assert_eq!(metatron.total_sessions(), 0);
         assert_eq!(stats.accepted_shares, 0);
@@ -259,7 +266,7 @@ mod tests {
 
     #[test]
     fn session_count_tracks_active_sessions() {
-        let metatron = Metatron::new(pool_extranonces(), String::new());
+        let metatron = Metatron::new(pool_extranonces(), String::new(), 0);
         assert_eq!(metatron.total_sessions(), 0);
 
         let s1 = metatron.new_session(test_auth("deadbeef", "foo"));
@@ -275,7 +282,7 @@ mod tests {
 
     #[test]
     fn new_session_creates_user_and_worker() {
-        let metatron = Metatron::new(pool_extranonces(), String::new());
+        let metatron = Metatron::new(pool_extranonces(), String::new(), 0);
 
         metatron.new_session(test_auth("deadbeef", "rig1"));
         assert_eq!(metatron.total_users(), 1);
@@ -288,7 +295,7 @@ mod tests {
 
     #[test]
     fn record_share_updates_stats() {
-        let metatron = Metatron::new(pool_extranonces(), String::new());
+        let metatron = Metatron::new(pool_extranonces(), String::new(), 0);
         let session = metatron.new_session(test_auth("deadbeef", "foo"));
 
         session.record_accepted(Difficulty::from(1000.0), Difficulty::from(1500.0));
@@ -302,14 +309,14 @@ mod tests {
 
     #[test]
     fn block_count_increments() {
-        let metatron = Metatron::new(pool_extranonces(), String::new());
+        let metatron = Metatron::new(pool_extranonces(), String::new(), 0);
         metatron.add_block();
         assert_eq!(metatron.total_blocks(), 1);
     }
 
     #[test]
     fn pool_enonce1() {
-        let metatron = Metatron::new(pool_extranonces(), String::new());
+        let metatron = Metatron::new(pool_extranonces(), String::new(), 0);
         let e1 = metatron.next_enonce1();
         let e2 = metatron.next_enonce1();
 
@@ -322,7 +329,7 @@ mod tests {
 
     #[test]
     fn next_enonce1_is_unique() {
-        let metatron = Metatron::new(pool_extranonces(), String::new());
+        let metatron = Metatron::new(pool_extranonces(), String::new(), 0);
         let mut seen = std::collections::HashSet::new();
         for _ in 0..1000 {
             let enonce = metatron.next_enonce1();
@@ -335,7 +342,7 @@ mod tests {
         let upstream_enonce1 = Extranonce::from_bytes(&[0xde, 0xad, 0xbe, 0xef]);
         let extranonces =
             Extranonces::Proxy(ProxyExtranonces::new(upstream_enonce1.clone(), 8, 2).unwrap());
-        let metatron = Metatron::new(extranonces, String::new());
+        let metatron = Metatron::new(extranonces, String::new(), 0);
 
         assert_eq!(metatron.enonce2_size(), 6);
 
@@ -355,7 +362,7 @@ mod tests {
         let upstream_enonce1 = Extranonce::from_bytes(&[0xde, 0xad, 0xbe, 0xef]);
         let extranonces =
             Extranonces::Proxy(ProxyExtranonces::new(upstream_enonce1.clone(), 8, 1).unwrap());
-        let metatron = Metatron::new(extranonces, String::new());
+        let metatron = Metatron::new(extranonces, String::new(), 0);
 
         let e1 = metatron.next_enonce1();
         assert_eq!(e1.len(), 5);
@@ -370,7 +377,7 @@ mod tests {
 
     #[test]
     fn accepted_work_accumulates() {
-        let metatron = Metatron::new(pool_extranonces(), String::new());
+        let metatron = Metatron::new(pool_extranonces(), String::new(), 0);
         let pool_diff = Difficulty::from(100.0);
         let expected = TotalWork::from_difficulty(pool_diff);
 
@@ -393,7 +400,7 @@ mod tests {
 
     #[test]
     fn store_and_take_disconnected() {
-        let metatron = Metatron::new(pool_extranonces(), String::new());
+        let metatron = Metatron::new(pool_extranonces(), String::new(), 0);
 
         let enonce1: Extranonce = "deadbeef".parse().unwrap();
         assert!(!metatron.take_disconnected(&enonce1));
@@ -408,7 +415,7 @@ mod tests {
 
     #[test]
     fn retire_session_folds_stats() {
-        let metatron = Metatron::new(pool_extranonces(), String::new());
+        let metatron = Metatron::new(pool_extranonces(), String::new(), 0);
         let session = metatron.new_session(test_auth("deadbeef", "foo"));
 
         let pool_diff = Difficulty::from(100.0);
@@ -430,7 +437,7 @@ mod tests {
 
     #[test]
     fn retire_accumulates_across_multiple_sessions() {
-        let metatron = Metatron::new(pool_extranonces(), String::new());
+        let metatron = Metatron::new(pool_extranonces(), String::new(), 0);
         let s1 = metatron.new_session(test_auth("deadbeef", "foo"));
         let s2 = metatron.new_session(test_auth("cafebabe", "foo"));
 
@@ -449,7 +456,7 @@ mod tests {
 
     #[test]
     fn stats_combine_active_sessions_and_lifetime() {
-        let metatron = Metatron::new(pool_extranonces(), String::new());
+        let metatron = Metatron::new(pool_extranonces(), String::new(), 0);
         let s1 = metatron.new_session(test_auth("deadbeef", "foo"));
         let s2 = metatron.new_session(test_auth("cafebabe", "foo"));
 
@@ -470,7 +477,7 @@ mod tests {
         let old_enonce1 = Extranonce::from_bytes(&[0xaa, 0xbb, 0xcc, 0xdd]);
         let extranonces =
             Extranonces::Proxy(ProxyExtranonces::new(old_enonce1.clone(), 8, 2).unwrap());
-        let metatron = Metatron::new(extranonces, String::new());
+        let metatron = Metatron::new(extranonces, String::new(), 0);
 
         let before = metatron.next_enonce1();
         assert_eq!(&before.as_bytes()[..4], old_enonce1.as_bytes());
@@ -490,7 +497,7 @@ mod tests {
     fn update_extranonces_preserves_stats() {
         let old_enonce1 = Extranonce::from_bytes(&[0xaa, 0xbb, 0xcc, 0xdd]);
         let extranonces = Extranonces::Proxy(ProxyExtranonces::new(old_enonce1, 8, 2).unwrap());
-        let metatron = Metatron::new(extranonces, String::new());
+        let metatron = Metatron::new(extranonces, String::new(), 0);
 
         let session = metatron.new_session(test_auth("deadbeef", "foo"));
         let pool_diff = Difficulty::from(100.0);
