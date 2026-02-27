@@ -39,8 +39,7 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
             }
         }
 
-        session_hashrates
-            .sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        session_hashrates.sort_by(|a, b| a.0.total_cmp(&b.0));
 
         let hashrate_min = session_hashrates.first().copied().unwrap_or(HashRate(0.0));
         let hashrate_max = session_hashrates.last().copied().unwrap_or(HashRate(0.0));

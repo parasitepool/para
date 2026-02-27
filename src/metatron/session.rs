@@ -109,3 +109,30 @@ impl Session {
         stats.rejected_work += TotalWork::from_difficulty(pool_diff);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_id_round_trip() {
+        #[track_caller]
+        fn case(upstream_id: u32, counter: u32) {
+            let id = SessionId::new(upstream_id, counter);
+            assert_eq!(id.upstream_id(), upstream_id);
+        }
+
+        case(0, 0);
+        case(0, 1);
+        case(1, 0);
+        case(7, 42);
+        case(u32::MAX, u32::MAX);
+    }
+
+    #[test]
+    fn session_id_uniqueness() {
+        let a = SessionId::new(0, 1);
+        let b = SessionId::new(1, 0);
+        assert_ne!(a, b);
+    }
+}
