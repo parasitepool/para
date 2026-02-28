@@ -16,10 +16,11 @@ use {
     tracing::{debug, error, warn},
 };
 
-pub use error::ClientError;
+pub use {error::ClientError, event::Event};
 
 mod actor;
 mod error;
+mod event;
 
 pub type Result<T = (), E = ClientError> = std::result::Result<T, E>;
 

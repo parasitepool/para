@@ -582,7 +582,7 @@ async fn new_job_shares_rejected_at_old_diff() {
     let new_notify = timeout(Duration::from_secs(10), async {
         loop {
             match events.recv().await {
-                Ok(stratum::Event::Notify(n)) if n.job_id != notify.job_id => return n,
+                Ok(stratum::client::Event::Notify(n)) if n.job_id != notify.job_id => return n,
                 Ok(_) => continue,
                 Err(e) => panic!("Event channel closed: {:?}", e),
             }
@@ -1075,7 +1075,7 @@ async fn bouncer() {
             }
 
             while let Some(Ok(event)) = events.try_recv() {
-                if let stratum::Event::Notify(notify) = event
+                if let stratum::client::Event::Notify(notify) = event
                     && notify.job_id != last_job_id
                 {
                     last_job_id = notify.job_id;
@@ -1309,7 +1309,7 @@ async fn high_diff_port() {
 
     assert_eq!(normal_diff, Difficulty::from(0.00001));
 
-    let high_diff_client = stratum::Client::new(
+    let high_diff_client = stratum::client::Client::new(
         format!("127.0.0.1:{high_diff_port}"),
         signet_username(),
         None,

@@ -1,6 +1,6 @@
 use {
     super::*,
-    stratum::{Client, Event},
+    stratum::client::{Client, Event},
 };
 
 #[derive(Debug, Parser)]

@@ -142,7 +142,10 @@ impl Controller {
         Ok(controller.shares)
     }
 
-    async fn connect(&mut self, disable_version_rolling: bool) -> Result<stratum::EventReceiver> {
+    async fn connect(
+        &mut self,
+        disable_version_rolling: bool,
+    ) -> Result<stratum::client::EventReceiver> {
         let events = self
             .client
             .connect()
@@ -204,7 +207,7 @@ impl Controller {
 
     async fn event_loop(
         &mut self,
-        mut events: stratum::EventReceiver,
+        mut events: stratum::client::EventReceiver,
         cancel_token: CancellationToken,
     ) -> Result<Action> {
         loop {
@@ -216,26 +219,26 @@ impl Controller {
                 },
                 event = events.recv() => {
                     match event {
-                        Ok(stratum::Event::Notify(notify)) => {
+                        Ok(stratum::client::Event::Notify(notify)) => {
                             self.handle_notify(notify).await?;
                         }
-                        Ok(stratum::Event::SetDifficulty(difficulty)) => {
+                        Ok(stratum::client::Event::SetDifficulty(difficulty)) => {
                             self.handle_set_difficulty(difficulty);
                         }
-                        Ok(stratum::Event::Reconnect(_)) => {
+                        Ok(stratum::client::Event::Reconnect(_)) => {
                             info!("Received client.reconnect from server");
                             self.cancel_hashers();
                             return Ok(Action::Reconnect);
                         }
-                        Ok(stratum::Event::Disconnected) => {
+                        Ok(stratum::client::Event::Disconnected) => {
                             info!("Disconnected from stratum server");
                             self.cancel_hashers();
                             return Ok(Action::Reconnect);
                         }
-                        Err(stratum::ClientError::EventsLagged { count }) => {
+                        Err(stratum::client::ClientError::EventsLagged { count }) => {
                             warn!("Event loop lagged, missed {count} messages");
                         }
-                        Err(stratum::ClientError::EventChannelClosed) => {
+                        Err(stratum::client::ClientError::EventChannelClosed) => {
                             info!("Client event channel closed, shutting down");
                             return Ok(Action::Shutdown);
                         }

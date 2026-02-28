@@ -28,58 +28,42 @@ use {
 };
 
 pub use {
-    authorize::Authorize,
-    configure::{Configure, ConfigureResponse},
     difficulty::Difficulty,
     error::{InternalError, Result, StratumError, StratumErrorResponse},
-    event::Event,
     extranonce::Extranonce,
     job_id::JobId,
     merkle::{MerkleNode, merkle_branches, merkle_root},
     message::{Id, Message},
+    method::{
+        Authorize, Configure, ConfigureResponse, Notify, Reconnect, SetDifficulty, Submit,
+        Subscribe, SubscribeResponse, SuggestDifficulty,
+    },
     nbits::Nbits,
     nonce::Nonce,
-    notify::Notify,
     ntime::Ntime,
     prevhash::PrevHash,
-    reconnect::Reconnect,
-    set_difficulty::SetDifficulty,
     si::{format_si, parse_si},
-    submit::Submit,
-    subscribe::{Subscribe, SubscribeResponse},
-    suggest_difficulty::SuggestDifficulty,
     username::Username,
     version::Version,
 };
 
-#[cfg(feature = "client")]
-pub use client::{Client, ClientError, EventReceiver};
-
-#[cfg(feature = "client")]
 pub const MAX_MESSAGE_SIZE: usize = 32 * 1024;
 
-mod authorize;
-mod configure;
+pub mod error;
+pub mod message;
+pub mod method;
+
+#[cfg(feature = "client")]
+pub mod client;
+
 mod difficulty;
-mod error;
-mod event;
 mod extranonce;
 mod job_id;
 mod merkle;
-mod message;
 mod nbits;
 mod nonce;
-mod notify;
 mod ntime;
 mod prevhash;
-mod reconnect;
-mod set_difficulty;
 mod si;
-mod submit;
-mod subscribe;
-mod suggest_difficulty;
 mod username;
 mod version;
-
-#[cfg(feature = "client")]
-mod client;
