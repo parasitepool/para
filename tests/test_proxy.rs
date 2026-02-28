@@ -110,12 +110,12 @@ impl TestProxy {
         format!("127.0.0.1:{}", self.proxy_port)
     }
 
-    pub(crate) fn stratum_client(&self) -> stratum::Client {
+    pub(crate) fn stratum_client(&self) -> stratum::client::Client {
         self.stratum_client_for_username(&signet_username().to_string())
     }
 
-    pub(crate) fn stratum_client_for_username(&self, username: &str) -> stratum::Client {
-        stratum::Client::new(
+    pub(crate) fn stratum_client_for_username(&self, username: &str) -> stratum::client::Client {
+        stratum::client::Client::new(
             self.stratum_endpoint(),
             Username::new(username),
             None,

@@ -1,6 +1,6 @@
 use {
     super::*,
-    stratum::{Client, ClientError, Event},
+    stratum::client::{Client, ClientError, Event},
 };
 
 pub(crate) struct UpstreamSubmit {

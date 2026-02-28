@@ -168,8 +168,8 @@ impl TestPool {
         }
     }
 
-    pub(crate) async fn stratum_client(&self) -> stratum::Client {
-        stratum::Client::new(
+    pub(crate) async fn stratum_client(&self) -> stratum::client::Client {
+        stratum::client::Client::new(
             self.stratum_endpoint(),
             signet_username(),
             None,
@@ -178,8 +178,11 @@ impl TestPool {
         )
     }
 
-    pub(crate) async fn stratum_client_for_username(&self, username: &str) -> stratum::Client {
-        stratum::Client::new(
+    pub(crate) async fn stratum_client_for_username(
+        &self,
+        username: &str,
+    ) -> stratum::client::Client {
+        stratum::client::Client::new(
             self.stratum_endpoint(),
             Username::new(username),
             None,

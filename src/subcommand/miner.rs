@@ -1,4 +1,4 @@
-use {super::*, controller::Controller, hasher::Hasher, metrics::Metrics, stratum::Client};
+use {super::*, controller::Controller, hasher::Hasher, metrics::Metrics, stratum::client::Client};
 
 mod controller;
 mod hasher;

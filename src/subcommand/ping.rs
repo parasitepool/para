@@ -85,7 +85,7 @@ impl Ping {
     async fn ping_once(&self, addr: SocketAddr, ping_type: &PingType) -> Result<(Duration, usize)> {
         match ping_type {
             PingType::Subscribe => {
-                let client = stratum::Client::new(
+                let client = stratum::client::Client::new(
                     addr.to_string(),
                     "".into(),
                     None,
@@ -102,7 +102,7 @@ impl Ping {
                 Ok((duration, size))
             }
             PingType::Authorized { username, password } => {
-                let client = stratum::Client::new(
+                let client = stratum::client::Client::new(
                     addr.to_string(),
                     username.clone(),
                     Some(password.clone()),
@@ -119,10 +119,10 @@ impl Ping {
 
                 loop {
                     match events.recv().await {
-                        Ok(stratum::Event::Notify(_)) => {
+                        Ok(stratum::client::Event::Notify(_)) => {
                             break;
                         }
-                        Ok(stratum::Event::Disconnected) => {
+                        Ok(stratum::client::Event::Disconnected) => {
                             return Err(anyhow!("Disconnected before notify"));
                         }
                         Err(e) => {

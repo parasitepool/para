@@ -73,8 +73,8 @@ use {
         time::Instant,
     },
     stratum::{
-        self, ClientError, Difficulty, Extranonce, JobId, Nonce, Notify, Ntime, StratumError,
-        Username, Version,
+        self, Difficulty, Extranonce, JobId, Nonce, Notify, Ntime, StratumError, Username, Version,
+        client::ClientError,
     },
     tempfile::tempdir,
     test_ckpool::TestCkpool,
@@ -205,13 +205,15 @@ fn solve_share_with_version_bits(
 }
 
 #[cfg(target_os = "linux")]
-async fn wait_for_notify(events: &mut stratum::EventReceiver) -> (stratum::Notify, Difficulty) {
+async fn wait_for_notify(
+    events: &mut stratum::client::EventReceiver,
+) -> (stratum::Notify, Difficulty) {
     let mut difficulty = Difficulty::from(1);
     timeout(Duration::from_secs(10), async {
         loop {
             match events.recv().await.unwrap() {
-                stratum::Event::SetDifficulty(diff) => difficulty = diff,
-                stratum::Event::Notify(notify) => return (notify, difficulty),
+                stratum::client::Event::SetDifficulty(diff) => difficulty = diff,
+                stratum::client::Event::Notify(notify) => return (notify, difficulty),
                 _ => {}
             }
         }
@@ -222,7 +224,7 @@ async fn wait_for_notify(events: &mut stratum::EventReceiver) -> (stratum::Notif
 
 #[cfg(target_os = "linux")]
 async fn submit_share(
-    client: &stratum::Client,
+    client: &stratum::client::Client,
     notify: &stratum::Notify,
     enonce1: &Extranonce,
     enonce2_size: usize,
@@ -237,8 +239,8 @@ async fn submit_share(
 
 #[cfg(target_os = "linux")]
 async fn mine_until_difficulty_increases(
-    client: &stratum::Client,
-    events: &mut stratum::EventReceiver,
+    client: &stratum::client::Client,
+    events: &mut stratum::client::EventReceiver,
     notify: &mut stratum::Notify,
     enonce1: &Extranonce,
     enonce2_size: usize,
@@ -249,8 +251,8 @@ async fn mine_until_difficulty_increases(
     loop {
         while let Some(Ok(event)) = events.try_recv() {
             match event {
-                stratum::Event::Notify(n) => *notify = n,
-                stratum::Event::SetDifficulty(d) if d > initial_difficulty => return d,
+                stratum::client::Event::Notify(n) => *notify = n,
+                stratum::client::Event::SetDifficulty(d) if d > initial_difficulty => return d,
                 _ => {}
             }
         }
@@ -272,13 +274,15 @@ async fn mine_until_difficulty_increases(
 
 #[cfg(target_os = "linux")]
 async fn wait_for_job_update(
-    events: &mut stratum::EventReceiver,
+    events: &mut stratum::client::EventReceiver,
     old_job_id: JobId,
 ) -> stratum::Notify {
     timeout(Duration::from_secs(10), async {
         loop {
             match events.recv().await.unwrap() {
-                stratum::Event::Notify(n) if n.job_id != old_job_id && !n.clean_jobs => return n,
+                stratum::client::Event::Notify(n) if n.job_id != old_job_id && !n.clean_jobs => {
+                    return n;
+                }
                 _ => {}
             }
         }
@@ -289,13 +293,15 @@ async fn wait_for_job_update(
 
 #[cfg(target_os = "linux")]
 async fn wait_for_new_block(
-    events: &mut stratum::EventReceiver,
+    events: &mut stratum::client::EventReceiver,
     old_job_id: JobId,
 ) -> stratum::Notify {
     timeout(Duration::from_secs(10), async {
         loop {
             match events.recv().await.unwrap() {
-                stratum::Event::Notify(n) if n.job_id != old_job_id && n.clean_jobs => return n,
+                stratum::client::Event::Notify(n) if n.job_id != old_job_id && n.clean_jobs => {
+                    return n;
+                }
                 _ => {}
             }
         }
