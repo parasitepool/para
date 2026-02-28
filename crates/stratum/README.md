@@ -27,12 +27,12 @@ Methods defined in the [Stratum mining protocol](https://en.bitcoin.it/wiki/Stra
 
 | Method                       | Type         | `stratum` | ckpool |
 |------------------------------|--------------|-----------|--------|
-| `mining.authorize`           | Request      | ✅        | ✅     |
 | `mining.configure`           | Request      | ✅        | ✅     |
-| `mining.submit`              | Request      | ✅        | ✅     |
 | `mining.subscribe`           | Request      | ✅        | ✅     |
-| `mining.suggest_difficulty`  | Request      | ✅        | ✅     |
+| `mining.authorize`           | Request      | ✅        | ✅     |
 | `mining.notify`              | Notification | ✅        | ✅     |
+| `mining.submit`              | Request      | ✅        | ✅     |
+| `mining.suggest_difficulty`  | Request      | ✅        | ✅     |
 | `mining.set_difficulty`      | Notification | ✅        | ✅     |
 | `client.reconnect`           | Notification | ✅        | ✅     |
 | `client.get_version`         | Notification | ❌        | ✅     |
