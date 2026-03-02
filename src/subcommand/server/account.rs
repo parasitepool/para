@@ -161,10 +161,7 @@ pub(crate) async fn account_metadata_update(
         return Ok(StatusCode::BAD_REQUEST.into_response());
     }
 
-    if !filtered
-        .values()
-        .all(|v| v.is_boolean() || v.is_null())
-    {
+    if !filtered.values().all(|v| v.is_boolean() || v.is_null()) {
         return Ok(StatusCode::BAD_REQUEST.into_response());
     }
 
