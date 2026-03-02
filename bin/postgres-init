@@ -243,7 +243,7 @@ PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
 PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
   CREATE TABLE IF NOT EXISTS blocks (
       id SERIAL PRIMARY KEY,
-      blockheight INTEGER NOT NULL,
+      blockheight INTEGER UNIQUE NOT NULL,
       blockhash VARCHAR(64) NOT NULL,
       confirmed BOOLEAN DEFAULT FALSE,
       workername VARCHAR(255),

@@ -66,25 +66,25 @@ pub(crate) async fn sync_batch(
                         block.blockheight
                     );
                 }
-
-                let notification_result = notifications::notify_block_found(
-                    config.alerts_ntfy_channel(),
-                    block.blockheight,
-                    block.blockhash.clone(),
-                    block.coinbasevalue.unwrap_or(0),
-                    block
-                        .username
-                        .clone()
-                        .unwrap_or_else(|| "unknown".to_string()),
-                )
-                .await;
-
-                match notification_result {
-                    Ok(_) => info!("Block notification sent successfully"),
-                    Err(e) => error!("Failed to send block notification: {}", e),
-                }
             }
             Err(e) => error!("Warning: Failed to upsert block: {}", e),
+        }
+
+        let notification_result = notifications::notify_block_found(
+            config.alerts_ntfy_channel(),
+            block.blockheight,
+            block.blockhash.clone(),
+            block.coinbasevalue.unwrap_or(0),
+            block
+                .username
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string()),
+        )
+        .await;
+
+        match notification_result {
+            Ok(_) => info!("Block notification sent successfully"),
+            Err(e) => error!("Failed to send block notification: {}", e),
         }
     }
 
