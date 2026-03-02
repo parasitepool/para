@@ -1,5 +1,23 @@
 use super::*;
 
+async fn insert_remote_share(
+    pool: &sqlx::PgPool,
+    id: i64,
+    blockheight: i32,
+    username: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO remote_shares (id, origin, blockheight, diff, sdiff, result, workername, username)
+         VALUES ($1, 'test', $2, 1000.0, 500.0, true, 'worker', $3)",
+    )
+    .bind(id)
+    .bind(blockheight)
+    .bind(username)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 async fn insert_test_shares_with_diff(
     database_url: String,
     shares: Vec<(String, f64)>,
@@ -922,4 +940,68 @@ async fn test_payouts_simulate_groups_by_lnurl() {
         .unwrap();
 
     assert_eq!(shared_payout.amount_sats, other_payout.amount_sats);
+}
+
+#[tokio::test]
+async fn latest_block_contributors() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    let res = server
+        .get_json_async_raw("/blocks/latest/contributors")
+        .await;
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+
+    insert_test_block(db_url.clone(), 100).await.unwrap();
+
+    let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
+    insert_remote_share(&pool, 1, 100, "foo").await.unwrap();
+    insert_remote_share(&pool, 2, 100, "bar").await.unwrap();
+
+    let result: BlockContributors = server.get_json_async("/blocks/latest/contributors").await;
+
+    assert_eq!(result.block_height, 100);
+    let mut contributors = result.contributors.clone();
+    contributors.sort();
+    assert_eq!(contributors, vec!["bar", "foo"]);
+
+    insert_test_block(db_url.clone(), 200).await.unwrap();
+    insert_remote_share(&pool, 3, 150, "baz").await.unwrap();
+    insert_remote_share(&pool, 4, 200, "foo").await.unwrap();
+
+    let result: BlockContributors = server.get_json_async("/blocks/latest/contributors").await;
+
+    assert_eq!(result.block_height, 200);
+    let mut contributors = result.contributors.clone();
+    contributors.sort();
+    assert_eq!(contributors, vec!["baz", "foo"]);
+
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn latest_block_contributors_excludes_rejected() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    insert_test_block(db_url.clone(), 100).await.unwrap();
+
+    let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
+    insert_remote_share(&pool, 1, 100, "foo").await.unwrap();
+
+    sqlx::query(
+        "INSERT INTO remote_shares (id, origin, blockheight, diff, sdiff, result, reject_reason, workername, username)
+         VALUES (2, 'test', 100, 1000.0, 500.0, false, 'stale', 'worker', 'bar')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let result: BlockContributors = server.get_json_async("/blocks/latest/contributors").await;
+
+    assert_eq!(result.contributors, vec!["foo"]);
+
+    pool.close().await;
 }
