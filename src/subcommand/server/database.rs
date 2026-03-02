@@ -52,6 +52,12 @@ pub struct UpdatePayoutStatusRequest {
     pub failure_reason: Option<String>,
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, ToSchema)]
+pub struct BlockContributors {
+    pub block_height: i32,
+    pub contributors: Vec<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Database {
     pub(crate) pool: Pool<Postgres>,
@@ -753,5 +759,46 @@ impl Database {
         .rows_affected();
 
         Ok(rows_affected)
+    }
+
+    pub async fn get_latest_block_contributors(&self) -> Result<Option<BlockContributors>> {
+        let Some((block_height,)) = sqlx::query_as::<_, (i32,)>(
+            "SELECT blockheight FROM blocks ORDER BY blockheight DESC LIMIT 1",
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))?
+        else {
+            return Ok(None);
+        };
+
+        let prev: i32 = sqlx::query_scalar(
+            "SELECT COALESCE(MAX(blockheight), 0) FROM blocks WHERE blockheight < $1",
+        )
+        .bind(block_height)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))?;
+
+        let contributors: Vec<(String,)> = sqlx::query_as(
+            "
+            SELECT DISTINCT username
+            FROM remote_shares
+            WHERE blockheight <= $1
+              AND blockheight > $2
+              AND reject_reason IS NULL
+              AND username IS NOT NULL
+            ",
+        )
+        .bind(block_height)
+        .bind(prev)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))?;
+
+        Ok(Some(BlockContributors {
+            block_height,
+            contributors: contributors.into_iter().map(|(u,)| u).collect(),
+        }))
     }
 }

@@ -9,7 +9,7 @@ use {
         },
         subcommand::{
             server::{
-                account::account_router, payouts::payouts_router,
+                account::account_router, blocks::blocks_router, payouts::payouts_router,
                 sharediff::share_difficulty_router, sync_routes::sync_router,
             },
             sync::{ShareBatch, SyncResponse},
@@ -39,6 +39,7 @@ use {
 
 pub mod account;
 mod aggregator;
+mod blocks;
 mod cache;
 pub mod database;
 pub mod notifications;
@@ -148,6 +149,8 @@ impl Modify for SecurityAddon {
         payouts::user_payout_range,
         payouts::update_payout_status,
         payouts::payouts_simulate,
+        // Block endpoints
+        blocks::latest_block_contributors,
         // Sync endpoints
         sync_routes::sync_batch,
         // Status endpoints
@@ -165,6 +168,7 @@ impl Modify for SecurityAddon {
         account::AccountMetadataUpdate,
         account::AccountResponse,
         // Database schemas
+        database::BlockContributors,
         database::HighestDiff,
         database::TeraShare,
         database::Split,
@@ -186,6 +190,7 @@ impl Modify for SecurityAddon {
     )),
     tags(
         (name = "account", description = "Account management endpoints"),
+        (name = "blocks", description = "Block information endpoints"),
         (name = "sharediff", description = "Share difficulty endpoints"),
         (name = "payouts", description = "Payout and split endpoints"),
         (name = "sync", description = "Share synchronization endpoints"),
@@ -308,6 +313,7 @@ impl Server {
 
                 router = router
                     .merge(account_router(config.clone(), database.clone()))
+                    .merge(blocks_router(config.clone(), database.clone()))
                     .merge(share_difficulty_router(config.clone(), database.clone()))
                     .merge(payouts_router(config.clone(), database.clone()))
                     .merge(sync_router(config.clone(), database));
