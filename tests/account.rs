@@ -36,6 +36,11 @@ impl TestAccount {
         sign_simple_encoded(&address, ln_address, self.private_key.to_wif().as_str()).unwrap()
     }
 
+    pub fn sign_metadata(&self, address: &str, metadata: &serde_json::Value) -> String {
+        let message = serde_json::to_string(metadata).unwrap();
+        sign_simple_encoded(address, &message, self.private_key.to_wif().as_str()).unwrap()
+    }
+
     pub fn sign_update_legacy(&self, ln_address: &str) -> Result<String, Error> {
         let secp = Secp256k1::new();
         let message = ln_address;
@@ -463,4 +468,104 @@ async fn account_signature_invalid() {
         .post_json_raw("/account/update", &update_request)
         .await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn metadata_update_allowlist() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    let test_account = TestAccount::new();
+    let btc_address = test_account.native_segwit_address.clone();
+    let ln_address = "foo@bar.com";
+    let signature = test_account.sign_update(btc_address.clone(), ln_address);
+    let _: Account = server
+        .post_json(
+            "/account/update",
+            &AccountUpdate {
+                btc_address: btc_address.clone(),
+                ln_address: ln_address.to_string(),
+                signature,
+            },
+        )
+        .await;
+
+    async fn case(
+        server: &TestServer,
+        account: &TestAccount,
+        address: &str,
+        metadata: serde_json::Value,
+        expected_status: StatusCode,
+    ) -> Option<Account> {
+        let signature = account.sign_metadata(address, &metadata);
+        let response = server
+            .post_json_raw(
+                "/account/metadata",
+                &AccountMetadataUpdate {
+                    btc_address: address.to_string(),
+                    metadata,
+                    signature,
+                },
+            )
+            .await;
+        assert_eq!(response.status(), expected_status);
+        if expected_status == StatusCode::OK {
+            Some(response.json().await.unwrap())
+        } else {
+            None
+        }
+    }
+
+    let account = case(
+        &server,
+        &test_account,
+        &btc_address,
+        serde_json::json!({"is_private": true}),
+        StatusCode::OK,
+    )
+    .await
+    .unwrap();
+    assert_eq!(account.metadata.unwrap()["is_private"], true);
+
+    case(
+        &server,
+        &test_account,
+        &btc_address,
+        serde_json::json!({"block_count": 999999}),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+
+    case(
+        &server,
+        &test_account,
+        &btc_address,
+        serde_json::json!({"highest_blockheight": 0}),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+
+    case(
+        &server,
+        &test_account,
+        &btc_address,
+        serde_json::json!({"is_private": "banana"}),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+
+    let account = case(
+        &server,
+        &test_account,
+        &btc_address,
+        serde_json::json!({"is_private": false, "block_count": 999999, "highest_blockheight": 0}),
+        StatusCode::OK,
+    )
+    .await
+    .unwrap();
+    let metadata = account.metadata.unwrap();
+    assert_eq!(metadata["is_private"], false);
+    assert!(metadata.get("block_count").is_none());
+    assert!(metadata.get("highest_blockheight").is_none());
 }

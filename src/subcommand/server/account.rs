@@ -1,5 +1,7 @@
 use super::*;
 
+const USER_METADATA_KEYS: &[&str] = &["is_private"];
+
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, ToSchema)]
 pub struct Account {
     pub btc_address: String,
@@ -36,7 +38,10 @@ pub(crate) fn account_router(config: Arc<ServerConfig>, database: Database) -> a
     let mut router = axum::Router::new()
         .route("/account/{address}", get(account_lookup))
         .route("/account/update", post(account_update))
-        .route("/account/metadata", post(account_metadata_update));
+        .route(
+            "/account/metadata",
+            post(account_metadata_update).layer(DefaultBodyLimit::max(1024)),
+        );
 
     if let Some(token) = config.api_token() {
         router = router.layer(bearer_auth(token))
@@ -142,8 +147,31 @@ pub(crate) async fn account_metadata_update(
         return Ok(StatusCode::UNAUTHORIZED.into_response());
     }
 
+    let Some(object) = metadata_update.metadata.as_object() else {
+        return Ok(StatusCode::BAD_REQUEST.into_response());
+    };
+
+    let filtered: serde_json::Map<String, serde_json::Value> = object
+        .iter()
+        .filter(|(key, _)| USER_METADATA_KEYS.contains(&key.as_str()))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+
+    if filtered.is_empty() {
+        return Ok(StatusCode::BAD_REQUEST.into_response());
+    }
+
+    if !filtered
+        .values()
+        .all(|v| v.is_boolean() || v.is_null())
+    {
+        return Ok(StatusCode::BAD_REQUEST.into_response());
+    }
+
+    let filtered = serde_json::Value::Object(filtered);
+
     database
-        .update_account_metadata(&metadata_update.btc_address, &metadata_update.metadata)
+        .update_account_metadata(&metadata_update.btc_address, &filtered)
         .await?
         .ok_or_not_found(|| "Account")
         .map(Json)
