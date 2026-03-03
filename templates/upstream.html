@@ -9,9 +9,7 @@
     <div class=row><span>Extranonce1</span><span id=enonce1></span></div>
     <div class=row><span>Extranonce2 Size</span><span id=enonce2_size></span></div>
     <div class=row><span>Version Mask</span><span id=version_mask></span></div>
-    <h3>Shares</h3>
-    <div class=row><span>Accepted</span><span id=upstream_accepted></span></div>
-    <div class=row><span>Rejected</span><span id=upstream_rejected></span></div>
+    <div class=row><span>Rejected Shares</span><span id=upstream_rejected class=copyable></span></div>
     <div class=row><span>Filtered</span><span id=upstream_filtered></span></div>
     <div class=row><span>Forwarded</span><span><span id=forward_ratio></span>%</span></div>
   </div>
@@ -25,13 +23,28 @@
     <div class=row><span>SPS</span><span id=sps_1m></span></div>
     <div class=row><span>PHd</span><span id=ph_days class=copyable></span></div>
     <div class=row><span>Uptime</span><span><span id=uptime_secs></span>s</span></div>
-    <h3>Shares</h3>
-    <div class=row><span>Accepted</span><span id=accepted></span></div>
-    <div class=row><span>Rejected</span><span id=rejected></span></div>
-    <div class=row><span>Accepted Work</span><span id=accepted_work class=copyable></span></div>
+    <div class=row><span>Rejected Shares</span><span id=rejected_shares class=copyable></span></div>
     <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
     <div class=row><span>Best</span><span id=best_ever class=copyable></span></div>
     <div class=row><span>Last</span><span><span id=last_share></span>s ago</span></div>
+  </div>
+
+  <div class="column column-full">
+    <h2>Workers</h2>
+    <table id=workers-table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Sessions</th>
+          <th>Hashrate</th>
+          <th>SPS</th>
+          <th>Best</th>
+          <th>PHd</th>
+          <th>Last</th>
+        </tr>
+      </thead>
+      <tbody id=workers-list></tbody>
+    </table>
   </div>
 
   <div class="column column-full">
@@ -81,8 +94,8 @@ async function refresh() {
     set('enonce1', data.upstream.enonce1);
     set('enonce2_size', data.upstream.enonce2_size);
     set('version_mask', data.upstream.version_mask);
-    set('upstream_accepted', data.upstream.accepted);
-    set('upstream_rejected', data.upstream.rejected);
+    const upstreamRejectedPct = forwarded > 0 ? formatTruncated((data.upstream.rejected / forwarded) * 100) + '%' : '0.00%';
+    copyable('upstream_rejected', upstreamRejectedPct, `${data.upstream.rejected || 0} / ${forwarded}`);
     set('upstream_filtered', data.upstream.filtered);
     set('forward_ratio', forwardRatio);
 
@@ -92,49 +105,24 @@ async function refresh() {
     set('hashrate_1m', data.hashrate_1m, formatHashrate);
     set('sps_1m', data.sps_1m, formatTruncated);
     set('uptime_secs', data.uptime_secs);
-    set('accepted', data.accepted_shares);
-    set('rejected', data.rejected_shares);
+    const totalShares = (data.accepted_shares || 0) + (data.rejected_shares || 0);
+    const rejectedSharesPct = totalShares > 0 ? formatTruncated((data.rejected_shares / totalShares) * 100) + '%' : '0.00%';
+    copyable('rejected_shares', rejectedSharesPct, `${data.rejected_shares || 0} / ${totalShares}`);
+
+    const totalWork = (data.accepted_work || 0) + (data.rejected_work || 0);
+    const rejectedWorkPct = totalWork > 0 ? formatTruncated((data.rejected_work / totalWork) * 100) + '%' : '0.00%';
+    copyable('rejected_work', rejectedWorkPct, `${formatDifficulty(data.rejected_work || 0)} / ${formatDifficulty(totalWork)}`);
+
     set('last_share', data.last_share);
     copyable('best_ever', bestEver, data.best_ever);
-
-    const acceptedWork = formatDifficulty(data.accepted_work);
-    copyable('accepted_work', acceptedWork, data.accepted_work);
-    const rejectedWork = formatDifficulty(data.rejected_work);
-    copyable('rejected_work', rejectedWork, data.rejected_work);
     copyable('ph_days', formatPhDays(data.ph_days), data.ph_days);
 
-    const sessions = (data.sessions || []).sort((a, b) => b.hashrate_1m - a.hashrate_1m);
-    document.getElementById('sessions-list').innerHTML = sessions.map(session => {
-      const sessionUser = session.username || '';
-      const shortSessionUser = sessionUser.length > 15
-        ? sessionUser.slice(0, 6) + '...' + sessionUser.slice(-6)
-        : sessionUser;
-      const lastShare = session.last_share != null ? `${session.last_share}s ago` : '-';
-      const bestShare = formatDifficulty(session.best_ever);
-      return `<tr>
-        <td><span class="copyable hover-expand session-username" data-full="${sessionUser}" data-formatted="${shortSessionUser}">${shortSessionUser}</span></td>
-        <td>${formatHashrate(session.hashrate_1m)}</td>
-        <td>${formatTruncated(session.sps_1m)}</td>
-        <td>${bestShare || '-'}</td>
-        <td>${formatPhDays(session.ph_days) || '-'}</td>
-        <td>${lastShare}</td>
-      </tr>`;
-    }).join('');
+    document.getElementById('workers-list').innerHTML = renderWorkerRows(data.workers || []);
+    document.getElementById('sessions-list').innerHTML = renderSessionRows(data.sessions || []);
 
   } catch (e) { console.error('refresh error:', e); }
 }
-document.getElementById('sessions-list').addEventListener('click', async (e) => {
-  const el = e.target.closest('.session-username');
-  if (!el) return;
-  const full = el.dataset.full;
-  if (!full) return;
-  try {
-    await navigator.clipboard.writeText(full);
-    const formatted = el.dataset.formatted;
-    el.textContent = 'Copied!';
-    setTimeout(() => { el.textContent = formatted; }, 1000);
-  } catch (e) { console.error('Copy failed:', e); }
-});
+initTableCopyClick('sessions-list');
 startPolling(refresh);
 initCopyables();
 </script>

@@ -229,6 +229,56 @@ function setupLogToggle() {
   });
 }
 
+function renderWorkerRows(workers) {
+  return workers.sort((a, b) => b.hashrate_1m - a.hashrate_1m).map(w => {
+    const lastShare = w.last_share != null ? `${w.last_share}s ago` : '-';
+    const bestShare = formatDifficulty(w.best_ever);
+    return `<tr>
+      <td>${w.name || '(default)'}</td>
+      <td>${w.session_count}</td>
+      <td>${formatHashrate(w.hashrate_1m)}</td>
+      <td>${formatTruncated(w.sps_1m)}</td>
+      <td>${bestShare || '-'}</td>
+      <td>${formatPhDays(w.ph_days) || '-'}</td>
+      <td>${lastShare}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderSessionRows(sessions) {
+  return sessions.sort((a, b) => b.hashrate_1m - a.hashrate_1m).map(session => {
+    const sessionUser = session.username || '';
+    const shortSessionUser = sessionUser.length > 15
+      ? sessionUser.slice(0, 6) + '...' + sessionUser.slice(-6)
+      : sessionUser;
+    const lastShare = session.last_share != null ? `${session.last_share}s ago` : '-';
+    const bestShare = formatDifficulty(session.best_ever);
+    return `<tr>
+      <td><span class="copyable hover-expand session-username" data-full="${sessionUser}" data-formatted="${shortSessionUser}">${shortSessionUser}</span></td>
+      <td>${formatHashrate(session.hashrate_1m)}</td>
+      <td>${formatTruncated(session.sps_1m)}</td>
+      <td>${bestShare || '-'}</td>
+      <td>${formatPhDays(session.ph_days) || '-'}</td>
+      <td>${lastShare}</td>
+    </tr>`;
+  }).join('');
+}
+
+function initTableCopyClick(containerId) {
+  document.getElementById(containerId).addEventListener('click', async (e) => {
+    const el = e.target.closest('.session-username');
+    if (!el) return;
+    const full = el.dataset.full;
+    if (!full) return;
+    try {
+      await navigator.clipboard.writeText(full);
+      const formatted = el.dataset.formatted;
+      el.textContent = 'Copied!';
+      setTimeout(() => { el.textContent = formatted; }, CONFIG.COPY_FEEDBACK_DURATION);
+    } catch (e) { console.error('Copy failed:', e); }
+  });
+}
+
 let pollInterval;
 
 function startPolling(refreshFn, intervalMs) {

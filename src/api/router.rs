@@ -197,8 +197,15 @@ async fn upstream(
     let stats = slot.metatron.snapshot();
 
     let mut sessions = Vec::new();
+    let mut workers = Vec::new();
     for user in slot.metatron.users().iter() {
         for worker in user.workers() {
+            let worker_stats = worker.snapshot();
+            workers.push(WorkerDetail {
+                name: worker.workername().to_string(),
+                session_count: worker.session_count(),
+                stats: MiningStats::from_snapshot(&worker_stats, now),
+            });
             for session in worker.sessions() {
                 let s = session.snapshot();
                 sessions.push(SessionDetail {
@@ -224,6 +231,7 @@ async fn upstream(
         disconnected_count: slot.metatron.total_disconnected(),
         idle_count: slot.metatron.total_idle(),
         uptime_secs: slot.metatron.uptime().as_secs(),
+        workers,
         sessions,
         stats: MiningStats::from_snapshot(&stats, now),
     })

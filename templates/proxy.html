@@ -9,9 +9,7 @@
     <div class=row><span>Extranonce1</span><span id=upstream_enonce1></span></div>
     <div class=row><span>Extranonce2 Size</span><span id=upstream_enonce2_size></span></div>
     <div class=row><span>Version Mask</span><span id=upstream_version_mask></span></div>
-    <h3>Shares</h3>
-    <div class=row><span>Accepted</span><span id=upstream_accepted></span></div>
-    <div class=row><span>Rejected</span><span id=upstream_rejected></span></div>
+    <div class=row><span>Rejected Shares</span><span id=upstream_rejected class=copyable></span></div>
     <div class=row><span>Filtered</span><span id=upstream_filtered></span></div>
     <div class=row><span>Forwarded</span><span><span id=forward_ratio></span>%</span></div>
   </div>
@@ -26,10 +24,7 @@
     <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
     <div class=row><span>PHd</span><span id=ph_days class=copyable></span></div>
     <div class=row><span>Uptime</span><span><span id=uptime_secs></span>s</span></div>
-    <h3>Shares</h3>
-    <div class=row><span>Accepted</span><span id=accepted></span></div>
-    <div class=row><span>Rejected</span><span id=rejected></span></div>
-    <div class=row><span>Accepted Work</span><span id=accepted_work class=copyable></span></div>
+    <div class=row><span>Rejected Shares</span><span id=rejected_shares class=copyable></span></div>
     <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
     <div class=row><span>Best</span><span id=best_ever class=copyable></span></div>
     <div class=row><span>Last</span><span><span id=last_share></span>s ago</span></div>
@@ -98,8 +93,8 @@ async function refresh() {
     set('upstream_enonce1', proxyData.upstream.enonce1);
     set('upstream_enonce2_size', proxyData.upstream.enonce2_size);
     set('upstream_version_mask', proxyData.upstream.version_mask);
-    set('upstream_accepted', proxyData.upstream.accepted);
-    set('upstream_rejected', proxyData.upstream.rejected);
+    const upstreamRejectedPct = forwarded > 0 ? formatTruncated((proxyData.upstream.rejected / forwarded) * 100) + '%' : '0.00%';
+    copyable('upstream_rejected', upstreamRejectedPct, `${proxyData.upstream.rejected || 0} / ${forwarded}`);
     set('upstream_filtered', proxyData.upstream.filtered);
     set('forward_ratio', forward_ratio);
     set('upstream_ping', proxyData.upstream.ping_ms, formatPing);
@@ -112,15 +107,16 @@ async function refresh() {
     set('hashrate_1m', proxyData.hashrate_1m, formatHashrate);
     set('sps_1m', proxyData.sps_1m, formatTruncated);
     set('uptime_secs', proxyData.uptime_secs);
-    set('accepted', proxyData.accepted_shares);
-    set('rejected', proxyData.rejected_shares);
+    const totalShares = (proxyData.accepted_shares || 0) + (proxyData.rejected_shares || 0);
+    const rejectedSharesPct = totalShares > 0 ? formatTruncated((proxyData.rejected_shares / totalShares) * 100) + '%' : '0.00%';
+    copyable('rejected_shares', rejectedSharesPct, `${proxyData.rejected_shares || 0} / ${totalShares}`);
+
+    const totalWork = (proxyData.accepted_work || 0) + (proxyData.rejected_work || 0);
+    const rejectedWorkPct = totalWork > 0 ? formatTruncated((proxyData.rejected_work / totalWork) * 100) + '%' : '0.00%';
+    copyable('rejected_work', rejectedWorkPct, `${formatDifficulty(proxyData.rejected_work || 0)} / ${formatDifficulty(totalWork)}`);
+
     set('last_share', proxyData.last_share);
     copyable('best_ever', best_ever, proxyData.best_ever);
-
-    const accepted_work = formatDifficulty(proxyData.accepted_work);
-    copyable('accepted_work', accepted_work, proxyData.accepted_work);
-    const rejected_work = formatDifficulty(proxyData.rejected_work);
-    copyable('rejected_work', rejected_work, proxyData.rejected_work);
     copyable('ph_days', formatPhDays(proxyData.ph_days), proxyData.ph_days);
 
     // Bitcoin data

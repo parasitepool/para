@@ -66,9 +66,7 @@
     <div class=row><span>SPS</span><span id=sps_1m></span></div>
     <div class=row><span>PHd</span><span id=ph_days class=copyable></span></div>
     <div class=row><span>Uptime</span><span><span id=uptime_secs></span>s</span></div>
-    <div class=row><span>Accepted</span><span id=accepted></span></div>
-    <div class=row><span>Rejected</span><span id=rejected></span></div>
-    <div class=row><span>Accepted Work</span><span id=accepted_work class=copyable></span></div>
+    <div class=row><span>Rejected Shares</span><span id=rejected_shares class=copyable></span></div>
     <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
     <div class=row><span>Best</span><span id=best_ever class=copyable></span></div>
     <div class=row><span>Last</span><span><span id=last_share></span>s ago</span></div>
@@ -125,8 +123,6 @@ async function refresh() {
     ]);
 
     const bestEver = formatDifficulty(routerData.best_ever);
-    const acceptedWork = formatDifficulty(routerData.accepted_work);
-    const rejectedWork = formatDifficulty(routerData.rejected_work);
     const networkDifficulty = formatDifficulty(bitcoinData.network_difficulty);
 
     set('upstream_count', routerData.upstream_count);
@@ -134,13 +130,17 @@ async function refresh() {
     set('hashrate_1m', routerData.hashrate_1m, formatHashrate);
     set('sps_1m', routerData.sps_1m, formatTruncated);
     set('uptime_secs', routerData.uptime_secs);
-    set('accepted', routerData.accepted_shares);
-    set('rejected', routerData.rejected_shares);
     set('last_share', routerData.last_share);
     copyable('ph_days', formatPhDays(routerData.ph_days), routerData.ph_days);
-    copyable('accepted_work', acceptedWork, routerData.accepted_work);
-    copyable('rejected_work', rejectedWork, routerData.rejected_work);
     copyable('best_ever', bestEver, routerData.best_ever);
+
+    const totalShares = (routerData.accepted_shares || 0) + (routerData.rejected_shares || 0);
+    const rejectedSharesPct = totalShares > 0 ? formatTruncated((routerData.rejected_shares / totalShares) * 100) + '%' : '0.00%';
+    copyable('rejected_shares', rejectedSharesPct, `${routerData.rejected_shares || 0} / ${totalShares}`);
+
+    const totalWork = (routerData.accepted_work || 0) + (routerData.rejected_work || 0);
+    const rejectedWorkPct = totalWork > 0 ? formatTruncated((routerData.rejected_work / totalWork) * 100) + '%' : '0.00%';
+    copyable('rejected_work', rejectedWorkPct, `${formatDifficulty(routerData.rejected_work || 0)} / ${formatDifficulty(totalWork)}`);
 
     set('btc_height', bitcoinData.height);
     const heightLink = document.getElementById('btc_height_link');

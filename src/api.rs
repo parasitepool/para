@@ -37,7 +37,7 @@ pub struct MiningStats {
 }
 
 impl MiningStats {
-    pub(crate) fn from_snapshot(stats: &metatron::stats::Stats, now: Instant) -> Self {
+    pub(crate) fn from_snapshot(stats: &Stats, now: Instant) -> Self {
         Self {
             hashrate_1m: stats.hashrate_1m(now),
             hashrate_5m: stats.hashrate_5m(now),
@@ -130,6 +130,7 @@ pub struct UserDetail {
     pub session_count: usize,
     pub authorized_at: u64,
     pub workers: Vec<WorkerDetail>,
+    pub sessions: Vec<SessionDetail>,
     #[serde(flatten)]
     pub stats: MiningStats,
 }
@@ -183,6 +184,7 @@ pub struct UpstreamDetail {
     pub disconnected_count: usize,
     pub idle_count: usize,
     pub uptime_secs: u64,
+    pub workers: Vec<WorkerDetail>,
     pub sessions: Vec<SessionDetail>,
     #[serde(flatten)]
     pub stats: MiningStats,
