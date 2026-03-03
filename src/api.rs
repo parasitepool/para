@@ -5,14 +5,42 @@ use {
         self,
         error::{OptionExt, ServerResult},
         templates::{
-            DashboardHtml, PoolHtml, ProxyHtml, RouterHtml, UpstreamHtml, UserHtml, UsersHtml,
+            PoolHtml, ProxyHtml, RouterHtml, UpstreamHtml, UserHtml, UsersHtml, render_page,
         },
     },
 };
 
+pub use http_server::{BitcoinStatus, SystemStatus};
+
 pub mod pool;
 pub mod proxy;
 pub mod router;
+
+async fn users(State(metatron): State<Arc<Metatron>>) -> Json<Vec<String>> {
+    Json(
+        metatron
+            .users()
+            .iter()
+            .map(|entry| entry.key().to_string())
+            .collect(),
+    )
+}
+
+async fn user(
+    State(metatron): State<Arc<Metatron>>,
+    Path(address): Path<Address<NetworkUnchecked>>,
+) -> ServerResult<Response> {
+    let address = address.assume_checked();
+
+    let now = Instant::now();
+
+    let user = metatron
+        .users()
+        .get(&address)
+        .ok_or_not_found(|| format!("User {address}"))?;
+
+    Ok(Json(UserDetail::from_user(&user, now)).into_response())
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MiningStats {
@@ -27,12 +55,12 @@ pub struct MiningStats {
     pub sps_5m: f64,
     pub sps_15m: f64,
     pub sps_1hr: f64,
+    pub best_share: Option<Difficulty>,
+    pub last_share: Option<u64>,
     pub accepted_shares: u64,
     pub rejected_shares: u64,
     pub accepted_work: TotalWork,
     pub rejected_work: TotalWork,
-    pub best_share: Option<Difficulty>,
-    pub last_share: Option<u64>,
     pub ph_days: PhDays,
 }
 
@@ -50,17 +78,117 @@ impl MiningStats {
             sps_5m: stats.sps_5m(now),
             sps_15m: stats.sps_15m(now),
             sps_1hr: stats.sps_1hr(now),
-            accepted_shares: stats.accepted_shares,
-            rejected_shares: stats.rejected_shares,
-            accepted_work: stats.accepted_work,
-            rejected_work: stats.rejected_work,
             best_share: stats.best_share,
             last_share: stats
                 .last_share
                 .map(|time| now.duration_since(time).as_secs()),
+            accepted_shares: stats.accepted_shares,
+            rejected_shares: stats.rejected_shares,
+            accepted_work: stats.accepted_work,
+            rejected_work: stats.rejected_work,
             ph_days: stats.accepted_work.into(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PoolStatus {
+    pub endpoint: String,
+    pub user_count: usize,
+    pub worker_count: usize,
+    pub block_count: u64,
+    pub session_count: usize,
+    pub disconnected_count: usize,
+    pub idle_count: usize,
+    pub uptime_secs: u64,
+    #[serde(flatten)]
+    pub stats: MiningStats,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserDetail {
+    pub address: String,
+    pub session_count: usize,
+    pub authorized_at: u64,
+    pub workers: Vec<WorkerDetail>,
+    pub sessions: Vec<SessionDetail>,
+    #[serde(flatten)]
+    pub stats: MiningStats,
+}
+
+impl UserDetail {
+    pub(crate) fn from_user(user: &User, now: Instant) -> Self {
+        let mut workers = Vec::new();
+        let mut sessions = Vec::new();
+
+        for worker in user.workers() {
+            for session in worker.sessions() {
+                let s = session.snapshot();
+                sessions.push(SessionDetail {
+                    id: session.id(),
+                    upstream_id: session.id().upstream_id(),
+                    address: session.address().to_string(),
+                    worker_name: session.workername().to_string(),
+                    username: session.username().to_string(),
+                    enonce1: session.enonce1().clone(),
+                    version_mask: session.version_mask(),
+                    stats: MiningStats::from_snapshot(&s, now),
+                });
+            }
+            let stats = worker.snapshot();
+            workers.push(WorkerDetail {
+                name: worker.workername().to_string(),
+                session_count: worker.session_count(),
+                stats: MiningStats::from_snapshot(&stats, now),
+            });
+        }
+
+        let user_stats = user.snapshot();
+
+        Self {
+            address: user.address.to_string(),
+            session_count: user.session_count(),
+            authorized_at: user.authorized,
+            workers,
+            sessions,
+            stats: MiningStats::from_snapshot(&user_stats, now),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkerDetail {
+    pub name: String,
+    pub session_count: usize,
+    #[serde(flatten)]
+    pub stats: MiningStats,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionDetail {
+    pub id: SessionId,
+    pub upstream_id: u32,
+    pub address: String,
+    pub worker_name: String,
+    pub username: String,
+    pub enonce1: Extranonce,
+    pub version_mask: Option<Version>,
+    #[serde(flatten)]
+    pub stats: MiningStats,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProxyStatus {
+    pub endpoint: String,
+    pub user_count: usize,
+    pub worker_count: usize,
+    pub session_count: usize,
+    pub disconnected_count: usize,
+    pub idle_count: usize,
+    pub uptime_secs: u64,
+    pub upstream: UpstreamInfo,
+    #[serde(flatten)]
+    pub stats: MiningStats,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -100,53 +228,6 @@ impl UpstreamInfo {
             ph_days: (accepted_work + rejected_work).into(),
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PoolStatus {
-    pub endpoint: String,
-    pub user_count: usize,
-    pub worker_count: usize,
-    pub block_count: u64,
-    pub session_count: usize,
-    pub disconnected_count: usize,
-    pub idle_count: usize,
-    pub uptime_secs: u64,
-    #[serde(flatten)]
-    pub stats: MiningStats,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProxyStatus {
-    pub endpoint: String,
-    pub user_count: usize,
-    pub worker_count: usize,
-    pub session_count: usize,
-    pub disconnected_count: usize,
-    pub idle_count: usize,
-    pub uptime_secs: u64,
-    pub upstream: UpstreamInfo,
-    #[serde(flatten)]
-    pub stats: MiningStats,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UserDetail {
-    pub address: String,
-    pub session_count: usize,
-    pub authorized_at: u64,
-    pub workers: Vec<WorkerDetail>,
-    pub sessions: Vec<SessionDetail>,
-    #[serde(flatten)]
-    pub stats: MiningStats,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorkerDetail {
-    pub name: String,
-    pub session_count: usize,
-    #[serde(flatten)]
-    pub stats: MiningStats,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -195,59 +276,3 @@ pub struct UpstreamDetail {
     #[serde(flatten)]
     pub stats: MiningStats,
 }
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionDetail {
-    pub id: SessionId,
-    pub upstream_id: u32,
-    pub address: String,
-    pub worker_name: String,
-    pub username: String,
-    pub enonce1: Extranonce,
-    pub version_mask: Option<Version>,
-    #[serde(flatten)]
-    pub stats: MiningStats,
-}
-
-impl UserDetail {
-    pub(crate) fn from_user(user: &User, now: Instant) -> Self {
-        let mut workers = Vec::new();
-        let mut sessions = Vec::new();
-
-        for worker in user.workers() {
-            for session in worker.sessions() {
-                let s = session.snapshot();
-                sessions.push(SessionDetail {
-                    id: session.id(),
-                    upstream_id: session.id().upstream_id(),
-                    address: session.address().to_string(),
-                    worker_name: session.workername().to_string(),
-                    username: session.username().to_string(),
-                    enonce1: session.enonce1().clone(),
-                    version_mask: session.version_mask(),
-                    stats: MiningStats::from_snapshot(&s, now),
-                });
-            }
-            let stats = worker.snapshot();
-            workers.push(WorkerDetail {
-                name: worker.workername().to_string(),
-                session_count: worker.session_count(),
-                stats: MiningStats::from_snapshot(&stats, now),
-            });
-        }
-
-        let user_stats = user.snapshot();
-
-        Self {
-            address: user.address.to_string(),
-            session_count: user.session_count(),
-            authorized_at: user.authorized,
-            workers,
-            sessions,
-            stats: MiningStats::from_snapshot(&user_stats, now),
-        }
-    }
-}
-
-pub type BitcoinStatus = http_server::BitcoinStatus;
-pub type SystemStatus = http_server::SystemStatus;

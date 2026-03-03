@@ -105,3 +105,26 @@ impl DashboardContent for ReloadedContent {
         self.title
     }
 }
+
+pub(crate) fn render_page(content: impl DashboardContent + Boilerplate, chain: Chain) -> Response {
+    #[cfg(feature = "reload")]
+    let body = {
+        let title = content.title();
+        let html = content
+            .reload_from_path()
+            .map(|r| r.to_string())
+            .unwrap_or_else(|_| content.to_string());
+
+        let dashboard = DashboardHtml::new(ReloadedContent { html, title }, chain);
+
+        dashboard
+            .reload_from_path()
+            .map(|r| r.to_string())
+            .unwrap_or_else(|_| dashboard.to_string())
+    };
+
+    #[cfg(not(feature = "reload"))]
+    let body = DashboardHtml::new(content, chain).to_string();
+
+    ([(CONTENT_TYPE, "text/html;charset=utf-8")], body).into_response()
+}
