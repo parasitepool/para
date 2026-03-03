@@ -85,6 +85,10 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
     let mut combined = Stats::new();
     let mut session_count = 0;
     let mut uptime_secs = 0;
+    let mut upstream_accepted = 0u64;
+    let mut upstream_rejected = 0u64;
+    let mut upstream_accepted_work = TotalWork::ZERO;
+    let mut upstream_rejected_work = TotalWork::ZERO;
 
     for slot in router.slots().iter() {
         let stats = slot.metatron.snapshot();
@@ -142,6 +146,11 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
             hashrate_median,
         });
 
+        upstream_accepted += slot.upstream.accepted();
+        upstream_rejected += slot.upstream.rejected();
+        upstream_accepted_work += slot.upstream.accepted_work();
+        upstream_rejected_work += slot.upstream.rejected_work();
+
         combined.absorb(stats, now);
     }
 
@@ -150,6 +159,11 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
         session_count,
         uptime_secs,
         slots,
+        upstream_accepted,
+        upstream_rejected,
+        upstream_accepted_work,
+        upstream_rejected_work,
+        upstream_ph_days: (upstream_accepted_work + upstream_rejected_work).into(),
         stats: MiningStats::from_snapshot(&combined, now),
     })
 }

@@ -60,16 +60,27 @@
 <div class="grid grid-stack">
   <div class="column column-full">
     <h2>Info</h2>
-    <div class=row><span>Upstreams</span><span id=upstream_count></span></div>
-    <div class=row><span>Sessions</span><span id=session_count></span></div>
-    <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
-    <div class=row><span>SPS</span><span id=sps_1m></span></div>
     <div class=row><span>Uptime</span><span><span id=uptime_secs></span>s</span></div>
-    <div class=row><span>Rejected Shares</span><span id=rejected_shares class=copyable></span></div>
-    <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
-    <div class=row><span>Best Share</span><span id=best_share class=copyable></span></div>
-    <div class=row><span>Last Share</span><span><span id=last_share></span>s ago</span></div>
-    <div class=row><span>PHd</span><span id=ph_days class=copyable></span></div>
+    <div class="slot-card">
+      <div class=slot-pane>
+        <h2>Upstream</h2>
+        <div class=row><span>Upstreams</span><span id=upstream_count></span></div>
+        <div class=row><span>Rejected Shares</span><span id=upstream_rejected_shares class=copyable></span></div>
+        <div class=row><span>Rejected Work</span><span id=upstream_rejected_work class=copyable></span></div>
+        <div class=row><span>PHd</span><span id=upstream_ph_days class=copyable></span></div>
+      </div>
+      <div class=slot-pane>
+        <h2>Downstream</h2>
+        <div class=row><span>Sessions</span><span id=session_count></span></div>
+        <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
+        <div class=row><span>SPS</span><span id=sps_1m></span></div>
+        <div class=row><span>Rejected Shares</span><span id=rejected_shares class=copyable></span></div>
+        <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
+        <div class=row><span>Best Share</span><span id=best_share class=copyable></span></div>
+        <div class=row><span>Last Share</span><span><span id=last_share></span>s ago</span></div>
+        <div class=row><span>PHd</span><span id=ph_days class=copyable></span></div>
+      </div>
+    </div>
   </div>
 
   <div id=upstreams-list class=column-full></div>
@@ -138,6 +149,16 @@ async function refresh(signal) {
     const totalWork = (routerData.accepted_work || 0) + (routerData.rejected_work || 0);
     const rejectedWorkPct = totalWork > 0 ? formatTruncated((routerData.rejected_work / totalWork) * 100) + '%' : '0.00%';
     copyable('rejected_work', rejectedWorkPct, `${formatDifficulty(routerData.rejected_work || 0)} / ${formatDifficulty(totalWork)}`);
+
+    const upTotalShares = (routerData.upstream_accepted || 0) + (routerData.upstream_rejected || 0);
+    const upRejSharesPct = upTotalShares > 0 ? formatTruncated((routerData.upstream_rejected / upTotalShares) * 100) + '%' : '0.00%';
+    copyable('upstream_rejected_shares', upRejSharesPct, `${routerData.upstream_rejected || 0} / ${upTotalShares}`);
+
+    const upTotalWork = (routerData.upstream_accepted_work || 0) + (routerData.upstream_rejected_work || 0);
+    const upRejWorkPct = upTotalWork > 0 ? formatTruncated((routerData.upstream_rejected_work / upTotalWork) * 100) + '%' : '0.00%';
+    copyable('upstream_rejected_work', upRejWorkPct, `${formatDifficulty(routerData.upstream_rejected_work || 0)} / ${formatDifficulty(upTotalWork)}`);
+
+    copyable('upstream_ph_days', formatPhDays(routerData.upstream_ph_days), routerData.upstream_ph_days);
 
     set('btc_height', bitcoinData.height);
     const heightLink = document.getElementById('btc_height_link');

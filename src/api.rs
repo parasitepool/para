@@ -155,6 +155,11 @@ pub struct RouterStatus {
     pub session_count: usize,
     pub uptime_secs: u64,
     pub slots: Vec<SlotStatus>,
+    pub upstream_accepted: u64,
+    pub upstream_rejected: u64,
+    pub upstream_accepted_work: TotalWork,
+    pub upstream_rejected_work: TotalWork,
+    pub upstream_ph_days: PhDays,
     #[serde(flatten)]
     pub stats: MiningStats,
 }
