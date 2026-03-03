@@ -6,13 +6,13 @@
     <div class=row><span>Sessions</span><span id=sessions></span></div>
     <div class=row><span>SPS</span><span id=sps_1m></span></div>
     <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
-    <div class=row><span>PHd</span><span id=ph_days class=copyable></span></div>
     <div class=row><span>Uptime</span><span><span id=uptime_secs></span>s</span></div>
     <div class=row><span>Blocks</span><span id=blocks></span></div>
     <div class=row><span>Rejected Shares</span><span id=rejected_shares class=copyable></span></div>
     <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
-    <div class=row><span>Best</span><span id=best_ever class=copyable></span></div>
-    <div class=row><span>Last</span><span><span id=last_share></span>s ago</span></div>
+    <div class=row><span>Best Share</span><span id=best_share class=copyable></span></div>
+    <div class=row><span>Last Share</span><span><span id=last_share></span>s ago</span></div>
+    <div class=row><span>PHd</span><span id=ph_days class=copyable></span></div>
   </div>
 
   <div class=column>
@@ -61,7 +61,7 @@ async function refresh() {
     ]);
 
     const network_difficulty = formatDifficulty(bitcoinData.network_difficulty);
-    const best_ever = formatDifficulty(poolData.best_ever);
+    const best_share = formatDifficulty(poolData.best_share);
 
     // Pool data
     set('users', poolData.user_count);
@@ -80,7 +80,7 @@ async function refresh() {
     copyable('rejected_work', rejectedWorkPct, `${formatDifficulty(poolData.rejected_work || 0)} / ${formatDifficulty(totalWork)}`);
 
     set('last_share', poolData.last_share);
-    copyable('best_ever', best_ever, poolData.best_ever);
+    copyable('best_share', best_share, poolData.best_share);
     copyable('ph_days', formatPhDays(poolData.ph_days), poolData.ph_days);
 
     // Bitcoin data

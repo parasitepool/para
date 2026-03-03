@@ -54,7 +54,7 @@ async fn proxy() {
     assert_eq!(status.upstream.accepted, 0);
     assert_eq!(status.upstream.rejected, 0);
     assert_eq!(status.upstream.difficulty, Difficulty::from(0.00001));
-    assert!(status.stats.best_ever.is_none());
+    assert!(status.stats.best_share.is_none());
     assert!(status.stats.last_share.is_none());
 
     let client = proxy.stratum_client();
@@ -114,19 +114,19 @@ async fn proxy() {
     assert_eq!(status.stats.rejected_shares, 0);
     assert_eq!(status.upstream.accepted, 1);
     assert_eq!(status.upstream.rejected, 0);
-    assert!(status.stats.best_ever.is_some());
+    assert!(status.stats.best_share.is_some());
     assert!(status.stats.last_share.is_some());
 
     let user = proxy.get_user(&user_address).await.unwrap();
     assert_eq!(user.address, user_address);
     assert_eq!(user.stats.accepted_shares, 1);
     assert_eq!(user.stats.rejected_shares, 0);
-    assert!(user.stats.best_ever.is_some());
+    assert!(user.stats.best_share.is_some());
     assert!(user.stats.last_share.is_some());
     assert_eq!(user.workers.len(), 1);
     assert_eq!(user.workers[0].stats.accepted_shares, 1);
     assert_eq!(user.workers[0].stats.rejected_shares, 0);
-    assert!(user.workers[0].stats.best_ever.is_some());
+    assert!(user.workers[0].stats.best_share.is_some());
     assert!(user.workers[0].stats.last_share.is_some());
 
     let bad_enonce2 = Extranonce::random(subscribe.enonce2_size);

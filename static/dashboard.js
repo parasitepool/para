@@ -232,7 +232,7 @@ function setupLogToggle() {
 function renderWorkerRows(workers) {
   return workers.sort((a, b) => b.hashrate_1m - a.hashrate_1m).map(w => {
     const lastShare = w.last_share != null ? `${w.last_share}s ago` : '-';
-    const bestShare = formatDifficulty(w.best_ever);
+    const bestShare = formatDifficulty(w.best_share);
     return `<tr>
       <td>${w.name || '(default)'}</td>
       <td>${w.session_count}</td>
@@ -252,7 +252,7 @@ function renderSessionRows(sessions) {
       ? sessionUser.slice(0, 6) + '...' + sessionUser.slice(-6)
       : sessionUser;
     const lastShare = session.last_share != null ? `${session.last_share}s ago` : '-';
-    const bestShare = formatDifficulty(session.best_ever);
+    const bestShare = formatDifficulty(session.best_share);
     return `<tr>
       <td><span class="copyable hover-expand session-username" data-full="${sessionUser}" data-formatted="${shortSessionUser}">${shortSessionUser}</span></td>
       <td>${formatHashrate(session.hashrate_1m)}</td>

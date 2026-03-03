@@ -428,7 +428,7 @@ mod tests {
         assert_eq!(metatron.total_sessions(), 0);
         assert_eq!(stats.accepted_shares, 2);
         assert_eq!(stats.rejected_shares, 1);
-        assert_eq!(stats.best_ever, Some(Difficulty::from(200.0)));
+        assert_eq!(stats.best_share, Some(Difficulty::from(200.0)));
         assert!(stats.last_share.is_some());
         let expected = TotalWork::from_difficulty(pool_diff);
         assert_eq!(stats.accepted_work, expected + expected);
@@ -449,7 +449,7 @@ mod tests {
 
         let stats = metatron.snapshot();
         assert_eq!(stats.accepted_shares, 2);
-        assert_eq!(stats.best_ever, Some(Difficulty::from(300.0)));
+        assert_eq!(stats.best_share, Some(Difficulty::from(300.0)));
         let expected = TotalWork::from_difficulty(pool_diff);
         assert_eq!(stats.accepted_work, expected + expected);
     }
@@ -467,7 +467,7 @@ mod tests {
 
         let stats = metatron.snapshot();
         assert_eq!(stats.accepted_shares, 2);
-        assert_eq!(stats.best_ever, Some(Difficulty::from(200.0)));
+        assert_eq!(stats.best_share, Some(Difficulty::from(200.0)));
         let expected = TotalWork::from_difficulty(pool_diff);
         assert_eq!(stats.accepted_work, expected + expected);
     }
@@ -510,7 +510,7 @@ mod tests {
 
         let stats = metatron.snapshot();
         assert_eq!(stats.accepted_shares, 1);
-        assert_eq!(stats.best_ever, Some(Difficulty::from(200.0)));
+        assert_eq!(stats.best_share, Some(Difficulty::from(200.0)));
         assert_eq!(stats.accepted_work, TotalWork::from_difficulty(pool_diff));
     }
 }

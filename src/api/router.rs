@@ -89,7 +89,7 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
     let mut rejected_shares = 0;
     let mut total_accepted_work = TotalWork::ZERO;
     let mut total_rejected_work = TotalWork::ZERO;
-    let mut best_ever = None;
+    let mut best_share = None;
     let mut last_share = None;
     let mut uptime_secs = 0;
 
@@ -141,11 +141,10 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
         total_rejected_work += stats.rejected_work;
         uptime_secs = uptime_secs.max(slot.metatron.uptime().as_secs());
 
-        if stats
-            .best_ever
-            .is_some_and(|slot_best_ever| best_ever.is_none_or(|current| slot_best_ever > current))
-        {
-            best_ever = stats.best_ever;
+        if stats.best_share.is_some_and(|slot_best_share| {
+            best_share.is_none_or(|current| slot_best_share > current)
+        }) {
+            best_share = stats.best_share;
         }
 
         if stats.last_share.is_some_and(|slot_last_share| {
@@ -160,6 +159,9 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
             username: slot.upstream.username().to_string(),
             hashrate_1m,
             ph_days: PhDays::from(stats.accepted_work),
+            upstream_ph_days: PhDays::from(
+                slot.upstream.accepted_work() + slot.upstream.rejected_work(),
+            ),
             session_count: slot_session_count,
             hashrate_min,
             hashrate_max,
@@ -176,7 +178,7 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
         sps_1m: total_sps_1m,
         accepted_shares,
         rejected_shares,
-        best_ever,
+        best_share,
         last_share: last_share.map(|time| now.duration_since(time).as_secs()),
         accepted_work: total_accepted_work,
         rejected_work: total_rejected_work,

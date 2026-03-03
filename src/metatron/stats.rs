@@ -7,7 +7,7 @@ pub(crate) struct Stats {
     pub(crate) accepted_work: TotalWork,
     pub(crate) rejected_work: TotalWork,
     pub(crate) last_share: Option<Instant>,
-    pub(crate) best_ever: Option<Difficulty>,
+    pub(crate) best_share: Option<Difficulty>,
     pub(crate) dsps_1m: DecayingAverage,
     pub(crate) dsps_5m: DecayingAverage,
     pub(crate) dsps_15m: DecayingAverage,
@@ -29,7 +29,7 @@ impl Stats {
             accepted_work: TotalWork::ZERO,
             rejected_work: TotalWork::ZERO,
             last_share: None,
-            best_ever: None,
+            best_share: None,
             dsps_1m: DecayingAverage::new(Duration::from_mins(1)),
             dsps_5m: DecayingAverage::new(Duration::from_mins(5)),
             dsps_15m: DecayingAverage::new(Duration::from_mins(15)),
@@ -62,10 +62,10 @@ impl Stats {
         self.sps_1hr.absorb(other.sps_1hr, now);
 
         if other
-            .best_ever
-            .is_some_and(|other_diff| self.best_ever.is_none_or(|diff| other_diff > diff))
+            .best_share
+            .is_some_and(|other_diff| self.best_share.is_none_or(|diff| other_diff > diff))
         {
-            self.best_ever = other.best_ever;
+            self.best_share = other.best_share;
         }
 
         if other

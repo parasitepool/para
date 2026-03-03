@@ -31,7 +31,7 @@ pub struct MiningStats {
     pub rejected_shares: u64,
     pub accepted_work: TotalWork,
     pub rejected_work: TotalWork,
-    pub best_ever: Option<Difficulty>,
+    pub best_share: Option<Difficulty>,
     pub last_share: Option<u64>,
     pub ph_days: PhDays,
 }
@@ -54,7 +54,7 @@ impl MiningStats {
             rejected_shares: stats.rejected_shares,
             accepted_work: stats.accepted_work,
             rejected_work: stats.rejected_work,
-            best_ever: stats.best_ever,
+            best_share: stats.best_share,
             last_share: stats
                 .last_share
                 .map(|time| now.duration_since(time).as_secs()),
@@ -75,11 +75,15 @@ pub struct UpstreamInfo {
     pub version_mask: Option<Version>,
     pub accepted: u64,
     pub rejected: u64,
-    pub filtered: u64,
+    pub accepted_work: TotalWork,
+    pub rejected_work: TotalWork,
+    pub ph_days: PhDays,
 }
 
 impl UpstreamInfo {
     pub(crate) fn from_upstream(upstream: &Upstream) -> Self {
+        let accepted_work = upstream.accepted_work();
+        let rejected_work = upstream.rejected_work();
         Self {
             endpoint: upstream.endpoint().to_string(),
             connected: upstream.is_connected(),
@@ -91,7 +95,9 @@ impl UpstreamInfo {
             version_mask: upstream.version_mask(),
             accepted: upstream.accepted(),
             rejected: upstream.rejected(),
-            filtered: upstream.filtered(),
+            accepted_work,
+            rejected_work,
+            ph_days: (accepted_work + rejected_work).into(),
         }
     }
 }
@@ -152,7 +158,7 @@ pub struct RouterStatus {
     pub sps_1m: f64,
     pub accepted_shares: u64,
     pub rejected_shares: u64,
-    pub best_ever: Option<Difficulty>,
+    pub best_share: Option<Difficulty>,
     pub last_share: Option<u64>,
     pub accepted_work: TotalWork,
     pub rejected_work: TotalWork,
@@ -168,6 +174,7 @@ pub struct SlotStatus {
     pub hashrate_1m: HashRate,
     pub session_count: usize,
     pub ph_days: PhDays,
+    pub upstream_ph_days: PhDays,
     pub hashrate_min: HashRate,
     pub hashrate_max: HashRate,
     pub hashrate_avg: HashRate,

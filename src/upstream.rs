@@ -23,7 +23,8 @@ pub(crate) struct Upstream {
     difficulty: Arc<RwLock<Difficulty>>,
     accepted: Arc<AtomicU64>,
     rejected: Arc<AtomicU64>,
-    filtered: Arc<AtomicU64>,
+    accepted_work: Arc<Mutex<TotalWork>>,
+    rejected_work: Arc<Mutex<TotalWork>>,
     version_mask: Option<Version>,
     disconnect_notify: Arc<tokio::sync::Notify>,
     workbase_rx: watch::Receiver<Arc<Notify>>,
@@ -202,7 +203,8 @@ impl Upstream {
             difficulty,
             accepted: Arc::new(AtomicU64::new(0)),
             rejected: Arc::new(AtomicU64::new(0)),
-            filtered: Arc::new(AtomicU64::new(0)),
+            accepted_work: Arc::new(Mutex::new(TotalWork::ZERO)),
+            rejected_work: Arc::new(Mutex::new(TotalWork::ZERO)),
             version_mask,
             disconnect_notify,
             workbase_rx,
@@ -220,7 +222,6 @@ impl Upstream {
                 "Share below upstream difficulty: share_diff={} < upstream_diff={}",
                 submit.share_diff, upstream_diff
             );
-            self.filtered.fetch_add(1, Ordering::Relaxed);
             return;
         }
 
@@ -232,6 +233,8 @@ impl Upstream {
         let client = self.client.clone();
         let accepted = self.accepted.clone();
         let rejected = self.rejected.clone();
+        let accepted_work = self.accepted_work.clone();
+        let rejected_work = self.rejected_work.clone();
         let ping = self.ping.clone();
 
         tokio::spawn(async move {
@@ -247,6 +250,7 @@ impl Upstream {
             {
                 Ok(duration) => {
                     accepted.fetch_add(1, Ordering::Relaxed);
+                    *accepted_work.lock() += TotalWork::from_difficulty(upstream_diff);
                     let mut ping = ping.write();
                     *ping = duration;
 
@@ -254,10 +258,12 @@ impl Upstream {
                 }
                 Err(ClientError::SubmitFalse) => {
                     rejected.fetch_add(1, Ordering::Relaxed);
+                    *rejected_work.lock() += TotalWork::from_difficulty(upstream_diff);
                     warn!("Upstream rejected share");
                 }
                 Err(ClientError::Rejected { reason, .. }) => {
                     rejected.fetch_add(1, Ordering::Relaxed);
+                    *rejected_work.lock() += TotalWork::from_difficulty(upstream_diff);
                     warn!("Upstream rejected share: {}", reason);
                 }
                 Err(e) => {
@@ -307,8 +313,12 @@ impl Upstream {
         self.rejected.load(Ordering::Relaxed)
     }
 
-    pub(crate) fn filtered(&self) -> u64 {
-        self.filtered.load(Ordering::Relaxed)
+    pub(crate) fn accepted_work(&self) -> TotalWork {
+        *self.accepted_work.lock()
+    }
+
+    pub(crate) fn rejected_work(&self) -> TotalWork {
+        *self.rejected_work.lock()
     }
 
     pub(crate) fn version_mask(&self) -> Option<Version> {

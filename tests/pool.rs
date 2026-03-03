@@ -636,7 +636,7 @@ async fn share_validation() {
     assert_eq!(status.block_count, 0);
     assert_eq!(status.stats.accepted_shares, 0);
     assert_eq!(status.stats.rejected_shares, 0);
-    assert!(status.stats.best_ever.is_none());
+    assert!(status.stats.best_share.is_none());
     assert!(status.stats.last_share.is_none());
 
     let system_status = pool.get_system_status().await.unwrap();
@@ -681,19 +681,19 @@ async fn share_validation() {
     assert_eq!(status.session_count, 1);
     assert_eq!(status.stats.accepted_shares, 1);
     assert_eq!(status.stats.rejected_shares, 0);
-    assert!(status.stats.best_ever.is_some());
+    assert!(status.stats.best_share.is_some());
     assert!(status.stats.last_share.is_some());
 
     let user = pool.get_user(&user_address).await.unwrap();
     assert_eq!(user.address, user_address);
     assert_eq!(user.stats.accepted_shares, 1);
     assert_eq!(user.stats.rejected_shares, 0);
-    assert!(user.stats.best_ever.is_some());
+    assert!(user.stats.best_share.is_some());
     assert!(user.stats.last_share.is_some());
     assert_eq!(user.workers.len(), 1);
     assert_eq!(user.workers[0].stats.accepted_shares, 1);
     assert_eq!(user.workers[0].stats.rejected_shares, 0);
-    assert!(user.workers[0].stats.best_ever.is_some());
+    assert!(user.workers[0].stats.best_share.is_some());
     assert!(user.workers[0].stats.last_share.is_some());
 
     // Duplicate rejected

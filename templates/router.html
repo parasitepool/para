@@ -64,18 +64,15 @@
     <div class=row><span>Sessions</span><span id=session_count></span></div>
     <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
     <div class=row><span>SPS</span><span id=sps_1m></span></div>
-    <div class=row><span>PHd</span><span id=ph_days class=copyable></span></div>
     <div class=row><span>Uptime</span><span><span id=uptime_secs></span>s</span></div>
     <div class=row><span>Rejected Shares</span><span id=rejected_shares class=copyable></span></div>
     <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
-    <div class=row><span>Best</span><span id=best_ever class=copyable></span></div>
-    <div class=row><span>Last</span><span><span id=last_share></span>s ago</span></div>
+    <div class=row><span>Best Share</span><span id=best_share class=copyable></span></div>
+    <div class=row><span>Last Share</span><span><span id=last_share></span>s ago</span></div>
+    <div class=row><span>PHd</span><span id=ph_days class=copyable></span></div>
   </div>
 
-  <div class="column column-full">
-    <h2>Slots</h2>
-    <div id=upstreams-list></div>
-  </div>
+  <div id=upstreams-list class=column-full></div>
 
   <div class=column>
     <h2>Bitcoin</h2>
@@ -122,7 +119,7 @@ async function refresh() {
       fetch('/api/bitcoin/status').then(r => r.json()).catch(() => ({}))
     ]);
 
-    const bestEver = formatDifficulty(routerData.best_ever);
+    const bestShare = formatDifficulty(routerData.best_share);
     const networkDifficulty = formatDifficulty(bitcoinData.network_difficulty);
 
     set('upstream_count', routerData.upstream_count);
@@ -132,7 +129,7 @@ async function refresh() {
     set('uptime_secs', routerData.uptime_secs);
     set('last_share', routerData.last_share);
     copyable('ph_days', formatPhDays(routerData.ph_days), routerData.ph_days);
-    copyable('best_ever', bestEver, routerData.best_ever);
+    copyable('best_share', bestShare, routerData.best_share);
 
     const totalShares = (routerData.accepted_shares || 0) + (routerData.rejected_shares || 0);
     const rejectedSharesPct = totalShares > 0 ? formatTruncated((routerData.rejected_shares / totalShares) * 100) + '%' : '0.00%';
@@ -162,20 +159,22 @@ async function refresh() {
       const username = slot.username || '';
       const shortUser = username.length > 15 ? username.slice(0, 6) + '...' + username.slice(-6) : username;
       const phDays = formatPhDays(slot.ph_days);
+      const upstreamPhDays = formatPhDays(slot.upstream_ph_days);
       return `<div class="slot-card">
         <div class=slot-pane>
           <div class=row><a class=slot-link href="/upstream/${slot.upstream_id}">ID</a><span>${slot.upstream_id}</span></div>
+          <div class=row><span>PHd</span><span>${upstreamPhDays || '-'}</span></div>
           <div class=row><span>Endpoint</span><span>${slot.endpoint}</span></div>
           <div class=row><span>Username</span><span class="copyable hover-expand slot-username" data-full="${username}" data-formatted="${shortUser}">${shortUser}</span></div>
         </div>
         <div class=slot-pane>
           <div class=row><a class=slot-link href="/upstream/${slot.upstream_id}">Sessions</a><span>${slot.session_count}</span></div>
-          <div class=row><span>Hashrate</span><span>${formatHashrate(slot.hashrate_1m)}</span></div>
           <div class=row><span>PHd</span><span>${phDays || '-'}</span></div>
-          <div class=row><span>Min</span><span>${formatHashrate(slot.hashrate_min)}</span></div>
+          <div class=row><span>Hashrate</span><span>${formatHashrate(slot.hashrate_1m)}</span></div>
           <div class=row><span>Max</span><span>${formatHashrate(slot.hashrate_max)}</span></div>
           <div class=row><span>Avg</span><span>${formatHashrate(slot.hashrate_avg)}</span></div>
           <div class=row><span>Median</span><span>${formatHashrate(slot.hashrate_median)}</span></div>
+          <div class=row><span>Min</span><span>${formatHashrate(slot.hashrate_min)}</span></div>
         </div>
       </div>`;
     }).join('');

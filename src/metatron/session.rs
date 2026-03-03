@@ -98,8 +98,8 @@ impl Session {
         stats.accepted_work += TotalWork::from_difficulty(pool_diff);
         stats.last_share = Some(now);
 
-        if stats.best_ever.is_none_or(|best| share_diff > best) {
-            stats.best_ever = Some(share_diff);
+        if stats.best_share.is_none_or(|best| share_diff > best) {
+            stats.best_share = Some(share_diff);
         }
     }
 
