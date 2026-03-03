@@ -209,5 +209,45 @@ pub struct SessionDetail {
     pub stats: MiningStats,
 }
 
+impl UserDetail {
+    pub(crate) fn from_user(user: &User, now: Instant) -> Self {
+        let mut workers = Vec::new();
+        let mut sessions = Vec::new();
+
+        for worker in user.workers() {
+            for session in worker.sessions() {
+                let s = session.snapshot();
+                sessions.push(SessionDetail {
+                    id: session.id(),
+                    upstream_id: session.id().upstream_id(),
+                    address: session.address().to_string(),
+                    worker_name: session.workername().to_string(),
+                    username: session.username().to_string(),
+                    enonce1: session.enonce1().clone(),
+                    version_mask: session.version_mask(),
+                    stats: MiningStats::from_snapshot(&s, now),
+                });
+            }
+            let stats = worker.snapshot();
+            workers.push(WorkerDetail {
+                name: worker.workername().to_string(),
+                session_count: worker.session_count(),
+                stats: MiningStats::from_snapshot(&stats, now),
+            });
+        }
+
+        let user_stats = user.snapshot();
+
+        Self {
+            address: user.address.to_string(),
+            session_count: user.session_count(),
+            authorized_at: user.authorized,
+            workers,
+            sessions,
+            stats: MiningStats::from_snapshot(&user_stats, now),
+        }
+    }
+}
+
 pub type BitcoinStatus = http_server::BitcoinStatus;
 pub type SystemStatus = http_server::SystemStatus;

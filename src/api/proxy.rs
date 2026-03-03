@@ -185,42 +185,5 @@ async fn user(
         .get(&address)
         .ok_or_not_found(|| format!("User {address}"))?;
 
-    let mut sessions = Vec::new();
-
-    let workers: Vec<WorkerDetail> = user
-        .workers()
-        .map(|worker| {
-            for session in worker.sessions() {
-                let s = session.snapshot();
-                sessions.push(SessionDetail {
-                    id: session.id(),
-                    upstream_id: session.id().upstream_id(),
-                    address: session.address().to_string(),
-                    worker_name: session.workername().to_string(),
-                    username: session.username().to_string(),
-                    enonce1: session.enonce1().clone(),
-                    version_mask: session.version_mask(),
-                    stats: MiningStats::from_snapshot(&s, now),
-                });
-            }
-            let stats = worker.snapshot();
-            WorkerDetail {
-                name: worker.workername().to_string(),
-                session_count: worker.session_count(),
-                stats: MiningStats::from_snapshot(&stats, now),
-            }
-        })
-        .collect();
-
-    let user_stats = user.snapshot();
-
-    Ok(Json(UserDetail {
-        address: user.address.to_string(),
-        session_count: user.session_count(),
-        authorized_at: user.authorized,
-        workers,
-        sessions,
-        stats: MiningStats::from_snapshot(&user_stats, now),
-    })
-    .into_response())
+    Ok(Json(UserDetail::from_user(&user, now)).into_response())
 }

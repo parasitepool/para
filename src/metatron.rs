@@ -9,7 +9,7 @@ use {
 
 pub(crate) mod session;
 pub(crate) mod stats;
-mod user;
+pub(crate) mod user;
 mod worker;
 
 pub(crate) struct Metatron {
