@@ -44,6 +44,30 @@ async fn user_page(Extension(chain): Extension<Chain>) -> Response {
     )
 }
 
+pub(super) async fn users(State(metatron): State<Arc<Metatron>>) -> Json<Vec<String>> {
+    Json(
+        metatron
+            .users()
+            .iter()
+            .map(|entry| entry.key().to_string())
+            .collect(),
+    )
+}
+
+pub(super) async fn user(
+    State(metatron): State<Arc<Metatron>>,
+    Path(address): Path<Address<NetworkUnchecked>>,
+) -> ServerResult<Response> {
+    let address = address.assume_checked();
+
+    let user = metatron
+        .users()
+        .get(&address)
+        .ok_or_not_found(|| format!("User {address}"))?;
+
+    Ok(Json(UserDetail::from_user(&user, Instant::now())).into_response())
+}
+
 async fn status(State(metatron): State<Arc<Metatron>>) -> Json<PoolStatus> {
     Json(PoolStatus {
         endpoint: metatron.endpoint().to_string(),

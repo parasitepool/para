@@ -16,32 +16,6 @@ pub mod pool;
 pub mod proxy;
 pub mod router;
 
-async fn users(State(metatron): State<Arc<Metatron>>) -> Json<Vec<String>> {
-    Json(
-        metatron
-            .users()
-            .iter()
-            .map(|entry| entry.key().to_string())
-            .collect(),
-    )
-}
-
-async fn user(
-    State(metatron): State<Arc<Metatron>>,
-    Path(address): Path<Address<NetworkUnchecked>>,
-) -> ServerResult<Response> {
-    let address = address.assume_checked();
-
-    let now = Instant::now();
-
-    let user = metatron
-        .users()
-        .get(&address)
-        .ok_or_not_found(|| format!("User {address}"))?;
-
-    Ok(Json(UserDetail::from_user(&user, now)).into_response())
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MiningStats {
     pub hashrate_1m: HashRate,

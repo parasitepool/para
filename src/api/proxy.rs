@@ -6,22 +6,29 @@ pub(crate) fn router(
     chain: Chain,
     logs: Arc<logs::Logs>,
 ) -> axum::Router {
-    let user_routes = axum::Router::new()
-        .route("/api/proxy/users", get(super::users))
-        .route("/api/proxy/user/{address}", get(super::user))
-        .with_state(metrics.metatron.clone());
-
     axum::Router::new()
         .route("/", get(home))
         .route("/users", get(users_page))
         .route("/user/{address}", get(user_page))
         .route("/api/proxy/status", get(status))
+        .route("/api/proxy/users", get(users))
+        .route("/api/proxy/user/{address}", get(user))
         .with_state(metrics)
-        .merge(user_routes)
         .merge(common_routes())
         .layer(Extension(bitcoin_client))
         .layer(Extension(chain))
         .layer(Extension(logs))
+}
+
+async fn users(State(metrics): State<Arc<Metrics>>) -> Json<Vec<String>> {
+    pool::users(State(metrics.metatron.clone())).await
+}
+
+async fn user(
+    State(metrics): State<Arc<Metrics>>,
+    path: Path<Address<NetworkUnchecked>>,
+) -> ServerResult<Response> {
+    pool::user(State(metrics.metatron.clone()), path).await
 }
 
 async fn home(Extension(chain): Extension<Chain>) -> Response {
