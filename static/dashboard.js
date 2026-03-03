@@ -8,55 +8,111 @@ const CONFIG = {
   DEFAULT_POLL_INTERVAL: 1000
 };
 
+const logState = {
+  paused: false,
+  allLogs: [],
+  pausedLogs: [],
+  ws: null,
+};
+
+function createLogLine(level, text) {
+  const line = document.createElement('div');
+  const lvl = document.createElement('span');
+  lvl.className = 'log-' + level.trim().toLowerCase();
+  lvl.textContent = level;
+  line.appendChild(lvl);
+  line.appendChild(document.createTextNode(' ' + text));
+  line.dataset.text = (level + ' ' + text).toLowerCase();
+  return line;
+}
+
+function renderLogs() {
+  const logsEl = document.getElementById('logs');
+  const filterInput = document.getElementById('log-filter');
+  if (!logsEl) return;
+
+  const filter = filterInput?.value || '';
+  const source = logState.paused ? logState.pausedLogs : logState.allLogs;
+
+  const fragment = document.createDocumentFragment();
+  let count = 0;
+  for (let i = source.length - 1; i >= 0 && count < CONFIG.LOGS_TO_SHOW; i--) {
+    const log = source[i];
+    if (filter && !(log.level + ' ' + log.text).toLowerCase().includes(filter.toLowerCase())) continue;
+    fragment.prepend(createLogLine(log.level, log.text));
+    count++;
+  }
+
+  logsEl.innerHTML = '';
+  logsEl.appendChild(fragment);
+
+  if (!logState.paused) {
+    logsEl.scrollTop = logsEl.scrollHeight;
+  }
+}
+
 function connectWs() {
   const logsEl = document.getElementById('logs');
+  if (!logsEl) return;
+
+  if (logState.ws) {
+    logState.ws.onclose = null;
+    logState.ws.onerror = null;
+    logState.ws.onmessage = null;
+    logState.ws.close();
+  }
+
+  const levelToggle = document.getElementById('log-level-toggle');
+  const levelOptions = document.getElementById('log-level-options');
+
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(`${protocol}//${location.host}/ws/logs`);
+  logState.ws = ws;
+
+  ws.onmessage = (e) => {
+    const [level, ...rest] = e.data.split('\t');
+    const text = rest.join('\t');
+    if (level === 'level') {
+      if (levelToggle) levelToggle.textContent = text.toUpperCase();
+      if (levelOptions) levelOptions.classList.add('hidden');
+      return;
+    }
+    logState.allLogs.push({ level, text });
+    if (logState.allLogs.length > CONFIG.MAX_LOGS) {
+      logState.allLogs.splice(0, logState.allLogs.length - CONFIG.MAX_LOGS);
+    }
+    if (!logState.paused) renderLogs();
+  };
+  ws.onerror = () => ws.close();
+  ws.onclose = () => {
+    if (logState.ws !== ws) return;
+    clearTimeout(wsReconnectTimeout);
+    wsReconnectTimeout = setTimeout(connectWs, CONFIG.WS_RECONNECT_DELAY);
+  };
+
+  document.querySelectorAll('.log-level').forEach(btn => {
+    btn.onclick = () => {
+      if (logState.ws?.readyState === WebSocket.OPEN) {
+        logState.ws.send('set-level:' + btn.dataset.level);
+      }
+    };
+  });
+}
+
+function initLogControls() {
   const pauseBtn = document.getElementById('log-pause');
   const filterInput = document.getElementById('log-filter');
   const clearBtn = document.getElementById('log-clear');
-  if (!logsEl) return;
+  const levelToggle = document.getElementById('log-level-toggle');
+  const levelOptions = document.getElementById('log-level-options');
+  if (!pauseBtn) return;
 
-  let paused = false;
-  let allLogs = [];
-  let pausedLogs = [];
-  const maxLogs = CONFIG.MAX_LOGS;
-
-  function createLogLine(level, text) {
-    const line = document.createElement('div');
-    const lvl = document.createElement('span');
-    lvl.className = 'log-' + level.trim().toLowerCase();
-    lvl.textContent = level;
-    line.appendChild(lvl);
-    line.appendChild(document.createTextNode(' ' + text));
-    line.dataset.text = (level + ' ' + text).toLowerCase();
-    return line;
-  }
-
-  function matchesFilter(logEntry, filter) {
-    if (!filter) return true;
-    const searchText = (logEntry.level + ' ' + logEntry.text).toLowerCase();
-    return searchText.includes(filter.toLowerCase());
-  }
-
-  function renderLogs() {
-    const filter = filterInput?.value || '';
-    logsEl.innerHTML = '';
-    const source = paused ? pausedLogs : allLogs;
-    const filtered = source.filter(log => matchesFilter(log, filter));
-    const toShow = filtered.slice(-CONFIG.LOGS_TO_SHOW);
-    toShow.forEach(log => {
-      logsEl.appendChild(createLogLine(log.level, log.text));
-    });
-    if (!paused) {
-      logsEl.scrollTop = logsEl.scrollHeight;
-    }
-  }
-
-  pauseBtn?.addEventListener('click', () => {
-    paused = !paused;
-    pauseBtn.textContent = paused ? 'Resume' : 'Pause';
-    pauseBtn.className = paused ? 'paused' : '';
-    if (paused) {
-      pausedLogs = [...allLogs];
+  pauseBtn.addEventListener('click', () => {
+    logState.paused = !logState.paused;
+    pauseBtn.textContent = logState.paused ? 'Resume' : 'Pause';
+    pauseBtn.className = logState.paused ? 'paused' : '';
+    if (logState.paused) {
+      logState.pausedLogs = [...logState.allLogs];
     } else {
       renderLogs();
     }
@@ -65,47 +121,11 @@ function connectWs() {
   filterInput?.addEventListener('input', renderLogs);
 
   clearBtn?.addEventListener('click', () => {
-    allLogs = [];
-    pausedLogs = [];
+    logState.allLogs = [];
+    logState.pausedLogs = [];
     if (filterInput) filterInput.value = '';
     renderLogs();
   });
-
-  const levelToggle = document.getElementById('log-level-toggle');
-  const levelOptions = document.getElementById('log-level-options');
-
-  function setActiveLevel(level) {
-    if (levelToggle) {
-      levelToggle.textContent = level.toUpperCase();
-    }
-    if (levelOptions) {
-      levelOptions.classList.add('hidden');
-    }
-  }
-
-  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const ws = new WebSocket(`${protocol}//${location.host}/ws/logs`);
-  ws.onmessage = (e) => {
-    const [level, ...rest] = e.data.split('\t');
-    const text = rest.join('\t');
-    if (level === 'level') {
-      setActiveLevel(text);
-      return;
-    }
-    allLogs.push({ level, text });
-    while (allLogs.length > maxLogs) {
-      allLogs.shift();
-    }
-    if (!paused) renderLogs();
-  };
-  ws.onerror = (e) => {
-    console.error('WebSocket error:', e);
-    ws.close();
-  };
-  ws.onclose = () => {
-    clearTimeout(wsReconnectTimeout);
-    wsReconnectTimeout = setTimeout(connectWs, CONFIG.WS_RECONNECT_DELAY);
-  };
 
   levelToggle?.addEventListener('click', () => {
     levelOptions?.classList.toggle('hidden');
@@ -116,12 +136,6 @@ function connectWs() {
         && !e.target.closest('#log-level-controls')) {
       levelOptions.classList.add('hidden');
     }
-  });
-
-  document.querySelectorAll('.log-level').forEach(btn => {
-    btn.addEventListener('click', () => {
-      ws.send('set-level:' + btn.dataset.level);
-    });
   });
 }
 
@@ -280,13 +294,20 @@ function initTableCopyClick(containerId) {
 }
 
 let pollInterval;
+let pollController;
 
 function startPolling(refreshFn, intervalMs) {
-  refreshFn();
+  function poll() {
+    if (pollController) pollController.abort();
+    pollController = new AbortController();
+    refreshFn(pollController.signal);
+  }
+  poll();
   clearInterval(pollInterval);
-  pollInterval = setInterval(refreshFn, intervalMs || CONFIG.DEFAULT_POLL_INTERVAL);
+  pollInterval = setInterval(poll, intervalMs || CONFIG.DEFAULT_POLL_INTERVAL);
 }
 
 window.addEventListener('beforeunload', () => {
   clearInterval(pollInterval);
+  if (pollController) pollController.abort();
 });

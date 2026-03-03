@@ -52,12 +52,12 @@
 <div id=logs class=hidden></div>
 
 <script>
-async function refresh() {
+async function refresh(signal) {
   try {
     const [poolData, systemData, bitcoinData] = await Promise.all([
-      fetch('/api/pool/status').then(r => r.json()).catch(() => ({})),
-      fetch('/api/system/status').then(r => r.json()).catch(() => ({})),
-      fetch('/api/bitcoin/status').then(r => r.json()).catch(() => ({}))
+      fetch('/api/pool/status', { signal }).then(r => r.json()).catch(() => ({})),
+      fetch('/api/system/status', { signal }).then(r => r.json()).catch(() => ({})),
+      fetch('/api/bitcoin/status', { signal }).then(r => r.json()).catch(() => ({}))
     ]);
 
     const network_difficulty = formatDifficulty(bitcoinData.network_difficulty);
@@ -98,9 +98,10 @@ async function refresh() {
     set('memory_usage_percent', systemData.memory_usage_percent, formatTruncated);
     set('disk_usage_percent', systemData.disk_usage_percent, formatTruncated);
     set('uptime', systemData.uptime);
-  } catch (e) { console.error('refresh error:', e); }
+  } catch (e) { if (e.name !== 'AbortError') console.error('refresh error:', e); }
 }
 startPolling(refresh);
+initLogControls();
 connectWs();
 setupLogToggle();
 initCopyables();

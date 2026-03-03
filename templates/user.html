@@ -54,9 +54,9 @@
 const apiBase = '{{ self.api_base }}';
 const userAddress = window.location.pathname.split('/').pop();
 
-async function refresh() {
+async function refresh(signal) {
   try {
-    const user = await fetch(`${apiBase}/user/${userAddress}`).then(r => r.json()).catch(() => null);
+    const user = await fetch(`${apiBase}/user/${userAddress}`, { signal }).then(r => r.json()).catch(() => null);
 
     if (!user) {
       document.querySelector('.grid').innerHTML = '<div class="column column-full"><h2>User Not Found</h2></div>';
@@ -87,7 +87,7 @@ async function refresh() {
 
     document.getElementById('workers-list').innerHTML = renderWorkerRows(user.workers || []);
     document.getElementById('sessions-list').innerHTML = renderSessionRows(user.sessions || []);
-  } catch (e) { console.error('refresh error:', e); }
+  } catch (e) { if (e.name !== 'AbortError') console.error('refresh error:', e); }
 }
 initTableCopyClick('sessions-list');
 startPolling(refresh);
