@@ -58,7 +58,7 @@ async function refresh() {
     set('sessions', user.session_count);
     set('hashrate_1m', user.hashrate_1m, formatHashrate);
     set('sps_1m', user.sps_1m, formatTruncated);
-    set('authorized', new Date(user.authorized * 1000).toLocaleString());
+    set('authorized', new Date(user.authorized_at * 1000).toLocaleString());
     set('accepted', user.accepted_shares);
     set('rejected', user.rejected_shares);
     set('last_share', user.last_share);

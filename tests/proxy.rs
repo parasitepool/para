@@ -31,34 +31,38 @@ async fn proxy() {
     assert!(bitcoin_status.network_difficulty.as_f64() > 0.0);
 
     assert_eq!(
-        status.upstream_endpoint, upstream,
+        status.upstream.endpoint, upstream,
         "Upstream URL should match"
     );
 
-    assert_eq!(status.upstream_username, username, "Username should match");
+    assert_eq!(
+        status.upstream.username,
+        username.to_string(),
+        "Username should match"
+    );
 
     assert!(
-        status.upstream_connected,
+        status.upstream.connected,
         "Proxy should be connected to upstream"
     );
 
-    assert_eq!(status.users, 0);
-    assert_eq!(status.workers, 0);
+    assert_eq!(status.user_count, 0);
+    assert_eq!(status.worker_count, 0);
     assert_eq!(status.session_count, 0);
-    assert_eq!(status.accepted_shares, 0);
-    assert_eq!(status.rejected_shares, 0);
-    assert_eq!(status.upstream_accepted, 0);
-    assert_eq!(status.upstream_rejected, 0);
-    assert_eq!(status.upstream_difficulty, Difficulty::from(0.00001));
-    assert!(status.best_ever.is_none());
-    assert!(status.last_share.is_none());
+    assert_eq!(status.stats.accepted_shares, 0);
+    assert_eq!(status.stats.rejected_shares, 0);
+    assert_eq!(status.upstream.accepted, 0);
+    assert_eq!(status.upstream.rejected, 0);
+    assert_eq!(status.upstream.difficulty, Difficulty::from(0.00001));
+    assert!(status.stats.best_ever.is_none());
+    assert!(status.stats.last_share.is_none());
 
     let client = proxy.stratum_client();
     let mut events = client.connect().await.unwrap();
 
     let (subscribe, _, _) = client.subscribe().await.unwrap();
 
-    let upstream_enonce1 = status.upstream_enonce1.as_bytes();
+    let upstream_enonce1 = status.upstream.enonce1.as_bytes();
     let extended_enonce1 = subscribe.enonce1.as_bytes();
     assert_eq!(
         &extended_enonce1[..upstream_enonce1.len()],
@@ -73,7 +77,7 @@ async fn proxy() {
 
     assert_eq!(
         subscribe.enonce2_size,
-        status.upstream_enonce2_size - ENONCE1_EXTENSION_SIZE,
+        status.upstream.enonce2_size - ENONCE1_EXTENSION_SIZE,
         "Miner enonce2_size should be upstream minus extension"
     );
 
@@ -103,27 +107,27 @@ async fn proxy() {
         .to_string();
 
     let status = proxy.get_status().await.unwrap();
-    assert_eq!(status.users, 1);
-    assert_eq!(status.workers, 1);
+    assert_eq!(status.user_count, 1);
+    assert_eq!(status.worker_count, 1);
     assert_eq!(status.session_count, 1);
-    assert_eq!(status.accepted_shares, 1);
-    assert_eq!(status.rejected_shares, 0);
-    assert_eq!(status.upstream_accepted, 1);
-    assert_eq!(status.upstream_rejected, 0);
-    assert!(status.best_ever.is_some());
-    assert!(status.last_share.is_some());
+    assert_eq!(status.stats.accepted_shares, 1);
+    assert_eq!(status.stats.rejected_shares, 0);
+    assert_eq!(status.upstream.accepted, 1);
+    assert_eq!(status.upstream.rejected, 0);
+    assert!(status.stats.best_ever.is_some());
+    assert!(status.stats.last_share.is_some());
 
     let user = proxy.get_user(&user_address).await.unwrap();
     assert_eq!(user.address, user_address);
-    assert_eq!(user.accepted_shares, 1);
-    assert_eq!(user.rejected_shares, 0);
-    assert!(user.best_ever.is_some());
-    assert!(user.last_share.is_some());
+    assert_eq!(user.stats.accepted_shares, 1);
+    assert_eq!(user.stats.rejected_shares, 0);
+    assert!(user.stats.best_ever.is_some());
+    assert!(user.stats.last_share.is_some());
     assert_eq!(user.workers.len(), 1);
-    assert_eq!(user.workers[0].accepted_shares, 1);
-    assert_eq!(user.workers[0].rejected_shares, 0);
-    assert!(user.workers[0].best_ever.is_some());
-    assert!(user.workers[0].last_share.is_some());
+    assert_eq!(user.workers[0].stats.accepted_shares, 1);
+    assert_eq!(user.workers[0].stats.rejected_shares, 0);
+    assert!(user.workers[0].stats.best_ever.is_some());
+    assert!(user.workers[0].stats.last_share.is_some());
 
     let bad_enonce2 = Extranonce::random(subscribe.enonce2_size);
     let result = client
@@ -139,10 +143,10 @@ async fn proxy() {
     assert_stratum_error(result, StratumError::AboveTarget);
 
     let status = proxy.get_status().await.unwrap();
-    assert_eq!(status.accepted_shares, 1);
-    assert_eq!(status.rejected_shares, 1);
-    assert_eq!(status.upstream_accepted, 1);
-    assert_eq!(status.upstream_rejected, 0);
+    assert_eq!(status.stats.accepted_shares, 1);
+    assert_eq!(status.stats.rejected_shares, 1);
+    assert_eq!(status.upstream.accepted, 1);
+    assert_eq!(status.upstream.rejected, 0);
 
     assert_stratum_error(
         client
@@ -158,8 +162,8 @@ async fn proxy() {
     );
 
     let status = proxy.get_status().await.unwrap();
-    assert_eq!(status.accepted_shares, 1);
-    assert_eq!(status.rejected_shares, 2);
+    assert_eq!(status.stats.accepted_shares, 1);
+    assert_eq!(status.stats.rejected_shares, 2);
 
     assert_stratum_error(
         client
@@ -175,14 +179,14 @@ async fn proxy() {
     );
 
     let status = proxy.get_status().await.unwrap();
-    assert_eq!(status.accepted_shares, 1);
-    assert_eq!(status.rejected_shares, 3);
+    assert_eq!(status.stats.accepted_shares, 1);
+    assert_eq!(status.stats.rejected_shares, 3);
 
     let user = proxy.get_user(&user_address).await.unwrap();
-    assert_eq!(user.accepted_shares, 1);
-    assert_eq!(user.rejected_shares, 3);
-    assert_eq!(user.workers[0].accepted_shares, 1);
-    assert_eq!(user.workers[0].rejected_shares, 3);
+    assert_eq!(user.stats.accepted_shares, 1);
+    assert_eq!(user.stats.rejected_shares, 3);
+    assert_eq!(user.workers[0].stats.accepted_shares, 1);
+    assert_eq!(user.workers[0].stats.rejected_shares, 3);
 
     client.disconnect().await;
     drop(events);
@@ -218,16 +222,16 @@ async fn proxy() {
         .unwrap();
 
     let status = proxy.get_status().await.unwrap();
-    assert_eq!(status.accepted_shares, 2);
-    assert_eq!(status.rejected_shares, 3);
-    assert_eq!(status.upstream_accepted, 2);
-    assert_eq!(status.upstream_rejected, 0);
+    assert_eq!(status.stats.accepted_shares, 2);
+    assert_eq!(status.stats.rejected_shares, 3);
+    assert_eq!(status.upstream.accepted, 2);
+    assert_eq!(status.upstream.rejected, 0);
 
     let user = proxy.get_user(&user_address).await.unwrap();
-    assert_eq!(user.accepted_shares, 2);
-    assert_eq!(user.rejected_shares, 3);
-    assert_eq!(user.workers[0].accepted_shares, 2);
-    assert_eq!(user.workers[0].rejected_shares, 3);
+    assert_eq!(user.stats.accepted_shares, 2);
+    assert_eq!(user.stats.rejected_shares, 3);
+    assert_eq!(user.workers[0].stats.accepted_shares, 2);
+    assert_eq!(user.workers[0].stats.rejected_shares, 3);
 }
 
 #[test]
@@ -304,12 +308,12 @@ async fn proxy_with_non_default_enonce_sizes() {
     let status = proxy.get_status().await.unwrap();
 
     assert_eq!(
-        status.upstream_enonce1.len(),
+        status.upstream.enonce1.len(),
         6,
         "Upstream enonce1 should be 6 bytes"
     );
     assert_eq!(
-        status.upstream_enonce2_size, 4,
+        status.upstream.enonce2_size, 4,
         "Upstream enonce2 should be 4 bytes"
     );
 
@@ -355,7 +359,7 @@ async fn proxy_allows_version_rolling() {
     );
 
     assert_eq!(
-        proxy.get_status().await.unwrap().upstream_version_mask,
+        proxy.get_status().await.unwrap().upstream.version_mask,
         Some(Version::from_str("1fffe000").unwrap()),
         "Upstream version mask should match pool's configured mask"
     );
@@ -452,8 +456,8 @@ async fn reconnects_on_upstream_disconnect() {
     );
 
     let original_status = proxy.get_status().await.unwrap();
-    assert_eq!(original_status.upstream_enonce1.len(), ENONCE1_SIZE);
-    assert_eq!(original_status.upstream_enonce2_size, MAX_ENONCE_SIZE);
+    assert_eq!(original_status.upstream.enonce1.len(), ENONCE1_SIZE);
+    assert_eq!(original_status.upstream.enonce2_size, MAX_ENONCE_SIZE);
 
     let mut miner = CommandBuilder::new(format!(
         "miner {} --mode continuous --username {} --cpu-cores 1",
@@ -480,7 +484,7 @@ async fn reconnects_on_upstream_disconnect() {
     timeout(Duration::from_secs(10), async {
         loop {
             if let Ok(status) = proxy.get_status().await
-                && !status.upstream_connected
+                && !status.upstream.connected
             {
                 break;
             }
@@ -500,7 +504,7 @@ async fn reconnects_on_upstream_disconnect() {
     timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(status) = proxy.get_status().await
-                && status.upstream_connected
+                && status.upstream.connected
             {
                 break;
             }
@@ -511,11 +515,11 @@ async fn reconnects_on_upstream_disconnect() {
     .expect("Timeout waiting for proxy to reconnect");
 
     let reconnected_status = proxy.get_status().await.unwrap();
-    assert_eq!(reconnected_status.upstream_enonce1.len(), 6);
-    assert_eq!(reconnected_status.upstream_enonce2_size, 4);
+    assert_eq!(reconnected_status.upstream.enonce1.len(), 6);
+    assert_eq!(reconnected_status.upstream.enonce2_size, 4);
     assert_ne!(
-        reconnected_status.upstream_enonce1,
-        original_status.upstream_enonce1,
+        reconnected_status.upstream.enonce1,
+        original_status.upstream.enonce1,
     );
 
     timeout(Duration::from_secs(30), async {
@@ -538,7 +542,7 @@ async fn reconnects_on_upstream_disconnect() {
 
     assert_eq!(
         &subscribe.enonce1.as_bytes()[..6],
-        reconnected_status.upstream_enonce1.as_bytes(),
+        reconnected_status.upstream.enonce1.as_bytes(),
     );
     assert_eq!(subscribe.enonce1.len(), 6 + ENONCE1_EXTENSION_SIZE,);
     assert_eq!(subscribe.enonce2_size, 4 - ENONCE1_EXTENSION_SIZE,);

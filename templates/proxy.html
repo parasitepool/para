@@ -80,34 +80,34 @@ async function refresh() {
       fetch('/api/bitcoin/status').then(r => r.json()).catch(() => ({}))
     ]);
 
-    const u = proxyData.upstream_username;
+    const u = proxyData.upstream.username;
     const upstream_username = u?.length > 15 ? u.slice(0,6) + '...' + u.slice(-6) : u;
-    const forwarded = (proxyData.upstream_accepted || 0) + (proxyData.upstream_rejected || 0);
-    const total = forwarded + (proxyData.upstream_filtered || 0);
+    const forwarded = (proxyData.upstream.accepted || 0) + (proxyData.upstream.rejected || 0);
+    const total = forwarded + (proxyData.upstream.filtered || 0);
     const forward_ratio = total > 0 ? formatTruncated((forwarded / total) * 100) : '-';
-    const upstream_difficulty = formatDifficulty(proxyData.upstream_difficulty);
+    const upstream_difficulty = formatDifficulty(proxyData.upstream.difficulty);
     const network_difficulty = formatDifficulty(bitcoinData.network_difficulty);
     const best_ever = formatDifficulty(proxyData.best_ever);
 
     // Upstream data
-    set('upstream_endpoint', proxyData.upstream_endpoint);
-    set('upstream_status', proxyData.upstream_connected ? 'Connected' : 'Disconnected');
-    setClass('upstream_status', proxyData.upstream_connected ? 'connected' : 'disconnected');
+    set('upstream_endpoint', proxyData.upstream.endpoint);
+    set('upstream_status', proxyData.upstream.connected ? 'Connected' : 'Disconnected');
+    setClass('upstream_status', proxyData.upstream.connected ? 'connected' : 'disconnected');
     copyable('upstream_username', upstream_username, u);
-    copyable('upstream_difficulty', upstream_difficulty, proxyData.upstream_difficulty);
-    set('upstream_enonce1', proxyData.upstream_enonce1);
-    set('upstream_enonce2_size', proxyData.upstream_enonce2_size);
-    set('upstream_version_mask', proxyData.upstream_version_mask);
-    set('upstream_accepted', proxyData.upstream_accepted);
-    set('upstream_rejected', proxyData.upstream_rejected);
-    set('upstream_filtered', proxyData.upstream_filtered);
+    copyable('upstream_difficulty', upstream_difficulty, proxyData.upstream.difficulty);
+    set('upstream_enonce1', proxyData.upstream.enonce1);
+    set('upstream_enonce2_size', proxyData.upstream.enonce2_size);
+    set('upstream_version_mask', proxyData.upstream.version_mask);
+    set('upstream_accepted', proxyData.upstream.accepted);
+    set('upstream_rejected', proxyData.upstream.rejected);
+    set('upstream_filtered', proxyData.upstream.filtered);
     set('forward_ratio', forward_ratio);
-    set('upstream_ping', proxyData.upstream_ping, formatPing);
+    set('upstream_ping', proxyData.upstream.ping_ms, formatPing);
 
     // Downstream data
     set('endpoint', proxyData.endpoint);
-    set('users', proxyData.users);
-    set('workers', proxyData.workers);
+    set('users', proxyData.user_count);
+    set('workers', proxyData.worker_count);
     set('sessions', proxyData.session_count);
     set('hashrate_1m', proxyData.hashrate_1m, formatHashrate);
     set('sps_1m', proxyData.sps_1m, formatTruncated);

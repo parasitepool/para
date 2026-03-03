@@ -148,33 +148,14 @@ async fn status(State(metatron): State<Arc<Metatron>>) -> Json<PoolStatus> {
 
     Json(PoolStatus {
         endpoint: metatron.endpoint().to_string(),
-        hashrate_1m: stats.hashrate_1m(now),
-        hashrate_5m: stats.hashrate_5m(now),
-        hashrate_15m: stats.hashrate_15m(now),
-        hashrate_1hr: stats.hashrate_1hr(now),
-        hashrate_6hr: stats.hashrate_6hr(now),
-        hashrate_1d: stats.hashrate_1d(now),
-        hashrate_7d: stats.hashrate_7d(now),
-        sps_1m: stats.sps_1m(now),
-        sps_5m: stats.sps_5m(now),
-        sps_15m: stats.sps_15m(now),
-        sps_1hr: stats.sps_1hr(now),
-        users: metatron.total_users(),
-        workers: metatron.total_workers(),
-        session_count: metatron.session_count(),
-        disconnected: metatron.disconnected(),
-        idle: metatron.idle(),
-        accepted_shares: stats.accepted_shares,
-        rejected_shares: stats.rejected_shares,
-        blocks: metatron.total_blocks(),
-        best_ever: stats.best_ever,
-        last_share: stats
-            .last_share
-            .map(|time| now.duration_since(time).as_secs()),
-        accepted_work: stats.accepted_work,
-        rejected_work: stats.rejected_work,
-        ph_days: stats.accepted_work.into(),
+        user_count: metatron.total_users(),
+        worker_count: metatron.total_workers(),
+        block_count: metatron.total_blocks(),
+        session_count: metatron.total_sessions(),
+        disconnected_count: metatron.total_disconnected(),
+        idle_count: metatron.total_idle(),
         uptime_secs: metatron.uptime().as_secs(),
+        stats: MiningStats::from_snapshot(&stats, now),
     })
 }
 
@@ -208,26 +189,7 @@ async fn user(
             WorkerDetail {
                 name: worker.workername().to_string(),
                 session_count: worker.session_count(),
-                hashrate_1m: stats.hashrate_1m(now),
-                hashrate_5m: stats.hashrate_5m(now),
-                hashrate_15m: stats.hashrate_15m(now),
-                hashrate_1hr: stats.hashrate_1hr(now),
-                hashrate_6hr: stats.hashrate_6hr(now),
-                hashrate_1d: stats.hashrate_1d(now),
-                hashrate_7d: stats.hashrate_7d(now),
-                sps_1m: stats.sps_1m(now),
-                sps_5m: stats.sps_5m(now),
-                sps_15m: stats.sps_15m(now),
-                sps_1hr: stats.sps_1hr(now),
-                accepted_shares: stats.accepted_shares,
-                rejected_shares: stats.rejected_shares,
-                accepted_work: stats.accepted_work,
-                rejected_work: stats.rejected_work,
-                ph_days: stats.accepted_work.into(),
-                best_ever: stats.best_ever,
-                last_share: stats
-                    .last_share
-                    .map(|time| now.duration_since(time).as_secs()),
+                stats: MiningStats::from_snapshot(&stats, now),
             }
         })
         .collect();
@@ -236,29 +198,10 @@ async fn user(
 
     Ok(Json(UserDetail {
         address: user.address.to_string(),
-        hashrate_1m: user_stats.hashrate_1m(now),
-        hashrate_5m: user_stats.hashrate_5m(now),
-        hashrate_15m: user_stats.hashrate_15m(now),
-        hashrate_1hr: user_stats.hashrate_1hr(now),
-        hashrate_6hr: user_stats.hashrate_6hr(now),
-        hashrate_1d: user_stats.hashrate_1d(now),
-        hashrate_7d: user_stats.hashrate_7d(now),
-        sps_1m: user_stats.sps_1m(now),
-        sps_5m: user_stats.sps_5m(now),
-        sps_15m: user_stats.sps_15m(now),
-        sps_1hr: user_stats.sps_1hr(now),
-        accepted_shares: user_stats.accepted_shares,
-        rejected_shares: user_stats.rejected_shares,
-        best_ever: user_stats.best_ever,
-        last_share: user_stats
-            .last_share
-            .map(|time| now.duration_since(time).as_secs()),
-        accepted_work: user_stats.accepted_work,
-        rejected_work: user_stats.rejected_work,
-        ph_days: user_stats.accepted_work.into(),
         session_count: user.session_count(),
-        authorized: user.authorized,
+        authorized_at: user.authorized,
         workers,
+        stats: MiningStats::from_snapshot(&user_stats, now),
     })
     .into_response())
 }

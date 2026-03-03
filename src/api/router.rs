@@ -130,7 +130,7 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
         };
 
         let hashrate_1m = stats.hashrate_1m(now);
-        let slot_session_count = slot.metatron.session_count();
+        let slot_session_count = slot.metatron.total_sessions();
 
         session_count += slot_session_count;
         total_hashrate += hashrate_1m;
@@ -205,28 +205,11 @@ async fn upstream(
                     id: session.id(),
                     upstream_id: session.id().upstream_id(),
                     address: session.address().to_string(),
-                    workername: session.workername().to_string(),
+                    worker_name: session.workername().to_string(),
                     username: session.username().to_string(),
                     enonce1: session.enonce1().clone(),
                     version_mask: session.version_mask(),
-                    accepted_shares: s.accepted_shares,
-                    rejected_shares: s.rejected_shares,
-                    accepted_work: s.accepted_work,
-                    rejected_work: s.rejected_work,
-                    best_ever: s.best_ever,
-                    last_share: s.last_share.map(|time| now.duration_since(time).as_secs()),
-                    ph_days: s.accepted_work.into(),
-                    hashrate_1m: s.hashrate_1m(now),
-                    hashrate_5m: s.hashrate_5m(now),
-                    hashrate_15m: s.hashrate_15m(now),
-                    hashrate_1hr: s.hashrate_1hr(now),
-                    hashrate_6hr: s.hashrate_6hr(now),
-                    hashrate_1d: s.hashrate_1d(now),
-                    hashrate_7d: s.hashrate_7d(now),
-                    sps_1m: s.sps_1m(now),
-                    sps_5m: s.sps_5m(now),
-                    sps_15m: s.sps_15m(now),
-                    sps_1hr: s.sps_1hr(now),
+                    stats: MiningStats::from_snapshot(&s, now),
                 });
             }
         }
@@ -234,44 +217,15 @@ async fn upstream(
 
     Ok(Json(UpstreamDetail {
         upstream_id: slot.upstream.id(),
-        endpoint: slot.upstream.endpoint().to_string(),
-        username: slot.upstream.username().to_string(),
-        connected: slot.upstream.is_connected(),
-        ping_ms: slot.upstream.ping_ms(),
-        difficulty: slot.upstream.difficulty(),
-        enonce1: slot.upstream.enonce1().clone(),
-        enonce2_size: slot.upstream.enonce2_size(),
-        version_mask: slot.upstream.version_mask(),
-        accepted: slot.upstream.accepted(),
-        rejected: slot.upstream.rejected(),
-        filtered: slot.upstream.filtered(),
-        users: slot.metatron.total_users(),
-        workers: slot.metatron.total_workers(),
-        session_count: slot.metatron.session_count(),
-        disconnected: slot.metatron.disconnected(),
-        idle: slot.metatron.idle(),
-        hashrate_1m: stats.hashrate_1m(now),
-        hashrate_5m: stats.hashrate_5m(now),
-        hashrate_15m: stats.hashrate_15m(now),
-        hashrate_1hr: stats.hashrate_1hr(now),
-        hashrate_6hr: stats.hashrate_6hr(now),
-        hashrate_1d: stats.hashrate_1d(now),
-        hashrate_7d: stats.hashrate_7d(now),
-        sps_1m: stats.sps_1m(now),
-        sps_5m: stats.sps_5m(now),
-        sps_15m: stats.sps_15m(now),
-        sps_1hr: stats.sps_1hr(now),
-        accepted_shares: stats.accepted_shares,
-        rejected_shares: stats.rejected_shares,
-        best_ever: stats.best_ever,
-        last_share: stats
-            .last_share
-            .map(|time| now.duration_since(time).as_secs()),
-        accepted_work: stats.accepted_work,
-        rejected_work: stats.rejected_work,
-        ph_days: stats.accepted_work.into(),
+        upstream: UpstreamInfo::from_upstream(&slot.upstream),
+        user_count: slot.metatron.total_users(),
+        worker_count: slot.metatron.total_workers(),
+        session_count: slot.metatron.total_sessions(),
+        disconnected_count: slot.metatron.total_disconnected(),
+        idle_count: slot.metatron.total_idle(),
         uptime_secs: slot.metatron.uptime().as_secs(),
         sessions,
+        stats: MiningStats::from_snapshot(&stats, now),
     })
     .into_response())
 }

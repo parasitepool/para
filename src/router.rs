@@ -114,7 +114,7 @@ impl StatusLine for Router {
 
         for slot in &slots {
             let stats = slot.metatron.snapshot();
-            total_sessions += slot.metatron.session_count();
+            total_sessions += slot.metatron.total_sessions();
             total_hashrate += stats.hashrate_1m(now).0;
             if slot.upstream.is_connected() {
                 connected += 1;
