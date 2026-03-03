@@ -82,15 +82,8 @@ async fn upstream_page(Extension(chain): Extension<Chain>) -> Response {
 async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
     let now = Instant::now();
     let mut slots = Vec::new();
+    let mut combined = Stats::new();
     let mut session_count = 0;
-    let mut total_hashrate = HashRate(0.0);
-    let mut total_sps_1m = 0.0;
-    let mut accepted_shares = 0;
-    let mut rejected_shares = 0;
-    let mut total_accepted_work = TotalWork::ZERO;
-    let mut total_rejected_work = TotalWork::ZERO;
-    let mut best_share = None;
-    let mut last_share = None;
     let mut uptime_secs = 0;
 
     for slot in router.slots().iter() {
@@ -129,35 +122,15 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
             }
         };
 
-        let hashrate_1m = stats.hashrate_1m(now);
         let slot_session_count = slot.metatron.total_sessions();
-
         session_count += slot_session_count;
-        total_hashrate += hashrate_1m;
-        total_sps_1m += stats.sps_1m(now);
-        accepted_shares += stats.accepted_shares;
-        rejected_shares += stats.rejected_shares;
-        total_accepted_work += stats.accepted_work;
-        total_rejected_work += stats.rejected_work;
         uptime_secs = uptime_secs.max(slot.metatron.uptime().as_secs());
-
-        if stats.best_share.is_some_and(|slot_best_share| {
-            best_share.is_none_or(|current| slot_best_share > current)
-        }) {
-            best_share = stats.best_share;
-        }
-
-        if stats.last_share.is_some_and(|slot_last_share| {
-            last_share.is_none_or(|current| slot_last_share > current)
-        }) {
-            last_share = stats.last_share;
-        }
 
         slots.push(SlotStatus {
             upstream_id: slot.upstream.id(),
             endpoint: slot.upstream.endpoint().to_string(),
             username: slot.upstream.username().to_string(),
-            hashrate_1m,
+            hashrate_1m: stats.hashrate_1m(now),
             ph_days: PhDays::from(stats.accepted_work),
             upstream_ph_days: PhDays::from(
                 slot.upstream.accepted_work() + slot.upstream.rejected_work(),
@@ -168,22 +141,16 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
             hashrate_avg,
             hashrate_median,
         });
+
+        combined.absorb(stats, now);
     }
 
     Json(RouterStatus {
         upstream_count: slots.len(),
         session_count,
-        hashrate_1m: total_hashrate,
-        ph_days: PhDays::from(total_accepted_work),
-        sps_1m: total_sps_1m,
-        accepted_shares,
-        rejected_shares,
-        best_share,
-        last_share: last_share.map(|time| now.duration_since(time).as_secs()),
-        accepted_work: total_accepted_work,
-        rejected_work: total_rejected_work,
         uptime_secs,
         slots,
+        stats: MiningStats::from_snapshot(&combined, now),
     })
 }
 

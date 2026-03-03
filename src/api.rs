@@ -69,7 +69,7 @@ pub struct UpstreamInfo {
     pub connected: bool,
     pub ping_ms: u128,
     pub difficulty: Difficulty,
-    pub username: String,
+    pub username: Username,
     pub enonce1: Extranonce,
     pub enonce2_size: usize,
     pub version_mask: Option<Version>,
@@ -89,7 +89,7 @@ impl UpstreamInfo {
             connected: upstream.is_connected(),
             ping_ms: upstream.ping_ms(),
             difficulty: upstream.difficulty(),
-            username: upstream.username().to_string(),
+            username: upstream.username().clone(),
             enonce1: upstream.enonce1().clone(),
             enonce2_size: upstream.enonce2_size(),
             version_mask: upstream.version_mask(),
@@ -153,17 +153,10 @@ pub struct WorkerDetail {
 pub struct RouterStatus {
     pub upstream_count: usize,
     pub session_count: usize,
-    pub hashrate_1m: HashRate,
-    pub ph_days: PhDays,
-    pub sps_1m: f64,
-    pub accepted_shares: u64,
-    pub rejected_shares: u64,
-    pub best_share: Option<Difficulty>,
-    pub last_share: Option<u64>,
-    pub accepted_work: TotalWork,
-    pub rejected_work: TotalWork,
     pub uptime_secs: u64,
     pub slots: Vec<SlotStatus>,
+    #[serde(flatten)]
+    pub stats: MiningStats,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

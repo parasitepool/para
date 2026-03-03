@@ -35,11 +35,7 @@ async fn proxy() {
         "Upstream URL should match"
     );
 
-    assert_eq!(
-        status.upstream.username,
-        username.to_string(),
-        "Username should match"
-    );
+    assert_eq!(status.upstream.username, username, "Username should match");
 
     assert!(
         status.upstream.connected,
