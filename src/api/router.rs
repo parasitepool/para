@@ -106,6 +106,7 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
             upstream_id: slot.upstream.id(),
             endpoint: slot.upstream.endpoint().to_string(),
             username: slot.upstream.username().to_string(),
+            ping_ms: slot.upstream.ping_ms(),
             upstream_accepted: slot_upstream_accepted,
             upstream_rejected: slot_upstream_rejected,
             upstream_accepted_work: slot_upstream_accepted_work,
@@ -117,10 +118,10 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
             stats: MiningStats::from_snapshot(&stats, now),
         });
 
-        upstream_accepted += slot.upstream.accepted();
-        upstream_rejected += slot.upstream.rejected();
-        upstream_accepted_work += slot.upstream.accepted_work();
-        upstream_rejected_work += slot.upstream.rejected_work();
+        upstream_accepted += slot_upstream_accepted;
+        upstream_rejected += slot_upstream_rejected;
+        upstream_accepted_work += slot_upstream_accepted_work;
+        upstream_rejected_work += slot_upstream_rejected_work;
 
         combined.absorb(stats, now);
     }

@@ -169,6 +169,7 @@ pub struct SlotStatus {
     pub upstream_id: u32,
     pub endpoint: String,
     pub username: String,
+    pub ping_ms: u128,
     pub session_count: usize,
     pub upstream_accepted: u64,
     pub upstream_rejected: u64,

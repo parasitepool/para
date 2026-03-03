@@ -173,6 +173,11 @@ function formatTruncated(n) {
   return truncated.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
 }
 
+function rejectionPct(accepted, rejected) {
+  const total = (accepted || 0) + (rejected || 0);
+  return total > 0 ? formatTruncated((rejected / total) * 100) + '%' : '0.00%';
+}
+
 function formatPing(ms) {
   if (ms === null || ms === undefined) return null;
   return String(ms);
@@ -221,6 +226,31 @@ function initCopyables() {
       if (el.dataset.formatted) el.textContent = el.dataset.formatted;
     });
   });
+}
+
+function initDelegatedCopyables(containerId, selector = '.copyable') {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  container.addEventListener('click', async (e) => {
+    const el = e.target.closest(selector);
+    if (!el) return;
+    const full = el.dataset.full;
+    if (!full || full === 'undefined') return;
+    try {
+      await navigator.clipboard.writeText(full);
+      const formatted = el.dataset.formatted || el.textContent;
+      el.textContent = 'Copied!';
+      setTimeout(() => { el.textContent = formatted; }, CONFIG.COPY_FEEDBACK_DURATION);
+    } catch (e) { console.error('Copy failed:', e); }
+  });
+  container.addEventListener('mouseenter', (e) => {
+    const el = e.target.closest(selector);
+    if (el && el.dataset.full) el.textContent = el.dataset.full;
+  }, true);
+  container.addEventListener('mouseleave', (e) => {
+    const el = e.target.closest(selector);
+    if (el && el.dataset.formatted) el.textContent = el.dataset.formatted;
+  }, true);
 }
 
 function setupLogToggle() {

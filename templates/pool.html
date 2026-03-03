@@ -71,13 +71,8 @@ async function refresh(signal) {
     set('sps_1m', poolData.sps_1m, formatTruncated);
     set('uptime_secs', poolData.uptime_secs);
     set('blocks', poolData.block_count);
-    const totalShares = (poolData.accepted_shares || 0) + (poolData.rejected_shares || 0);
-    const rejectedSharesPct = totalShares > 0 ? formatTruncated((poolData.rejected_shares / totalShares) * 100) + '%' : '0.00%';
-    copyable('rejected_shares', rejectedSharesPct, `${poolData.rejected_shares || 0} / ${totalShares}`);
-
-    const totalWork = (poolData.accepted_work || 0) + (poolData.rejected_work || 0);
-    const rejectedWorkPct = totalWork > 0 ? formatTruncated((poolData.rejected_work / totalWork) * 100) + '%' : '0.00%';
-    copyable('rejected_work', rejectedWorkPct, `${formatDifficulty(poolData.rejected_work || 0)} / ${formatDifficulty(totalWork)}`);
+    copyable('rejected_shares', rejectionPct(poolData.accepted_shares, poolData.rejected_shares), `${poolData.rejected_shares || 0} / ${(poolData.accepted_shares || 0) + (poolData.rejected_shares || 0)}`);
+    copyable('rejected_work', rejectionPct(poolData.accepted_work, poolData.rejected_work), `${formatDifficulty(poolData.rejected_work || 0)} / ${formatDifficulty((poolData.accepted_work || 0) + (poolData.rejected_work || 0))}`);
 
     set('last_share', poolData.last_share);
     copyable('best_share', best_share, poolData.best_share);

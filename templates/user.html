@@ -73,13 +73,8 @@ async function refresh(signal) {
     set('hashrate_1m', user.hashrate_1m, formatHashrate);
     set('sps_1m', user.sps_1m, formatTruncated);
     set('authorized', new Date(user.authorized_at * 1000).toLocaleString());
-    const totalShares = (user.accepted_shares || 0) + (user.rejected_shares || 0);
-    const rejectedSharesPct = totalShares > 0 ? formatTruncated((user.rejected_shares / totalShares) * 100) + '%' : '0.00%';
-    copyable('rejected_shares', rejectedSharesPct, `${user.rejected_shares || 0} / ${totalShares}`);
-
-    const totalWork = (user.accepted_work || 0) + (user.rejected_work || 0);
-    const rejectedWorkPct = totalWork > 0 ? formatTruncated((user.rejected_work / totalWork) * 100) + '%' : '0.00%';
-    copyable('rejected_work', rejectedWorkPct, `${formatDifficulty(user.rejected_work || 0)} / ${formatDifficulty(totalWork)}`);
+    copyable('rejected_shares', rejectionPct(user.accepted_shares, user.rejected_shares), `${user.rejected_shares || 0} / ${(user.accepted_shares || 0) + (user.rejected_shares || 0)}`);
+    copyable('rejected_work', rejectionPct(user.accepted_work, user.rejected_work), `${formatDifficulty(user.rejected_work || 0)} / ${formatDifficulty((user.accepted_work || 0) + (user.rejected_work || 0))}`);
 
     set('last_share', user.last_share);
     copyable('best_share', best_share, user.best_share);

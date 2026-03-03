@@ -11,7 +11,8 @@
     <div class=row><span>Version Mask</span><span id=upstream_version_mask></span></div>
     <div class=row><span>Rejected Shares</span><span id=upstream_rejected class=copyable></span></div>
     <div class=row><span>Rejected Work</span><span id=upstream_rejected_work class=copyable></span></div>
-    <div class=row><span>PHd</span><span id=upstream_ph_days class=copyable></span></div>
+    <div class=row><span>Delivered Work</span><span id=upstream_total_work></span></div>
+    <div class=row><span>Delivered PHd</span><span id=upstream_ph_days class=copyable></span></div>
   </div>
 
   <div class=column>
@@ -27,7 +28,8 @@
     <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
     <div class=row><span>Best Share</span><span id=best_share class=copyable></span></div>
     <div class=row><span>Last Share</span><span><span id=last_share></span>s ago</span></div>
-    <div class=row><span>PHd</span><span id=ph_days class=copyable></span></div>
+    <div class=row><span>Received Work</span><span id=received_work></span></div>
+    <div class=row><span>Received PHd</span><span id=ph_days class=copyable></span></div>
   </div>
 
   <div class=column>
@@ -77,7 +79,6 @@ async function refresh(signal) {
 
     const u = proxyData.upstream.username;
     const upstream_username = u?.length > 15 ? u.slice(0,6) + '...' + u.slice(-6) : u;
-    const forwarded = (proxyData.upstream.accepted || 0) + (proxyData.upstream.rejected || 0);
     const upstream_difficulty = formatDifficulty(proxyData.upstream.difficulty);
     const network_difficulty = formatDifficulty(bitcoinData.network_difficulty);
     const best_share = formatDifficulty(proxyData.best_share);
@@ -91,13 +92,10 @@ async function refresh(signal) {
     set('upstream_enonce1', proxyData.upstream.enonce1);
     set('upstream_enonce2_size', proxyData.upstream.enonce2_size);
     set('upstream_version_mask', proxyData.upstream.version_mask);
-    const upstreamRejectedPct = forwarded > 0 ? formatTruncated((proxyData.upstream.rejected / forwarded) * 100) + '%' : '0.00%';
-    copyable('upstream_rejected', upstreamRejectedPct, `${proxyData.upstream.rejected || 0} / ${forwarded}`);
+    copyable('upstream_rejected', rejectionPct(proxyData.upstream.accepted, proxyData.upstream.rejected), `${proxyData.upstream.rejected || 0} / ${(proxyData.upstream.accepted || 0) + (proxyData.upstream.rejected || 0)}`);
+    set('upstream_total_work', (proxyData.upstream.accepted_work || 0) + (proxyData.upstream.rejected_work || 0), formatDifficulty);
     copyable('upstream_ph_days', formatPhDays(proxyData.upstream.ph_days), proxyData.upstream.ph_days);
-
-    const upstreamTotalWork = (proxyData.upstream.accepted_work || 0) + (proxyData.upstream.rejected_work || 0);
-    const upstreamRejectedWorkPct = upstreamTotalWork > 0 ? formatTruncated((proxyData.upstream.rejected_work / upstreamTotalWork) * 100) + '%' : '0.00%';
-    copyable('upstream_rejected_work', upstreamRejectedWorkPct, `${formatDifficulty(proxyData.upstream.rejected_work || 0)} / ${formatDifficulty(upstreamTotalWork)}`);
+    copyable('upstream_rejected_work', rejectionPct(proxyData.upstream.accepted_work, proxyData.upstream.rejected_work), `${formatDifficulty(proxyData.upstream.rejected_work || 0)} / ${formatDifficulty((proxyData.upstream.accepted_work || 0) + (proxyData.upstream.rejected_work || 0))}`);
     set('upstream_ping', proxyData.upstream.ping_ms, formatPing);
 
     // Downstream data
@@ -108,16 +106,12 @@ async function refresh(signal) {
     set('hashrate_1m', proxyData.hashrate_1m, formatHashrate);
     set('sps_1m', proxyData.sps_1m, formatTruncated);
     set('uptime_secs', proxyData.uptime_secs);
-    const totalShares = (proxyData.accepted_shares || 0) + (proxyData.rejected_shares || 0);
-    const rejectedSharesPct = totalShares > 0 ? formatTruncated((proxyData.rejected_shares / totalShares) * 100) + '%' : '0.00%';
-    copyable('rejected_shares', rejectedSharesPct, `${proxyData.rejected_shares || 0} / ${totalShares}`);
-
-    const totalWork = (proxyData.accepted_work || 0) + (proxyData.rejected_work || 0);
-    const rejectedWorkPct = totalWork > 0 ? formatTruncated((proxyData.rejected_work / totalWork) * 100) + '%' : '0.00%';
-    copyable('rejected_work', rejectedWorkPct, `${formatDifficulty(proxyData.rejected_work || 0)} / ${formatDifficulty(totalWork)}`);
+    copyable('rejected_shares', rejectionPct(proxyData.accepted_shares, proxyData.rejected_shares), `${proxyData.rejected_shares || 0} / ${(proxyData.accepted_shares || 0) + (proxyData.rejected_shares || 0)}`);
+    copyable('rejected_work', rejectionPct(proxyData.accepted_work, proxyData.rejected_work), `${formatDifficulty(proxyData.rejected_work || 0)} / ${formatDifficulty((proxyData.accepted_work || 0) + (proxyData.rejected_work || 0))}`);
 
     set('last_share', proxyData.last_share);
     copyable('best_share', best_share, proxyData.best_share);
+    set('received_work', proxyData.accepted_work, formatDifficulty);
     copyable('ph_days', formatPhDays(proxyData.ph_days), proxyData.ph_days);
 
     // Bitcoin data

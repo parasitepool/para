@@ -22,7 +22,8 @@
     <div class=row><span>Version Mask</span><span id=version_mask></span></div>
     <div class=row><span>Rejected Shares</span><span id=upstream_rejected class=copyable></span></div>
     <div class=row><span>Rejected Work</span><span id=upstream_rejected_work class=copyable></span></div>
-    <div class=row><span>PHd</span><span id=upstream_ph_days class=copyable></span></div>
+    <div class=row><span>Delivered Work</span><span id=upstream_total_work></span></div>
+    <div class=row><span>Delivered PHd</span><span id=upstream_ph_days class=copyable></span></div>
   </div>
 
   <div class=column>
@@ -33,11 +34,12 @@
     <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
     <div class=row><span>SPS</span><span id=sps_1m></span></div>
     <div class=row><span>Uptime</span><span><span id=uptime_secs></span>s</span></div>
-    <div class=row><span>Rejected Shares</span><span id=rejected_shares class=copyable></span></div>
-    <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
     <div class=row><span>Best Share</span><span id=best_share class=copyable></span></div>
     <div class=row><span>Last Share</span><span><span id=last_share></span>s ago</span></div>
-    <div class=row><span>PHd</span><span id=ph_days class=copyable></span></div>
+    <div class=row><span>Rejected Shares</span><span id=rejected_shares class=copyable></span></div>
+    <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
+    <div class=row><span>Received Work</span><span id=received_work></span></div>
+    <div class=row><span>Received PHd</span><span id=ph_days class=copyable></span></div>
   </div>
 
   <div class="column column-full">
@@ -114,8 +116,6 @@ async function refresh(signal) {
     const shortUser = username?.length > 15 ? username.slice(0, 6) + '...' + username.slice(-6) : username;
     const difficulty = formatDifficulty(data.upstream.difficulty);
     const bestShare = formatDifficulty(data.best_share);
-    const forwarded = (data.upstream.accepted || 0) + (data.upstream.rejected || 0);
-
     set('endpoint', data.upstream.endpoint);
     set('status', data.upstream.connected ? 'Connected' : 'Disconnected');
     setClass('status', data.upstream.connected ? 'connected' : 'disconnected');
@@ -125,13 +125,10 @@ async function refresh(signal) {
     set('enonce1', data.upstream.enonce1);
     set('enonce2_size', data.upstream.enonce2_size);
     set('version_mask', data.upstream.version_mask);
-    const upstreamRejectedPct = forwarded > 0 ? formatTruncated((data.upstream.rejected / forwarded) * 100) + '%' : '0.00%';
-    copyable('upstream_rejected', upstreamRejectedPct, `${data.upstream.rejected || 0} / ${forwarded}`);
+    copyable('upstream_rejected', rejectionPct(data.upstream.accepted, data.upstream.rejected), `${data.upstream.rejected || 0} / ${(data.upstream.accepted || 0) + (data.upstream.rejected || 0)}`);
+    set('upstream_total_work', (data.upstream.accepted_work || 0) + (data.upstream.rejected_work || 0), formatDifficulty);
     copyable('upstream_ph_days', formatPhDays(data.upstream.ph_days), data.upstream.ph_days);
-
-    const upstreamTotalWork = (data.upstream.accepted_work || 0) + (data.upstream.rejected_work || 0);
-    const upstreamRejectedWorkPct = upstreamTotalWork > 0 ? formatTruncated((data.upstream.rejected_work / upstreamTotalWork) * 100) + '%' : '0.00%';
-    copyable('upstream_rejected_work', upstreamRejectedWorkPct, `${formatDifficulty(data.upstream.rejected_work || 0)} / ${formatDifficulty(upstreamTotalWork)}`);
+    copyable('upstream_rejected_work', rejectionPct(data.upstream.accepted_work, data.upstream.rejected_work), `${formatDifficulty(data.upstream.rejected_work || 0)} / ${formatDifficulty((data.upstream.accepted_work || 0) + (data.upstream.rejected_work || 0))}`);
 
     set('users', data.user_count);
     set('workers', data.worker_count);
@@ -139,16 +136,12 @@ async function refresh(signal) {
     set('hashrate_1m', data.hashrate_1m, formatHashrate);
     set('sps_1m', data.sps_1m, formatTruncated);
     set('uptime_secs', data.uptime_secs);
-    const totalShares = (data.accepted_shares || 0) + (data.rejected_shares || 0);
-    const rejectedSharesPct = totalShares > 0 ? formatTruncated((data.rejected_shares / totalShares) * 100) + '%' : '0.00%';
-    copyable('rejected_shares', rejectedSharesPct, `${data.rejected_shares || 0} / ${totalShares}`);
-
-    const totalWork = (data.accepted_work || 0) + (data.rejected_work || 0);
-    const rejectedWorkPct = totalWork > 0 ? formatTruncated((data.rejected_work / totalWork) * 100) + '%' : '0.00%';
-    copyable('rejected_work', rejectedWorkPct, `${formatDifficulty(data.rejected_work || 0)} / ${formatDifficulty(totalWork)}`);
+    copyable('rejected_shares', rejectionPct(data.accepted_shares, data.rejected_shares), `${data.rejected_shares || 0} / ${(data.accepted_shares || 0) + (data.rejected_shares || 0)}`);
+    copyable('rejected_work', rejectionPct(data.accepted_work, data.rejected_work), `${formatDifficulty(data.rejected_work || 0)} / ${formatDifficulty((data.accepted_work || 0) + (data.rejected_work || 0))}`);
 
     set('last_share', data.last_share);
     copyable('best_share', bestShare, data.best_share);
+    set('received_work', data.accepted_work, formatDifficulty);
     copyable('ph_days', formatPhDays(data.ph_days), data.ph_days);
 
     document.getElementById('workers-list').innerHTML = renderWorkerRows(data.workers || []);
