@@ -2,7 +2,7 @@ use {
     super::*,
     axum::extract::{Path, State},
     http_server::{
-        self,
+        self, common_routes,
         error::{OptionExt, ServerResult},
         templates::{
             PoolHtml, ProxyHtml, RouterHtml, UpstreamHtml, UserHtml, UsersHtml, render_page,

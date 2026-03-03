@@ -18,7 +18,7 @@ pub(crate) fn router(
         .route("/api/proxy/status", get(status))
         .with_state(metrics)
         .merge(user_routes)
-        .merge(http_server::common_routes())
+        .merge(common_routes())
         .layer(Extension(bitcoin_client))
         .layer(Extension(chain))
         .layer(Extension(logs))
@@ -49,10 +49,6 @@ async fn user_page(Extension(chain): Extension<Chain>) -> Response {
 }
 
 async fn status(State(metrics): State<Arc<Metrics>>) -> Json<ProxyStatus> {
-    let now = Instant::now();
-    let upstream = metrics.upstream();
-    let stats = metrics.metatron.snapshot();
-
     Json(ProxyStatus {
         endpoint: metrics.metatron.endpoint().to_string(),
         user_count: metrics.metatron.total_users(),
@@ -61,7 +57,7 @@ async fn status(State(metrics): State<Arc<Metrics>>) -> Json<ProxyStatus> {
         disconnected_count: metrics.metatron.total_disconnected(),
         idle_count: metrics.metatron.total_idle(),
         uptime_secs: metrics.metatron.uptime().as_secs(),
-        upstream: UpstreamInfo::from_upstream(&upstream),
-        stats: MiningStats::from_snapshot(&stats, now),
+        upstream: UpstreamInfo::from_upstream(&metrics.upstream()),
+        stats: MiningStats::from_snapshot(&metrics.metatron.snapshot(), Instant::now()),
     })
 }

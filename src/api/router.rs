@@ -12,7 +12,7 @@ pub(crate) fn router(
         .route("/api/router/status", get(status))
         .route("/api/router/upstream/{upstream_id}", get(upstream))
         .with_state(state)
-        .merge(http_server::common_routes())
+        .merge(common_routes())
         .layer(Extension(bitcoin_client))
         .layer(Extension(chain))
         .layer(Extension(logs))
@@ -32,8 +32,8 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
     let mut combined = Stats::new();
     let mut session_count = 0;
     let mut uptime_secs = 0;
-    let mut upstream_accepted = 0u64;
-    let mut upstream_rejected = 0u64;
+    let mut upstream_accepted = 0;
+    let mut upstream_rejected = 0;
     let mut upstream_accepted_work = TotalWork::ZERO;
     let mut upstream_rejected_work = TotalWork::ZERO;
 
@@ -96,16 +96,15 @@ async fn upstream(
         .ok_or_not_found(|| format!("Upstream {upstream_id}"))?;
 
     let now = Instant::now();
-    let stats = slot.metatron.snapshot();
-
     let mut sessions = Vec::new();
     let mut workers = Vec::new();
+
     for user in slot.metatron.users().iter() {
         for worker in user.workers() {
             sessions.extend(
                 worker
                     .sessions()
-                    .map(|s| SessionDetail::from_session(&s, now)),
+                    .map(|session| SessionDetail::from_session(&session, now)),
             );
             workers.push(WorkerDetail::from_worker(&worker, now));
         }
@@ -122,7 +121,7 @@ async fn upstream(
         uptime_secs: slot.metatron.uptime().as_secs(),
         workers,
         sessions,
-        stats: MiningStats::from_snapshot(&stats, now),
+        stats: MiningStats::from_snapshot(&slot.metatron.snapshot(), now),
     })
     .into_response())
 }

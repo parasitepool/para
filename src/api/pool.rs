@@ -11,10 +11,10 @@ pub(crate) fn router(
         .route("/users", get(users_page))
         .route("/user/{address}", get(user_page))
         .route("/api/pool/status", get(status))
-        .route("/api/pool/users", get(super::users))
-        .route("/api/pool/user/{address}", get(super::user))
+        .route("/api/pool/users", get(users))
+        .route("/api/pool/user/{address}", get(user))
         .with_state(metatron)
-        .merge(http_server::common_routes())
+        .merge(common_routes())
         .layer(Extension(bitcoin_client))
         .layer(Extension(chain))
         .layer(Extension(logs))
@@ -45,9 +45,6 @@ async fn user_page(Extension(chain): Extension<Chain>) -> Response {
 }
 
 async fn status(State(metatron): State<Arc<Metatron>>) -> Json<PoolStatus> {
-    let now = Instant::now();
-    let stats = metatron.snapshot();
-
     Json(PoolStatus {
         endpoint: metatron.endpoint().to_string(),
         user_count: metatron.total_users(),
@@ -57,6 +54,6 @@ async fn status(State(metatron): State<Arc<Metatron>>) -> Json<PoolStatus> {
         disconnected_count: metatron.total_disconnected(),
         idle_count: metatron.total_idle(),
         uptime_secs: metatron.uptime().as_secs(),
-        stats: MiningStats::from_snapshot(&stats, now),
+        stats: MiningStats::from_snapshot(&metatron.snapshot(), Instant::now()),
     })
 }

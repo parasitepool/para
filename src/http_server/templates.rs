@@ -119,7 +119,7 @@ pub(crate) fn render_page(content: impl DashboardContent + Boilerplate, chain: C
 
         dashboard
             .reload_from_path()
-            .map(|r| r.to_string())
+            .map(|reloaded| reloaded.to_string())
             .unwrap_or_else(|_| dashboard.to_string())
     };
 
