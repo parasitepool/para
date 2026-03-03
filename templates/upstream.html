@@ -112,23 +112,20 @@ async function refresh(signal) {
       return;
     }
 
-    const username = data.upstream.username;
-    const shortUser = username?.length > 15 ? username.slice(0, 6) + '...' + username.slice(-6) : username;
-    const difficulty = formatDifficulty(data.upstream.difficulty);
-    const bestShare = formatDifficulty(data.best_share);
-    set('endpoint', data.upstream.endpoint);
-    set('status', data.upstream.connected ? 'Connected' : 'Disconnected');
-    setClass('status', data.upstream.connected ? 'connected' : 'disconnected');
-    set('ping_ms', data.upstream.ping_ms, formatPing);
-    copyable('username', shortUser, data.upstream.username);
-    copyable('difficulty', difficulty, data.upstream.difficulty);
-    set('enonce1', data.upstream.enonce1);
-    set('enonce2_size', data.upstream.enonce2_size);
-    set('version_mask', data.upstream.version_mask);
-    copyable('upstream_rejected', rejectionPct(data.upstream.accepted, data.upstream.rejected), `${data.upstream.rejected || 0} / ${(data.upstream.accepted || 0) + (data.upstream.rejected || 0)}`);
-    set('upstream_total_work', (data.upstream.accepted_work || 0) + (data.upstream.rejected_work || 0), formatDifficulty);
-    copyable('upstream_ph_days', formatPhDays(data.upstream.ph_days), data.upstream.ph_days);
-    copyable('upstream_rejected_work', rejectionPct(data.upstream.accepted_work, data.upstream.rejected_work), `${formatDifficulty(data.upstream.rejected_work || 0)} / ${formatDifficulty((data.upstream.accepted_work || 0) + (data.upstream.rejected_work || 0))}`);
+    const upstream = data.upstream;
+    set('endpoint', upstream.endpoint);
+    set('status', upstream.connected ? 'Connected' : 'Disconnected');
+    setClass('status', upstream.connected ? 'connected' : 'disconnected');
+    set('ping_ms', upstream.ping_ms, formatPing);
+    copyable('username', truncateMiddle(upstream.username), upstream.username);
+    copyable('difficulty', formatDifficulty(upstream.difficulty), upstream.difficulty);
+    set('enonce1', upstream.enonce1);
+    set('enonce2_size', upstream.enonce2_size);
+    set('version_mask', upstream.version_mask);
+    rejectionCopyable('upstream_rejected', upstream.accepted, upstream.rejected);
+    set('upstream_total_work', (upstream.accepted_work || 0) + (upstream.rejected_work || 0), formatDifficulty);
+    copyable('upstream_ph_days', formatPhDays(upstream.ph_days), upstream.ph_days);
+    rejectionWorkCopyable('upstream_rejected_work', upstream.accepted_work, upstream.rejected_work);
 
     set('users', data.user_count);
     set('workers', data.worker_count);
@@ -136,11 +133,10 @@ async function refresh(signal) {
     set('hashrate_1m', data.hashrate_1m, formatHashrate);
     set('sps_1m', data.sps_1m, formatTruncated);
     set('uptime_secs', data.uptime_secs);
-    copyable('rejected_shares', rejectionPct(data.accepted_shares, data.rejected_shares), `${data.rejected_shares || 0} / ${(data.accepted_shares || 0) + (data.rejected_shares || 0)}`);
-    copyable('rejected_work', rejectionPct(data.accepted_work, data.rejected_work), `${formatDifficulty(data.rejected_work || 0)} / ${formatDifficulty((data.accepted_work || 0) + (data.rejected_work || 0))}`);
-
+    rejectionCopyable('rejected_shares', data.accepted_shares, data.rejected_shares);
+    rejectionWorkCopyable('rejected_work', data.accepted_work, data.rejected_work);
     set('last_share', data.last_share);
-    copyable('best_share', bestShare, data.best_share);
+    copyable('best_share', formatDifficulty(data.best_share), data.best_share);
     set('received_work', data.accepted_work, formatDifficulty);
     copyable('ph_days', formatPhDays(data.ph_days), data.ph_days);
 

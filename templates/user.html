@@ -2,15 +2,15 @@
   <div class="column column-full">
     <h2>Info</h2>
     <div class=row><span>Address</span><span id=address class=copyable></span></div>
+    <div class=row><span>Authorized</span><span id=authorized></span></div>
     <div class=row><span>Workers</span><span id=workers_count></span></div>
     <div class=row><span>Sessions</span><span id=sessions></span></div>
-    <div class=row><span>SPS</span><span id=sps_1m></span></div>
     <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
-    <div class=row><span>Authorized</span><span id=authorized></span></div>
-    <div class=row><span>Rejected Shares</span><span id=rejected_shares class=copyable></span></div>
-    <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
+    <div class=row><span>SPS</span><span id=sps_1m></span></div>
     <div class=row><span>Best Share</span><span id=best_share class=copyable></span></div>
     <div class=row><span>Last Share</span><span><span id=last_share></span>s ago</span></div>
+    <div class=row><span>Rejected Shares</span><span id=rejected_shares class=copyable></span></div>
+    <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
     <div class=row><span>PHd</span><span id=ph_days class=copyable></span></div>
   </div>
 
@@ -63,21 +63,16 @@ async function refresh(signal) {
       return;
     }
 
-    const addr = user.address;
-    const shortAddr = addr.length > 20 ? addr.slice(0,8) + '...' + addr.slice(-8) : addr;
-    const best_share = formatDifficulty(user.best_share);
-
-    copyable('address', shortAddr, addr);
+    copyable('address', truncateMiddle(user.address, 20, 8), user.address);
     set('workers_count', user.workers.length);
     set('sessions', user.session_count);
     set('hashrate_1m', user.hashrate_1m, formatHashrate);
     set('sps_1m', user.sps_1m, formatTruncated);
     set('authorized', new Date(user.authorized_at * 1000).toLocaleString());
-    copyable('rejected_shares', rejectionPct(user.accepted_shares, user.rejected_shares), `${user.rejected_shares || 0} / ${(user.accepted_shares || 0) + (user.rejected_shares || 0)}`);
-    copyable('rejected_work', rejectionPct(user.accepted_work, user.rejected_work), `${formatDifficulty(user.rejected_work || 0)} / ${formatDifficulty((user.accepted_work || 0) + (user.rejected_work || 0))}`);
-
+    rejectionCopyable('rejected_shares', user.accepted_shares, user.rejected_shares);
+    rejectionWorkCopyable('rejected_work', user.accepted_work, user.rejected_work);
     set('last_share', user.last_share);
-    copyable('best_share', best_share, user.best_share);
+    copyable('best_share', formatDifficulty(user.best_share), user.best_share);
     copyable('ph_days', formatPhDays(user.ph_days), user.ph_days);
 
     document.getElementById('workers-list').innerHTML = renderWorkerRows(user.workers || []);

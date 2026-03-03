@@ -31,14 +31,14 @@ function renderLogs() {
   const filterInput = document.getElementById('log-filter');
   if (!logsEl) return;
 
-  const filter = filterInput?.value || '';
+  const filter = filterInput?.value?.toLowerCase() || '';
   const source = logState.paused ? logState.pausedLogs : logState.allLogs;
 
   const fragment = document.createDocumentFragment();
   let count = 0;
   for (let i = source.length - 1; i >= 0 && count < CONFIG.LOGS_TO_SHOW; i--) {
     const log = source[i];
-    if (filter && !(log.level + ' ' + log.text).toLowerCase().includes(filter.toLowerCase())) continue;
+    if (filter && !(log.level + ' ' + log.text).toLowerCase().includes(filter)) continue;
     fragment.prepend(createLogLine(log.level, log.text));
     count++;
   }
@@ -178,6 +178,18 @@ function rejectionPct(accepted, rejected) {
   return total > 0 ? formatTruncated((rejected / total) * 100) + '%' : '0.00%';
 }
 
+function rejectionDetail(accepted, rejected) {
+  return `${rejected || 0} / ${(accepted || 0) + (rejected || 0)}`;
+}
+
+function rejectionWorkDetail(accepted, rejected) {
+  return `${formatDifficulty(rejected || 0)} / ${formatDifficulty((accepted || 0) + (rejected || 0))}`;
+}
+
+function truncateMiddle(s, maxLen = 15, edgeLen = 6) {
+  return s && s.length > maxLen ? s.slice(0, edgeLen) + '...' + s.slice(-edgeLen) : s;
+}
+
 function formatPing(ms) {
   if (ms === null || ms === undefined) return null;
   return String(ms);
@@ -203,6 +215,14 @@ function copyable(id, formatted, raw) {
     el.dataset.formatted = formatted;
   }
   return el;
+}
+
+function rejectionCopyable(id, accepted, rejected) {
+  copyable(id, rejectionPct(accepted, rejected), rejectionDetail(accepted, rejected));
+}
+
+function rejectionWorkCopyable(id, accepted, rejected) {
+  copyable(id, rejectionPct(accepted, rejected), rejectionWorkDetail(accepted, rejected));
 }
 
 function initCopyables() {
@@ -273,6 +293,22 @@ function setupLogToggle() {
   });
 }
 
+function renderBitcoinData(data) {
+  set('btc_height', data.height);
+  const link = document.getElementById('btc_height_link');
+  if (link && data.height != null) link.href = `https://mempool.space/block/${data.height}`;
+  copyable('network_difficulty', formatDifficulty(data.network_difficulty), data.network_difficulty);
+  set('network_hashrate', data.network_hashrate, formatHashrate);
+  set('mempool_txs', data.mempool_txs);
+}
+
+function renderSystemData(data) {
+  set('cpu_usage_percent', data.cpu_usage_percent, formatTruncated);
+  set('memory_usage_percent', data.memory_usage_percent, formatTruncated);
+  set('disk_usage_percent', data.disk_usage_percent, formatTruncated);
+  set('uptime', data.uptime);
+}
+
 function renderWorkerRows(workers) {
   return workers.sort((a, b) => b.hashrate_1m - a.hashrate_1m).map(w => {
     const lastShare = w.last_share != null ? `${w.last_share}s ago` : '-';
@@ -292,9 +328,7 @@ function renderWorkerRows(workers) {
 function renderSessionRows(sessions) {
   return sessions.sort((a, b) => b.hashrate_1m - a.hashrate_1m).map(session => {
     const sessionUser = session.username || '';
-    const shortSessionUser = sessionUser.length > 15
-      ? sessionUser.slice(0, 6) + '...' + sessionUser.slice(-6)
-      : sessionUser;
+    const shortSessionUser = truncateMiddle(sessionUser);
     const lastShare = session.last_share != null ? `${session.last_share}s ago` : '-';
     const bestShare = formatDifficulty(session.best_share);
     return `<tr>

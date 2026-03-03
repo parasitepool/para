@@ -21,13 +21,12 @@
     <div class=row><a href="/users"><span>Users</span></a><span id=users></span></div>
     <div class=row><span>Workers</span><span id=workers></span></div>
     <div class=row><span>Sessions</span><span id=sessions></span></div>
-    <div class=row><span>SPS</span><span id=sps_1m></span></div>
     <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
-    <div class=row><span>Uptime</span><span><span id=uptime_secs></span>s</span></div>
-    <div class=row><span>Rejected Shares</span><span id=rejected_shares class=copyable></span></div>
-    <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
+    <div class=row><span>SPS</span><span id=sps_1m></span></div>
     <div class=row><span>Best Share</span><span id=best_share class=copyable></span></div>
     <div class=row><span>Last Share</span><span><span id=last_share></span>s ago</span></div>
+    <div class=row><span>Rejected Shares</span><span id=rejected_shares class=copyable></span></div>
+    <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
     <div class=row><span>Received Work</span><span id=received_work></span></div>
     <div class=row><span>Received PHd</span><span id=ph_days class=copyable></span></div>
   </div>
@@ -77,58 +76,37 @@ async function refresh(signal) {
       fetch('/api/bitcoin/status', { signal }).then(r => r.json()).catch(() => ({}))
     ]);
 
-    const u = proxyData.upstream.username;
-    const upstream_username = u?.length > 15 ? u.slice(0,6) + '...' + u.slice(-6) : u;
-    const upstream_difficulty = formatDifficulty(proxyData.upstream.difficulty);
-    const network_difficulty = formatDifficulty(bitcoinData.network_difficulty);
-    const best_share = formatDifficulty(proxyData.best_share);
+    const u = proxyData.upstream;
 
-    // Upstream data
-    set('upstream_endpoint', proxyData.upstream.endpoint);
-    set('upstream_status', proxyData.upstream.connected ? 'Connected' : 'Disconnected');
-    setClass('upstream_status', proxyData.upstream.connected ? 'connected' : 'disconnected');
-    copyable('upstream_username', upstream_username, u);
-    copyable('upstream_difficulty', upstream_difficulty, proxyData.upstream.difficulty);
-    set('upstream_enonce1', proxyData.upstream.enonce1);
-    set('upstream_enonce2_size', proxyData.upstream.enonce2_size);
-    set('upstream_version_mask', proxyData.upstream.version_mask);
-    copyable('upstream_rejected', rejectionPct(proxyData.upstream.accepted, proxyData.upstream.rejected), `${proxyData.upstream.rejected || 0} / ${(proxyData.upstream.accepted || 0) + (proxyData.upstream.rejected || 0)}`);
-    set('upstream_total_work', (proxyData.upstream.accepted_work || 0) + (proxyData.upstream.rejected_work || 0), formatDifficulty);
-    copyable('upstream_ph_days', formatPhDays(proxyData.upstream.ph_days), proxyData.upstream.ph_days);
-    copyable('upstream_rejected_work', rejectionPct(proxyData.upstream.accepted_work, proxyData.upstream.rejected_work), `${formatDifficulty(proxyData.upstream.rejected_work || 0)} / ${formatDifficulty((proxyData.upstream.accepted_work || 0) + (proxyData.upstream.rejected_work || 0))}`);
-    set('upstream_ping', proxyData.upstream.ping_ms, formatPing);
+    set('upstream_endpoint', u.endpoint);
+    set('upstream_status', u.connected ? 'Connected' : 'Disconnected');
+    setClass('upstream_status', u.connected ? 'connected' : 'disconnected');
+    copyable('upstream_username', truncateMiddle(u.username), u.username);
+    copyable('upstream_difficulty', formatDifficulty(u.difficulty), u.difficulty);
+    set('upstream_enonce1', u.enonce1);
+    set('upstream_enonce2_size', u.enonce2_size);
+    set('upstream_version_mask', u.version_mask);
+    rejectionCopyable('upstream_rejected', u.accepted, u.rejected);
+    set('upstream_total_work', (u.accepted_work || 0) + (u.rejected_work || 0), formatDifficulty);
+    copyable('upstream_ph_days', formatPhDays(u.ph_days), u.ph_days);
+    rejectionWorkCopyable('upstream_rejected_work', u.accepted_work, u.rejected_work);
+    set('upstream_ping', u.ping_ms, formatPing);
 
-    // Downstream data
     set('endpoint', proxyData.endpoint);
     set('users', proxyData.user_count);
     set('workers', proxyData.worker_count);
     set('sessions', proxyData.session_count);
     set('hashrate_1m', proxyData.hashrate_1m, formatHashrate);
     set('sps_1m', proxyData.sps_1m, formatTruncated);
-    set('uptime_secs', proxyData.uptime_secs);
-    copyable('rejected_shares', rejectionPct(proxyData.accepted_shares, proxyData.rejected_shares), `${proxyData.rejected_shares || 0} / ${(proxyData.accepted_shares || 0) + (proxyData.rejected_shares || 0)}`);
-    copyable('rejected_work', rejectionPct(proxyData.accepted_work, proxyData.rejected_work), `${formatDifficulty(proxyData.rejected_work || 0)} / ${formatDifficulty((proxyData.accepted_work || 0) + (proxyData.rejected_work || 0))}`);
-
+    copyable('best_share', formatDifficulty(proxyData.best_share), proxyData.best_share);
     set('last_share', proxyData.last_share);
-    copyable('best_share', best_share, proxyData.best_share);
+    rejectionCopyable('rejected_shares', proxyData.accepted_shares, proxyData.rejected_shares);
+    rejectionWorkCopyable('rejected_work', proxyData.accepted_work, proxyData.rejected_work);
     set('received_work', proxyData.accepted_work, formatDifficulty);
     copyable('ph_days', formatPhDays(proxyData.ph_days), proxyData.ph_days);
 
-    // Bitcoin data
-    set('btc_height', bitcoinData.height);
-    const height_link = document.getElementById('btc_height_link');
-    if (height_link && bitcoinData.height !== null && bitcoinData.height !== undefined) {
-      height_link.href = `https://mempool.space/block/${bitcoinData.height}`;
-    }
-    copyable('network_difficulty', network_difficulty, bitcoinData.network_difficulty);
-    set('network_hashrate', bitcoinData.network_hashrate, formatHashrate);
-    set('mempool_txs', bitcoinData.mempool_txs);
-
-    // System data
-    set('cpu_usage_percent', systemData.cpu_usage_percent, formatTruncated);
-    set('memory_usage_percent', systemData.memory_usage_percent, formatTruncated);
-    set('disk_usage_percent', systemData.disk_usage_percent, formatTruncated);
-    set('uptime', systemData.uptime);
+    renderBitcoinData(bitcoinData);
+    renderSystemData(systemData);
   } catch (e) { if (e.name !== 'AbortError') console.error('refresh error:', e); }
 }
 startPolling(refresh);

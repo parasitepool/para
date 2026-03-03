@@ -27,7 +27,7 @@ async function refresh(signal) {
       .filter(u => u !== null)
       .map(u => {
         const addr = u.address;
-        const shortAddr = addr.length > 20 ? addr.slice(0,8) + '...' + addr.slice(-8) : addr;
+        const shortAddr = truncateMiddle(addr, 20, 8);
         return `<div class=user-row>
           <a href="/user/${addr}">${shortAddr}</a>
           <span>${u.workers.length} | ${u.session_count} | ${formatHashrate(u.hashrate_1m)}</span>

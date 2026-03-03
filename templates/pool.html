@@ -1,17 +1,16 @@
 <div class=grid>
   <div class="column column-full">
-    <h2>Stats</h2>
+    <h2>Info</h2>
+    <div class=row><span>Endpoint</span><span id=endpoint></span></div>
     <div class=row><a href="/users"><span>Users</span></a><span id=users></span></div>
     <div class=row><span>Workers</span><span id=workers></span></div>
     <div class=row><span>Sessions</span><span id=sessions></span></div>
-    <div class=row><span>SPS</span><span id=sps_1m></span></div>
     <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
-    <div class=row><span>Uptime</span><span><span id=uptime_secs></span>s</span></div>
-    <div class=row><span>Blocks</span><span id=blocks></span></div>
-    <div class=row><span>Rejected Shares</span><span id=rejected_shares class=copyable></span></div>
-    <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
+    <div class=row><span>SPS</span><span id=sps_1m></span></div>
     <div class=row><span>Best Share</span><span id=best_share class=copyable></span></div>
     <div class=row><span>Last Share</span><span><span id=last_share></span>s ago</span></div>
+    <div class=row><span>Rejected Shares</span><span id=rejected_shares class=copyable></span></div>
+    <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
     <div class=row><span>PHd</span><span id=ph_days class=copyable></span></div>
   </div>
 
@@ -60,39 +59,20 @@ async function refresh(signal) {
       fetch('/api/bitcoin/status', { signal }).then(r => r.json()).catch(() => ({}))
     ]);
 
-    const network_difficulty = formatDifficulty(bitcoinData.network_difficulty);
-    const best_share = formatDifficulty(poolData.best_share);
-
-    // Pool data
+    set('endpoint', poolData.endpoint);
     set('users', poolData.user_count);
     set('workers', poolData.worker_count);
     set('sessions', poolData.session_count);
     set('hashrate_1m', poolData.hashrate_1m, formatHashrate);
     set('sps_1m', poolData.sps_1m, formatTruncated);
-    set('uptime_secs', poolData.uptime_secs);
-    set('blocks', poolData.block_count);
-    copyable('rejected_shares', rejectionPct(poolData.accepted_shares, poolData.rejected_shares), `${poolData.rejected_shares || 0} / ${(poolData.accepted_shares || 0) + (poolData.rejected_shares || 0)}`);
-    copyable('rejected_work', rejectionPct(poolData.accepted_work, poolData.rejected_work), `${formatDifficulty(poolData.rejected_work || 0)} / ${formatDifficulty((poolData.accepted_work || 0) + (poolData.rejected_work || 0))}`);
-
+    copyable('best_share', formatDifficulty(poolData.best_share), poolData.best_share);
     set('last_share', poolData.last_share);
-    copyable('best_share', best_share, poolData.best_share);
+    rejectionCopyable('rejected_shares', poolData.accepted_shares, poolData.rejected_shares);
+    rejectionWorkCopyable('rejected_work', poolData.accepted_work, poolData.rejected_work);
     copyable('ph_days', formatPhDays(poolData.ph_days), poolData.ph_days);
 
-    // Bitcoin data
-    set('btc_height', bitcoinData.height);
-    const height_link = document.getElementById('btc_height_link');
-    if (height_link && bitcoinData.height !== null && bitcoinData.height !== undefined) {
-      height_link.href = `https://mempool.space/block/${bitcoinData.height}`;
-    }
-    copyable('network_difficulty', network_difficulty, bitcoinData.network_difficulty);
-    set('network_hashrate', bitcoinData.network_hashrate, formatHashrate);
-    set('mempool_txs', bitcoinData.mempool_txs);
-
-    // System data
-    set('cpu_usage_percent', systemData.cpu_usage_percent, formatTruncated);
-    set('memory_usage_percent', systemData.memory_usage_percent, formatTruncated);
-    set('disk_usage_percent', systemData.disk_usage_percent, formatTruncated);
-    set('uptime', systemData.uptime);
+    renderBitcoinData(bitcoinData);
+    renderSystemData(systemData);
   } catch (e) { if (e.name !== 'AbortError') console.error('refresh error:', e); }
 }
 startPolling(refresh);

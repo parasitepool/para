@@ -134,74 +134,57 @@ async function refresh(signal) {
       fetch('/api/bitcoin/status', { signal }).then(r => r.json()).catch(() => ({}))
     ]);
 
-    const bestShare = formatDifficulty(routerData.best_share);
-    const networkDifficulty = formatDifficulty(bitcoinData.network_difficulty);
-
     set('upstream_count', routerData.upstream_count);
     set('session_count', routerData.session_count);
     set('hashrate_1m', routerData.hashrate_1m, formatHashrate);
     set('sps_1m', routerData.sps_1m, formatTruncated);
     set('last_share', routerData.last_share);
     copyable('ph_days', formatPhDays(routerData.ph_days), routerData.ph_days);
-    copyable('best_share', bestShare, routerData.best_share);
+    copyable('best_share', formatDifficulty(routerData.best_share), routerData.best_share);
 
-    copyable('rejected_shares', rejectionPct(routerData.accepted_shares, routerData.rejected_shares), `${routerData.rejected_shares || 0} / ${(routerData.accepted_shares || 0) + (routerData.rejected_shares || 0)}`);
-    copyable('rejected_work', rejectionPct(routerData.accepted_work, routerData.rejected_work), `${formatDifficulty(routerData.rejected_work || 0)} / ${formatDifficulty((routerData.accepted_work || 0) + (routerData.rejected_work || 0))}`);
-    copyable('upstream_rejected_shares', rejectionPct(routerData.upstream_accepted, routerData.upstream_rejected), `${routerData.upstream_rejected || 0} / ${(routerData.upstream_accepted || 0) + (routerData.upstream_rejected || 0)}`);
-    copyable('upstream_rejected_work', rejectionPct(routerData.upstream_accepted_work, routerData.upstream_rejected_work), `${formatDifficulty(routerData.upstream_rejected_work || 0)} / ${formatDifficulty((routerData.upstream_accepted_work || 0) + (routerData.upstream_rejected_work || 0))}`);
+    rejectionCopyable('rejected_shares', routerData.accepted_shares, routerData.rejected_shares);
+    rejectionWorkCopyable('rejected_work', routerData.accepted_work, routerData.rejected_work);
+    rejectionCopyable('upstream_rejected_shares', routerData.upstream_accepted, routerData.upstream_rejected);
+    rejectionWorkCopyable('upstream_rejected_work', routerData.upstream_accepted_work, routerData.upstream_rejected_work);
 
     set('upstream_total_work', (routerData.upstream_accepted_work || 0) + (routerData.upstream_rejected_work || 0), formatDifficulty);
     copyable('upstream_ph_days', formatPhDays(routerData.upstream_ph_days), routerData.upstream_ph_days);
     set('received_work', routerData.accepted_work, formatDifficulty);
 
-    set('btc_height', bitcoinData.height);
-    const heightLink = document.getElementById('btc_height_link');
-    if (heightLink && bitcoinData.height !== null && bitcoinData.height !== undefined) {
-      heightLink.href = `https://mempool.space/block/${bitcoinData.height}`;
-    }
-    copyable('network_difficulty', networkDifficulty, bitcoinData.network_difficulty);
-    set('network_hashrate', bitcoinData.network_hashrate, formatHashrate);
-    set('mempool_txs', bitcoinData.mempool_txs);
-
-    set('cpu_usage_percent', systemData.cpu_usage_percent, formatTruncated);
-    set('memory_usage_percent', systemData.memory_usage_percent, formatTruncated);
-    set('disk_usage_percent', systemData.disk_usage_percent, formatTruncated);
-    set('uptime', systemData.uptime);
+    renderBitcoinData(bitcoinData);
+    renderSystemData(systemData);
 
     const container = document.getElementById('upstreams-list');
     if (!container.querySelector('.copyable:hover')) {
     const slots = routerData.slots || [];
     container.innerHTML = slots.map(slot => {
       const username = slot.username || '';
-      const shortUser = username.length > 15 ? username.slice(0, 6) + '...' + username.slice(-6) : username;
-      const upstreamPhDays = formatPhDays(slot.upstream_ph_days);
-      const phDays = formatPhDays(slot.ph_days);
-      const bestShare = formatDifficulty(slot.best_share);
-      const slotRejSharesPct = rejectionPct(slot.accepted_shares, slot.rejected_shares);
-      const slotRejWorkPct = rejectionPct(slot.accepted_work, slot.rejected_work);
+      const shortUser = truncateMiddle(username);
       const upRejSharesPct = rejectionPct(slot.upstream_accepted, slot.upstream_rejected);
       const upRejWorkPct = rejectionPct(slot.upstream_accepted_work, slot.upstream_rejected_work);
+      const slotRejSharesPct = rejectionPct(slot.accepted_shares, slot.rejected_shares);
+      const slotRejWorkPct = rejectionPct(slot.accepted_work, slot.rejected_work);
       return `<div class="slot-card">
         <div class=slot-pane>
           <h2><a class=slot-link href="/upstream/${slot.upstream_id}">Upstream ${slot.upstream_id}</a></h2>
           <div class=row><span>Endpoint</span><span>${slot.endpoint}</span></div>
           <div class=row><span>Ping</span><span>${formatPing(slot.ping_ms)}ms</span></div>
           <div class=row><span>Username</span><span class=copyable data-full="${username}" data-formatted="${shortUser}">${shortUser}</span></div>
-          <div class=row><span>Rejected Shares</span><span class=copyable data-formatted="${upRejSharesPct}" data-full="${slot.upstream_rejected || 0} / ${(slot.upstream_accepted || 0) + (slot.upstream_rejected || 0)}">${upRejSharesPct}</span></div>
-          <div class=row><span>Rejected Work</span><span class=copyable data-formatted="${upRejWorkPct}" data-full="${formatDifficulty(slot.upstream_rejected_work || 0)} / ${formatDifficulty((slot.upstream_accepted_work || 0) + (slot.upstream_rejected_work || 0))}">${upRejWorkPct}</span></div>
+          <div class=row><span>Rejected Shares</span><span class=copyable data-formatted="${upRejSharesPct}" data-full="${rejectionDetail(slot.upstream_accepted, slot.upstream_rejected)}">${upRejSharesPct}</span></div>
+          <div class=row><span>Rejected Work</span><span class=copyable data-formatted="${upRejWorkPct}" data-full="${rejectionWorkDetail(slot.upstream_accepted_work, slot.upstream_rejected_work)}">${upRejWorkPct}</span></div>
           <div class=row><span>Delivered Work</span><span>${formatDifficulty((slot.upstream_accepted_work || 0) + (slot.upstream_rejected_work || 0)) || '-'}</span></div>
-          <div class=row><span>Delivered PHd</span><span>${upstreamPhDays || '-'}</span></div>
+          <div class=row><span>Delivered PHd</span><span>${formatPhDays(slot.upstream_ph_days) || '-'}</span></div>
         </div>
         <div class=slot-pane>
           <div class=row><a class=slot-link href="/upstream/${slot.upstream_id}">Sessions</a><span>${slot.session_count}</span></div>
           <div class=row><span>Hashrate</span><span>${formatHashrate(slot.hashrate_1m)}</span></div>
           <div class=row><span>SPS</span><span>${formatTruncated(slot.sps_1m)}</span></div>
-          <div class=row><span>Best Share</span><span>${bestShare}</span></div>
+          <div class=row><span>Best Share</span><span>${formatDifficulty(slot.best_share)}</span></div>
           <div class=row><span>Last Share</span><span>${slot.last_share != null ? slot.last_share + 's ago' : '-'}</span></div>
-          <div class=row><span>Rejected Shares</span><span class=copyable data-formatted="${slotRejSharesPct}" data-full="${slot.rejected_shares || 0} / ${(slot.accepted_shares || 0) + (slot.rejected_shares || 0)}">${slotRejSharesPct}</span></div>
-          <div class=row><span>Rejected Work</span><span class=copyable data-formatted="${slotRejWorkPct}" data-full="${formatDifficulty(slot.rejected_work || 0)} / ${formatDifficulty((slot.accepted_work || 0) + (slot.rejected_work || 0))}">${slotRejWorkPct}</span></div>
+          <div class=row><span>Rejected Shares</span><span class=copyable data-formatted="${slotRejSharesPct}" data-full="${rejectionDetail(slot.accepted_shares, slot.rejected_shares)}">${slotRejSharesPct}</span></div>
+          <div class=row><span>Rejected Work</span><span class=copyable data-formatted="${slotRejWorkPct}" data-full="${rejectionWorkDetail(slot.accepted_work, slot.rejected_work)}">${slotRejWorkPct}</span></div>
           <div class=row><span>Received Work</span><span>${formatDifficulty(slot.accepted_work) || '-'}</span></div>
-          <div class=row><span>Received PHd</span><span>${phDays || '-'}</span></div>
+          <div class=row><span>Received PHd</span><span>${formatPhDays(slot.ph_days) || '-'}</span></div>
         </div>
       </div>`;
     }).join('');
