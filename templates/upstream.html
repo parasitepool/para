@@ -149,7 +149,7 @@ async function refresh(signal) {
 
   } catch (e) { if (e.name !== 'AbortError') console.error('refresh error:', e); }
 }
-initTableCopyClick('sessions-list');
+initDelegatedCopyables('sessions-list');
 startPolling(refresh);
 initCopyables();
 </script>

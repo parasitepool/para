@@ -308,21 +308,6 @@ function renderSessionRows(sessions) {
   }).join('');
 }
 
-function initTableCopyClick(containerId) {
-  document.getElementById(containerId).addEventListener('click', async (e) => {
-    const el = e.target.closest('.session-username');
-    if (!el) return;
-    const full = el.dataset.full;
-    if (!full) return;
-    try {
-      await navigator.clipboard.writeText(full);
-      const formatted = el.dataset.formatted;
-      el.textContent = 'Copied!';
-      setTimeout(() => { el.textContent = formatted; }, CONFIG.COPY_FEEDBACK_DURATION);
-    } catch (e) { console.error('Copy failed:', e); }
-  });
-}
-
 let pollInterval;
 let pollController;
 
