@@ -319,7 +319,7 @@ function renderWorkerRows(workers) {
       <td>${formatHashrate(w.hashrate_1m)}</td>
       <td>${formatTruncated(w.sps_1m)}</td>
       <td>${bestShare || '-'}</td>
-      <td>${formatPhDays(w.ph_days) || '-'}</td>
+      <td>${w.ph_days != null ? w.ph_days.toFixed(2) : '-'}</td>
       <td>${lastShare}</td>
     </tr>`;
   }).join('');
@@ -336,7 +336,7 @@ function renderSessionRows(sessions) {
       <td>${formatHashrate(session.hashrate_1m)}</td>
       <td>${formatTruncated(session.sps_1m)}</td>
       <td>${bestShare || '-'}</td>
-      <td>${formatPhDays(session.ph_days) || '-'}</td>
+      <td>${session.ph_days != null ? session.ph_days.toFixed(2) : '-'}</td>
       <td>${lastShare}</td>
     </tr>`;
   }).join('');
