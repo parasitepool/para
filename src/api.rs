@@ -122,25 +122,12 @@ impl UserDetail {
         let mut sessions = Vec::new();
 
         for worker in user.workers() {
-            for session in worker.sessions() {
-                let s = session.snapshot();
-                sessions.push(SessionDetail {
-                    id: session.id(),
-                    upstream_id: session.id().upstream_id(),
-                    address: session.address().to_string(),
-                    worker_name: session.workername().to_string(),
-                    username: session.username().to_string(),
-                    enonce1: session.enonce1().clone(),
-                    version_mask: session.version_mask(),
-                    stats: MiningStats::from_snapshot(&s, now),
-                });
-            }
-            let stats = worker.snapshot();
-            workers.push(WorkerDetail {
-                name: worker.workername().to_string(),
-                session_count: worker.session_count(),
-                stats: MiningStats::from_snapshot(&stats, now),
-            });
+            sessions.extend(
+                worker
+                    .sessions()
+                    .map(|s| SessionDetail::from_session(&s, now)),
+            );
+            workers.push(WorkerDetail::from_worker(&worker, now));
         }
 
         let user_stats = user.snapshot();
@@ -164,6 +151,17 @@ pub struct WorkerDetail {
     pub stats: MiningStats,
 }
 
+impl WorkerDetail {
+    pub(crate) fn from_worker(worker: &Worker, now: Instant) -> Self {
+        let stats = worker.snapshot();
+        Self {
+            name: worker.workername().to_string(),
+            session_count: worker.session_count(),
+            stats: MiningStats::from_snapshot(&stats, now),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionDetail {
     pub id: SessionId,
@@ -175,6 +173,22 @@ pub struct SessionDetail {
     pub version_mask: Option<Version>,
     #[serde(flatten)]
     pub stats: MiningStats,
+}
+
+impl SessionDetail {
+    pub(crate) fn from_session(session: &Session, now: Instant) -> Self {
+        let stats = session.snapshot();
+        Self {
+            id: session.id(),
+            upstream_id: session.id().upstream_id(),
+            address: session.address().to_string(),
+            worker_name: session.workername().to_string(),
+            username: session.username().to_string(),
+            enonce1: session.enonce1().clone(),
+            version_mask: session.version_mask(),
+            stats: MiningStats::from_snapshot(&stats, now),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

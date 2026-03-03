@@ -102,25 +102,12 @@ async fn upstream(
     let mut workers = Vec::new();
     for user in slot.metatron.users().iter() {
         for worker in user.workers() {
-            let worker_stats = worker.snapshot();
-            workers.push(WorkerDetail {
-                name: worker.workername().to_string(),
-                session_count: worker.session_count(),
-                stats: MiningStats::from_snapshot(&worker_stats, now),
-            });
-            for session in worker.sessions() {
-                let s = session.snapshot();
-                sessions.push(SessionDetail {
-                    id: session.id(),
-                    upstream_id: session.id().upstream_id(),
-                    address: session.address().to_string(),
-                    worker_name: session.workername().to_string(),
-                    username: session.username().to_string(),
-                    enonce1: session.enonce1().clone(),
-                    version_mask: session.version_mask(),
-                    stats: MiningStats::from_snapshot(&s, now),
-                });
-            }
+            sessions.extend(
+                worker
+                    .sessions()
+                    .map(|s| SessionDetail::from_session(&s, now)),
+            );
+            workers.push(WorkerDetail::from_worker(&worker, now));
         }
     }
 

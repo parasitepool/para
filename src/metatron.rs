@@ -10,7 +10,7 @@ use {
 pub(crate) mod session;
 pub(crate) mod stats;
 pub(crate) mod user;
-mod worker;
+pub(crate) mod worker;
 
 pub(crate) struct Metatron {
     blocks: AtomicU64,
