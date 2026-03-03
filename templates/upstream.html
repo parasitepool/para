@@ -1,6 +1,17 @@
+<style>
+  .nav-arrow {
+    color: #888;
+    text-decoration: none;
+    padding: 0 8px;
+  }
+  .nav-arrow:hover {
+    color: #eee;
+  }
+</style>
+
 <div class="grid grid-stack">
   <div class=column>
-    <h2>Upstream</h2>
+    <h2 id=upstream-title></h2>
     <div class=row><span>Endpoint</span><span id=endpoint></span></div>
     <div class=row><span>Status</span><span id=status></span></div>
     <div class=row><span>Ping</span><span><span id=ping_ms></span>ms</span></div>
@@ -67,6 +78,28 @@
 
 <script>
 const upstreamId = window.location.pathname.split('/').filter(Boolean).pop();
+
+document.title = document.title.replace('Upstream', `Upstream ${upstreamId}`);
+document.querySelector('h1').childNodes[0].textContent = `Router | Upstream ${upstreamId}`;
+
+let upstreamIds = [];
+fetch('/api/router/status').then(r => r.json()).then(data => {
+  upstreamIds = (data.slots || []).map(s => s.upstream_id);
+  updateNav();
+}).catch(() => {});
+
+function updateNav() {
+  const el = document.getElementById('upstream-title');
+  if (!el || upstreamIds.length < 2) {
+    if (el) el.textContent = `Upstream ${upstreamId}`;
+    return;
+  }
+  const idx = upstreamIds.indexOf(Number(upstreamId));
+  const prevId = upstreamIds[(idx - 1 + upstreamIds.length) % upstreamIds.length];
+  const nextId = upstreamIds[(idx + 1) % upstreamIds.length];
+  el.innerHTML = `<a href="/upstream/${prevId}" class="nav-arrow">\u25C0</a> Upstream ${upstreamId} <a href="/upstream/${nextId}" class="nav-arrow">\u25B6</a>`;
+}
+updateNav();
 
 async function refresh(signal) {
   try {

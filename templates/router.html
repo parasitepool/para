@@ -5,30 +5,30 @@
     gap: 20px;
     width: 100%;
     box-sizing: border-box;
+    border-top: 2px solid #666;
+    border-bottom: 2px solid #666;
+    padding: 24px 0;
   }
 
   .slot-card {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 16px;
+    gap: 48px;
     width: 100%;
     box-sizing: border-box;
   }
 
   .slot-pane {
-    border: 1px solid #333;
-    padding: 12px;
-    background: #111;
+    border: 1px solid #444;
+    padding: 20px 30px;
     min-width: 0;
   }
 
   .slot-pane h2 {
-    margin: 0 0 10px;
-    color: #888;
+    margin: 0 0 15px;
     font-size: 1.22em;
     text-align: center;
-    border-bottom: 1px solid #333;
-    padding-bottom: 8px;
+    color: #888;
   }
 
   .slot-link {
@@ -48,39 +48,41 @@
   @media (max-width: 1140px) {
     #upstreams-list {
       width: 100%;
-      max-width: 100%;
+      max-width: 500px;
     }
 
     .slot-card {
       grid-template-columns: 1fr;
+      gap: 30px;
+    }
+
+    .slot-pane {
+      width: 100%;
+      max-width: 500px;
+      box-sizing: border-box;
     }
   }
 </style>
 
 <div class="grid grid-stack">
-  <div class="column column-full">
-    <h2>Info</h2>
-    <div class=row><span>Uptime</span><span><span id=uptime_secs></span>s</span></div>
-    <div class="slot-card">
-      <div class=slot-pane>
-        <h2>Upstream</h2>
-        <div class=row><span>Upstreams</span><span id=upstream_count></span></div>
-        <div class=row><span>Rejected Shares</span><span id=upstream_rejected_shares class=copyable></span></div>
-        <div class=row><span>Rejected Work</span><span id=upstream_rejected_work class=copyable></span></div>
-        <div class=row><span>PHd</span><span id=upstream_ph_days class=copyable></span></div>
-      </div>
-      <div class=slot-pane>
-        <h2>Downstream</h2>
-        <div class=row><span>Sessions</span><span id=session_count></span></div>
-        <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
-        <div class=row><span>SPS</span><span id=sps_1m></span></div>
-        <div class=row><span>Rejected Shares</span><span id=rejected_shares class=copyable></span></div>
-        <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
-        <div class=row><span>Best Share</span><span id=best_share class=copyable></span></div>
-        <div class=row><span>Last Share</span><span><span id=last_share></span>s ago</span></div>
-        <div class=row><span>PHd</span><span id=ph_days class=copyable></span></div>
-      </div>
-    </div>
+  <div class=column>
+    <h2>Upstream</h2>
+    <div class=row><span>Upstreams</span><span id=upstream_count></span></div>
+    <div class=row><span>Rejected Shares</span><span id=upstream_rejected_shares class=copyable></span></div>
+    <div class=row><span>Rejected Work</span><span id=upstream_rejected_work class=copyable></span></div>
+    <div class=row><span>PHd</span><span id=upstream_ph_days class=copyable></span></div>
+  </div>
+
+  <div class=column>
+    <h2>Downstream</h2>
+    <div class=row><span>Sessions</span><span id=session_count></span></div>
+    <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
+    <div class=row><span>SPS</span><span id=sps_1m></span></div>
+    <div class=row><span>Rejected Shares</span><span id=rejected_shares class=copyable></span></div>
+    <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
+    <div class=row><span>Best Share</span><span id=best_share class=copyable></span></div>
+    <div class=row><span>Last Share</span><span><span id=last_share></span>s ago</span></div>
+    <div class=row><span>PHd</span><span id=ph_days class=copyable></span></div>
   </div>
 
   <div id=upstreams-list class=column-full></div>
@@ -137,7 +139,6 @@ async function refresh(signal) {
     set('session_count', routerData.session_count);
     set('hashrate_1m', routerData.hashrate_1m, formatHashrate);
     set('sps_1m', routerData.sps_1m, formatTruncated);
-    set('uptime_secs', routerData.uptime_secs);
     set('last_share', routerData.last_share);
     copyable('ph_days', formatPhDays(routerData.ph_days), routerData.ph_days);
     copyable('best_share', bestShare, routerData.best_share);
@@ -179,23 +180,35 @@ async function refresh(signal) {
     container.innerHTML = slots.map(slot => {
       const username = slot.username || '';
       const shortUser = username.length > 15 ? username.slice(0, 6) + '...' + username.slice(-6) : username;
-      const phDays = formatPhDays(slot.ph_days);
       const upstreamPhDays = formatPhDays(slot.upstream_ph_days);
+      const phDays = formatPhDays(slot.ph_days);
+      const bestShare = formatDifficulty(slot.best_share);
+      const slotTotalShares = (slot.accepted_shares || 0) + (slot.rejected_shares || 0);
+      const slotRejSharesPct = slotTotalShares > 0 ? formatTruncated((slot.rejected_shares / slotTotalShares) * 100) + '%' : '0.00%';
+      const slotTotalWork = (slot.accepted_work || 0) + (slot.rejected_work || 0);
+      const slotRejWorkPct = slotTotalWork > 0 ? formatTruncated((slot.rejected_work / slotTotalWork) * 100) + '%' : '0.00%';
+      const upTotalShares = (slot.upstream_accepted || 0) + (slot.upstream_rejected || 0);
+      const upRejSharesPct = upTotalShares > 0 ? formatTruncated((slot.upstream_rejected / upTotalShares) * 100) + '%' : '0.00%';
+      const upTotalWork = (slot.upstream_accepted_work || 0) + (slot.upstream_rejected_work || 0);
+      const upRejWorkPct = upTotalWork > 0 ? formatTruncated((slot.upstream_rejected_work / upTotalWork) * 100) + '%' : '0.00%';
       return `<div class="slot-card">
         <div class=slot-pane>
-          <div class=row><a class=slot-link href="/upstream/${slot.upstream_id}">ID</a><span>${slot.upstream_id}</span></div>
-          <div class=row><span>PHd</span><span>${upstreamPhDays || '-'}</span></div>
+          <h2><a class=slot-link href="/upstream/${slot.upstream_id}">Upstream ${slot.upstream_id}</a></h2>
           <div class=row><span>Endpoint</span><span>${slot.endpoint}</span></div>
           <div class=row><span>Username</span><span class="copyable hover-expand slot-username" data-full="${username}" data-formatted="${shortUser}">${shortUser}</span></div>
+          <div class=row><span>Rejected Shares</span><span>${upRejSharesPct}</span></div>
+          <div class=row><span>Rejected Work</span><span>${upRejWorkPct}</span></div>
+          <div class=row><span>PHd</span><span>${upstreamPhDays || '-'}</span></div>
         </div>
         <div class=slot-pane>
           <div class=row><a class=slot-link href="/upstream/${slot.upstream_id}">Sessions</a><span>${slot.session_count}</span></div>
-          <div class=row><span>PHd</span><span>${phDays || '-'}</span></div>
           <div class=row><span>Hashrate</span><span>${formatHashrate(slot.hashrate_1m)}</span></div>
-          <div class=row><span>Max</span><span>${formatHashrate(slot.hashrate_max)}</span></div>
-          <div class=row><span>Avg</span><span>${formatHashrate(slot.hashrate_avg)}</span></div>
-          <div class=row><span>Median</span><span>${formatHashrate(slot.hashrate_median)}</span></div>
-          <div class=row><span>Min</span><span>${formatHashrate(slot.hashrate_min)}</span></div>
+          <div class=row><span>SPS</span><span>${formatTruncated(slot.sps_1m)}</span></div>
+          <div class=row><span>Rejected Shares</span><span>${slotRejSharesPct}</span></div>
+          <div class=row><span>Rejected Work</span><span>${slotRejWorkPct}</span></div>
+          <div class=row><span>Best Share</span><span>${bestShare}</span></div>
+          <div class=row><span>Last Share</span><span>${slot.last_share != null ? slot.last_share + 's ago' : '-'}</span></div>
+          <div class=row><span>PHd</span><span>${phDays || '-'}</span></div>
         </div>
       </div>`;
     }).join('');

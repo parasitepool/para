@@ -169,14 +169,14 @@ pub struct SlotStatus {
     pub upstream_id: u32,
     pub endpoint: String,
     pub username: String,
-    pub hashrate_1m: HashRate,
     pub session_count: usize,
-    pub ph_days: PhDays,
+    pub upstream_accepted: u64,
+    pub upstream_rejected: u64,
+    pub upstream_accepted_work: TotalWork,
+    pub upstream_rejected_work: TotalWork,
     pub upstream_ph_days: PhDays,
-    pub hashrate_min: HashRate,
-    pub hashrate_max: HashRate,
-    pub hashrate_avg: HashRate,
-    pub hashrate_median: HashRate,
+    #[serde(flatten)]
+    pub stats: MiningStats,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

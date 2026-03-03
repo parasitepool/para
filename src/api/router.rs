@@ -93,57 +93,28 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
     for slot in router.slots().iter() {
         let stats = slot.metatron.snapshot();
 
-        let mut session_hashrates = Vec::new();
-        for user in slot.metatron.users().iter() {
-            for worker in user.workers() {
-                for session in worker.sessions() {
-                    let session_stats = session.snapshot();
-                    session_hashrates.push(session_stats.hashrate_1m(now));
-                }
-            }
-        }
-
-        session_hashrates.sort_by(|a, b| a.0.total_cmp(&b.0));
-
-        let hashrate_min = session_hashrates.first().copied().unwrap_or(HashRate(0.0));
-        let hashrate_max = session_hashrates.last().copied().unwrap_or(HashRate(0.0));
-
-        let hashrate_avg = if session_hashrates.is_empty() {
-            HashRate(0.0)
-        } else {
-            let sum: f64 = session_hashrates.iter().map(|h| h.0).sum();
-            HashRate(sum / session_hashrates.len() as f64)
-        };
-
-        let hashrate_median = if session_hashrates.is_empty() {
-            HashRate(0.0)
-        } else {
-            let mid = session_hashrates.len() / 2;
-            if session_hashrates.len() % 2 == 0 {
-                HashRate((session_hashrates[mid - 1].0 + session_hashrates[mid].0) / 2.0)
-            } else {
-                session_hashrates[mid]
-            }
-        };
-
         let slot_session_count = slot.metatron.total_sessions();
         session_count += slot_session_count;
         uptime_secs = uptime_secs.max(slot.metatron.uptime().as_secs());
+
+        let slot_upstream_accepted = slot.upstream.accepted();
+        let slot_upstream_rejected = slot.upstream.rejected();
+        let slot_upstream_accepted_work = slot.upstream.accepted_work();
+        let slot_upstream_rejected_work = slot.upstream.rejected_work();
 
         slots.push(SlotStatus {
             upstream_id: slot.upstream.id(),
             endpoint: slot.upstream.endpoint().to_string(),
             username: slot.upstream.username().to_string(),
-            hashrate_1m: stats.hashrate_1m(now),
-            ph_days: PhDays::from(stats.accepted_work),
+            upstream_accepted: slot_upstream_accepted,
+            upstream_rejected: slot_upstream_rejected,
+            upstream_accepted_work: slot_upstream_accepted_work,
+            upstream_rejected_work: slot_upstream_rejected_work,
             upstream_ph_days: PhDays::from(
-                slot.upstream.accepted_work() + slot.upstream.rejected_work(),
+                slot_upstream_accepted_work + slot_upstream_rejected_work,
             ),
             session_count: slot_session_count,
-            hashrate_min,
-            hashrate_max,
-            hashrate_avg,
-            hashrate_median,
+            stats: MiningStats::from_snapshot(&stats, now),
         });
 
         upstream_accepted += slot.upstream.accepted();
