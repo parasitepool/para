@@ -6,13 +6,16 @@ pub static DIFFICULTY_1_TARGET: LazyLock<U256> =
 /// Difficulty is a fraught metric. It is derived from the network target, where the difficulty
 /// equals the current network target divided by the network target defined in the genesis block.
 /// The target principally represents a 256-bit number but the block header contains a compact
-/// representation called nbits (or CompactTarget). This is inherently lossy. 
+/// representation called nbits (or CompactTarget). This is inherently lossy.
 /// Furthermore difficulty has made itself into the stratum protocol to define the target (inverse
 /// of difficulty) a miner's share has to meet. It is used to tune the frequency of a miner's share
 /// submission and for accounting how much work has been completed. This struct aims to define it's
 /// edges and make it easier to work with but it is inherently lossy and imprecise. If someone
 /// stumbles accross this comment and sees a better way to reconcile these different types, please
-/// let me know. #[derive(Debug, Clone, Copy, PartialEq, Eq)] pub struct Difficulty(CompactTarget);
+/// let me know.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Difficulty(CompactTarget);
+
 impl Difficulty {
     pub fn to_target(self) -> Target {
         self.0.into()
