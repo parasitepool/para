@@ -1,5 +1,6 @@
 use super::*;
 
+/// Job identifier (hex-encoded u64)
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, DeserializeFromStr, SerializeDisplay, Hash,
 )]

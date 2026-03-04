@@ -1,5 +1,6 @@
 use super::*;
 
+/// Block version with bitmask operations
 #[derive(Debug, Clone, PartialEq, Eq, DeserializeFromStr, SerializeDisplay, Copy)]
 pub struct Version(pub block::Version);
 

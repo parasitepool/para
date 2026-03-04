@@ -25,40 +25,31 @@ Stratum Messages
 
 Methods defined in the [Stratum mining protocol](https://en.bitcoin.it/wiki/Stratum_mining_protocol).
 
-| Method                       | Type         | `stratum` | ckpool |
-|------------------------------|--------------|-----------|--------|
-| `mining.configure`           | Request      | ✅        | ✅     |
-| `mining.subscribe`           | Request      | ✅        | ✅     |
-| `mining.authorize`           | Request      | ✅        | ✅     |
-| `mining.notify`              | Notification | ✅        | ✅     |
-| `mining.submit`              | Request      | ✅        | ✅     |
-| `mining.suggest_difficulty`  | Request      | ✅        | ✅     |
-| `mining.set_difficulty`      | Notification | ✅        | ✅     |
-| `client.reconnect`           | Notification | ✅        | ✅     |
-| `client.get_version`         | Notification | ❌        | ✅     |
-| `client.show_message`        | Notification | ❌        | ✅     |
-| `mining.get_transactions`    | Request      | ❌        | ✅     |
-| `mining.extranonce.subscribe`| Request      | ❌        | ❌     |
-| `mining.suggest_target`      | Request      | ❌        | ❌     |
-| `mining.set_extranonce`      | Notification | ❌        | ❌     |
+| Method                       | Type         | Implemented |
+|------------------------------|--------------|-------------|
+| `mining.configure`           | Request      | ✅          |
+| `mining.subscribe`           | Request      | ✅          |
+| `mining.authorize`           | Request      | ✅          |
+| `mining.notify`              | Notification | ✅          |
+| `mining.submit`              | Request      | ✅          |
+| `mining.suggest_difficulty`  | Request      | ✅          |
+| `mining.set_difficulty`      | Notification | ✅          |
+| `client.reconnect`           | Notification | ✅          |
+| `client.get_version`         | Notification | ❌          |
+| `client.show_message`        | Notification | ❌          |
+| `mining.get_transactions`    | Request      | ❌          |
+| `mining.extranonce.subscribe`| Request      | ❌          |
+| `mining.suggest_target`      | Request      | ❌          |
+| `mining.set_extranonce`      | Notification | ❌          |
 
-### Draft / Proposed
+### Experimental Extensions
 
-| Method                | Type    | `stratum` | ckpool |
-|-----------------------|---------|-----------|--------|
-| `mining.capabilities` | Request | ❌        | ❌     |
-| `mining.set_goal`     | Request | ❌        | ❌     |
-
-### CKPool Extensions
-
-| Method                  | Type         | `stratum` | ckpool |
-|-------------------------|--------------|-----------|--------|
-| `mining.get_txnhashes`  | Request      | ❌        | ✅     |
-| `mining.node`           | Request      | ❌        | ✅     |
-| `mining.passthrough`    | Request      | ❌        | ✅     |
-| `mining.remote`         | Request      | ❌        | ✅     |
-| `mining.term`           | Request      | ❌        | ✅     |
-| `mining.ping`           | Notification | ❌        | ✅     |
+| Method                       | Type         | Implemented |
+|------------------------------|--------------|-------------|
+| `mining.ping`                | Notification | ❌          |
+| `mining.get_txnhashes`       | Request      | ❌          |
+| `mining.capabilities`        | Request      | ❌          |
+| `mining.set_goal`            | Request      | ❌          |
 
 Types
 -----
@@ -66,7 +57,7 @@ Types
 | Type         | Description                                    |
 |--------------|------------------------------------------------|
 | `Difficulty` | Mining difficulty with target conversion       |
-| `Extranonce` | Extra nonce bytes with hex encoding            |
+| `Extranonce` | Extranonce bytes with hex encoding             |
 | `JobId`      | Job identifier (hex-encoded u64)               |
 | `MerkleNode` | Merkle tree node with natural big-endian hex   |
 | `Nbits`      | Compact target (nBits) from block header       |
@@ -81,7 +72,7 @@ Helpers
 
 | Function          | Description                                         |
 |-------------------|-----------------------------------------------------|
-| `format_si`       | Format a value with SI prefixes (K, M, G, T, ...)   |
+| `format_si`       | Format a value with SI prefixes (K, M, G, T, P, ...)|
 | `parse_si`        | Parse SI-prefixed values (e.g., "1.5 TH/s")         |
 | `merkle_root`     | Compute merkle root from coinbase and branches      |
 | `merkle_branches` | Build merkle branches from non-coinbase txids       |

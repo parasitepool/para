@@ -1,5 +1,6 @@
 use super::*;
 
+/// Compact target (nBits) from block header
 #[derive(Debug, Clone, Copy, PartialEq, Eq, DeserializeFromStr, SerializeDisplay)]
 pub struct Nbits(CompactTarget);
 

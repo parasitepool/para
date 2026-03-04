@@ -12,6 +12,7 @@ pub const SI_PREFIXES: &[(&str, f64)] = &[
     ("Y", 1e24),
 ];
 
+/// Format a value with SI prefixes (K, M, G, T, P, ...)
 pub fn format_si(value: f64, unit: &str, f: &mut Formatter<'_>) -> fmt::Result {
     if value == 0.0 {
         return if unit.is_empty() {
@@ -44,6 +45,7 @@ pub fn format_si(value: f64, unit: &str, f: &mut Formatter<'_>) -> fmt::Result {
     }
 }
 
+/// Parse SI-prefixed values (e.g., "1.5 TH/s")
 pub fn parse_si(s: &str, units: &[&str]) -> Result<f64> {
     let s = s.trim();
 
