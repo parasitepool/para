@@ -52,6 +52,9 @@ use {
     metatron::{
         Metatron,
         session::{Session, SessionId},
+        stats::Stats,
+        user::User,
+        worker::Worker,
     },
     metrics::Metrics,
     parking_lot::{Mutex, RwLock},

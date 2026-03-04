@@ -8,9 +8,9 @@ use {
 };
 
 pub(crate) mod session;
-mod stats;
-mod user;
-mod worker;
+pub(crate) mod stats;
+pub(crate) mod user;
+pub(crate) mod worker;
 
 pub(crate) struct Metatron {
     blocks: AtomicU64,
@@ -163,15 +163,15 @@ impl Metatron {
         self.blocks.load(Ordering::Relaxed)
     }
 
-    pub(crate) fn session_count(&self) -> usize {
+    pub(crate) fn total_sessions(&self) -> usize {
         self.users.iter().map(|user| user.session_count()).sum()
     }
 
-    pub(crate) fn disconnected(&self) -> usize {
+    pub(crate) fn total_disconnected(&self) -> usize {
         self.disconnected.len()
     }
 
-    pub(crate) fn idle(&self) -> usize {
+    pub(crate) fn total_idle(&self) -> usize {
         let now = Instant::now();
 
         self.users
@@ -214,7 +214,7 @@ impl StatusLine for Metatron {
             "sps={:.2}  hashrate={:.2}  sessions={}  users={}  workers={}  accepted={}  rejected={}  blocks={}  uptime={}s",
             stats.sps_1m(now),
             stats.hashrate_1m(now),
-            self.session_count(),
+            self.total_sessions(),
             self.total_users(),
             self.total_workers(),
             stats.accepted_shares,
@@ -256,7 +256,7 @@ mod tests {
     fn new_metatron_starts_at_zero() {
         let metatron = Metatron::new(pool_extranonces(), String::new(), 0);
         let stats = metatron.snapshot();
-        assert_eq!(metatron.session_count(), 0);
+        assert_eq!(metatron.total_sessions(), 0);
         assert_eq!(stats.accepted_shares, 0);
         assert_eq!(stats.rejected_shares, 0);
         assert_eq!(metatron.total_blocks(), 0);
@@ -267,17 +267,17 @@ mod tests {
     #[test]
     fn session_count_tracks_active_sessions() {
         let metatron = Metatron::new(pool_extranonces(), String::new(), 0);
-        assert_eq!(metatron.session_count(), 0);
+        assert_eq!(metatron.total_sessions(), 0);
 
         let s1 = metatron.new_session(test_auth("deadbeef", "foo"));
         let s2 = metatron.new_session(test_auth("cafebabe", "foo"));
-        assert_eq!(metatron.session_count(), 2);
+        assert_eq!(metatron.total_sessions(), 2);
 
         metatron.retire_session(s1);
-        assert_eq!(metatron.session_count(), 1);
+        assert_eq!(metatron.total_sessions(), 1);
 
         metatron.retire_session(s2);
-        assert_eq!(metatron.session_count(), 0);
+        assert_eq!(metatron.total_sessions(), 0);
     }
 
     #[test]
@@ -407,10 +407,10 @@ mod tests {
 
         let session = metatron.new_session(test_auth("deadbeef", "foo"));
         metatron.retire_session(session);
-        assert_eq!(metatron.disconnected(), 1);
+        assert_eq!(metatron.total_disconnected(), 1);
 
         assert!(metatron.take_disconnected(&enonce1));
-        assert_eq!(metatron.disconnected(), 0);
+        assert_eq!(metatron.total_disconnected(), 0);
     }
 
     #[test]
@@ -425,10 +425,10 @@ mod tests {
         metatron.retire_session(session);
 
         let stats = metatron.snapshot();
-        assert_eq!(metatron.session_count(), 0);
+        assert_eq!(metatron.total_sessions(), 0);
         assert_eq!(stats.accepted_shares, 2);
         assert_eq!(stats.rejected_shares, 1);
-        assert_eq!(stats.best_ever, Some(Difficulty::from(200.0)));
+        assert_eq!(stats.best_share, Some(Difficulty::from(200.0)));
         assert!(stats.last_share.is_some());
         let expected = TotalWork::from_difficulty(pool_diff);
         assert_eq!(stats.accepted_work, expected + expected);
@@ -449,7 +449,7 @@ mod tests {
 
         let stats = metatron.snapshot();
         assert_eq!(stats.accepted_shares, 2);
-        assert_eq!(stats.best_ever, Some(Difficulty::from(300.0)));
+        assert_eq!(stats.best_share, Some(Difficulty::from(300.0)));
         let expected = TotalWork::from_difficulty(pool_diff);
         assert_eq!(stats.accepted_work, expected + expected);
     }
@@ -467,7 +467,7 @@ mod tests {
 
         let stats = metatron.snapshot();
         assert_eq!(stats.accepted_shares, 2);
-        assert_eq!(stats.best_ever, Some(Difficulty::from(200.0)));
+        assert_eq!(stats.best_share, Some(Difficulty::from(200.0)));
         let expected = TotalWork::from_difficulty(pool_diff);
         assert_eq!(stats.accepted_work, expected + expected);
     }
@@ -510,7 +510,7 @@ mod tests {
 
         let stats = metatron.snapshot();
         assert_eq!(stats.accepted_shares, 1);
-        assert_eq!(stats.best_ever, Some(Difficulty::from(200.0)));
+        assert_eq!(stats.best_share, Some(Difficulty::from(200.0)));
         assert_eq!(stats.accepted_work, TotalWork::from_difficulty(pool_diff));
     }
 }

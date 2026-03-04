@@ -139,7 +139,7 @@ impl TestPool {
             }
 
             match self.get_status().await {
-                Ok(status) if status.accepted_shares >= min_shares => return Ok(status),
+                Ok(status) if status.stats.accepted_shares >= min_shares => return Ok(status),
                 Ok(_) => tokio::time::sleep(Duration::from_millis(100)).await,
                 Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
             }
@@ -161,7 +161,7 @@ impl TestPool {
             }
 
             match self.get_status().await {
-                Ok(status) if status.blocks >= min_blocks => return Ok(status),
+                Ok(status) if status.block_count >= min_blocks => return Ok(status),
                 Ok(_) => tokio::time::sleep(Duration::from_millis(100)).await,
                 Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
             }

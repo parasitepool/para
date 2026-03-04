@@ -238,6 +238,14 @@ pub(crate) async fn ws_logs(
     })
 }
 
+pub(crate) fn common_routes() -> axum::Router {
+    axum::Router::new()
+        .route("/api/bitcoin/status", get(bitcoin_status))
+        .route("/api/system/status", get(system_status))
+        .route("/ws/logs", get(ws_logs))
+        .route("/static/{*path}", get(static_assets))
+}
+
 pub(crate) async fn static_assets(Path(path): Path<String>) -> ServerResult<Response> {
     let content = StaticAssets::get(if let Some(stripped) = path.strip_prefix('/') {
         stripped

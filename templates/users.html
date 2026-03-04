@@ -7,9 +7,9 @@
 <script>
 const apiBase = '{{ self.api_base }}';
 
-async function refresh() {
+async function refresh(signal) {
   try {
-    const users = await fetch(`${apiBase}/users`).then(r => r.json()).catch(() => []);
+    const users = await fetch(`${apiBase}/users`, { signal }).then(r => r.json()).catch(() => []);
     const container = document.getElementById('users-list');
 
     if (users.length === 0) {
@@ -19,7 +19,7 @@ async function refresh() {
 
     const userDetails = await Promise.all(
       users.map(addr =>
-        fetch(`${apiBase}/user/${addr}`).then(r => r.json()).catch(() => null)
+        fetch(`${apiBase}/user/${addr}`, { signal }).then(r => r.json()).catch(() => null)
       )
     );
 
@@ -27,14 +27,14 @@ async function refresh() {
       .filter(u => u !== null)
       .map(u => {
         const addr = u.address;
-        const shortAddr = addr.length > 20 ? addr.slice(0,8) + '...' + addr.slice(-8) : addr;
+        const shortAddr = truncateMiddle(addr, 20, 8);
         return `<div class=user-row>
           <a href="/user/${addr}">${shortAddr}</a>
           <span>${u.workers.length} | ${u.session_count} | ${formatHashrate(u.hashrate_1m)}</span>
         </div>`;
       })
       .join('');
-  } catch (e) { console.error('refresh error:', e); }
+  } catch (e) { if (e.name !== 'AbortError') console.error('refresh error:', e); }
 }
 startPolling(refresh);
 </script>

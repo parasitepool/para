@@ -2,19 +2,16 @@
   <div class="column column-full">
     <h2>Info</h2>
     <div class=row><span>Address</span><span id=address class=copyable></span></div>
+    <div class=row><span>Authorized</span><span id=authorized></span></div>
     <div class=row><span>Workers</span><span id=workers_count></span></div>
     <div class=row><span>Sessions</span><span id=sessions></span></div>
-    <div class=row><span>SPS</span><span id=sps_1m></span></div>
     <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
-    <div class=row><span>PHd</span><span id=ph_days class=copyable></span></div>
-    <div class=row><span>Authorized</span><span id=authorized></span></div>
-    <h3>Shares</h3>
-    <div class=row><span>Accepted</span><span id=accepted></span></div>
-    <div class=row><span>Rejected</span><span id=rejected></span></div>
-    <div class=row><span>Accepted Work</span><span id=accepted_work class=copyable></span></div>
+    <div class=row><span>SPS</span><span id=sps_1m></span></div>
+    <div class=row><span>Best Share</span><span id=best_share class=copyable></span></div>
+    <div class=row><span>Last Share</span><span><span id=last_share></span>s ago</span></div>
+    <div class=row><span>Rejected Shares</span><span id=rejected_shares class=copyable></span></div>
     <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
-    <div class=row><span>Best</span><span id=best_ever class=copyable></span></div>
-    <div class=row><span>Last</span><span><span id=last_share></span>s ago</span></div>
+    <div class=row><span>PHd</span><span id=ph_days class=copyable></span></div>
   </div>
 
   <div class="column column-full">
@@ -26,12 +23,29 @@
           <th>Sessions</th>
           <th>Hashrate</th>
           <th>SPS</th>
-          <th>Best</th>
+          <th>Best Share</th>
           <th>PHd</th>
-          <th>Last</th>
+          <th>Last Share</th>
         </tr>
       </thead>
       <tbody id=workers-list></tbody>
+    </table>
+  </div>
+
+  <div class="column column-full">
+    <h2>Sessions</h2>
+    <table id=sessions-table>
+      <thead>
+        <tr>
+          <th>Username</th>
+          <th>Hashrate</th>
+          <th>SPS</th>
+          <th>Best Share</th>
+          <th>PHd</th>
+          <th>Last Share</th>
+        </tr>
+      </thead>
+      <tbody id=sessions-list></tbody>
     </table>
   </div>
 </div>
@@ -40,53 +54,32 @@
 const apiBase = '{{ self.api_base }}';
 const userAddress = window.location.pathname.split('/').pop();
 
-async function refresh() {
+async function refresh(signal) {
   try {
-    const user = await fetch(`${apiBase}/user/${userAddress}`).then(r => r.json()).catch(() => null);
+    const user = await fetch(`${apiBase}/user/${userAddress}`, { signal }).then(r => r.json()).catch(() => null);
 
     if (!user) {
       document.querySelector('.grid').innerHTML = '<div class="column column-full"><h2>User Not Found</h2></div>';
       return;
     }
 
-    const addr = user.address;
-    const shortAddr = addr.length > 20 ? addr.slice(0,8) + '...' + addr.slice(-8) : addr;
-    const best_ever = formatDifficulty(user.best_ever);
-
-    copyable('address', shortAddr, addr);
+    copyable('address', truncateMiddle(user.address, 20, 8), user.address);
     set('workers_count', user.workers.length);
     set('sessions', user.session_count);
     set('hashrate_1m', user.hashrate_1m, formatHashrate);
     set('sps_1m', user.sps_1m, formatTruncated);
-    set('authorized', new Date(user.authorized * 1000).toLocaleString());
-    set('accepted', user.accepted_shares);
-    set('rejected', user.rejected_shares);
+    set('authorized', new Date(user.authorized_at * 1000).toLocaleString());
+    rejectionCopyable('rejected_shares', user.accepted_shares, user.rejected_shares);
+    rejectionWorkCopyable('rejected_work', user.accepted_work, user.rejected_work);
     set('last_share', user.last_share);
-    copyable('best_ever', best_ever, user.best_ever);
-
-    const accepted_work = formatDifficulty(user.accepted_work);
-    copyable('accepted_work', accepted_work, user.accepted_work);
-    const rejected_work = formatDifficulty(user.rejected_work);
-    copyable('rejected_work', rejected_work, user.rejected_work);
+    copyable('best_share', formatDifficulty(user.best_share), user.best_share);
     copyable('ph_days', formatPhDays(user.ph_days), user.ph_days);
 
-    const container = document.getElementById('workers-list');
-    const workers = user.workers.sort((a, b) => b.hashrate_1m - a.hashrate_1m);
-    container.innerHTML = workers.map(w => {
-      const lastShare = w.last_share != null ? `${w.last_share}s ago` : '-';
-      const bestShare = formatDifficulty(w.best_ever);
-      return `<tr>
-        <td>${w.name || '(default)'}</td>
-        <td>${w.session_count}</td>
-        <td>${formatHashrate(w.hashrate_1m)}</td>
-        <td>${formatTruncated(w.sps_1m)}</td>
-        <td>${bestShare || '-'}</td>
-        <td>${formatPhDays(w.ph_days) || '-'}</td>
-        <td>${lastShare}</td>
-      </tr>`;
-    }).join('');
-  } catch (e) { console.error('refresh error:', e); }
+    document.getElementById('workers-list').innerHTML = renderWorkerRows(user.workers || []);
+    document.getElementById('sessions-list').innerHTML = renderSessionRows(user.sessions || []);
+  } catch (e) { if (e.name !== 'AbortError') console.error('refresh error:', e); }
 }
+initDelegatedCopyables('sessions-list');
 startPolling(refresh);
 initCopyables();
 </script>
