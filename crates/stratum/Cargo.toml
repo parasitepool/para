@@ -1,6 +1,6 @@
 [package]
 name = "stratum"
-version = "0.0.3"
+version = "0.0.4"
 description = "Stratum protocol types, helpers and client"
 repository = "https://github.com/parasitepool/para/tree/master/crates/stratum"
 readme = "README.md"
