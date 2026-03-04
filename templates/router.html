@@ -72,6 +72,7 @@
     <div class=row><span>Rejected Work</span><span id=upstream_rejected_work class=copyable></span></div>
     <div class=row><span>Delivered Work</span><span id=upstream_total_work></span></div>
     <div class=row><span>Delivered PHd</span><span id=upstream_ph_days class=copyable></span></div>
+    <div class=row><span>Efficiency</span><span id=upstream_efficiency></span></div>
   </div>
 
   <div class=column>
@@ -134,6 +135,8 @@ async function refresh(signal) {
       fetch('/api/bitcoin/status', { signal }).then(r => r.json()).catch(() => ({}))
     ]);
 
+    set('upstream_efficiency', efficiencyPct(routerData.upstream_accepted_work, routerData.accepted_work, routerData.rejected_work));
+
     set('upstream_count', routerData.upstream_count);
     set('session_count', routerData.session_count);
     set('hashrate_1m', routerData.hashrate_1m, formatHashrate);
@@ -174,6 +177,7 @@ async function refresh(signal) {
           <div class=row><span>Rejected Work</span><span class=copyable data-formatted="${upRejWorkPct}" data-full="${rejectionWorkDetail(slot.upstream_accepted_work, slot.upstream_rejected_work)}">${upRejWorkPct}</span></div>
           <div class=row><span>Delivered Work</span><span>${formatDifficulty((slot.upstream_accepted_work || 0) + (slot.upstream_rejected_work || 0)) || '-'}</span></div>
           <div class=row><span>Delivered PHd</span><span>${formatPhDays(slot.upstream_ph_days) || '-'}</span></div>
+          <div class=row><span>Efficiency</span><span>${efficiencyPct(slot.upstream_accepted_work, slot.accepted_work, slot.rejected_work)}</span></div>
         </div>
         <div class=slot-pane>
           <div class=row><a class=slot-link href="/upstream/${slot.upstream_id}">Sessions</a><span>${slot.session_count}</span></div>
