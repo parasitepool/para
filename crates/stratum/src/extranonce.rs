@@ -1,5 +1,6 @@
 use super::*;
 
+/// Extranonce bytes with hex encoding
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Extranonce(SmallVec<[u8; 8]>);
 

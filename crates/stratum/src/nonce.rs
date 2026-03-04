@@ -1,5 +1,6 @@
 use super::*;
 
+/// 32-bit nonce (hex-encoded)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, DeserializeFromStr, SerializeDisplay)]
 pub struct Nonce(u32);
 

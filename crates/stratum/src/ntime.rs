@@ -1,5 +1,6 @@
 use super::*;
 
+/// Block timestamp (hex-encoded u32)
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, DeserializeFromStr, SerializeDisplay,
 )]
