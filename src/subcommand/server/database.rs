@@ -1,4 +1,7 @@
-use super::*;
+use {
+    super::*,
+    rounds::{Round, RoundParticipant},
+};
 
 #[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone, PartialEq, ToSchema)]
 pub struct HighestDiff {
@@ -753,5 +756,83 @@ impl Database {
         .rows_affected();
 
         Ok(rows_affected)
+    }
+
+    pub(crate) async fn get_rounds(&self) -> Result<Vec<Round>> {
+        sqlx::query_as::<_, Round>(
+            "
+            SELECT blockheight, blockhash, username, diff, coinbasevalue
+            FROM blocks
+            ORDER BY blockheight ASC
+            ",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))
+    }
+
+    pub(crate) async fn get_round(&self, blockheight: i32) -> Result<Vec<RoundParticipant>> {
+        sqlx::query_as::<_, RoundParticipant>(
+            "
+            WITH previous_block AS (
+                SELECT COALESCE(MAX(blockheight), 0) AS prev_height
+                FROM blocks
+                WHERE blockheight < $1
+            )
+            SELECT
+                COALESCE(rs.username, '') AS username,
+                COUNT(DISTINCT rs.blockheight) AS blocks_participated,
+                COALESCE(MAX(rs.sdiff), 0) AS top_diff
+            FROM remote_shares rs, previous_block pb
+            WHERE rs.blockheight > pb.prev_height
+                AND rs.blockheight <= $1
+                AND rs.reject_reason IS NULL
+            GROUP BY rs.username
+            ORDER BY top_diff DESC
+            ",
+        )
+        .bind(blockheight)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))
+    }
+
+    pub(crate) async fn get_current_round(&self) -> Result<Vec<RoundParticipant>> {
+        sqlx::query_as::<_, RoundParticipant>(
+            "
+            WITH last_block AS (
+                SELECT COALESCE(MAX(blockheight), 0) AS prev_height
+                FROM blocks
+            )
+            SELECT
+                COALESCE(rs.username, '') AS username,
+                COUNT(DISTINCT rs.blockheight) AS blocks_participated,
+                COALESCE(MAX(rs.sdiff), 0) AS top_diff
+            FROM remote_shares rs, last_block lb
+            WHERE rs.blockheight > lb.prev_height
+                AND rs.reject_reason IS NULL
+            GROUP BY rs.username
+            ORDER BY top_diff DESC
+            ",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))
+    }
+
+    pub(crate) async fn get_participants(&self, blockheight: i32) -> Result<Vec<String>> {
+        sqlx::query_scalar::<_, String>(
+            "
+            SELECT DISTINCT COALESCE(username, '')
+            FROM remote_shares
+            WHERE blockheight = $1
+                AND reject_reason IS NULL
+            ORDER BY 1
+            ",
+        )
+        .bind(blockheight)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))
     }
 }
