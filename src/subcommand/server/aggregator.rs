@@ -20,7 +20,6 @@ impl Aggregator {
             .timeout(TIMEOUT)
             .pool_idle_timeout(Duration::from_secs(60))
             .pool_max_idle_per_host(3)
-            .use_rustls_tls()
             .build()?;
 
         let cache = Arc::new(Cache::new(client.clone(), config.clone()));

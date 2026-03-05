@@ -67,7 +67,7 @@ pub fn spawn(
 pub fn spawn_with_handle(
     config: HttpConfig,
     router: axum::Router,
-    handle: Handle,
+    handle: Handle<SocketAddr>,
 ) -> Result<JoinHandle<io::Result<()>>> {
     let (listener, tls_enabled) = bind_listener(&config)?;
 
@@ -107,7 +107,7 @@ fn bind_listener(config: &HttpConfig) -> Result<(std::net::TcpListener, bool)> {
 async fn serve(
     listener: std::net::TcpListener,
     router: axum::Router,
-    handle: Handle,
+    handle: Handle<SocketAddr>,
     tls_enabled: bool,
     config: HttpConfig,
 ) -> io::Result<()> {
@@ -117,7 +117,7 @@ async fn serve(
             config.acme_domains[0], config.acme_contacts[0]
         );
 
-        axum_server::from_tcp(listener)
+        axum_server::from_tcp(listener)?
             .handle(handle)
             .acceptor(
                 acceptor(config.acme_domains, config.acme_contacts, config.acme_cache).unwrap(),
@@ -125,7 +125,7 @@ async fn serve(
             .serve(router.into_make_service())
             .await
     } else {
-        axum_server::from_tcp(listener)
+        axum_server::from_tcp(listener)?
             .handle(handle)
             .serve(router.into_make_service())
             .await
