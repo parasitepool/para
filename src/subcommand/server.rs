@@ -231,7 +231,7 @@ pub struct Server {
 impl Server {
     pub async fn run(
         &self,
-        handle: Handle<std::net::SocketAddr>,
+        handle: Handle<SocketAddr>,
         cancel_token: CancellationToken,
     ) -> Result {
         let config = Arc::new(self.config.clone());
