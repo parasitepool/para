@@ -1,5 +1,65 @@
 use super::*;
 
+#[derive(Deserialize, Debug)]
+struct Round {
+    blockheight: i32,
+    blockhash: String,
+}
+
+#[derive(Deserialize, Debug)]
+struct RoundParticipant {
+    username: String,
+    blocks_participated: i64,
+    top_diff: f64,
+}
+
+async fn insert_test_shares_for_round(
+    database_url: String,
+    users: Vec<(&str, f64)>,
+    blockheight: i64,
+    id_offset: i64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = sqlx::PgPool::connect(&database_url).await?;
+
+    for (i, (username, sdiff)) in users.iter().enumerate() {
+        let share_id = id_offset + i as i64;
+
+        sqlx::query(
+            "INSERT INTO remote_shares (
+                id, origin, blockheight, workinfoid, clientid, enonce1, nonce2,
+                nonce, ntime, diff, sdiff, hash, result, workername, username,
+                createdate, createby, createcode, createinet
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+            )",
+        )
+        .bind(share_id)
+        .bind("test_origin")
+        .bind(blockheight as i32)
+        .bind(1i64)
+        .bind(1i64)
+        .bind("enonce1")
+        .bind("nonce2")
+        .bind("nonce")
+        .bind("ntime")
+        .bind(sdiff)
+        .bind(sdiff)
+        .bind("hash")
+        .bind(true)
+        .bind(format!("{}_worker", username))
+        .bind(*username)
+        .bind("2024-01-01 12:00:00")
+        .bind("test")
+        .bind("test")
+        .bind("127.0.0.1")
+        .execute(&pool)
+        .await?;
+    }
+
+    pool.close().await;
+    Ok(())
+}
+
 async fn insert_test_shares_with_diff(
     database_url: String,
     shares: Vec<(String, f64)>,
@@ -922,4 +982,256 @@ async fn test_payouts_simulate_groups_by_lnurl() {
         .unwrap();
 
     assert_eq!(shared_payout.amount_sats, other_payout.amount_sats);
+}
+
+#[tokio::test]
+async fn test_rounds_empty() {
+    let server = TestServer::spawn_with_db().await;
+    setup_test_schema(server.database_url().unwrap())
+        .await
+        .unwrap();
+
+    let rounds: Vec<Round> = server.get_json_async("/rounds").await;
+    assert!(rounds.is_empty());
+}
+
+#[tokio::test]
+async fn test_rounds_lists_found_blocks() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    insert_test_block(db_url.clone(), 100).await.unwrap();
+    insert_test_block(db_url.clone(), 200).await.unwrap();
+    insert_test_block(db_url.clone(), 300).await.unwrap();
+
+    let rounds: Vec<Round> = server.get_json_async("/rounds").await;
+    assert_eq!(rounds.len(), 3);
+    assert_eq!(rounds[0].blockheight, 100);
+    assert_eq!(rounds[1].blockheight, 200);
+    assert_eq!(rounds[2].blockheight, 300);
+    assert!(!rounds[0].blockhash.is_empty());
+}
+
+#[tokio::test]
+async fn test_round_participants() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    insert_test_block(db_url.clone(), 5).await.unwrap();
+    insert_test_block(db_url.clone(), 10).await.unwrap();
+
+    insert_test_shares_for_round(
+        db_url.clone(),
+        vec![("foo", 1000.0), ("bar", 5000.0)],
+        6,
+        1000,
+    )
+    .await
+    .unwrap();
+    insert_test_shares_for_round(
+        db_url.clone(),
+        vec![("foo", 3000.0), ("baz", 2000.0)],
+        8,
+        2000,
+    )
+    .await
+    .unwrap();
+
+    let participants: Vec<RoundParticipant> = server.get_json_async("/rounds/10").await;
+    assert_eq!(participants.len(), 3);
+
+    let foo = participants.iter().find(|p| p.username == "foo").unwrap();
+    assert_eq!(foo.blocks_participated, 2);
+    assert_eq!(foo.top_diff, 3000.0);
+
+    let bar = participants.iter().find(|p| p.username == "bar").unwrap();
+    assert_eq!(bar.blocks_participated, 1);
+    assert_eq!(bar.top_diff, 5000.0);
+
+    let baz = participants.iter().find(|p| p.username == "baz").unwrap();
+    assert_eq!(baz.blocks_participated, 1);
+    assert_eq!(baz.top_diff, 2000.0);
+}
+
+#[tokio::test]
+async fn test_round_excludes_shares_from_previous_round() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    insert_test_block(db_url.clone(), 5).await.unwrap();
+    insert_test_block(db_url.clone(), 10).await.unwrap();
+
+    insert_test_shares_for_round(db_url.clone(), vec![("foo", 9000.0)], 4, 500)
+        .await
+        .unwrap();
+    insert_test_shares_for_round(db_url.clone(), vec![("bar", 1000.0)], 7, 600)
+        .await
+        .unwrap();
+
+    let participants: Vec<RoundParticipant> = server.get_json_async("/rounds/10").await;
+    assert_eq!(participants.len(), 1);
+    assert_eq!(participants[0].username, "bar");
+}
+
+#[tokio::test]
+async fn test_round_first_includes_all_prior_shares() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    insert_test_block(db_url.clone(), 5).await.unwrap();
+
+    insert_test_shares_for_round(db_url.clone(), vec![("foo", 100.0)], 1, 100)
+        .await
+        .unwrap();
+    insert_test_shares_for_round(db_url.clone(), vec![("foo", 200.0)], 3, 200)
+        .await
+        .unwrap();
+    insert_test_shares_for_round(db_url.clone(), vec![("foo", 300.0)], 5, 300)
+        .await
+        .unwrap();
+
+    let participants: Vec<RoundParticipant> = server.get_json_async("/rounds/5").await;
+    assert_eq!(participants.len(), 1);
+    assert_eq!(participants[0].blocks_participated, 3);
+    assert_eq!(participants[0].top_diff, 300.0);
+}
+
+#[tokio::test]
+async fn test_round_empty() {
+    let server = TestServer::spawn_with_db().await;
+    setup_test_schema(server.database_url().unwrap())
+        .await
+        .unwrap();
+
+    let participants: Vec<RoundParticipant> = server.get_json_async("/rounds/999").await;
+    assert!(participants.is_empty());
+}
+
+#[tokio::test]
+async fn test_current_round() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    insert_test_block(db_url.clone(), 5).await.unwrap();
+
+    insert_test_shares_for_round(db_url.clone(), vec![("foo", 1000.0)], 3, 100)
+        .await
+        .unwrap();
+    insert_test_shares_for_round(
+        db_url.clone(),
+        vec![("foo", 2000.0), ("bar", 500.0)],
+        7,
+        200,
+    )
+    .await
+    .unwrap();
+
+    let participants: Vec<RoundParticipant> = server.get_json_async("/rounds/current").await;
+    assert_eq!(participants.len(), 2);
+
+    let foo = participants.iter().find(|p| p.username == "foo").unwrap();
+    assert_eq!(foo.blocks_participated, 1);
+    assert_eq!(foo.top_diff, 2000.0);
+
+    let bar = participants.iter().find(|p| p.username == "bar").unwrap();
+    assert_eq!(bar.blocks_participated, 1);
+    assert_eq!(bar.top_diff, 500.0);
+}
+
+#[tokio::test]
+async fn test_current_round_no_blocks_found() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    insert_test_shares_for_round(db_url.clone(), vec![("foo", 100.0), ("bar", 200.0)], 1, 100)
+        .await
+        .unwrap();
+
+    let participants: Vec<RoundParticipant> = server.get_json_async("/rounds/current").await;
+    assert_eq!(participants.len(), 2);
+}
+
+#[tokio::test]
+async fn test_participants_for_blockheight() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    insert_test_shares_for_round(
+        db_url.clone(),
+        vec![("foo", 100.0), ("bar", 200.0), ("baz", 300.0)],
+        42,
+        100,
+    )
+    .await
+    .unwrap();
+    insert_test_shares_for_round(db_url.clone(), vec![("other", 100.0)], 43, 200)
+        .await
+        .unwrap();
+
+    let participants: Vec<String> = server.get_json_async("/participants/42").await;
+    assert_eq!(participants.len(), 3);
+    assert!(participants.contains(&"foo".to_string()));
+    assert!(participants.contains(&"bar".to_string()));
+    assert!(participants.contains(&"baz".to_string()));
+    assert!(!participants.contains(&"other".to_string()));
+}
+
+#[tokio::test]
+async fn test_participants_empty() {
+    let server = TestServer::spawn_with_db().await;
+    setup_test_schema(server.database_url().unwrap())
+        .await
+        .unwrap();
+
+    let participants: Vec<String> = server.get_json_async("/participants/999").await;
+    assert!(participants.is_empty());
+}
+
+#[tokio::test]
+async fn test_participants_excludes_rejected_shares() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
+
+    sqlx::query(
+        "INSERT INTO remote_shares (
+            id, origin, blockheight, diff, sdiff, result, workername, username,
+            createdate, createby, createcode, createinet, reject_reason
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+    )
+    .bind(900i64)
+    .bind("test_origin")
+    .bind(50i32)
+    .bind(100.0)
+    .bind(100.0)
+    .bind(false)
+    .bind("foo_worker")
+    .bind("foo")
+    .bind("2024-01-01 12:00:00")
+    .bind("test")
+    .bind("test")
+    .bind("127.0.0.1")
+    .bind("stale")
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    insert_test_shares_for_round(db_url.clone(), vec![("bar", 100.0)], 50, 901)
+        .await
+        .unwrap();
+
+    pool.close().await;
+
+    let participants: Vec<String> = server.get_json_async("/participants/50").await;
+    assert_eq!(participants.len(), 1);
+    assert_eq!(participants[0], "bar");
 }

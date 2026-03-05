@@ -9,7 +9,7 @@ use {
         },
         subcommand::{
             server::{
-                account::account_router, payouts::payouts_router,
+                account::account_router, payouts::payouts_router, rounds::rounds_router,
                 sharediff::share_difficulty_router, sync_routes::sync_router,
             },
             sync::{ShareBatch, SyncResponse},
@@ -43,6 +43,7 @@ mod cache;
 pub mod database;
 pub mod notifications;
 mod payouts;
+mod rounds;
 mod server_config;
 mod sharediff;
 mod sync_routes;
@@ -148,6 +149,11 @@ impl Modify for SecurityAddon {
         payouts::user_payout_range,
         payouts::update_payout_status,
         payouts::payouts_simulate,
+        // Round endpoints
+        rounds::rounds,
+        rounds::round_current,
+        rounds::round,
+        rounds::participants,
         // Sync endpoints
         sync_routes::sync_batch,
         // Status endpoints
@@ -172,6 +178,9 @@ impl Modify for SecurityAddon {
         database::PendingPayout,
         database::FailedPayout,
         database::UpdatePayoutStatusRequest,
+        // Round schemas
+        rounds::Round,
+        rounds::RoundParticipant,
         // Server schemas
         Payment,
         SatSplit,
@@ -188,6 +197,7 @@ impl Modify for SecurityAddon {
         (name = "account", description = "Account management endpoints"),
         (name = "sharediff", description = "Share difficulty endpoints"),
         (name = "payouts", description = "Payout and split endpoints"),
+        (name = "rounds", description = "Round and participant endpoints"),
         (name = "sync", description = "Share synchronization endpoints"),
         (name = "status", description = "Server status endpoints"),
         (name = "aggregator", description = "Multi-node aggregation endpoints"),
@@ -310,6 +320,7 @@ impl Server {
                     .merge(account_router(config.clone(), database.clone()))
                     .merge(share_difficulty_router(config.clone(), database.clone()))
                     .merge(payouts_router(config.clone(), database.clone()))
+                    .merge(rounds_router(config.clone(), database.clone()))
                     .merge(sync_router(config.clone(), database));
             }
             Err(err) => {
