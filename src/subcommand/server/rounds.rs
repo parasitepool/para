@@ -55,7 +55,7 @@ pub(crate) async fn rounds(Extension(database): Extension<Database>) -> ServerRe
 pub(crate) async fn round_current(
     Extension(database): Extension<Database>,
 ) -> ServerResult<Response> {
-    Ok(Json(database.get_round_participants(None).await?).into_response())
+    Ok(Json(database.get_round_participation(None).await?).into_response())
 }
 
 #[utoipa::path(
@@ -74,7 +74,7 @@ pub(crate) async fn round(
     Path(blockheight): Path<i32>,
     Extension(database): Extension<Database>,
 ) -> ServerResult<Response> {
-    Ok(Json(database.get_round_participants(Some(blockheight)).await?).into_response())
+    Ok(Json(database.get_round_participation(Some(blockheight)).await?).into_response())
 }
 
 #[utoipa::path(

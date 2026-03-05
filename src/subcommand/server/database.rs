@@ -771,7 +771,7 @@ impl Database {
         .map_err(|err| anyhow!(err))
     }
 
-    pub(crate) async fn get_round_participants(
+    pub(crate) async fn get_round_participation(
         &self,
         blockheight: Option<i32>,
     ) -> Result<Vec<RoundParticipant>> {
