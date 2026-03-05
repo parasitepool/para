@@ -771,15 +771,7 @@ impl Database {
         .map_err(|err| anyhow!(err))
     }
 
-    pub(crate) async fn get_round(&self, blockheight: i32) -> Result<Vec<RoundParticipant>> {
-        self.get_round_participants(Some(blockheight)).await
-    }
-
-    pub(crate) async fn get_current_round(&self) -> Result<Vec<RoundParticipant>> {
-        self.get_round_participants(None).await
-    }
-
-    async fn get_round_participants(
+    pub(crate) async fn get_round_participants(
         &self,
         blockheight: Option<i32>,
     ) -> Result<Vec<RoundParticipant>> {
