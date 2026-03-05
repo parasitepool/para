@@ -67,7 +67,6 @@ pub(crate) async fn round_current(
     ),
     responses(
         (status = 200, description = "Round participants", body = Vec<RoundParticipant>),
-        (status = 404, description = "No block found at this height"),
     ),
     tag = "rounds"
 )]

@@ -772,12 +772,23 @@ impl Database {
     }
 
     pub(crate) async fn get_round(&self, blockheight: i32) -> Result<Vec<RoundParticipant>> {
+        self.get_round_participants(Some(blockheight)).await
+    }
+
+    pub(crate) async fn get_current_round(&self) -> Result<Vec<RoundParticipant>> {
+        self.get_round_participants(None).await
+    }
+
+    async fn get_round_participants(
+        &self,
+        blockheight: Option<i32>,
+    ) -> Result<Vec<RoundParticipant>> {
         sqlx::query_as::<_, RoundParticipant>(
             "
             WITH previous_block AS (
                 SELECT COALESCE(MAX(blockheight), 0) AS prev_height
                 FROM blocks
-                WHERE blockheight < $1
+                WHERE ($1::INTEGER IS NULL OR blockheight < $1)
             )
             SELECT
                 COALESCE(rs.username, '') AS username,
@@ -785,36 +796,13 @@ impl Database {
                 COALESCE(MAX(rs.sdiff), 0) AS top_diff
             FROM remote_shares rs, previous_block pb
             WHERE rs.blockheight > pb.prev_height
-                AND rs.blockheight <= $1
+                AND ($1::INTEGER IS NULL OR rs.blockheight <= $1)
                 AND rs.reject_reason IS NULL
             GROUP BY rs.username
             ORDER BY top_diff DESC
             ",
         )
         .bind(blockheight)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|err| anyhow!(err))
-    }
-
-    pub(crate) async fn get_current_round(&self) -> Result<Vec<RoundParticipant>> {
-        sqlx::query_as::<_, RoundParticipant>(
-            "
-            WITH last_block AS (
-                SELECT COALESCE(MAX(blockheight), 0) AS prev_height
-                FROM blocks
-            )
-            SELECT
-                COALESCE(rs.username, '') AS username,
-                COUNT(DISTINCT rs.blockheight) AS blocks_participated,
-                COALESCE(MAX(rs.sdiff), 0) AS top_diff
-            FROM remote_shares rs, last_block lb
-            WHERE rs.blockheight > lb.prev_height
-                AND rs.reject_reason IS NULL
-            GROUP BY rs.username
-            ORDER BY top_diff DESC
-            ",
-        )
         .fetch_all(&self.pool)
         .await
         .map_err(|err| anyhow!(err))
