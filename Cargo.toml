@@ -25,11 +25,20 @@ rust-version = "1.91.0"
 anyhow = { version = "1.0.98", features = ["backtrace"] }
 bitcoin = { version = "0.32.7", features = ["rand", "serde"] }
 bitcoind-async-client = { version = "0.10.0", features = ["raw_rpc"] }
+byteorder = "1.5.0"
 clap = { version = "4.5.36", features = ["derive", "env"] }
+derive_more = { version = "2.0.1", features = ["display"] }
+futures = "0.3.31"
+hex = "0.4.3"
+primitive-types = "0.14.0"
 rand = "0.9.1"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
+serde_with = "3.14.0"
+snafu = "0.8.9"
 tokio = { version = "1.44.2", features = ["macros", "rt-multi-thread", "signal"] }
+tokio-util = "0.7.15"
+tracing = "0.1.41"
 
 [features]
 swagger-ui = ["dep:utoipa-swagger-ui"]
@@ -39,51 +48,51 @@ reload = ["boilerplate/reload"]
 anyhow.workspace = true
 async-trait = "0.1.89"
 axum = { version = "0.8.3", features = ["http2", "ws"] }
-axum-server = "0.7.3"
+axum-server = "0.8.0"
 backon = "1.6.0"
 base64 = "0.22.1"
 bip322 = "0.0.10"
 bitcoin.workspace = true
 bitcoind-async-client.workspace = true
 boilerplate = { version = "1.1.1", features = ["axum"] }
-byteorder = "1.5.0"
+byteorder.workspace = true
 chrono = "0.4.41"
 clap.workspace = true
 dashmap = "6.1.0"
-derive_more = { version = "2.0.1", features = ["display"] }
+derive_more.workspace = true
 dirs = "6.0.0"
-futures = "0.3.31"
-hex = "0.4.3"
+futures.workspace = true
+hex.workspace = true
 lru = "0.16.2"
 mime_guess = "2.0.5"
 parking_lot = "0.12.5"
-primitive-types = "0.14.0"
+primitive-types.workspace = true
 rand.workspace = true
-reqwest = { version = "0.12.22", features = ["rustls-tls", "blocking", "json"] }
+reqwest = { version = "0.13.2", features = ["blocking", "json"] }
 rust-embed = "8.7.1"
 rustls = { version = "0.23.26", features = ["ring"] }
-rustls-acme = { version = "0.14.0", features = ["axum"] }
+rustls-acme = { version = "0.15.1", default-features = false, features = ["axum", "ring", "webpki-roots"] }
 serde.workspace = true
 serde_json.workspace = true
-serde_with = "3.14.0"
-snafu = "0.8.9"
+serde_with.workspace = true
+snafu.workspace = true
 sqlx = { version =  "0.8.5", features = ["postgres", "runtime-tokio"] }
 stratum = { path = "crates/stratum", features = ["client"] }
-sysinfo = "0.37.0"
-tokio-util = "0.7.15"
+sysinfo = "0.38.3"
+tokio-util.workspace = true
 tokio.workspace = true
 tower-http = { version = "0.6.2", features = ["auth", "fs", "set-header"] }
-tracing = "0.1.41"
 tracing-appender = "0.2.3"
 tracing-subscriber = { version =  "0.3.19", features = ["env-filter", "fmt"] }
+tracing.workspace = true
 utoipa = "5.4.0"
 utoipa-swagger-ui = { version =  "9.0.2", features = ["axum"], optional = true }
-zeromq = "0.4.1"
+zeromq = "0.5.0"
 
 [dev-dependencies]
 chrono = "0.4.41"
 harness = { path = "crates/harness" }
-nix = "0.30.1"
+nix = { version = "0.31.2", features = ["signal", "process"] }
 ntest = "0.9.3"
 once_cell = "1.21.3"
 pretty_assertions = "1.4.1"

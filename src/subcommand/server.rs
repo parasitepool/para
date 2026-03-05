@@ -229,7 +229,11 @@ pub struct Server {
 }
 
 impl Server {
-    pub async fn run(&self, handle: Handle, cancel_token: CancellationToken) -> Result {
+    pub async fn run(
+        &self,
+        handle: Handle<std::net::SocketAddr>,
+        cancel_token: CancellationToken,
+    ) -> Result {
         let config = Arc::new(self.config.clone());
         let log_dir = config.log_dir();
         let pool_dir = log_dir.join("pool");

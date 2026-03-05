@@ -1,6 +1,6 @@
 [package]
 name = "stratum"
-version = "0.0.4"
+version = "0.0.5"
 description = "Stratum protocol types, helpers and client"
 repository = "https://github.com/parasitepool/para/tree/master/crates/stratum"
 readme = "README.md"
@@ -16,20 +16,20 @@ client = ["tokio", "futures", "tokio-util", "tracing"]
 
 [dependencies]
 bitcoin.workspace = true
-byteorder = "1.5.0"
-derive_more = { version = "2.0.1", features = ["display"] }
-futures = { version = "0.3.31", optional = true }
-hex = "0.4.3"
-primitive-types = "0.14.0"
+byteorder.workspace = true
+derive_more.workspace = true
+futures = { workspace = true, optional = true }
+hex.workspace = true
+primitive-types.workspace = true
 rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-serde_with = "3.14.0"
+serde_with.workspace = true
 smallvec = "1.15.1"
-snafu = "0.8.9"
+snafu.workspace = true
 tokio = { workspace = true, features = ["io-util", "net", "time", "rt", "sync", "macros"], optional = true }
-tokio-util = { version = "0.7.15", features = ["codec"], optional = true }
-tracing = { version = "0.1.41", optional = true }
+tokio-util = { workspace = true, features = ["codec"], optional = true }
+tracing = { workspace = true, optional = true }
 
 [dev-dependencies]
 pretty_assertions = "1.4.1"
