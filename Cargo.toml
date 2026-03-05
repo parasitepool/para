@@ -71,7 +71,7 @@ rand.workspace = true
 reqwest = { version = "0.13.2", features = ["blocking", "json"] }
 rust-embed = "8.7.1"
 rustls = { version = "0.23.26", features = ["ring"] }
-rustls-acme = { version = "0.15.1", default-features = false, features = ["axum", "ring", "webpki-roots"] }
+rustls-acme = { version = "0.15.1", default-features = false, features = ["axum", "ring", "tls12", "webpki-roots"] }
 serde.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true
