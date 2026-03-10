@@ -21,6 +21,8 @@
     <div class=row><a href="/users"><span>Users</span></a><span id=users></span></div>
     <div class=row><span>Workers</span><span id=workers></span></div>
     <div class=row><span>Sessions</span><span id=sessions></span></div>
+    <div class=row><span>Idle</span><span id=idle></span></div>
+    <div class=row><span>Disconnected</span><span id=disconnected></span></div>
     <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
     <div class=row><span>SPS</span><span id=sps_1m></span></div>
     <div class=row><span>Best Share</span><span id=best_share class=copyable></span></div>
@@ -96,6 +98,8 @@ async function refresh(signal) {
     set('users', proxyData.user_count);
     set('workers', proxyData.worker_count);
     set('sessions', proxyData.session_count);
+    set('idle', proxyData.idle_count);
+    set('disconnected', proxyData.disconnected_count);
     set('hashrate_1m', proxyData.hashrate_1m, formatHashrate);
     set('sps_1m', proxyData.sps_1m, formatTruncated);
     copyable('best_share', formatDifficulty(proxyData.best_share), proxyData.best_share);
