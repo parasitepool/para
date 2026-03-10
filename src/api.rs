@@ -92,18 +92,7 @@ pub struct UserDetail {
 
 impl UserDetail {
     pub(crate) fn from_user(user: &User, now: Instant) -> Self {
-        let mut workers = Vec::new();
-        let mut sessions = Vec::new();
-
-        for worker in user.workers() {
-            sessions.extend(
-                worker
-                    .sessions()
-                    .map(|s| SessionDetail::from_session(&s, now)),
-            );
-            workers.push(WorkerDetail::from_worker(&worker, now));
-        }
-
+        let (workers, sessions) = collect_details(user.workers(), now);
         let user_stats = user.snapshot();
 
         Self {
@@ -115,6 +104,23 @@ impl UserDetail {
             stats: MiningStats::from_snapshot(&user_stats, now),
         }
     }
+}
+
+pub(crate) fn collect_details(
+    workers: impl Iterator<Item = Arc<Worker>>,
+    now: Instant,
+) -> (Vec<WorkerDetail>, Vec<SessionDetail>) {
+    let mut worker_details = Vec::new();
+    let mut session_details = Vec::new();
+    for worker in workers {
+        session_details.extend(
+            worker
+                .sessions()
+                .map(|s| SessionDetail::from_session(&s, now)),
+        );
+        worker_details.push(WorkerDetail::from_worker(&worker, now));
+    }
+    (worker_details, session_details)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

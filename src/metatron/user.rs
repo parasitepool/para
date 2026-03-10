@@ -48,10 +48,11 @@ impl User {
     }
 
     pub(crate) fn sessions(&self) -> Vec<Arc<Session>> {
-        self.workers
-            .iter()
-            .flat_map(|worker| worker.sessions().collect::<Vec<_>>())
-            .collect()
+        let mut sessions = Vec::new();
+        for worker in self.workers.iter() {
+            sessions.extend(worker.sessions());
+        }
+        sessions
     }
 
     pub(crate) fn workers(&self) -> impl Iterator<Item = Arc<Worker>> {
