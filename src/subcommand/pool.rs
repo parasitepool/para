@@ -15,7 +15,7 @@ impl Pool {
         cancel_token: CancellationToken,
         logs: Arc<logs::Logs>,
     ) -> Result {
-        let mut tasks = JoinSet::new();
+        let tasks = TaskTracker::new();
 
         let settings = Arc::new(
             Settings::from_pool_options(self.options.clone())
@@ -28,7 +28,7 @@ impl Pool {
             bitcoin_client.clone(),
             settings.clone(),
             cancel_token.clone(),
-            &mut tasks,
+            &tasks,
         )
         .await
         .context("failed to subscribe to ZMQ block notifications")?;
@@ -43,16 +43,16 @@ impl Pool {
             format!("{}:{}", settings.address(), settings.port()),
             0,
         ));
-        metatron.clone().spawn(cancel_token.clone(), &mut tasks);
+        metatron.clone().spawn(cancel_token.clone(), &tasks);
 
         http_server::spawn(
             &settings,
             api::pool::router(metatron.clone(), bitcoin_client, settings.chain(), logs),
             cancel_token.clone(),
-            &mut tasks,
+            &tasks,
         )?;
 
-        let event_tx = build_event_sink(&settings, cancel_token.clone(), &mut tasks)
+        let event_tx = build_event_sink(&settings, cancel_token.clone(), &tasks)
             .await
             .context("failed to build record sink")?;
 
@@ -78,7 +78,7 @@ impl Pool {
         };
 
         if !integration_test() && !logs_enabled() {
-            spawn_throbber(metatron.clone(), cancel_token.clone(), &mut tasks);
+            spawn_throbber(metatron.clone(), cancel_token.clone(), &tasks);
         }
 
         loop {
@@ -143,7 +143,8 @@ impl Pool {
 
         info!("Waiting for {} tasks to complete...", tasks.len());
 
-        while tasks.join_next().await.is_some() {}
+        tasks.close();
+        tasks.wait().await;
 
         info!("All pool tasks stopped");
 

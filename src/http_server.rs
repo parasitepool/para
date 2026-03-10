@@ -28,7 +28,7 @@ pub fn spawn(
     settings: &Settings,
     router: axum::Router,
     cancel_token: CancellationToken,
-    tasks: &mut JoinSet<()>,
+    tasks: &TaskTracker,
 ) -> Result<()> {
     let Some(port) = settings.http_port() else {
         return Ok(());

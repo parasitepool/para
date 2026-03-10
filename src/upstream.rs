@@ -36,7 +36,7 @@ impl Upstream {
         target: &UpstreamTarget,
         timeout: Duration,
         cancel: CancellationToken,
-        tasks: &mut JoinSet<()>,
+        tasks: &TaskTracker,
     ) -> Result<Arc<Self>> {
         let upstream_addr = resolve_stratum_endpoint(target.endpoint())
             .await

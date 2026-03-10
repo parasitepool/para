@@ -15,7 +15,7 @@ impl Proxy {
         cancel_token: CancellationToken,
         logs: Arc<logs::Logs>,
     ) -> Result {
-        let mut tasks = JoinSet::new();
+        let tasks = TaskTracker::new();
 
         let settings = Arc::new(
             Settings::from_proxy_options(self.options.clone())
@@ -43,7 +43,7 @@ impl Proxy {
             upstream_target,
             timeout,
             &cancel_token,
-            &mut tasks,
+            &tasks,
             &mut backoff,
         )
         .await
@@ -66,7 +66,7 @@ impl Proxy {
             0,
         ));
 
-        metatron.clone().spawn(cancel_token.clone(), &mut tasks);
+        metatron.clone().spawn(cancel_token.clone(), &tasks);
 
         let metrics = Arc::new(Metrics::new(upstream.clone(), metatron.clone()));
 
@@ -74,15 +74,15 @@ impl Proxy {
             &settings,
             api::proxy::router(metrics.clone(), bitcoin_client, settings.chain(), logs),
             cancel_token.clone(),
-            &mut tasks,
+            &tasks,
         )?;
 
-        let event_tx = build_event_sink(&settings, cancel_token.clone(), &mut tasks)
+        let event_tx = build_event_sink(&settings, cancel_token.clone(), &tasks)
             .await
             .context("failed to build record sink")?;
 
         if !integration_test() && !logs_enabled() {
-            spawn_throbber(metrics.clone(), cancel_token.clone(), &mut tasks);
+            spawn_throbber(metrics.clone(), cancel_token.clone(), &tasks);
         }
 
         loop {
@@ -103,7 +103,8 @@ impl Proxy {
                     }
                     _ = cancel_token.cancelled() => {
                         info!("Shutting down proxy");
-                        while tasks.join_next().await.is_some() {}
+                        tasks.close();
+                        tasks.wait().await;
                         info!("All proxy tasks stopped");
                         return Ok(());
                     }
@@ -142,7 +143,7 @@ impl Proxy {
                 upstream_target,
                 timeout,
                 &cancel_token,
-                &mut tasks,
+                &tasks,
                 &mut backoff,
             )
             .await
@@ -164,7 +165,8 @@ impl Proxy {
             upstream = new_upstream;
         }
 
-        while tasks.join_next().await.is_some() {}
+        tasks.close();
+        tasks.wait().await;
 
         info!("All proxy tasks stopped");
 
@@ -176,7 +178,7 @@ async fn connect_upstream(
     target: &UpstreamTarget,
     timeout: Duration,
     cancel_token: &CancellationToken,
-    tasks: &mut JoinSet<()>,
+    tasks: &TaskTracker,
     backoff: &mut Duration,
 ) -> Option<Arc<Upstream>> {
     let mut max_backoff_attempts = 0u32;
