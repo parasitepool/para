@@ -414,11 +414,13 @@ impl Controller {
 
     fn maybe_spawn_throbber(&mut self, cancel_token: &CancellationToken) {
         if !integration_test() && !logs_enabled() {
-            spawn_throbber(self.metrics.clone(), cancel_token.clone(), &self.hashers);
+            let handle = spawn_throbber(self.metrics.clone(), cancel_token.clone(), &self.hashers);
+            self.hasher_handles.push(handle);
         }
     }
 
     fn reset_hashers(&mut self) {
+        self.hashers.close();
         self.hashers = TaskTracker::new();
         self.hasher_handles.clear();
     }
