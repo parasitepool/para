@@ -18,7 +18,7 @@ impl User {
         }
     }
 
-    pub(crate) fn new_session(&self, workername: &str, session: Arc<Session>) {
+    pub(super) fn new_session(&self, workername: &str, session: Arc<Session>) {
         self.workers
             .entry(workername.to_string())
             .or_insert_with(|| Arc::new(Worker::new(workername.to_string())))

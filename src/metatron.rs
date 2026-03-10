@@ -16,6 +16,7 @@ pub(crate) struct Metatron {
     blocks: AtomicU64,
     started: Instant,
     users: DashMap<Address, Arc<User>>,
+    upstream_sessions: DashMap<u32, DashMap<SessionId, Arc<Session>>>,
     disconnected: DashMap<Extranonce, (Arc<Session>, Instant)>,
     session_id_counter: AtomicU32,
 }
@@ -26,6 +27,7 @@ impl Metatron {
             blocks: AtomicU64::new(0),
             started: Instant::now(),
             users: DashMap::new(),
+            upstream_sessions: DashMap::new(),
             disconnected: DashMap::new(),
             session_id_counter: AtomicU32::new(0),
         }
@@ -76,6 +78,11 @@ impl Metatron {
             .or_insert_with(|| Arc::new(User::new(auth.address.clone())))
             .new_session(&auth.workername, session.clone());
 
+        self.upstream_sessions
+            .entry(upstream_id)
+            .or_default()
+            .insert(id, session.clone());
+
         session
     }
 
@@ -86,12 +93,30 @@ impl Metatron {
             worker.retire_session(session.id());
         }
 
+        if let Some(sessions) = self.upstream_sessions.get(&session.id().upstream_id()) {
+            sessions.remove(&session.id());
+
+            let remove_upstream = sessions.is_empty();
+            drop(sessions);
+
+            if remove_upstream {
+                self.upstream_sessions.remove(&session.id().upstream_id());
+            }
+        }
+
         self.disconnected
             .insert(session.enonce1().clone(), (session, Instant::now()));
     }
 
-    pub(crate) fn take_disconnected(&self, enonce1: &Extranonce) -> bool {
-        self.disconnected.remove(enonce1).is_some()
+    pub(crate) fn take_disconnected(&self, enonce1: &Extranonce, upstream_id: u32) -> bool {
+        if let Some(entry) = self.disconnected.get(enonce1)
+            && entry.value().0.id().upstream_id() == upstream_id
+        {
+            drop(entry);
+            return self.disconnected.remove(enonce1).is_some();
+        }
+
+        false
     }
 
     pub(crate) fn add_block(&self) {
@@ -119,6 +144,13 @@ impl Metatron {
         self.disconnected.len()
     }
 
+    pub(crate) fn upstream_disconnected_count(&self, upstream_id: u32) -> usize {
+        self.disconnected
+            .iter()
+            .filter(|entry| entry.value().0.id().upstream_id() == upstream_id)
+            .count()
+    }
+
     pub(crate) fn total_idle(&self) -> usize {
         let now = Instant::now();
 
@@ -137,16 +169,109 @@ impl Metatron {
         self.users.len()
     }
 
+    pub(crate) fn upstream_user_count(&self, upstream_id: u32) -> usize {
+        self.users
+            .iter()
+            .filter(|user| {
+                user.sessions()
+                    .into_iter()
+                    .any(|session| session.id().upstream_id() == upstream_id)
+            })
+            .count()
+    }
+
     pub(crate) fn total_workers(&self) -> usize {
         self.users.iter().map(|user| user.worker_count()).sum()
+    }
+
+    pub(crate) fn upstream_worker_count(&self, upstream_id: u32) -> usize {
+        self.users
+            .iter()
+            .map(|user| {
+                user.workers()
+                    .filter(|worker| worker.upstream_session_count(upstream_id) > 0)
+                    .count()
+            })
+            .sum()
     }
 
     pub(crate) fn uptime(&self) -> Duration {
         self.started.elapsed()
     }
 
+    pub(crate) fn upstream_sessions(&self, upstream_id: u32) -> Vec<Arc<Session>> {
+        self.upstream_sessions
+            .get(&upstream_id)
+            .map(|sessions| {
+                sessions
+                    .iter()
+                    .map(|session| session.value().clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn upstream_session_count(&self, upstream_id: u32) -> usize {
+        self.upstream_sessions
+            .get(&upstream_id)
+            .map(|sessions| sessions.len())
+            .unwrap_or(0)
+    }
+
+    pub(crate) fn upstream_idle_count(&self, upstream_id: u32) -> usize {
+        let now = Instant::now();
+
+        self.upstream_sessions(upstream_id)
+            .into_iter()
+            .filter(|session| {
+                session
+                    .last_share()
+                    .is_none_or(|last| now.duration_since(last).as_secs() > 60)
+            })
+            .count()
+    }
+
+    pub(crate) fn upstream_snapshot(&self, upstream_id: u32) -> Stats {
+        let now = Instant::now();
+
+        self.upstream_sessions(upstream_id).into_iter().fold(
+            Stats::new(),
+            |mut combined, session| {
+                combined.absorb(session.snapshot(), now);
+                combined
+            },
+        )
+    }
+
     pub(crate) fn users(&self) -> &DashMap<Address, Arc<User>> {
         &self.users
+    }
+
+    #[cfg(test)]
+    pub(crate) fn check_invariants(&self) {
+        let tree: HashSet<SessionId> = self
+            .users
+            .iter()
+            .flat_map(|user| user.sessions())
+            .map(|session| session.id())
+            .collect();
+
+        let index: HashSet<SessionId> = self
+            .upstream_sessions
+            .iter()
+            .flat_map(|entry| {
+                entry
+                    .value()
+                    .iter()
+                    .map(|session| {
+                        assert_eq!(session.value().id().upstream_id(), *entry.key());
+                        *session.key()
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+
+        assert_eq!(tree, index);
     }
 }
 
@@ -195,6 +320,7 @@ mod tests {
     #[test]
     fn new_metatron_starts_at_zero() {
         let metatron = Metatron::new();
+        metatron.check_invariants();
         let stats = metatron.snapshot();
         assert_eq!(metatron.total_sessions(), 0);
         assert_eq!(stats.accepted_shares, 0);
@@ -210,13 +336,17 @@ mod tests {
         assert_eq!(metatron.total_sessions(), 0);
 
         let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+        metatron.check_invariants();
         let s2 = metatron.new_session(test_auth("cafebabe", "foo"), 0);
+        metatron.check_invariants();
         assert_eq!(metatron.total_sessions(), 2);
 
         metatron.retire_session(s1);
+        metatron.check_invariants();
         assert_eq!(metatron.total_sessions(), 1);
 
         metatron.retire_session(s2);
+        metatron.check_invariants();
         assert_eq!(metatron.total_sessions(), 0);
     }
 
@@ -225,10 +355,12 @@ mod tests {
         let metatron = Metatron::new();
 
         metatron.new_session(test_auth("deadbeef", "rig1"), 0);
+        metatron.check_invariants();
         assert_eq!(metatron.total_users(), 1);
         assert_eq!(metatron.total_workers(), 1);
 
         metatron.new_session(test_auth("cafebabe", "rig2"), 0);
+        metatron.check_invariants();
         assert_eq!(metatron.total_users(), 1);
         assert_eq!(metatron.total_workers(), 2);
     }
@@ -237,6 +369,7 @@ mod tests {
     fn record_share_updates_stats() {
         let metatron = Metatron::new();
         let session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+        metatron.check_invariants();
 
         session.record_accepted(Difficulty::from(1000.0), Difficulty::from(1500.0));
         session.record_accepted(Difficulty::from(1000.0), Difficulty::from(1500.0));
@@ -250,6 +383,7 @@ mod tests {
     #[test]
     fn block_count_increments() {
         let metatron = Metatron::new();
+        metatron.check_invariants();
         metatron.add_block();
         assert_eq!(metatron.total_blocks(), 1);
     }
@@ -263,12 +397,14 @@ mod tests {
         assert_eq!(metatron.snapshot().accepted_work, TotalWork::ZERO);
 
         let foo_session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+        metatron.check_invariants();
         foo_session.record_accepted(pool_diff, Difficulty::from(200.0));
         foo_session.record_accepted(pool_diff, Difficulty::from(50.0));
 
         assert_eq!(metatron.snapshot().accepted_work, expected + expected);
 
         let bar_session = metatron.new_session(test_auth("cafebabe", "bar"), 0);
+        metatron.check_invariants();
         bar_session.record_accepted(pool_diff, Difficulty::from(400.0));
 
         assert_eq!(
@@ -280,15 +416,18 @@ mod tests {
     #[test]
     fn store_and_take_disconnected() {
         let metatron = Metatron::new();
+        metatron.check_invariants();
 
         let enonce1: Extranonce = "deadbeef".parse().unwrap();
-        assert!(!metatron.take_disconnected(&enonce1));
+        assert!(!metatron.take_disconnected(&enonce1, 0));
 
         let session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+        metatron.check_invariants();
         metatron.retire_session(session);
+        metatron.check_invariants();
         assert_eq!(metatron.total_disconnected(), 1);
 
-        assert!(metatron.take_disconnected(&enonce1));
+        assert!(metatron.take_disconnected(&enonce1, 0));
         assert_eq!(metatron.total_disconnected(), 0);
     }
 
@@ -296,12 +435,14 @@ mod tests {
     fn retire_session_folds_stats() {
         let metatron = Metatron::new();
         let session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+        metatron.check_invariants();
 
         let pool_diff = Difficulty::from(100.0);
         session.record_accepted(pool_diff, Difficulty::from(200.0));
         session.record_accepted(pool_diff, Difficulty::from(50.0));
         session.record_rejected(pool_diff);
         metatron.retire_session(session);
+        metatron.check_invariants();
 
         let stats = metatron.snapshot();
         assert_eq!(metatron.total_sessions(), 0);
@@ -318,13 +459,17 @@ mod tests {
     fn retire_accumulates_across_multiple_sessions() {
         let metatron = Metatron::new();
         let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+        metatron.check_invariants();
         let s2 = metatron.new_session(test_auth("cafebabe", "foo"), 0);
+        metatron.check_invariants();
 
         let pool_diff = Difficulty::from(100.0);
         s1.record_accepted(pool_diff, Difficulty::from(50.0));
         s2.record_accepted(pool_diff, Difficulty::from(300.0));
         metatron.retire_session(s1);
+        metatron.check_invariants();
         metatron.retire_session(s2);
+        metatron.check_invariants();
 
         let stats = metatron.snapshot();
         assert_eq!(stats.accepted_shares, 2);
@@ -337,17 +482,120 @@ mod tests {
     fn stats_combine_active_sessions_and_lifetime() {
         let metatron = Metatron::new();
         let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+        metatron.check_invariants();
         let s2 = metatron.new_session(test_auth("cafebabe", "foo"), 0);
+        metatron.check_invariants();
 
         let pool_diff = Difficulty::from(100.0);
         s1.record_accepted(pool_diff, Difficulty::from(50.0));
         s2.record_accepted(pool_diff, Difficulty::from(200.0));
         metatron.retire_session(s1);
+        metatron.check_invariants();
 
         let stats = metatron.snapshot();
         assert_eq!(stats.accepted_shares, 2);
         assert_eq!(stats.best_share, Some(Difficulty::from(200.0)));
         let expected = TotalWork::from_difficulty(pool_diff);
         assert_eq!(stats.accepted_work, expected + expected);
+    }
+
+    #[test]
+    fn upstream_counts_are_isolated() {
+        let metatron = Metatron::new();
+
+        let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+        metatron.check_invariants();
+        let s2 = metatron.new_session(test_auth("cafebabe", "bar"), 1);
+        metatron.check_invariants();
+
+        assert_eq!(metatron.upstream_session_count(0), 1);
+        assert_eq!(metatron.upstream_session_count(1), 1);
+        assert_eq!(metatron.upstream_sessions(0)[0].id(), s1.id());
+        assert_eq!(metatron.upstream_sessions(1)[0].id(), s2.id());
+    }
+
+    #[test]
+    fn upstream_user_and_worker_counts_are_filtered() {
+        let metatron = Metatron::new();
+
+        metatron.new_session(test_auth("deadbeef", "foo"), 0);
+        metatron.check_invariants();
+        metatron.new_session(test_auth("cafebabe", "bar"), 0);
+        metatron.check_invariants();
+        metatron.new_session(test_auth("facefeed", "foo"), 1);
+        metatron.check_invariants();
+
+        assert_eq!(metatron.upstream_user_count(0), 1);
+        assert_eq!(metatron.upstream_worker_count(0), 2);
+        assert_eq!(metatron.upstream_user_count(1), 1);
+        assert_eq!(metatron.upstream_worker_count(1), 1);
+    }
+
+    #[test]
+    fn upstream_disconnected_count_is_filtered() {
+        let metatron = Metatron::new();
+
+        let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+        metatron.check_invariants();
+        let s2 = metatron.new_session(test_auth("cafebabe", "bar"), 1);
+        metatron.check_invariants();
+
+        metatron.retire_session(s1);
+        metatron.check_invariants();
+        metatron.retire_session(s2);
+        metatron.check_invariants();
+
+        assert_eq!(metatron.upstream_disconnected_count(0), 1);
+        assert_eq!(metatron.upstream_disconnected_count(1), 1);
+    }
+
+    #[test]
+    fn take_disconnected_rejects_wrong_upstream() {
+        let metatron = Metatron::new();
+
+        let enonce1: Extranonce = "deadbeef".parse().unwrap();
+        let session = metatron.new_session(test_auth("deadbeef", "foo"), 1);
+        metatron.check_invariants();
+        metatron.retire_session(session);
+        metatron.check_invariants();
+
+        assert!(!metatron.take_disconnected(&enonce1, 0));
+        assert!(metatron.take_disconnected(&enonce1, 1));
+    }
+
+    #[test]
+    fn upstream_snapshot_only_includes_requested_upstream() {
+        let metatron = Metatron::new();
+
+        let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+        metatron.check_invariants();
+        let s2 = metatron.new_session(test_auth("cafebabe", "bar"), 1);
+        metatron.check_invariants();
+
+        s1.record_accepted(Difficulty::from(100.0), Difficulty::from(200.0));
+        s2.record_rejected(Difficulty::from(300.0));
+
+        let upstream_0 = metatron.upstream_snapshot(0);
+        let upstream_1 = metatron.upstream_snapshot(1);
+
+        assert_eq!(upstream_0.accepted_shares, 1);
+        assert_eq!(upstream_0.rejected_shares, 0);
+        assert_eq!(upstream_1.accepted_shares, 0);
+        assert_eq!(upstream_1.rejected_shares, 1);
+    }
+
+    #[test]
+    fn retire_removes_session_from_upstream_index() {
+        let metatron = Metatron::new();
+
+        let session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+        metatron.check_invariants();
+        assert_eq!(metatron.upstream_session_count(0), 1);
+
+        metatron.retire_session(session);
+        metatron.check_invariants();
+
+        assert_eq!(metatron.upstream_session_count(0), 0);
+        assert!(metatron.upstream_sessions(0).is_empty());
     }
 }

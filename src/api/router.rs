@@ -40,9 +40,10 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
         let slot_upstream_rejected = slot.upstream.rejected();
         let slot_upstream_accepted_work = slot.upstream.accepted_work();
         let slot_upstream_rejected_work = slot.upstream.rejected_work();
+        let upstream_id = slot.upstream.id();
 
         slots.push(SlotStatus {
-            upstream_id: slot.upstream.id(),
+            upstream_id,
             endpoint: slot.upstream.endpoint().to_string(),
             username: slot.upstream.username().to_string(),
             ping_ms: slot.upstream.ping_ms(),
@@ -53,10 +54,10 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
             upstream_ph_days: PhDays::from(
                 slot_upstream_accepted_work + slot_upstream_rejected_work,
             ),
-            session_count: 0,
-            disconnected_count: 0,
-            idle_count: 0,
-            stats: MiningStats::from_snapshot(&Stats::new(), now),
+            session_count: metatron.upstream_session_count(upstream_id),
+            disconnected_count: metatron.upstream_disconnected_count(upstream_id),
+            idle_count: metatron.upstream_idle_count(upstream_id),
+            stats: MiningStats::from_snapshot(&metatron.upstream_snapshot(upstream_id), now),
         });
 
         upstream_accepted += slot_upstream_accepted;
@@ -90,19 +91,37 @@ async fn upstream(
         .ok_or_not_found(|| format!("Upstream {upstream_id}"))?;
 
     let now = Instant::now();
+    let metatron = router.metatron();
+    let id = slot.upstream.id();
+    let sessions = metatron.upstream_sessions(id);
+    let session_details = sessions
+        .iter()
+        .map(|session| SessionDetail::from_session(session, now))
+        .collect();
+    let workers = metatron
+        .users()
+        .iter()
+        .flat_map(|user| user.workers().collect::<Vec<_>>())
+        .filter(|worker| worker.upstream_session_count(id) > 0)
+        .map(|worker| WorkerDetail {
+            name: worker.workername().to_string(),
+            session_count: worker.upstream_session_count(id),
+            stats: MiningStats::from_snapshot(&worker.upstream_snapshot(id), now),
+        })
+        .collect();
 
     Ok(Json(UpstreamDetail {
-        upstream_id: slot.upstream.id(),
+        upstream_id: id,
         upstream: UpstreamInfo::from_upstream(&slot.upstream),
-        user_count: 0,
-        worker_count: 0,
-        session_count: 0,
-        disconnected_count: 0,
-        idle_count: 0,
-        uptime_secs: 0,
-        workers: Vec::new(),
-        sessions: Vec::new(),
-        stats: MiningStats::from_snapshot(&Stats::new(), now),
+        user_count: metatron.upstream_user_count(id),
+        worker_count: metatron.upstream_worker_count(id),
+        session_count: metatron.upstream_session_count(id),
+        disconnected_count: metatron.upstream_disconnected_count(id),
+        idle_count: metatron.upstream_idle_count(id),
+        uptime_secs: metatron.uptime().as_secs(),
+        workers,
+        sessions: session_details,
+        stats: MiningStats::from_snapshot(&metatron.upstream_snapshot(id), now),
     })
     .into_response())
 }

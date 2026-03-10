@@ -500,7 +500,9 @@ impl<W: Workbase> Stratifier<W> {
 
         let (enonce1, enonce2_size) = if let Some(ref requested_enonce1) = subscribe.enonce1 {
             let enonce1 = if self.allocator.is_compatible_enonce1(requested_enonce1)
-                && self.metatron.take_disconnected(requested_enonce1)
+                && self
+                    .metatron
+                    .take_disconnected(requested_enonce1, self.allocator.upstream_id())
             {
                 info!("Resuming session with enonce1 {requested_enonce1}");
                 requested_enonce1.clone()
