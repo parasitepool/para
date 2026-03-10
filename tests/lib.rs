@@ -21,7 +21,7 @@ use {
         path::PathBuf,
         process::{Child, Command, Stdio},
         str::FromStr,
-        sync::{Arc, Barrier, OnceLock},
+        sync::{Arc, Barrier},
         thread,
         time::Duration,
     },
@@ -69,7 +69,10 @@ use {
         io::{BufReader, stderr},
         net::TcpStream,
         process::ChildStdout,
-        sync::atomic::{AtomicUsize, Ordering},
+        sync::{
+            OnceLock,
+            atomic::{AtomicUsize, Ordering},
+        },
         time::Instant,
     },
     stratum::{
