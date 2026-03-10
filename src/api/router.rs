@@ -110,9 +110,14 @@ async fn upstream(
     let mut workers = Vec::new();
 
     for user in slot.metatron.users().iter() {
-        let (w, s) = collect_details(user.workers(), now);
-        workers.extend(w);
-        sessions.extend(s);
+        for worker in user.workers() {
+            sessions.extend(
+                worker
+                    .sessions()
+                    .map(|session| SessionDetail::from_session(&session, now)),
+            );
+            workers.push(WorkerDetail::from_worker(&worker, now));
+        }
     }
 
     Ok(Json(UpstreamDetail {
