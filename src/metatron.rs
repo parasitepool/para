@@ -48,7 +48,7 @@ impl Metatron {
         &self.endpoint
     }
 
-    pub(crate) fn spawn(self: Arc<Self>, cancel: CancellationToken, tasks: &mut JoinSet<()>) {
+    pub(crate) fn spawn(self: Arc<Self>, cancel: CancellationToken, tasks: &TaskTracker) {
         info!("Spawning metatron session cleanup task");
 
         tasks.spawn(async move {

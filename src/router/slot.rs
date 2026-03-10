@@ -14,7 +14,7 @@ impl Slot {
         enonce1_extension_size: usize,
         endpoint: &str,
         slot_cancel: CancellationToken,
-        tasks: &mut JoinSet<()>,
+        tasks: &TaskTracker,
     ) -> Result<Arc<Self>> {
         let upstream =
             Upstream::connect(upstream_id, target, timeout, slot_cancel.clone(), tasks).await?;

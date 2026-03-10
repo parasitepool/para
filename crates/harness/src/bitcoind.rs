@@ -5,9 +5,11 @@ pub struct Bitcoind {
     pub handle: Option<Child>,
     pub network: Network,
     pub rpc_port: u16,
+    pub zmq_port: Option<u16>,
     pub rpc_user: String,
     pub rpc_password: String,
     pub with_output: bool,
+    _tempdir: Option<Arc<TempDir>>,
 }
 
 impl Bitcoind {
@@ -22,9 +24,11 @@ impl Bitcoind {
             handle: None,
             network,
             rpc_port,
+            zmq_port: None,
             rpc_user,
             rpc_password,
             with_output: true,
+            _tempdir: None,
         };
 
         let info = bitcoind.client()?.get_blockchain_info().await?;
@@ -126,9 +130,11 @@ maxtxfee=1000000
             handle: Some(handle),
             network,
             rpc_port,
+            zmq_port: Some(zmq_port),
             rpc_user,
             rpc_password,
             with_output,
+            _tempdir: Some(tempdir),
         })
     }
 

@@ -1,11 +1,9 @@
 use super::*;
 
 pub(crate) struct TestPool {
-    bitcoind_handle: Bitcoind,
     pool_handle: Child,
     pool_port: u16,
     http_port: u16,
-    bitcoind_rpc_port: u16,
     _tempdir: Arc<TempDir>,
 }
 
@@ -24,15 +22,11 @@ impl TestPool {
 
     fn spawn_inner(port: Option<u16>, args: impl ToArgs) -> Self {
         let tempdir = Arc::new(TempDir::new().unwrap());
+        let bitcoind = global_bitcoind();
 
-        let bitcoind_port = allocate_port();
-        let rpc_port = allocate_port();
-        let zmq_port = allocate_port();
         let pool_port = port.unwrap_or_else(allocate_port);
         let http_port = allocate_port();
-
-        let bitcoind_handle =
-            Bitcoind::spawn(tempdir.clone(), bitcoind_port, rpc_port, zmq_port, false).unwrap();
+        let zmq_port = bitcoind.zmq_port.expect("global bitcoind missing zmq_port");
 
         let pool_handle = CommandBuilder::new(format!(
             "pool
@@ -42,9 +36,10 @@ impl TestPool {
                 --http-port {http_port}
                 --bitcoin-rpc-username satoshi
                 --bitcoin-rpc-password nakamoto
-                --bitcoin-rpc-port {rpc_port}
+                --bitcoin-rpc-port {}
                 --zmq-block-notifications tcp://127.0.0.1:{zmq_port}
                 {}",
+            bitcoind.rpc_port,
             args.to_args().join(" ")
         ))
         .capture_stderr(true)
@@ -67,11 +62,9 @@ impl TestPool {
         }
 
         Self {
-            bitcoind_handle,
             pool_handle,
             pool_port,
             http_port,
-            bitcoind_rpc_port: rpc_port,
             _tempdir: tempdir,
         }
     }
@@ -193,15 +186,15 @@ impl TestPool {
 
     #[allow(unused)]
     pub(crate) fn bitcoind_handle(&self) -> &Bitcoind {
-        &self.bitcoind_handle
+        global_bitcoind()
     }
 
     pub(crate) fn bitcoind_rpc_port(&self) -> u16 {
-        self.bitcoind_rpc_port
+        global_bitcoind().rpc_port
     }
 
     pub(crate) async fn get_block_height(&self) -> u64 {
-        self.bitcoind_handle
+        self.bitcoind_handle()
             .client()
             .unwrap()
             .get_block_count()
@@ -233,7 +226,6 @@ impl TestPool {
 
 impl Drop for TestPool {
     fn drop(&mut self) {
-        self.bitcoind_handle.shutdown();
         #[cfg(unix)]
         {
             use nix::{
