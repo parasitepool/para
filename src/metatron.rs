@@ -176,17 +176,13 @@ impl Metatron {
 
         self.users
             .iter()
-            .map(|user| {
-                user.workers()
-                    .filter(|worker| {
-                        worker
-                            .snapshot()
-                            .last_share
-                            .is_none_or(|last| now.duration_since(last).as_secs() > 60)
-                    })
-                    .count()
+            .flat_map(|user| user.sessions())
+            .filter(|session| {
+                session
+                    .last_share()
+                    .is_none_or(|last| now.duration_since(last).as_secs() > 60)
             })
-            .sum()
+            .count()
     }
 
     pub(crate) fn total_users(&self) -> usize {

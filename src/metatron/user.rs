@@ -47,6 +47,13 @@ impl User {
             })
     }
 
+    pub(crate) fn sessions(&self) -> Vec<Arc<Session>> {
+        self.workers
+            .iter()
+            .flat_map(|worker| worker.sessions())
+            .collect()
+    }
+
     pub(crate) fn workers(&self) -> impl Iterator<Item = Arc<Worker>> {
         self.workers.iter().map(|entry| entry.value().clone())
     }
