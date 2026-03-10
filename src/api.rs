@@ -67,7 +67,6 @@ impl MiningStats {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolStatus {
-    pub endpoint: String,
     pub user_count: usize,
     pub worker_count: usize,
     pub block_count: u64,
@@ -167,7 +166,6 @@ impl SessionDetail {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyStatus {
-    pub endpoint: String,
     pub user_count: usize,
     pub worker_count: usize,
     pub session_count: usize,

@@ -4,12 +4,12 @@ use {
 };
 
 #[derive(Parser, Debug)]
-pub(crate) struct RouterCli {
+pub(crate) struct RouterSubcommand {
     #[command(flatten)]
     pub(crate) options: RouterOptions,
 }
 
-impl RouterCli {
+impl RouterSubcommand {
     pub(crate) async fn run(
         &self,
         cancel_token: CancellationToken,
@@ -34,8 +34,7 @@ impl RouterCli {
 
         let timeout = settings.timeout();
         let enonce1_extension_size = settings.enonce1_extension_size();
-        let endpoint = format!("{}:{}", settings.address(), settings.port());
-        let metatron = Arc::new(Metatron::new(endpoint.clone()));
+        let metatron = Arc::new(Metatron::new());
 
         metatron.clone().spawn(cancel_token.clone(), &tasks);
 
@@ -44,7 +43,6 @@ impl RouterCli {
             settings.upstream_targets(),
             timeout,
             enonce1_extension_size,
-            &endpoint,
             &cancel_token,
             &tasks,
         )

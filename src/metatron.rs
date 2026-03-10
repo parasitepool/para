@@ -18,23 +18,17 @@ pub(crate) struct Metatron {
     users: DashMap<Address, Arc<User>>,
     disconnected: DashMap<Extranonce, (Arc<Session>, Instant)>,
     session_id_counter: AtomicU32,
-    endpoint: String,
 }
 
 impl Metatron {
-    pub(crate) fn new(endpoint: String) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             blocks: AtomicU64::new(0),
             started: Instant::now(),
             users: DashMap::new(),
             disconnected: DashMap::new(),
             session_id_counter: AtomicU32::new(0),
-            endpoint,
         }
-    }
-
-    pub(crate) fn endpoint(&self) -> &str {
-        &self.endpoint
     }
 
     pub(crate) fn spawn(self: Arc<Self>, cancel: CancellationToken, tasks: &TaskTracker) {
@@ -200,7 +194,7 @@ mod tests {
 
     #[test]
     fn new_metatron_starts_at_zero() {
-        let metatron = Metatron::new(String::new());
+        let metatron = Metatron::new();
         let stats = metatron.snapshot();
         assert_eq!(metatron.total_sessions(), 0);
         assert_eq!(stats.accepted_shares, 0);
@@ -212,7 +206,7 @@ mod tests {
 
     #[test]
     fn session_count_tracks_active_sessions() {
-        let metatron = Metatron::new(String::new());
+        let metatron = Metatron::new();
         assert_eq!(metatron.total_sessions(), 0);
 
         let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0);
@@ -228,7 +222,7 @@ mod tests {
 
     #[test]
     fn new_session_creates_user_and_worker() {
-        let metatron = Metatron::new(String::new());
+        let metatron = Metatron::new();
 
         metatron.new_session(test_auth("deadbeef", "rig1"), 0);
         assert_eq!(metatron.total_users(), 1);
@@ -241,7 +235,7 @@ mod tests {
 
     #[test]
     fn record_share_updates_stats() {
-        let metatron = Metatron::new(String::new());
+        let metatron = Metatron::new();
         let session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
 
         session.record_accepted(Difficulty::from(1000.0), Difficulty::from(1500.0));
@@ -255,14 +249,14 @@ mod tests {
 
     #[test]
     fn block_count_increments() {
-        let metatron = Metatron::new(String::new());
+        let metatron = Metatron::new();
         metatron.add_block();
         assert_eq!(metatron.total_blocks(), 1);
     }
 
     #[test]
     fn accepted_work_accumulates() {
-        let metatron = Metatron::new(String::new());
+        let metatron = Metatron::new();
         let pool_diff = Difficulty::from(100.0);
         let expected = TotalWork::from_difficulty(pool_diff);
 
@@ -285,7 +279,7 @@ mod tests {
 
     #[test]
     fn store_and_take_disconnected() {
-        let metatron = Metatron::new(String::new());
+        let metatron = Metatron::new();
 
         let enonce1: Extranonce = "deadbeef".parse().unwrap();
         assert!(!metatron.take_disconnected(&enonce1));
@@ -300,7 +294,7 @@ mod tests {
 
     #[test]
     fn retire_session_folds_stats() {
-        let metatron = Metatron::new(String::new());
+        let metatron = Metatron::new();
         let session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
 
         let pool_diff = Difficulty::from(100.0);
@@ -322,7 +316,7 @@ mod tests {
 
     #[test]
     fn retire_accumulates_across_multiple_sessions() {
-        let metatron = Metatron::new(String::new());
+        let metatron = Metatron::new();
         let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0);
         let s2 = metatron.new_session(test_auth("cafebabe", "foo"), 0);
 
@@ -341,7 +335,7 @@ mod tests {
 
     #[test]
     fn stats_combine_active_sessions_and_lifetime() {
-        let metatron = Metatron::new(String::new());
+        let metatron = Metatron::new();
         let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0);
         let s2 = metatron.new_session(test_auth("cafebabe", "foo"), 0);
 

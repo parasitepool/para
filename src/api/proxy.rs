@@ -57,7 +57,6 @@ async fn user_page(Extension(chain): Extension<Chain>) -> Response {
 
 async fn status(State(metrics): State<Arc<Metrics>>) -> Json<ProxyStatus> {
     Json(ProxyStatus {
-        endpoint: metrics.metatron.endpoint().to_string(),
         user_count: metrics.metatron.total_users(),
         worker_count: metrics.metatron.total_workers(),
         session_count: metrics.metatron.total_sessions(),

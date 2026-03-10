@@ -54,7 +54,6 @@ impl Router {
         targets: &[UpstreamTarget],
         timeout: Duration,
         enonce1_extension_size: usize,
-        endpoint: &str,
         cancel_token: &CancellationToken,
         tasks: &TaskTracker,
     ) -> Result<Arc<Self>, Error> {
@@ -66,7 +65,6 @@ impl Router {
                 target,
                 timeout,
                 enonce1_extension_size,
-                endpoint,
                 cancel_token.child_token(),
                 tasks,
             )

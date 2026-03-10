@@ -70,7 +70,6 @@ pub(super) async fn user(
 
 async fn status(State(metatron): State<Arc<Metatron>>) -> Json<PoolStatus> {
     Json(PoolStatus {
-        endpoint: metatron.endpoint().to_string(),
         user_count: metatron.total_users(),
         worker_count: metatron.total_workers(),
         block_count: metatron.total_blocks(),

@@ -20,7 +20,7 @@ pub(crate) enum Subcommand {
     #[command(about = "Run a toy stratum proxy")]
     Proxy(proxy::Proxy),
     #[command(about = "Run a toy hashrate router")]
-    Router(router::RouterCli),
+    Router(router::RouterSubcommand),
     #[command(about = "Run API server")]
     Server(server::Server),
     #[command(about = "Sync shares via HTTP")]

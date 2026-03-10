@@ -12,12 +12,11 @@ impl Slot {
         target: &UpstreamTarget,
         timeout: Duration,
         enonce1_extension_size: usize,
-        _endpoint: &str,
-        slot_cancel: CancellationToken,
+        cancel: CancellationToken,
         tasks: &TaskTracker,
     ) -> Result<Arc<Self>> {
         let upstream =
-            Upstream::connect(upstream_id, target, timeout, slot_cancel.clone(), tasks).await?;
+            Upstream::connect(upstream_id, target, timeout, cancel.clone(), tasks).await?;
 
         let proxy_extranonces = ProxyExtranonces::new(
             upstream.enonce1().clone(),
@@ -35,7 +34,7 @@ impl Slot {
         Ok(Arc::new(Self {
             upstream,
             allocator,
-            cancel_token: slot_cancel,
+            cancel_token: cancel,
         }))
     }
 }
