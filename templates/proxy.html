@@ -17,7 +17,6 @@
 
   <div class=column>
     <h2>Downstream</h2>
-    <div class=row><span>Endpoint</span><span id=endpoint></span></div>
     <div class=row><a href="/users"><span>Users</span></a><span id=users></span></div>
     <div class=row><span>Workers</span><span id=workers></span></div>
     <div class=row><span>Sessions</span><span id=sessions></span></div>
@@ -94,7 +93,6 @@ async function refresh(signal) {
     rejectionWorkCopyable('upstream_rejected_work', u.accepted_work, u.rejected_work);
     set('upstream_ping', u.ping_ms, formatPing);
 
-    set('endpoint', proxyData.endpoint);
     set('users', proxyData.user_count);
     set('workers', proxyData.worker_count);
     set('sessions', proxyData.session_count);
