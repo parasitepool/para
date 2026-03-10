@@ -11,7 +11,8 @@ pub(crate) struct Controller {
     enonce1: Extranonce,
     enonce2: Arc<Mutex<Extranonce>>,
     hasher_cancel: Option<CancellationToken>,
-    hashers: JoinSet<()>,
+    hashers: TaskTracker,
+    hasher_handles: Vec<JoinHandle<()>>,
     metrics: Arc<Metrics>,
     notify_tx: watch::Sender<Option<(Notify, CancellationToken)>>,
     notify_rx: watch::Receiver<Option<(Notify, CancellationToken)>>,
@@ -49,7 +50,8 @@ impl Controller {
             enonce1: Extranonce::zeros(0),
             enonce2: Arc::new(Mutex::new(Extranonce::zeros(0))),
             hasher_cancel: None,
-            hashers: JoinSet::new(),
+            hashers: TaskTracker::new(),
+            hasher_handles: Vec::new(),
             metrics: Arc::new(Metrics::new()),
             notify_rx,
             notify_tx,
@@ -79,8 +81,7 @@ impl Controller {
                 Action::Reconnect => {
                     controller.cancel_hashers();
                     controller.notify_tx.send_replace(None);
-                    controller.hashers.abort_all();
-                    while controller.hashers.join_next().await.is_some() {}
+                    controller.stop_hashers().await;
                     tokio::select! {
                         _ = controller.client.disconnect() => {}
                         _ = cancel_token.cancelled() => {
@@ -128,6 +129,7 @@ impl Controller {
                     };
 
                     backoff = Duration::from_secs(1);
+                    controller.reset_hashers();
                     controller.spawn_hashers();
                     controller.maybe_spawn_throbber(&cancel_token);
                 }
@@ -135,8 +137,8 @@ impl Controller {
         }
 
         controller.cancel.cancel();
+        controller.stop_hashers().await;
         drop(controller.notify_tx);
-        while controller.hashers.join_next().await.is_some() {}
         controller.client.disconnect().await;
 
         Ok(controller.shares)
@@ -307,7 +309,7 @@ impl Controller {
             let version_mask = self.version_mask;
 
             info!("Starting hasher for core {core_id}",);
-            self.hashers.spawn(async move {
+            let handle = self.hashers.spawn(async move {
                 loop {
                     if notify_rx.changed().await.is_err() {
                         break;
@@ -382,6 +384,7 @@ impl Controller {
                     }
                 }
             });
+            self.hasher_handles.push(handle);
         }
     }
 
@@ -411,12 +414,26 @@ impl Controller {
 
     fn maybe_spawn_throbber(&mut self, cancel_token: &CancellationToken) {
         if !integration_test() && !logs_enabled() {
-            spawn_throbber(
-                self.metrics.clone(),
-                cancel_token.clone(),
-                &mut self.hashers,
-            );
+            let handle = spawn_throbber(self.metrics.clone(), cancel_token.clone(), &self.hashers);
+            self.hasher_handles.push(handle);
         }
+    }
+
+    fn reset_hashers(&mut self) {
+        self.hashers.close();
+        self.hashers = TaskTracker::new();
+        self.hasher_handles.clear();
+    }
+
+    async fn stop_hashers(&mut self) {
+        self.hashers.close();
+
+        for handle in &self.hasher_handles {
+            handle.abort();
+        }
+
+        self.hashers.wait().await;
+        self.hasher_handles.clear();
     }
 
     fn cancel_hashers(&mut self) -> CancellationToken {
