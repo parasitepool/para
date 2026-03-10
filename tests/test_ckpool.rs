@@ -38,7 +38,7 @@ impl TestCkpool {
         Lazy::force(&COMPILE_CKPOOL);
 
         let ckpool_port = allocate_port();
-        let zmq_port = bitcoind.zmq_port.unwrap();
+        let zmq_port = bitcoind.zmq_port.expect("global bitcoind missing zmq_port");
 
         let ckpool_conf = tempdir.path().join("ckpool.conf");
 

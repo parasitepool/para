@@ -9,6 +9,7 @@ pub struct Bitcoind {
     pub rpc_user: String,
     pub rpc_password: String,
     pub with_output: bool,
+    _tempdir: Option<Arc<TempDir>>,
 }
 
 impl Bitcoind {
@@ -27,6 +28,7 @@ impl Bitcoind {
             rpc_user,
             rpc_password,
             with_output: true,
+            _tempdir: None,
         };
 
         let info = bitcoind.client()?.get_blockchain_info().await?;
@@ -91,20 +93,28 @@ maxtxfee=1000000
         let compiled_bitcoind = format!("{}/bitcoin/build/bin", workspace_root());
         let expanded_path = format!("{compiled_bitcoind}:{}", std::env::var("PATH")?);
 
-        let handle = Command::new("bitcoind")
-            .env("PATH", &expanded_path)
-            .arg(format!("-conf={}", bitcoind_conf.display()))
-            .stdout(if with_output {
-                Stdio::inherit()
-            } else {
-                Stdio::null()
-            })
-            .stderr(if with_output {
-                Stdio::inherit()
-            } else {
-                Stdio::null()
-            })
-            .spawn()?;
+        use std::os::unix::process::CommandExt;
+
+        let handle = unsafe {
+            Command::new("bitcoind")
+                .env("PATH", &expanded_path)
+                .arg(format!("-conf={}", bitcoind_conf.display()))
+                .stdout(if with_output {
+                    Stdio::inherit()
+                } else {
+                    Stdio::null()
+                })
+                .stderr(if with_output {
+                    Stdio::inherit()
+                } else {
+                    Stdio::null()
+                })
+                .pre_exec(|| {
+                    nix::sys::prctl::set_pdeathsig(nix::sys::signal::Signal::SIGKILL)
+                        .map_err(|e| std::io::Error::from_raw_os_error(e as i32))
+                })
+                .spawn()?
+        };
 
         let status = Command::new("bitcoin-cli")
             .env("PATH", &expanded_path)
@@ -132,6 +142,7 @@ maxtxfee=1000000
             rpc_user,
             rpc_password,
             with_output,
+            _tempdir: Some(tempdir),
         })
     }
 

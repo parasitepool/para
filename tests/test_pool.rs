@@ -26,7 +26,7 @@ impl TestPool {
 
         let pool_port = port.unwrap_or_else(allocate_port);
         let http_port = allocate_port();
-        let zmq_port = bitcoind.zmq_port.unwrap();
+        let zmq_port = bitcoind.zmq_port.expect("global bitcoind missing zmq_port");
 
         let pool_handle = CommandBuilder::new(format!(
             "pool
