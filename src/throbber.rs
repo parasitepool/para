@@ -32,7 +32,7 @@ impl Drop for Throbber {
 pub(crate) fn spawn_throbber<T: StatusLine>(
     source: Arc<T>,
     cancel: CancellationToken,
-    tasks: &mut JoinSet<()>,
+    tasks: &TaskTracker,
 ) {
     tasks.spawn(async move {
         let frames = ["⣷", "⣯", "⣟", "⡿", "⢿", "⣻", "⣽", "⣾"];

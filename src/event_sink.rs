@@ -17,7 +17,7 @@ const EVENT_CHANNEL_CAPACITY: usize = 10_000;
 pub(crate) async fn build_event_sink(
     settings: &Settings,
     cancel_token: CancellationToken,
-    tasks: &mut JoinSet<()>,
+    tasks: &TaskTracker,
 ) -> Result<Option<mpsc::Sender<Event>>> {
     let mut sinks: Vec<Box<dyn EventSink>> = Vec::new();
 

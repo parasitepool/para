@@ -49,7 +49,7 @@ impl Router {
         enonce1_extension_size: usize,
         endpoint: &str,
         cancel_token: &CancellationToken,
-        tasks: &mut JoinSet<()>,
+        tasks: &TaskTracker,
     ) -> Result<Arc<Self>, Error> {
         let mut slots = Vec::new();
 
@@ -77,7 +77,7 @@ impl Router {
         Ok(Arc::new(Self::new(slots)))
     }
 
-    pub(crate) fn spawn(self: &Arc<Self>, cancel: CancellationToken, tasks: &mut JoinSet<()>) {
+    pub(crate) fn spawn(self: &Arc<Self>, cancel: CancellationToken, tasks: &TaskTracker) {
         for slot in &self.slots() {
             let slot = slot.clone();
             let router = self.clone();

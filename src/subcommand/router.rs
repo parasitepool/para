@@ -15,7 +15,7 @@ impl RouterCli {
         cancel_token: CancellationToken,
         logs: Arc<logs::Logs>,
     ) -> Result {
-        let mut tasks = JoinSet::new();
+        let tasks = TaskTracker::new();
 
         let settings = Arc::new(
             Settings::from_router_options(self.options.clone())
@@ -42,21 +42,21 @@ impl RouterCli {
             enonce1_extension_size,
             &endpoint,
             &cancel_token,
-            &mut tasks,
+            &tasks,
         )
         .await?;
 
-        router.spawn(cancel_token.clone(), &mut tasks);
+        router.spawn(cancel_token.clone(), &tasks);
 
         http_server::spawn(
             &settings,
             api::router::router(router.clone(), bitcoin_client, settings.chain(), logs),
             cancel_token.clone(),
-            &mut tasks,
+            &tasks,
         )?;
 
         if !integration_test() && !logs_enabled() {
-            spawn_throbber(router.clone(), cancel_token.clone(), &mut tasks);
+            spawn_throbber(router.clone(), cancel_token.clone(), &tasks);
         }
 
         let start_diff = settings.start_diff();
@@ -74,7 +74,8 @@ impl RouterCli {
                 }
                 _ = cancel_token.cancelled() => {
                     info!("Shutting down router");
-                    while tasks.join_next().await.is_some() {}
+                    tasks.close();
+                    tasks.wait().await;
                     info!("All router tasks stopped");
                     return Ok(());
                 }

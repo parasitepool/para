@@ -4,7 +4,7 @@ pub(crate) async fn spawn_generator(
     rpc: Arc<BitcoindClient>,
     settings: Arc<Settings>,
     cancel: CancellationToken,
-    tasks: &mut JoinSet<()>,
+    tasks: &TaskTracker,
 ) -> Result<watch::Receiver<Arc<BlockTemplate>>> {
     info!("Spawning generator task");
 
