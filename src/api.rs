@@ -222,6 +222,8 @@ impl UpstreamInfo {
 pub struct RouterStatus {
     pub upstream_count: usize,
     pub session_count: usize,
+    pub disconnected_count: usize,
+    pub idle_count: usize,
     pub uptime_secs: u64,
     pub slots: Vec<SlotStatus>,
     pub upstream_accepted: u64,
@@ -240,6 +242,8 @@ pub struct SlotStatus {
     pub username: String,
     pub ping_ms: u128,
     pub session_count: usize,
+    pub disconnected_count: usize,
+    pub idle_count: usize,
     pub upstream_accepted: u64,
     pub upstream_rejected: u64,
     pub upstream_accepted_work: TotalWork,

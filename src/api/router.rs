@@ -31,6 +31,8 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
     let mut slots = Vec::new();
     let mut combined = Stats::new();
     let mut session_count = 0;
+    let mut disconnected_count = 0;
+    let mut idle_count = 0;
     let mut uptime_secs = 0;
     let mut upstream_accepted = 0;
     let mut upstream_rejected = 0;
@@ -41,7 +43,11 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
         let stats = slot.metatron.snapshot();
 
         let slot_session_count = slot.metatron.total_sessions();
+        let slot_disconnected_count = slot.metatron.total_disconnected();
+        let slot_idle_count = slot.metatron.total_idle();
         session_count += slot_session_count;
+        disconnected_count += slot_disconnected_count;
+        idle_count += slot_idle_count;
         uptime_secs = uptime_secs.max(slot.metatron.uptime().as_secs());
 
         let slot_upstream_accepted = slot.upstream.accepted();
@@ -62,6 +68,8 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
                 slot_upstream_accepted_work + slot_upstream_rejected_work,
             ),
             session_count: slot_session_count,
+            disconnected_count: slot_disconnected_count,
+            idle_count: slot_idle_count,
             stats: MiningStats::from_snapshot(&stats, now),
         });
 
@@ -76,6 +84,8 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
     Json(RouterStatus {
         upstream_count: slots.len(),
         session_count,
+        disconnected_count,
+        idle_count,
         uptime_secs,
         slots,
         upstream_accepted,

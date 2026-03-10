@@ -78,6 +78,8 @@
   <div class=column>
     <h2>Downstream</h2>
     <div class=row><span>Sessions</span><span id=session_count></span></div>
+    <div class=row><span>Idle</span><span id=idle></span></div>
+    <div class=row><span>Disconnected</span><span id=disconnected></span></div>
     <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
     <div class=row><span>SPS</span><span id=sps_1m></span></div>
     <div class=row><span>Best Share</span><span id=best_share class=copyable></span></div>
@@ -139,6 +141,8 @@ async function refresh(signal) {
 
     set('upstream_count', routerData.upstream_count);
     set('session_count', routerData.session_count);
+    set('idle', routerData.idle_count);
+    set('disconnected', routerData.disconnected_count);
     set('hashrate_1m', routerData.hashrate_1m, formatHashrate);
     set('sps_1m', routerData.sps_1m, formatTruncated);
     set('last_share', routerData.last_share);
@@ -181,6 +185,8 @@ async function refresh(signal) {
         </div>
         <div class=slot-pane>
           <div class=row><a class=slot-link href="/upstream/${slot.upstream_id}">Sessions</a><span>${slot.session_count}</span></div>
+          <div class=row><span>Idle</span><span>${slot.idle_count}</span></div>
+          <div class=row><span>Disconnected</span><span>${slot.disconnected_count}</span></div>
           <div class=row><span>Hashrate</span><span>${formatHashrate(slot.hashrate_1m)}</span></div>
           <div class=row><span>SPS</span><span>${formatTruncated(slot.sps_1m)}</span></div>
           <div class=row><span>Best Share</span><span>${formatDifficulty(slot.best_share)}</span></div>
