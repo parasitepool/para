@@ -99,8 +99,8 @@ impl UserDetail {
             sessions.extend(
                 worker
                     .sessions()
-                    .into_iter()
-                    .map(|s| SessionDetail::from_session(&s, now)),
+                    .iter()
+                    .map(|s| SessionDetail::from_session(s, now)),
             );
             workers.push(WorkerDetail::from_worker(&worker, now));
         }

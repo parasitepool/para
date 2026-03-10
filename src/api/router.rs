@@ -114,8 +114,8 @@ async fn upstream(
             sessions.extend(
                 worker
                     .sessions()
-                    .into_iter()
-                    .map(|session| SessionDetail::from_session(&session, now)),
+                    .iter()
+                    .map(|session| SessionDetail::from_session(session, now)),
             );
             workers.push(WorkerDetail::from_worker(&worker, now));
         }
