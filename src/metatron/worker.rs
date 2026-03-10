@@ -34,7 +34,7 @@ impl Worker {
         self.sessions.len()
     }
 
-    pub(crate) fn sessions(&self) -> impl Iterator<Item = Arc<Session>> + '_ {
+    pub(crate) fn sessions(&self) -> impl Iterator<Item = Arc<Session>> {
         self.sessions.iter().map(|entry| entry.value().clone())
     }
 
