@@ -34,11 +34,8 @@ impl Worker {
         self.sessions.len()
     }
 
-    pub(crate) fn sessions(&self) -> Vec<Arc<Session>> {
-        self.sessions
-            .iter()
-            .map(|entry| entry.value().clone())
-            .collect()
+    pub(crate) fn sessions(&self) -> impl Iterator<Item = Arc<Session>> + '_ {
+        self.sessions.iter().map(|entry| entry.value().clone())
     }
 
     pub(crate) fn snapshot(&self) -> Stats {

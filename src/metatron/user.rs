@@ -50,7 +50,7 @@ impl User {
     pub(crate) fn sessions(&self) -> Vec<Arc<Session>> {
         self.workers
             .iter()
-            .flat_map(|worker| worker.sessions())
+            .flat_map(|worker| worker.sessions().collect::<Vec<_>>())
             .collect()
     }
 
