@@ -21,7 +21,7 @@ use {
         path::PathBuf,
         process::{Child, Command, Stdio},
         str::FromStr,
-        sync::{Arc, Barrier},
+        sync::{Arc, Barrier, OnceLock},
         thread,
         time::Duration,
     },
@@ -128,6 +128,20 @@ fn allocate_port() -> u16 {
         .local_addr()
         .unwrap()
         .port()
+}
+
+#[cfg(target_os = "linux")]
+fn global_bitcoind() -> &'static Bitcoind {
+    static BITCOIND: OnceLock<Bitcoind> = OnceLock::new();
+
+    BITCOIND.get_or_init(|| {
+        let tempdir = Arc::new(TempDir::new().unwrap());
+        let bitcoind_port = allocate_port();
+        let rpc_port = allocate_port();
+        let zmq_port = allocate_port();
+
+        Bitcoind::spawn(tempdir, bitcoind_port, rpc_port, zmq_port, false).unwrap()
+    })
 }
 
 #[cfg(target_os = "linux")]

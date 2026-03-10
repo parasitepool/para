@@ -22,7 +22,6 @@ static COMPILE_CKPOOL: Lazy<()> = Lazy::new(|| {
 });
 
 pub(crate) struct TestCkpool {
-    bitcoind_handle: Bitcoind,
     ckpool_handle: Child,
     ckpool_port: u16,
     _tempdir: Arc<TempDir>,
@@ -31,37 +30,15 @@ pub(crate) struct TestCkpool {
 impl TestCkpool {
     pub(crate) fn spawn() -> Self {
         let tempdir = Arc::new(TempDir::new().unwrap());
+        let bitcoind = global_bitcoind();
 
         let sockdir = tempdir.path().join("tmp");
         fs::create_dir(&sockdir).unwrap();
 
         Lazy::force(&COMPILE_CKPOOL);
 
-        let (bitcoind_port, rpc_port, zmq_port, ckpool_port) = (
-            TcpListener::bind("127.0.0.1:0")
-                .unwrap()
-                .local_addr()
-                .unwrap()
-                .port(),
-            TcpListener::bind("127.0.0.1:0")
-                .unwrap()
-                .local_addr()
-                .unwrap()
-                .port(),
-            TcpListener::bind("127.0.0.1:0")
-                .unwrap()
-                .local_addr()
-                .unwrap()
-                .port(),
-            TcpListener::bind("127.0.0.1:0")
-                .unwrap()
-                .local_addr()
-                .unwrap()
-                .port(),
-        );
-
-        let bitcoind_handle =
-            Bitcoind::spawn(tempdir.clone(), bitcoind_port, rpc_port, zmq_port, false).unwrap();
+        let ckpool_port = allocate_port();
+        let zmq_port = bitcoind.zmq_port.unwrap();
 
         let ckpool_conf = tempdir.path().join("ckpool.conf");
 
@@ -71,7 +48,7 @@ impl TestCkpool {
                 r#"{{
     "btcd" : [
         {{
-            "url" : "127.0.0.1:{rpc_port}",
+            "url" : "127.0.0.1:{}",
             "auth" : "satoshi",
             "pass" : "nakamoto",
             "notify" : true
@@ -93,7 +70,8 @@ impl TestCkpool {
     "maxdiff" : 0,
     "zmqblock" : "tcp://127.0.0.1:{zmq_port}",
     "logdir" : "logs"
-}}"#
+}}"#,
+                bitcoind.rpc_port,
             ),
         )
         .unwrap();
@@ -127,7 +105,6 @@ impl TestCkpool {
         }
 
         Self {
-            bitcoind_handle,
             ckpool_handle,
             ckpool_port,
             _tempdir: tempdir,
@@ -141,7 +118,6 @@ impl TestCkpool {
 
 impl Drop for TestCkpool {
     fn drop(&mut self) {
-        self.bitcoind_handle.shutdown();
         self.ckpool_handle.kill().unwrap();
         self.ckpool_handle.wait().unwrap();
     }
