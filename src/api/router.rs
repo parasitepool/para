@@ -29,27 +29,13 @@ async fn upstream_page(Extension(chain): Extension<Chain>) -> Response {
 async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
     let now = Instant::now();
     let mut slots = Vec::new();
-    let mut combined = Stats::new();
-    let mut session_count = 0;
-    let mut disconnected_count = 0;
-    let mut idle_count = 0;
-    let mut uptime_secs = 0;
     let mut upstream_accepted = 0;
     let mut upstream_rejected = 0;
     let mut upstream_accepted_work = TotalWork::ZERO;
     let mut upstream_rejected_work = TotalWork::ZERO;
+    let metatron = router.metatron();
 
     for slot in router.slots().iter() {
-        let stats = slot.metatron.snapshot();
-
-        let slot_session_count = slot.metatron.total_sessions();
-        let slot_disconnected_count = slot.metatron.total_disconnected();
-        let slot_idle_count = slot.metatron.total_idle();
-        session_count += slot_session_count;
-        disconnected_count += slot_disconnected_count;
-        idle_count += slot_idle_count;
-        uptime_secs = uptime_secs.max(slot.metatron.uptime().as_secs());
-
         let slot_upstream_accepted = slot.upstream.accepted();
         let slot_upstream_rejected = slot.upstream.rejected();
         let slot_upstream_accepted_work = slot.upstream.accepted_work();
@@ -67,33 +53,31 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
             upstream_ph_days: PhDays::from(
                 slot_upstream_accepted_work + slot_upstream_rejected_work,
             ),
-            session_count: slot_session_count,
-            disconnected_count: slot_disconnected_count,
-            idle_count: slot_idle_count,
-            stats: MiningStats::from_snapshot(&stats, now),
+            session_count: 0,
+            disconnected_count: 0,
+            idle_count: 0,
+            stats: MiningStats::from_snapshot(&Stats::new(), now),
         });
 
         upstream_accepted += slot_upstream_accepted;
         upstream_rejected += slot_upstream_rejected;
         upstream_accepted_work += slot_upstream_accepted_work;
         upstream_rejected_work += slot_upstream_rejected_work;
-
-        combined.absorb(stats, now);
     }
 
     Json(RouterStatus {
         upstream_count: slots.len(),
-        session_count,
-        disconnected_count,
-        idle_count,
-        uptime_secs,
+        session_count: metatron.total_sessions(),
+        disconnected_count: metatron.total_disconnected(),
+        idle_count: metatron.total_idle(),
+        uptime_secs: metatron.uptime().as_secs(),
         slots,
         upstream_accepted,
         upstream_rejected,
         upstream_accepted_work,
         upstream_rejected_work,
         upstream_ph_days: (upstream_accepted_work + upstream_rejected_work).into(),
-        stats: MiningStats::from_snapshot(&combined, now),
+        stats: MiningStats::from_snapshot(&metatron.snapshot(), now),
     })
 }
 
@@ -106,32 +90,19 @@ async fn upstream(
         .ok_or_not_found(|| format!("Upstream {upstream_id}"))?;
 
     let now = Instant::now();
-    let mut sessions = Vec::new();
-    let mut workers = Vec::new();
-
-    for user in slot.metatron.users().iter() {
-        for worker in user.workers() {
-            sessions.extend(
-                worker
-                    .sessions()
-                    .map(|session| SessionDetail::from_session(&session, now)),
-            );
-            workers.push(WorkerDetail::from_worker(&worker, now));
-        }
-    }
 
     Ok(Json(UpstreamDetail {
         upstream_id: slot.upstream.id(),
         upstream: UpstreamInfo::from_upstream(&slot.upstream),
-        user_count: slot.metatron.total_users(),
-        worker_count: slot.metatron.total_workers(),
-        session_count: slot.metatron.total_sessions(),
-        disconnected_count: slot.metatron.total_disconnected(),
-        idle_count: slot.metatron.total_idle(),
-        uptime_secs: slot.metatron.uptime().as_secs(),
-        workers,
-        sessions,
-        stats: MiningStats::from_snapshot(&slot.metatron.snapshot(), now),
+        user_count: 0,
+        worker_count: 0,
+        session_count: 0,
+        disconnected_count: 0,
+        idle_count: 0,
+        uptime_secs: 0,
+        workers: Vec::new(),
+        sessions: Vec::new(),
+        stats: MiningStats::from_snapshot(&Stats::new(), now),
     })
     .into_response())
 }

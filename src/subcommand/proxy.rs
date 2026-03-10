@@ -60,11 +60,12 @@ impl Proxy {
             .context("upstream extranonce configuration incompatible with proxy mode")?,
         );
 
-        let metatron = Arc::new(Metatron::new(
-            extranonces,
-            format!("{}:{}", settings.address(), settings.port()),
-            0,
-        ));
+        let allocator = Arc::new(EnonceAllocator::new(extranonces, 0));
+        let metatron = Arc::new(Metatron::new(format!(
+            "{}:{}",
+            settings.address(),
+            settings.port()
+        )));
 
         metatron.clone().spawn(cancel_token.clone(), &tasks);
 
@@ -113,6 +114,7 @@ impl Proxy {
                 debug!("Spawning stratifier task for {addr}");
 
                 let settings = settings.clone();
+                let allocator = allocator.clone();
                 let metatron = metatron.clone();
                 let upstream = upstream.clone();
                 let conn_cancel_token = cancel_token.child_token();
@@ -124,6 +126,7 @@ impl Proxy {
                     let mut stratifier: Stratifier<Notify> = Stratifier::new(
                         addr,
                         settings,
+                        allocator,
                         metatron,
                         Some(upstream),
                         stream,
@@ -160,7 +163,7 @@ impl Proxy {
                 .context("upstream extranonce configuration incompatible with proxy mode")?,
             );
 
-            metatron.update_extranonces(new_extranonces);
+            allocator.update_extranonces(new_extranonces);
             metrics.update_upstream(new_upstream.clone());
             upstream = new_upstream;
         }

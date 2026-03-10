@@ -35,8 +35,12 @@ impl RouterCli {
         let timeout = settings.timeout();
         let enonce1_extension_size = settings.enonce1_extension_size();
         let endpoint = format!("{}:{}", settings.address(), settings.port());
+        let metatron = Arc::new(Metatron::new(endpoint.clone()));
+
+        metatron.clone().spawn(cancel_token.clone(), &tasks);
 
         let router = Router::connect(
+            metatron.clone(),
             settings.upstream_targets(),
             timeout,
             enonce1_extension_size,
@@ -88,6 +92,7 @@ impl RouterCli {
 
             let settings = settings.clone();
             let cancel_token = slot.cancel_token.child_token();
+            let metatron = metatron.clone();
 
             debug!("Spawning stratifier task for {addr}");
 
@@ -95,7 +100,8 @@ impl RouterCli {
                 let mut stratifier: Stratifier<Notify> = Stratifier::new(
                     addr,
                     settings,
-                    slot.metatron.clone(),
+                    slot.allocator.clone(),
+                    metatron,
                     Some(slot.upstream.clone()),
                     stream,
                     slot.upstream.workbase_rx(),

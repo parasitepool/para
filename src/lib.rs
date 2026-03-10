@@ -38,6 +38,7 @@ use {
     coinbase_builder::CoinbaseBuilder,
     dashmap::DashMap,
     decay::{DecayingAverage, calculate_time_bias},
+    enonce_allocator::EnonceAllocator,
     extranonces::{Extranonces, PoolExtranonces, ProxyExtranonces},
     futures::{
         sink::SinkExt,
@@ -140,6 +141,7 @@ mod chain;
 pub mod ckpool;
 mod coinbase_builder;
 mod decay;
+mod enonce_allocator;
 mod event_sink;
 mod extranonces;
 mod generator;

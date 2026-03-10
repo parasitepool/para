@@ -2,7 +2,7 @@ use super::*;
 
 pub(crate) struct Slot {
     pub(crate) upstream: Arc<Upstream>,
-    pub(crate) metatron: Arc<Metatron>,
+    pub(crate) allocator: Arc<EnonceAllocator>,
     pub(crate) cancel_token: CancellationToken,
 }
 
@@ -12,7 +12,7 @@ impl Slot {
         target: &UpstreamTarget,
         timeout: Duration,
         enonce1_extension_size: usize,
-        endpoint: &str,
+        _endpoint: &str,
         slot_cancel: CancellationToken,
         tasks: &TaskTracker,
     ) -> Result<Arc<Self>> {
@@ -25,19 +25,16 @@ impl Slot {
             enonce1_extension_size,
         )?;
 
-        let metatron = Arc::new(Metatron::new(
+        let allocator = Arc::new(EnonceAllocator::new(
             Extranonces::Proxy(proxy_extranonces),
-            endpoint.to_string(),
             upstream_id,
         ));
-
-        metatron.clone().spawn(slot_cancel.clone(), tasks);
 
         info!("Upstream {target} connected");
 
         Ok(Arc::new(Self {
             upstream,
-            metatron,
+            allocator,
             cancel_token: slot_cancel,
         }))
     }

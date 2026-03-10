@@ -3,13 +3,15 @@ use {super::*, slot::Slot};
 mod slot;
 
 pub(crate) struct Router {
+    metatron: Arc<Metatron>,
     slots: RwLock<Vec<Arc<Slot>>>,
     counter: AtomicU64,
 }
 
 impl Router {
-    pub(crate) fn new(slots: Vec<Arc<Slot>>) -> Self {
+    pub(crate) fn new(metatron: Arc<Metatron>, slots: Vec<Arc<Slot>>) -> Self {
         Self {
+            metatron,
             slots: RwLock::new(slots),
             counter: AtomicU64::new(0),
         }
@@ -35,6 +37,10 @@ impl Router {
         self.slots.read().clone()
     }
 
+    pub(crate) fn metatron(&self) -> Arc<Metatron> {
+        self.metatron.clone()
+    }
+
     pub(crate) fn slot_by_upstream_id(&self, id: u32) -> Option<Arc<Slot>> {
         self.slots
             .read()
@@ -44,6 +50,7 @@ impl Router {
     }
 
     pub(crate) async fn connect(
+        metatron: Arc<Metatron>,
         targets: &[UpstreamTarget],
         timeout: Duration,
         enonce1_extension_size: usize,
@@ -74,7 +81,7 @@ impl Router {
 
         ensure!(!slots.is_empty(), "all upstream connections failed");
 
-        Ok(Arc::new(Self::new(slots)))
+        Ok(Arc::new(Self::new(metatron, slots)))
     }
 
     pub(crate) fn spawn(self: &Arc<Self>, cancel: CancellationToken, tasks: &TaskTracker) {
@@ -108,14 +115,10 @@ impl StatusLine for Router {
     fn status_line(&self) -> String {
         let now = Instant::now();
         let slots = self.slots();
-        let mut total_sessions = 0;
-        let mut total_hashrate = 0.0;
+        let stats = self.metatron.snapshot();
         let mut connected = 0;
 
         for slot in &slots {
-            let stats = slot.metatron.snapshot();
-            total_sessions += slot.metatron.total_sessions();
-            total_hashrate += stats.hashrate_1m(now).0;
             if slot.upstream.is_connected() {
                 connected += 1;
             }
@@ -125,8 +128,8 @@ impl StatusLine for Router {
             "upstreams={}/{}  sessions={}  hashrate={:.2}",
             connected,
             slots.len(),
-            total_sessions,
-            HashRate(total_hashrate),
+            self.metatron.total_sessions(),
+            stats.hashrate_1m(now),
         )
     }
 }

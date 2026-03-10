@@ -38,11 +38,12 @@ impl Pool {
                 .context("invalid extranonce configuration")?,
         );
 
-        let metatron = Arc::new(Metatron::new(
-            extranonces,
-            format!("{}:{}", settings.address(), settings.port()),
-            0,
-        ));
+        let allocator = Arc::new(EnonceAllocator::new(extranonces, 0));
+        let metatron = Arc::new(Metatron::new(format!(
+            "{}:{}",
+            settings.address(),
+            settings.port()
+        )));
         metatron.clone().spawn(cancel_token.clone(), &tasks);
 
         http_server::spawn(
@@ -118,6 +119,7 @@ impl Pool {
 
             let workbase_rx = workbase_rx.clone();
             let settings = settings.clone();
+            let allocator = allocator.clone();
             let metatron = metatron.clone();
             let conn_cancel_token = cancel_token.child_token();
             let event_tx = event_tx.clone();
@@ -126,6 +128,7 @@ impl Pool {
                 let mut stratifier: Stratifier<BlockTemplate> = Stratifier::new(
                     addr,
                     settings.clone(),
+                    allocator,
                     metatron,
                     None,
                     stream,
