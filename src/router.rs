@@ -50,13 +50,10 @@ impl Router {
         tasks: &TaskTracker,
     ) -> Result<Arc<Self>, Error> {
         let mut slots = Vec::new();
-        let upstream_counter = AtomicU32::new(0);
-
         for (index, target) in targets.iter().enumerate() {
-            let upstream_id = upstream_counter.fetch_add(1, Ordering::Relaxed);
             match Slot::connect(
                 index,
-                upstream_id,
+                index as u32,
                 target,
                 timeout,
                 enonce1_extension_size,

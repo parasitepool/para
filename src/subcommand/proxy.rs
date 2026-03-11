@@ -41,8 +41,7 @@ impl Proxy {
 
         let metatron = Arc::new(Metatron::new());
 
-        let upstream_counter = AtomicU32::new(0);
-        let upstream_id = upstream_counter.fetch_add(1, Ordering::Relaxed);
+        let mut upstream_id = 0u32;
 
         let Some(mut upstream) = connect_upstream(
             upstream_id,
@@ -143,7 +142,8 @@ impl Proxy {
                 });
             }
 
-            let new_id = upstream_counter.fetch_add(1, Ordering::Relaxed);
+            upstream_id += 1;
+            let new_id = upstream_id;
 
             let Some(new_upstream) = connect_upstream(
                 new_id,
