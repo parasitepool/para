@@ -106,7 +106,11 @@ impl Router {
     }
 
     pub(crate) fn upstream_disconnected_count(&self, upstream_id: u32) -> usize {
-        self.metatron.disconnected_count_for(upstream_id)
+        self.metatron
+            .disconnected()
+            .iter()
+            .filter(|entry| entry.value().0.id().upstream_id() == upstream_id)
+            .count()
     }
 
     pub(crate) fn slot_by_index(&self, index: usize) -> Option<Arc<Slot>> {
@@ -122,9 +126,10 @@ impl Router {
         tasks: &TaskTracker,
     ) -> Result<Arc<Self>, Error> {
         let mut slots = Vec::new();
+        let upstream_counter = AtomicU32::new(0);
 
         for (index, target) in targets.iter().enumerate() {
-            let upstream_id = metatron.next_upstream_id();
+            let upstream_id = upstream_counter.fetch_add(1, Ordering::Relaxed);
             match Slot::connect(
                 index,
                 upstream_id,
@@ -272,6 +277,21 @@ mod tests {
         assert_eq!(upstream_0.rejected_shares, 0);
         assert_eq!(upstream_1.accepted_shares, 0);
         assert_eq!(upstream_1.rejected_shares, 1);
+    }
+
+    #[test]
+    fn upstream_disconnected_count_is_filtered() {
+        let router = test_router();
+        let metatron = router.metatron();
+
+        let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+        let s2 = metatron.new_session(test_auth("cafebabe", "bar"), 1);
+
+        metatron.retire_session(s1);
+        metatron.retire_session(s2);
+
+        assert_eq!(router.upstream_disconnected_count(0), 1);
+        assert_eq!(router.upstream_disconnected_count(1), 1);
     }
 
     #[test]

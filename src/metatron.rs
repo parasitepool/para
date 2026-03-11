@@ -18,7 +18,6 @@ pub(crate) struct Metatron {
     users: DashMap<Address, Arc<User>>,
     disconnected: DashMap<Extranonce, (Arc<Session>, Instant)>,
     counter: AtomicU32,
-    upstream_counter: AtomicU32,
 }
 
 impl Metatron {
@@ -29,12 +28,7 @@ impl Metatron {
             users: DashMap::new(),
             disconnected: DashMap::new(),
             counter: AtomicU32::new(0),
-            upstream_counter: AtomicU32::new(0),
         }
-    }
-
-    pub(crate) fn next_upstream_id(&self) -> u32 {
-        self.upstream_counter.fetch_add(1, Ordering::Relaxed)
     }
 
     pub(crate) fn spawn(self: Arc<Self>, cancel: CancellationToken, tasks: &TaskTracker) {
@@ -154,11 +148,8 @@ impl Metatron {
         self.started.elapsed()
     }
 
-    pub(crate) fn disconnected_count_for(&self, upstream_id: u32) -> usize {
-        self.disconnected
-            .iter()
-            .filter(|entry| entry.value().0.id().upstream_id() == upstream_id)
-            .count()
+    pub(crate) fn disconnected(&self) -> &DashMap<Extranonce, (Arc<Session>, Instant)> {
+        &self.disconnected
     }
 }
 
@@ -363,20 +354,6 @@ mod tests {
     }
 
     #[test]
-    fn disconnected_count_for_is_filtered() {
-        let metatron = Metatron::new();
-
-        let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0);
-        let s2 = metatron.new_session(test_auth("cafebabe", "bar"), 1);
-
-        metatron.retire_session(s1);
-        metatron.retire_session(s2);
-
-        assert_eq!(metatron.disconnected_count_for(0), 1);
-        assert_eq!(metatron.disconnected_count_for(1), 1);
-    }
-
-    #[test]
     fn take_disconnected_rejects_wrong_upstream() {
         let metatron = Metatron::new();
 
@@ -386,13 +363,5 @@ mod tests {
 
         assert!(!metatron.resume_session(&enonce1, 0));
         assert!(metatron.resume_session(&enonce1, 1));
-    }
-
-    #[test]
-    fn next_upstream_id_is_monotonic() {
-        let metatron = Metatron::new();
-        assert_eq!(metatron.next_upstream_id(), 0);
-        assert_eq!(metatron.next_upstream_id(), 1);
-        assert_eq!(metatron.next_upstream_id(), 2);
     }
 }

@@ -39,10 +39,7 @@ impl Pool {
         );
 
         let metatron = Arc::new(Metatron::new());
-        let allocator = Arc::new(EnonceAllocator::new(
-            extranonces,
-            metatron.next_upstream_id(),
-        ));
+        let allocator = Arc::new(EnonceAllocator::new(extranonces, 0));
         metatron.clone().spawn(cancel_token.clone(), &tasks);
 
         http_server::spawn(
