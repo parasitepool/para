@@ -102,11 +102,13 @@ async fn upstream(
         .users()
         .iter()
         .flat_map(|user| user.workers().collect::<Vec<_>>())
-        .filter(|worker| worker.upstream_session_count(id) > 0)
-        .map(|worker| WorkerDetail {
-            name: worker.workername().to_string(),
-            session_count: worker.upstream_session_count(id),
-            stats: MiningStats::from_snapshot(&worker.upstream_snapshot(id), now),
+        .filter_map(|worker| {
+            let session_count = worker.upstream_session_count(id);
+            (session_count > 0).then(|| WorkerDetail {
+                name: worker.workername().to_string(),
+                session_count,
+                stats: MiningStats::from_snapshot(&worker.upstream_snapshot(id), now),
+            })
         })
         .collect();
 

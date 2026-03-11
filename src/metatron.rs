@@ -153,11 +153,7 @@ impl Metatron {
         self.users
             .iter()
             .flat_map(|user| user.sessions())
-            .filter(|session| {
-                session
-                    .last_share()
-                    .is_none_or(|last| now.duration_since(last).as_secs() > 60)
-            })
+            .filter(|session| session.is_idle(now))
             .count()
     }
 
@@ -169,9 +165,8 @@ impl Metatron {
         self.users
             .iter()
             .filter(|user| {
-                user.sessions()
-                    .into_iter()
-                    .any(|session| session.id().upstream_id() == upstream_id)
+                user.workers()
+                    .any(|worker| worker.upstream_session_count(upstream_id) > 0)
             })
             .count()
     }
@@ -224,11 +219,7 @@ impl Metatron {
                 upstream
                     .sessions
                     .iter()
-                    .filter(|session| {
-                        session
-                            .last_share()
-                            .is_none_or(|last| now.duration_since(last).as_secs() > 60)
-                    })
+                    .filter(|session| session.is_idle(now))
                     .count()
             })
             .unwrap_or(0)
