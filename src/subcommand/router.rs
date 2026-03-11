@@ -32,8 +32,6 @@ impl RouterSubcommand {
 
         info!("Stratum router listening for downstream miners on {address}:{port}");
 
-        let timeout = settings.timeout();
-        let enonce1_extension_size = settings.enonce1_extension_size();
         let metatron = Arc::new(Metatron::new());
 
         metatron.clone().spawn(cancel_token.clone(), &tasks);
@@ -41,8 +39,8 @@ impl RouterSubcommand {
         let router = Router::connect(
             metatron.clone(),
             settings.upstream_targets(),
-            timeout,
-            enonce1_extension_size,
+            settings.timeout(),
+            settings.enonce1_extension_size(),
             &cancel_token,
             &tasks,
         )
@@ -89,7 +87,7 @@ impl RouterSubcommand {
             };
 
             let settings = settings.clone();
-            let cancel_token = slot.cancel_token.child_token();
+            let cancel_token = slot.cancel.child_token();
             let metatron = metatron.clone();
 
             debug!("Spawning stratifier task for {addr}");

@@ -3,7 +3,7 @@ use super::*;
 pub(crate) struct Slot {
     pub(crate) upstream: Arc<Upstream>,
     pub(crate) allocator: Arc<EnonceAllocator>,
-    pub(crate) cancel_token: CancellationToken,
+    pub(crate) cancel: CancellationToken,
 }
 
 impl Slot {
@@ -34,7 +34,7 @@ impl Slot {
         Ok(Arc::new(Self {
             upstream,
             allocator,
-            cancel_token: cancel,
+            cancel,
         }))
     }
 }

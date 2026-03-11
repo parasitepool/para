@@ -12,13 +12,18 @@ pub(crate) mod stats;
 pub(crate) mod user;
 pub(crate) mod worker;
 
+#[derive(Default)]
+struct UpstreamState {
+    sessions: DashMap<SessionId, Arc<Session>>,
+}
+
 pub(crate) struct Metatron {
     blocks: AtomicU64,
     started: Instant,
     users: DashMap<Address, Arc<User>>,
-    upstream_sessions: DashMap<u32, DashMap<SessionId, Arc<Session>>>,
+    upstreams: DashMap<u32, UpstreamState>,
     disconnected: DashMap<Extranonce, (Arc<Session>, Instant)>,
-    session_id_counter: AtomicU32,
+    session_counter: AtomicU32,
 }
 
 impl Metatron {
@@ -27,9 +32,9 @@ impl Metatron {
             blocks: AtomicU64::new(0),
             started: Instant::now(),
             users: DashMap::new(),
-            upstream_sessions: DashMap::new(),
+            upstreams: DashMap::new(),
             disconnected: DashMap::new(),
-            session_id_counter: AtomicU32::new(0),
+            session_counter: AtomicU32::new(0),
         }
     }
 
@@ -61,8 +66,8 @@ impl Metatron {
     }
 
     pub(crate) fn new_session(&self, auth: Arc<Authorization>, upstream_id: u32) -> Arc<Session> {
-        let counter = self.session_id_counter.fetch_add(1, Ordering::Relaxed);
-        let id = SessionId::new(upstream_id, counter);
+        let session_counter = self.session_counter.fetch_add(1, Ordering::Relaxed);
+        let id = SessionId::new(upstream_id, session_counter);
 
         let session = Arc::new(Session::new(
             id,
@@ -78,9 +83,10 @@ impl Metatron {
             .or_insert_with(|| Arc::new(User::new(auth.address.clone())))
             .new_session(&auth.workername, session.clone());
 
-        self.upstream_sessions
+        self.upstreams
             .entry(upstream_id)
             .or_default()
+            .sessions
             .insert(id, session.clone());
 
         session
@@ -93,30 +99,20 @@ impl Metatron {
             worker.retire_session(session.id());
         }
 
-        if let Some(sessions) = self.upstream_sessions.get(&session.id().upstream_id()) {
-            sessions.remove(&session.id());
-
-            let remove_upstream = sessions.is_empty();
-            drop(sessions);
-
-            if remove_upstream {
-                self.upstream_sessions.remove(&session.id().upstream_id());
-            }
+        if let Some(upstream) = self.upstreams.get(&session.id().upstream_id()) {
+            upstream.sessions.remove(&session.id());
         }
 
         self.disconnected
             .insert(session.enonce1().clone(), (session, Instant::now()));
     }
 
-    pub(crate) fn take_disconnected(&self, enonce1: &Extranonce, upstream_id: u32) -> bool {
-        if let Some(entry) = self.disconnected.get(enonce1)
-            && entry.value().0.id().upstream_id() == upstream_id
-        {
-            drop(entry);
-            return self.disconnected.remove(enonce1).is_some();
-        }
-
-        false
+    pub(crate) fn resume_session(&self, enonce1: &Extranonce, upstream_id: u32) -> bool {
+        self.disconnected
+            .remove_if(enonce1, |_, (session, _)| {
+                session.id().upstream_id() == upstream_id
+            })
+            .is_some()
     }
 
     pub(crate) fn add_block(&self) {
@@ -200,10 +196,11 @@ impl Metatron {
     }
 
     pub(crate) fn upstream_sessions(&self, upstream_id: u32) -> Vec<Arc<Session>> {
-        self.upstream_sessions
+        self.upstreams
             .get(&upstream_id)
-            .map(|sessions| {
-                sessions
+            .map(|upstream| {
+                upstream
+                    .sessions
                     .iter()
                     .map(|session| session.value().clone())
                     .collect()
@@ -212,35 +209,46 @@ impl Metatron {
     }
 
     pub(crate) fn upstream_session_count(&self, upstream_id: u32) -> usize {
-        self.upstream_sessions
+        self.upstreams
             .get(&upstream_id)
-            .map(|sessions| sessions.len())
+            .map(|upstream| upstream.sessions.len())
             .unwrap_or(0)
     }
 
     pub(crate) fn upstream_idle_count(&self, upstream_id: u32) -> usize {
         let now = Instant::now();
 
-        self.upstream_sessions(upstream_id)
-            .into_iter()
-            .filter(|session| {
-                session
-                    .last_share()
-                    .is_none_or(|last| now.duration_since(last).as_secs() > 60)
+        self.upstreams
+            .get(&upstream_id)
+            .map(|upstream| {
+                upstream
+                    .sessions
+                    .iter()
+                    .filter(|session| {
+                        session
+                            .last_share()
+                            .is_none_or(|last| now.duration_since(last).as_secs() > 60)
+                    })
+                    .count()
             })
-            .count()
+            .unwrap_or(0)
     }
 
     pub(crate) fn upstream_snapshot(&self, upstream_id: u32) -> Stats {
         let now = Instant::now();
 
-        self.upstream_sessions(upstream_id).into_iter().fold(
-            Stats::new(),
-            |mut combined, session| {
-                combined.absorb(session.snapshot(), now);
-                combined
-            },
-        )
+        self.upstreams
+            .get(&upstream_id)
+            .map(|upstream| {
+                upstream
+                    .sessions
+                    .iter()
+                    .fold(Stats::new(), |mut combined, session| {
+                        combined.absorb(session.snapshot(), now);
+                        combined
+                    })
+            })
+            .unwrap_or_else(Stats::new)
     }
 
     pub(crate) fn users(&self) -> &DashMap<Address, Arc<User>> {
@@ -257,11 +265,12 @@ impl Metatron {
             .collect();
 
         let index: HashSet<SessionId> = self
-            .upstream_sessions
+            .upstreams
             .iter()
             .flat_map(|entry| {
                 entry
                     .value()
+                    .sessions
                     .iter()
                     .map(|session| {
                         assert_eq!(session.value().id().upstream_id(), *entry.key());
@@ -419,7 +428,7 @@ mod tests {
         metatron.check_invariants();
 
         let enonce1: Extranonce = "deadbeef".parse().unwrap();
-        assert!(!metatron.take_disconnected(&enonce1, 0));
+        assert!(!metatron.resume_session(&enonce1, 0));
 
         let session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
         metatron.check_invariants();
@@ -427,7 +436,7 @@ mod tests {
         metatron.check_invariants();
         assert_eq!(metatron.total_disconnected(), 1);
 
-        assert!(metatron.take_disconnected(&enonce1, 0));
+        assert!(metatron.resume_session(&enonce1, 0));
         assert_eq!(metatron.total_disconnected(), 0);
     }
 
@@ -559,8 +568,8 @@ mod tests {
         metatron.retire_session(session);
         metatron.check_invariants();
 
-        assert!(!metatron.take_disconnected(&enonce1, 0));
-        assert!(metatron.take_disconnected(&enonce1, 1));
+        assert!(!metatron.resume_session(&enonce1, 0));
+        assert!(metatron.resume_session(&enonce1, 1));
     }
 
     #[test]

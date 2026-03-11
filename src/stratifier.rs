@@ -502,7 +502,7 @@ impl<W: Workbase> Stratifier<W> {
             let enonce1 = if self.allocator.is_compatible_enonce1(requested_enonce1)
                 && self
                     .metatron
-                    .take_disconnected(requested_enonce1, self.allocator.upstream_id())
+                    .resume_session(requested_enonce1, self.allocator.upstream_id())
             {
                 info!("Resuming session with enonce1 {requested_enonce1}");
                 requested_enonce1.clone()

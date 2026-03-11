@@ -96,7 +96,7 @@ impl Router {
                             "Upstream {} disconnected, removing slot",
                             slot.upstream.endpoint()
                         );
-                        slot.cancel_token.cancel();
+                        slot.cancel.cancel();
                         router.remove_slot(&slot);
                         if router.slots().is_empty() {
                             error!("All upstreams disconnected, shutting down");
