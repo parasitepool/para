@@ -37,6 +37,72 @@ impl Router {
         self.slots.read().clone()
     }
 
+    pub(crate) fn slot_by_index(&self, index: usize) -> Option<Arc<Slot>> {
+        self.slots.read().iter().find(|s| s.index == index).cloned()
+    }
+
+    pub(crate) async fn connect(
+        metatron: Arc<Metatron>,
+        targets: &[UpstreamTarget],
+        timeout: Duration,
+        enonce1_extension_size: usize,
+        cancel_token: &CancellationToken,
+        tasks: &TaskTracker,
+    ) -> Result<Arc<Self>, Error> {
+        let mut slots = Vec::new();
+        let upstream_counter = AtomicU32::new(0);
+
+        for (index, target) in targets.iter().enumerate() {
+            let upstream_id = upstream_counter.fetch_add(1, Ordering::Relaxed);
+            match Slot::connect(
+                index,
+                upstream_id,
+                target,
+                timeout,
+                enonce1_extension_size,
+                cancel_token.child_token(),
+                tasks,
+            )
+            .await
+            {
+                Ok(slot) => slots.push(slot),
+                Err(err) => {
+                    warn!("Skipping upstream {target}: {err}");
+                }
+            }
+        }
+
+        ensure!(!slots.is_empty(), "all upstream connections failed");
+
+        Ok(Arc::new(Self::new(metatron, slots)))
+    }
+
+    pub(crate) fn spawn(self: &Arc<Self>, cancel: CancellationToken, tasks: &TaskTracker) {
+        for slot in &self.slots() {
+            let slot = slot.clone();
+            let router = self.clone();
+            let cancel = cancel.clone();
+            tasks.spawn(async move {
+                tokio::select! {
+                    biased;
+                    _ = cancel.cancelled() => {}
+                    _ = slot.upstream.disconnected() => {
+                        warn!(
+                            "Upstream {} disconnected, removing slot",
+                            slot.upstream.endpoint()
+                        );
+                        slot.cancel.cancel();
+                        router.remove_slot(&slot);
+                        if router.slots().is_empty() {
+                            error!("All upstreams disconnected, shutting down");
+                            cancel.cancel();
+                        }
+                    }
+                }
+            });
+        }
+    }
+
     pub(crate) fn metatron(&self) -> Arc<Metatron> {
         self.metatron.clone()
     }
@@ -113,71 +179,6 @@ impl Router {
             .count()
     }
 
-    pub(crate) fn slot_by_index(&self, index: usize) -> Option<Arc<Slot>> {
-        self.slots.read().iter().find(|s| s.index == index).cloned()
-    }
-
-    pub(crate) async fn connect(
-        metatron: Arc<Metatron>,
-        targets: &[UpstreamTarget],
-        timeout: Duration,
-        enonce1_extension_size: usize,
-        cancel_token: &CancellationToken,
-        tasks: &TaskTracker,
-    ) -> Result<Arc<Self>, Error> {
-        let mut slots = Vec::new();
-        let upstream_counter = AtomicU32::new(0);
-
-        for (index, target) in targets.iter().enumerate() {
-            let upstream_id = upstream_counter.fetch_add(1, Ordering::Relaxed);
-            match Slot::connect(
-                index,
-                upstream_id,
-                target,
-                timeout,
-                enonce1_extension_size,
-                cancel_token.child_token(),
-                tasks,
-            )
-            .await
-            {
-                Ok(slot) => slots.push(slot),
-                Err(err) => {
-                    warn!("Skipping upstream {target}: {err}");
-                }
-            }
-        }
-
-        ensure!(!slots.is_empty(), "all upstream connections failed");
-
-        Ok(Arc::new(Self::new(metatron, slots)))
-    }
-
-    pub(crate) fn spawn(self: &Arc<Self>, cancel: CancellationToken, tasks: &TaskTracker) {
-        for slot in &self.slots() {
-            let slot = slot.clone();
-            let router = self.clone();
-            let cancel = cancel.clone();
-            tasks.spawn(async move {
-                tokio::select! {
-                    biased;
-                    _ = cancel.cancelled() => {}
-                    _ = slot.upstream.disconnected() => {
-                        warn!(
-                            "Upstream {} disconnected, removing slot",
-                            slot.upstream.endpoint()
-                        );
-                        slot.cancel.cancel();
-                        router.remove_slot(&slot);
-                        if router.slots().is_empty() {
-                            error!("All upstreams disconnected, shutting down");
-                            cancel.cancel();
-                        }
-                    }
-                }
-            });
-        }
-    }
 }
 
 impl StatusLine for Router {
