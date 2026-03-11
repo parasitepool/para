@@ -4,12 +4,12 @@ use {
 };
 
 #[derive(Parser, Debug)]
-pub(crate) struct RouterCli {
+pub(crate) struct RouterSubcommand {
     #[command(flatten)]
     pub(crate) options: RouterOptions,
 }
 
-impl RouterCli {
+impl RouterSubcommand {
     pub(crate) async fn run(
         &self,
         cancel_token: CancellationToken,
@@ -32,15 +32,15 @@ impl RouterCli {
 
         info!("Stratum router listening for downstream miners on {address}:{port}");
 
-        let timeout = settings.timeout();
-        let enonce1_extension_size = settings.enonce1_extension_size();
-        let endpoint = format!("{}:{}", settings.address(), settings.port());
+        let metatron = Arc::new(Metatron::new());
+
+        metatron.clone().spawn(cancel_token.clone(), &tasks);
 
         let router = Router::connect(
+            metatron.clone(),
             settings.upstream_targets(),
-            timeout,
-            enonce1_extension_size,
-            &endpoint,
+            settings.timeout(),
+            settings.enonce1_extension_size(),
             &cancel_token,
             &tasks,
         )
@@ -87,7 +87,8 @@ impl RouterCli {
             };
 
             let settings = settings.clone();
-            let cancel_token = slot.cancel_token.child_token();
+            let cancel_token = slot.cancel.child_token();
+            let metatron = metatron.clone();
 
             debug!("Spawning stratifier task for {addr}");
 
@@ -95,7 +96,8 @@ impl RouterCli {
                 let mut stratifier: Stratifier<Notify> = Stratifier::new(
                     addr,
                     settings,
-                    slot.metatron.clone(),
+                    slot.allocator.clone(),
+                    metatron,
                     Some(slot.upstream.clone()),
                     stream,
                     slot.upstream.workbase_rx(),

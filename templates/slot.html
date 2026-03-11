@@ -81,36 +81,36 @@
 </div>
 
 <script>
-const upstreamId = window.location.pathname.split('/').filter(Boolean).pop();
+const slotIndex = window.location.pathname.split('/').filter(Boolean).pop();
 
-document.title = document.title.replace('Upstream', `Upstream ${upstreamId}`);
-document.querySelector('h1').childNodes[0].textContent = `Router | Upstream ${upstreamId}`;
+document.title = document.title.replace('Slot', `Slot ${slotIndex}`);
+document.querySelector('h1').childNodes[0].textContent = `Router | Slot ${slotIndex}`;
 
-let upstreamIds = [];
+let slotIndices = [];
 fetch('/api/router/status').then(r => r.json()).then(data => {
-  upstreamIds = (data.slots || []).map(s => s.upstream_id);
+  slotIndices = (data.slots || []).map(s => s.index);
   updateNav();
 }).catch(() => {});
 
 function updateNav() {
   const el = document.getElementById('upstream-title');
-  if (!el || upstreamIds.length < 2) {
-    if (el) el.textContent = `Upstream ${upstreamId}`;
+  if (!el || slotIndices.length < 2) {
+    if (el) el.textContent = `Slot ${slotIndex}`;
     return;
   }
-  const idx = upstreamIds.indexOf(Number(upstreamId));
-  const prevId = upstreamIds[(idx - 1 + upstreamIds.length) % upstreamIds.length];
-  const nextId = upstreamIds[(idx + 1) % upstreamIds.length];
-  el.innerHTML = `<a href="/upstream/${prevId}" class="nav-arrow">\u25C0</a> Upstream ${upstreamId} <a href="/upstream/${nextId}" class="nav-arrow">\u25B6</a>`;
+  const idx = slotIndices.indexOf(Number(slotIndex));
+  const prevIdx = slotIndices[(idx - 1 + slotIndices.length) % slotIndices.length];
+  const nextIdx = slotIndices[(idx + 1) % slotIndices.length];
+  el.innerHTML = `<a href="/slot/${prevIdx}" class="nav-arrow">\u25C0</a> Slot ${slotIndex} <a href="/slot/${nextIdx}" class="nav-arrow">\u25B6</a>`;
 }
 updateNav();
 
 async function refresh(signal) {
   try {
-    const data = await fetch(`/api/router/upstream/${upstreamId}`, { signal }).then(r => r.json()).catch(() => null);
+    const data = await fetch(`/api/router/slot/${slotIndex}`, { signal }).then(r => r.json()).catch(() => null);
 
     if (!data) {
-      document.querySelector('.grid').innerHTML = '<div class="column column-full"><h2>Upstream Not Found</h2></div>';
+      document.querySelector('.grid').innerHTML = '<div class="column column-full"><h2>Slot Not Found</h2></div>';
       return;
     }
 

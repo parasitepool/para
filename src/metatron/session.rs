@@ -74,6 +74,15 @@ impl Session {
         self.version_mask
     }
 
+    pub(crate) fn last_share(&self) -> Option<Instant> {
+        self.stats.lock().last_share
+    }
+
+    pub(crate) fn is_idle(&self, now: Instant) -> bool {
+        self.last_share()
+            .is_none_or(|last| now.duration_since(last).as_secs() > 60)
+    }
+
     pub(crate) fn snapshot(&self) -> Stats {
         self.stats.lock().clone()
     }

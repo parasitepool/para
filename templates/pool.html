@@ -1,7 +1,6 @@
 <div class=grid>
   <div class="column column-full">
     <h2>Info</h2>
-    <div class=row><span>Endpoint</span><span id=endpoint></span></div>
     <div class=row><a href="/users"><span>Users</span></a><span id=users></span></div>
     <div class=row><span>Workers</span><span id=workers></span></div>
     <div class=row><span>Sessions</span><span id=sessions></span></div>
@@ -61,7 +60,6 @@ async function refresh(signal) {
       fetch('/api/bitcoin/status', { signal }).then(r => r.json()).catch(() => ({}))
     ]);
 
-    set('endpoint', poolData.endpoint);
     set('users', poolData.user_count);
     set('workers', poolData.worker_count);
     set('sessions', poolData.session_count);

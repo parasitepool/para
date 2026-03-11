@@ -17,8 +17,6 @@ async fn proxy() {
 
     let status = proxy.get_status().await.unwrap();
 
-    assert_eq!(status.endpoint, proxy.stratum_endpoint());
-
     let system_status = proxy.get_system_status().await.unwrap();
     assert!(system_status.cpu_usage_percent >= 0.0 && system_status.cpu_usage_percent <= 100.0);
     assert!(
@@ -557,4 +555,114 @@ async fn reconnects_on_upstream_disconnect() {
 
     miner.kill().unwrap();
     miner.wait().unwrap();
+}
+
+#[tokio::test]
+#[serial(bitcoind)]
+#[timeout(120000)]
+async fn stale_extended_enonce1_is_rejected_after_upstream_reconnect() {
+    let pool = TestPool::spawn_with_args("--start-diff 0.00001");
+    let pool_port = pool.pool_port();
+
+    let proxy = TestProxy::spawn_with_args(
+        &pool.stratum_endpoint(),
+        signet_username().as_str(),
+        pool.bitcoind_rpc_port(),
+        "--start-diff 0.00001",
+    );
+
+    let client = proxy.stratum_client();
+    let mut events = client.connect().await.unwrap();
+
+    let (subscribe, _, _) = client.subscribe().await.unwrap();
+    client.authorize().await.unwrap();
+
+    let (notify, difficulty) = wait_for_notify(&mut events).await;
+    let enonce2 = Extranonce::random(subscribe.enonce2_size);
+    let (ntime, nonce) = solve_share(&notify, &subscribe.enonce1, &enonce2, difficulty);
+
+    client
+        .submit(notify.job_id, enonce2, ntime, nonce, None)
+        .await
+        .unwrap();
+
+    client.disconnect().await;
+    drop(events);
+
+    let stale_enonce1 = subscribe.enonce1;
+
+    drop(pool);
+
+    timeout(Duration::from_secs(10), async {
+        loop {
+            if let Ok(status) = proxy.get_status().await
+                && !status.upstream.connected
+            {
+                break;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("Timeout waiting for proxy to detect disconnect");
+
+    thread::sleep(Duration::from_millis(500));
+
+    let pool2 = TestPool::spawn_on_port(
+        pool_port,
+        "--start-diff 0.00001 --enonce1-size 6 --enonce2-size 4",
+    );
+
+    timeout(Duration::from_secs(30), async {
+        loop {
+            if let Ok(status) = proxy.get_status().await
+                && status.upstream.connected
+            {
+                break;
+            }
+            sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("Timeout waiting for proxy to reconnect");
+
+    let reconnected_status = proxy.get_status().await.unwrap();
+
+    let client2 = proxy.stratum_client();
+    let mut events2 = client2.connect().await.unwrap();
+
+    let (subscribe2, _, _) = client2
+        .subscribe_with_enonce1(Some(stale_enonce1.clone()))
+        .await
+        .unwrap();
+
+    assert_ne!(subscribe2.enonce1, stale_enonce1);
+    assert_eq!(
+        &subscribe2.enonce1.as_bytes()[..reconnected_status.upstream.enonce1.len()],
+        reconnected_status.upstream.enonce1.as_bytes(),
+    );
+    assert_eq!(
+        subscribe2.enonce1.len(),
+        reconnected_status.upstream.enonce1.len() + ENONCE1_EXTENSION_SIZE,
+    );
+    assert_eq!(
+        subscribe2.enonce2_size,
+        reconnected_status.upstream.enonce2_size - ENONCE1_EXTENSION_SIZE,
+    );
+
+    client2.authorize().await.unwrap();
+
+    let (notify2, difficulty2) = wait_for_notify(&mut events2).await;
+    let enonce2_2 = Extranonce::random(subscribe2.enonce2_size);
+    let (ntime2, nonce2) = solve_share(&notify2, &subscribe2.enonce1, &enonce2_2, difficulty2);
+
+    client2
+        .submit(notify2.job_id, enonce2_2, ntime2, nonce2, None)
+        .await
+        .unwrap();
+
+    let status = proxy.get_status().await.unwrap();
+    assert_eq!(status.upstream.accepted, 1);
+
+    drop(pool2);
 }

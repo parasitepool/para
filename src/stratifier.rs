@@ -13,6 +13,7 @@ pub(crate) struct Stratifier<W: Workbase> {
     state: State,
     socket_addr: SocketAddr,
     settings: Arc<Settings>,
+    allocator: Arc<EnonceAllocator>,
     metatron: Arc<Metatron>,
     upstream: Option<Arc<Upstream>>,
     reader: FramedRead<OwnedReadHalf, LinesCodec>,
@@ -30,6 +31,7 @@ impl<W: Workbase> Stratifier<W> {
     pub(crate) fn new(
         socket_addr: SocketAddr,
         settings: Arc<Settings>,
+        allocator: Arc<EnonceAllocator>,
         metatron: Arc<Metatron>,
         upstream: Option<Arc<Upstream>>,
         tcp_stream: TcpStream,
@@ -56,6 +58,7 @@ impl<W: Workbase> Stratifier<W> {
             state: State::new(),
             socket_addr,
             settings,
+            allocator,
             metatron,
             upstream,
             reader: FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_MESSAGE_SIZE)),
@@ -151,7 +154,9 @@ impl<W: Workbase> Stratifier<W> {
                         "mining.submit" => {
                             let session = match &self.state {
                                 State::Authorized(auth) => {
-                                    let session = self.metatron.new_session(auth.clone());
+                                    let session = self
+                                        .metatron
+                                        .new_session(auth.clone(), self.allocator.upstream_id());
                                     self.state = State::Working(session.clone());
                                     session
                                 },
@@ -238,7 +243,7 @@ impl<W: Workbase> Stratifier<W> {
 
                 match workbase.create_job(
                     enonce1,
-                    self.metatron.enonce2_size(),
+                    self.allocator.enonce2_size(),
                     Some(address),
                     self.jobs.next_id(),
                     self.state.version_mask(),
@@ -373,7 +378,7 @@ impl<W: Workbase> Stratifier<W> {
             workbase
                 .create_job(
                     identity.enonce1(),
-                    self.metatron.enonce2_size(),
+                    self.allocator.enonce2_size(),
                     Some(identity.address()),
                     self.jobs.next_id(),
                     self.state.version_mask(),
@@ -493,32 +498,20 @@ impl<W: Workbase> Stratifier<W> {
             return Ok(self.bouncer.reject());
         }
 
-        let (enonce1, enonce2_size) = if let Some(ref requested_enonce1) = subscribe.enonce1 {
-            let enonce1 = if self.metatron.take_disconnected(requested_enonce1) {
-                info!("Resuming session with enonce1 {requested_enonce1}");
-                requested_enonce1.clone()
-            } else {
-                self.metatron.next_enonce1()
-            };
-
-            (enonce1, self.metatron.enonce2_size())
+        let enonce1 = if let Some(ref requested) = subscribe.enonce1
+            && self
+                .metatron
+                .resume_session(requested, self.allocator.upstream_id())
+        {
+            info!("Resuming session with enonce1 {requested}");
+            requested.clone()
         } else {
-            (self.metatron.next_enonce1(), self.metatron.enonce2_size())
+            self.allocator.next_enonce1()
         };
 
-        if !self.state.subscribe(enonce1.clone(), subscribe.user_agent) {
-            self.send_error(
-                id,
-                StratumError::MethodNotAllowed,
-                Some(serde_json::json!({
-                    "method": "mining.subscribe",
-                    "current_state": self.state.to_string()
-                })),
-            )
-            .await?;
+        let enonce2_size = self.allocator.enonce2_size();
 
-            return Ok(self.bouncer.reject());
-        }
+        self.state.subscribe(enonce1.clone(), subscribe.user_agent);
 
         self.bouncer.accept();
 
@@ -603,7 +596,7 @@ impl<W: Workbase> Stratifier<W> {
             workbase
                 .create_job(
                     &subscription.enonce1,
-                    self.metatron.enonce2_size(),
+                    self.allocator.enonce2_size(),
                     Some(&address),
                     self.jobs.next_id(),
                     self.state.version_mask(),
@@ -707,7 +700,7 @@ impl<W: Workbase> Stratifier<W> {
 
         let pool_diff = self.vardiff.pool_diff(submit.job_id);
 
-        let expected_extranonce2_size = self.metatron.enonce2_size();
+        let expected_extranonce2_size = self.allocator.enonce2_size();
 
         if submit.enonce2.len() != expected_extranonce2_size {
             warn!(
@@ -1051,7 +1044,7 @@ impl<W: Workbase> Stratifier<W> {
         };
 
         let enonce2 = {
-            let extranonces = self.metatron.extranonces();
+            let extranonces = self.allocator.extranonces();
             match &*extranonces {
                 Extranonces::Pool(_) => submit.enonce2.clone(),
                 Extranonces::Proxy(proxy) => {

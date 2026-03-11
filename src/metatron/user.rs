@@ -18,7 +18,7 @@ impl User {
         }
     }
 
-    pub(crate) fn new_session(&self, workername: &str, session: Arc<Session>) {
+    pub(super) fn new_session(&self, workername: &str, session: Arc<Session>) {
         self.workers
             .entry(workername.to_string())
             .or_insert_with(|| Arc::new(Worker::new(workername.to_string())))
@@ -45,6 +45,13 @@ impl User {
                 combined.absorb(worker.snapshot(), now);
                 combined
             })
+    }
+
+    pub(crate) fn sessions(&self) -> Vec<Arc<Session>> {
+        self.workers
+            .iter()
+            .flat_map(|worker| worker.sessions().collect::<Vec<_>>())
+            .collect()
     }
 
     pub(crate) fn workers(&self) -> impl Iterator<Item = Arc<Worker>> {

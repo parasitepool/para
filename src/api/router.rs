@@ -8,9 +8,9 @@ pub(crate) fn router(
 ) -> axum::Router {
     axum::Router::new()
         .route("/", get(home))
-        .route("/upstream/{upstream_id}", get(upstream_page))
+        .route("/slot/{index}", get(slot_page))
         .route("/api/router/status", get(status))
-        .route("/api/router/upstream/{upstream_id}", get(upstream))
+        .route("/api/router/slot/{index}", get(slot))
         .with_state(state)
         .merge(common_routes())
         .layer(Extension(bitcoin_client))
@@ -22,41 +22,29 @@ async fn home(Extension(chain): Extension<Chain>) -> Response {
     render_page(RouterHtml, chain)
 }
 
-async fn upstream_page(Extension(chain): Extension<Chain>) -> Response {
-    render_page(UpstreamHtml, chain)
+async fn slot_page(Extension(chain): Extension<Chain>) -> Response {
+    render_page(SlotHtml, chain)
 }
 
 async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
     let now = Instant::now();
     let mut slots = Vec::new();
-    let mut combined = Stats::new();
-    let mut session_count = 0;
-    let mut disconnected_count = 0;
-    let mut idle_count = 0;
-    let mut uptime_secs = 0;
     let mut upstream_accepted = 0;
     let mut upstream_rejected = 0;
     let mut upstream_accepted_work = TotalWork::ZERO;
     let mut upstream_rejected_work = TotalWork::ZERO;
+    let metatron = router.metatron();
 
     for slot in router.slots().iter() {
-        let stats = slot.metatron.snapshot();
-
-        let slot_session_count = slot.metatron.total_sessions();
-        let slot_disconnected_count = slot.metatron.total_disconnected();
-        let slot_idle_count = slot.metatron.total_idle();
-        session_count += slot_session_count;
-        disconnected_count += slot_disconnected_count;
-        idle_count += slot_idle_count;
-        uptime_secs = uptime_secs.max(slot.metatron.uptime().as_secs());
-
         let slot_upstream_accepted = slot.upstream.accepted();
         let slot_upstream_rejected = slot.upstream.rejected();
         let slot_upstream_accepted_work = slot.upstream.accepted_work();
         let slot_upstream_rejected_work = slot.upstream.rejected_work();
+        let upstream_id = slot.upstream.id();
 
         slots.push(SlotStatus {
-            upstream_id: slot.upstream.id(),
+            index: slot.index,
+            upstream_id,
             endpoint: slot.upstream.endpoint().to_string(),
             username: slot.upstream.username().to_string(),
             ping_ms: slot.upstream.ping_ms(),
@@ -67,71 +55,77 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
             upstream_ph_days: PhDays::from(
                 slot_upstream_accepted_work + slot_upstream_rejected_work,
             ),
-            session_count: slot_session_count,
-            disconnected_count: slot_disconnected_count,
-            idle_count: slot_idle_count,
-            stats: MiningStats::from_snapshot(&stats, now),
+            session_count: router.upstream_session_count(upstream_id),
+            disconnected_count: router.upstream_disconnected_count(upstream_id),
+            idle_count: router.upstream_idle_count(upstream_id),
+            stats: MiningStats::from_snapshot(&router.upstream_snapshot(upstream_id), now),
         });
 
         upstream_accepted += slot_upstream_accepted;
         upstream_rejected += slot_upstream_rejected;
         upstream_accepted_work += slot_upstream_accepted_work;
         upstream_rejected_work += slot_upstream_rejected_work;
-
-        combined.absorb(stats, now);
     }
 
     Json(RouterStatus {
         upstream_count: slots.len(),
-        session_count,
-        disconnected_count,
-        idle_count,
-        uptime_secs,
+        session_count: metatron.total_sessions(),
+        disconnected_count: metatron.total_disconnected(),
+        idle_count: metatron.total_idle(),
+        uptime_secs: metatron.uptime().as_secs(),
         slots,
         upstream_accepted,
         upstream_rejected,
         upstream_accepted_work,
         upstream_rejected_work,
         upstream_ph_days: (upstream_accepted_work + upstream_rejected_work).into(),
-        stats: MiningStats::from_snapshot(&combined, now),
+        stats: MiningStats::from_snapshot(&metatron.snapshot(), now),
     })
 }
 
-async fn upstream(
+async fn slot(
     State(router): State<Arc<Router>>,
-    Path(upstream_id): Path<u32>,
+    Path(index): Path<usize>,
 ) -> ServerResult<Response> {
     let slot = router
-        .slot_by_upstream_id(upstream_id)
-        .ok_or_not_found(|| format!("Upstream {upstream_id}"))?;
+        .slot_by_index(index)
+        .ok_or_not_found(|| format!("Slot {index}"))?;
 
     let now = Instant::now();
-    let mut sessions = Vec::new();
-    let mut workers = Vec::new();
+    let metatron = router.metatron();
+    let upstream_id = slot.upstream.id();
+    let sessions = router.upstream_sessions(upstream_id);
+    let session_details = sessions
+        .iter()
+        .map(|session| SessionDetail::from_session(session, now))
+        .collect();
+    let workers = metatron
+        .users()
+        .iter()
+        .flat_map(|user| user.workers().collect::<Vec<_>>())
+        .filter_map(|worker| {
+            let session_count = worker.upstream_session_count(upstream_id);
+            (session_count > 0).then(|| WorkerDetail {
+                name: worker.workername().to_string(),
+                session_count,
+                stats: MiningStats::from_snapshot(&worker.upstream_snapshot(upstream_id), now),
+            })
+        })
+        .collect();
 
-    for user in slot.metatron.users().iter() {
-        for worker in user.workers() {
-            sessions.extend(
-                worker
-                    .sessions()
-                    .map(|session| SessionDetail::from_session(&session, now)),
-            );
-            workers.push(WorkerDetail::from_worker(&worker, now));
-        }
-    }
-
-    Ok(Json(UpstreamDetail {
-        upstream_id: slot.upstream.id(),
+    Ok(Json(SlotDetail {
+        index: slot.index,
+        upstream_id,
         upstream: UpstreamInfo::from_upstream(&slot.upstream),
-        user_count: slot.metatron.total_users(),
-        worker_count: slot.metatron.total_workers(),
-        session_count: slot.metatron.total_sessions(),
-        disconnected_count: slot.metatron.total_disconnected(),
-        idle_count: slot.metatron.total_idle(),
-        uptime_secs: slot.metatron.uptime().as_secs(),
+        user_count: router.upstream_user_count(upstream_id),
+        worker_count: router.upstream_worker_count(upstream_id),
+        session_count: router.upstream_session_count(upstream_id),
+        disconnected_count: router.upstream_disconnected_count(upstream_id),
+        idle_count: router.upstream_idle_count(upstream_id),
+        uptime_secs: metatron.uptime().as_secs(),
         workers,
-        sessions,
-        stats: MiningStats::from_snapshot(&slot.metatron.snapshot(), now),
+        sessions: session_details,
+        stats: MiningStats::from_snapshot(&router.upstream_snapshot(upstream_id), now),
     })
     .into_response())
 }

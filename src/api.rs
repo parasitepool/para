@@ -4,9 +4,7 @@ use {
     http_server::{
         self, common_routes,
         error::{OptionExt, ServerResult},
-        templates::{
-            PoolHtml, ProxyHtml, RouterHtml, UpstreamHtml, UserHtml, UsersHtml, render_page,
-        },
+        templates::{PoolHtml, ProxyHtml, RouterHtml, SlotHtml, UserHtml, UsersHtml, render_page},
     },
 };
 
@@ -67,7 +65,6 @@ impl MiningStats {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolStatus {
-    pub endpoint: String,
     pub user_count: usize,
     pub worker_count: usize,
     pub block_count: u64,
@@ -167,7 +164,6 @@ impl SessionDetail {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyStatus {
-    pub endpoint: String,
     pub user_count: usize,
     pub worker_count: usize,
     pub session_count: usize,
@@ -221,40 +217,42 @@ impl UpstreamInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RouterStatus {
     pub upstream_count: usize,
-    pub session_count: usize,
-    pub disconnected_count: usize,
-    pub idle_count: usize,
-    pub uptime_secs: u64,
-    pub slots: Vec<SlotStatus>,
     pub upstream_accepted: u64,
     pub upstream_rejected: u64,
     pub upstream_accepted_work: TotalWork,
     pub upstream_rejected_work: TotalWork,
     pub upstream_ph_days: PhDays,
+    pub session_count: usize,
+    pub disconnected_count: usize,
+    pub idle_count: usize,
+    pub uptime_secs: u64,
+    pub slots: Vec<SlotStatus>,
     #[serde(flatten)]
     pub stats: MiningStats,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SlotStatus {
+    pub index: usize,
     pub upstream_id: u32,
+    pub upstream_accepted: u64,
+    pub upstream_rejected: u64,
+    pub upstream_accepted_work: TotalWork,
+    pub upstream_rejected_work: TotalWork,
+    pub upstream_ph_days: PhDays,
     pub endpoint: String,
     pub username: String,
     pub ping_ms: u128,
     pub session_count: usize,
     pub disconnected_count: usize,
     pub idle_count: usize,
-    pub upstream_accepted: u64,
-    pub upstream_rejected: u64,
-    pub upstream_accepted_work: TotalWork,
-    pub upstream_rejected_work: TotalWork,
-    pub upstream_ph_days: PhDays,
     #[serde(flatten)]
     pub stats: MiningStats,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UpstreamDetail {
+pub struct SlotDetail {
+    pub index: usize,
     pub upstream_id: u32,
     pub upstream: UpstreamInfo,
     pub user_count: usize,

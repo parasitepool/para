@@ -173,7 +173,7 @@ async function refresh(signal) {
       const slotRejWorkPct = rejectionPct(slot.accepted_work, slot.rejected_work);
       return `<div class="slot-card">
         <div class=slot-pane>
-          <h2><a class=slot-link href="/upstream/${slot.upstream_id}">Upstream ${slot.upstream_id}</a></h2>
+          <h2><a class=slot-link href="/slot/${slot.index}">Slot ${slot.index}</a></h2>
           <div class=row><span>Endpoint</span><span>${slot.endpoint}</span></div>
           <div class=row><span>Ping</span><span>${formatPing(slot.ping_ms)}ms</span></div>
           <div class=row><span>Username</span><span class=copyable data-full="${username}" data-formatted="${shortUser}">${shortUser}</span></div>
@@ -184,7 +184,7 @@ async function refresh(signal) {
           <div class=row><span>Efficiency</span><span>${efficiencyPct(slot.upstream_accepted_work, slot.accepted_work, slot.rejected_work)}</span></div>
         </div>
         <div class=slot-pane>
-          <div class=row><a class=slot-link href="/upstream/${slot.upstream_id}">Sessions</a><span>${slot.session_count}</span></div>
+          <div class=row><a class=slot-link href="/slot/${slot.index}">Sessions</a><span>${slot.session_count}</span></div>
           <div class=row><span>Idle</span><span>${slot.idle_count}</span></div>
           <div class=row><span>Disconnected</span><span>${slot.disconnected_count}</span></div>
           <div class=row><span>Hashrate</span><span>${formatHashrate(slot.hashrate_1m)}</span></div>
