@@ -39,7 +39,12 @@ impl Proxy {
             .first()
             .context("no upstream target configured")?;
 
+        let metatron = Arc::new(Metatron::new());
+
+        let upstream_id = metatron.next_upstream_id();
+
         let Some(mut upstream) = connect_upstream(
+            upstream_id,
             upstream_target,
             timeout,
             &cancel_token,
@@ -60,8 +65,7 @@ impl Proxy {
             .context("upstream extranonce configuration incompatible with proxy mode")?,
         );
 
-        let allocator = Arc::new(EnonceAllocator::new(extranonces, 0));
-        let metatron = Arc::new(Metatron::new());
+        let allocator = Arc::new(EnonceAllocator::new(extranonces, upstream_id));
 
         metatron.clone().spawn(cancel_token.clone(), &tasks);
 
@@ -138,7 +142,10 @@ impl Proxy {
                 });
             }
 
+            let new_id = metatron.next_upstream_id();
+
             let Some(new_upstream) = connect_upstream(
+                new_id,
                 upstream_target,
                 timeout,
                 &cancel_token,
@@ -160,6 +167,7 @@ impl Proxy {
             );
 
             allocator.update_extranonces(new_extranonces);
+            allocator.set_upstream_id(new_id);
             metrics.update_upstream(new_upstream.clone());
             upstream = new_upstream;
         }
@@ -174,16 +182,17 @@ impl Proxy {
 }
 
 async fn connect_upstream(
+    upstream_id: u32,
     target: &UpstreamTarget,
     timeout: Duration,
     cancel_token: &CancellationToken,
     tasks: &TaskTracker,
     backoff: &mut Duration,
 ) -> Option<Arc<Upstream>> {
-    let mut max_backoff_attempts = 0u32;
+    let mut max_backoff_attempts = 0;
 
     loop {
-        match Upstream::connect(0, target, timeout, cancel_token.clone(), tasks).await {
+        match Upstream::connect(upstream_id, target, timeout, cancel_token.clone(), tasks).await {
             Ok(upstream) => {
                 *backoff = Duration::from_secs(1);
                 return Some(upstream);

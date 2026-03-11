@@ -1,6 +1,7 @@
 use super::*;
 
 pub(crate) struct Slot {
+    pub(crate) index: usize,
     pub(crate) upstream: Arc<Upstream>,
     pub(crate) allocator: Arc<EnonceAllocator>,
     pub(crate) cancel: CancellationToken,
@@ -8,6 +9,7 @@ pub(crate) struct Slot {
 
 impl Slot {
     pub(crate) async fn connect(
+        index: usize,
         upstream_id: u32,
         target: &UpstreamTarget,
         timeout: Duration,
@@ -32,6 +34,7 @@ impl Slot {
         info!("Upstream {target} connected");
 
         Ok(Arc::new(Self {
+            index,
             upstream,
             allocator,
             cancel,

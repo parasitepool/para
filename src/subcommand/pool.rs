@@ -38,8 +38,11 @@ impl Pool {
                 .context("invalid extranonce configuration")?,
         );
 
-        let allocator = Arc::new(EnonceAllocator::new(extranonces, 0));
         let metatron = Arc::new(Metatron::new());
+        let allocator = Arc::new(EnonceAllocator::new(
+            extranonces,
+            metatron.next_upstream_id(),
+        ));
         metatron.clone().spawn(cancel_token.clone(), &tasks);
 
         http_server::spawn(

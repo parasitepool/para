@@ -499,7 +499,6 @@ impl<W: Workbase> Stratifier<W> {
         }
 
         let enonce1 = if let Some(ref requested) = subscribe.enonce1
-            && self.allocator.is_compatible_enonce1(requested)
             && self
                 .metatron
                 .resume_session(requested, self.allocator.upstream_id())

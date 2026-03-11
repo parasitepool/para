@@ -24,6 +24,7 @@ pub(crate) struct Metatron {
     upstreams: DashMap<u32, UpstreamState>,
     disconnected: DashMap<Extranonce, (Arc<Session>, Instant)>,
     counter: AtomicU32,
+    upstream_counter: AtomicU32,
 }
 
 impl Metatron {
@@ -35,7 +36,12 @@ impl Metatron {
             upstreams: DashMap::new(),
             disconnected: DashMap::new(),
             counter: AtomicU32::new(0),
+            upstream_counter: AtomicU32::new(0),
         }
+    }
+
+    pub(crate) fn next_upstream_id(&self) -> u32 {
+        self.upstream_counter.fetch_add(1, Ordering::Relaxed)
     }
 
     pub(crate) fn spawn(self: Arc<Self>, cancel: CancellationToken, tasks: &TaskTracker) {
@@ -596,5 +602,13 @@ mod tests {
 
         assert_eq!(metatron.upstream_session_count(0), 0);
         assert!(metatron.upstream_sessions(0).is_empty());
+    }
+
+    #[test]
+    fn next_upstream_id_is_monotonic() {
+        let metatron = Metatron::new();
+        assert_eq!(metatron.next_upstream_id(), 0);
+        assert_eq!(metatron.next_upstream_id(), 1);
+        assert_eq!(metatron.next_upstream_id(), 2);
     }
 }

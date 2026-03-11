@@ -8,9 +8,9 @@ pub(crate) fn router(
 ) -> axum::Router {
     axum::Router::new()
         .route("/", get(home))
-        .route("/upstream/{upstream_id}", get(upstream_page))
+        .route("/slot/{index}", get(slot_page))
         .route("/api/router/status", get(status))
-        .route("/api/router/upstream/{upstream_id}", get(upstream))
+        .route("/api/router/slot/{index}", get(slot))
         .with_state(state)
         .merge(common_routes())
         .layer(Extension(bitcoin_client))
@@ -22,8 +22,8 @@ async fn home(Extension(chain): Extension<Chain>) -> Response {
     render_page(RouterHtml, chain)
 }
 
-async fn upstream_page(Extension(chain): Extension<Chain>) -> Response {
-    render_page(UpstreamHtml, chain)
+async fn slot_page(Extension(chain): Extension<Chain>) -> Response {
+    render_page(SlotHtml, chain)
 }
 
 async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
@@ -43,6 +43,7 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
         let upstream_id = slot.upstream.id();
 
         slots.push(SlotStatus {
+            index: slot.index,
             upstream_id,
             endpoint: slot.upstream.endpoint().to_string(),
             username: slot.upstream.username().to_string(),
@@ -82,18 +83,18 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
     })
 }
 
-async fn upstream(
+async fn slot(
     State(router): State<Arc<Router>>,
-    Path(upstream_id): Path<u32>,
+    Path(index): Path<usize>,
 ) -> ServerResult<Response> {
     let slot = router
-        .slot_by_upstream_id(upstream_id)
-        .ok_or_not_found(|| format!("Upstream {upstream_id}"))?;
+        .slot_by_index(index)
+        .ok_or_not_found(|| format!("Slot {index}"))?;
 
     let now = Instant::now();
     let metatron = router.metatron();
-    let id = slot.upstream.id();
-    let sessions = metatron.upstream_sessions(id);
+    let upstream_id = slot.upstream.id();
+    let sessions = metatron.upstream_sessions(upstream_id);
     let session_details = sessions
         .iter()
         .map(|session| SessionDetail::from_session(session, now))
@@ -103,27 +104,28 @@ async fn upstream(
         .iter()
         .flat_map(|user| user.workers().collect::<Vec<_>>())
         .filter_map(|worker| {
-            let session_count = worker.upstream_session_count(id);
+            let session_count = worker.upstream_session_count(upstream_id);
             (session_count > 0).then(|| WorkerDetail {
                 name: worker.workername().to_string(),
                 session_count,
-                stats: MiningStats::from_snapshot(&worker.upstream_snapshot(id), now),
+                stats: MiningStats::from_snapshot(&worker.upstream_snapshot(upstream_id), now),
             })
         })
         .collect();
 
-    Ok(Json(UpstreamDetail {
-        upstream_id: id,
+    Ok(Json(SlotDetail {
+        index: slot.index,
+        upstream_id,
         upstream: UpstreamInfo::from_upstream(&slot.upstream),
-        user_count: metatron.upstream_user_count(id),
-        worker_count: metatron.upstream_worker_count(id),
-        session_count: metatron.upstream_session_count(id),
-        disconnected_count: metatron.upstream_disconnected_count(id),
-        idle_count: metatron.upstream_idle_count(id),
+        user_count: metatron.upstream_user_count(upstream_id),
+        worker_count: metatron.upstream_worker_count(upstream_id),
+        session_count: metatron.upstream_session_count(upstream_id),
+        disconnected_count: metatron.upstream_disconnected_count(upstream_id),
+        idle_count: metatron.upstream_idle_count(upstream_id),
         uptime_secs: metatron.uptime().as_secs(),
         workers,
         sessions: session_details,
-        stats: MiningStats::from_snapshot(&metatron.upstream_snapshot(id), now),
+        stats: MiningStats::from_snapshot(&metatron.upstream_snapshot(upstream_id), now),
     })
     .into_response())
 }

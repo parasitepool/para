@@ -41,12 +41,8 @@ impl Router {
         self.metatron.clone()
     }
 
-    pub(crate) fn slot_by_upstream_id(&self, id: u32) -> Option<Arc<Slot>> {
-        self.slots
-            .read()
-            .iter()
-            .find(|s| s.upstream.id() == id)
-            .cloned()
+    pub(crate) fn slot_by_index(&self, index: usize) -> Option<Arc<Slot>> {
+        self.slots.read().iter().find(|s| s.index == index).cloned()
     }
 
     pub(crate) async fn connect(
@@ -59,9 +55,11 @@ impl Router {
     ) -> Result<Arc<Self>, Error> {
         let mut slots = Vec::new();
 
-        for (upstream_id, target) in targets.iter().enumerate() {
+        for (index, target) in targets.iter().enumerate() {
+            let upstream_id = metatron.next_upstream_id();
             match Slot::connect(
-                upstream_id as u32,
+                index,
+                upstream_id,
                 target,
                 timeout,
                 enonce1_extension_size,

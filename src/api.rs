@@ -4,9 +4,7 @@ use {
     http_server::{
         self, common_routes,
         error::{OptionExt, ServerResult},
-        templates::{
-            PoolHtml, ProxyHtml, RouterHtml, UpstreamHtml, UserHtml, UsersHtml, render_page,
-        },
+        templates::{PoolHtml, ProxyHtml, RouterHtml, SlotHtml, UserHtml, UsersHtml, render_page},
     },
 };
 
@@ -235,6 +233,7 @@ pub struct RouterStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SlotStatus {
+    pub index: usize,
     pub upstream_id: u32,
     pub upstream_accepted: u64,
     pub upstream_rejected: u64,
@@ -252,7 +251,8 @@ pub struct SlotStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UpstreamDetail {
+pub struct SlotDetail {
+    pub index: usize,
     pub upstream_id: u32,
     pub upstream: UpstreamInfo,
     pub user_count: usize,
