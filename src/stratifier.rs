@@ -498,36 +498,21 @@ impl<W: Workbase> Stratifier<W> {
             return Ok(self.bouncer.reject());
         }
 
-        let (enonce1, enonce2_size) = if let Some(ref requested_enonce1) = subscribe.enonce1 {
-            let enonce1 = if self.allocator.is_compatible_enonce1(requested_enonce1)
-                && self
-                    .metatron
-                    .resume_session(requested_enonce1, self.allocator.upstream_id())
-            {
-                info!("Resuming session with enonce1 {requested_enonce1}");
-                requested_enonce1.clone()
-            } else {
-                self.allocator.next_enonce1()
-            };
-
-            (enonce1, self.allocator.enonce2_size())
+        let enonce1 = if let Some(ref requested) = subscribe.enonce1
+            && self.allocator.is_compatible_enonce1(requested)
+            && self
+                .metatron
+                .resume_session(requested, self.allocator.upstream_id())
+        {
+            info!("Resuming session with enonce1 {requested}");
+            requested.clone()
         } else {
-            (self.allocator.next_enonce1(), self.allocator.enonce2_size())
+            self.allocator.next_enonce1()
         };
 
-        if !self.state.subscribe(enonce1.clone(), subscribe.user_agent) {
-            self.send_error(
-                id,
-                StratumError::MethodNotAllowed,
-                Some(serde_json::json!({
-                    "method": "mining.subscribe",
-                    "current_state": self.state.to_string()
-                })),
-            )
-            .await?;
+        let enonce2_size = self.allocator.enonce2_size();
 
-            return Ok(self.bouncer.reject());
-        }
+        self.state.subscribe(enonce1.clone(), subscribe.user_agent);
 
         self.bouncer.accept();
 

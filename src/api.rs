@@ -219,16 +219,16 @@ impl UpstreamInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RouterStatus {
     pub upstream_count: usize,
-    pub session_count: usize,
-    pub disconnected_count: usize,
-    pub idle_count: usize,
-    pub uptime_secs: u64,
-    pub slots: Vec<SlotStatus>,
     pub upstream_accepted: u64,
     pub upstream_rejected: u64,
     pub upstream_accepted_work: TotalWork,
     pub upstream_rejected_work: TotalWork,
     pub upstream_ph_days: PhDays,
+    pub session_count: usize,
+    pub disconnected_count: usize,
+    pub idle_count: usize,
+    pub uptime_secs: u64,
+    pub slots: Vec<SlotStatus>,
     #[serde(flatten)]
     pub stats: MiningStats,
 }
@@ -236,17 +236,17 @@ pub struct RouterStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SlotStatus {
     pub upstream_id: u32,
+    pub upstream_accepted: u64,
+    pub upstream_rejected: u64,
+    pub upstream_accepted_work: TotalWork,
+    pub upstream_rejected_work: TotalWork,
+    pub upstream_ph_days: PhDays,
     pub endpoint: String,
     pub username: String,
     pub ping_ms: u128,
     pub session_count: usize,
     pub disconnected_count: usize,
     pub idle_count: usize,
-    pub upstream_accepted: u64,
-    pub upstream_rejected: u64,
-    pub upstream_accepted_work: TotalWork,
-    pub upstream_rejected_work: TotalWork,
-    pub upstream_ph_days: PhDays,
     #[serde(flatten)]
     pub stats: MiningStats,
 }

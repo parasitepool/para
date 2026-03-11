@@ -23,7 +23,7 @@ pub(crate) struct Metatron {
     users: DashMap<Address, Arc<User>>,
     upstreams: DashMap<u32, UpstreamState>,
     disconnected: DashMap<Extranonce, (Arc<Session>, Instant)>,
-    session_counter: AtomicU32,
+    counter: AtomicU32,
 }
 
 impl Metatron {
@@ -34,7 +34,7 @@ impl Metatron {
             users: DashMap::new(),
             upstreams: DashMap::new(),
             disconnected: DashMap::new(),
-            session_counter: AtomicU32::new(0),
+            counter: AtomicU32::new(0),
         }
     }
 
@@ -66,8 +66,7 @@ impl Metatron {
     }
 
     pub(crate) fn new_session(&self, auth: Arc<Authorization>, upstream_id: u32) -> Arc<Session> {
-        let session_counter = self.session_counter.fetch_add(1, Ordering::Relaxed);
-        let id = SessionId::new(upstream_id, session_counter);
+        let id = SessionId::new(upstream_id, self.counter.fetch_add(1, Ordering::Relaxed));
 
         let session = Arc::new(Session::new(
             id,
@@ -140,13 +139,6 @@ impl Metatron {
         self.disconnected.len()
     }
 
-    pub(crate) fn upstream_disconnected_count(&self, upstream_id: u32) -> usize {
-        self.disconnected
-            .iter()
-            .filter(|entry| entry.value().0.id().upstream_id() == upstream_id)
-            .count()
-    }
-
     pub(crate) fn total_idle(&self) -> usize {
         let now = Instant::now();
 
@@ -157,8 +149,27 @@ impl Metatron {
             .count()
     }
 
+    pub(crate) fn users(&self) -> &DashMap<Address, Arc<User>> {
+        &self.users
+    }
+
     pub(crate) fn total_users(&self) -> usize {
         self.users.len()
+    }
+
+    pub(crate) fn total_workers(&self) -> usize {
+        self.users.iter().map(|user| user.worker_count()).sum()
+    }
+
+    pub(crate) fn uptime(&self) -> Duration {
+        self.started.elapsed()
+    }
+
+    pub(crate) fn upstream_disconnected_count(&self, upstream_id: u32) -> usize {
+        self.disconnected
+            .iter()
+            .filter(|entry| entry.value().0.id().upstream_id() == upstream_id)
+            .count()
     }
 
     pub(crate) fn upstream_user_count(&self, upstream_id: u32) -> usize {
@@ -171,10 +182,6 @@ impl Metatron {
             .count()
     }
 
-    pub(crate) fn total_workers(&self) -> usize {
-        self.users.iter().map(|user| user.worker_count()).sum()
-    }
-
     pub(crate) fn upstream_worker_count(&self, upstream_id: u32) -> usize {
         self.users
             .iter()
@@ -184,10 +191,6 @@ impl Metatron {
                     .count()
             })
             .sum()
-    }
-
-    pub(crate) fn uptime(&self) -> Duration {
-        self.started.elapsed()
     }
 
     pub(crate) fn upstream_sessions(&self, upstream_id: u32) -> Vec<Arc<Session>> {
@@ -240,10 +243,6 @@ impl Metatron {
                     })
             })
             .unwrap_or_else(Stats::new)
-    }
-
-    pub(crate) fn users(&self) -> &DashMap<Address, Arc<User>> {
-        &self.users
     }
 
     #[cfg(test)]
