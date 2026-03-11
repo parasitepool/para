@@ -178,7 +178,6 @@ impl Router {
             .filter(|entry| entry.value().0.id().upstream_id() == upstream_id)
             .count()
     }
-
 }
 
 impl StatusLine for Router {
