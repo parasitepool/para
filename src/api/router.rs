@@ -55,10 +55,10 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
             upstream_ph_days: PhDays::from(
                 slot_upstream_accepted_work + slot_upstream_rejected_work,
             ),
-            session_count: metatron.upstream_session_count(upstream_id),
-            disconnected_count: metatron.upstream_disconnected_count(upstream_id),
-            idle_count: metatron.upstream_idle_count(upstream_id),
-            stats: MiningStats::from_snapshot(&metatron.upstream_snapshot(upstream_id), now),
+            session_count: router.upstream_session_count(upstream_id),
+            disconnected_count: router.upstream_disconnected_count(upstream_id),
+            idle_count: router.upstream_idle_count(upstream_id),
+            stats: MiningStats::from_snapshot(&router.upstream_snapshot(upstream_id), now),
         });
 
         upstream_accepted += slot_upstream_accepted;
@@ -94,7 +94,7 @@ async fn slot(
     let now = Instant::now();
     let metatron = router.metatron();
     let upstream_id = slot.upstream.id();
-    let sessions = metatron.upstream_sessions(upstream_id);
+    let sessions = router.upstream_sessions(upstream_id);
     let session_details = sessions
         .iter()
         .map(|session| SessionDetail::from_session(session, now))
@@ -117,15 +117,15 @@ async fn slot(
         index: slot.index,
         upstream_id,
         upstream: UpstreamInfo::from_upstream(&slot.upstream),
-        user_count: metatron.upstream_user_count(upstream_id),
-        worker_count: metatron.upstream_worker_count(upstream_id),
-        session_count: metatron.upstream_session_count(upstream_id),
-        disconnected_count: metatron.upstream_disconnected_count(upstream_id),
-        idle_count: metatron.upstream_idle_count(upstream_id),
+        user_count: router.upstream_user_count(upstream_id),
+        worker_count: router.upstream_worker_count(upstream_id),
+        session_count: router.upstream_session_count(upstream_id),
+        disconnected_count: router.upstream_disconnected_count(upstream_id),
+        idle_count: router.upstream_idle_count(upstream_id),
         uptime_secs: metatron.uptime().as_secs(),
         workers,
         sessions: session_details,
-        stats: MiningStats::from_snapshot(&metatron.upstream_snapshot(upstream_id), now),
+        stats: MiningStats::from_snapshot(&router.upstream_snapshot(upstream_id), now),
     })
     .into_response())
 }
