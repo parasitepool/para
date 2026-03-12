@@ -32,6 +32,13 @@ pub(crate) struct PoolOptions {
     #[arg(long, default_value_t = MAX_ENONCE_SIZE, help = "Set enonce2 size in bytes (2-8).")]
     pub(crate) enonce2_size: usize,
 
+    #[arg(
+        long,
+        default_value_t = 60,
+        help = "Shut down after <RPC_TIMEOUT> seconds of consecutive RPC failures."
+    )]
+    pub(crate) rpc_timeout: u64,
+
     #[arg(long, help = "Disable bouncer.")]
     pub(crate) disable_bouncer: bool,
 

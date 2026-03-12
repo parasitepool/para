@@ -49,7 +49,7 @@ use {
         CompressedPublicKey, Network, PrivateKey, block::Header, hashes::Hash,
         key::UntweakedPublicKey, secp256k1::Secp256k1, sign_message::MessageSignature,
     },
-    bitcoind_async_client::traits::Reader,
+    bitcoind_async_client::{Auth, Client as BitcoindClient, traits::Reader},
     harness::bitcoind::Bitcoind,
     ntest::timeout,
     para::{
@@ -106,6 +106,8 @@ mod account;
 mod alerts;
 #[cfg(target_os = "linux")]
 mod event_sink;
+#[cfg(target_os = "linux")]
+mod generator;
 #[cfg(target_os = "linux")]
 mod payouts;
 #[cfg(target_os = "linux")]

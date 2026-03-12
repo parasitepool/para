@@ -29,10 +29,13 @@ async fn test_file_sink_json() {
     let events_file = tempdir.path().join("events.json");
 
     {
-        let pool = TestPool::spawn_with_args(format!(
-            "--events-file {} --start-diff 0.000001",
-            events_file.display()
-        ));
+        let pool = TestPool::spawn_with_args(
+            global_bitcoind(),
+            format!(
+                "--events-file {} --start-diff 0.000001",
+                events_file.display()
+            ),
+        );
 
         let mut miner = CommandBuilder::new(format!(
             "miner --mode continuous --username {} {}",
@@ -90,10 +93,13 @@ async fn test_file_sink_csv() {
     let events_csv = tempdir.path().join("events.csv");
 
     {
-        let pool = TestPool::spawn_with_args(format!(
-            "--events-file {} --start-diff 0.000001",
-            events_csv.display()
-        ));
+        let pool = TestPool::spawn_with_args(
+            global_bitcoind(),
+            format!(
+                "--events-file {} --start-diff 0.000001",
+                events_csv.display()
+            ),
+        );
 
         let mut miner = CommandBuilder::new(format!(
             "miner --mode continuous --username {} {}",
@@ -133,10 +139,10 @@ async fn test_database_sink() {
     setup_test_schema(database_url.clone()).await.unwrap();
 
     {
-        let pool = TestPool::spawn_with_args(format!(
-            "--database-url {} --start-diff 0.000001",
-            database_url
-        ));
+        let pool = TestPool::spawn_with_args(
+            global_bitcoind(),
+            format!("--database-url {} --start-diff 0.000001", database_url),
+        );
 
         let mut miner = CommandBuilder::new(format!(
             "miner --mode continuous --username {} {}",
@@ -188,11 +194,14 @@ async fn test_multi_sink() {
     let multi_events = tempdir.path().join("multi-events.json");
 
     {
-        let pool = TestPool::spawn_with_args(format!(
-            "--events-file {} --database-url {} --start-diff 0.000001",
-            multi_events.display(),
-            database_url
-        ));
+        let pool = TestPool::spawn_with_args(
+            global_bitcoind(),
+            format!(
+                "--events-file {} --database-url {} --start-diff 0.000001",
+                multi_events.display(),
+                database_url
+            ),
+        );
 
         let mut miner = CommandBuilder::new(format!(
             "miner --mode continuous --username {} {}",
@@ -247,11 +256,14 @@ async fn test_block_found_event() {
     let block_events = tempdir.path().join("block-events.json");
 
     {
-        let pool = TestPool::spawn_with_args(format!(
-            "--events-file {} --database-url {} --start-diff 0.0000001",
-            block_events.display(),
-            database_url
-        ));
+        let pool = TestPool::spawn_with_args(
+            global_bitcoind(),
+            format!(
+                "--events-file {} --database-url {} --start-diff 0.0000001",
+                block_events.display(),
+                database_url
+            ),
+        );
 
         pool.mine_block().await;
         pool.wait_for_blocks(1, Duration::from_secs(10))

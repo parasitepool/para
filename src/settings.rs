@@ -38,6 +38,7 @@ pub(crate) struct Settings {
     enonce1_size: usize,
     enonce2_size: usize,
     enonce1_extension_size: usize,
+    rpc_timeout: Duration,
     disable_bouncer: bool,
     database_url: Option<String>,
     events_file: Option<PathBuf>,
@@ -73,6 +74,7 @@ impl Default for Settings {
             enonce1_size: ENONCE1_SIZE,
             enonce2_size: MAX_ENONCE_SIZE,
             enonce1_extension_size: ENONCE1_EXTENSION_SIZE,
+            rpc_timeout: Duration::from_secs(60),
             disable_bouncer: false,
             database_url: None,
             events_file: None,
@@ -117,6 +119,7 @@ impl Settings {
             enonce1_size: options.enonce1_size,
             enonce2_size: options.enonce2_size,
             enonce1_extension_size: ENONCE1_EXTENSION_SIZE,
+            rpc_timeout: Duration::from_secs(options.rpc_timeout),
             disable_bouncer: options.disable_bouncer,
             database_url: options.database_url,
             events_file: options.events_file,
@@ -162,6 +165,7 @@ impl Settings {
             enonce1_size: ENONCE1_SIZE,
             enonce2_size: MAX_ENONCE_SIZE,
             enonce1_extension_size: options.enonce1_extension_size,
+            rpc_timeout: Duration::from_secs(60),
             disable_bouncer: false,
             database_url: None,
             events_file: None,
@@ -207,6 +211,7 @@ impl Settings {
             enonce1_size: ENONCE1_SIZE,
             enonce2_size: MAX_ENONCE_SIZE,
             enonce1_extension_size: options.enonce1_extension_size,
+            rpc_timeout: Duration::from_secs(60),
             disable_bouncer: false,
             database_url: None,
             events_file: None,
@@ -463,6 +468,10 @@ impl Settings {
 
     pub(crate) fn update_interval(&self) -> Duration {
         self.update_interval
+    }
+
+    pub(crate) fn rpc_timeout(&self) -> Duration {
+        self.rpc_timeout
     }
 
     pub(crate) fn version_mask(&self) -> Version {
