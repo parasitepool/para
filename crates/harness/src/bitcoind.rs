@@ -49,7 +49,7 @@ impl Bitcoind {
         with_output: bool,
     ) -> Result<Self> {
         let bitcoind_data_dir = tempdir.path().join("bitcoin");
-        fs::create_dir(&bitcoind_data_dir)?;
+        fs::create_dir_all(&bitcoind_data_dir)?;
 
         let bitcoind_conf = bitcoind_data_dir.join("bitcoin.conf");
 

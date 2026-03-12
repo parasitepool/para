@@ -5,7 +5,7 @@ use {super::*, para::subcommand::template::Output};
 #[timeout(90000)]
 #[ignore]
 fn template_with_ckpool() {
-    let ckpool = TestCkpool::spawn();
+    let ckpool = TestCkpool::spawn(global_bitcoind());
 
     let stratum_endpoint = ckpool.stratum_endpoint();
 

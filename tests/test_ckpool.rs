@@ -28,9 +28,8 @@ pub(crate) struct TestCkpool {
 }
 
 impl TestCkpool {
-    pub(crate) fn spawn() -> Self {
+    pub(crate) fn spawn(bitcoind: &Bitcoind) -> Self {
         let tempdir = Arc::new(TempDir::new().unwrap());
-        let bitcoind = global_bitcoind();
 
         let sockdir = tempdir.path().join("tmp");
         fs::create_dir(&sockdir).unwrap();
@@ -38,7 +37,7 @@ impl TestCkpool {
         Lazy::force(&COMPILE_CKPOOL);
 
         let ckpool_port = allocate_port();
-        let zmq_port = bitcoind.zmq_port.expect("global bitcoind missing zmq_port");
+        let zmq_port = bitcoind.zmq_port.expect("bitcoind missing zmq_port");
 
         let ckpool_conf = tempdir.path().join("ckpool.conf");
 
