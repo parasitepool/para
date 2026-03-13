@@ -915,21 +915,19 @@ impl Database {
     pub(crate) async fn refresh_current_round_participation(&self) -> Result<()> {
         let mut conn = self.pool.acquire().await.map_err(|err| anyhow!(err))?;
 
-        let acquired: bool =
-            sqlx::query_scalar("SELECT pg_try_advisory_lock(8675309)")
-                .fetch_one(&mut *conn)
-                .await
-                .map_err(|err| anyhow!(err))?;
+        let acquired: bool = sqlx::query_scalar("SELECT pg_try_advisory_lock(8675309)")
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(|err| anyhow!(err))?;
 
         if !acquired {
             return Ok(());
         }
 
-        let result = sqlx::query(
-            "REFRESH MATERIALIZED VIEW CONCURRENTLY round_participation_current",
-        )
-        .execute(&mut *conn)
-        .await;
+        let result =
+            sqlx::query("REFRESH MATERIALIZED VIEW CONCURRENTLY round_participation_current")
+                .execute(&mut *conn)
+                .await;
 
         let _ = sqlx::query("SELECT pg_advisory_unlock(8675309)")
             .execute(&mut *conn)
