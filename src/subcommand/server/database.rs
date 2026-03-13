@@ -777,7 +777,7 @@ impl Database {
     ) -> Result<Vec<RoundParticipant>> {
         match blockheight {
             None => {
-                // Current round: try materialized view, fall back to direct query
+                // 'current' round comes from matview
                 match sqlx::query_as::<_, RoundParticipant>(
                     "
                     SELECT username, blocks_participated, top_diff
@@ -788,98 +788,75 @@ impl Database {
                 .fetch_all(&self.pool)
                 .await
                 {
-                    Ok(result) => return Ok(result),
+                    Ok(result) => Ok(result),
                     Err(e) => {
                         warn!("Materialized view query failed, falling back to direct query: {e}");
+                        self.query_round_participation(None).await
                     }
                 }
-
-                // Fallback: direct query (matview doesn't exist or error)
-                sqlx::query_as::<_, RoundParticipant>(
-                    "
-                    WITH previous_block AS (
-                        SELECT COALESCE(MAX(blockheight), 0) AS prev_height
-                        FROM blocks
-                    )
-                    SELECT
-                        COALESCE(rs.username, '') AS username,
-                        COUNT(DISTINCT rs.blockheight) AS blocks_participated,
-                        COALESCE(MAX(rs.sdiff), 0) AS top_diff
-                    FROM remote_shares rs, previous_block pb
-                    WHERE rs.blockheight > pb.prev_height
-                        AND rs.reject_reason IS NULL
-                    GROUP BY rs.username
-                    ORDER BY top_diff DESC
-                    ",
-                )
-                .fetch_all(&self.pool)
-                .await
-                .map_err(|err| anyhow!(err))
             }
             Some(h) => {
-                // Completed round: try history table first
-                let history = sqlx::query_as::<_, RoundParticipant>(
-                    "
-                    SELECT username, blocks_participated, top_diff
-                    FROM round_participation_history
-                    WHERE blockheight = $1
-                    ORDER BY top_diff DESC
-                    ",
-                )
-                .bind(h)
-                .fetch_all(&self.pool)
-                .await;
-
-                match history {
+                // historical round ending on blockheight 'h' comes from history table
+                match self.get_round_participation_history(h).await {
                     Ok(result) if !result.is_empty() => Ok(result),
                     Ok(_) => {
-                        // History table exists but no data: snapshot then read
                         if let Err(e) = self.snapshot_round_participation(h).await {
                             warn!("Failed to snapshot round {h}: {e}");
                         }
-
-                        sqlx::query_as::<_, RoundParticipant>(
-                            "
-                            SELECT username, blocks_participated, top_diff
-                            FROM round_participation_history
-                            WHERE blockheight = $1
-                            ORDER BY top_diff DESC
-                            ",
-                        )
-                        .bind(h)
-                        .fetch_all(&self.pool)
-                        .await
-                        .map_err(|err| anyhow!(err))
+                        self.get_round_participation_history(h)
+                            .await
+                            .map_err(|err| anyhow!(err))
                     }
-                    Err(_) => {
-                        // History table doesn't exist: fall back to direct query
-                        sqlx::query_as::<_, RoundParticipant>(
-                            "
-                            WITH previous_block AS (
-                                SELECT COALESCE(MAX(blockheight), 0) AS prev_height
-                                FROM blocks
-                                WHERE blockheight < $1
-                            )
-                            SELECT
-                                COALESCE(rs.username, '') AS username,
-                                COUNT(DISTINCT rs.blockheight) AS blocks_participated,
-                                COALESCE(MAX(rs.sdiff), 0) AS top_diff
-                            FROM remote_shares rs, previous_block pb
-                            WHERE rs.blockheight > pb.prev_height
-                                AND rs.blockheight <= $1
-                                AND rs.reject_reason IS NULL
-                            GROUP BY rs.username
-                            ORDER BY top_diff DESC
-                            ",
-                        )
-                        .bind(h)
-                        .fetch_all(&self.pool)
-                        .await
-                        .map_err(|err| anyhow!(err))
-                    }
+                    Err(_) => self.query_round_participation(Some(h)).await,
                 }
             }
         }
+    }
+
+    async fn get_round_participation_history(
+        &self,
+        blockheight: i32,
+    ) -> Result<Vec<RoundParticipant>, sqlx::Error> {
+        sqlx::query_as::<_, RoundParticipant>(
+            "
+            SELECT username, blocks_participated, top_diff
+            FROM round_participation_history
+            WHERE blockheight = $1
+            ORDER BY top_diff DESC
+            ",
+        )
+        .bind(blockheight)
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    async fn query_round_participation(
+        &self,
+        blockheight: Option<i32>,
+    ) -> Result<Vec<RoundParticipant>> {
+        sqlx::query_as::<_, RoundParticipant>(
+            "
+            WITH previous_block AS (
+                SELECT COALESCE(MAX(blockheight), 0) AS prev_height
+                FROM blocks
+                WHERE ($1::INTEGER IS NULL OR blockheight < $1)
+            )
+            SELECT
+                COALESCE(rs.username, '') AS username,
+                COUNT(DISTINCT rs.blockheight) AS blocks_participated,
+                COALESCE(MAX(rs.sdiff), 0) AS top_diff
+            FROM remote_shares rs, previous_block pb
+            WHERE rs.blockheight > pb.prev_height
+                AND ($1::INTEGER IS NULL OR rs.blockheight <= $1)
+                AND rs.reject_reason IS NULL
+            GROUP BY rs.username
+            ORDER BY top_diff DESC
+            ",
+        )
+        .bind(blockheight)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))
     }
 
     pub(crate) async fn snapshot_round_participation(&self, blockheight: i32) -> Result<()> {
