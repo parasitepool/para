@@ -100,10 +100,10 @@ pub(crate) async fn sync_batch(
                         height, e
                     );
                 }
-            }
-
-            if let Err(e) = database.refresh_current_round_participation().await {
-                error!("Failed to refresh current round participation: {}", e);
+            } else {
+                if let Err(e) = database.refresh_current_round_participation().await {
+                    error!("Failed to refresh current round participation: {}", e);
+                }
             }
 
             let response = SyncResponse {
