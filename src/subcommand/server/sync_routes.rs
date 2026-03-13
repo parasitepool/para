@@ -52,10 +52,13 @@ pub(crate) async fn sync_batch(
         return Ok(Json(response));
     }
 
+    let mut new_block_height: Option<i32> = None;
+
     if let Some(block) = &batch.block {
         match database.upsert_block(block).await {
             Ok(was_inserted) => {
                 if was_inserted {
+                    new_block_height = Some(block.blockheight);
                     info!(
                         "Successfully inserted new block at height {}",
                         block.blockheight
@@ -90,6 +93,19 @@ pub(crate) async fn sync_batch(
 
     match process_share_batch(&batch, &database).await {
         Ok(_) => {
+            if let Some(height) = new_block_height {
+                if let Err(e) = database.snapshot_round_participation(height).await {
+                    error!(
+                        "Failed to snapshot round participation for block {}: {}",
+                        height, e
+                    );
+                }
+            }
+
+            if let Err(e) = database.refresh_current_round_participation().await {
+                error!("Failed to refresh current round participation: {}", e);
+            }
+
             let response = SyncResponse {
                 batch_id: batch.batch_id,
                 received_count: batch.shares.len(),

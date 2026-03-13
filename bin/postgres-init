@@ -113,6 +113,14 @@ PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
       idx_remote_shares_blockheight ON
       remote_shares (blockheight);
   "
+# Covering index for round participation queries (index-only scans)
+PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
+  CREATE INDEX CONCURRENTLY IF NOT EXISTS
+      idx_remote_shares_round_participation ON
+      remote_shares (blockheight, username)
+      INCLUDE (sdiff)
+      WHERE reject_reason IS NULL;
+  "
 
 # This is wildly unacceptable and demonstrates why we made need to move to an internal query-library model
 PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
@@ -259,6 +267,36 @@ PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
   SELECT 0, '0000000000000000000000000000000000000000000000000000000000000000', FALSE
   WHERE NOT EXISTS (SELECT 1 FROM blocks);
 "
+
+# History table for completed round participation (computed once per block, stored permanently)
+PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
+  CREATE TABLE IF NOT EXISTS round_participation_history (
+      blockheight INTEGER NOT NULL,
+      username TEXT NOT NULL,
+      blocks_participated BIGINT NOT NULL,
+      top_diff DOUBLE PRECISION NOT NULL,
+      PRIMARY KEY (blockheight, username)
+  )
+  "
+
+# Materialized view for current (in-progress) round participation
+if ! PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -tAc "SELECT 1 FROM pg_matviews WHERE matviewname='round_participation_current'" | grep -q 1; then
+  PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
+    CREATE MATERIALIZED VIEW round_participation_current AS
+    SELECT
+        COALESCE(rs.username, '') AS username,
+        COUNT(DISTINCT rs.blockheight)::BIGINT AS blocks_participated,
+        COALESCE(MAX(rs.sdiff), 0) AS top_diff
+    FROM remote_shares rs
+    WHERE rs.blockheight > (SELECT COALESCE(MAX(blockheight), 0) FROM blocks)
+        AND rs.reject_reason IS NULL
+    GROUP BY rs.username;
+    "
+  PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
+    CREATE UNIQUE INDEX idx_round_participation_current_username
+        ON round_participation_current (username);
+    "
+fi
 
 PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
   CREATE TABLE IF NOT EXISTS accounts
