@@ -650,7 +650,7 @@ impl<W: Workbase> Stratifier<W> {
         if submit.username != *session.username() {
             debug!(
                 "Rejected worker mismatch from {}: authorized={} submitted={}",
-                session.username(),
+                self.socket_addr,
                 session.username(),
                 submit.username
             );

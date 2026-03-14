@@ -167,7 +167,7 @@ mod workbase;
 mod zmq;
 
 pub const COIN_VALUE: u64 = 100_000_000;
-pub const USER_AGENT: &str = "para/0.5.2";
+pub const USER_AGENT: &str = concat!("para/", env!("CARGO_PKG_VERSION"));
 pub const MIN_ENONCE_SIZE: usize = 2;
 pub const MAX_ENONCE_SIZE: usize = 8;
 pub const ENONCE1_SIZE: usize = 4;
