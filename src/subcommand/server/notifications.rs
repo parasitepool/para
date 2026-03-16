@@ -126,7 +126,7 @@ impl NotificationHandler {
                         btc_value,
                         miner
                     ),
-                    NotificationPriority::High,
+                    NotificationPriority::Max,
                     vec![
                         "pick".to_string(),
                         "bitcoin".to_string(),
