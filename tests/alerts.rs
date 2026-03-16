@@ -86,7 +86,7 @@ fn test_format_block_found_notification() {
     assert!(message.contains("6.25000000 BTC"));
     assert!(message.contains("test_pool"));
     assert!(message.contains("850000"));
-    assert!(matches!(priority, NotificationPriority::High));
+    assert!(matches!(priority, NotificationPriority::Max));
     assert!(tags.contains(&"mining".to_string()));
     assert!(tags.contains(&"bitcoin".to_string()));
     assert!(tags.contains(&"pick".to_string()));
