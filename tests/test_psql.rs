@@ -304,6 +304,54 @@ pub(crate) async fn setup_test_schema(db_url: String) -> Result<(), Box<dyn std:
         .execute(&pool)
         .await?;
 
+    sqlx::query(
+        r#"
+                CREATE TABLE IF NOT EXISTS round_participation_history (
+                    blockheight INTEGER NOT NULL,
+                    username TEXT NOT NULL,
+                    blocks_participated BIGINT NOT NULL,
+                    top_diff DOUBLE PRECISION NOT NULL,
+                    PRIMARY KEY (blockheight, username)
+                )
+                "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    // Materialized views don't support IF NOT EXISTS, so check pg_matviews first
+    let matview_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM pg_matviews WHERE matviewname = 'round_participation_current')",
+    )
+    .fetch_one(&pool)
+    .await?;
+
+    if !matview_exists {
+        sqlx::query(
+            r#"
+                CREATE MATERIALIZED VIEW round_participation_current AS
+                SELECT
+                    COALESCE(rs.username, '') AS username,
+                    COUNT(DISTINCT rs.blockheight)::BIGINT AS blocks_participated,
+                    COALESCE(MAX(rs.sdiff), 0) AS top_diff
+                FROM remote_shares rs
+                WHERE rs.blockheight > (SELECT COALESCE(MAX(blockheight), 0) FROM blocks)
+                    AND rs.reject_reason IS NULL
+                GROUP BY rs.username
+                "#,
+        )
+        .execute(&pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+                CREATE UNIQUE INDEX idx_round_participation_current_username
+                    ON round_participation_current (username)
+                "#,
+        )
+        .execute(&pool)
+        .await?;
+    }
+
     pool.close().await;
     Ok(())
 }
@@ -411,6 +459,17 @@ pub(crate) async fn insert_test_account(
     .execute(&pool)
     .await?;
 
+    pool.close().await;
+    Ok(())
+}
+
+pub(crate) async fn refresh_round_participation_view(
+    db_url: String,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = sqlx::PgPool::connect(&db_url).await?;
+    sqlx::query("REFRESH MATERIALIZED VIEW CONCURRENTLY round_participation_current")
+        .execute(&pool)
+        .await?;
     pool.close().await;
     Ok(())
 }
