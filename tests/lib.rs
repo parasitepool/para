@@ -38,7 +38,8 @@ use {
         test_psql::{
             create_test_block, create_test_shares, insert_test_account,
             insert_test_account_with_diff, insert_test_block, insert_test_payout,
-            insert_test_remote_shares, insert_test_shares, setup_test_schema,
+            insert_test_remote_shares, insert_test_shares, refresh_round_participation_view,
+            setup_test_schema,
         },
     },
     anyhow::Error,

@@ -775,6 +775,65 @@ impl Database {
         &self,
         blockheight: Option<i32>,
     ) -> Result<Vec<RoundParticipant>> {
+        match blockheight {
+            None => {
+                // 'current' round comes from matview
+                match sqlx::query_as::<_, RoundParticipant>(
+                    "
+                    SELECT username, blocks_participated, top_diff
+                    FROM round_participation_current
+                    ORDER BY top_diff DESC
+                    ",
+                )
+                .fetch_all(&self.pool)
+                .await
+                {
+                    Ok(result) => Ok(result),
+                    Err(e) => {
+                        warn!("Materialized view query failed, falling back to direct query: {e}");
+                        self.query_round_participation(None).await
+                    }
+                }
+            }
+            Some(h) => {
+                // historical round ending on blockheight 'h' comes from history table
+                match self.get_round_participation_history(h).await {
+                    Ok(result) if !result.is_empty() => Ok(result),
+                    Ok(_) => {
+                        if let Err(e) = self.snapshot_round_participation(h).await {
+                            warn!("Failed to snapshot round {h}: {e}");
+                        }
+                        self.get_round_participation_history(h)
+                            .await
+                            .map_err(|err| anyhow!(err))
+                    }
+                    Err(_) => self.query_round_participation(Some(h)).await,
+                }
+            }
+        }
+    }
+
+    async fn get_round_participation_history(
+        &self,
+        blockheight: i32,
+    ) -> Result<Vec<RoundParticipant>, sqlx::Error> {
+        sqlx::query_as::<_, RoundParticipant>(
+            "
+            SELECT username, blocks_participated, top_diff
+            FROM round_participation_history
+            WHERE blockheight = $1
+            ORDER BY top_diff DESC
+            ",
+        )
+        .bind(blockheight)
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    async fn query_round_participation(
+        &self,
+        blockheight: Option<i32>,
+    ) -> Result<Vec<RoundParticipant>> {
         sqlx::query_as::<_, RoundParticipant>(
             "
             WITH previous_block AS (
@@ -798,6 +857,61 @@ impl Database {
         .fetch_all(&self.pool)
         .await
         .map_err(|err| anyhow!(err))
+    }
+
+    pub(crate) async fn snapshot_round_participation(&self, blockheight: i32) -> Result<()> {
+        sqlx::query(
+            "
+            INSERT INTO round_participation_history (blockheight, username, blocks_participated, top_diff)
+            WITH previous_block AS (
+                SELECT COALESCE(MAX(b.blockheight), 0) AS prev_height
+                FROM blocks b
+                WHERE b.blockheight < $1
+            )
+            SELECT
+                $1,
+                COALESCE(rs.username, ''),
+                COUNT(DISTINCT rs.blockheight),
+                COALESCE(MAX(rs.sdiff), 0)
+            FROM remote_shares rs, previous_block pb
+            WHERE rs.blockheight > pb.prev_height
+                AND rs.blockheight <= $1
+                AND rs.reject_reason IS NULL
+            GROUP BY rs.username
+            ON CONFLICT (blockheight, username) DO NOTHING
+            ",
+        )
+        .bind(blockheight)
+        .execute(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))?;
+
+        Ok(())
+    }
+
+    pub(crate) async fn refresh_current_round_participation(&self) -> Result<()> {
+        let mut conn = self.pool.acquire().await.map_err(|err| anyhow!(err))?;
+
+        let acquired: bool = sqlx::query_scalar("SELECT pg_try_advisory_lock(8675309)")
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(|err| anyhow!(err))?;
+
+        if !acquired {
+            return Ok(());
+        }
+
+        let result =
+            sqlx::query("REFRESH MATERIALIZED VIEW CONCURRENTLY round_participation_current")
+                .execute(&mut *conn)
+                .await;
+
+        let _ = sqlx::query("SELECT pg_advisory_unlock(8675309)")
+            .execute(&mut *conn)
+            .await;
+
+        result.map_err(|err| anyhow!(err))?;
+        Ok(())
     }
 
     pub(crate) async fn get_participants(&self, blockheight: i32) -> Result<Vec<String>> {

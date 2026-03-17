@@ -1131,6 +1131,8 @@ async fn test_current_round() {
     .await
     .unwrap();
 
+    refresh_round_participation_view(db_url).await.unwrap();
+
     let participants: Vec<RoundParticipant> = server.get_json_async("/rounds/current").await;
     assert_eq!(participants.len(), 2);
 
@@ -1152,6 +1154,8 @@ async fn test_current_round_no_blocks_found() {
     insert_test_shares_for_round(db_url.clone(), vec![("foo", 100.0), ("bar", 200.0)], 1, 100)
         .await
         .unwrap();
+
+    refresh_round_participation_view(db_url).await.unwrap();
 
     let participants: Vec<RoundParticipant> = server.get_json_async("/rounds/current").await;
     assert_eq!(participants.len(), 2);
