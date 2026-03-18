@@ -12,14 +12,14 @@ pub(crate) struct TestPool {
 
 impl TestPool {
     pub(crate) fn spawn_on_port(bitcoind: &Bitcoind, port: u16, args: impl ToArgs) -> Self {
-        Self::spawn(bitcoind, Some(port), args)
+        Self::spawn_inner(bitcoind, Some(port), args)
     }
 
     pub(crate) fn spawn_with_args(bitcoind: &Bitcoind, args: impl ToArgs) -> Self {
-        Self::spawn(bitcoind, None, args)
+        Self::spawn_inner(bitcoind, None, args)
     }
 
-    pub(crate) fn spawn(bitcoind: &Bitcoind, port: Option<u16>, args: impl ToArgs) -> Self {
+    fn spawn_inner(bitcoind: &Bitcoind, port: Option<u16>, args: impl ToArgs) -> Self {
         let tempdir = Arc::new(TempDir::new().unwrap());
 
         let rpc_port = bitcoind.rpc_port;

@@ -196,6 +196,20 @@ async fn read_http_request(stream: &mut tokio::net::TcpStream) -> serde_json::Va
     serde_json::from_slice(&buffer[body_start..body_start + content_length]).unwrap()
 }
 
+async fn wait_for_exit(pool: &mut TestPool) {
+    timeout(Duration::from_secs(20), async {
+        loop {
+            match pool.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) => sleep(Duration::from_millis(200)).await,
+                Err(e) => panic!("Failed to wait for pool: {e}"),
+            }
+        }
+    })
+    .await
+    .expect("Pool did not exit");
+}
+
 async fn get_block_template(bitcoind: &Bitcoind) -> serde_json::Value {
     bitcoind
         .client()
@@ -223,17 +237,7 @@ async fn exits_on_prolonged_rpc_failure() {
 
     bitcoind.shutdown();
 
-    timeout(Duration::from_secs(20), async {
-        loop {
-            match pool.try_wait() {
-                Ok(Some(_)) => break,
-                Ok(None) => sleep(Duration::from_millis(200)).await,
-                Err(e) => panic!("Failed to wait for pool: {e}"),
-            }
-        }
-    })
-    .await
-    .expect("Pool did not exit after bitcoind shutdown");
+    wait_for_exit(&mut pool).await;
 }
 
 #[tokio::test]
@@ -251,17 +255,7 @@ async fn exits_on_prolonged_zmq_failure() {
 
     let mut rpc = MockBitcoindRpc::spawn(bitcoind.rpc_port, template).await;
 
-    timeout(Duration::from_secs(20), async {
-        loop {
-            match pool.try_wait() {
-                Ok(Some(_)) => break,
-                Ok(None) => sleep(Duration::from_millis(200)).await,
-                Err(e) => panic!("Failed to wait for pool: {e}"),
-            }
-        }
-    })
-    .await
-    .expect("Pool did not exit after ZMQ shutdown");
+    wait_for_exit(&mut pool).await;
 
     rpc.shutdown().await;
 }

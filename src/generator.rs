@@ -50,7 +50,6 @@ pub(crate) async fn spawn_generator(
                             {
                                 break;
                             }
-                            continue;
                         }
                     }
                 }
@@ -84,7 +83,6 @@ async fn zmq_reconnect(
     settings: &Arc<Settings>,
     cancel: &CancellationToken,
 ) -> bool {
-    let _ = zmq_fail_since.get_or_insert_with(Instant::now);
     let mut backoff = Duration::from_secs(1);
     loop {
         tokio::select! {
