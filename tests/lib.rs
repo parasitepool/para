@@ -50,7 +50,7 @@ use {
         CompressedPublicKey, Network, PrivateKey, block::Header, hashes::Hash,
         key::UntweakedPublicKey, secp256k1::Secp256k1, sign_message::MessageSignature,
     },
-    bitcoind_async_client::{Auth, Client as BitcoindClient, traits::Reader},
+    bitcoind_async_client::traits::Reader,
     harness::bitcoind::Bitcoind,
     ntest::timeout,
     para::{
