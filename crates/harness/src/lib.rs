@@ -114,10 +114,16 @@ pub fn main() {
                     continuous,
                 }) => {
                     let network = parse_network(&network);
-                    let bitcoind =
-                        Bitcoind::connect(rpc_port, rpc_user, rpc_password, zmq_port, network)
-                            .await
-                            .expect("Failed to connect to bitcoind");
+                    let bitcoind = Bitcoind::connect(
+                        rpc_port,
+                        rpc_user,
+                        rpc_password,
+                        zmq_port,
+                        network,
+                        true,
+                    )
+                    .await
+                    .expect("Failed to connect to bitcoind");
 
                     if let Some(target_bytes) = continuous {
                         println!(

@@ -19,6 +19,7 @@ impl Bitcoind {
         rpc_password: String,
         zmq_port: u16,
         network: Network,
+        with_output: bool,
     ) -> Result<Self> {
         let bitcoind = Self {
             datadir: None,
@@ -28,7 +29,7 @@ impl Bitcoind {
             zmq_port,
             rpc_user,
             rpc_password,
-            with_output: true,
+            with_output,
             _tempdir: None,
         };
 

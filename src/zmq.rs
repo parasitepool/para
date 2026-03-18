@@ -66,7 +66,7 @@ impl Zmq {
 async fn connect(
     endpoint: &str,
 ) -> Result<(SubSocket, futures::channel::mpsc::Receiver<SocketEvent>)> {
-    let socket = match timeout(Duration::from_secs(1), async {
+    match timeout(Duration::from_secs(1), async {
         let mut socket = SubSocket::new();
         let monitor = socket.monitor();
 
@@ -84,12 +84,10 @@ async fn connect(
     })
     .await
     {
-        Ok(Ok(socket)) => socket,
-        Ok(Err(err)) => return Err(err),
+        Ok(Ok(pair)) => Ok(pair),
+        Ok(Err(err)) => Err(err),
         Err(_) => bail!(
             "timed out connecting to ZMQ endpoint `{endpoint}` - ensure bitcoind is running with `-zmqpubhashblock={endpoint}`"
         ),
-    };
-
-    Ok(socket)
+    }
 }

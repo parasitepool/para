@@ -36,7 +36,6 @@ pub(crate) async fn spawn_generator(
                 result = subscription.recv_blockhash() => {
                     match result {
                         Ok(blockhash) => {
-                            zmq_fail_since = None;
                             info!("ZMQ blockhash {blockhash}");
                         }
                         Err(err) => {
@@ -52,6 +51,7 @@ pub(crate) async fn spawn_generator(
                             {
                                 break;
                             }
+                            continue;
                         }
                     }
                 }
