@@ -137,7 +137,7 @@ fn allocate_port() -> u16 {
 }
 
 #[cfg(target_os = "linux")]
-fn global_bitcoind() -> &'static Bitcoind {
+fn bitcoind() -> &'static Bitcoind {
     static BITCOIND: OnceLock<Bitcoind> = OnceLock::new();
 
     BITCOIND.get_or_init(|| {

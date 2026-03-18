@@ -4,7 +4,7 @@ use super::*;
 #[serial(bitcoind)]
 #[timeout(90000)]
 async fn proxy() {
-    let pool = TestPool::spawn_with_args(global_bitcoind(), "--start-diff 0.00001");
+    let pool = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.00001");
     let upstream = pool.stratum_endpoint();
     let username = signet_username();
 
@@ -232,7 +232,7 @@ async fn proxy() {
 #[serial(bitcoind)]
 #[timeout(90000)]
 fn mine_through_proxy() {
-    let pool = TestPool::spawn_with_args(global_bitcoind(), "--start-diff 0.00001");
+    let pool = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.00001");
 
     let proxy = TestProxy::spawn_with_args(
         &pool.stratum_endpoint(),
@@ -266,8 +266,7 @@ fn mine_through_proxy() {
 #[serial(bitcoind)]
 #[timeout(90000)]
 fn proxy_rejects_incompatible_upstream_enonce2_size() {
-    let pool =
-        TestPool::spawn_with_args(global_bitcoind(), "--start-diff 0.00001 --enonce2-size 2");
+    let pool = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.00001 --enonce2-size 2");
 
     let stderr = TestProxy::spawn_expect_failure(
         &pool.stratum_endpoint(),
@@ -291,7 +290,7 @@ fn proxy_rejects_incompatible_upstream_enonce2_size() {
 #[timeout(90000)]
 async fn proxy_with_non_default_enonce_sizes() {
     let pool = TestPool::spawn_with_args(
-        global_bitcoind(),
+        bitcoind(),
         "--start-diff 0.00001 --enonce1-size 6 --enonce2-size 4",
     );
     let upstream = pool.stratum_endpoint();
@@ -347,7 +346,7 @@ async fn proxy_with_non_default_enonce_sizes() {
 #[serial(bitcoind)]
 #[timeout(90000)]
 async fn proxy_allows_version_rolling() {
-    let pool = TestPool::spawn_with_args(global_bitcoind(), "--start-diff 0.00001");
+    let pool = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.00001");
 
     let proxy = TestProxy::spawn_with_args(
         &pool.stratum_endpoint(),
@@ -409,10 +408,7 @@ async fn proxy_allows_version_rolling() {
 #[timeout(120000)]
 #[ignore]
 async fn proxy_relays_job_updates_and_new_blocks() {
-    let pool = TestPool::spawn_with_args(
-        global_bitcoind(),
-        "--start-diff 0.000001 --update-interval 1",
-    );
+    let pool = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.000001 --update-interval 1");
 
     let proxy = TestProxy::spawn_with_args(
         &pool.stratum_endpoint(),
@@ -446,7 +442,7 @@ async fn proxy_relays_job_updates_and_new_blocks() {
 #[serial(bitcoind)]
 #[timeout(120000)]
 async fn reconnects_on_upstream_disconnect() {
-    let pool = TestPool::spawn_with_args(global_bitcoind(), "--start-diff 0.00001");
+    let pool = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.00001");
     let pool_port = pool.pool_port();
 
     let proxy = TestProxy::spawn_with_args(
@@ -498,7 +494,7 @@ async fn reconnects_on_upstream_disconnect() {
     thread::sleep(Duration::from_millis(500));
 
     let _pool2 = TestPool::spawn_on_port(
-        global_bitcoind(),
+        bitcoind(),
         pool_port,
         "--start-diff 0.00001 --enonce1-size 6 --enonce2-size 4",
     );
@@ -569,7 +565,7 @@ async fn reconnects_on_upstream_disconnect() {
 #[serial(bitcoind)]
 #[timeout(120000)]
 async fn stale_extended_enonce1_is_rejected_after_upstream_reconnect() {
-    let pool = TestPool::spawn_with_args(global_bitcoind(), "--start-diff 0.00001");
+    let pool = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.00001");
     let pool_port = pool.pool_port();
 
     let proxy = TestProxy::spawn_with_args(
@@ -617,7 +613,7 @@ async fn stale_extended_enonce1_is_rejected_after_upstream_reconnect() {
     thread::sleep(Duration::from_millis(500));
 
     let pool2 = TestPool::spawn_on_port(
-        global_bitcoind(),
+        bitcoind(),
         pool_port,
         "--start-diff 0.00001 --enonce1-size 6 --enonce2-size 4",
     );

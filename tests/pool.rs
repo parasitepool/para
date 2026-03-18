@@ -4,7 +4,7 @@ use super::*;
 #[serial(bitcoind)]
 #[timeout(90000)]
 fn mine_to_pool() {
-    let pool = TestPool::spawn_with_args(global_bitcoind(), "--start-diff 0.00001");
+    let pool = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.00001");
 
     let stratum_endpoint = pool.stratum_endpoint();
 
@@ -25,8 +25,7 @@ fn mine_to_pool() {
 #[serial(bitcoind)]
 #[timeout(120000)]
 async fn stratum_state_machine() {
-    let pool =
-        TestPool::spawn_with_args(global_bitcoind(), "--start-diff 0.00001 --disable-bouncer");
+    let pool = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.00001 --disable-bouncer");
 
     // State::Init
     {
@@ -338,7 +337,7 @@ async fn stratum_state_machine() {
 #[timeout(90000)]
 #[ignore]
 async fn clean_jobs_true_on_init_and_new_block() {
-    let pool = TestPool::spawn_with_args(global_bitcoind(), "--start-diff 0.0001");
+    let pool = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.0001");
     let client = pool.stratum_client().await;
     let mut events = client.connect().await.unwrap();
 
@@ -358,10 +357,7 @@ async fn clean_jobs_true_on_init_and_new_block() {
 #[serial(bitcoind)]
 #[timeout(90000)]
 fn configure_template_update_interval() {
-    let pool = TestPool::spawn_with_args(
-        global_bitcoind(),
-        "--update-interval 1 --start-diff 0.00001",
-    );
+    let pool = TestPool::spawn_with_args(bitcoind(), "--update-interval 1 --start-diff 0.00001");
 
     let stratum_endpoint = pool.stratum_endpoint();
 
@@ -400,7 +396,7 @@ async fn concurrently_listening_workers_receive_new_templates_on_new_block() {
     use std::sync::Barrier;
     use std::time::Duration;
 
-    let pool = TestPool::spawn_with_args(global_bitcoind(), "--start-diff 0.0001");
+    let pool = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.0001");
     let endpoint = pool.stratum_endpoint();
     let user = signet_username();
 
@@ -479,7 +475,7 @@ async fn concurrently_listening_workers_receive_new_templates_on_new_block() {
 #[timeout(120000)]
 async fn vardiff_adjusts_difficulty() {
     let pool = TestPool::spawn_with_args(
-        global_bitcoind(),
+        bitcoind(),
         "--start-diff 0.00001 --vardiff-period 1 --vardiff-window 5 --disable-bouncer",
     );
 
@@ -562,7 +558,7 @@ async fn vardiff_adjusts_difficulty() {
 #[timeout(120000)]
 async fn new_job_shares_rejected_at_old_diff() {
     let pool = TestPool::spawn_with_args(
-        global_bitcoind(),
+        bitcoind(),
         "--start-diff 0.00001 --vardiff-period 1 --vardiff-window 5 --update-interval 1 --disable-bouncer",
     );
 
@@ -632,8 +628,7 @@ async fn new_job_shares_rejected_at_old_diff() {
 #[serial(bitcoind)]
 #[timeout(90000)]
 async fn share_validation() {
-    let pool =
-        TestPool::spawn_with_args(global_bitcoind(), "--start-diff 0.00001 --disable-bouncer");
+    let pool = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.00001 --disable-bouncer");
 
     let status = pool.get_status().await.unwrap();
     assert_eq!(status.user_count, 0);
@@ -997,7 +992,7 @@ async fn share_validation() {
 #[serial(bitcoind)]
 #[timeout(90000)]
 async fn bouncer() {
-    let pool = TestPool::spawn_with_args(global_bitcoind(), "--start-diff 0.00001");
+    let pool = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.00001");
 
     let auth_timeout_test = async {
         let client = pool.stratum_client().await;
@@ -1311,7 +1306,7 @@ async fn bouncer() {
 async fn high_diff_port() {
     let high_diff_port = allocate_port();
     let pool = TestPool::spawn_with_args(
-        global_bitcoind(),
+        bitcoind(),
         format!("--start-diff 0.00001 --disable-bouncer --high-diff-port {high_diff_port}",),
     );
 
@@ -1343,7 +1338,7 @@ async fn high_diff_port() {
 #[serial(bitcoind)]
 #[timeout(90000)]
 async fn idle_drop_retires_session() {
-    let pool = TestPool::spawn_with_args(global_bitcoind(), "--start-diff 0.00001");
+    let pool = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.00001");
 
     let client = pool.stratum_client().await;
     let mut events = client.connect().await.unwrap();

@@ -30,7 +30,7 @@ async fn test_file_sink_json() {
 
     {
         let pool = TestPool::spawn_with_args(
-            global_bitcoind(),
+            bitcoind(),
             format!(
                 "--events-file {} --start-diff 0.000001",
                 events_file.display()
@@ -94,7 +94,7 @@ async fn test_file_sink_csv() {
 
     {
         let pool = TestPool::spawn_with_args(
-            global_bitcoind(),
+            bitcoind(),
             format!(
                 "--events-file {} --start-diff 0.000001",
                 events_csv.display()
@@ -140,7 +140,7 @@ async fn test_database_sink() {
 
     {
         let pool = TestPool::spawn_with_args(
-            global_bitcoind(),
+            bitcoind(),
             format!("--database-url {} --start-diff 0.000001", database_url),
         );
 
@@ -195,7 +195,7 @@ async fn test_multi_sink() {
 
     {
         let pool = TestPool::spawn_with_args(
-            global_bitcoind(),
+            bitcoind(),
             format!(
                 "--events-file {} --database-url {} --start-diff 0.000001",
                 multi_events.display(),
@@ -257,7 +257,7 @@ async fn test_block_found_event() {
 
     {
         let pool = TestPool::spawn_with_args(
-            global_bitcoind(),
+            bitcoind(),
             format!(
                 "--events-file {} --database-url {} --start-diff 0.0000001",
                 block_events.display(),

@@ -67,6 +67,8 @@ pub enum Commands {
         rpc_user: String,
         #[arg(long, default_value = "nakamoto")]
         rpc_password: String,
+        #[arg(long, default_value = "28332")]
+        zmq_port: u16,
         #[arg(long, default_value = "signet")]
         network: String,
         #[arg(long)]
@@ -106,14 +108,16 @@ pub fn main() {
                     rpc_port,
                     rpc_user,
                     rpc_password,
+                    zmq_port,
                     network,
                     breadth,
                     continuous,
                 }) => {
                     let network = parse_network(&network);
-                    let bitcoind = Bitcoind::connect(rpc_port, rpc_user, rpc_password, network)
-                        .await
-                        .expect("Failed to connect to bitcoind");
+                    let bitcoind =
+                        Bitcoind::connect(rpc_port, rpc_user, rpc_password, zmq_port, network)
+                            .await
+                            .expect("Failed to connect to bitcoind");
 
                     if let Some(target_bytes) = continuous {
                         println!(

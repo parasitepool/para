@@ -9,25 +9,21 @@ pub(crate) struct TestPool {
 }
 
 impl TestPool {
-    pub(crate) fn spawn(bitcoind: &Bitcoind) -> Self {
-        Self::spawn_with_args(bitcoind, "")
-    }
-
     pub(crate) fn spawn_on_port(bitcoind: &Bitcoind, port: u16, args: impl ToArgs) -> Self {
-        Self::spawn_inner(bitcoind, Some(port), args)
+        Self::spawn(bitcoind, Some(port), args)
     }
 
     pub(crate) fn spawn_with_args(bitcoind: &Bitcoind, args: impl ToArgs) -> Self {
-        Self::spawn_inner(bitcoind, None, args)
+        Self::spawn(bitcoind, None, args)
     }
 
-    fn spawn_inner(bitcoind: &Bitcoind, port: Option<u16>, args: impl ToArgs) -> Self {
+    pub(crate) fn spawn(bitcoind: &Bitcoind, port: Option<u16>, args: impl ToArgs) -> Self {
         let tempdir = Arc::new(TempDir::new().unwrap());
 
+        let rpc_port = bitcoind.rpc_port;
+        let zmq_port = bitcoind.zmq_port;
         let pool_port = port.unwrap_or_else(allocate_port);
         let http_port = allocate_port();
-        let rpc_port = bitcoind.rpc_port;
-        let zmq_port = bitcoind.zmq_port.expect("bitcoind missing zmq_port");
 
         let pool_handle = CommandBuilder::new(format!(
             "pool
