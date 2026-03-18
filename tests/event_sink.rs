@@ -259,7 +259,7 @@ async fn test_block_found_event() {
         let pool = TestPool::spawn_with_args(
             bitcoind(),
             format!(
-                "--events-file {} --database-url {} --start-diff 0.0000001",
+                "--events-file {} --database-url {} --start-diff 0.00001",
                 block_events.display(),
                 database_url
             ),
@@ -293,10 +293,12 @@ async fn test_block_found_event() {
         blockheight.is_some() && blockheight.unwrap() > 0,
         "Block height should be positive"
     );
+
     assert!(
         blockhash.is_some() && !blockhash.unwrap().is_empty(),
         "Block hash should be present"
     );
+
     assert!(
         diff.is_some() && diff.unwrap() > 0.0,
         "Difficulty should be positive"
