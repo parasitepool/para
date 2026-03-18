@@ -4,29 +4,26 @@ pub(crate) struct TestPool {
     pool_handle: Child,
     pool_port: u16,
     http_port: u16,
+    rpc_port: u16,
     _tempdir: Arc<TempDir>,
 }
 
 impl TestPool {
-    pub(crate) fn spawn() -> Self {
-        Self::spawn_with_args("")
+    pub(crate) fn spawn_on_port(bitcoind: &Bitcoind, port: u16, args: impl ToArgs) -> Self {
+        Self::spawn_inner(bitcoind, Some(port), args)
     }
 
-    pub(crate) fn spawn_on_port(port: u16, args: impl ToArgs) -> Self {
-        Self::spawn_inner(Some(port), args)
+    pub(crate) fn spawn_with_args(bitcoind: &Bitcoind, args: impl ToArgs) -> Self {
+        Self::spawn_inner(bitcoind, None, args)
     }
 
-    pub(crate) fn spawn_with_args(args: impl ToArgs) -> Self {
-        Self::spawn_inner(None, args)
-    }
-
-    fn spawn_inner(port: Option<u16>, args: impl ToArgs) -> Self {
+    fn spawn_inner(bitcoind: &Bitcoind, port: Option<u16>, args: impl ToArgs) -> Self {
         let tempdir = Arc::new(TempDir::new().unwrap());
-        let bitcoind = global_bitcoind();
 
+        let rpc_port = bitcoind.rpc_port;
         let pool_port = port.unwrap_or_else(allocate_port);
         let http_port = allocate_port();
-        let zmq_port = bitcoind.zmq_port.expect("global bitcoind missing zmq_port");
+        let zmq_port = bitcoind.zmq_port;
 
         let pool_handle = CommandBuilder::new(format!(
             "pool
@@ -36,10 +33,9 @@ impl TestPool {
                 --http-port {http_port}
                 --bitcoin-rpc-username satoshi
                 --bitcoin-rpc-password nakamoto
-                --bitcoin-rpc-port {}
+                --bitcoin-rpc-port {rpc_port}
                 --zmq-block-notifications tcp://127.0.0.1:{zmq_port}
                 {}",
-            bitcoind.rpc_port,
             args.to_args().join(" ")
         ))
         .capture_stderr(true)
@@ -65,6 +61,7 @@ impl TestPool {
             pool_handle,
             pool_port,
             http_port,
+            rpc_port,
             _tempdir: tempdir,
         }
     }
@@ -184,17 +181,12 @@ impl TestPool {
         )
     }
 
-    #[allow(unused)]
-    pub(crate) fn bitcoind_handle(&self) -> &Bitcoind {
-        global_bitcoind()
-    }
-
     pub(crate) fn bitcoind_rpc_port(&self) -> u16 {
-        global_bitcoind().rpc_port
+        self.rpc_port
     }
 
     pub(crate) async fn get_block_height(&self) -> u64 {
-        self.bitcoind_handle()
+        bitcoind()
             .client()
             .unwrap()
             .get_block_count()
@@ -221,6 +213,10 @@ impl TestPool {
             }
             sleep(Duration::from_millis(100)).await;
         }
+    }
+
+    pub(crate) fn try_wait(&mut self) -> std::io::Result<Option<std::process::ExitStatus>> {
+        self.pool_handle.try_wait()
     }
 }
 

@@ -130,7 +130,7 @@ use {
     utoipa::{OpenApi, ToSchema},
     vardiff::Vardiff,
     workbase::Workbase,
-    zeromq::{Endpoint, Socket, SocketRecv, SubSocket},
+    zeromq::{Endpoint, Socket, SocketEvent, SocketRecv, SubSocket},
     zmq::Zmq,
 };
 

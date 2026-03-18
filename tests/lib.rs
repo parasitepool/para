@@ -108,6 +108,8 @@ mod alerts;
 #[cfg(target_os = "linux")]
 mod event_sink;
 #[cfg(target_os = "linux")]
+mod generator;
+#[cfg(target_os = "linux")]
 mod payouts;
 #[cfg(target_os = "linux")]
 mod ping;
@@ -135,7 +137,7 @@ fn allocate_port() -> u16 {
 }
 
 #[cfg(target_os = "linux")]
-fn global_bitcoind() -> &'static Bitcoind {
+fn bitcoind() -> &'static Bitcoind {
     static BITCOIND: OnceLock<Bitcoind> = OnceLock::new();
 
     BITCOIND.get_or_init(|| {

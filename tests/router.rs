@@ -4,8 +4,8 @@ use super::*;
 #[serial(bitcoind)]
 #[timeout(120000)]
 async fn router_round_robin() {
-    let pool_a = TestPool::spawn_with_args("--start-diff 0.00001");
-    let pool_b = TestPool::spawn_with_args("--start-diff 0.00001");
+    let pool_a = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.00001");
+    let pool_b = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.00001");
 
     let username_a = "tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.foo";
     let username_b = "tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.bar";
@@ -96,10 +96,14 @@ async fn router_round_robin() {
 #[serial(bitcoind)]
 #[timeout(120000)]
 async fn router_rejects_incompatible_resumed_enonce1() {
-    let pool_a =
-        TestPool::spawn_with_args("--start-diff 0.00001 --enonce1-size 4 --enonce2-size 8");
-    let pool_b =
-        TestPool::spawn_with_args("--start-diff 0.00001 --enonce1-size 6 --enonce2-size 6");
+    let pool_a = TestPool::spawn_with_args(
+        bitcoind(),
+        "--start-diff 0.00001 --enonce1-size 4 --enonce2-size 8",
+    );
+    let pool_b = TestPool::spawn_with_args(
+        bitcoind(),
+        "--start-diff 0.00001 --enonce1-size 6 --enonce2-size 6",
+    );
 
     let router = TestRouter::spawn(
         &[

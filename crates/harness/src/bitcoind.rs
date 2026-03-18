@@ -5,7 +5,7 @@ pub struct Bitcoind {
     pub handle: Option<Child>,
     pub network: Network,
     pub rpc_port: u16,
-    pub zmq_port: Option<u16>,
+    pub zmq_port: u16,
     pub rpc_user: String,
     pub rpc_password: String,
     pub with_output: bool,
@@ -17,17 +17,19 @@ impl Bitcoind {
         rpc_port: u16,
         rpc_user: String,
         rpc_password: String,
+        zmq_port: u16,
         network: Network,
+        with_output: bool,
     ) -> Result<Self> {
         let bitcoind = Self {
             datadir: None,
             handle: None,
             network,
             rpc_port,
-            zmq_port: None,
+            zmq_port,
             rpc_user,
             rpc_password,
-            with_output: true,
+            with_output,
             _tempdir: None,
         };
 
@@ -49,7 +51,7 @@ impl Bitcoind {
         with_output: bool,
     ) -> Result<Self> {
         let bitcoind_data_dir = tempdir.path().join("bitcoin");
-        fs::create_dir(&bitcoind_data_dir)?;
+        fs::create_dir_all(&bitcoind_data_dir)?;
 
         let bitcoind_conf = bitcoind_data_dir.join("bitcoin.conf");
 
@@ -130,7 +132,7 @@ maxtxfee=1000000
             handle: Some(handle),
             network,
             rpc_port,
-            zmq_port: Some(zmq_port),
+            zmq_port,
             rpc_user,
             rpc_password,
             with_output,
