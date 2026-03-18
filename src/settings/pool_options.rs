@@ -35,9 +35,9 @@ pub(crate) struct PoolOptions {
     #[arg(
         long,
         default_value_t = 60,
-        help = "Shut down after <RPC_TIMEOUT> seconds of consecutive RPC failures."
+        help = "Shut down after <BITCOIND_TIMEOUT> seconds of consecutive bitcoind RPC or ZMQ failures."
     )]
-    pub(crate) rpc_timeout: u64,
+    pub(crate) bitcoind_timeout: u64,
 
     #[arg(long, help = "Disable bouncer.")]
     pub(crate) disable_bouncer: bool,

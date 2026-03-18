@@ -85,7 +85,11 @@ use {
     test_pool::TestPool,
     test_proxy::TestProxy,
     test_router::TestRouter,
-    tokio::{sync::mpsc, time::sleep},
+    tokio::{
+        sync::{mpsc, oneshot},
+        task::JoinHandle,
+        time::sleep,
+    },
 };
 
 mod command_builder;

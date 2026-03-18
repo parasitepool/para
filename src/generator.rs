@@ -16,7 +16,7 @@ pub(crate) async fn spawn_generator(
     let mut ticker = interval(settings.update_interval());
     ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-    let rpc_timeout = settings.rpc_timeout();
+    let bitcoind_timeout = settings.bitcoind_timeout();
 
     tasks.spawn(async move {
         let fetch = || async {
@@ -26,6 +26,7 @@ pub(crate) async fn spawn_generator(
         };
 
         let mut rpc_fail_since: Option<Instant> = None;
+        let mut zmq_fail_since: Option<Instant> = None;
 
         loop {
             tokio::select! {
@@ -33,58 +34,39 @@ pub(crate) async fn spawn_generator(
                 result = subscription.recv_blockhash() => {
                     match result {
                         Ok(blockhash) => {
+                            zmq_fail_since = None;
                             info!("ZMQ blockhash {blockhash}");
-                            match fetch().await {
-                                Ok(()) => rpc_fail_since = None,
-                                Err(err) => {
-                                    warn!("Failed to fetch new block template: {err}");
-                                    let since = *rpc_fail_since.get_or_insert_with(Instant::now);
-                                    if since.elapsed() > rpc_timeout {
-                                        error!("bitcoind unavailable for over {rpc_timeout:?}, shutting down");
-                                        cancel.cancel();
-                                        break;
-                                    }
-                                }
-                            }
                         }
                         Err(err) => {
                             error!("ZMQ receive error: {err}");
-                            let mut backoff = Duration::from_secs(1);
-                            loop {
-                                tokio::select! {
-                                    _ = cancel.cancelled() => break,
-                                    _ = sleep(backoff) => {}
-                                }
-                                if cancel.is_cancelled() {
-                                    break;
-                                }
-                                match Zmq::connect(settings.clone()).await {
-                                    Ok(new_sub) => {
-                                        info!("ZMQ reconnected");
-                                        subscription = new_sub;
-                                        break;
-                                    }
-                                    Err(err) => {
-                                        warn!("ZMQ reconnection failed: {err}");
-                                        backoff = (backoff * 2).min(Duration::from_secs(30));
-                                    }
-                                }
+                            if !zmq_reconnect(
+                                &mut subscription,
+                                &mut zmq_fail_since,
+                                bitcoind_timeout,
+                                &settings,
+                                &cancel,
+                            )
+                            .await
+                            {
+                                break;
                             }
+                            continue;
                         }
                     }
                 }
-                _ = ticker.tick() => {
-                    match fetch().await {
-                        Ok(()) => rpc_fail_since = None,
-                        Err(err) => {
-                            warn!("Failed to fetch new block template: {err}");
-                            let since = *rpc_fail_since.get_or_insert_with(Instant::now);
-                            if since.elapsed() > rpc_timeout {
-                                error!("bitcoind unavailable for over {rpc_timeout:?}, shutting down");
-                                cancel.cancel();
-                                break;
-                            }
-                        }
+                _ = ticker.tick() => {}
+            }
+
+            match fetch().await {
+                Ok(()) => rpc_fail_since = None,
+                Err(err) => {
+                    warn!("Failed to fetch new block template: {err}");
+                    if timed_out(&mut rpc_fail_since, bitcoind_timeout) {
+                        error!(
+                            "bitcoind RPC unavailable for over {bitcoind_timeout:?}, shutting down"
+                        );
+                        cancel.cancel();
+                        break;
                     }
                 }
             }
@@ -93,6 +75,44 @@ pub(crate) async fn spawn_generator(
     });
 
     Ok(rx)
+}
+
+async fn zmq_reconnect(
+    subscription: &mut Zmq,
+    zmq_fail_since: &mut Option<Instant>,
+    bitcoind_timeout: Duration,
+    settings: &Arc<Settings>,
+    cancel: &CancellationToken,
+) -> bool {
+    let _ = zmq_fail_since.get_or_insert_with(Instant::now);
+    let mut backoff = Duration::from_secs(1);
+    loop {
+        tokio::select! {
+            _ = cancel.cancelled() => return false,
+            _ = sleep(backoff) => {}
+        }
+        match Zmq::connect(settings.clone()).await {
+            Ok(new_sub) => {
+                info!("ZMQ reconnected");
+                *subscription = new_sub;
+                *zmq_fail_since = None;
+                return true;
+            }
+            Err(err) => {
+                warn!("ZMQ reconnection failed: {err}");
+                if timed_out(zmq_fail_since, bitcoind_timeout) {
+                    error!("bitcoind ZMQ unavailable for over {bitcoind_timeout:?}, shutting down");
+                    cancel.cancel();
+                    return false;
+                }
+                backoff = (backoff * 2).min(Duration::from_secs(30));
+            }
+        }
+    }
+}
+
+fn timed_out(fail_since: &mut Option<Instant>, timeout: Duration) -> bool {
+    fail_since.get_or_insert_with(Instant::now).elapsed() > timeout
 }
 
 async fn get_block_template(

@@ -1,6 +1,7 @@
 use super::*;
 
 pub struct Zmq {
+    monitor: futures::channel::mpsc::Receiver<SocketEvent>,
     socket: SubSocket,
 }
 
@@ -10,35 +11,25 @@ impl Zmq {
 
         info!("Subscribing to hashblock on ZMQ endpoint {endpoint}");
 
-        let socket = match timeout(Duration::from_secs(1), async {
-            let mut socket = SubSocket::new();
+        let (socket, monitor) = connect(&endpoint).await?;
 
-            socket
-                .connect(&endpoint)
-                .await
-                .with_context(|| format!("failed to connect to ZMQ endpoint `{endpoint}`"))?;
-
-            socket
-                .subscribe("hashblock")
-                .await
-                .with_context(|| format!("failed to subscribe to hashblock on `{endpoint}`"))?;
-
-            Ok::<_, Error>(socket)
-        })
-        .await
-        {
-            Ok(Ok(socket)) => socket,
-            Ok(Err(err)) => return Err(err),
-            Err(_) => bail!(
-                "timed out connecting to ZMQ endpoint `{endpoint}` - ensure bitcoind is running with `-zmqpubhashblock={endpoint}`"
-            ),
-        };
-
-        Ok(Self { socket })
+        Ok(Self { monitor, socket })
     }
 
     pub async fn recv_blockhash(&mut self) -> Result<BlockHash> {
-        let message = self.socket.recv().await?;
+        let socket = &mut self.socket;
+        let monitor = &mut self.monitor;
+
+        let message = loop {
+            tokio::select! {
+                message = socket.recv() => break message?,
+                event = monitor.next() => match event {
+                    Some(SocketEvent::Disconnected(_)) => bail!("disconnected from ZMQ endpoint"),
+                    Some(_) => {}
+                    None => bail!("ZMQ monitor closed"),
+                }
+            }
+        };
 
         ensure!(
             message.len() == 3,
@@ -70,4 +61,35 @@ impl Zmq {
 
         BlockHash::from_slice(&arr).context("blockhash parse")
     }
+}
+
+async fn connect(
+    endpoint: &str,
+) -> Result<(SubSocket, futures::channel::mpsc::Receiver<SocketEvent>)> {
+    let socket = match timeout(Duration::from_secs(1), async {
+        let mut socket = SubSocket::new();
+        let monitor = socket.monitor();
+
+        socket
+            .connect(endpoint)
+            .await
+            .with_context(|| format!("failed to connect to ZMQ endpoint `{endpoint}`"))?;
+
+        socket
+            .subscribe("hashblock")
+            .await
+            .with_context(|| format!("failed to subscribe to hashblock on `{endpoint}`"))?;
+
+        Ok::<_, Error>((socket, monitor))
+    })
+    .await
+    {
+        Ok(Ok(socket)) => socket,
+        Ok(Err(err)) => return Err(err),
+        Err(_) => bail!(
+            "timed out connecting to ZMQ endpoint `{endpoint}` - ensure bitcoind is running with `-zmqpubhashblock={endpoint}`"
+        ),
+    };
+
+    Ok(socket)
 }

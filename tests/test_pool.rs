@@ -1,5 +1,7 @@
 use super::*;
 
+use std::io::Read;
+
 pub(crate) struct TestPool {
     pool_handle: Child,
     pool_port: u16,
@@ -21,11 +23,11 @@ impl TestPool {
         let tempdir = Arc::new(TempDir::new().unwrap());
 
         let rpc_port = bitcoind.rpc_port;
-        let zmq_port = bitcoind.zmq_port;
         let pool_port = port.unwrap_or_else(allocate_port);
         let http_port = allocate_port();
+        let zmq_port = bitcoind.zmq_port;
 
-        let pool_handle = CommandBuilder::new(format!(
+        let mut pool_handle = CommandBuilder::new(format!(
             "pool
                 --chain signet
                 --address 127.0.0.1
@@ -50,10 +52,34 @@ impl TestPool {
                 Err(_) if attempt < 100 => {
                     thread::sleep(Duration::from_millis(50));
                 }
-                Err(e) => panic!(
-                    "Failed to connect to para pool after {} attempts: {}",
-                    attempt, e
-                ),
+                Err(e) => {
+                    let exited = pool_handle.try_wait().unwrap();
+
+                    let (stdout, stderr) = if exited.is_some() {
+                        let mut stdout = String::new();
+                        pool_handle
+                            .stdout
+                            .as_mut()
+                            .unwrap()
+                            .read_to_string(&mut stdout)
+                            .unwrap();
+                        let mut stderr = String::new();
+                        pool_handle
+                            .stderr
+                            .as_mut()
+                            .unwrap()
+                            .read_to_string(&mut stderr)
+                            .unwrap();
+                        (stdout, stderr)
+                    } else {
+                        (String::new(), String::new())
+                    };
+
+                    panic!(
+                        "Failed to connect to para pool after {} attempts: {}\nstatus: {:?}\nstdout:\n{}\nstderr:\n{}",
+                        attempt, e, exited, stdout, stderr,
+                    )
+                }
             }
         }
 
@@ -219,6 +245,7 @@ impl TestPool {
             sleep(Duration::from_millis(100)).await;
         }
     }
+
     pub(crate) fn try_wait(&mut self) -> std::io::Result<Option<std::process::ExitStatus>> {
         self.pool_handle.try_wait()
     }
