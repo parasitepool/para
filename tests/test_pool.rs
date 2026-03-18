@@ -186,17 +186,12 @@ impl TestPool {
     }
 
     pub(crate) async fn get_block_height(&self) -> u64 {
-        BitcoindClient::new(
-            format!("http://127.0.0.1:{}", self.rpc_port),
-            Auth::UserPass("satoshi".into(), "nakamoto".into()),
-            None,
-            None,
-            None,
-        )
-        .unwrap()
-        .get_block_count()
-        .await
-        .unwrap()
+        bitcoind()
+            .client()
+            .unwrap()
+            .get_block_count()
+            .await
+            .unwrap()
     }
 
     pub(crate) async fn mine_block(&self) {
