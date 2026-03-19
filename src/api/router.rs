@@ -88,7 +88,7 @@ async fn slot(
     Path(index): Path<usize>,
 ) -> ServerResult<Response> {
     let slot = router
-        .slot_by_index(index)
+        .get_slot(index)
         .ok_or_not_found(|| format!("Slot {index}"))?;
 
     let now = Instant::now();

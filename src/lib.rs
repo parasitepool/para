@@ -61,7 +61,7 @@ use {
     parking_lot::{Mutex, RwLock},
     ph_days::PhDays,
     reqwest::Url,
-    router::Router,
+    router::{Router, slot::Slot},
     rust_embed::RustEmbed,
     rustls_acme::{
         AcmeConfig,

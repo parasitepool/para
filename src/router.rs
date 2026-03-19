@@ -1,6 +1,6 @@
 use {super::*, slot::Slot};
 
-mod slot;
+pub(crate) mod slot;
 
 pub(crate) struct Router {
     metatron: Arc<Metatron>,
@@ -9,15 +9,32 @@ pub(crate) struct Router {
 }
 
 impl Router {
-    pub(crate) fn new(metatron: Arc<Metatron>, slots: Vec<Arc<Slot>>) -> Self {
+    pub(crate) fn new(metatron: Arc<Metatron>) -> Self {
         Self {
             metatron,
-            slots: RwLock::new(slots),
+            slots: RwLock::new(Vec::new()),
             counter: AtomicU64::new(0),
         }
     }
 
-    pub(crate) fn assign_to_slot(&self) -> Option<Arc<Slot>> {
+    pub(crate) fn add_slot(&self, slot: Arc<Slot>) {
+        self.slots.write().push(slot)
+    }
+
+    pub(crate) fn remove_slot(&self, slot: &Arc<Slot>) {
+        let mut slots = self.slots.write();
+        slots.retain(|s| !Arc::ptr_eq(s, slot));
+    }
+
+    pub(crate) fn get_slot(&self, index: usize) -> Option<Arc<Slot>> {
+        self.slots.read().iter().find(|s| s.index == index).cloned()
+    }
+
+    pub(crate) fn slots(&self) -> Vec<Arc<Slot>> {
+        self.slots.read().clone()
+    }
+
+    pub(crate) fn get_next_slot(&self) -> Option<Arc<Slot>> {
         let slots = self.slots.read();
         if slots.is_empty() {
             return None;
@@ -28,53 +45,7 @@ impl Router {
         Some(slots[idx].clone())
     }
 
-    pub(crate) fn remove_slot(&self, slot: &Arc<Slot>) {
-        let mut slots = self.slots.write();
-        slots.retain(|s| !Arc::ptr_eq(s, slot));
-    }
-
-    pub(crate) fn slots(&self) -> Vec<Arc<Slot>> {
-        self.slots.read().clone()
-    }
-
-    pub(crate) fn slot_by_index(&self, index: usize) -> Option<Arc<Slot>> {
-        self.slots.read().iter().find(|s| s.index == index).cloned()
-    }
-
-    pub(crate) async fn connect(
-        metatron: Arc<Metatron>,
-        targets: &[UpstreamTarget],
-        timeout: Duration,
-        enonce1_extension_size: usize,
-        cancel_token: &CancellationToken,
-        tasks: &TaskTracker,
-    ) -> Result<Arc<Self>, Error> {
-        let mut slots = Vec::new();
-        for (index, target) in targets.iter().enumerate() {
-            match Slot::connect(
-                index,
-                index as u32,
-                target,
-                timeout,
-                enonce1_extension_size,
-                cancel_token.child_token(),
-                tasks,
-            )
-            .await
-            {
-                Ok(slot) => slots.push(slot),
-                Err(err) => {
-                    warn!("Skipping upstream {target}: {err}");
-                }
-            }
-        }
-
-        ensure!(!slots.is_empty(), "all upstream connections failed");
-
-        Ok(Arc::new(Self::new(metatron, slots)))
-    }
-
-    pub(crate) fn spawn(self: &Arc<Self>, cancel: CancellationToken, tasks: &TaskTracker) {
+    pub(crate) fn spawn(self: Arc<Self>, cancel: CancellationToken, tasks: &TaskTracker) {
         for slot in &self.slots() {
             let slot = slot.clone();
             let router = self.clone();
@@ -88,8 +59,10 @@ impl Router {
                             "Upstream {} disconnected, removing slot",
                             slot.upstream.endpoint()
                         );
+
                         slot.cancel.cancel();
                         router.remove_slot(&slot);
+
                         if router.slots().is_empty() {
                             error!("All upstreams disconnected, shutting down");
                             cancel.cancel();
@@ -224,7 +197,7 @@ mod tests {
     }
 
     fn test_router() -> Router {
-        Router::new(Arc::new(Metatron::new()), vec![])
+        Router::new(Arc::new(Metatron::new()))
     }
 
     #[test]

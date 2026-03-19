@@ -36,17 +36,24 @@ impl RouterSubcommand {
 
         metatron.clone().spawn(cancel_token.clone(), &tasks);
 
-        let router = Router::connect(
-            metatron.clone(),
-            settings.upstream_targets(),
-            settings.timeout(),
-            settings.enonce1_extension_size(),
-            &cancel_token,
-            &tasks,
-        )
-        .await?;
+        let router = Arc::new(Router::new(metatron.clone()));
 
-        router.spawn(cancel_token.clone(), &tasks);
+        for (index, target) in settings.upstream_targets().iter().enumerate() {
+            router.add_slot(
+                Slot::connect(
+                    index,
+                    index as u32,
+                    target,
+                    settings.timeout(),
+                    settings.enonce1_extension_size(),
+                    cancel_token.child_token(),
+                    &tasks,
+                )
+                .await?,
+            );
+        }
+
+        router.clone().spawn(cancel_token.clone(), &tasks);
 
         http_server::spawn(
             &settings,
@@ -81,7 +88,7 @@ impl RouterSubcommand {
                 }
             };
 
-            let Some(slot) = router.assign_to_slot() else {
+            let Some(slot) = router.get_next_slot() else {
                 warn!("No upstream available, dropping connection from {addr}");
                 continue;
             };
