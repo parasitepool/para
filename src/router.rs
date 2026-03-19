@@ -45,7 +45,7 @@ impl Router {
         Some(slots[idx].clone())
     }
 
-    pub(crate) fn spawn(self: Arc<Self>, cancel: CancellationToken, tasks: &TaskTracker) {
+    pub(crate) fn spawn(self: &Arc<Self>, cancel: CancellationToken, tasks: &TaskTracker) {
         for slot in &self.slots() {
             let slot = slot.clone();
             let router = self.clone();

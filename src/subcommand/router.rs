@@ -30,11 +30,8 @@ impl RouterSubcommand {
             .await
             .with_context(|| format!("failed to bind to {address}:{port}"))?;
 
-        info!("Stratum router listening for downstream miners on {address}:{port}");
-
         let metatron = Arc::new(Metatron::new());
-
-        metatron.clone().spawn(cancel_token.clone(), &tasks);
+        metatron.spawn(cancel_token.clone(), &tasks);
 
         let router = Arc::new(Router::new(metatron.clone()));
 
@@ -53,7 +50,7 @@ impl RouterSubcommand {
             );
         }
 
-        router.clone().spawn(cancel_token.clone(), &tasks);
+        router.spawn(cancel_token.clone(), &tasks);
 
         http_server::spawn(
             &settings,
@@ -66,7 +63,7 @@ impl RouterSubcommand {
             spawn_throbber(router.clone(), cancel_token.clone(), &tasks);
         }
 
-        let start_diff = settings.start_diff();
+        info!("Stratum router listening for downstream miners on {address}:{port}");
 
         loop {
             let (stream, addr) = tokio::select! {
@@ -96,6 +93,7 @@ impl RouterSubcommand {
             let settings = settings.clone();
             let cancel_token = slot.cancel.child_token();
             let metatron = metatron.clone();
+            let start_diff = settings.start_diff();
 
             debug!("Spawning stratifier task for {addr}");
 

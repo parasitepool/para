@@ -33,14 +33,8 @@ impl Pool {
         .await
         .context("failed to subscribe to ZMQ block notifications")?;
 
-        let extranonces = Extranonces::Pool(
-            PoolExtranonces::new(settings.enonce1_size(), settings.enonce2_size())
-                .context("invalid extranonce configuration")?,
-        );
-
         let metatron = Arc::new(Metatron::new());
-        let allocator = Arc::new(EnonceAllocator::new(extranonces, 0));
-        metatron.clone().spawn(cancel_token.clone(), &tasks);
+        metatron.spawn(cancel_token.clone(), &tasks);
 
         http_server::spawn(
             &settings,
@@ -77,6 +71,13 @@ impl Pool {
         if !integration_test() && !logs_enabled() {
             spawn_throbber(metatron.clone(), cancel_token.clone(), &tasks);
         }
+
+        let extranonces = Extranonces::Pool(
+            PoolExtranonces::new(settings.enonce1_size(), settings.enonce2_size())
+                .context("invalid extranonce configuration")?,
+        );
+
+        let allocator = Arc::new(EnonceAllocator::new(extranonces, 0));
 
         loop {
             let (stream, addr, start_diff) = tokio::select! {

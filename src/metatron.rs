@@ -31,8 +31,10 @@ impl Metatron {
         }
     }
 
-    pub(crate) fn spawn(self: Arc<Self>, cancel: CancellationToken, tasks: &TaskTracker) {
+    pub(crate) fn spawn(self: &Arc<Self>, cancel: CancellationToken, tasks: &TaskTracker) {
         info!("Spawning metatron session cleanup task");
+
+        let metatron = self.clone();
 
         tasks.spawn(async move {
             let mut cleanup_interval = tokio::time::interval(Duration::from_secs(60));
@@ -47,11 +49,11 @@ impl Metatron {
                     }
 
                     _ = cleanup_interval.tick() => {
-                        self.disconnected.retain(|_, (_, disconnected_at)| {
+                        metatron.disconnected.retain(|_, (_, disconnected_at)| {
                             disconnected_at.elapsed() < SESSION_TTL
                         });
 
-                        info!("{}", self.status_line());
+                        info!("{}", metatron.status_line());
                     }
                 }
             }
