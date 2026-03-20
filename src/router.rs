@@ -1,6 +1,7 @@
 use {super::*, slot::Slot};
 
 pub(crate) mod slot;
+pub(crate) mod order;
 
 pub(crate) struct Router {
     metatron: Arc<Metatron>,
