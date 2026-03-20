@@ -256,18 +256,16 @@ impl Upstream {
 
                     debug!("Upstream accepted share");
                 }
-                Err(ClientError::SubmitFalse) => {
+                Err(err) => {
                     rejected.fetch_add(1, Ordering::Relaxed);
                     *rejected_work.lock() += TotalWork::from_difficulty(upstream_diff);
-                    warn!("Upstream rejected share");
-                }
-                Err(ClientError::Rejected { reason, .. }) => {
-                    rejected.fetch_add(1, Ordering::Relaxed);
-                    *rejected_work.lock() += TotalWork::from_difficulty(upstream_diff);
-                    warn!("Upstream rejected share: {}", reason);
-                }
-                Err(e) => {
-                    warn!("Upstream submit error: {e}");
+                    match err {
+                        ClientError::SubmitFalse => warn!("Upstream rejected share"),
+                        ClientError::Rejected { reason, .. } => {
+                            warn!("Upstream rejected share: {reason}")
+                        }
+                        err => warn!("Upstream submit error: {err}"),
+                    }
                 }
             }
         });
