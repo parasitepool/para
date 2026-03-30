@@ -8,96 +8,160 @@ pub enum Id {
     String(String),
 }
 
-#[derive(Debug, Serialize, PartialEq)]
-#[serde(untagged)]
+/// Stratum does id: null, which is technically wrong according to the JSON-RPC spec, which
+/// states that no id field should be present. This is a work around to allow both cases. If
+/// a server sends a notification with an id field other than null it will be classified as
+/// a request and should just be ignored by any client.
+#[derive(Debug, PartialEq)]
 pub enum Message {
     Request {
         id: Id,
-        method: String,
-        params: Value,
+        method: Method,
     },
     Response {
         id: Id,
         result: Option<Value>,
         error: Option<StratumErrorResponse>,
-        #[serde(skip_serializing_if = "Option::is_none", rename = "reject-reason")]
         reject_reason: Option<String>,
     },
     Notification {
-        method: String,
-        params: Value,
+        method: Method,
     },
 }
 
-/// Stratum does id: null, which is technically wrong according to the JSON-RPC spec, which
-/// states that no id field should be present. This is a work around to allow both cases. If
-/// a server sends a notification with an id field other than null it will be classified as
-/// a request and should just be ignored by any client.
+struct Params<'a>(&'a Method);
+
+impl Serialize for Params<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.0.serialize_params(serializer)
+    }
+}
+
+impl Serialize for Message {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Message::Request { id, method } => {
+                let mut map = serializer.serialize_map(Some(3))?;
+                map.serialize_entry("id", id)?;
+                map.serialize_entry("method", method.method_name())?;
+                map.serialize_entry("params", &Params(method))?;
+                map.end()
+            }
+            Message::Response {
+                id,
+                result,
+                error,
+                reject_reason,
+            } => {
+                let len = 3 + reject_reason.is_some() as usize;
+                let mut map = serializer.serialize_map(Some(len))?;
+                map.serialize_entry("id", id)?;
+                map.serialize_entry("result", result)?;
+                map.serialize_entry("error", error)?;
+                if let Some(reason) = reject_reason {
+                    map.serialize_entry("reject-reason", reason)?;
+                }
+                map.end()
+            }
+            Message::Notification { method } => {
+                let mut map = serializer.serialize_map(Some(2))?;
+                map.serialize_entry("method", method.method_name())?;
+                map.serialize_entry("params", &Params(method))?;
+                map.end()
+            }
+        }
+    }
+}
+
 impl<'de> Deserialize<'de> for Message {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        let value = Value::deserialize(deserializer)?;
+        struct MessageVisitor;
 
-        let is_request = value.get("method").is_some() && value.get("id").is_some();
+        impl<'de> de::Visitor<'de> for MessageVisitor {
+            type Value = Message;
 
-        let is_notification_optional_null_id = value.get("method").is_some()
-            && (value.get("id") == Some(&Value::Null) || value.get("id").is_none());
-
-        let is_response = value.get("result").is_some()
-            || value.get("error").is_some()
-            || value.get("reject-reason").is_some();
-
-        if is_response {
-            #[derive(Deserialize)]
-            struct Resp {
-                id: Id,
-                result: Option<Value>,
-                error: Option<StratumErrorResponse>,
-                #[serde(rename = "reject-reason")]
-                reject_reason: Option<String>,
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a stratum message")
             }
 
-            let r: Resp = serde_json::from_value(value).map_err(de::Error::custom)?;
+            fn visit_map<A>(self, mut map: A) -> Result<Message, A::Error>
+            where
+                A: de::MapAccess<'de>,
+            {
+                let mut id: Option<Id> = None;
+                let mut method: Option<&'de str> = None;
+                let mut params: Option<&'de serde_json::value::RawValue> = None;
+                let mut result: Option<&'de serde_json::value::RawValue> = None;
+                let mut error: Option<&'de serde_json::value::RawValue> = None;
+                let mut reject_reason: Option<String> = None;
 
-            Ok(Message::Response {
-                id: r.id,
-                result: r.result,
-                error: r.error,
-                reject_reason: r.reject_reason,
-            })
-        } else if is_notification_optional_null_id {
-            let method = value
-                .get("method")
-                .and_then(Value::as_str)
-                .ok_or_else(|| de::Error::missing_field("method"))?
-                .to_string();
+                while let Some(key) = map.next_key::<&str>()? {
+                    match key {
+                        "id" => id = Some(map.next_value()?),
+                        "method" => method = Some(map.next_value()?),
+                        "params" => params = Some(map.next_value()?),
+                        "result" => result = Some(map.next_value()?),
+                        "error" => error = Some(map.next_value()?),
+                        "reject-reason" => reject_reason = Some(map.next_value()?),
+                        _ => {
+                            map.next_value::<de::IgnoredAny>()?;
+                        }
+                    }
+                }
 
-            let params = value
-                .get("params")
-                .cloned()
-                .ok_or_else(|| de::Error::missing_field("params"))?;
+                let is_response = result.is_some() || error.is_some() || reject_reason.is_some();
+                let is_notification =
+                    method.is_some() && !matches!(id, Some(Id::Number(_) | Id::String(_)));
 
-            Ok(Message::Notification { method, params })
-        } else if is_request {
-            #[derive(Deserialize)]
-            struct Req {
-                id: Id,
-                method: String,
-                params: Value,
+                if is_response {
+                    let id = id.ok_or_else(|| de::Error::missing_field("id"))?;
+
+                    let result = match result {
+                        Some(raw) => serde_json::from_str(raw.get()).map_err(de::Error::custom)?,
+                        None => None,
+                    };
+
+                    let error = match error {
+                        Some(raw) => serde_json::from_str(raw.get()).map_err(de::Error::custom)?,
+                        None => None,
+                    };
+
+                    Ok(Message::Response {
+                        id,
+                        result,
+                        error,
+                        reject_reason,
+                    })
+                } else if is_notification {
+                    let method = method.ok_or_else(|| de::Error::missing_field("method"))?;
+                    let params = params.ok_or_else(|| de::Error::missing_field("params"))?;
+                    let method =
+                        Method::from_parts(method, params.get()).map_err(de::Error::custom)?;
+
+                    Ok(Message::Notification { method })
+                } else if let Some(method) = method {
+                    let id = id.ok_or_else(|| de::Error::missing_field("id"))?;
+                    let params = params.ok_or_else(|| de::Error::missing_field("params"))?;
+                    let method =
+                        Method::from_parts(method, params.get()).map_err(de::Error::custom)?;
+
+                    Ok(Message::Request { id, method })
+                } else {
+                    Err(de::Error::custom("unknown message format"))
+                }
             }
-
-            let r: Req = serde_json::from_value(value).map_err(de::Error::custom)?;
-
-            Ok(Message::Request {
-                id: r.id,
-                method: r.method,
-                params: r.params,
-            })
-        } else {
-            Err(de::Error::custom("unknown message format"))
         }
+
+        deserializer.deserialize_map(MessageVisitor)
     }
 }
 
@@ -122,11 +186,13 @@ mod tests {
     #[test]
     fn request() {
         case(
-            r#"{"id":1,"method":"mining.subscribe","params":[]}"#,
+            r#"{"id":1,"method":"mining.subscribe","params":["foo"]}"#,
             Message::Request {
                 id: Id::Number(1),
-                method: "mining.subscribe".into(),
-                params: serde_json::json!([]),
+                method: Method::Subscribe(Subscribe {
+                    user_agent: "foo".into(),
+                    enonce1: None,
+                }),
             },
         );
     }
@@ -134,20 +200,18 @@ mod tests {
     #[test]
     fn notification() {
         case(
-            r#"{"method":"mining.notify","params":[]}"#,
+            r#"{"method":"mining.set_difficulty","params":[2]}"#,
             Message::Notification {
-                method: "mining.notify".into(),
-                params: serde_json::json!([]),
+                method: Method::SetDifficulty(SetDifficulty(Difficulty::from(2))),
             },
         );
 
-        let with_id_null = r#"{"method":"mining.notify","params":[],"id":null}"#;
+        let with_id_null = r#"{"method":"mining.set_difficulty","params":[2],"id":null}"#;
 
         assert_eq!(
             serde_json::from_str::<Message>(with_id_null).unwrap(),
             Message::Notification {
-                method: "mining.notify".into(),
-                params: serde_json::json!([]),
+                method: Method::SetDifficulty(SetDifficulty(Difficulty::from(2))),
             }
         );
     }
@@ -221,15 +285,14 @@ mod tests {
             merkle_branches: Vec::new(),
             version: Version(block::Version::TWO),
             nbits: "1c2ac4af".parse().unwrap(),
-            ntime: "504e86b9".parse().unwrap(), 
+            ntime: "504e86b9".parse().unwrap(),
             clean_jobs: false,
         };
 
         case(
             r#"{"method":"mining.notify","params":["bf","4d16b6f85af6e2198f44ae2a6de67f78487ae5611b77c6c0440b921e00000000","01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff20020862062f503253482f04b8864e5008","072f736c7573682f000000000100f2052a010000001976a914d23fcdf86f7e756a64a7a9688ef9903327048ed988ac00000000",[],"00000002","1c2ac4af","504e86b9",false]}"#,
             Message::Notification {
-                method: "mining.notify".into(),
-                params: serde_json::to_value(&notify).unwrap(),
+                method: Method::Notify(notify.clone()),
             },
         );
 
@@ -241,8 +304,7 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<Message>(notify_string).unwrap(),
             Message::Notification {
-                method: "mining.notify".into(),
-                params: serde_json::to_value(notify).unwrap(),
+                method: Method::Notify(notify),
             },
         );
     }
@@ -253,16 +315,14 @@ mod tests {
             r#"{"id":4,"method":"mining.submit","params":["slush.miner1","bf","00000001","504e86ed","b2957c02"]}"#,
             Message::Request {
                 id: Id::Number(4),
-                method: "mining.submit".into(),
-                params: serde_json::to_value(&Submit {
+                method: Method::Submit(Submit {
                     username: "slush.miner1".into(),
                     job_id: "bf".parse().unwrap(),
                     enonce2: "00000001".parse().unwrap(),
                     ntime: "504e86ed".parse().unwrap(),
                     nonce: "b2957c02".parse().unwrap(),
                     version_bits: None,
-                })
-                .unwrap(),
+                }),
             },
         );
 
@@ -283,16 +343,14 @@ mod tests {
             r#"{"id":4,"method":"mining.submit","params":["slush.miner1","bf","00000001","504e86ed","b2957c02","04d46000"]}"#,
             Message::Request {
                 id: Id::Number(4),
-                method: "mining.submit".into(),
-                params: serde_json::to_value(&Submit {
+                method: Method::Submit(Submit {
                     username: "slush.miner1".into(),
                     job_id: "bf".parse().unwrap(),
                     enonce2: "00000001".parse().unwrap(),
                     ntime: "504e86ed".parse().unwrap(),
                     nonce: "b2957c02".parse().unwrap(),
                     version_bits: Some("04d46000".parse().unwrap()),
-                })
-                .unwrap(),
+                }),
             },
         );
 
@@ -314,8 +372,7 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<Message>(set_difficulty_str).unwrap(),
             Message::Notification {
-                method: "mining.set_difficulty".into(),
-                params: serde_json::to_value(SetDifficulty(Difficulty::from(2))).unwrap(),
+                method: Method::SetDifficulty(SetDifficulty(Difficulty::from(2))),
             },
         );
     }
@@ -326,12 +383,10 @@ mod tests {
             r#"{"id":2,"method":"mining.authorize","params":["slush.miner1","password"]}"#,
             Message::Request {
                 id: Id::Number(2),
-                method: "mining.authorize".into(),
-                params: serde_json::to_value(Authorize {
+                method: Method::Authorize(Authorize {
                     username: "slush.miner1".into(),
                     password: Some("password".into()),
-                })
-                .unwrap(),
+                }),
             },
         );
 
@@ -352,12 +407,10 @@ mod tests {
             r#"{"id":2,"method":"mining.authorize","params":["slush.miner1"]}"#,
             Message::Request {
                 id: Id::Number(2),
-                method: "mining.authorize".into(),
-                params: serde_json::to_value(Authorize {
+                method: Method::Authorize(Authorize {
                     username: "slush.miner1".into(),
                     password: None,
-                })
-                .unwrap(),
+                }),
             },
         );
     }
@@ -368,12 +421,10 @@ mod tests {
             r#"{"id":1,"method":"mining.subscribe","params":["para/0.5.2"]}"#,
             Message::Request {
                 id: Id::Number(1),
-                method: "mining.subscribe".into(),
-                params: serde_json::to_value(Subscribe {
+                method: Method::Subscribe(Subscribe {
                     user_agent: "para/0.5.2".into(),
                     enonce1: None,
-                })
-                .unwrap(),
+                }),
             },
         );
 
@@ -381,12 +432,10 @@ mod tests {
             r#"{"id":2,"method":"mining.subscribe","params":["para/0.1","abcd"]}"#,
             Message::Request {
                 id: Id::Number(2),
-                method: "mining.subscribe".into(),
-                params: serde_json::to_value(Subscribe {
+                method: Method::Subscribe(Subscribe {
                     user_agent: "para/0.1".into(),
                     enonce1: Some("abcd".parse().unwrap()),
-                })
-                .unwrap(),
+                }),
             },
         );
     }
@@ -426,14 +475,64 @@ mod tests {
             r#"{"id":3,"method":"mining.configure","params":[["version-rolling"],{"version-rolling.mask":"ffffffff"}]}"#,
             Message::Request {
                 id: Id::Number(3),
-                method: "mining.configure".into(),
-                params: serde_json::to_value(Configure {
+                method: Method::Configure(Configure {
                     extensions: vec!["version-rolling".into()],
                     minimum_difficulty_value: None,
                     version_rolling_mask: Some("ffffffff".parse().unwrap()),
                     version_rolling_min_bit_count: None,
-                })
-                .unwrap(),
+                }),
+            },
+        );
+    }
+
+    #[test]
+    fn extra_fields_ignored() {
+        assert_eq!(
+            serde_json::from_str::<Message>(
+                r#"{"id":1,"method":"mining.subscribe","params":["foo"],"extra":"bar"}"#
+            )
+            .unwrap(),
+            Message::Request {
+                id: Id::Number(1),
+                method: Method::Subscribe(Subscribe {
+                    user_agent: "foo".into(),
+                    enonce1: None,
+                }),
+            },
+        );
+    }
+
+    #[test]
+    fn unknown_message_format() {
+        assert!(serde_json::from_str::<Message>(r#"{"foo":"bar"}"#).is_err());
+    }
+
+    #[test]
+    fn request_missing_params() {
+        assert!(
+            serde_json::from_str::<Message>(r#"{"id":1,"method":"mining.subscribe"}"#).is_err()
+        );
+    }
+
+    #[test]
+    fn request_missing_id() {
+        assert!(
+            serde_json::from_str::<Message>(r#"{"method":"mining.subscribe","params":["foo"]}"#)
+                .is_ok(),
+            "missing id is classified as notification"
+        );
+    }
+
+    #[test]
+    fn request_with_string_id() {
+        case(
+            r#"{"id":"abc","method":"mining.subscribe","params":["foo"]}"#,
+            Message::Request {
+                id: Id::String("abc".into()),
+                method: Method::Subscribe(Subscribe {
+                    user_agent: "foo".into(),
+                    enonce1: None,
+                }),
             },
         );
     }
@@ -444,14 +543,12 @@ mod tests {
             r#"{"id":5,"method":"mining.configure","params":[["minimum-difficulty","version-rolling"],{"minimum-difficulty.value":2048,"version-rolling.mask":"00fff000","version-rolling.min-bit-count":2}]}"#,
             Message::Request {
                 id: Id::Number(5),
-                method: "mining.configure".into(),
-                params: serde_json::to_value(Configure {
+                method: Method::Configure(Configure {
                     extensions: vec!["minimum-difficulty".into(), "version-rolling".into()],
                     minimum_difficulty_value: Some(Difficulty::from(2048)),
                     version_rolling_mask: Some("00fff000".parse().unwrap()),
                     version_rolling_min_bit_count: Some(2),
-                })
-                .unwrap(),
+                }),
             },
         );
     }

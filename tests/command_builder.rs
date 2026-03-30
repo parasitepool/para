@@ -97,6 +97,7 @@ impl CommandBuilder {
     }
 
     #[track_caller]
+    #[allow(unused)]
     pub(crate) fn run_and_deserialize_output<T: DeserializeOwned>(self) -> T {
         let output = self.spawn().wait_with_output().unwrap();
         let stdout = str::from_utf8(&output.stdout).unwrap();

@@ -1,7 +1,7 @@
 use super::*;
 
 /// mining.subscribe
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Subscribe {
     pub user_agent: String,
     pub enonce1: Option<Extranonce>,

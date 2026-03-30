@@ -13,7 +13,7 @@ use {
     serde::{
         Deserialize, Serialize, Serializer,
         de::{self, Deserializer},
-        ser::SerializeSeq,
+        ser::{SerializeMap, SerializeSeq},
     },
     serde_json::Value,
     serde_with::{DeserializeFromStr, SerializeDisplay},
@@ -35,7 +35,7 @@ pub use {
     merkle::{MerkleNode, merkle_branches, merkle_root},
     message::{Id, Message},
     method::{
-        Authorize, Configure, ConfigureResponse, Notify, Reconnect, SetDifficulty, Submit,
+        Authorize, Configure, ConfigureResponse, Method, Notify, Reconnect, SetDifficulty, Submit,
         Subscribe, SubscribeResponse, SuggestDifficulty,
     },
     nbits::Nbits,

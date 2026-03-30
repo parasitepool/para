@@ -143,18 +143,13 @@ impl Client {
 
     async fn send_request(
         &self,
-        method: &'static str,
-        params: Value,
+        method: Method,
     ) -> Result<(oneshot::Receiver<Result<(Message, usize)>>, Instant)> {
         let (respond_to, rx) = oneshot::channel();
         let instant = Instant::now();
 
         self.tx
-            .send(ClientMessage::Request {
-                method,
-                params,
-                respond_to,
-            })
+            .send(ClientMessage::Request { method, respond_to })
             .await
             .map_err(|_| ClientError::NotConnected)?;
 
@@ -203,18 +198,14 @@ impl Client {
         extensions: Vec<String>,
         version_rolling_mask: Option<Version>,
     ) -> Result<(ConfigureResponse, Duration, usize)> {
-        let (rx, instant) = self
-            .send_request(
-                "mining.configure",
-                serde_json::to_value(Configure {
-                    extensions,
-                    minimum_difficulty_value: None,
-                    version_rolling_mask,
-                    version_rolling_min_bit_count: None,
-                })
-                .context(error::SerializationSnafu)?,
-            )
-            .await?;
+        let configure = Method::Configure(Configure {
+            extensions,
+            minimum_difficulty_value: None,
+            version_rolling_mask,
+            version_rolling_min_bit_count: None,
+        });
+
+        let (rx, instant) = self.send_request(configure).await?;
 
         let (message, bytes_read, duration) = self.await_response(rx, instant).await?;
         let result = self.handle_response(message, "mining.configure")?;
@@ -233,16 +224,12 @@ impl Client {
         &self,
         enonce1: Option<Extranonce>,
     ) -> Result<(SubscribeResponse, Duration, usize)> {
-        let (rx, instant) = self
-            .send_request(
-                "mining.subscribe",
-                serde_json::to_value(Subscribe {
-                    user_agent: self.config.user_agent.clone(),
-                    enonce1,
-                })
-                .context(error::SerializationSnafu)?,
-            )
-            .await?;
+        let subscribe = Method::Subscribe(Subscribe {
+            user_agent: self.config.user_agent.clone(),
+            enonce1,
+        });
+
+        let (rx, instant) = self.send_request(subscribe).await?;
 
         let (message, bytes_read, duration) = self.await_response(rx, instant).await?;
         let result = self.handle_response(message, "mining.subscribe")?;
@@ -254,16 +241,12 @@ impl Client {
     }
 
     pub async fn authorize(&self) -> Result<(Duration, usize)> {
-        let (rx, instant) = self
-            .send_request(
-                "mining.authorize",
-                serde_json::to_value(Authorize {
-                    username: self.config.username.clone(),
-                    password: self.config.password.clone().or(Some("x".to_string())),
-                })
-                .context(error::SerializationSnafu)?,
-            )
-            .await?;
+        let authorize = Method::Authorize(Authorize {
+            username: self.config.username.clone(),
+            password: self.config.password.clone().or(Some("x".to_string())),
+        });
+
+        let (rx, instant) = self.send_request(authorize).await?;
 
         let (message, bytes_read, duration) = self.await_response(rx, instant).await?;
         let result = self.handle_response(message, "mining.authorize")?;
@@ -305,21 +288,16 @@ impl Client {
         nonce: Nonce,
         version_bits: Option<Version>,
     ) -> Result<Duration> {
-        let submit = Submit {
+        let submit = Method::Submit(Submit {
             username,
             job_id,
             enonce2,
             ntime,
             nonce,
             version_bits,
-        };
+        });
 
-        let (rx, instant) = self
-            .send_request(
-                "mining.submit",
-                serde_json::to_value(&submit).context(error::SerializationSnafu)?,
-            )
-            .await?;
+        let (rx, instant) = self.send_request(submit).await?;
 
         let (message, _, duration) = self.await_response(rx, instant).await?;
         let result = self.handle_response(message, "mining.submit")?;

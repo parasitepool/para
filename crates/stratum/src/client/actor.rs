@@ -12,8 +12,7 @@ enum IncomingMessage {
         bytes_read: usize,
     },
     Notification {
-        method: String,
-        params: Value,
+        method: Method,
     },
     Disconnected,
     Error(ClientError),
@@ -28,8 +27,7 @@ pub(super) enum ClientMessage {
         respond_to: oneshot::Sender<Result>,
     },
     Request {
-        method: &'static str,
-        params: Value,
+        method: Method,
         respond_to: oneshot::Sender<Result<(Message, usize)>>,
     },
     Disconnect {
@@ -80,7 +78,7 @@ impl ClientActor {
                                 debug!("Connect response dropped: caller gave up");
                             }
                         }
-                        ClientMessage::Request { method, params, respond_to } => {
+                        ClientMessage::Request { method, respond_to } => {
                             self.evict_expired_pending();
 
                             if self.pending.len() >= MAX_PENDING_REQUESTS {
@@ -93,7 +91,7 @@ impl ClientActor {
                             let id = self.next_id();
                             let deadline = Instant::now() + self.inner.timeout;
 
-                            match self.handle_request(id.clone(), method, params).await {
+                            match self.handle_request(id.clone(), method).await {
                                 Ok(_) => {
                                     self.pending.insert(id, (respond_to, deadline));
                                 }
@@ -201,12 +199,8 @@ impl ClientActor {
         Ok(())
     }
 
-    async fn handle_request(&mut self, id: Id, method: &'static str, params: Value) -> Result {
-        let msg = Message::Request {
-            id,
-            method: method.to_owned(),
-            params,
-        };
+    async fn handle_request(&mut self, id: Id, method: Method) -> Result {
+        let msg = Message::Request { id, method };
         self.send_message(&msg).await
     }
 
@@ -243,36 +237,27 @@ impl ClientActor {
                     warn!("Unmatched response ID={:?}", id);
                 }
             }
-            IncomingMessage::Notification { method, params } => match method.as_str() {
-                "mining.notify" => match serde_json::from_value::<Notify>(params) {
-                    Ok(notify) => {
-                        if self.events.send(Event::Notify(notify)).is_err() {
-                            debug!("Notify event dropped: no subscribers");
-                        }
+            IncomingMessage::Notification { method } => match method {
+                Method::Notify(notify) => {
+                    if self.events.send(Event::Notify(notify)).is_err() {
+                        debug!("Notify event dropped: no subscribers");
                     }
-                    Err(e) => warn!("Failed to parse mining.notify: {}", e),
-                },
-                "mining.set_difficulty" => match serde_json::from_value::<SetDifficulty>(params) {
-                    Ok(set_diff) => {
-                        if self
-                            .events
-                            .send(Event::SetDifficulty(set_diff.difficulty()))
-                            .is_err()
-                        {
-                            debug!("SetDifficulty event dropped: no subscribers");
-                        }
+                }
+                Method::SetDifficulty(set_diff) => {
+                    if self
+                        .events
+                        .send(Event::SetDifficulty(set_diff.difficulty()))
+                        .is_err()
+                    {
+                        debug!("SetDifficulty event dropped: no subscribers");
                     }
-                    Err(e) => warn!("Failed to parse mining.set_difficulty: {}", e),
-                },
-                "client.reconnect" => match serde_json::from_value::<Reconnect>(params) {
-                    Ok(reconnect) => {
-                        if self.events.send(Event::Reconnect(reconnect)).is_err() {
-                            debug!("Reconnect event dropped: no subscribers");
-                        }
+                }
+                Method::Reconnect(reconnect) => {
+                    if self.events.send(Event::Reconnect(reconnect)).is_err() {
+                        debug!("Reconnect event dropped: no subscribers");
                     }
-                    Err(e) => warn!("Failed to parse client.reconnect: {}", e),
-                },
-                _ => warn!("Unhandled notification: {}", method),
+                }
+                _ => warn!("Unhandled notification: {}", method.method_name()),
             },
             IncomingMessage::Disconnected => {
                 self.handle_disconnect().await;
@@ -316,8 +301,8 @@ impl ClientActor {
                 }
             };
 
-            match &msg {
-                Message::Response { id, .. } => {
+            match msg {
+                Message::Response { ref id, .. } => {
                     if incoming_tx
                         .send(IncomingMessage::Response {
                             id: id.clone(),
@@ -331,12 +316,9 @@ impl ClientActor {
                         break;
                     }
                 }
-                Message::Notification { method, params } => {
+                Message::Notification { method } => {
                     if incoming_tx
-                        .send(IncomingMessage::Notification {
-                            method: method.clone(),
-                            params: params.clone(),
-                        })
+                        .send(IncomingMessage::Notification { method })
                         .await
                         .is_err()
                     {
@@ -344,7 +326,7 @@ impl ClientActor {
                         break;
                     }
                 }
-                _ => {
+                msg => {
                     warn!("Unexpected message type: {:?}", msg);
                 }
             }

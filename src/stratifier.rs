@@ -98,31 +98,25 @@ impl<W: Workbase> Stratifier<W> {
                         break;
                     };
 
-                    let Message::Request { id, method, params } = message else {
+                    let Message::Request { id, method } = message else {
                         warn!(?message, "Ignoring any notifications or responses from workers");
                         continue;
                     };
 
-                    debug!("{} from {} with {params}", method.as_str(), self.socket_addr);
+                    debug!("{} from {}", method.method_name(), self.socket_addr);
 
-                    match method.as_str() {
-                        "mining.configure" => {
-                            let configure = serde_json::from_value::<Configure>(params.clone())
-                                .context(format!("failed to deserialize {method} from {params}"))?;
-
+                    match method {
+                        Method::Configure(configure) => {
                             self.configure(id, configure).await?
                         }
-                        "mining.subscribe" => {
-                            let subscribe = serde_json::from_value::<Subscribe>(params.clone())
-                                .context(format!("failed to deserialize {method} from {params}"))?;
-
+                        Method::Subscribe(subscribe) => {
                             let consequence = self.subscribe(id, subscribe).await?;
 
                             if self.handle_protocol_consequence(consequence).await {
                                 break;
                             }
                         }
-                        "mining.authorize" => {
+                        Method::Authorize(authorize) => {
                             let Some(subscription) = self.state.subscribed() else {
                                 self.send_error(
                                     id.clone(),
@@ -142,16 +136,13 @@ impl<W: Workbase> Stratifier<W> {
                                 continue;
                             };
 
-                            let authorize = serde_json::from_value::<Authorize>(params.clone())
-                                .context(format!("failed to deserialize {method} from {params}"))?;
-
                             let consequence = self.authorize(id, authorize, subscription).await?;
 
                             if self.handle_protocol_consequence(consequence).await {
                                 break;
                             }
                         }
-                        "mining.submit" => {
+                        Method::Submit(submit) => {
                             let session = match &self.state {
                                 State::Authorized(auth) => {
                                     let session = self
@@ -178,9 +169,6 @@ impl<W: Workbase> Stratifier<W> {
                                 }
                             };
 
-                            let submit = serde_json::from_value::<Submit>(params.clone())
-                                .context(format!("failed to deserialize {method} from {params}"))?;
-
                             let consequence = self
                                 .submit(id, submit, session.clone())
                                 .await?;
@@ -190,7 +178,7 @@ impl<W: Workbase> Stratifier<W> {
                             }
                         }
                         method => {
-                            warn!("Unknown method {method} with {params} from {}", self.socket_addr);
+                            warn!("Unexpected method {} from {}", method.method_name(), self.socket_addr);
                         }
                     }
                 }
@@ -199,8 +187,7 @@ impl<W: Workbase> Stratifier<W> {
                     if changed.is_err() {
                         warn!("Upstream disconnected, sending client.reconnect to {}", self.socket_addr);
                         let _ = self.send(Message::Notification {
-                            method: "client.reconnect".into(),
-                            params: json!(Reconnect::default()),
+                            method: Method::Reconnect(Reconnect::default()),
                         }).await;
                         break;
                     }
@@ -255,8 +242,7 @@ impl<W: Workbase> Stratifier<W> {
                         if let Ok(notify) = new_job.notify(clean_jobs) {
                             let _ = self
                                 .send(Message::Notification {
-                                    method: "mining.notify".into(),
-                                    params: json!(notify),
+                                    method: Method::Notify(notify),
                                 })
                                 .await;
                         }
@@ -281,8 +267,7 @@ impl<W: Workbase> Stratifier<W> {
 
                 let _ = self
                     .send(Message::Notification {
-                        method: "client.reconnect".into(),
-                        params: json!(Reconnect::default()),
+                        method: Method::Reconnect(Reconnect::default()),
                     })
                     .await;
 
@@ -330,8 +315,7 @@ impl<W: Workbase> Stratifier<W> {
                 );
                 let _ = self
                     .send(Message::Notification {
-                        method: "client.reconnect".into(),
-                        params: json!(Reconnect::default()),
+                        method: Method::Reconnect(Reconnect::default()),
                     })
                     .await;
                 false
@@ -367,8 +351,7 @@ impl<W: Workbase> Stratifier<W> {
                     .record_diff_change_job_id(self.jobs.peek_next_id());
 
                 self.send(Message::Notification {
-                    method: "mining.set_difficulty".into(),
-                    params: json!(SetDifficulty(new_diff)),
+                    method: Method::SetDifficulty(SetDifficulty(new_diff)),
                 })
                 .await?;
             }
@@ -394,8 +377,7 @@ impl<W: Workbase> Stratifier<W> {
         );
 
         self.send(Message::Notification {
-            method: "mining.notify".into(),
-            params: json!(new_job.notify(clean_jobs)?),
+            method: Method::Notify(new_job.notify(clean_jobs)?),
         })
         .await?;
 
@@ -623,8 +605,7 @@ impl<W: Workbase> Stratifier<W> {
         );
 
         self.send(Message::Notification {
-            method: "mining.set_difficulty".into(),
-            params: json!(SetDifficulty(current_diff)),
+            method: Method::SetDifficulty(SetDifficulty(current_diff)),
         })
         .await?;
 
@@ -633,8 +614,7 @@ impl<W: Workbase> Stratifier<W> {
         let clean_jobs = self.jobs.insert(job.clone());
 
         self.send(Message::Notification {
-            method: "mining.notify".into(),
-            params: json!(job.notify(clean_jobs)?),
+            method: Method::Notify(job.notify(clean_jobs)?),
         })
         .await?;
 
@@ -1023,8 +1003,7 @@ impl<W: Workbase> Stratifier<W> {
                 .record_diff_change_job_id(self.jobs.peek_next_id());
 
             self.send(Message::Notification {
-                method: "mining.set_difficulty".into(),
-                params: json!(SetDifficulty(new_diff)),
+                method: Method::SetDifficulty(SetDifficulty(new_diff)),
             })
             .await?;
         }
