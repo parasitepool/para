@@ -95,4 +95,23 @@ impl CommandBuilder {
 
         child
     }
+
+    #[track_caller]
+    pub(crate) fn run_and_deserialize_output<T: DeserializeOwned>(self) -> T {
+        let output = self.spawn().wait_with_output().unwrap();
+        let stdout = str::from_utf8(&output.stdout).unwrap();
+        let stderr = str::from_utf8(&output.stderr).unwrap();
+
+        if output.status.code() != Some(0) {
+            panic!(
+                "Test failed: {}\nstdout:\n{}\nstderr:\n{}",
+                output.status, stdout, stderr
+            );
+        }
+
+        match serde_json::from_str(stdout) {
+            Ok(output) => output,
+            Err(err) => panic!("Failed to deserialize JSON: {err}\n{stdout}"),
+        }
+    }
 }

@@ -4,12 +4,12 @@ use {
 };
 
 #[derive(Parser, Debug)]
-pub(crate) struct RouterSubcommand {
+pub(crate) struct RouterCommand {
     #[command(flatten)]
     pub(crate) options: RouterOptions,
 }
 
-impl RouterSubcommand {
+impl RouterCommand {
     pub(crate) async fn run(
         &self,
         cancel_token: CancellationToken,

@@ -51,6 +51,8 @@ axum = { version = "0.8.3", features = ["http2", "ws"] }
 axum-server = "0.8.0"
 backon = "1.6.0"
 base64 = "0.22.1"
+bdk_bitcoind_rpc = "0.22.0"
+bdk_wallet = { version = "2.3.0", features = ["keys-bip39"] }
 bip322 = "0.0.10"
 bitcoin.workspace = true
 bitcoind-async-client.workspace = true
@@ -87,6 +89,7 @@ tracing-subscriber = { version =  "0.3.19", features = ["env-filter", "fmt"] }
 tracing.workspace = true
 utoipa = "5.4.0"
 utoipa-swagger-ui = { version =  "9.0.2", features = ["axum"], optional = true }
+miniscript = "13.0.0"
 zeromq = "0.5.0"
 
 [dev-dependencies]

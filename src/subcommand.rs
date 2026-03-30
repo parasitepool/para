@@ -8,6 +8,7 @@ pub mod router;
 pub mod server;
 pub mod sync;
 pub mod template;
+pub mod wallet;
 
 #[derive(Debug, Parser)]
 pub(crate) enum Subcommand {
@@ -20,13 +21,15 @@ pub(crate) enum Subcommand {
     #[command(about = "Run a toy stratum proxy")]
     Proxy(proxy::Proxy),
     #[command(about = "Run a toy hashrate router")]
-    Router(router::RouterSubcommand),
+    Router(router::RouterCommand),
     #[command(about = "Run API server")]
     Server(server::Server),
     #[command(about = "Sync shares via HTTP")]
     Sync(sync::Sync),
     #[command(about = "Monitor block templates")]
     Template(template::Template),
+    #[command(about = "Toy wallet for testing")]
+    Wallet(wallet::WalletCommand),
 }
 
 impl Subcommand {
@@ -79,6 +82,7 @@ impl Subcommand {
             }
             Self::Sync(sync) => sync.run(cancel_token).await,
             Self::Template(template) => template.run(cancel_token).await,
+            Self::Wallet(wallet) => wallet.run().await,
         }
     }
 }

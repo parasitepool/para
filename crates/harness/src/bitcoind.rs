@@ -49,46 +49,49 @@ impl Bitcoind {
         rpc_port: u16,
         zmq_port: u16,
         with_output: bool,
+        network: Network,
     ) -> Result<Self> {
         let bitcoind_data_dir = tempdir.path().join("bitcoin");
         fs::create_dir_all(&bitcoind_data_dir)?;
 
         let bitcoind_conf = bitcoind_data_dir.join("bitcoin.conf");
 
-        let network = Network::Signet;
         let rpc_user = "satoshi".to_string();
         let rpc_password = "nakamoto".to_string();
+        let rpcauth = Self::generate_rpcauth(rpc_user.as_str(), rpc_password.as_str(), None);
+
+        let (network_flag, section, extra) = match network {
+            Network::Signet => ("signet=1", "[signet]", "signetchallenge=51\n\n"),
+            Network::Regtest => ("regtest=1", "[regtest]", ""),
+            _ => bail!("unsupported network: {network}"),
+        };
 
         fs::write(
             &bitcoind_conf,
             format!(
-                "
-signet=1
+                "\
+{network_flag}
 datadir={}
 
-[signet]
-# OP_TRUE
-signetchallenge=51
-
+{section}
+{extra}
 server=1
 txindex=1
 zmqpubhashblock=tcp://127.0.0.1:{zmq_port}
 
 port={bitcoind_port}
 
-maxconnections=256
-maxmempool=2048
-minrelaytxfee=0.00001
-
 rpcbind=127.0.0.1
 rpcport={rpc_port}
 rpcallowip=127.0.0.1
-rpcauth={}
+rpcauth={rpcauth}
 
 maxtxfee=1000000
+maxconnections=256
+maxmempool=2048
+minrelaytxfee=0.00001
 ",
                 &bitcoind_data_dir.display(),
-                Self::generate_rpcauth(rpc_user.as_str(), rpc_password.as_str(), None)
             ),
         )?;
 
@@ -147,7 +150,6 @@ maxtxfee=1000000
             let mut salt_bytes = [0u8; 16];
             rng().fill_bytes(&mut salt_bytes);
             salt_bytes
-                .clone()
                 .iter()
                 .map(|b| format!("{:02x}", b))
                 .collect::<String>()

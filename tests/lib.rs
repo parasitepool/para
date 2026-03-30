@@ -126,6 +126,8 @@ mod server_with_db;
 mod sync;
 #[cfg(target_os = "linux")]
 mod template;
+#[cfg(target_os = "linux")]
+mod wallet;
 
 #[cfg(target_os = "linux")]
 fn allocate_port() -> u16 {
@@ -146,7 +148,15 @@ fn bitcoind() -> &'static Bitcoind {
         let rpc_port = allocate_port();
         let zmq_port = allocate_port();
 
-        Bitcoind::spawn(tempdir, bitcoind_port, rpc_port, zmq_port, false).unwrap()
+        Bitcoind::spawn(
+            tempdir,
+            bitcoind_port,
+            rpc_port,
+            zmq_port,
+            false,
+            Network::Signet,
+        )
+        .unwrap()
     })
 }
 

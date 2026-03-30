@@ -16,8 +16,8 @@ use {
     base64::{Engine, engine::general_purpose},
     bip322::verify_simple_encoded,
     bitcoin::{
-        Address, Amount, Block, BlockHash, CompactTarget, Network, OutPoint, ScriptBuf, Sequence,
-        Target, Transaction, TxIn, TxOut, Txid, VarInt, Witness,
+        Address, Amount, Block, BlockHash, CompactTarget, FeeRate, Network, OutPoint, ScriptBuf,
+        Sequence, Target, Transaction, TxIn, TxOut, Txid, VarInt, Witness,
         address::NetworkUnchecked,
         block::{self, Header},
         consensus::{self, Decodable, encode},
@@ -75,7 +75,7 @@ use {
     },
     serde_json::json,
     serde_with::{DeserializeFromStr, SerializeDisplay},
-    settings::{PoolOptions, ProxyOptions, RouterOptions, Settings},
+    settings::{BitcoinOptions, PoolOptions, ProxyOptions, RouterOptions, Settings},
     snafu::Snafu,
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
     std::{
@@ -129,6 +129,7 @@ use {
     upstream_target::UpstreamTarget,
     utoipa::{OpenApi, ToSchema},
     vardiff::Vardiff,
+    wallet::Wallet,
     workbase::Workbase,
     zeromq::{Endpoint, Socket, SocketEvent, SocketRecv, SubSocket},
     zmq::Zmq,
@@ -163,6 +164,7 @@ mod total_work;
 mod upstream;
 mod upstream_target;
 mod vardiff;
+mod wallet;
 mod workbase;
 mod zmq;
 

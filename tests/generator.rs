@@ -15,8 +15,15 @@ impl IsolatedBitcoind {
         let rpc_port = allocate_port();
         let zmq_port = allocate_port();
 
-        let bitcoind =
-            Bitcoind::spawn(tempdir.clone(), bitcoind_port, rpc_port, zmq_port, false).unwrap();
+        let bitcoind = Bitcoind::spawn(
+            tempdir.clone(),
+            bitcoind_port,
+            rpc_port,
+            zmq_port,
+            false,
+            Network::Signet,
+        )
+        .unwrap();
 
         Self {
             bitcoind,
@@ -38,6 +45,7 @@ impl IsolatedBitcoind {
             self.rpc_port,
             self.zmq_port,
             false,
+            Network::Signet,
         )
         .unwrap();
     }

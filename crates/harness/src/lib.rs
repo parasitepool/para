@@ -1,5 +1,5 @@
 use {
-    anyhow::Error,
+    anyhow::{Error, bail},
     bitcoin::{
         Address, Amount, Network, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness,
         absolute::LockTime,
@@ -186,8 +186,15 @@ async fn run_ephemeral_harness() {
             .port(),
     );
 
-    let bitcoind =
-        Bitcoind::spawn(tempdir.clone(), bitcoind_port, rpc_port, zmq_port, true).unwrap();
+    let bitcoind = Bitcoind::spawn(
+        tempdir.clone(),
+        bitcoind_port,
+        rpc_port,
+        zmq_port,
+        true,
+        Network::Signet,
+    )
+    .unwrap();
 
     println!("Bitcoin rpc port: {}", bitcoind.rpc_port);
     println!("Bitcoin zmq port: {}", zmq_port);

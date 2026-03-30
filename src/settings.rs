@@ -1,13 +1,14 @@
 use super::*;
 
+mod bitcoin_options;
 mod common_options;
 mod pool_options;
 mod proxy_options;
 mod router_options;
 
 pub(crate) use {
-    common_options::CommonOptions, pool_options::PoolOptions, proxy_options::ProxyOptions,
-    router_options::RouterOptions,
+    bitcoin_options::BitcoinOptions, common_options::CommonOptions, pool_options::PoolOptions,
+    proxy_options::ProxyOptions, router_options::RouterOptions,
 };
 
 #[derive(Clone, Debug)]
@@ -84,11 +85,33 @@ impl Default for Settings {
 }
 
 impl Settings {
+    pub(crate) fn from_bitcoin_options(options: BitcoinOptions) -> Result<Self> {
+        let chain = options.chain.unwrap_or_default();
+
+        let bitcoin_rpc_port = options
+            .bitcoin_rpc_port
+            .unwrap_or_else(|| chain.default_rpc_port());
+
+        let settings = Self {
+            bitcoin_data_dir: options.bitcoin_data_dir,
+            bitcoin_rpc_port,
+            bitcoin_rpc_cookie_file: options.bitcoin_rpc_cookie_file,
+            bitcoin_rpc_username: options.bitcoin_rpc_username,
+            bitcoin_rpc_password: options.bitcoin_rpc_password,
+            chain,
+            ..Self::default()
+        };
+
+        settings.validate()?;
+        Ok(settings)
+    }
+
     pub(crate) fn from_pool_options(options: PoolOptions) -> Result<Self> {
-        let chain = options.common.chain.unwrap_or_default();
+        let chain = options.common.bitcoin.chain.unwrap_or_default();
 
         let bitcoin_rpc_port = options
             .common
+            .bitcoin
             .bitcoin_rpc_port
             .unwrap_or_else(|| chain.default_rpc_port());
 
@@ -98,11 +121,11 @@ impl Settings {
             http_port: options.common.http_port,
             upstream_targets: Vec::new(),
             timeout: Duration::from_secs(30),
-            bitcoin_data_dir: options.common.bitcoin_data_dir,
+            bitcoin_data_dir: options.common.bitcoin.bitcoin_data_dir,
             bitcoin_rpc_port,
-            bitcoin_rpc_cookie_file: options.common.bitcoin_rpc_cookie_file,
-            bitcoin_rpc_username: options.common.bitcoin_rpc_username,
-            bitcoin_rpc_password: options.common.bitcoin_rpc_password,
+            bitcoin_rpc_cookie_file: options.common.bitcoin.bitcoin_rpc_cookie_file,
+            bitcoin_rpc_username: options.common.bitcoin.bitcoin_rpc_username,
+            bitcoin_rpc_password: options.common.bitcoin.bitcoin_rpc_password,
             chain,
             acme_domains: options.common.acme_domain,
             acme_contacts: options.common.acme_contact,
@@ -131,10 +154,11 @@ impl Settings {
     }
 
     pub(crate) fn from_proxy_options(options: ProxyOptions) -> Result<Self> {
-        let chain = options.common.chain.unwrap_or_default();
+        let chain = options.common.bitcoin.chain.unwrap_or_default();
 
         let bitcoin_rpc_port = options
             .common
+            .bitcoin
             .bitcoin_rpc_port
             .unwrap_or_else(|| chain.default_rpc_port());
 
@@ -144,11 +168,11 @@ impl Settings {
             http_port: options.common.http_port,
             upstream_targets: vec![options.upstream],
             timeout: Duration::from_secs(options.timeout),
-            bitcoin_data_dir: options.common.bitcoin_data_dir,
+            bitcoin_data_dir: options.common.bitcoin.bitcoin_data_dir,
             bitcoin_rpc_port,
-            bitcoin_rpc_cookie_file: options.common.bitcoin_rpc_cookie_file,
-            bitcoin_rpc_username: options.common.bitcoin_rpc_username,
-            bitcoin_rpc_password: options.common.bitcoin_rpc_password,
+            bitcoin_rpc_cookie_file: options.common.bitcoin.bitcoin_rpc_cookie_file,
+            bitcoin_rpc_username: options.common.bitcoin.bitcoin_rpc_username,
+            bitcoin_rpc_password: options.common.bitcoin.bitcoin_rpc_password,
             chain,
             acme_domains: options.common.acme_domain,
             acme_contacts: options.common.acme_contact,
@@ -177,10 +201,11 @@ impl Settings {
     }
 
     pub(crate) fn from_router_options(options: RouterOptions) -> Result<Self> {
-        let chain = options.common.chain.unwrap_or_default();
+        let chain = options.common.bitcoin.chain.unwrap_or_default();
 
         let bitcoin_rpc_port = options
             .common
+            .bitcoin
             .bitcoin_rpc_port
             .unwrap_or_else(|| chain.default_rpc_port());
 
@@ -190,11 +215,11 @@ impl Settings {
             http_port: options.common.http_port,
             upstream_targets: options.upstream,
             timeout: Duration::from_secs(options.timeout),
-            bitcoin_data_dir: options.common.bitcoin_data_dir,
+            bitcoin_data_dir: options.common.bitcoin.bitcoin_data_dir,
             bitcoin_rpc_port,
-            bitcoin_rpc_cookie_file: options.common.bitcoin_rpc_cookie_file,
-            bitcoin_rpc_username: options.common.bitcoin_rpc_username,
-            bitcoin_rpc_password: options.common.bitcoin_rpc_password,
+            bitcoin_rpc_cookie_file: options.common.bitcoin.bitcoin_rpc_cookie_file,
+            bitcoin_rpc_username: options.common.bitcoin.bitcoin_rpc_username,
+            bitcoin_rpc_password: options.common.bitcoin.bitcoin_rpc_password,
             chain,
             acme_domains: options.common.acme_domain,
             acme_contacts: options.common.acme_contact,
