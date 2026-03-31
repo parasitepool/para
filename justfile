@@ -91,8 +91,7 @@ router:
     --bitcoin-rpc-port 38332 \
     --address 0.0.0.0 \
     --port 42070 \
-    --upstream tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.router123@127.0.0.1:42069 \
-    --upstream tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.router456@127.0.0.1:42069 \
+    --upstream tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.chameleon@127.0.0.1:42069 \
     --http-port 8082 \
     --start-diff 0.00001 \
     --vardiff-window 10 \

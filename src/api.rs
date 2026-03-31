@@ -233,7 +233,7 @@ pub struct RouterStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SlotStatus {
-    pub index: usize,
+    pub id: u32,
     pub upstream_id: u32,
     pub upstream_accepted: u64,
     pub upstream_rejected: u64,
@@ -252,7 +252,7 @@ pub struct SlotStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SlotDetail {
-    pub index: usize,
+    pub id: u32,
     pub upstream_id: u32,
     pub upstream: UpstreamInfo,
     pub user_count: usize,
@@ -265,4 +265,9 @@ pub struct SlotDetail {
     pub sessions: Vec<SessionDetail>,
     #[serde(flatten)]
     pub stats: MiningStats,
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+pub struct Order {
+    pub target: UpstreamTarget,
 }

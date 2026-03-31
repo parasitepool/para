@@ -125,7 +125,7 @@ async fn test_send_block_notification() {
             .contains("6.25000000 BTC")
     );
 
-    assert_eq!(received_msg.priority, Some(4));
+    assert_eq!(received_msg.priority, Some(5));
 
     if let Some(tags) = received_msg.tags {
         assert!(tags.iter().any(|t| t.contains("mining")));

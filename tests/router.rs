@@ -171,3 +171,107 @@ async fn router_rejects_incompatible_resumed_enonce1() {
         .await
         .unwrap();
 }
+
+#[tokio::test]
+#[serial(bitcoind)]
+#[timeout(120000)]
+async fn orders() {
+    let pool_a = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.00001");
+    let pool_b = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.00001");
+
+    let username = "tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.foo";
+
+    let router = TestRouter::spawn(
+        &[(username, &pool_a.stratum_endpoint())],
+        pool_a.bitcoind_rpc_port(),
+        "--start-diff 0.00001",
+    );
+
+    let status = router.get_status().await.unwrap();
+    assert_eq!(status.slots.len(), 1);
+
+    let response = router
+        .add_order(&api::Order {
+            target: format!("{username}@127.0.0.1:1").parse().unwrap(),
+        })
+        .await
+        .unwrap();
+
+    assert_ne!(response.status(), StatusCode::OK);
+
+    let response = router
+        .add_order(&api::Order {
+            target: format!("{username}@{}", pool_b.stratum_endpoint())
+                .parse()
+                .unwrap(),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let status = router.get_status().await.unwrap();
+    assert_eq!(status.slots.len(), 2);
+
+    let response = router.remove_order(9999).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    let id = status.slots[0].id;
+    let response = router.remove_order(id).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let status = router.get_status().await.unwrap();
+    assert_eq!(status.slots.len(), 1);
+    assert_ne!(status.slots[0].id, id);
+}
+
+#[tokio::test]
+#[serial(bitcoind)]
+#[timeout(120000)]
+async fn slot_removed_on_upstream_disconnect() {
+    let pool_a = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.00001");
+    let pool_b = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.00001");
+
+    let username = "tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.foo";
+
+    let router = TestRouter::spawn(
+        &[(username, &pool_a.stratum_endpoint())],
+        pool_a.bitcoind_rpc_port(),
+        "--start-diff 0.00001",
+    );
+
+    let status = router.get_status().await.unwrap();
+    assert_eq!(status.slots.len(), 1);
+
+    let response = router
+        .add_order(&api::Order {
+            target: format!("{username}@{}", pool_b.stratum_endpoint())
+                .parse()
+                .unwrap(),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let status = router.get_status().await.unwrap();
+    assert_eq!(status.slots.len(), 2);
+
+    drop(pool_b);
+
+    timeout(Duration::from_secs(30), async {
+        loop {
+            if let Ok(status) = router.get_status().await
+                && status.slots.len() == 1
+            {
+                break;
+            }
+            sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("Timeout waiting for dynamic slot to be removed after upstream disconnect");
+
+    let status = router.get_status().await.unwrap();
+    assert_eq!(status.slots.len(), 1);
+}

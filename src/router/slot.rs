@@ -1,7 +1,7 @@
 use super::*;
 
 pub(crate) struct Slot {
-    pub(crate) index: usize,
+    pub(crate) id: u32,
     pub(crate) upstream: Arc<Upstream>,
     pub(crate) allocator: Arc<EnonceAllocator>,
     pub(crate) cancel: CancellationToken,
@@ -9,16 +9,14 @@ pub(crate) struct Slot {
 
 impl Slot {
     pub(crate) async fn connect(
-        index: usize,
-        upstream_id: u32,
+        id: u32,
         target: &UpstreamTarget,
         timeout: Duration,
         enonce1_extension_size: usize,
         cancel: CancellationToken,
         tasks: &TaskTracker,
     ) -> Result<Arc<Self>> {
-        let upstream =
-            Upstream::connect(upstream_id, target, timeout, cancel.clone(), tasks).await?;
+        let upstream = Upstream::connect(id, target, timeout, cancel.clone(), tasks).await?;
 
         let proxy_extranonces = ProxyExtranonces::new(
             upstream.enonce1().clone(),
@@ -28,13 +26,13 @@ impl Slot {
 
         let allocator = Arc::new(EnonceAllocator::new(
             Extranonces::Proxy(proxy_extranonces),
-            upstream_id,
+            id,
         ));
 
         info!("Upstream {target} connected");
 
         Ok(Arc::new(Self {
-            index,
+            id,
             upstream,
             allocator,
             cancel,

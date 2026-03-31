@@ -80,6 +80,24 @@ impl TestRouter {
             .json()
             .await
     }
+
+    pub(crate) async fn add_order(&self, order: &api::Order) -> reqwest::Result<reqwest::Response> {
+        reqwest::Client::new()
+            .post(format!("{}/api/router/order", self.api_endpoint()))
+            .json(order)
+            .send()
+            .await
+    }
+
+    pub(crate) async fn remove_order(&self, id: u32) -> reqwest::Result<reqwest::Response> {
+        reqwest::Client::new()
+            .post(format!(
+                "{}/api/router/order/{id}/remove",
+                self.api_endpoint()
+            ))
+            .send()
+            .await
+    }
 }
 
 impl Drop for TestRouter {

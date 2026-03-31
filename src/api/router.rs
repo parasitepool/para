@@ -11,6 +11,8 @@ pub(crate) fn router(
         .route("/slot/{index}", get(slot_page))
         .route("/api/router/status", get(status))
         .route("/api/router/slot/{index}", get(slot))
+        .route("/api/router/order", post(add_order))
+        .route("/api/router/order/{id}/remove", post(remove_order))
         .with_state(state)
         .merge(common_routes())
         .layer(Extension(bitcoin_client))
@@ -43,7 +45,7 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
         let upstream_id = slot.upstream.id();
 
         slots.push(SlotStatus {
-            index: slot.index,
+            id: slot.id,
             upstream_id,
             endpoint: slot.upstream.endpoint().to_string(),
             username: slot.upstream.username().to_string(),
@@ -83,13 +85,10 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
     })
 }
 
-async fn slot(
-    State(router): State<Arc<Router>>,
-    Path(index): Path<usize>,
-) -> ServerResult<Response> {
+async fn slot(State(router): State<Arc<Router>>, Path(id): Path<u32>) -> ServerResult<Response> {
     let slot = router
-        .slot_by_index(index)
-        .ok_or_not_found(|| format!("Slot {index}"))?;
+        .get_slot(id)
+        .ok_or_not_found(|| format!("Slot {id}"))?;
 
     let now = Instant::now();
     let metatron = router.metatron();
@@ -114,7 +113,7 @@ async fn slot(
         .collect();
 
     Ok(Json(SlotDetail {
-        index: slot.index,
+        id: slot.id,
         upstream_id,
         upstream: UpstreamInfo::from_upstream(&slot.upstream),
         user_count: router.upstream_user_count(upstream_id),
@@ -128,4 +127,24 @@ async fn slot(
         stats: MiningStats::from_snapshot(&router.upstream_snapshot(upstream_id), now),
     })
     .into_response())
+}
+
+async fn add_order(
+    State(router): State<Arc<Router>>,
+    Json(order): Json<Order>,
+) -> ServerResult<Response> {
+    let id = router.add_order(order).await?;
+
+    Ok(Json(json!({ "id": id })).into_response())
+}
+
+async fn remove_order(
+    State(router): State<Arc<Router>>,
+    Path(id): Path<u32>,
+) -> ServerResult<Response> {
+    router
+        .remove_order(id)
+        .ok_or_not_found(|| format!("Order {id}"))?;
+
+    Ok(Json(json!({ "id": id })).into_response())
 }

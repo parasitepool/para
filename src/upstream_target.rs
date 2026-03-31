@@ -1,22 +1,22 @@
 use super::*;
 
-#[derive(Clone, Debug)]
-pub(crate) struct UpstreamTarget {
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct UpstreamTarget {
     endpoint: String,
     username: Username,
     password: Option<String>,
 }
 
 impl UpstreamTarget {
-    pub(crate) fn endpoint(&self) -> &str {
+    pub fn endpoint(&self) -> &str {
         &self.endpoint
     }
 
-    pub(crate) fn username(&self) -> &Username {
+    pub fn username(&self) -> &Username {
         &self.username
     }
 
-    pub(crate) fn password(&self) -> Option<&str> {
+    pub fn password(&self) -> Option<&str> {
         self.password.as_deref()
     }
 }

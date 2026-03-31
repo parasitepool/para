@@ -5,8 +5,6 @@
     gap: 20px;
     width: 100%;
     box-sizing: border-box;
-    border-top: 2px solid #666;
-    border-bottom: 2px solid #666;
     padding: 24px 0;
   }
 
@@ -45,7 +43,126 @@
     overflow-wrap: anywhere;
   }
 
+  #add-order-btn {
+    width: 1048px;
+    background: #333;
+    border: 1px solid #444;
+    color: #eee;
+    padding: 8px 16px;
+    cursor: pointer;
+    font: inherit;
+  }
+
+  #add-order-btn:hover { background: #444; }
+
+  .slot-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    margin: 0 0 15px;
+  }
+
+  .slot-header h2 { margin: 0; }
+
+  .slot-delete {
+    position: absolute;
+    right: 0;
+    background: none;
+    border: 1px solid #444;
+    color: #888;
+    width: 24px;
+    height: 24px;
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.8em;
+    line-height: 1;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .slot-delete:hover { color: #f55; border-color: #f55; }
+
+  #order-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+  }
+
+  #order-overlay.hidden { display: none; }
+
+  #order-modal {
+    background: #1a1a1a;
+    border: 1px solid #444;
+    padding: 30px;
+    width: 400px;
+    max-width: 90vw;
+  }
+
+  #order-modal h2 {
+    margin: 0 0 20px;
+    font-size: 1.22em;
+    text-align: center;
+    color: #888;
+  }
+
+  #order-modal label {
+    display: block;
+    margin-bottom: 4px;
+    color: #888;
+    font-size: 0.9em;
+  }
+
+  #order-modal input {
+    width: 100%;
+    background: #111;
+    border: 1px solid #444;
+    color: #eee;
+    padding: 8px 12px;
+    font: inherit;
+    box-sizing: border-box;
+    margin-bottom: 14px;
+  }
+
+  #order-modal input::placeholder { color: #555; }
+
+  #order-modal .modal-buttons {
+    display: flex;
+    gap: 10px;
+    margin-top: 6px;
+  }
+
+  #order-modal .modal-buttons button {
+    flex: 1;
+    background: #333;
+    border: 1px solid #444;
+    color: #eee;
+    padding: 8px 16px;
+    cursor: pointer;
+    font: inherit;
+  }
+
+  #order-modal .modal-buttons button:hover { background: #444; }
+
+  #order-error {
+    color: #f55;
+    font-size: 0.85em;
+    margin-bottom: 10px;
+    min-height: 1.4em;
+  }
+
   @media (max-width: 1140px) {
+    #add-order-btn {
+      width: 100%;
+      max-width: 500px;
+    }
+
     #upstreams-list {
       width: 100%;
       max-width: 500px;
@@ -90,7 +207,26 @@
     <div class=row><span>Received PHd</span><span id=ph_days class=copyable></span></div>
   </div>
 
+  <button id=add-order-btn>Add Order</button>
+
   <div id=upstreams-list class=column-full></div>
+
+  <div id=order-overlay class=hidden>
+    <div id=order-modal>
+      <h2>Add Order</h2>
+      <label for=order-endpoint>Endpoint</label>
+      <input id=order-endpoint placeholder="host:port">
+      <label for=order-username>Username</label>
+      <input id=order-username placeholder="user.worker">
+      <label for=order-password>Password</label>
+      <input id=order-password placeholder="optional">
+      <div id=order-error></div>
+      <div class=modal-buttons>
+        <button id=order-cancel>Cancel</button>
+        <button id=order-submit>Add</button>
+      </div>
+    </div>
+  </div>
 
   <div class=column>
     <h2>Bitcoin</h2>
@@ -173,7 +309,10 @@ async function refresh(signal) {
       const slotRejWorkPct = rejectionPct(slot.accepted_work, slot.rejected_work);
       return `<div class="slot-card">
         <div class=slot-pane>
-          <h2><a class=slot-link href="/slot/${slot.index}">Slot ${slot.index}</a></h2>
+          <div class=slot-header>
+            <h2><a class=slot-link href="/slot/${slot.id}">Slot ${slot.id}</a></h2>
+            <button class=slot-delete data-id="${slot.id}">&times;</button>
+          </div>
           <div class=row><span>Endpoint</span><span>${slot.endpoint}</span></div>
           <div class=row><span>Ping</span><span>${formatPing(slot.ping_ms)}ms</span></div>
           <div class=row><span>Username</span><span class=copyable data-full="${username}" data-formatted="${shortUser}">${shortUser}</span></div>
@@ -184,7 +323,7 @@ async function refresh(signal) {
           <div class=row><span>Efficiency</span><span>${efficiencyPct(slot.upstream_accepted_work, slot.accepted_work, slot.rejected_work)}</span></div>
         </div>
         <div class=slot-pane>
-          <div class=row><a class=slot-link href="/slot/${slot.index}">Sessions</a><span>${slot.session_count}</span></div>
+          <div class=row><a class=slot-link href="/slot/${slot.id}">Sessions</a><span>${slot.session_count}</span></div>
           <div class=row><span>Idle</span><span>${slot.idle_count}</span></div>
           <div class=row><span>Disconnected</span><span>${slot.disconnected_count}</span></div>
           <div class=row><span>Hashrate</span><span>${formatHashrate(slot.hashrate_1m)}</span></div>
@@ -208,4 +347,81 @@ initLogControls();
 connectWs();
 setupLogToggle();
 initCopyables();
+
+document.getElementById('upstreams-list').addEventListener('click', async (e) => {
+  const btn = e.target.closest('.slot-delete');
+  if (!btn) return;
+  const id = btn.dataset.id;
+  if (!confirm(`Remove slot ${id}?`)) return;
+  try {
+    const res = await fetch(`/api/router/order/${id}/remove`, { method: 'POST' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(data.message || `Error: ${res.status}`);
+    }
+  } catch (e) {
+    alert(e.message);
+  }
+});
+
+{
+  const overlay = document.getElementById('order-overlay');
+  const endpoint = document.getElementById('order-endpoint');
+  const username = document.getElementById('order-username');
+  const password = document.getElementById('order-password');
+  const error = document.getElementById('order-error');
+
+  document.getElementById('add-order-btn').addEventListener('click', () => {
+    error.textContent = '';
+    overlay.classList.remove('hidden');
+    endpoint.focus();
+  });
+
+  document.getElementById('order-cancel').addEventListener('click', () => {
+    overlay.classList.add('hidden');
+  });
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) overlay.classList.add('hidden');
+  });
+
+  document.getElementById('order-submit').addEventListener('click', async () => {
+    error.textContent = '';
+
+    if (!endpoint.value || !username.value) {
+      error.textContent = 'Endpoint and username are required';
+      return;
+    }
+
+    const body = {
+      target: {
+        endpoint: endpoint.value,
+        username: username.value,
+      }
+    };
+
+    if (password.value) body.target.password = password.value;
+
+    try {
+      const res = await fetch('/api/router/order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        error.textContent = data.message || `Error: ${res.status}`;
+        return;
+      }
+
+      overlay.classList.add('hidden');
+      endpoint.value = '';
+      username.value = '';
+      password.value = '';
+    } catch (e) {
+      error.textContent = e.message;
+    }
+  });
+}
 </script>

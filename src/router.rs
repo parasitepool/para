@@ -1,31 +1,67 @@
 use {super::*, slot::Slot};
 
-mod slot;
+pub(crate) mod slot;
 
 pub(crate) struct Router {
     metatron: Arc<Metatron>,
     slots: RwLock<Vec<Arc<Slot>>>,
-    counter: AtomicU64,
+    round_robin: AtomicU64,
+    next_id: AtomicU32,
+    settings: Arc<Settings>,
+    tasks: TaskTracker,
+    cancel: CancellationToken,
 }
 
 impl Router {
-    pub(crate) fn new(metatron: Arc<Metatron>, slots: Vec<Arc<Slot>>) -> Self {
+    pub(crate) fn new(
+        metatron: Arc<Metatron>,
+        settings: Arc<Settings>,
+        tasks: TaskTracker,
+        cancel: CancellationToken,
+    ) -> Self {
         Self {
             metatron,
-            slots: RwLock::new(slots),
-            counter: AtomicU64::new(0),
+            slots: RwLock::new(Vec::new()),
+            round_robin: AtomicU64::new(0),
+            next_id: AtomicU32::new(0),
+            settings,
+            tasks,
+            cancel,
         }
     }
 
-    pub(crate) fn assign_to_slot(&self) -> Option<Arc<Slot>> {
-        let slots = self.slots.read();
-        if slots.is_empty() {
-            return None;
-        }
+    pub(crate) fn next_id(&self) -> u32 {
+        self.next_id.fetch_add(1, Ordering::Relaxed)
+    }
 
-        let idx = self.counter.fetch_add(1, Ordering::Relaxed) as usize % slots.len();
+    pub(crate) async fn add_order(self: &Arc<Self>, order: api::Order) -> Result<u32> {
+        let id = self.next_id();
 
-        Some(slots[idx].clone())
+        let slot = Slot::connect(
+            id,
+            &order.target,
+            self.settings.timeout(),
+            self.settings.enonce1_extension_size(),
+            self.cancel.child_token(),
+            &self.tasks,
+        )
+        .await?;
+
+        self.add_slot(slot.clone());
+        self.spawn_slot_monitor(slot);
+
+        Ok(id)
+    }
+
+    pub(crate) fn add_slot(&self, slot: Arc<Slot>) {
+        self.slots.write().push(slot)
+    }
+
+    pub(crate) fn remove_order(&self, id: u32) -> Option<Arc<Slot>> {
+        let slot = self.get_slot(id)?;
+        slot.cancel.cancel();
+        self.remove_slot(&slot);
+        Some(slot)
     }
 
     pub(crate) fn remove_slot(&self, slot: &Arc<Slot>) {
@@ -33,71 +69,48 @@ impl Router {
         slots.retain(|s| !Arc::ptr_eq(s, slot));
     }
 
+    pub(crate) fn get_slot(&self, id: u32) -> Option<Arc<Slot>> {
+        self.slots.read().iter().find(|s| s.id == id).cloned()
+    }
+
     pub(crate) fn slots(&self) -> Vec<Arc<Slot>> {
         self.slots.read().clone()
     }
 
-    pub(crate) fn slot_by_index(&self, index: usize) -> Option<Arc<Slot>> {
-        self.slots.read().iter().find(|s| s.index == index).cloned()
-    }
-
-    pub(crate) async fn connect(
-        metatron: Arc<Metatron>,
-        targets: &[UpstreamTarget],
-        timeout: Duration,
-        enonce1_extension_size: usize,
-        cancel_token: &CancellationToken,
-        tasks: &TaskTracker,
-    ) -> Result<Arc<Self>, Error> {
-        let mut slots = Vec::new();
-        for (index, target) in targets.iter().enumerate() {
-            match Slot::connect(
-                index,
-                index as u32,
-                target,
-                timeout,
-                enonce1_extension_size,
-                cancel_token.child_token(),
-                tasks,
-            )
-            .await
-            {
-                Ok(slot) => slots.push(slot),
-                Err(err) => {
-                    warn!("Skipping upstream {target}: {err}");
-                }
-            }
+    pub(crate) fn get_next_slot(&self) -> Option<Arc<Slot>> {
+        let slots = self.slots.read();
+        if slots.is_empty() {
+            return None;
         }
 
-        ensure!(!slots.is_empty(), "all upstream connections failed");
+        let idx = self.round_robin.fetch_add(1, Ordering::Relaxed) as usize % slots.len();
 
-        Ok(Arc::new(Self::new(metatron, slots)))
+        Some(slots[idx].clone())
     }
 
-    pub(crate) fn spawn(self: &Arc<Self>, cancel: CancellationToken, tasks: &TaskTracker) {
-        for slot in &self.slots() {
-            let slot = slot.clone();
-            let router = self.clone();
-            let cancel = cancel.clone();
-            tasks.spawn(async move {
-                tokio::select! {
-                    biased;
-                    _ = cancel.cancelled() => {}
-                    _ = slot.upstream.disconnected() => {
-                        warn!(
-                            "Upstream {} disconnected, removing slot",
-                            slot.upstream.endpoint()
-                        );
-                        slot.cancel.cancel();
-                        router.remove_slot(&slot);
-                        if router.slots().is_empty() {
-                            error!("All upstreams disconnected, shutting down");
-                            cancel.cancel();
-                        }
+    fn spawn_slot_monitor(self: &Arc<Self>, slot: Arc<Slot>) {
+        let router = self.clone();
+        let cancel = self.cancel.clone();
+        self.tasks.spawn(async move {
+            tokio::select! {
+                biased;
+                _ = cancel.cancelled() => {}
+                _ = slot.upstream.disconnected() => {
+                    warn!(
+                        "Upstream {} disconnected, removing slot",
+                        slot.upstream.endpoint()
+                    );
+
+                    slot.cancel.cancel();
+                    router.remove_slot(&slot);
+
+                    if router.slots().is_empty() {
+                        error!("All upstreams disconnected, shutting down");
+                        cancel.cancel();
                     }
                 }
-            });
-        }
+            }
+        });
     }
 
     pub(crate) fn metatron(&self) -> Arc<Metatron> {
@@ -224,7 +237,12 @@ mod tests {
     }
 
     fn test_router() -> Router {
-        Router::new(Arc::new(Metatron::new()), vec![])
+        Router::new(
+            Arc::new(Metatron::new()),
+            Arc::new(Settings::default()),
+            TaskTracker::new(),
+            CancellationToken::new(),
+        )
     }
 
     #[test]

@@ -88,7 +88,7 @@ document.querySelector('h1').childNodes[0].textContent = `Router | Slot ${slotIn
 
 let slotIndices = [];
 fetch('/api/router/status').then(r => r.json()).then(data => {
-  slotIndices = (data.slots || []).map(s => s.index);
+  slotIndices = (data.slots || []).map(s => s.id);
   updateNav();
 }).catch(() => {});
 

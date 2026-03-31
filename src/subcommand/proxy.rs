@@ -40,6 +40,7 @@ impl Proxy {
             .context("no upstream target configured")?;
 
         let metatron = Arc::new(Metatron::new());
+        metatron.spawn(cancel_token.clone(), &tasks);
 
         let mut upstream_id = 0u32;
 
@@ -66,8 +67,6 @@ impl Proxy {
         );
 
         let allocator = Arc::new(EnonceAllocator::new(extranonces, upstream_id));
-
-        metatron.clone().spawn(cancel_token.clone(), &tasks);
 
         let metrics = Arc::new(Metrics::new(upstream.clone(), metatron.clone()));
 

@@ -30,23 +30,23 @@ impl RouterCommand {
             .await
             .with_context(|| format!("failed to bind to {address}:{port}"))?;
 
-        info!("Stratum router listening for downstream miners on {address}:{port}");
-
         let metatron = Arc::new(Metatron::new());
+        metatron.spawn(cancel_token.clone(), &tasks);
 
-        metatron.clone().spawn(cancel_token.clone(), &tasks);
-
-        let router = Router::connect(
+        let router = Arc::new(Router::new(
             metatron.clone(),
-            settings.upstream_targets(),
-            settings.timeout(),
-            settings.enonce1_extension_size(),
-            &cancel_token,
-            &tasks,
-        )
-        .await?;
+            settings.clone(),
+            tasks.clone(),
+            cancel_token.clone(),
+        ));
 
-        router.spawn(cancel_token.clone(), &tasks);
+        for target in settings.upstream_targets() {
+            router
+                .add_order(api::Order {
+                    target: target.clone(),
+                })
+                .await?;
+        }
 
         http_server::spawn(
             &settings,
@@ -59,7 +59,7 @@ impl RouterCommand {
             spawn_throbber(router.clone(), cancel_token.clone(), &tasks);
         }
 
-        let start_diff = settings.start_diff();
+        info!("Stratum router listening for downstream miners on {address}:{port}");
 
         loop {
             let (stream, addr) = tokio::select! {
@@ -81,7 +81,7 @@ impl RouterCommand {
                 }
             };
 
-            let Some(slot) = router.assign_to_slot() else {
+            let Some(slot) = router.get_next_slot() else {
                 warn!("No upstream available, dropping connection from {addr}");
                 continue;
             };
@@ -89,6 +89,7 @@ impl RouterCommand {
             let settings = settings.clone();
             let cancel_token = slot.cancel.child_token();
             let metatron = metatron.clone();
+            let start_diff = settings.start_diff();
 
             debug!("Spawning stratifier task for {addr}");
 
