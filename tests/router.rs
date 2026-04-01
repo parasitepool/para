@@ -10,7 +10,7 @@ async fn router_round_robin() {
     let username_a = "tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.foo";
     let username_b = "tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.bar";
 
-    let mut router = TestRouter::spawn(
+    let router = TestRouter::spawn(
         &[
             (username_a, &pool_a.stratum_endpoint()),
             (username_b, &pool_b.stratum_endpoint()),
@@ -20,7 +20,7 @@ async fn router_round_robin() {
     );
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.slots.len(), 2);
+    assert_eq!(status.orders.len(), 2);
     assert_eq!(status.session_count, 0);
 
     let mut miners = Vec::new();
@@ -50,7 +50,7 @@ async fn router_round_robin() {
     .expect("Timeout waiting for 3 sessions");
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.slots.len(), 2);
+    assert_eq!(status.upstream_count, 2);
     assert_eq!(status.session_count, 3);
 
     drop(pool_a);
@@ -58,7 +58,7 @@ async fn router_round_robin() {
     timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(status) = router.get_status().await
-                && status.slots.len() == 1
+                && status.upstream_count == 1
                 && status.session_count >= 3
             {
                 break;
@@ -70,21 +70,28 @@ async fn router_round_robin() {
     .expect("Timeout waiting for miners to reconnect to remaining upstream");
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.slots.len(), 1);
+    assert_eq!(status.upstream_count, 1);
+    assert_eq!(status.orders.len(), 2);
     assert_eq!(status.session_count, 3);
 
     drop(pool_b);
 
     timeout(Duration::from_secs(30), async {
         loop {
-            if router.try_wait().unwrap().is_some() {
+            if let Ok(status) = router.get_status().await
+                && status.upstream_count == 0
+            {
                 break;
             }
             sleep(Duration::from_millis(200)).await;
         }
     })
     .await
-    .expect("Timeout waiting for router to exit");
+    .expect("Timeout waiting for all upstreams to disconnect");
+
+    let status = router.get_status().await.unwrap();
+    assert_eq!(status.upstream_count, 0);
+    assert_eq!(status.orders.len(), 2);
 
     for mut miner in miners {
         miner.kill().unwrap();
@@ -188,10 +195,10 @@ async fn orders() {
     );
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.slots.len(), 1);
+    assert_eq!(status.orders.len(), 1);
 
     let response = router
-        .add_order(&api::Order {
+        .add_order(&api::OrderRequest {
             target: format!("{username}@127.0.0.1:1").parse().unwrap(),
         })
         .await
@@ -200,7 +207,7 @@ async fn orders() {
     assert_ne!(response.status(), StatusCode::OK);
 
     let response = router
-        .add_order(&api::Order {
+        .add_order(&api::OrderRequest {
             target: format!("{username}@{}", pool_b.stratum_endpoint())
                 .parse()
                 .unwrap(),
@@ -211,24 +218,24 @@ async fn orders() {
     assert_eq!(response.status(), StatusCode::OK);
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.slots.len(), 2);
+    assert_eq!(status.upstream_count, 2);
 
     let response = router.remove_order(9999).await.unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
-    let id = status.slots[0].id;
+    let id = status.orders[0].id;
     let response = router.remove_order(id).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.slots.len(), 1);
-    assert_ne!(status.slots[0].id, id);
+    assert_eq!(status.orders.len(), 2);
+    assert_eq!(status.upstream_count, 1);
 }
 
 #[tokio::test]
 #[serial(bitcoind)]
 #[timeout(120000)]
-async fn slot_removed_on_upstream_disconnect() {
+async fn order_disconnected_on_upstream_disconnect() {
     let pool_a = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.00001");
     let pool_b = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.00001");
 
@@ -241,10 +248,10 @@ async fn slot_removed_on_upstream_disconnect() {
     );
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.slots.len(), 1);
+    assert_eq!(status.orders.len(), 1);
 
     let response = router
-        .add_order(&api::Order {
+        .add_order(&api::OrderRequest {
             target: format!("{username}@{}", pool_b.stratum_endpoint())
                 .parse()
                 .unwrap(),
@@ -255,14 +262,14 @@ async fn slot_removed_on_upstream_disconnect() {
     assert_eq!(response.status(), StatusCode::OK);
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.slots.len(), 2);
+    assert_eq!(status.upstream_count, 2);
 
     drop(pool_b);
 
     timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(status) = router.get_status().await
-                && status.slots.len() == 1
+                && status.upstream_count == 1
             {
                 break;
             }
@@ -270,8 +277,17 @@ async fn slot_removed_on_upstream_disconnect() {
         }
     })
     .await
-    .expect("Timeout waiting for dynamic slot to be removed after upstream disconnect");
+    .expect("Timeout waiting for order to be marked disconnected after upstream disconnect");
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.slots.len(), 1);
+    assert_eq!(status.orders.len(), 2);
+    assert_eq!(status.upstream_count, 1);
+    assert_eq!(
+        status
+            .orders
+            .iter()
+            .filter(|o| o.status == OrderStatus::Disconnected)
+            .count(),
+        1
+    );
 }

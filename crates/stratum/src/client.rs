@@ -12,7 +12,10 @@ use {
         net::TcpStream,
         sync::{broadcast, mpsc, oneshot},
     },
-    tokio_util::codec::{FramedRead, LinesCodec},
+    tokio_util::{
+        codec::{FramedRead, LinesCodec},
+        sync::CancellationToken,
+    },
     tracing::{debug, error, warn},
 };
 
@@ -80,6 +83,25 @@ impl Client {
         user_agent: String,
         timeout: Duration,
     ) -> Self {
+        Self::with_cancel(
+            address,
+            username,
+            password,
+            user_agent,
+            timeout,
+            CancellationToken::new(),
+        )
+    }
+
+    #[must_use]
+    pub fn with_cancel(
+        address: String,
+        username: Username,
+        password: Option<String>,
+        user_agent: String,
+        timeout: Duration,
+        cancel: CancellationToken,
+    ) -> Self {
         let (tx, rx) = mpsc::channel(CHANNEL_BUFFER_SIZE);
         let (events, _) = broadcast::channel(CHANNEL_BUFFER_SIZE);
 
@@ -91,7 +113,7 @@ impl Client {
             timeout,
         });
 
-        let actor = ClientActor::new(config.clone(), rx, events.clone());
+        let actor = ClientActor::new(config.clone(), rx, events.clone(), cancel);
 
         tokio::spawn(async move {
             actor.run().await;

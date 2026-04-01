@@ -5,7 +5,7 @@ pub(crate) struct RouterOptions {
     #[command(flatten)]
     pub(crate) common: CommonOptions,
 
-    #[arg(long, required = true, help = "Upstream <USER[:PASS]@HOST:PORT>.")]
+    #[arg(long, help = "Upstream <USER[:PASS]@HOST:PORT>.")]
     pub(crate) upstream: Vec<UpstreamTarget>,
 
     #[arg(

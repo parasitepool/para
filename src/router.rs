@@ -1,10 +1,13 @@
-use {super::*, slot::Slot};
+use {super::*, order::Order, orders::Orders};
 
-pub(crate) mod slot;
+pub(crate) mod order;
+pub(crate) mod orders;
+
+pub use order::OrderStatus;
 
 pub(crate) struct Router {
     metatron: Arc<Metatron>,
-    slots: RwLock<Vec<Arc<Slot>>>,
+    orders: RwLock<Orders>,
     round_robin: AtomicU64,
     next_id: AtomicU32,
     settings: Arc<Settings>,
@@ -21,7 +24,7 @@ impl Router {
     ) -> Self {
         Self {
             metatron,
-            slots: RwLock::new(Vec::new()),
+            orders: RwLock::new(Orders::new()),
             round_robin: AtomicU64::new(0),
             next_id: AtomicU32::new(0),
             settings,
@@ -30,16 +33,12 @@ impl Router {
         }
     }
 
-    pub(crate) fn next_id(&self) -> u32 {
-        self.next_id.fetch_add(1, Ordering::Relaxed)
-    }
+    pub(crate) async fn add_order(self: &Arc<Self>, request: api::OrderRequest) -> Result<u32> {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
 
-    pub(crate) async fn add_order(self: &Arc<Self>, order: api::Order) -> Result<u32> {
-        let id = self.next_id();
-
-        let slot = Slot::connect(
+        let order = Order::connect(
             id,
-            &order.target,
+            &request.target,
             self.settings.timeout(),
             self.settings.enonce1_extension_size(),
             self.cancel.child_token(),
@@ -47,67 +46,50 @@ impl Router {
         )
         .await?;
 
-        self.add_slot(slot.clone());
-        self.spawn_slot_monitor(slot);
+        self.orders.write().add(order.clone());
+        self.spawn_order_monitor(order);
 
         Ok(id)
     }
 
-    pub(crate) fn add_slot(&self, slot: Arc<Slot>) {
-        self.slots.write().push(slot)
+    pub(crate) fn cancel_order(&self, id: u32) -> Option<Arc<Order>> {
+        let mut orders = self.orders.write();
+        let order = orders.get(id)?;
+        order.set_status(OrderStatus::Cancelled);
+        order.cancel.cancel();
+        orders.deactivate(id);
+        Some(order)
     }
 
-    pub(crate) fn remove_order(&self, id: u32) -> Option<Arc<Slot>> {
-        let slot = self.get_slot(id)?;
-        slot.cancel.cancel();
-        self.remove_slot(&slot);
-        Some(slot)
+    pub(crate) fn get_order(&self, id: u32) -> Option<Arc<Order>> {
+        self.orders.read().get(id)
     }
 
-    pub(crate) fn remove_slot(&self, slot: &Arc<Slot>) {
-        let mut slots = self.slots.write();
-        slots.retain(|s| !Arc::ptr_eq(s, slot));
+    pub(crate) fn orders(&self) -> Vec<Arc<Order>> {
+        self.orders.read().all()
     }
 
-    pub(crate) fn get_slot(&self, id: u32) -> Option<Arc<Slot>> {
-        self.slots.read().iter().find(|s| s.id == id).cloned()
+    pub(crate) fn match_with_order(&self) -> Option<Arc<Order>> {
+        let counter = self.round_robin.fetch_add(1, Ordering::Relaxed);
+        self.orders.read().match_round_robin(counter)
     }
 
-    pub(crate) fn slots(&self) -> Vec<Arc<Slot>> {
-        self.slots.read().clone()
-    }
-
-    pub(crate) fn get_next_slot(&self) -> Option<Arc<Slot>> {
-        let slots = self.slots.read();
-        if slots.is_empty() {
-            return None;
-        }
-
-        let idx = self.round_robin.fetch_add(1, Ordering::Relaxed) as usize % slots.len();
-
-        Some(slots[idx].clone())
-    }
-
-    fn spawn_slot_monitor(self: &Arc<Self>, slot: Arc<Slot>) {
+    fn spawn_order_monitor(self: &Arc<Self>, order: Arc<Order>) {
         let router = self.clone();
-        let cancel = self.cancel.clone();
         self.tasks.spawn(async move {
             tokio::select! {
                 biased;
-                _ = cancel.cancelled() => {}
-                _ = slot.upstream.disconnected() => {
+                _ = order.cancel.cancelled() => {}
+                _ = order.upstream.disconnected() => {
                     warn!(
-                        "Upstream {} disconnected, removing slot",
-                        slot.upstream.endpoint()
+                        "Upstream {} disconnected, order {} marked disconnected",
+                        order.upstream.endpoint(),
+                        order.id,
                     );
 
-                    slot.cancel.cancel();
-                    router.remove_slot(&slot);
-
-                    if router.slots().is_empty() {
-                        error!("All upstreams disconnected, shutting down");
-                        cancel.cancel();
-                    }
+                    order.set_status(OrderStatus::Disconnected);
+                    order.cancel.cancel();
+                    router.orders.write().deactivate(order.id);
                 }
             }
         });
@@ -193,20 +175,17 @@ impl Router {
 impl StatusLine for Router {
     fn status_line(&self) -> String {
         let now = Instant::now();
-        let slots = self.slots();
+        let all = self.orders();
         let stats = self.metatron.snapshot();
-        let mut connected = 0;
-
-        for slot in &slots {
-            if slot.upstream.is_connected() {
-                connected += 1;
-            }
-        }
+        let connected = all
+            .iter()
+            .filter(|o| o.is_active() && o.upstream.is_connected())
+            .count();
 
         format!(
             "upstreams={}/{}  sessions={}  hashrate={:.2}",
             connected,
-            slots.len(),
+            all.iter().filter(|o| o.is_active()).count(),
             self.metatron.total_sessions(),
             stats.hashrate_1m(now),
         )

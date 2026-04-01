@@ -42,7 +42,7 @@ impl RouterCommand {
 
         for target in settings.upstream_targets() {
             router
-                .add_order(api::Order {
+                .add_order(api::OrderRequest {
                     target: target.clone(),
                 })
                 .await?;
@@ -81,13 +81,13 @@ impl RouterCommand {
                 }
             };
 
-            let Some(slot) = router.get_next_slot() else {
-                warn!("No upstream available, dropping connection from {addr}");
+            let Some(order) = router.match_with_order() else {
+                warn!("No order to match with available, dropping connection from {addr}");
                 continue;
             };
 
             let settings = settings.clone();
-            let cancel_token = slot.cancel.child_token();
+            let cancel_token = order.cancel.child_token();
             let metatron = metatron.clone();
             let start_diff = settings.start_diff();
 
@@ -97,11 +97,11 @@ impl RouterCommand {
                 let mut stratifier: Stratifier<Notify> = Stratifier::new(
                     addr,
                     settings,
-                    slot.allocator.clone(),
+                    order.allocator.clone(),
                     metatron,
-                    Some(slot.upstream.clone()),
+                    Some(order.upstream.clone()),
                     stream,
-                    slot.upstream.workbase_rx(),
+                    order.upstream.workbase_rx(),
                     cancel_token,
                     None,
                     start_diff,

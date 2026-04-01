@@ -4,11 +4,14 @@ use {
     http_server::{
         self, common_routes,
         error::{OptionExt, ServerResult},
-        templates::{PoolHtml, ProxyHtml, RouterHtml, SlotHtml, UserHtml, UsersHtml, render_page},
+        templates::{OrderHtml, PoolHtml, ProxyHtml, RouterHtml, UserHtml, UsersHtml, render_page},
     },
 };
 
-pub use http_server::{BitcoinStatus, SystemStatus};
+pub use {
+    crate::router::OrderStatus,
+    http_server::{BitcoinStatus, SystemStatus},
+};
 
 pub mod pool;
 pub mod proxy;
@@ -226,14 +229,15 @@ pub struct RouterStatus {
     pub disconnected_count: usize,
     pub idle_count: usize,
     pub uptime_secs: u64,
-    pub slots: Vec<SlotStatus>,
+    pub orders: Vec<OrderStatusResponse>,
     #[serde(flatten)]
     pub stats: MiningStats,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SlotStatus {
+pub struct OrderStatusResponse {
     pub id: u32,
+    pub status: OrderStatus,
     pub upstream_id: u32,
     pub upstream_accepted: u64,
     pub upstream_rejected: u64,
@@ -251,8 +255,10 @@ pub struct SlotStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SlotDetail {
+pub struct OrderDetail {
     pub id: u32,
+    pub status: OrderStatus,
+    pub target: UpstreamTarget,
     pub upstream_id: u32,
     pub upstream: UpstreamInfo,
     pub user_count: usize,
@@ -268,6 +274,6 @@ pub struct SlotDetail {
 }
 
 #[derive(Deserialize, Serialize, Debug)]
-pub struct Order {
+pub struct OrderRequest {
     pub target: UpstreamTarget,
 }

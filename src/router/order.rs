@@ -1,13 +1,23 @@
 use super::*;
 
-pub(crate) struct Slot {
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OrderStatus {
+    Active,
+    Cancelled,
+    Disconnected,
+}
+
+pub(crate) struct Order {
     pub(crate) id: u32,
+    pub(crate) target: UpstreamTarget,
     pub(crate) upstream: Arc<Upstream>,
     pub(crate) allocator: Arc<EnonceAllocator>,
     pub(crate) cancel: CancellationToken,
+    pub(crate) status: Mutex<OrderStatus>,
 }
 
-impl Slot {
+impl Order {
     pub(crate) async fn connect(
         id: u32,
         target: &UpstreamTarget,
@@ -33,9 +43,23 @@ impl Slot {
 
         Ok(Arc::new(Self {
             id,
+            target: target.clone(),
             upstream,
             allocator,
             cancel,
+            status: Mutex::new(OrderStatus::Active),
         }))
+    }
+
+    pub(crate) fn status(&self) -> OrderStatus {
+        *self.status.lock()
+    }
+
+    pub(crate) fn set_status(&self, status: OrderStatus) {
+        *self.status.lock() = status;
+    }
+
+    pub(crate) fn is_active(&self) -> bool {
+        self.status() == OrderStatus::Active
     }
 }

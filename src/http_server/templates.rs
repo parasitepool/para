@@ -54,11 +54,11 @@ impl DashboardContent for RouterHtml {
 }
 
 #[derive(Boilerplate)]
-pub(crate) struct SlotHtml;
+pub(crate) struct OrderHtml;
 
-impl DashboardContent for SlotHtml {
+impl DashboardContent for OrderHtml {
     fn title(&self) -> &'static str {
-        "Router | Slot"
+        "Router | Order"
     }
 }
 

@@ -8,7 +8,7 @@
     padding: 24px 0;
   }
 
-  .slot-card {
+  .order-card {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 48px;
@@ -16,30 +16,30 @@
     box-sizing: border-box;
   }
 
-  .slot-pane {
+  .order-pane {
     border: 1px solid #444;
     padding: 20px 30px;
     min-width: 0;
   }
 
-  .slot-pane h2 {
+  .order-pane h2 {
     margin: 0 0 15px;
     font-size: 1.22em;
     text-align: center;
     color: #888;
   }
 
-  .slot-link {
+  .order-link {
     color: inherit;
     text-decoration: none;
   }
 
-  .slot-link:hover {
+  .order-link:hover {
     text-decoration: underline;
   }
 
-  .slot-pane .row span:last-child,
-  .slot-pane .row a {
+  .order-pane .row span:last-child,
+  .order-pane .row a {
     overflow-wrap: anywhere;
   }
 
@@ -55,7 +55,7 @@
 
   #add-order-btn:hover { background: #444; }
 
-  .slot-header {
+  .order-header {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -63,9 +63,9 @@
     margin: 0 0 15px;
   }
 
-  .slot-header h2 { margin: 0; }
+  .order-header h2 { margin: 0; }
 
-  .slot-delete {
+  .order-delete {
     position: absolute;
     right: 0;
     background: none;
@@ -83,7 +83,7 @@
     justify-content: center;
   }
 
-  .slot-delete:hover { color: #f55; border-color: #f55; }
+  .order-delete:hover { color: #f55; border-color: #f55; }
 
   #order-overlay {
     position: fixed;
@@ -168,12 +168,12 @@
       max-width: 500px;
     }
 
-    .slot-card {
+    .order-card {
       grid-template-columns: 1fr;
       gap: 30px;
     }
 
-    .slot-pane {
+    .order-pane {
       width: 100%;
       max-width: 500px;
       box-sizing: border-box;
@@ -299,41 +299,41 @@ async function refresh(signal) {
 
     const container = document.getElementById('upstreams-list');
     if (!container.querySelector('.copyable:hover')) {
-    const slots = routerData.slots || [];
-    container.innerHTML = slots.map(slot => {
-      const username = slot.username || '';
+    const orders = (routerData.orders || []).filter(o => o.status === 'active');
+    container.innerHTML = orders.map(order => {
+      const username = order.username || '';
       const shortUser = truncateMiddle(username);
-      const upRejSharesPct = rejectionPct(slot.upstream_accepted, slot.upstream_rejected);
-      const upRejWorkPct = rejectionPct(slot.upstream_accepted_work, slot.upstream_rejected_work);
-      const slotRejSharesPct = rejectionPct(slot.accepted_shares, slot.rejected_shares);
-      const slotRejWorkPct = rejectionPct(slot.accepted_work, slot.rejected_work);
-      return `<div class="slot-card">
-        <div class=slot-pane>
-          <div class=slot-header>
-            <h2><a class=slot-link href="/slot/${slot.id}">Slot ${slot.id}</a></h2>
-            <button class=slot-delete data-id="${slot.id}">&times;</button>
+      const upRejSharesPct = rejectionPct(order.upstream_accepted, order.upstream_rejected);
+      const upRejWorkPct = rejectionPct(order.upstream_accepted_work, order.upstream_rejected_work);
+      const orderRejSharesPct = rejectionPct(order.accepted_shares, order.rejected_shares);
+      const orderRejWorkPct = rejectionPct(order.accepted_work, order.rejected_work);
+      return `<div class="order-card">
+        <div class=order-pane>
+          <div class=order-header>
+            <h2><a class=order-link href="/order/${order.id}">Order ${order.id}</a></h2>
+            <button class=order-delete data-id="${order.id}">&times;</button>
           </div>
-          <div class=row><span>Endpoint</span><span>${slot.endpoint}</span></div>
-          <div class=row><span>Ping</span><span>${formatPing(slot.ping_ms)}ms</span></div>
+          <div class=row><span>Endpoint</span><span>${order.endpoint}</span></div>
+          <div class=row><span>Ping</span><span>${formatPing(order.ping_ms)}ms</span></div>
           <div class=row><span>Username</span><span class=copyable data-full="${username}" data-formatted="${shortUser}">${shortUser}</span></div>
-          <div class=row><span>Rejected Shares</span><span class=copyable data-formatted="${upRejSharesPct}" data-full="${rejectionDetail(slot.upstream_accepted, slot.upstream_rejected)}">${upRejSharesPct}</span></div>
-          <div class=row><span>Rejected Work</span><span class=copyable data-formatted="${upRejWorkPct}" data-full="${rejectionWorkDetail(slot.upstream_accepted_work, slot.upstream_rejected_work)}">${upRejWorkPct}</span></div>
-          <div class=row><span>Delivered Work</span><span>${formatDifficulty((slot.upstream_accepted_work || 0) + (slot.upstream_rejected_work || 0)) || '-'}</span></div>
-          <div class=row><span>Delivered PHd</span><span>${formatPhDays(slot.upstream_ph_days) || '-'}</span></div>
-          <div class=row><span>Efficiency</span><span>${efficiencyPct(slot.upstream_accepted_work, slot.accepted_work, slot.rejected_work)}</span></div>
+          <div class=row><span>Rejected Shares</span><span class=copyable data-formatted="${upRejSharesPct}" data-full="${rejectionDetail(order.upstream_accepted, order.upstream_rejected)}">${upRejSharesPct}</span></div>
+          <div class=row><span>Rejected Work</span><span class=copyable data-formatted="${upRejWorkPct}" data-full="${rejectionWorkDetail(order.upstream_accepted_work, order.upstream_rejected_work)}">${upRejWorkPct}</span></div>
+          <div class=row><span>Delivered Work</span><span>${formatDifficulty((order.upstream_accepted_work || 0) + (order.upstream_rejected_work || 0)) || '-'}</span></div>
+          <div class=row><span>Delivered PHd</span><span>${formatPhDays(order.upstream_ph_days) || '-'}</span></div>
+          <div class=row><span>Efficiency</span><span>${efficiencyPct(order.upstream_accepted_work, order.accepted_work, order.rejected_work)}</span></div>
         </div>
-        <div class=slot-pane>
-          <div class=row><a class=slot-link href="/slot/${slot.id}">Sessions</a><span>${slot.session_count}</span></div>
-          <div class=row><span>Idle</span><span>${slot.idle_count}</span></div>
-          <div class=row><span>Disconnected</span><span>${slot.disconnected_count}</span></div>
-          <div class=row><span>Hashrate</span><span>${formatHashrate(slot.hashrate_1m)}</span></div>
-          <div class=row><span>SPS</span><span>${formatTruncated(slot.sps_1m)}</span></div>
-          <div class=row><span>Best Share</span><span>${formatDifficulty(slot.best_share)}</span></div>
-          <div class=row><span>Last Share</span><span>${slot.last_share != null ? slot.last_share + 's ago' : '-'}</span></div>
-          <div class=row><span>Rejected Shares</span><span class=copyable data-formatted="${slotRejSharesPct}" data-full="${rejectionDetail(slot.accepted_shares, slot.rejected_shares)}">${slotRejSharesPct}</span></div>
-          <div class=row><span>Rejected Work</span><span class=copyable data-formatted="${slotRejWorkPct}" data-full="${rejectionWorkDetail(slot.accepted_work, slot.rejected_work)}">${slotRejWorkPct}</span></div>
-          <div class=row><span>Received Work</span><span>${formatDifficulty(slot.accepted_work) || '-'}</span></div>
-          <div class=row><span>Received PHd</span><span>${formatPhDays(slot.ph_days) || '-'}</span></div>
+        <div class=order-pane>
+          <div class=row><a class=order-link href="/order/${order.id}">Sessions</a><span>${order.session_count}</span></div>
+          <div class=row><span>Idle</span><span>${order.idle_count}</span></div>
+          <div class=row><span>Disconnected</span><span>${order.disconnected_count}</span></div>
+          <div class=row><span>Hashrate</span><span>${formatHashrate(order.hashrate_1m)}</span></div>
+          <div class=row><span>SPS</span><span>${formatTruncated(order.sps_1m)}</span></div>
+          <div class=row><span>Best Share</span><span>${formatDifficulty(order.best_share)}</span></div>
+          <div class=row><span>Last Share</span><span>${order.last_share != null ? order.last_share + 's ago' : '-'}</span></div>
+          <div class=row><span>Rejected Shares</span><span class=copyable data-formatted="${orderRejSharesPct}" data-full="${rejectionDetail(order.accepted_shares, order.rejected_shares)}">${orderRejSharesPct}</span></div>
+          <div class=row><span>Rejected Work</span><span class=copyable data-formatted="${orderRejWorkPct}" data-full="${rejectionWorkDetail(order.accepted_work, order.rejected_work)}">${orderRejWorkPct}</span></div>
+          <div class=row><span>Received Work</span><span>${formatDifficulty(order.accepted_work) || '-'}</span></div>
+          <div class=row><span>Received PHd</span><span>${formatPhDays(order.ph_days) || '-'}</span></div>
         </div>
       </div>`;
     }).join('');
@@ -349,12 +349,12 @@ setupLogToggle();
 initCopyables();
 
 document.getElementById('upstreams-list').addEventListener('click', async (e) => {
-  const btn = e.target.closest('.slot-delete');
+  const btn = e.target.closest('.order-delete');
   if (!btn) return;
   const id = btn.dataset.id;
-  if (!confirm(`Remove slot ${id}?`)) return;
+  if (!confirm(`Remove order ${id}?`)) return;
   try {
-    const res = await fetch(`/api/router/order/${id}/remove`, { method: 'POST' });
+    const res = await fetch(`/api/router/order/${id}`, { method: 'DELETE' });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       alert(data.message || `Error: ${res.status}`);

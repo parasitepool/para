@@ -68,10 +68,6 @@ impl TestRouter {
         format!("http://127.0.0.1:{}", self.http_port)
     }
 
-    pub(crate) fn try_wait(&mut self) -> std::io::Result<Option<std::process::ExitStatus>> {
-        self.router_handle.try_wait()
-    }
-
     pub(crate) async fn get_status(&self) -> reqwest::Result<RouterStatus> {
         reqwest::Client::new()
             .get(format!("{}/api/router/status", self.api_endpoint()))
@@ -81,7 +77,10 @@ impl TestRouter {
             .await
     }
 
-    pub(crate) async fn add_order(&self, order: &api::Order) -> reqwest::Result<reqwest::Response> {
+    pub(crate) async fn add_order(
+        &self,
+        order: &api::OrderRequest,
+    ) -> reqwest::Result<reqwest::Response> {
         reqwest::Client::new()
             .post(format!("{}/api/router/order", self.api_endpoint()))
             .json(order)
@@ -91,10 +90,7 @@ impl TestRouter {
 
     pub(crate) async fn remove_order(&self, id: u32) -> reqwest::Result<reqwest::Response> {
         reqwest::Client::new()
-            .post(format!(
-                "{}/api/router/order/{id}/remove",
-                self.api_endpoint()
-            ))
+            .delete(format!("{}/api/router/order/{id}", self.api_endpoint()))
             .send()
             .await
     }

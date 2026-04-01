@@ -54,12 +54,13 @@ impl Upstream {
             target.username()
         );
 
-        let client = Client::new(
+        let client = Client::with_cancel(
             upstream_addr.to_string(),
             target.username().clone(),
             target.password().map(String::from),
             USER_AGENT.into(),
             timeout,
+            cancel.clone(),
         );
 
         let mut events = client
@@ -176,20 +177,19 @@ impl Upstream {
                             }
                             Ok(Event::Reconnect(_)) | Ok(Event::Disconnected) => {
                                 warn!("Disconnected from upstream");
-                                connected_clone.store(false, Ordering::Relaxed);
-                                disconnect_clone.notify_waiters();
                                 break;
                             }
                             Err(err) => {
                                 error!("Upstream event error: {}", err);
-                                connected_clone.store(false, Ordering::Relaxed);
-                                disconnect_clone.notify_waiters();
                                 break;
                             }
                         }
                     }
                 }
             }
+
+            connected_clone.store(false, Ordering::Relaxed);
+            disconnect_clone.notify_waiters();
         });
 
         Ok(Arc::new(Self {
@@ -325,5 +325,46 @@ impl Upstream {
 
     pub(crate) fn ping_ms(&self) -> u128 {
         self.ping.read().as_millis()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test(id: u32) -> Arc<Self> {
+        let notify = Notify {
+            job_id: "bf".parse().unwrap(),
+            prevhash: "4d16b6f85af6e2198f44ae2a6de67f78487ae5611b77c6c0440b921e00000000"
+                .parse()
+                .unwrap(),
+            coinb1: "aa".into(),
+            coinb2: "bb".into(),
+            merkle_branches: Vec::new(),
+            version: Version(block::Version::TWO),
+            nbits: "1c2ac4af".parse().unwrap(),
+            ntime: "504e86b9".parse().unwrap(),
+            clean_jobs: false,
+        };
+        let (_, workbase_rx) = watch::channel(Arc::new(notify));
+        Arc::new(Self {
+            id,
+            client: Client::new(
+                "foo:3333".into(),
+                Username::new("bar"),
+                None,
+                "baz".into(),
+                Duration::from_secs(1),
+            ),
+            endpoint: "foo:3333".into(),
+            enonce1: Extranonce::random(4),
+            enonce2_size: 4,
+            connected: Arc::new(AtomicBool::new(true)),
+            ping: Arc::new(RwLock::new(Duration::ZERO)),
+            difficulty: Arc::new(RwLock::new(Difficulty::from(1u64))),
+            accepted: Arc::new(AtomicU64::new(0)),
+            rejected: Arc::new(AtomicU64::new(0)),
+            accepted_work: Arc::new(Mutex::new(TotalWork::ZERO)),
+            rejected_work: Arc::new(Mutex::new(TotalWork::ZERO)),
+            version_mask: None,
+            disconnect_notify: Arc::new(tokio::sync::Notify::new()),
+            workbase_rx,
+        })
     }
 }

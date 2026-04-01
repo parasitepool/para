@@ -1,4 +1,4 @@
-use {super::*, crate::MAX_MESSAGE_SIZE, std::time::Instant};
+use {super::*, crate::MAX_MESSAGE_SIZE, std::time::Instant, tokio_util::sync::CancellationToken};
 
 struct ConnectionState {
     writer: BufWriter<tokio::net::tcp::OwnedWriteHalf>,
@@ -39,6 +39,7 @@ pub(super) struct ClientActor {
     inner: Arc<Config>,
     rx: mpsc::Receiver<ClientMessage>,
     events: broadcast::Sender<Event>,
+    cancel: CancellationToken,
     id_counter: u64,
     pending: HashMap<Id, PendingRequest>,
     connection: Option<ConnectionState>,
@@ -49,11 +50,13 @@ impl ClientActor {
         inner: Arc<Config>,
         rx: mpsc::Receiver<ClientMessage>,
         events: broadcast::Sender<Event>,
+        cancel: CancellationToken,
     ) -> Self {
         Self {
             inner,
             rx,
             events,
+            cancel,
             id_counter: 0,
             pending: HashMap::new(),
             connection: None,
@@ -66,6 +69,12 @@ impl ClientActor {
         loop {
             tokio::select! {
                 biased;
+
+                _ = self.cancel.cancelled() => {
+                    debug!("Client actor cancelled");
+                    self.handle_disconnect().await;
+                    break;
+                }
 
                 Some(msg) = incoming_rx.recv() => {
                     self.handle_incoming(msg).await;
