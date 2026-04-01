@@ -50,7 +50,7 @@ async fn router_round_robin() {
     .expect("Timeout waiting for 3 sessions");
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.upstream_count, 2);
+    assert_eq!(status.active_orders, 2);
     assert_eq!(status.session_count, 3);
 
     drop(pool_a);
@@ -58,7 +58,7 @@ async fn router_round_robin() {
     timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(status) = router.get_status().await
-                && status.upstream_count == 1
+                && status.active_orders == 1
                 && status.session_count >= 3
             {
                 break;
@@ -70,7 +70,7 @@ async fn router_round_robin() {
     .expect("Timeout waiting for miners to reconnect to remaining upstream");
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.upstream_count, 1);
+    assert_eq!(status.active_orders, 1);
     assert_eq!(status.orders.len(), 2);
     assert_eq!(status.session_count, 3);
 
@@ -79,7 +79,7 @@ async fn router_round_robin() {
     timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(status) = router.get_status().await
-                && status.upstream_count == 0
+                && status.active_orders == 0
             {
                 break;
             }
@@ -90,7 +90,7 @@ async fn router_round_robin() {
     .expect("Timeout waiting for all upstreams to disconnect");
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.upstream_count, 0);
+    assert_eq!(status.active_orders, 0);
     assert_eq!(status.orders.len(), 2);
 
     for mut miner in miners {
@@ -220,7 +220,7 @@ async fn orders() {
     assert_eq!(response.status(), StatusCode::OK);
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.upstream_count, 2);
+    assert_eq!(status.active_orders, 2);
 
     let response = router.remove_order(9999).await.unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
@@ -231,7 +231,7 @@ async fn orders() {
 
     let status = router.get_status().await.unwrap();
     assert_eq!(status.orders.len(), 2);
-    assert_eq!(status.upstream_count, 1);
+    assert_eq!(status.active_orders, 1);
 }
 
 #[tokio::test]
@@ -265,14 +265,14 @@ async fn order_disconnected_on_upstream_disconnect() {
     assert_eq!(response.status(), StatusCode::OK);
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.upstream_count, 2);
+    assert_eq!(status.active_orders, 2);
 
     drop(pool_b);
 
     timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(status) = router.get_status().await
-                && status.upstream_count == 1
+                && status.active_orders == 1
             {
                 break;
             }
@@ -284,7 +284,7 @@ async fn order_disconnected_on_upstream_disconnect() {
 
     let status = router.get_status().await.unwrap();
     assert_eq!(status.orders.len(), 2);
-    assert_eq!(status.upstream_count, 1);
+    assert_eq!(status.active_orders, 1);
     assert_eq!(
         status
             .orders
@@ -322,7 +322,7 @@ async fn order_fulfilled_on_target_work_reached() {
     assert_eq!(response.status(), StatusCode::OK);
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.upstream_count, 1);
+    assert_eq!(status.active_orders, 1);
 
     let mut miner = CommandBuilder::new(format!(
         "miner {} --mode continuous --username {} --cpu-cores 1",
@@ -348,7 +348,7 @@ async fn order_fulfilled_on_target_work_reached() {
     .expect("Timeout waiting for order to be fulfilled");
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.upstream_count, 0);
+    assert_eq!(status.active_orders, 0);
 
     let fulfilled = status
         .orders
@@ -357,7 +357,7 @@ async fn order_fulfilled_on_target_work_reached() {
         .unwrap();
 
     assert_eq!(fulfilled.target_work, Some(HashDays(1e-10)));
-    assert!(fulfilled.upstream_hash_days >= HashDays(1e-10));
+    assert!(fulfilled.upstream.hash_days >= HashDays(1e-10));
 
     miner.kill().unwrap();
     miner.wait().unwrap();

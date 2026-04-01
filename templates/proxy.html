@@ -98,14 +98,15 @@ async function refresh(signal) {
     set('sessions', proxyData.session_count);
     set('idle', proxyData.idle_count);
     set('disconnected', proxyData.disconnected_count);
-    set('hashrate_1m', proxyData.hashrate_1m, formatHashrate);
-    set('sps_1m', proxyData.sps_1m, formatTruncated);
-    copyable('best_share', formatDifficulty(proxyData.best_share), proxyData.best_share);
-    set('last_share', proxyData.last_share);
-    rejectionCopyable('rejected_shares', proxyData.accepted_shares, proxyData.rejected_shares);
-    rejectionWorkCopyable('rejected_work', proxyData.accepted_work, proxyData.rejected_work);
-    set('received_work', proxyData.accepted_work, formatDifficulty);
-    copyable('hash_days', formatHashDays(proxyData.hash_days), proxyData.hash_days);
+    const s = proxyData.stats;
+    set('hashrate_1m', s.hashrate_1m, formatHashrate);
+    set('sps_1m', s.sps_1m, formatTruncated);
+    copyable('best_share', formatDifficulty(s.best_share), s.best_share);
+    set('last_share', s.last_share);
+    rejectionCopyable('rejected_shares', s.accepted_shares, s.rejected_shares);
+    rejectionWorkCopyable('rejected_work', s.accepted_work, s.rejected_work);
+    set('received_work', s.accepted_work, formatDifficulty);
+    copyable('hash_days', formatHashDays(s.hash_days), s.hash_days);
 
     renderBitcoinData(bitcoinData);
     renderSystemData(systemData);

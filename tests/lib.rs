@@ -3,7 +3,6 @@ use {
     command_builder::CommandBuilder,
     para::{
         ckpool::{self, HashRate, HashRateStatus, PoolStatus, ShareStatus, User, Worker},
-        hashdays::HashDays,
         subcommand::server::{
             Status,
             notifications::{NotificationHandler, NotificationPriority, NotificationType},
@@ -57,6 +56,7 @@ use {
     para::{
         ENONCE1_EXTENSION_SIZE, ENONCE1_SIZE, MAX_ENONCE_SIZE, USER_AGENT, api,
         api::OrderStatus,
+        hashdays::HashDays,
         subcommand::{
             miner::Share,
             server::{

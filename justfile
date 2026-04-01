@@ -95,7 +95,8 @@ router:
     --http-port 8082 \
     --start-diff 0.00001 \
     --vardiff-window 10 \
-    --vardiff-period 1
+    --vardiff-period 1 \
+    --tick-interval 1
 
 # Mine to anyone-can-spend P2WSH(OP_TRUE)
 miner port='42069': 

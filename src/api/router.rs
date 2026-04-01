@@ -30,53 +30,27 @@ async fn order_page(Extension(chain): Extension<Chain>) -> Response {
 
 async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
     let now = Instant::now();
+    let metatron = router.metatron();
     let mut orders = Vec::new();
-    let mut active_count = 0;
     let mut upstream_accepted = 0;
     let mut upstream_rejected = 0;
     let mut upstream_accepted_work = TotalWork::ZERO;
     let mut upstream_rejected_work = TotalWork::ZERO;
-    let metatron = router.metatron();
 
     for order in router.orders().iter() {
-        let order_upstream_accepted = order.upstream.accepted();
-        let order_upstream_rejected = order.upstream.rejected();
-        let order_upstream_accepted_work = order.upstream.accepted_work();
-        let order_upstream_rejected_work = order.upstream.rejected_work();
-        let upstream_id = order.upstream.id();
-        let status = order.status();
-
-        orders.push(OrderStatusResponse {
-            id: order.id,
-            status,
-            target_work: order.target_work,
-            upstream_id,
-            endpoint: order.upstream.endpoint().to_string(),
-            username: order.upstream.username().to_string(),
-            ping_ms: order.upstream.ping_ms(),
-            upstream_accepted: order_upstream_accepted,
-            upstream_rejected: order_upstream_rejected,
-            upstream_accepted_work: order_upstream_accepted_work,
-            upstream_rejected_work: order_upstream_rejected_work,
-            upstream_hash_days: (order_upstream_accepted_work + order_upstream_rejected_work)
-                .to_hash_days(),
-            session_count: router.upstream_session_count(upstream_id),
-            disconnected_count: router.upstream_disconnected_count(upstream_id),
-            idle_count: router.upstream_idle_count(upstream_id),
-            stats: MiningStats::from_snapshot(&router.upstream_snapshot(upstream_id), now),
-        });
-
-        if order.is_active() {
-            active_count += 1;
-            upstream_accepted += order_upstream_accepted;
-            upstream_rejected += order_upstream_rejected;
-            upstream_accepted_work += order_upstream_accepted_work;
-            upstream_rejected_work += order_upstream_rejected_work;
-        }
+        let detail = OrderDetail::from_order(order, &metatron, now);
+        upstream_accepted += detail.upstream.accepted;
+        upstream_rejected += detail.upstream.rejected;
+        upstream_accepted_work += detail.upstream.accepted_work;
+        upstream_rejected_work += detail.upstream.rejected_work;
+        orders.push(detail);
     }
 
     Json(RouterStatus {
-        upstream_count: active_count,
+        active_orders: orders
+            .iter()
+            .filter(|o| o.status == OrderStatus::Active)
+            .count(),
         session_count: metatron.total_sessions(),
         disconnected_count: metatron.total_disconnected(),
         idle_count: metatron.total_idle(),
@@ -99,46 +73,9 @@ async fn order_detail(
         .get_order(id)
         .ok_or_not_found(|| format!("Order {id}"))?;
 
-    let now = Instant::now();
     let metatron = router.metatron();
-    let upstream_id = order.upstream.id();
-    let sessions = router.upstream_sessions(upstream_id);
-    let session_details = sessions
-        .iter()
-        .map(|session| SessionDetail::from_session(session, now))
-        .collect();
-    let workers = metatron
-        .users()
-        .iter()
-        .flat_map(|user| user.workers().collect::<Vec<_>>())
-        .filter_map(|worker| {
-            let session_count = worker.upstream_session_count(upstream_id);
-            (session_count > 0).then(|| WorkerDetail {
-                name: worker.workername().to_string(),
-                session_count,
-                stats: MiningStats::from_snapshot(&worker.upstream_snapshot(upstream_id), now),
-            })
-        })
-        .collect();
 
-    Ok(Json(OrderDetail {
-        id: order.id,
-        status: order.status(),
-        target: order.target.clone(),
-        target_work: order.target_work,
-        upstream_id,
-        upstream: UpstreamInfo::from_upstream(&order.upstream),
-        user_count: router.upstream_user_count(upstream_id),
-        worker_count: router.upstream_worker_count(upstream_id),
-        session_count: router.upstream_session_count(upstream_id),
-        disconnected_count: router.upstream_disconnected_count(upstream_id),
-        idle_count: router.upstream_idle_count(upstream_id),
-        uptime_secs: metatron.uptime().as_secs(),
-        workers,
-        sessions: session_details,
-        stats: MiningStats::from_snapshot(&router.upstream_snapshot(upstream_id), now),
-    })
-    .into_response())
+    Ok(Json(OrderDetail::from_order(&order, &metatron, Instant::now())).into_response())
 }
 
 async fn add_order(

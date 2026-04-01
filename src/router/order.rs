@@ -9,7 +9,7 @@ pub enum OrderStatus {
     Disconnected,
 }
 
-pub(crate) struct Order {
+pub struct Order {
     pub(crate) id: u32,
     pub(crate) target: UpstreamTarget,
     pub(crate) target_work: Option<HashDays>,
@@ -74,7 +74,7 @@ impl Order {
         };
 
         let accepted = self.upstream.accepted_work().to_hash_days();
-        
+
         accepted >= target
     }
 }

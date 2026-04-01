@@ -130,20 +130,21 @@ async function refresh(signal) {
     copyable('upstream_hash_days', formatHashDays(upstream.hash_days), upstream.hash_days);
     rejectionWorkCopyable('upstream_rejected_work', upstream.accepted_work, upstream.rejected_work);
 
+    const stats = data.stats;
     set('users', data.user_count);
     set('workers', data.worker_count);
     set('sessions', data.session_count);
     set('idle', data.idle_count);
     set('disconnected', data.disconnected_count);
-    set('hashrate_1m', data.hashrate_1m, formatHashrate);
-    set('sps_1m', data.sps_1m, formatTruncated);
+    set('hashrate_1m', stats.hashrate_1m, formatHashrate);
+    set('sps_1m', stats.sps_1m, formatTruncated);
     set('uptime_secs', data.uptime_secs);
-    rejectionCopyable('rejected_shares', data.accepted_shares, data.rejected_shares);
-    rejectionWorkCopyable('rejected_work', data.accepted_work, data.rejected_work);
-    set('last_share', data.last_share);
-    copyable('best_share', formatDifficulty(data.best_share), data.best_share);
-    set('received_work', data.accepted_work, formatDifficulty);
-    copyable('hash_days', formatHashDays(data.hash_days), data.hash_days);
+    rejectionCopyable('rejected_shares', stats.accepted_shares, stats.rejected_shares);
+    rejectionWorkCopyable('rejected_work', stats.accepted_work, stats.rejected_work);
+    set('last_share', stats.last_share);
+    copyable('best_share', formatDifficulty(stats.best_share), stats.best_share);
+    set('received_work', stats.accepted_work, formatDifficulty);
+    copyable('hash_days', formatHashDays(stats.hash_days), stats.hash_days);
 
     document.getElementById('workers-list').innerHTML = renderWorkerRows(data.workers || []);
     document.getElementById('sessions-list').innerHTML = renderSessionRows(data.sessions || []);

@@ -30,7 +30,7 @@ async function refresh(signal) {
         const shortAddr = truncateMiddle(addr, 20, 8);
         return `<div class=user-row>
           <a href="/user/${addr}">${shortAddr}</a>
-          <span>${u.workers.length} | ${u.session_count} | ${formatHashrate(u.hashrate_1m)}</span>
+          <span>${u.workers.length} | ${u.session_count} | ${formatHashrate(u.stats.hashrate_1m)}</span>
         </div>`;
       })
       .join('');

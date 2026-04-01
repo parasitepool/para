@@ -65,13 +65,14 @@ async function refresh(signal) {
     set('sessions', poolData.session_count);
     set('idle', poolData.idle_count);
     set('disconnected', poolData.disconnected_count);
-    set('hashrate_1m', poolData.hashrate_1m, formatHashrate);
-    set('sps_1m', poolData.sps_1m, formatTruncated);
-    copyable('best_share', formatDifficulty(poolData.best_share), poolData.best_share);
-    set('last_share', poolData.last_share);
-    rejectionCopyable('rejected_shares', poolData.accepted_shares, poolData.rejected_shares);
-    rejectionWorkCopyable('rejected_work', poolData.accepted_work, poolData.rejected_work);
-    copyable('hash_days', formatHashDays(poolData.hash_days), poolData.hash_days);
+    const s = poolData.stats;
+    set('hashrate_1m', s.hashrate_1m, formatHashrate);
+    set('sps_1m', s.sps_1m, formatTruncated);
+    copyable('best_share', formatDifficulty(s.best_share), s.best_share);
+    set('last_share', s.last_share);
+    rejectionCopyable('rejected_shares', s.accepted_shares, s.rejected_shares);
+    rejectionWorkCopyable('rejected_work', s.accepted_work, s.rejected_work);
+    copyable('hash_days', formatHashDays(s.hash_days), s.hash_days);
 
     renderBitcoinData(bitcoinData);
     renderSystemData(systemData);

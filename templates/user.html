@@ -66,14 +66,15 @@ async function refresh(signal) {
     copyable('address', truncateMiddle(user.address, 20, 8), user.address);
     set('workers_count', user.workers.length);
     set('sessions', user.session_count);
-    set('hashrate_1m', user.hashrate_1m, formatHashrate);
-    set('sps_1m', user.sps_1m, formatTruncated);
+    const s = user.stats;
+    set('hashrate_1m', s.hashrate_1m, formatHashrate);
+    set('sps_1m', s.sps_1m, formatTruncated);
     set('authorized', new Date(user.authorized_at * 1000).toLocaleString());
-    rejectionCopyable('rejected_shares', user.accepted_shares, user.rejected_shares);
-    rejectionWorkCopyable('rejected_work', user.accepted_work, user.rejected_work);
-    set('last_share', user.last_share);
-    copyable('best_share', formatDifficulty(user.best_share), user.best_share);
-    copyable('hash_days', formatHashDays(user.hash_days), user.hash_days);
+    rejectionCopyable('rejected_shares', s.accepted_shares, s.rejected_shares);
+    rejectionWorkCopyable('rejected_work', s.accepted_work, s.rejected_work);
+    set('last_share', s.last_share);
+    copyable('best_share', formatDifficulty(s.best_share), s.best_share);
+    copyable('hash_days', formatHashDays(s.hash_days), s.hash_days);
 
     document.getElementById('workers-list').innerHTML = renderWorkerRows(user.workers || []);
     document.getElementById('sessions-list').innerHTML = renderSessionRows(user.sessions || []);

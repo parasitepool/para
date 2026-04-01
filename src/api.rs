@@ -9,7 +9,7 @@ use {
 };
 
 pub use {
-    crate::router::OrderStatus,
+    crate::router::{Order, OrderStatus},
     http_server::{BitcoinStatus, SystemStatus},
 };
 
@@ -75,7 +75,6 @@ pub struct PoolStatus {
     pub disconnected_count: usize,
     pub idle_count: usize,
     pub uptime_secs: u64,
-    #[serde(flatten)]
     pub stats: MiningStats,
 }
 
@@ -86,7 +85,6 @@ pub struct UserDetail {
     pub authorized_at: u64,
     pub workers: Vec<WorkerDetail>,
     pub sessions: Vec<SessionDetail>,
-    #[serde(flatten)]
     pub stats: MiningStats,
 }
 
@@ -121,7 +119,6 @@ impl UserDetail {
 pub struct WorkerDetail {
     pub name: String,
     pub session_count: usize,
-    #[serde(flatten)]
     pub stats: MiningStats,
 }
 
@@ -145,7 +142,6 @@ pub struct SessionDetail {
     pub username: String,
     pub enonce1: Extranonce,
     pub version_mask: Option<Version>,
-    #[serde(flatten)]
     pub stats: MiningStats,
 }
 
@@ -174,7 +170,6 @@ pub struct ProxyStatus {
     pub idle_count: usize,
     pub uptime_secs: u64,
     pub upstream: UpstreamInfo,
-    #[serde(flatten)]
     pub stats: MiningStats,
 }
 
@@ -219,7 +214,7 @@ impl UpstreamInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RouterStatus {
-    pub upstream_count: usize,
+    pub active_orders: usize,
     pub upstream_accepted: u64,
     pub upstream_rejected: u64,
     pub upstream_accepted_work: TotalWork,
@@ -229,29 +224,7 @@ pub struct RouterStatus {
     pub disconnected_count: usize,
     pub idle_count: usize,
     pub uptime_secs: u64,
-    pub orders: Vec<OrderStatusResponse>,
-    #[serde(flatten)]
-    pub stats: MiningStats,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OrderStatusResponse {
-    pub id: u32,
-    pub status: OrderStatus,
-    pub target_work: Option<HashDays>,
-    pub upstream_id: u32,
-    pub upstream_accepted: u64,
-    pub upstream_rejected: u64,
-    pub upstream_accepted_work: TotalWork,
-    pub upstream_rejected_work: TotalWork,
-    pub upstream_hash_days: HashDays,
-    pub endpoint: String,
-    pub username: String,
-    pub ping_ms: u128,
-    pub session_count: usize,
-    pub disconnected_count: usize,
-    pub idle_count: usize,
-    #[serde(flatten)]
+    pub orders: Vec<OrderDetail>,
     pub stats: MiningStats,
 }
 
@@ -271,8 +244,51 @@ pub struct OrderDetail {
     pub uptime_secs: u64,
     pub workers: Vec<WorkerDetail>,
     pub sessions: Vec<SessionDetail>,
-    #[serde(flatten)]
     pub stats: MiningStats,
+}
+
+impl OrderDetail {
+    pub(crate) fn from_order(order: &Order, metatron: &Metatron, now: Instant) -> Self {
+        let upstream_id = order.upstream.id();
+
+        let sessions: Vec<SessionDetail> = metatron
+            .upstream_sessions(upstream_id)
+            .iter()
+            .map(|session| SessionDetail::from_session(session, now))
+            .collect();
+
+        let workers = metatron
+            .users()
+            .iter()
+            .flat_map(|user| user.workers().collect::<Vec<_>>())
+            .filter_map(|worker| {
+                let session_count = worker.upstream_session_count(upstream_id);
+                (session_count > 0).then(|| WorkerDetail {
+                    name: worker.workername().to_string(),
+                    session_count,
+                    stats: MiningStats::from_snapshot(&worker.upstream_snapshot(upstream_id), now),
+                })
+            })
+            .collect();
+
+        Self {
+            id: order.id,
+            status: order.status(),
+            target: order.target.clone(),
+            target_work: order.target_work,
+            upstream_id,
+            upstream: UpstreamInfo::from_upstream(&order.upstream),
+            user_count: metatron.upstream_user_count(upstream_id),
+            worker_count: metatron.upstream_worker_count(upstream_id),
+            session_count: sessions.len(),
+            disconnected_count: metatron.upstream_disconnected_count(upstream_id),
+            idle_count: metatron.upstream_idle_count(upstream_id),
+            uptime_secs: metatron.uptime().as_secs(),
+            workers,
+            sessions,
+            stats: MiningStats::from_snapshot(&metatron.upstream_snapshot(upstream_id), now),
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug)]

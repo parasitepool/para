@@ -334,33 +334,35 @@ function renderSystemData(data) {
 }
 
 function renderWorkerRows(workers) {
-  return workers.sort((a, b) => b.hashrate_1m - a.hashrate_1m).map(w => {
-    const lastShare = w.last_share != null ? `${w.last_share}s ago` : '-';
-    const bestShare = formatDifficulty(w.best_share);
+  return workers.sort((a, b) => b.stats.hashrate_1m - a.stats.hashrate_1m).map(w => {
+    const stats = w.stats;
+    const lastShare = stats.last_share != null ? `${stats.last_share}s ago` : '-';
+    const bestShare = formatDifficulty(stats.best_share);
     return `<tr>
       <td>${w.name || '(default)'}</td>
       <td>${w.session_count}</td>
-      <td>${formatHashrate(w.hashrate_1m)}</td>
-      <td>${formatTruncated(w.sps_1m)}</td>
+      <td>${formatHashrate(stats.hashrate_1m)}</td>
+      <td>${formatTruncated(stats.sps_1m)}</td>
       <td>${bestShare || '-'}</td>
-      <td>${w.hash_days != null ? formatHashDays(w.hash_days) : '-'}</td>
+      <td>${stats.hash_days != null ? formatHashDays(stats.hash_days) : '-'}</td>
       <td>${lastShare}</td>
     </tr>`;
   }).join('');
 }
 
 function renderSessionRows(sessions) {
-  return sessions.sort((a, b) => b.hashrate_1m - a.hashrate_1m).map(session => {
+  return sessions.sort((a, b) => b.stats.hashrate_1m - a.stats.hashrate_1m).map(session => {
+    const stats = session.stats;
     const sessionUser = session.username || '';
     const shortSessionUser = truncateMiddle(sessionUser);
-    const lastShare = session.last_share != null ? `${session.last_share}s ago` : '-';
-    const bestShare = formatDifficulty(session.best_share);
+    const lastShare = stats.last_share != null ? `${stats.last_share}s ago` : '-';
+    const bestShare = formatDifficulty(stats.best_share);
     return `<tr>
       <td><span class="copyable hover-expand session-username" data-full="${sessionUser}" data-formatted="${shortSessionUser}">${shortSessionUser}</span></td>
-      <td>${formatHashrate(session.hashrate_1m)}</td>
-      <td>${formatTruncated(session.sps_1m)}</td>
+      <td>${formatHashrate(stats.hashrate_1m)}</td>
+      <td>${formatTruncated(stats.sps_1m)}</td>
       <td>${bestShare || '-'}</td>
-      <td>${session.hash_days != null ? formatHashDays(session.hash_days) : '-'}</td>
+      <td>${stats.hash_days != null ? formatHashDays(stats.hash_days) : '-'}</td>
       <td>${lastShare}</td>
     </tr>`;
   }).join('');
