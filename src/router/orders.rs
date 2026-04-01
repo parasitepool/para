@@ -49,6 +49,7 @@ mod tests {
         Arc::new(Order {
             id,
             target: "foo@bar:3333".parse().unwrap(),
+            target_work: None,
             upstream: Upstream::test(id),
             allocator: Arc::new(EnonceAllocator::new(
                 Extranonces::Pool(PoolExtranonces::new(4, 4).unwrap()),

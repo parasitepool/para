@@ -36,7 +36,7 @@ pub struct MiningStats {
     pub rejected_shares: u64,
     pub accepted_work: TotalWork,
     pub rejected_work: TotalWork,
-    pub ph_days: PhDays,
+    pub hash_days: HashDays,
 }
 
 impl MiningStats {
@@ -61,7 +61,7 @@ impl MiningStats {
             rejected_shares: stats.rejected_shares,
             accepted_work: stats.accepted_work,
             rejected_work: stats.rejected_work,
-            ph_days: stats.accepted_work.into(),
+            hash_days: stats.accepted_work.to_hash_days(),
         }
     }
 }
@@ -192,7 +192,7 @@ pub struct UpstreamInfo {
     pub rejected: u64,
     pub accepted_work: TotalWork,
     pub rejected_work: TotalWork,
-    pub ph_days: PhDays,
+    pub hash_days: HashDays,
 }
 
 impl UpstreamInfo {
@@ -212,7 +212,7 @@ impl UpstreamInfo {
             rejected: upstream.rejected(),
             accepted_work,
             rejected_work,
-            ph_days: (accepted_work + rejected_work).into(),
+            hash_days: (accepted_work + rejected_work).to_hash_days(),
         }
     }
 }
@@ -224,7 +224,7 @@ pub struct RouterStatus {
     pub upstream_rejected: u64,
     pub upstream_accepted_work: TotalWork,
     pub upstream_rejected_work: TotalWork,
-    pub upstream_ph_days: PhDays,
+    pub upstream_hash_days: HashDays,
     pub session_count: usize,
     pub disconnected_count: usize,
     pub idle_count: usize,
@@ -238,12 +238,13 @@ pub struct RouterStatus {
 pub struct OrderStatusResponse {
     pub id: u32,
     pub status: OrderStatus,
+    pub target_work: Option<HashDays>,
     pub upstream_id: u32,
     pub upstream_accepted: u64,
     pub upstream_rejected: u64,
     pub upstream_accepted_work: TotalWork,
     pub upstream_rejected_work: TotalWork,
-    pub upstream_ph_days: PhDays,
+    pub upstream_hash_days: HashDays,
     pub endpoint: String,
     pub username: String,
     pub ping_ms: u128,
@@ -259,6 +260,7 @@ pub struct OrderDetail {
     pub id: u32,
     pub status: OrderStatus,
     pub target: UpstreamTarget,
+    pub target_work: Option<HashDays>,
     pub upstream_id: u32,
     pub upstream: UpstreamInfo,
     pub user_count: usize,
@@ -276,4 +278,5 @@ pub struct OrderDetail {
 #[derive(Deserialize, Serialize, Debug)]
 pub struct OrderRequest {
     pub target: UpstreamTarget,
+    pub target_work: Option<HashDays>,
 }

@@ -44,6 +44,7 @@ pub(crate) struct Settings {
     database_url: Option<String>,
     events_file: Option<PathBuf>,
     high_diff_port: Option<u16>,
+    tick_interval: Duration,
 }
 
 impl Default for Settings {
@@ -80,6 +81,7 @@ impl Default for Settings {
             database_url: None,
             events_file: None,
             high_diff_port: None,
+            tick_interval: Duration::from_secs(60),
         }
     }
 }
@@ -147,6 +149,7 @@ impl Settings {
             database_url: options.database_url,
             events_file: options.events_file,
             high_diff_port: options.common.high_diff_port,
+            tick_interval: Duration::from_secs(60),
         };
 
         settings.validate()?;
@@ -194,6 +197,7 @@ impl Settings {
             database_url: None,
             events_file: None,
             high_diff_port: options.common.high_diff_port,
+            tick_interval: Duration::from_secs(60),
         };
 
         settings.validate()?;
@@ -241,6 +245,7 @@ impl Settings {
             database_url: None,
             events_file: None,
             high_diff_port: options.common.high_diff_port,
+            tick_interval: Duration::from_secs(options.tick_interval),
         };
 
         settings.validate()?;
@@ -557,6 +562,10 @@ impl Settings {
 
     pub(crate) fn high_diff_start(&self) -> Difficulty {
         Difficulty::from(1_000_000)
+    }
+
+    pub(crate) fn tick_interval(&self) -> Duration {
+        self.tick_interval
     }
 }
 
@@ -1374,5 +1383,20 @@ mod tests {
         let options = parse_router_options("para router --upstream bar@foo:1234");
         let settings = Settings::from_router_options(options).unwrap();
         assert_eq!(settings.start_diff, Difficulty::default());
+    }
+
+    #[test]
+    fn router_tick_interval_default() {
+        let options = parse_router_options("para router --upstream bar@foo:1234");
+        let settings = Settings::from_router_options(options).unwrap();
+        assert_eq!(settings.tick_interval, Duration::from_secs(60),);
+    }
+
+    #[test]
+    fn router_tick_interval_override() {
+        let options =
+            parse_router_options("para router --upstream bar@foo:1234 --tick-interval 10");
+        let settings = Settings::from_router_options(options).unwrap();
+        assert_eq!(settings.tick_interval, Duration::from_secs(10),);
     }
 }

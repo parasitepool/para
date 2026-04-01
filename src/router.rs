@@ -39,6 +39,7 @@ impl Router {
         let order = Order::connect(
             id,
             &request.target,
+            request.target_work,
             self.settings.timeout(),
             self.settings.enonce1_extension_size(),
             self.cancel.child_token(),
@@ -52,12 +53,15 @@ impl Router {
         Ok(id)
     }
 
-    pub(crate) fn cancel_order(&self, id: u32) -> Option<Arc<Order>> {
-        let mut orders = self.orders.write();
-        let order = orders.get(id)?;
-        order.set_status(OrderStatus::Cancelled);
+    fn terminate_order(&self, order: &Order, status: OrderStatus) {
+        order.set_status(status);
         order.cancel.cancel();
-        orders.deactivate(id);
+        self.orders.write().deactivate(order.id);
+    }
+
+    pub(crate) fn cancel_order(&self, id: u32) -> Option<Arc<Order>> {
+        let order = self.orders.read().get(id)?;
+        self.terminate_order(&order, OrderStatus::Cancelled);
         Some(order)
     }
 
@@ -76,6 +80,7 @@ impl Router {
 
     fn spawn_order_monitor(self: &Arc<Self>, order: Arc<Order>) {
         let router = self.clone();
+        let check_interval = self.settings.tick_interval();
         self.tasks.spawn(async move {
             tokio::select! {
                 biased;
@@ -86,10 +91,19 @@ impl Router {
                         order.upstream.endpoint(),
                         order.id,
                     );
-
-                    order.set_status(OrderStatus::Disconnected);
-                    order.cancel.cancel();
-                    router.orders.write().deactivate(order.id);
+                    router.terminate_order(&order, OrderStatus::Disconnected);
+                }
+                _ = async {
+                    let mut ticker = tokio::time::interval(check_interval);
+                    loop {
+                        ticker.tick().await;
+                        if order.is_fulfilled() {
+                            break;
+                        }
+                    }
+                } => {
+                    info!("Order {} fulfilled", order.id);
+                    router.terminate_order(&order, OrderStatus::Fulfilled);
                 }
             }
         });

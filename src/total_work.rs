@@ -1,7 +1,7 @@
 use super::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
-pub struct TotalWork(pub(crate) f64);
+pub struct TotalWork(pub f64);
 
 impl TotalWork {
     pub const ZERO: Self = Self(0.0);
@@ -12,6 +12,10 @@ impl TotalWork {
 
     pub fn as_f64(self) -> f64 {
         self.0
+    }
+
+    pub fn to_hash_days(self) -> HashDays {
+        HashDays(self.as_f64() * HASHES_PER_DIFF_1 as f64 / 86_400.0)
     }
 }
 

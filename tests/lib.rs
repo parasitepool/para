@@ -3,6 +3,7 @@ use {
     command_builder::CommandBuilder,
     para::{
         ckpool::{self, HashRate, HashRateStatus, PoolStatus, ShareStatus, User, Worker},
+        hashdays::HashDays,
         subcommand::server::{
             Status,
             notifications::{NotificationHandler, NotificationPriority, NotificationType},

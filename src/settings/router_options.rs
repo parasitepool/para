@@ -21,4 +21,7 @@ pub(crate) struct RouterOptions {
         help = "Extend upstream enonce1 by <ENONCE1_EXTENSION_SIZE> bytes."
     )]
     pub(crate) enonce1_extension_size: usize,
+
+    #[arg(long, default_value_t = 60, help = "Tick interval in seconds.")]
+    pub(crate) tick_interval: u64,
 }

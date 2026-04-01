@@ -45,7 +45,8 @@ use {
         stream::{FuturesUnordered, StreamExt},
     },
     generator::spawn_generator,
-    hashrate::HashRate,
+    hashdays::HashDays,
+    hashrate::{HASHES_PER_DIFF_1, HashRate},
     job::Job,
     jobs::Jobs,
     logs::logs_enabled,
@@ -59,7 +60,6 @@ use {
     },
     metrics::Metrics,
     parking_lot::{Mutex, RwLock},
-    ph_days::PhDays,
     reqwest::Url,
     router::Router,
     rust_embed::RustEmbed,
@@ -147,6 +147,7 @@ mod enonce_allocator;
 mod event_sink;
 mod extranonces;
 mod generator;
+pub mod hashdays;
 pub mod hashrate;
 mod http_server;
 mod job;
@@ -154,7 +155,6 @@ mod jobs;
 mod logs;
 mod metatron;
 mod metrics;
-mod ph_days;
 mod router;
 pub mod settings;
 mod signal;

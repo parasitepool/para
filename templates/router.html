@@ -188,7 +188,7 @@
     <div class=row><span>Rejected Shares</span><span id=upstream_rejected_shares class=copyable></span></div>
     <div class=row><span>Rejected Work</span><span id=upstream_rejected_work class=copyable></span></div>
     <div class=row><span>Delivered Work</span><span id=upstream_total_work></span></div>
-    <div class=row><span>Delivered PHd</span><span id=upstream_ph_days class=copyable></span></div>
+    <div class=row><span>Delivered Hashdays</span><span id=upstream_hash_days class=copyable></span></div>
     <div class=row><span>Efficiency</span><span id=upstream_efficiency></span></div>
   </div>
 
@@ -204,7 +204,7 @@
     <div class=row><span>Rejected Shares</span><span id=rejected_shares class=copyable></span></div>
     <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
     <div class=row><span>Received Work</span><span id=received_work></span></div>
-    <div class=row><span>Received PHd</span><span id=ph_days class=copyable></span></div>
+    <div class=row><span>Received Hashdays</span><span id=hash_days class=copyable></span></div>
   </div>
 
   <button id=add-order-btn>Add Order</button>
@@ -220,6 +220,8 @@
       <input id=order-username placeholder="user.worker">
       <label for=order-password>Password</label>
       <input id=order-password placeholder="optional">
+      <label for=order-target-work>Target Work</label>
+      <input id=order-target-work placeholder="e.g. 1.5 PHd, 500 THd, or leave empty for unlimited">
       <div id=order-error></div>
       <div class=modal-buttons>
         <button id=order-cancel>Cancel</button>
@@ -282,7 +284,7 @@ async function refresh(signal) {
     set('hashrate_1m', routerData.hashrate_1m, formatHashrate);
     set('sps_1m', routerData.sps_1m, formatTruncated);
     set('last_share', routerData.last_share);
-    copyable('ph_days', formatPhDays(routerData.ph_days), routerData.ph_days);
+    copyable('hash_days', formatHashDays(routerData.hash_days), routerData.hash_days);
     copyable('best_share', formatDifficulty(routerData.best_share), routerData.best_share);
 
     rejectionCopyable('rejected_shares', routerData.accepted_shares, routerData.rejected_shares);
@@ -291,7 +293,7 @@ async function refresh(signal) {
     rejectionWorkCopyable('upstream_rejected_work', routerData.upstream_accepted_work, routerData.upstream_rejected_work);
 
     set('upstream_total_work', (routerData.upstream_accepted_work || 0) + (routerData.upstream_rejected_work || 0), formatDifficulty);
-    copyable('upstream_ph_days', formatPhDays(routerData.upstream_ph_days), routerData.upstream_ph_days);
+    copyable('upstream_hash_days', formatHashDays(routerData.upstream_hash_days), routerData.upstream_hash_days);
     set('received_work', routerData.accepted_work, formatDifficulty);
 
     renderBitcoinData(bitcoinData);
@@ -319,7 +321,7 @@ async function refresh(signal) {
           <div class=row><span>Rejected Shares</span><span class=copyable data-formatted="${upRejSharesPct}" data-full="${rejectionDetail(order.upstream_accepted, order.upstream_rejected)}">${upRejSharesPct}</span></div>
           <div class=row><span>Rejected Work</span><span class=copyable data-formatted="${upRejWorkPct}" data-full="${rejectionWorkDetail(order.upstream_accepted_work, order.upstream_rejected_work)}">${upRejWorkPct}</span></div>
           <div class=row><span>Delivered Work</span><span>${formatDifficulty((order.upstream_accepted_work || 0) + (order.upstream_rejected_work || 0)) || '-'}</span></div>
-          <div class=row><span>Delivered PHd</span><span>${formatPhDays(order.upstream_ph_days) || '-'}</span></div>
+          <div class=row><span>Delivered Hashdays</span><span>${formatHashDays(order.upstream_hash_days) || '-'}</span></div>
           <div class=row><span>Efficiency</span><span>${efficiencyPct(order.upstream_accepted_work, order.accepted_work, order.rejected_work)}</span></div>
         </div>
         <div class=order-pane>
@@ -333,7 +335,7 @@ async function refresh(signal) {
           <div class=row><span>Rejected Shares</span><span class=copyable data-formatted="${orderRejSharesPct}" data-full="${rejectionDetail(order.accepted_shares, order.rejected_shares)}">${orderRejSharesPct}</span></div>
           <div class=row><span>Rejected Work</span><span class=copyable data-formatted="${orderRejWorkPct}" data-full="${rejectionWorkDetail(order.accepted_work, order.rejected_work)}">${orderRejWorkPct}</span></div>
           <div class=row><span>Received Work</span><span>${formatDifficulty(order.accepted_work) || '-'}</span></div>
-          <div class=row><span>Received PHd</span><span>${formatPhDays(order.ph_days) || '-'}</span></div>
+          <div class=row><span>Received Hashdays</span><span>${formatHashDays(order.hash_days) || '-'}</span></div>
         </div>
       </div>`;
     }).join('');
@@ -369,6 +371,7 @@ document.getElementById('upstreams-list').addEventListener('click', async (e) =>
   const endpoint = document.getElementById('order-endpoint');
   const username = document.getElementById('order-username');
   const password = document.getElementById('order-password');
+  const targetWork = document.getElementById('order-target-work');
   const error = document.getElementById('order-error');
 
   document.getElementById('add-order-btn').addEventListener('click', () => {
@@ -397,10 +400,20 @@ document.getElementById('upstreams-list').addEventListener('click', async (e) =>
       target: {
         endpoint: endpoint.value,
         username: username.value,
-      }
+      },
+      target_work: null,
     };
 
     if (password.value) body.target.password = password.value;
+
+    if (targetWork.value.trim()) {
+      const parsed = parseHashDays(targetWork.value);
+      if (parsed === null) {
+        error.textContent = 'Invalid target work (e.g. 1.5 PHd, 500 THd)';
+        return;
+      }
+      body.target_work = parsed;
+    }
 
     try {
       const res = await fetch('/api/router/order', {
@@ -419,6 +432,7 @@ document.getElementById('upstreams-list').addEventListener('click', async (e) =>
       endpoint.value = '';
       username.value = '';
       password.value = '';
+      targetWork.value = '';
     } catch (e) {
       error.textContent = e.message;
     }

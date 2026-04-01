@@ -23,7 +23,7 @@
     <div class=row><span>Rejected Shares</span><span id=upstream_rejected class=copyable></span></div>
     <div class=row><span>Rejected Work</span><span id=upstream_rejected_work class=copyable></span></div>
     <div class=row><span>Delivered Work</span><span id=upstream_total_work></span></div>
-    <div class=row><span>Delivered PHd</span><span id=upstream_ph_days class=copyable></span></div>
+    <div class=row><span>Delivered Hashdays</span><span id=upstream_hash_days class=copyable></span></div>
   </div>
 
   <div class=column>
@@ -41,7 +41,7 @@
     <div class=row><span>Rejected Shares</span><span id=rejected_shares class=copyable></span></div>
     <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
     <div class=row><span>Received Work</span><span id=received_work></span></div>
-    <div class=row><span>Received PHd</span><span id=ph_days class=copyable></span></div>
+    <div class=row><span>Received Hashdays</span><span id=hash_days class=copyable></span></div>
   </div>
 
   <div class="column column-full">
@@ -54,7 +54,7 @@
           <th>Hashrate</th>
           <th>SPS</th>
           <th>Best Share</th>
-          <th>PHd</th>
+          <th>Hashdays</th>
           <th>Last Share</th>
         </tr>
       </thead>
@@ -71,7 +71,7 @@
           <th>Hashrate</th>
           <th>SPS</th>
           <th>Best Share</th>
-          <th>PHd</th>
+          <th>Hashdays</th>
           <th>Last Share</th>
         </tr>
       </thead>
@@ -127,7 +127,7 @@ async function refresh(signal) {
     set('version_mask', upstream.version_mask);
     rejectionCopyable('upstream_rejected', upstream.accepted, upstream.rejected);
     set('upstream_total_work', (upstream.accepted_work || 0) + (upstream.rejected_work || 0), formatDifficulty);
-    copyable('upstream_ph_days', formatPhDays(upstream.ph_days), upstream.ph_days);
+    copyable('upstream_hash_days', formatHashDays(upstream.hash_days), upstream.hash_days);
     rejectionWorkCopyable('upstream_rejected_work', upstream.accepted_work, upstream.rejected_work);
 
     set('users', data.user_count);
@@ -143,7 +143,7 @@ async function refresh(signal) {
     set('last_share', data.last_share);
     copyable('best_share', formatDifficulty(data.best_share), data.best_share);
     set('received_work', data.accepted_work, formatDifficulty);
-    copyable('ph_days', formatPhDays(data.ph_days), data.ph_days);
+    copyable('hash_days', formatHashDays(data.hash_days), data.hash_days);
 
     document.getElementById('workers-list').innerHTML = renderWorkerRows(data.workers || []);
     document.getElementById('sessions-list').innerHTML = renderSessionRows(data.sessions || []);

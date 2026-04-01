@@ -328,6 +328,11 @@ impl Upstream {
     }
 
     #[cfg(test)]
+    pub(crate) fn set_accepted_work(&self, work: TotalWork) {
+        *self.accepted_work.lock() = work;
+    }
+
+    #[cfg(test)]
     pub(crate) fn test(id: u32) -> Arc<Self> {
         let notify = Notify {
             job_id: "bf".parse().unwrap(),

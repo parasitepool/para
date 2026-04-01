@@ -152,19 +152,37 @@ function formatDifficulty(d) {
   return truncated.toFixed(2) + SI_PREFIXES[i];
 }
 
-function formatHashrate(h) {
-  if (h === null || h === undefined) return null;
-  if (h < 1) return '0 H/s';
-  const i = Math.max(0, Math.min(Math.floor(Math.log10(h) / 3), SI_PREFIXES.length - 1));
-  const scaled = h / Math.pow(1000, i);
+function formatSi(v, unit) {
+  if (v === null || v === undefined) return null;
+  if (v < 1) return '0 ' + unit;
+  const i = Math.max(0, Math.min(Math.floor(Math.log10(v) / 3), SI_PREFIXES.length - 1));
+  const scaled = v / Math.pow(1000, i);
   const truncated = Math.floor(scaled * 100) / 100;
-  return truncated.toFixed(2) + ' ' + SI_PREFIXES[i] + 'H/s';
+  return truncated.toFixed(2) + ' ' + SI_PREFIXES[i] + unit;
 }
 
-function formatPhDays(v) {
-  if (v === null || v === undefined) return null;
-  return v.toFixed(2) + ' PHd';
+function formatHashrate(h) { return formatSi(h, 'H/s'); }
+function formatHashDays(v) { return formatSi(v, 'Hd'); }
+
+function parseSi(s, units) {
+  s = s.trim();
+  for (const u of units) {
+    if (s.endsWith(u)) s = s.slice(0, -u.length).trim();
+  }
+  for (let i = SI_PREFIXES.length - 1; i > 0; i--) {
+    const p = SI_PREFIXES[i];
+    if (s.endsWith(p) || s.endsWith(p.toLowerCase())) {
+      const num = parseFloat(s.slice(0, -p.length));
+      if (isNaN(num) || num < 0) return null;
+      return num * Math.pow(1000, i);
+    }
+  }
+  const num = parseFloat(s);
+  if (isNaN(num) || num < 0) return null;
+  return num;
 }
+
+function parseHashDays(s) { return parseSi(s, ['Hd']); }
 
 function formatTruncated(n) {
   if (n === null || n === undefined) return '-';
@@ -325,7 +343,7 @@ function renderWorkerRows(workers) {
       <td>${formatHashrate(w.hashrate_1m)}</td>
       <td>${formatTruncated(w.sps_1m)}</td>
       <td>${bestShare || '-'}</td>
-      <td>${w.ph_days != null ? w.ph_days.toFixed(2) : '-'}</td>
+      <td>${w.hash_days != null ? formatHashDays(w.hash_days) : '-'}</td>
       <td>${lastShare}</td>
     </tr>`;
   }).join('');
@@ -342,7 +360,7 @@ function renderSessionRows(sessions) {
       <td>${formatHashrate(session.hashrate_1m)}</td>
       <td>${formatTruncated(session.sps_1m)}</td>
       <td>${bestShare || '-'}</td>
-      <td>${session.ph_days != null ? session.ph_days.toFixed(2) : '-'}</td>
+      <td>${session.hash_days != null ? formatHashDays(session.hash_days) : '-'}</td>
       <td>${lastShare}</td>
     </tr>`;
   }).join('');

@@ -49,6 +49,7 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
         orders.push(OrderStatusResponse {
             id: order.id,
             status,
+            target_work: order.target_work,
             upstream_id,
             endpoint: order.upstream.endpoint().to_string(),
             username: order.upstream.username().to_string(),
@@ -57,9 +58,8 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
             upstream_rejected: order_upstream_rejected,
             upstream_accepted_work: order_upstream_accepted_work,
             upstream_rejected_work: order_upstream_rejected_work,
-            upstream_ph_days: PhDays::from(
-                order_upstream_accepted_work + order_upstream_rejected_work,
-            ),
+            upstream_hash_days: (order_upstream_accepted_work + order_upstream_rejected_work)
+                .to_hash_days(),
             session_count: router.upstream_session_count(upstream_id),
             disconnected_count: router.upstream_disconnected_count(upstream_id),
             idle_count: router.upstream_idle_count(upstream_id),
@@ -86,7 +86,7 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
         upstream_rejected,
         upstream_accepted_work,
         upstream_rejected_work,
-        upstream_ph_days: (upstream_accepted_work + upstream_rejected_work).into(),
+        upstream_hash_days: (upstream_accepted_work + upstream_rejected_work).to_hash_days(),
         stats: MiningStats::from_snapshot(&metatron.snapshot(), now),
     })
 }
@@ -125,6 +125,7 @@ async fn order_detail(
         id: order.id,
         status: order.status(),
         target: order.target.clone(),
+        target_work: order.target_work,
         upstream_id,
         upstream: UpstreamInfo::from_upstream(&order.upstream),
         user_count: router.upstream_user_count(upstream_id),

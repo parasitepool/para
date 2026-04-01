@@ -44,6 +44,7 @@ impl RouterCommand {
             router
                 .add_order(api::OrderRequest {
                     target: target.clone(),
+                    target_work: None,
                 })
                 .await?;
         }

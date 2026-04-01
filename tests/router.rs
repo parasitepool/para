@@ -199,6 +199,7 @@ async fn orders() {
 
     let response = router
         .add_order(&api::OrderRequest {
+            target_work: None,
             target: format!("{username}@127.0.0.1:1").parse().unwrap(),
         })
         .await
@@ -208,6 +209,7 @@ async fn orders() {
 
     let response = router
         .add_order(&api::OrderRequest {
+            target_work: None,
             target: format!("{username}@{}", pool_b.stratum_endpoint())
                 .parse()
                 .unwrap(),
@@ -252,6 +254,7 @@ async fn order_disconnected_on_upstream_disconnect() {
 
     let response = router
         .add_order(&api::OrderRequest {
+            target_work: None,
             target: format!("{username}@{}", pool_b.stratum_endpoint())
                 .parse()
                 .unwrap(),
@@ -290,4 +293,72 @@ async fn order_disconnected_on_upstream_disconnect() {
             .count(),
         1
     );
+}
+
+#[tokio::test]
+#[serial(bitcoind)]
+#[timeout(120000)]
+async fn order_fulfilled_on_target_work_reached() {
+    let pool = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.00001");
+
+    let username = "tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.foo";
+
+    let router = TestRouter::spawn(
+        &[],
+        pool.bitcoind_rpc_port(),
+        "--start-diff 0.00001 --tick-interval 1",
+    );
+
+    let response = router
+        .add_order(&api::OrderRequest {
+            target_work: Some(HashDays(1e-10)),
+            target: format!("{username}@{}", pool.stratum_endpoint())
+                .parse()
+                .unwrap(),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let status = router.get_status().await.unwrap();
+    assert_eq!(status.upstream_count, 1);
+
+    let mut miner = CommandBuilder::new(format!(
+        "miner {} --mode continuous --username {} --cpu-cores 1",
+        router.stratum_endpoint(),
+        signet_username()
+    ))
+    .spawn();
+
+    timeout(Duration::from_secs(60), async {
+        loop {
+            if let Ok(status) = router.get_status().await
+                && status
+                    .orders
+                    .iter()
+                    .any(|o| o.status == OrderStatus::Fulfilled)
+            {
+                break;
+            }
+            sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("Timeout waiting for order to be fulfilled");
+
+    let status = router.get_status().await.unwrap();
+    assert_eq!(status.upstream_count, 0);
+
+    let fulfilled = status
+        .orders
+        .iter()
+        .find(|o| o.status == OrderStatus::Fulfilled)
+        .unwrap();
+
+    assert_eq!(fulfilled.target_work, Some(HashDays(1e-10)));
+    assert!(fulfilled.upstream_hash_days >= HashDays(1e-10));
+
+    miner.kill().unwrap();
+    miner.wait().unwrap();
 }

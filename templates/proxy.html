@@ -12,7 +12,7 @@
     <div class=row><span>Rejected Shares</span><span id=upstream_rejected class=copyable></span></div>
     <div class=row><span>Rejected Work</span><span id=upstream_rejected_work class=copyable></span></div>
     <div class=row><span>Delivered Work</span><span id=upstream_total_work></span></div>
-    <div class=row><span>Delivered PHd</span><span id=upstream_ph_days class=copyable></span></div>
+    <div class=row><span>Delivered Hashdays</span><span id=upstream_hash_days class=copyable></span></div>
   </div>
 
   <div class=column>
@@ -29,7 +29,7 @@
     <div class=row><span>Rejected Shares</span><span id=rejected_shares class=copyable></span></div>
     <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
     <div class=row><span>Received Work</span><span id=received_work></span></div>
-    <div class=row><span>Received PHd</span><span id=ph_days class=copyable></span></div>
+    <div class=row><span>Received Hashdays</span><span id=hash_days class=copyable></span></div>
   </div>
 
   <div class=column>
@@ -89,7 +89,7 @@ async function refresh(signal) {
     set('upstream_version_mask', u.version_mask);
     rejectionCopyable('upstream_rejected', u.accepted, u.rejected);
     set('upstream_total_work', (u.accepted_work || 0) + (u.rejected_work || 0), formatDifficulty);
-    copyable('upstream_ph_days', formatPhDays(u.ph_days), u.ph_days);
+    copyable('upstream_hash_days', formatHashDays(u.hash_days), u.hash_days);
     rejectionWorkCopyable('upstream_rejected_work', u.accepted_work, u.rejected_work);
     set('upstream_ping', u.ping_ms, formatPing);
 
@@ -105,7 +105,7 @@ async function refresh(signal) {
     rejectionCopyable('rejected_shares', proxyData.accepted_shares, proxyData.rejected_shares);
     rejectionWorkCopyable('rejected_work', proxyData.accepted_work, proxyData.rejected_work);
     set('received_work', proxyData.accepted_work, formatDifficulty);
-    copyable('ph_days', formatPhDays(proxyData.ph_days), proxyData.ph_days);
+    copyable('hash_days', formatHashDays(proxyData.hash_days), proxyData.hash_days);
 
     renderBitcoinData(bitcoinData);
     renderSystemData(systemData);

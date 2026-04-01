@@ -12,7 +12,7 @@
     <div class=row><span>Last Share</span><span><span id=last_share></span>s ago</span></div>
     <div class=row><span>Rejected Shares</span><span id=rejected_shares class=copyable></span></div>
     <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
-    <div class=row><span>PHd</span><span id=ph_days class=copyable></span></div>
+    <div class=row><span>Hashdays</span><span id=hash_days class=copyable></span></div>
   </div>
 
   <div class=column>
@@ -71,7 +71,7 @@ async function refresh(signal) {
     set('last_share', poolData.last_share);
     rejectionCopyable('rejected_shares', poolData.accepted_shares, poolData.rejected_shares);
     rejectionWorkCopyable('rejected_work', poolData.accepted_work, poolData.rejected_work);
-    copyable('ph_days', formatPhDays(poolData.ph_days), poolData.ph_days);
+    copyable('hash_days', formatHashDays(poolData.hash_days), poolData.hash_days);
 
     renderBitcoinData(bitcoinData);
     renderSystemData(systemData);
