@@ -1,11 +1,11 @@
 use {super::*, para::subcommand::template::Output};
 
 #[test]
-#[serial(bitcoind)]
 #[timeout(90000)]
 #[ignore]
 fn template_with_ckpool() {
-    let ckpool = TestCkpool::spawn(bitcoind());
+    let bitcoind = bitcoind();
+    let ckpool = TestCkpool::spawn(&bitcoind);
 
     let stratum_endpoint = ckpool.stratum_endpoint();
 

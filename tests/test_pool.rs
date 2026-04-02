@@ -130,7 +130,7 @@ impl TestPool {
 
             match self.get_status().await {
                 Ok(status) if status.stats.accepted_shares >= min_shares => return Ok(status),
-                Ok(_) => tokio::time::sleep(Duration::from_millis(100)).await,
+                Ok(_) => tokio::time::sleep(Duration::from_millis(50)).await,
                 Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
             }
         }
@@ -152,8 +152,8 @@ impl TestPool {
 
             match self.get_status().await {
                 Ok(status) if status.block_count >= min_blocks => return Ok(status),
-                Ok(_) => tokio::time::sleep(Duration::from_millis(100)).await,
-                Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
+                Ok(_) => tokio::time::sleep(Duration::from_millis(50)).await,
+                Err(_) => tokio::time::sleep(Duration::from_millis(50)).await,
             }
         }
     }
@@ -186,12 +186,18 @@ impl TestPool {
     }
 
     pub(crate) async fn get_block_height(&self) -> u64 {
-        bitcoind()
-            .client()
-            .unwrap()
-            .get_block_count()
-            .await
-            .unwrap()
+        use bitcoind_async_client::{Auth, Client, traits::Reader};
+        Client::new(
+            format!("http://127.0.0.1:{}", self.rpc_port),
+            Auth::UserPass("satoshi".into(), "nakamoto".into()),
+            None,
+            None,
+            None,
+        )
+        .unwrap()
+        .get_block_count()
+        .await
+        .unwrap()
     }
 
     pub(crate) async fn mine_block(&self) {
@@ -208,10 +214,10 @@ impl TestPool {
 
         for _ in 0..100 {
             if self.get_block_height().await > current_height {
-                sleep(Duration::from_millis(500)).await;
+                sleep(Duration::from_millis(100)).await;
                 break;
             }
-            sleep(Duration::from_millis(100)).await;
+            sleep(Duration::from_millis(50)).await;
         }
     }
 

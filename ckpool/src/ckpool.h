@@ -386,14 +386,14 @@ struct apimsg {
     int   sockd;
 };
 
-static inline void    ckpool_api(ckpool_t __maybe_unused* ckp, apimsg_t __maybe_unused* apimsg) {};
+static inline void    ckpool_api(ckpool_t __maybe_unused* ckp, apimsg_t __maybe_unused* apimsg) {}
 static inline json_t* json_encode_errormsg(json_error_t __maybe_unused* err_val) {
     return NULL;
-};
+}
 static inline json_t* json_errormsg(const char __maybe_unused* fmt, ...) {
     return NULL;
-};
-static inline void send_api_response(json_t __maybe_unused* val, const int __maybe_unused sockd) {};
+}
+static inline void send_api_response(json_t __maybe_unused* val, const int __maybe_unused sockd) {}
 
 /* Subclients have client_ids in the high bits. Returns the value of the parent
  * client if one exists. */

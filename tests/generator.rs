@@ -3,7 +3,6 @@ use super::*;
 struct IsolatedBitcoind {
     bitcoind: Bitcoind,
     tempdir: Arc<TempDir>,
-    bitcoind_port: u16,
     rpc_port: u16,
     zmq_port: u16,
 }
@@ -11,24 +10,16 @@ struct IsolatedBitcoind {
 impl IsolatedBitcoind {
     fn spawn() -> Self {
         let tempdir = Arc::new(TempDir::new().unwrap());
-        let bitcoind_port = allocate_port();
         let rpc_port = allocate_port();
         let zmq_port = allocate_port();
 
-        let bitcoind = Bitcoind::spawn(
-            tempdir.clone(),
-            bitcoind_port,
-            rpc_port,
-            zmq_port,
-            false,
-            Network::Signet,
-        )
-        .unwrap();
+        let bitcoind =
+            Bitcoind::spawn_no_listen(tempdir.clone(), rpc_port, zmq_port, false, Network::Signet)
+                .unwrap();
 
         Self {
             bitcoind,
             tempdir,
-            bitcoind_port,
             rpc_port,
             zmq_port,
         }
@@ -39,9 +30,8 @@ impl IsolatedBitcoind {
     }
 
     fn restart(&mut self) {
-        self.bitcoind = Bitcoind::spawn(
+        self.bitcoind = Bitcoind::spawn_no_listen(
             self.tempdir.clone(),
-            self.bitcoind_port,
             self.rpc_port,
             self.zmq_port,
             false,
@@ -56,7 +46,7 @@ async fn wait_for_exit(pool: &mut TestPool) {
         loop {
             match pool.try_wait() {
                 Ok(Some(_)) => break,
-                Ok(None) => sleep(Duration::from_millis(200)).await,
+                Ok(None) => sleep(Duration::from_millis(50)).await,
                 Err(e) => panic!("Failed to wait for pool: {e}"),
             }
         }
@@ -66,7 +56,6 @@ async fn wait_for_exit(pool: &mut TestPool) {
 }
 
 #[tokio::test]
-#[serial(bitcoind)]
 #[timeout(30000)]
 async fn exits_on_prolonged_bitcoind_failure() {
     let mut bitcoind = IsolatedBitcoind::spawn();
@@ -81,7 +70,6 @@ async fn exits_on_prolonged_bitcoind_failure() {
 }
 
 #[tokio::test]
-#[serial(bitcoind)]
 #[timeout(60000)]
 async fn zmq_reconnects_after_bitcoind_restart() {
     let mut bitcoind = IsolatedBitcoind::spawn();

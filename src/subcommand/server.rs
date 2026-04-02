@@ -351,7 +351,22 @@ impl Server {
             acme_cache: config.acme_cache(),
         };
 
-        http_server::spawn_with_handle(http_config, router, handle)?.await??;
+        let server_task = http_server::spawn_with_handle(http_config, router, handle.clone())?;
+
+        let addr = handle
+            .listening()
+            .await
+            .expect("HTTP server failed to bind");
+        info!("HTTP server bound to {addr}");
+
+        let port_file = config.data_dir().join("http_port");
+        if config.port().unwrap_or_default() != addr.port()
+            && let Err(e) = fs::write(&port_file, addr.port().to_string())
+        {
+            warn!("Failed to write port file {}: {e}", port_file.display());
+        }
+
+        server_task.await??;
 
         Ok(())
     }

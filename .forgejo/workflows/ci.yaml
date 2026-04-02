@@ -1,0 +1,136 @@
+name: CI
+
+on:
+  push:
+    branches:
+    - master
+  pull_request:
+    branches:
+    - master
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  RUSTFLAGS: --deny warnings
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Restore Cargo Cache
+      id: cargo-cache
+      uses: https://data.forgejo.org/actions/cache/restore@v4
+      with:
+        path: |
+          /usr/local/cargo/registry
+          /usr/local/cargo/git
+          target
+        key: lint-${{ hashFiles('Cargo.lock') }}
+        restore-keys: lint-
+
+    - name: Clippy
+      run: cargo clippy --all --all-targets
+
+    - name: Format
+      run: cargo fmt --all -- --check
+
+    - name: Clean Cache
+      if: steps.cargo-cache.outputs.cache-hit != 'true'
+      run: |
+        for profile in target/debug target/release; do
+          [ -d "$profile" ] || continue
+          # Remove incremental compilation data and examples
+          rm -rf "$profile"/incremental "$profile"/examples "$profile"/.cargo-lock
+          # Remove workspace crate artifacts (recompiled every run)
+          for crate in para harness stratum; do
+            rm -rf "$profile"/build/${crate}-*
+            rm -rf "$profile"/.fingerprint/${crate}-*
+            rm -f "$profile"/deps/${crate}-* "$profile"/deps/lib${crate}-*
+          done
+        done
+        rm -f /usr/local/cargo/credentials.toml
+        rm -rf /usr/local/cargo/registry/src
+
+    - name: Save Cargo Cache
+      if: steps.cargo-cache.outputs.cache-hit != 'true'
+      uses: https://data.forgejo.org/actions/cache/save@v4
+      with:
+        path: |
+          /usr/local/cargo/registry
+          /usr/local/cargo/git
+          target
+        key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
+
+  test-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Restore Cargo Cache
+      id: cargo-cache
+      uses: https://data.forgejo.org/actions/cache/restore@v4
+      with:
+        path: |
+          /usr/local/cargo/registry
+          /usr/local/cargo/git
+          target
+        key: test-linux-${{ hashFiles('Cargo.lock') }}
+        restore-keys: test-linux-
+
+    - name: Install bitcoind
+      run: |
+        ./bin/install-bitcoin-core-linux
+
+    - name: Test
+      run: |
+        cargo test --all
+
+    - name: Clean Cache
+      if: steps.cargo-cache.outputs.cache-hit != 'true'
+      run: |
+        for profile in target/debug target/release; do
+          [ -d "$profile" ] || continue
+          rm -rf "$profile"/incremental "$profile"/examples "$profile"/.cargo-lock
+          for crate in para harness stratum; do
+            rm -rf "$profile"/build/${crate}-*
+            rm -rf "$profile"/.fingerprint/${crate}-*
+            rm -f "$profile"/deps/${crate}-* "$profile"/deps/lib${crate}-*
+          done
+        done
+        rm -f /usr/local/cargo/credentials.toml
+        rm -rf /usr/local/cargo/registry/src
+
+    - name: Save Cargo Cache
+      if: steps.cargo-cache.outputs.cache-hit != 'true'
+      uses: https://data.forgejo.org/actions/cache/save@v4
+      with:
+        path: |
+          /usr/local/cargo/registry
+          /usr/local/cargo/git
+          target
+        key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
+
+  ckpool:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Format
+      run: |
+        files=$(find ./ckpool/src -type f \( -name "*.c" -o -name "*.h" \) -not -path "**/jansson-2.14/*" -not -name "sha2.c" -not -name "sha2.h" -not -name "uthash.h")
+        if [ -n "$files" ]; then
+          echo "$files" | xargs clang-format --dry-run -Werror
+        else
+          echo "No .c or .h files found to format."
+        fi
+
+    - name: Test
+      run: |
+        ./bin/run_tests

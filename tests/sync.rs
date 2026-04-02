@@ -449,7 +449,7 @@ async fn test_sync_batch_with_migrate_accounts_flag() {
     let mut response: SyncResponse = server.post_json("/sync/batch", &batch).await;
     let mut attempts = 0;
     while response.status == "UNAVAILABLE" && attempts < 10 {
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        sleep(Duration::from_millis(100)).await;
         response = server.post_json("/sync/batch", &batch).await;
         attempts += 1;
     }

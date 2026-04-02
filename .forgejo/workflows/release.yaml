@@ -1,0 +1,84 @@
+name: Release
+
+on:
+  push:
+    tags:
+    - '*'
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Restore Cargo Cache
+      id: cargo-cache
+      uses: https://data.forgejo.org/actions/cache/restore@v4
+      with:
+        path: |
+          /usr/local/cargo/registry
+          /usr/local/cargo/git
+          target
+        key: release-${{ hashFiles('Cargo.lock') }}
+        restore-keys: release-
+
+    - name: Release Type
+      id: release-type
+      run: |
+        if [[ ${{ github.ref }} =~ ^refs/tags/[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
+            echo "value=release" >> $GITHUB_OUTPUT
+        else
+            echo "value=prerelease" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Package
+      id: package
+      env:
+        TARGET: x86_64-unknown-linux-gnu
+        REF: ${{ github.ref }}
+        OS: ubuntu-latest
+        TARGET_RUSTFLAGS: ''
+      run: ./bin/package
+      shell: bash
+
+    - name: Clean Cache
+      if: steps.cargo-cache.outputs.cache-hit != 'true'
+      run: |
+        for profile in target/debug target/release; do
+          [ -d "$profile" ] || continue
+          rm -rf "$profile"/incremental "$profile"/examples "$profile"/.cargo-lock
+          for crate in para harness stratum; do
+            rm -rf "$profile"/build/${crate}-*
+            rm -rf "$profile"/.fingerprint/${crate}-*
+            rm -f "$profile"/deps/${crate}-* "$profile"/deps/lib${crate}-*
+          done
+        done
+        rm -f /usr/local/cargo/credentials.toml
+        rm -rf /usr/local/cargo/registry/src
+
+    - name: Save Cargo Cache
+      if: steps.cargo-cache.outputs.cache-hit != 'true'
+      uses: https://data.forgejo.org/actions/cache/save@v4
+      with:
+        path: |
+          /usr/local/cargo/registry
+          /usr/local/cargo/git
+          target
+        key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
+
+    - name: Publish Release
+      uses: actions/forgejo-release@v2
+      with:
+        direction: upload
+        token: ${{ secrets.FORGEJO_TOKEN }}
+        tag: ${{ github.ref_name }}
+        release-dir: .
+        release-notes: ""
+        prerelease: ${{ steps.release-type.outputs.value == 'prerelease' }}

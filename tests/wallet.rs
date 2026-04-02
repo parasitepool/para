@@ -9,19 +9,10 @@ use {
 
 fn spawn_regtest() -> Bitcoind {
     let tempdir = Arc::new(TempDir::new().unwrap());
-    let bitcoind_port = allocate_port();
     let rpc_port = allocate_port();
     let zmq_port = allocate_port();
 
-    Bitcoind::spawn(
-        tempdir,
-        bitcoind_port,
-        rpc_port,
-        zmq_port,
-        false,
-        Network::Regtest,
-    )
-    .unwrap()
+    Bitcoind::spawn_no_listen(tempdir, rpc_port, zmq_port, false, Network::Regtest).unwrap()
 }
 
 async fn generate_to_address(bitcoind: &Bitcoind, n: u64, address: &str) {
@@ -34,7 +25,6 @@ async fn generate_to_address(bitcoind: &Bitcoind, n: u64, address: &str) {
 }
 
 #[tokio::test]
-#[serial(bitcoind)]
 #[timeout(60000)]
 async fn end_to_end() {
     let bitcoind = spawn_regtest();
@@ -140,7 +130,6 @@ async fn end_to_end() {
 }
 
 #[tokio::test]
-#[serial(bitcoind)]
 #[timeout(60000)]
 async fn change_descriptor() {
     let bitcoind = spawn_regtest();

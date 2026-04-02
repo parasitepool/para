@@ -1,10 +1,10 @@
 use super::*;
 
 #[test]
-#[serial(bitcoind)]
 #[timeout(90000)]
 fn ping_pool() {
-    let pool = TestPool::spawn_with_args(bitcoind(), "");
+    let bitcoind = bitcoind();
+    let pool = TestPool::spawn_with_args(&bitcoind, "");
 
     let stratum_endpoint = pool.stratum_endpoint();
 
@@ -16,11 +16,11 @@ fn ping_pool() {
 }
 
 #[test]
-#[serial(bitcoind)]
 #[timeout(90000)]
 #[ignore]
 fn ping_ckpool() {
-    let ckpool = TestCkpool::spawn(bitcoind());
+    let bitcoind = bitcoind();
+    let ckpool = TestCkpool::spawn(&bitcoind);
 
     let stratum_endpoint = ckpool.stratum_endpoint();
 

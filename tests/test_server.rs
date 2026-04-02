@@ -21,12 +21,6 @@ impl TestServer {
     }
 
     pub(crate) fn spawn_with_args(args: impl ToArgs) -> Self {
-        let port = TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
-
         let tempdir = Arc::new(TempDir::new().unwrap());
         let logdir = tempdir.path().join("logs");
         fs::create_dir(&logdir).unwrap();
@@ -34,7 +28,8 @@ impl TestServer {
         fs::create_dir(logdir.join("users")).unwrap();
 
         let child = CommandBuilder::new(format!(
-            "server --address 127.0.0.1 --port {port} --log-dir {} {}",
+            "server --address 127.0.0.1 --port 0 --data-dir {} --log-dir {} {}",
+            tempdir.path().display(),
             logdir.display(),
             args.to_args().join(" ")
         ))
@@ -44,19 +39,23 @@ impl TestServer {
         .integration_test(true)
         .spawn();
 
-        for attempt in 0.. {
-            if let Ok(response) = reqwest::blocking::get(format!("http://127.0.0.1:{port}"))
-                && response.status() == 200
-            {
-                break;
+        let port_file = tempdir.path().join("http_port");
+        let port: u16 = {
+            let mut port = None;
+            for attempt in 0.. {
+                if let Ok(contents) = fs::read_to_string(&port_file)
+                    && let Ok(p) = contents.trim().parse::<u16>()
+                {
+                    port = Some(p);
+                    break;
+                }
+                if attempt == 200 {
+                    panic!("Server did not write port file");
+                }
+                thread::sleep(Duration::from_millis(50));
             }
-
-            if attempt == 100 {
-                panic!("Server did not respond to status check",);
-            }
-
-            thread::sleep(Duration::from_millis(50));
-        }
+            port.unwrap()
+        };
 
         Self {
             child,
@@ -103,12 +102,6 @@ impl TestServer {
     pub(crate) async fn spawn_with_db_override(args: impl ToArgs, database: PgTempDB) -> Self {
         let database_url = database.connection_uri();
 
-        let port = TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
-
         let tempdir = Arc::new(TempDir::new().unwrap());
         let logdir = tempdir.path().join("logs");
         fs::create_dir(&logdir).unwrap();
@@ -116,7 +109,7 @@ impl TestServer {
         fs::create_dir(logdir.join("users")).unwrap();
 
         let child = CommandBuilder::new(format!(
-            "server --address 127.0.0.1 --port {port} --data-dir {} --log-dir {} --database-url {} {}",
+            "server --address 127.0.0.1 --port 0 --data-dir {} --log-dir {} --database-url {} {}",
             tempdir.path().display(),
             logdir.display(),
             database_url,
@@ -125,21 +118,23 @@ impl TestServer {
         .integration_test(true)
         .spawn();
 
-        for attempt in 0.. {
-            if let Ok(response) = reqwest::get(format!("http://127.0.0.1:{port}")).await
-                && response.status() == 200
-            {
-                break;
+        let port_file = tempdir.path().join("http_port");
+        let port: u16 = {
+            let mut port = None;
+            for attempt in 0.. {
+                if let Ok(contents) = fs::read_to_string(&port_file)
+                    && let Ok(p) = contents.trim().parse::<u16>()
+                {
+                    port = Some(p);
+                    break;
+                }
+                if attempt == 200 {
+                    panic!("Server did not write port file");
+                }
+                thread::sleep(Duration::from_millis(50));
             }
-
-            if attempt == 100 {
-                panic!("Server did not respond to status check");
-            }
-
-            thread::sleep(Duration::from_millis(50));
-        }
-
-        tokio::time::sleep(Duration::from_millis(100)).await;
+            port.unwrap()
+        };
 
         Self {
             child,

@@ -1,11 +1,11 @@
 use super::*;
 
 #[tokio::test]
-#[serial(bitcoind)]
 #[timeout(120000)]
 async fn router_round_robin() {
-    let pool_a = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.00001");
-    let pool_b = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.00001");
+    let bitcoind = bitcoind();
+    let pool_a = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001");
+    let pool_b = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001");
 
     let username_a = "tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.foo";
     let username_b = "tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.bar";
@@ -39,15 +39,16 @@ async fn router_round_robin() {
     timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(status) = router.get_status().await
+                && status.active_orders == 2
                 && status.session_count >= 3
             {
                 break;
             }
-            sleep(Duration::from_millis(200)).await;
+            sleep(Duration::from_millis(50)).await;
         }
     })
     .await
-    .expect("Timeout waiting for 3 sessions");
+    .expect("Timeout waiting for 2 slots and 3 sessions");
 
     let status = router.get_status().await.unwrap();
     assert_eq!(status.active_orders, 2);
@@ -63,7 +64,7 @@ async fn router_round_robin() {
             {
                 break;
             }
-            sleep(Duration::from_millis(200)).await;
+            sleep(Duration::from_millis(50)).await;
         }
     })
     .await
@@ -83,7 +84,7 @@ async fn router_round_robin() {
             {
                 break;
             }
-            sleep(Duration::from_millis(200)).await;
+            sleep(Duration::from_millis(50)).await;
         }
     })
     .await
@@ -100,15 +101,15 @@ async fn router_round_robin() {
 }
 
 #[tokio::test]
-#[serial(bitcoind)]
 #[timeout(120000)]
 async fn router_rejects_incompatible_resumed_enonce1() {
+    let bitcoind = bitcoind();
     let pool_a = TestPool::spawn_with_args(
-        bitcoind(),
+        &bitcoind,
         "--start-diff 0.00001 --enonce1-size 4 --enonce2-size 8",
     );
     let pool_b = TestPool::spawn_with_args(
-        bitcoind(),
+        &bitcoind,
         "--start-diff 0.00001 --enonce1-size 6 --enonce2-size 6",
     );
 
@@ -180,11 +181,11 @@ async fn router_rejects_incompatible_resumed_enonce1() {
 }
 
 #[tokio::test]
-#[serial(bitcoind)]
 #[timeout(120000)]
 async fn orders() {
-    let pool_a = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.00001");
-    let pool_b = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.00001");
+    let bitcoind = bitcoind();
+    let pool_a = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001");
+    let pool_b = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001");
 
     let username = "tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.foo";
 
@@ -235,11 +236,11 @@ async fn orders() {
 }
 
 #[tokio::test]
-#[serial(bitcoind)]
 #[timeout(120000)]
 async fn order_disconnected_on_upstream_disconnect() {
-    let pool_a = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.00001");
-    let pool_b = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.00001");
+    let bitcoind = bitcoind();
+    let pool_a = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001");
+    let pool_b = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001");
 
     let username = "tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.foo";
 
@@ -296,10 +297,10 @@ async fn order_disconnected_on_upstream_disconnect() {
 }
 
 #[tokio::test]
-#[serial(bitcoind)]
 #[timeout(120000)]
 async fn order_fulfilled_on_target_work_reached() {
-    let pool = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.00001");
+    let bitcoind = bitcoind();
+    let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001");
 
     let username = "tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.foo";
 

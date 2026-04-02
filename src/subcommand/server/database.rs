@@ -65,11 +65,7 @@ impl Database {
         Ok(Self {
             pool: PgPoolOptions::new()
                 .max_connections(5)
-                .acquire_timeout(if integration_test() {
-                    Duration::from_millis(50)
-                } else {
-                    Duration::from_secs(5)
-                })
+                .acquire_timeout(Duration::from_secs(5))
                 .connect(&database_url)
                 .await
                 .with_context(|| format!("failed to connect to database at `{database_url}`"))?,

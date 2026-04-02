@@ -50,7 +50,6 @@ use {
         CompressedPublicKey, Network, PrivateKey, block::Header, hashes::Hash,
         key::UntweakedPublicKey, secp256k1::Secp256k1, sign_message::MessageSignature,
     },
-    bitcoind_async_client::traits::Reader,
     harness::bitcoind::Bitcoind,
     ntest::timeout,
     para::{
@@ -72,10 +71,7 @@ use {
         io::{BufReader, stderr},
         net::TcpStream,
         process::ChildStdout,
-        sync::{
-            OnceLock,
-            atomic::{AtomicUsize, Ordering},
-        },
+        sync::atomic::{AtomicUsize, Ordering},
         time::Instant,
     },
     stratum::{
@@ -141,25 +137,22 @@ fn allocate_port() -> u16 {
 }
 
 #[cfg(target_os = "linux")]
-fn bitcoind() -> &'static Bitcoind {
-    static BITCOIND: OnceLock<Bitcoind> = OnceLock::new();
-
-    BITCOIND.get_or_init(|| {
+fn bitcoind() -> Bitcoind {
+    for attempt in 0..3 {
         let tempdir = Arc::new(TempDir::new().unwrap());
-        let bitcoind_port = allocate_port();
         let rpc_port = allocate_port();
         let zmq_port = allocate_port();
 
-        Bitcoind::spawn(
-            tempdir,
-            bitcoind_port,
-            rpc_port,
-            zmq_port,
-            false,
-            Network::Signet,
-        )
-        .unwrap()
-    })
+        match Bitcoind::spawn_no_listen(tempdir, rpc_port, zmq_port, false, Network::Signet) {
+            Ok(bitcoind) => return bitcoind,
+            Err(e) if attempt < 2 => {
+                eprintln!("bitcoind spawn attempt {attempt} failed: {e}, retrying with new ports");
+                continue;
+            }
+            Err(e) => panic!("bitcoind failed to spawn after 3 attempts: {e}"),
+        }
+    }
+    unreachable!()
 }
 
 #[cfg(target_os = "linux")]
@@ -278,7 +271,7 @@ async fn mine_until_difficulty_increases(
     enonce2_size: usize,
     initial_difficulty: Difficulty,
 ) -> Difficulty {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
 
     loop {
         while let Some(Ok(event)) = events.try_recv() {

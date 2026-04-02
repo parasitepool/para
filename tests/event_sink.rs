@@ -25,12 +25,13 @@ fn setup_pg_db() -> PgTempDB {
 #[cfg(target_os = "linux")]
 #[tokio::test]
 async fn test_file_sink_json() {
+    let bitcoind = bitcoind();
     let tempdir = TempDir::new().unwrap();
     let events_file = tempdir.path().join("events.json");
 
     {
         let pool = TestPool::spawn_with_args(
-            bitcoind(),
+            &bitcoind,
             format!(
                 "--events-file {} --start-diff 0.000001",
                 events_file.display()
@@ -89,12 +90,13 @@ async fn test_file_sink_json() {
 #[cfg(target_os = "linux")]
 #[tokio::test]
 async fn test_file_sink_csv() {
+    let bitcoind = bitcoind();
     let tempdir = TempDir::new().unwrap();
     let events_csv = tempdir.path().join("events.csv");
 
     {
         let pool = TestPool::spawn_with_args(
-            bitcoind(),
+            &bitcoind,
             format!(
                 "--events-file {} --start-diff 0.000001",
                 events_csv.display()
@@ -134,13 +136,14 @@ async fn test_file_sink_csv() {
 async fn test_database_sink() {
     use sqlx::PgPool;
 
+    let bitcoind = bitcoind();
     let pg_db = setup_pg_db();
     let database_url = pg_db.connection_uri();
     setup_test_schema(database_url.clone()).await.unwrap();
 
     {
         let pool = TestPool::spawn_with_args(
-            bitcoind(),
+            &bitcoind,
             format!("--database-url {} --start-diff 0.000001", database_url),
         );
 
@@ -186,6 +189,7 @@ async fn test_database_sink() {
 async fn test_multi_sink() {
     use sqlx::PgPool;
 
+    let bitcoind = bitcoind();
     let pg_db = setup_pg_db();
     let database_url = pg_db.connection_uri();
     setup_test_schema(database_url.clone()).await.unwrap();
@@ -195,7 +199,7 @@ async fn test_multi_sink() {
 
     {
         let pool = TestPool::spawn_with_args(
-            bitcoind(),
+            &bitcoind,
             format!(
                 "--events-file {} --database-url {} --start-diff 0.000001",
                 multi_events.display(),
@@ -248,6 +252,7 @@ async fn test_multi_sink() {
 async fn test_block_found_event() {
     use sqlx::PgPool;
 
+    let bitcoind = bitcoind();
     let pg_db = setup_pg_db();
     let database_url = pg_db.connection_uri();
     setup_test_schema(database_url.clone()).await.unwrap();
@@ -257,7 +262,7 @@ async fn test_block_found_event() {
 
     {
         let pool = TestPool::spawn_with_args(
-            bitcoind(),
+            &bitcoind,
             format!(
                 "--events-file {} --database-url {} --start-diff 0.00001",
                 block_events.display(),

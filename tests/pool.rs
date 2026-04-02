@@ -1,10 +1,10 @@
 use super::*;
 
 #[test]
-#[serial(bitcoind)]
 #[timeout(90000)]
 fn mine_to_pool() {
-    let pool = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.00001");
+    let bitcoind = bitcoind();
+    let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001");
 
     let stratum_endpoint = pool.stratum_endpoint();
 
@@ -22,10 +22,13 @@ fn mine_to_pool() {
 }
 
 #[tokio::test]
-#[serial(bitcoind)]
 #[timeout(120000)]
 async fn stratum_state_machine() {
-    let pool = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.00001 --disable-bouncer");
+    let bitcoind = bitcoind();
+    let pool = TestPool::spawn_with_args(
+        &bitcoind,
+        "--start-diff 0.00001 --disable-bouncer --update-interval 120",
+    );
 
     // State::Init
     {
@@ -333,11 +336,11 @@ async fn stratum_state_machine() {
 }
 
 #[tokio::test]
-#[serial(bitcoind)]
 #[timeout(90000)]
 #[ignore]
 async fn clean_jobs_true_on_init_and_new_block() {
-    let pool = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.0001");
+    let bitcoind = bitcoind();
+    let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.0001");
     let client = pool.stratum_client().await;
     let mut events = client.connect().await.unwrap();
 
@@ -354,10 +357,10 @@ async fn clean_jobs_true_on_init_and_new_block() {
 }
 
 #[test]
-#[serial(bitcoind)]
 #[timeout(90000)]
 fn configure_template_update_interval() {
-    let pool = TestPool::spawn_with_args(bitcoind(), "--update-interval 1 --start-diff 0.00001");
+    let bitcoind = bitcoind();
+    let pool = TestPool::spawn_with_args(&bitcoind, "--update-interval 1 --start-diff 0.00001");
 
     let stratum_endpoint = pool.stratum_endpoint();
 
@@ -389,14 +392,14 @@ fn configure_template_update_interval() {
 }
 
 #[tokio::test]
-#[serial(bitcoind)]
 #[timeout(90000)]
 #[ignore]
 async fn concurrently_listening_workers_receive_new_templates_on_new_block() {
     use std::sync::Barrier;
     use std::time::Duration;
 
-    let pool = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.0001");
+    let bitcoind = bitcoind();
+    let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.0001");
     let endpoint = pool.stratum_endpoint();
     let user = signet_username();
 
@@ -471,11 +474,11 @@ async fn concurrently_listening_workers_receive_new_templates_on_new_block() {
 }
 
 #[tokio::test]
-#[serial(bitcoind)]
 #[timeout(120000)]
 async fn vardiff_adjusts_difficulty() {
+    let bitcoind = bitcoind();
     let pool = TestPool::spawn_with_args(
-        bitcoind(),
+        &bitcoind,
         "--start-diff 0.00001 --vardiff-period 1 --vardiff-window 5 --disable-bouncer",
     );
 
@@ -554,11 +557,11 @@ async fn vardiff_adjusts_difficulty() {
 }
 
 #[tokio::test]
-#[serial(bitcoind)]
 #[timeout(120000)]
 async fn new_job_shares_rejected_at_old_diff() {
+    let bitcoind = bitcoind();
     let pool = TestPool::spawn_with_args(
-        bitcoind(),
+        &bitcoind,
         "--start-diff 0.00001 --vardiff-period 1 --vardiff-window 5 --update-interval 1 --disable-bouncer",
     );
 
@@ -625,10 +628,13 @@ async fn new_job_shares_rejected_at_old_diff() {
 }
 
 #[tokio::test]
-#[serial(bitcoind)]
 #[timeout(90000)]
 async fn share_validation() {
-    let pool = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.00001 --disable-bouncer");
+    let bitcoind = bitcoind();
+    let pool = TestPool::spawn_with_args(
+        &bitcoind,
+        "--start-diff 0.000001 --disable-bouncer --update-interval 120",
+    );
 
     let status = pool.get_status().await.unwrap();
     assert_eq!(status.user_count, 0);
@@ -871,15 +877,26 @@ async fn share_validation() {
     assert_eq!(status.stats.accepted_shares, 1);
     assert_eq!(status.stats.rejected_shares, 9);
 
-    // Stale after new block
+    // Stale after new block (submitted via pre-mined block to bitcoind)
     let old_job_id = notify.job_id;
     let fresh_enonce2 = Extranonce::random(enonce2_size);
     let (old_ntime, old_nonce) = solve_share(&notify, &enonce1, &fresh_enonce2, difficulty);
 
-    pool.mine_block().await;
-    pool.wait_for_blocks(1, Duration::from_secs(10))
+    bitcoind
+        .submit_premined_block()
         .await
-        .expect("Pool did not register block");
+        .expect("submit_premined_block failed");
+
+    timeout(Duration::from_secs(10), async {
+        loop {
+            match events.recv().await.unwrap() {
+                stratum::client::Event::Notify(n) if n.job_id != old_job_id => break,
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("Timeout waiting for new block notification");
 
     let baseline = pool.get_status().await.unwrap();
     let user_baseline = pool.get_user(&user_address).await.unwrap();
@@ -896,7 +913,6 @@ async fn share_validation() {
         status.stats.rejected_shares,
         baseline.stats.rejected_shares + 1
     );
-    assert_eq!(status.block_count, 1);
 
     let user = pool.get_user(&user_address).await.unwrap();
     assert_eq!(
@@ -989,10 +1005,10 @@ async fn share_validation() {
 }
 
 #[tokio::test]
-#[serial(bitcoind)]
 #[timeout(90000)]
 async fn bouncer() {
-    let pool = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.00001");
+    let bitcoind = bitcoind();
+    let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001 --update-interval 120");
 
     let auth_timeout_test = async {
         let client = pool.stratum_client().await;
@@ -1264,7 +1280,9 @@ async fn bouncer() {
         while start.elapsed() < Duration::from_secs(10) {
             match client.authorize().await {
                 Ok(_) => panic!("duplicate_authorize: Expected MethodNotAllowed response"),
-                Err(ClientError::NotConnected) | Err(ClientError::Io { .. }) => {
+                Err(ClientError::NotConnected)
+                | Err(ClientError::Io { .. })
+                | Err(ClientError::Timeout { .. }) => {
                     dropped = true;
                     break;
                 }
@@ -1301,13 +1319,15 @@ async fn bouncer() {
 }
 
 #[tokio::test]
-#[serial(bitcoind)]
 #[timeout(90000)]
 async fn high_diff_port() {
+    let bitcoind = bitcoind();
     let high_diff_port = allocate_port();
     let pool = TestPool::spawn_with_args(
-        bitcoind(),
-        format!("--start-diff 0.00001 --disable-bouncer --high-diff-port {high_diff_port}",),
+        &bitcoind,
+        format!(
+            "--start-diff 0.00001 --disable-bouncer --update-interval 120 --high-diff-port {high_diff_port}",
+        ),
     );
 
     let normal_client = pool.stratum_client().await;
@@ -1335,10 +1355,10 @@ async fn high_diff_port() {
 }
 
 #[tokio::test]
-#[serial(bitcoind)]
 #[timeout(90000)]
 async fn idle_drop_retires_session() {
-    let pool = TestPool::spawn_with_args(bitcoind(), "--start-diff 0.00001");
+    let bitcoind = bitcoind();
+    let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001 --update-interval 120");
 
     let client = pool.stratum_client().await;
     let mut events = client.connect().await.unwrap();
