@@ -17,7 +17,6 @@ use {
         ffi::{OsStr, OsString},
         fs,
         io::Write,
-        net::TcpListener,
         path::PathBuf,
         process::{Child, Command, Stdio},
         str::FromStr,
@@ -69,7 +68,7 @@ use {
     reqwest::Response,
     std::{
         io::{BufReader, stderr},
-        net::TcpStream,
+        net::{TcpListener, TcpStream},
         process::ChildStdout,
         sync::atomic::{AtomicUsize, Ordering},
         time::Instant,
