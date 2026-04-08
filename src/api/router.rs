@@ -1,4 +1,4 @@
-use super::*;
+use {super::*, axum::extract::Query};
 
 pub(crate) fn router(
     state: Arc<Router>,
@@ -12,6 +12,7 @@ pub(crate) fn router(
         .route("/api/router/status", get(status))
         .route("/api/router/order", post(add_order))
         .route("/api/router/order/{id}", get(order_detail))
+        .route("/api/router/orders", get(list_orders))
         .route("/api/router/order/{id}", delete(remove_order))
         .with_state(state)
         .merge(common_routes())
@@ -91,6 +92,33 @@ async fn add_order(
         "address": order.address.to_string(),
     }))
     .into_response()
+}
+
+#[derive(Deserialize)]
+struct OrdersQuery {
+    address: Option<String>,
+}
+
+async fn list_orders(
+    State(router): State<Arc<Router>>,
+    Query(query): Query<OrdersQuery>,
+) -> Json<Vec<u32>> {
+    Json(
+        router
+            .orders()
+            .iter()
+            .filter(|order| {
+                query.address.as_deref().is_none_or(|addr| {
+                    order
+                        .target
+                        .username()
+                        .address_str()
+                        .is_some_and(|a| a == addr)
+                })
+            })
+            .map(|order| order.id)
+            .collect(),
+    )
 }
 
 async fn remove_order(

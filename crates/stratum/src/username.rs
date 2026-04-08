@@ -18,7 +18,7 @@ impl Username {
         self.as_str().split('.').nth(1).unwrap_or("")
     }
 
-    fn address_str(&self) -> Option<&str> {
+    pub fn address_str(&self) -> Option<&str> {
         self.as_str().split('.').next()
     }
 
@@ -194,5 +194,23 @@ mod tests {
     fn infer_network_invalid_address() {
         let username = Username::new("notanaddress");
         assert!(username.infer_network().is_err());
+    }
+
+    #[test]
+    fn address_str() {
+        #[track_caller]
+        fn case(input: &str, expected: &str) {
+            assert_eq!(Username::new(input).address_str(), Some(expected));
+        }
+
+        case(
+            "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",
+            "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",
+        );
+        case(
+            "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.worker1",
+            "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",
+        );
+        case("foo.bar.baz", "foo");
     }
 }

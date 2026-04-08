@@ -188,6 +188,7 @@ pub struct UpstreamInfo {
     pub accepted_work: TotalWork,
     pub rejected_work: TotalWork,
     pub hash_days: HashDays,
+    pub best_share: Option<Difficulty>,
 }
 
 impl UpstreamInfo {
@@ -208,6 +209,7 @@ impl UpstreamInfo {
             accepted_work,
             rejected_work,
             hash_days: (accepted_work + rejected_work).to_hash_days(),
+            best_share: upstream.best_share(),
         }
     }
 }

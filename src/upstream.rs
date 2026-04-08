@@ -25,6 +25,7 @@ pub(crate) struct Upstream {
     rejected: Arc<AtomicU64>,
     accepted_work: Arc<Mutex<TotalWork>>,
     rejected_work: Arc<Mutex<TotalWork>>,
+    best_share: Mutex<Option<Difficulty>>,
     version_mask: Option<Version>,
     disconnect_notify: Arc<tokio::sync::Notify>,
     workbase_rx: watch::Receiver<Arc<Notify>>,
@@ -205,6 +206,7 @@ impl Upstream {
             rejected: Arc::new(AtomicU64::new(0)),
             accepted_work: Arc::new(Mutex::new(TotalWork::ZERO)),
             rejected_work: Arc::new(Mutex::new(TotalWork::ZERO)),
+            best_share: Mutex::new(None),
             version_mask,
             disconnect_notify,
             workbase_rx,
@@ -323,6 +325,17 @@ impl Upstream {
         self.version_mask
     }
 
+    pub(crate) fn best_share(&self) -> Option<Difficulty> {
+        *self.best_share.lock()
+    }
+
+    pub(crate) fn record_best_share(&self, share_diff: Difficulty) {
+        let mut best = self.best_share.lock();
+        if best.is_none_or(|b| share_diff > b) {
+            *best = Some(share_diff);
+        }
+    }
+
     pub(crate) fn ping_ms(&self) -> u128 {
         self.ping.read().as_millis()
     }
@@ -367,6 +380,7 @@ impl Upstream {
             rejected: Arc::new(AtomicU64::new(0)),
             accepted_work: Arc::new(Mutex::new(TotalWork::ZERO)),
             rejected_work: Arc::new(Mutex::new(TotalWork::ZERO)),
+            best_share: Mutex::new(None),
             version_mask: None,
             disconnect_notify: Arc::new(tokio::sync::Notify::new()),
             workbase_rx,

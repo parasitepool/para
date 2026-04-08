@@ -9,79 +9,7 @@
   }
 </style>
 
-<div class="grid grid-stack">
-  <div class=column>
-    <h2>Upstream</h2>
-    <div class=row><span>Status</span><span id=status></span></div>
-    <div class=row><span>Endpoint</span><span id=endpoint></span></div>
-    <div class=row><span>Target Work</span><span id=target_work></span></div>
-    <div class=row><span>Payment Amount</span><span id=amount></span></div>
-    <div class=row><span>Payment Address</span><span id=address class=copyable></span></div>
-    <div class=row><span>Ping</span><span id=ping_ms></span></div>
-    <div class=row><span>Username</span><span id=username class=copyable></span></div>
-    <div class=row><span>Difficulty</span><span id=difficulty class=copyable></span></div>
-    <div class=row><span>Extranonce1</span><span id=enonce1></span></div>
-    <div class=row><span>Extranonce2 Size</span><span id=enonce2_size></span></div>
-    <div class=row><span>Version Mask</span><span id=version_mask></span></div>
-    <div class=row><span>Rejected Shares</span><span id=upstream_rejected class=copyable></span></div>
-    <div class=row><span>Rejected Work</span><span id=upstream_rejected_work class=copyable></span></div>
-    <div class=row><span>Delivered Work</span><span id=upstream_total_work></span></div>
-    <div class=row><span>Delivered Hashdays</span><span id=upstream_hash_days class=copyable></span></div>
-  </div>
-
-  <div class=column>
-    <h2>Downstream</h2>
-    <div class=row><span>Users</span><span id=users></span></div>
-    <div class=row><span>Workers</span><span id=workers></span></div>
-    <div class=row><span>Sessions</span><span id=sessions></span></div>
-    <div class=row><span>Idle</span><span id=idle></span></div>
-    <div class=row><span>Disconnected</span><span id=disconnected></span></div>
-    <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
-    <div class=row><span>SPS</span><span id=sps_1m></span></div>
-    <div class=row><span>Uptime</span><span><span id=uptime_secs></span>s</span></div>
-    <div class=row><span>Best Share</span><span id=best_share class=copyable></span></div>
-    <div class=row><span>Last Share</span><span id=last_share></span></div>
-    <div class=row><span>Rejected Shares</span><span id=rejected_shares class=copyable></span></div>
-    <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
-    <div class=row><span>Received Work</span><span id=received_work></span></div>
-    <div class=row><span>Received Hashdays</span><span id=hash_days class=copyable></span></div>
-  </div>
-
-  <div class="column column-full">
-    <h2>Workers</h2>
-    <table id=workers-table>
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Sessions</th>
-          <th>Hashrate</th>
-          <th>SPS</th>
-          <th>Best Share</th>
-          <th>Hashdays</th>
-          <th>Last Share</th>
-        </tr>
-      </thead>
-      <tbody id=workers-list></tbody>
-    </table>
-  </div>
-
-  <div class="column column-full">
-    <h2>Sessions</h2>
-    <table id=sessions-table>
-      <thead>
-        <tr>
-          <th>Username</th>
-          <th>Hashrate</th>
-          <th>SPS</th>
-          <th>Best Share</th>
-          <th>Hashdays</th>
-          <th>Last Share</th>
-        </tr>
-      </thead>
-      <tbody id=sessions-list></tbody>
-    </table>
-  </div>
-</div>
+<div id=order-content class="grid grid-stack"></div>
 
 <script>
 const orderId = window.location.pathname.split('/').filter(Boolean).pop();
@@ -108,69 +36,172 @@ fetch('/api/router/status').then(r => r.json()).then(data => {
   h1.append(nextLink);
 }).catch(() => {});
 
+const TERMINAL = ['fulfilled', 'cancelled', 'disconnected', 'expired', 'paid_late'];
+
+function renderTerminal(data) {
+  const u = data.upstream;
+  const username = (u && u.username) || data.target.username || '';
+  const shortUser = truncateMiddle(username);
+  const shortAddress = truncateMiddle(data.address, 20, 8);
+  const rejShares = u ? rejectionPct(u.accepted, u.rejected) : '-';
+  const rejWork = u ? rejectionPct(u.accepted_work, u.rejected_work) : '-';
+
+  return `<div class="column column-full">
+    <div class=row><span>Order ID</span><span>${data.id}</span></div>
+    <div class=row><span>Status</span><span class="${statusClass(data.status)}">${formatStatus(data.status)}</span></div>
+    <div class=row><span>Endpoint</span><span>${u ? u.endpoint : data.target.endpoint}</span></div>
+    <div class=row><span>Target Work</span><span>${data.target_work != null ? formatHashDays(data.target_work) : 'Unlimited'}</span></div>
+    <div class=row><span>Payment Amount</span><span>${formatAmount(data.amount)}</span></div>
+    <div class=row><span>Payment Address</span><span class="copyable" data-formatted="${shortAddress}" data-full="${data.address}">${shortAddress}</span></div>
+    <div class=row><span>Username</span><span class="copyable" data-formatted="${shortUser}" data-full="${username}">${shortUser}</span></div>
+    <div class=row><span>Rejected Shares</span><span class="copyable" data-formatted="${rejShares}" data-full="${u ? rejectionDetail(u.accepted, u.rejected) : '-'}">${rejShares}</span></div>
+    <div class=row><span>Rejected Work</span><span class="copyable" data-formatted="${rejWork}" data-full="${u ? rejectionWorkDetail(u.accepted_work, u.rejected_work) : '-'}">${rejWork}</span></div>
+    <div class=row><span>Delivered Work</span><span>${u ? formatDifficulty((u.accepted_work || 0) + (u.rejected_work || 0)) || '-' : '-'}</span></div>
+    <div class=row><span>Delivered Hashdays</span><span class="copyable" data-formatted="${u ? formatHashDays(u.hash_days) : '-'}" data-full="${u ? u.hash_days : '-'}">${u ? formatHashDays(u.hash_days) || '-' : '-'}</span></div>
+    <div class=row><span>Best Share</span><span class="copyable" data-formatted="${u ? formatDifficulty(u.best_share) || '-' : '-'}" data-full="${u ? u.best_share : '-'}">${u ? formatDifficulty(u.best_share) || '-' : '-'}</span></div>
+  </div>`;
+}
+
+function renderActive() {
+  return `<div class=column>
+    <h2>Upstream</h2>
+    <div class=row><span>Status</span><span id=status></span></div>
+    <div class=row><span>Endpoint</span><span id=endpoint></span></div>
+    <div class=row><span>Target Work</span><span id=target_work></span></div>
+    <div class=row><span>Payment Amount</span><span id=amount></span></div>
+    <div class=row><span>Payment Address</span><span id=address class=copyable></span></div>
+    <div class=row><span>Ping</span><span id=ping_ms></span></div>
+    <div class=row><span>Username</span><span id=username class=copyable></span></div>
+    <div class=row><span>Difficulty</span><span id=difficulty class=copyable></span></div>
+    <div class=row><span>Extranonce1</span><span id=enonce1></span></div>
+    <div class=row><span>Extranonce2 Size</span><span id=enonce2_size></span></div>
+    <div class=row><span>Version Mask</span><span id=version_mask></span></div>
+    <div class=row><span>Rejected Shares</span><span id=upstream_rejected class=copyable></span></div>
+    <div class=row><span>Rejected Work</span><span id=upstream_rejected_work class=copyable></span></div>
+    <div class=row><span>Delivered Work</span><span id=upstream_total_work></span></div>
+    <div class=row><span>Delivered Hashdays</span><span id=upstream_hash_days class=copyable></span></div>
+    <div class=row><span>Best Share</span><span id=upstream_best_share class=copyable></span></div>
+  </div>
+  <div class=column>
+    <h2>Downstream</h2>
+    <div class=row><span>Users</span><span id=users></span></div>
+    <div class=row><span>Workers</span><span id=workers></span></div>
+    <div class=row><span>Sessions</span><span id=sessions></span></div>
+    <div class=row><span>Idle</span><span id=idle></span></div>
+    <div class=row><span>Disconnected</span><span id=disconnected></span></div>
+    <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
+    <div class=row><span>SPS</span><span id=sps_1m></span></div>
+    <div class=row><span>Uptime</span><span><span id=uptime_secs></span>s</span></div>
+    <div class=row><span>Best Share</span><span id=best_share class=copyable></span></div>
+    <div class=row><span>Last Share</span><span id=last_share></span></div>
+    <div class=row><span>Rejected Shares</span><span id=rejected_shares class=copyable></span></div>
+    <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
+    <div class=row><span>Received Work</span><span id=received_work></span></div>
+    <div class=row><span>Received Hashdays</span><span id=hash_days class=copyable></span></div>
+  </div>
+  <div class="column column-full">
+    <h2>Workers</h2>
+    <table id=workers-table>
+      <thead><tr><th>Name</th><th>Sessions</th><th>Hashrate</th><th>SPS</th><th>Best Share</th><th>Hashdays</th><th>Last Share</th></tr></thead>
+      <tbody id=workers-list></tbody>
+    </table>
+  </div>
+  <div class="column column-full">
+    <h2>Sessions</h2>
+    <table id=sessions-table>
+      <thead><tr><th>Username</th><th>Hashrate</th><th>SPS</th><th>Best Share</th><th>Hashdays</th><th>Last Share</th></tr></thead>
+      <tbody id=sessions-list></tbody>
+    </table>
+  </div>`;
+}
+
+function populateActive(data) {
+  const upstream = data.upstream;
+  const username = (upstream && upstream.username) || data.target.username || '';
+
+  set('status', formatStatus(data.status));
+  setClass('status', statusClass(data.status));
+  set('endpoint', upstream ? upstream.endpoint : data.target.endpoint);
+  set('target_work', data.target_work != null ? formatHashDays(data.target_work) : 'Unlimited');
+  set('amount', data.amount, formatAmount);
+  copyable('address', truncateMiddle(data.address, 20, 8), data.address);
+  set('ping_ms', upstream && upstream.ping_ms, value => `${formatPing(value)}ms`);
+  copyable('username', truncateMiddle(username), username);
+
+  if (upstream) {
+    copyable('difficulty', formatDifficulty(upstream.difficulty), upstream.difficulty);
+    set('enonce1', upstream.enonce1);
+    set('enonce2_size', upstream.enonce2_size);
+    set('version_mask', upstream.version_mask);
+    rejectionCopyable('upstream_rejected', upstream.accepted, upstream.rejected);
+    set('upstream_total_work', (upstream.accepted_work || 0) + (upstream.rejected_work || 0), formatDifficulty);
+    copyable('upstream_hash_days', formatHashDays(upstream.hash_days), upstream.hash_days);
+    rejectionWorkCopyable('upstream_rejected_work', upstream.accepted_work, upstream.rejected_work);
+    copyable('upstream_best_share', formatDifficulty(upstream.best_share), upstream.best_share);
+  } else {
+    set('difficulty', null);
+    set('enonce1', null);
+    set('enonce2_size', null);
+    set('version_mask', null);
+    set('upstream_rejected', null);
+    set('upstream_total_work', null);
+    set('upstream_hash_days', null);
+    set('upstream_rejected_work', null);
+    set('upstream_best_share', null);
+  }
+
+  const stats = data.stats;
+  set('users', data.user_count);
+  set('workers', data.worker_count);
+  set('sessions', data.session_count);
+  set('idle', data.idle_count);
+  set('disconnected', data.disconnected_count);
+  set('hashrate_1m', stats.hashrate_1m, formatHashrate);
+  set('sps_1m', stats.sps_1m, formatTruncated);
+  set('uptime_secs', data.uptime_secs);
+  rejectionCopyable('rejected_shares', stats.accepted_shares, stats.rejected_shares);
+  rejectionWorkCopyable('rejected_work', stats.accepted_work, stats.rejected_work);
+  set('last_share', stats.last_share, value => `${value}s ago`);
+  copyable('best_share', formatDifficulty(stats.best_share), stats.best_share);
+  set('received_work', stats.accepted_work, formatDifficulty);
+  copyable('hash_days', formatHashDays(stats.hash_days), stats.hash_days);
+
+  document.getElementById('workers-list').innerHTML = renderWorkerRows(data.workers || []);
+  document.getElementById('sessions-list').innerHTML = renderSessionRows(data.sessions || []);
+}
+
+let lastLayout = null;
+
 async function refresh(signal) {
   try {
     const data = await fetch(`/api/router/order/${orderId}`, { signal }).then(r => r.json()).catch(() => null);
 
     if (!data) {
-      document.querySelector('.grid').innerHTML = '<div class="column column-full"><h2>Order Not Found</h2></div>';
+      document.getElementById('order-content').innerHTML = '<div class="column column-full"><h2>Order Not Found</h2></div>';
       return;
     }
 
-    const upstream = data.upstream;
-    const username = (upstream && upstream.username) || data.target.username || '';
+    const terminal = TERMINAL.includes(data.status);
+    const container = document.getElementById('order-content');
 
-    set('status', formatStatus(data.status));
-    setClass('status', statusClass(data.status));
-    set('endpoint', upstream ? upstream.endpoint : data.target.endpoint);
-    set('target_work', data.target_work != null ? formatHashDays(data.target_work) : 'Unlimited');
-    set('amount', data.amount, formatAmount);
-    copyable('address', truncateMiddle(data.address, 20, 8), data.address);
-    set('ping_ms', upstream && upstream.ping_ms, value => `${formatPing(value)}ms`);
-    copyable('username', truncateMiddle(username), username);
-
-    if (upstream) {
-      copyable('difficulty', formatDifficulty(upstream.difficulty), upstream.difficulty);
-      set('enonce1', upstream.enonce1);
-      set('enonce2_size', upstream.enonce2_size);
-      set('version_mask', upstream.version_mask);
-      rejectionCopyable('upstream_rejected', upstream.accepted, upstream.rejected);
-      set('upstream_total_work', (upstream.accepted_work || 0) + (upstream.rejected_work || 0), formatDifficulty);
-      copyable('upstream_hash_days', formatHashDays(upstream.hash_days), upstream.hash_days);
-      rejectionWorkCopyable('upstream_rejected_work', upstream.accepted_work, upstream.rejected_work);
+    if (terminal) {
+      if (lastLayout !== 'terminal') {
+        container.innerHTML = renderTerminal(data);
+        initCopyables();
+        lastLayout = 'terminal';
+        clearInterval(pollInterval);
+      }
     } else {
-      set('difficulty', null);
-      set('enonce1', null);
-      set('enonce2_size', null);
-      set('version_mask', null);
-      set('upstream_rejected', null);
-      set('upstream_total_work', null);
-      set('upstream_hash_days', null);
-      set('upstream_rejected_work', null);
+      if (lastLayout !== 'active') {
+        container.innerHTML = renderActive();
+        initCopyables();
+        initDelegatedCopyables('sessions-list');
+        lastLayout = 'active';
+      }
+      populateActive(data);
     }
-
-    const stats = data.stats;
-    set('users', data.user_count);
-    set('workers', data.worker_count);
-    set('sessions', data.session_count);
-    set('idle', data.idle_count);
-    set('disconnected', data.disconnected_count);
-    set('hashrate_1m', stats.hashrate_1m, formatHashrate);
-    set('sps_1m', stats.sps_1m, formatTruncated);
-    set('uptime_secs', data.uptime_secs);
-    rejectionCopyable('rejected_shares', stats.accepted_shares, stats.rejected_shares);
-    rejectionWorkCopyable('rejected_work', stats.accepted_work, stats.rejected_work);
-    set('last_share', stats.last_share, value => `${value}s ago`);
-    copyable('best_share', formatDifficulty(stats.best_share), stats.best_share);
-    set('received_work', stats.accepted_work, formatDifficulty);
-    copyable('hash_days', formatHashDays(stats.hash_days), stats.hash_days);
-
-    document.getElementById('workers-list').innerHTML = renderWorkerRows(data.workers || []);
-    document.getElementById('sessions-list').innerHTML = renderSessionRows(data.sessions || []);
 
   } catch (e) { if (e.name !== 'AbortError') console.error('refresh error:', e); }
 }
-initDelegatedCopyables('sessions-list');
 startPolling(refresh);
-initCopyables();
 </script>

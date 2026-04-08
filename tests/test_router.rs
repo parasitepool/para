@@ -81,6 +81,14 @@ impl TestRouter {
             .await
     }
 
+    pub(crate) async fn list_orders(&self, address: Option<&str>) -> reqwest::Result<Vec<u32>> {
+        let mut url = format!("{}/api/router/orders", self.api_endpoint());
+        if let Some(addr) = address {
+            url.push_str(&format!("?address={addr}"));
+        }
+        reqwest::Client::new().get(url).send().await?.json().await
+    }
+
     pub(crate) async fn remove_order(&self, id: u32) -> reqwest::Result<reqwest::Response> {
         reqwest::Client::new()
             .delete(format!("{}/api/router/order/{id}", self.api_endpoint()))

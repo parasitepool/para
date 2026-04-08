@@ -596,3 +596,41 @@ async fn router_rejects_incompatible_resumed_enonce1() {
         .await
         .unwrap();
 }
+
+#[tokio::test]
+#[timeout(120000)]
+async fn list_orders_by_address() {
+    let wallet_bitcoind = spawn_regtest();
+    let descriptor = generate_descriptor();
+
+    let router = TestRouter::spawn(
+        &descriptor,
+        &wallet_bitcoind,
+        "--start-diff 0.00001 --tick-interval 1",
+    );
+
+    let username_a = signet_username();
+    let username_b = Username::new("tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.bar");
+
+    add_order(&router, &format!("{username_a}@foo:3333"), 1000, None).await;
+    add_order(&router, &format!("{username_a}@foo:4444"), 1000, None).await;
+    add_order(&router, &format!("{username_b}@foo:5555"), 1000, None).await;
+
+    let all = router.list_orders(None).await.unwrap();
+    assert_eq!(all.len(), 3);
+
+    let filtered_a = router
+        .list_orders(Some(username_a.address_str().unwrap()))
+        .await
+        .unwrap();
+    assert_eq!(filtered_a.len(), 2);
+
+    let filtered_b = router
+        .list_orders(Some(username_b.address_str().unwrap()))
+        .await
+        .unwrap();
+    assert_eq!(filtered_b.len(), 1);
+
+    let filtered_none = router.list_orders(Some("tb1qnonexistent")).await.unwrap();
+    assert_eq!(filtered_none.len(), 0);
+}
