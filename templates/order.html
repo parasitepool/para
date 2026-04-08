@@ -11,10 +11,11 @@
 
 <div class="grid grid-stack">
   <div class=column>
-    <h2 id=upstream-title></h2>
-    <div class=row><span>Endpoint</span><span id=endpoint></span></div>
+    <h2>Upstream</h2>
     <div class=row><span>Status</span><span id=status></span></div>
-    <div class=row><span>Amount</span><span id=amount></span></div>
+    <div class=row><span>Endpoint</span><span id=endpoint></span></div>
+    <div class=row><span>Target Work</span><span id=target_work></span></div>
+    <div class=row><span>Payment Amount</span><span id=amount></span></div>
     <div class=row><span>Payment Address</span><span id=address class=copyable></span></div>
     <div class=row><span>Ping</span><span id=ping_ms></span></div>
     <div class=row><span>Username</span><span id=username class=copyable></span></div>
@@ -85,27 +86,27 @@
 <script>
 const orderId = window.location.pathname.split('/').filter(Boolean).pop();
 
+const h1 = document.querySelector('h1');
 document.title = document.title.replace('Order', `Order ${orderId}`);
-document.querySelector('h1').childNodes[0].textContent = `Router | Order ${orderId}`;
+h1.childNodes[0].textContent = `Router | Order ${orderId}`;
 
-let orderIds = [];
 fetch('/api/router/status').then(r => r.json()).then(data => {
-  orderIds = (data.orders || []).map(o => o.id);
-  updateNav();
-}).catch(() => {});
-
-function updateNav() {
-  const el = document.getElementById('upstream-title');
-  if (!el || orderIds.length < 2) {
-    if (el) el.textContent = `Order ${orderId}`;
-    return;
-  }
+  const orderIds = (data.orders || []).map(o => o.id);
+  if (orderIds.length < 2) return;
   const idx = orderIds.indexOf(Number(orderId));
-  const prevIdx = orderIds[(idx - 1 + orderIds.length) % orderIds.length];
-  const nextIdx = orderIds[(idx + 1) % orderIds.length];
-  el.innerHTML = `<a href="/order/${prevIdx}" class="nav-arrow">\u25C0</a> Order ${orderId} <a href="/order/${nextIdx}" class="nav-arrow">\u25B6</a>`;
-}
-updateNav();
+  const prev = orderIds[(idx - 1 + orderIds.length) % orderIds.length];
+  const next = orderIds[(idx + 1) % orderIds.length];
+  const prevLink = document.createElement('a');
+  prevLink.href = `/order/${prev}`;
+  prevLink.className = 'nav-arrow';
+  prevLink.textContent = '\u25C0';
+  const nextLink = document.createElement('a');
+  nextLink.href = `/order/${next}`;
+  nextLink.className = 'nav-arrow';
+  nextLink.textContent = '\u25B6';
+  h1.prepend(prevLink);
+  h1.append(nextLink);
+}).catch(() => {});
 
 async function refresh(signal) {
   try {
@@ -119,9 +120,10 @@ async function refresh(signal) {
     const upstream = data.upstream;
     const username = (upstream && upstream.username) || data.target.username || '';
 
-    set('endpoint', upstream ? upstream.endpoint : data.target.endpoint);
     set('status', formatStatus(data.status));
     setClass('status', statusClass(data.status));
+    set('endpoint', upstream ? upstream.endpoint : data.target.endpoint);
+    set('target_work', data.target_work != null ? formatHashDays(data.target_work) : 'Unlimited');
     set('amount', data.amount, formatAmount);
     copyable('address', truncateMiddle(data.address, 20, 8), data.address);
     set('ping_ms', upstream && upstream.ping_ms, value => `${formatPing(value)}ms`);

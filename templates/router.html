@@ -9,24 +9,10 @@
   }
 
   .order-card {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 48px;
-    width: 100%;
-    box-sizing: border-box;
-  }
-
-  .order-pane {
     border: 1px solid #444;
     padding: 20px 30px;
-    min-width: 0;
-  }
-
-  .order-pane h2 {
-    margin: 0 0 15px;
-    font-size: 1.22em;
-    text-align: center;
-    color: #888;
+    width: 100%;
+    box-sizing: border-box;
   }
 
   .order-link {
@@ -38,8 +24,8 @@
     text-decoration: underline;
   }
 
-  .order-pane .row span:last-child,
-  .order-pane .row a {
+  .order-card .row span:last-child,
+  .order-card .row a {
     overflow-wrap: anywhere;
   }
 
@@ -63,7 +49,7 @@
     margin: 0 0 15px;
   }
 
-  .order-header h2 { margin: 0; }
+  .order-header h2 { margin: 0; font-size: 1.22em; }
 
   .order-delete {
     position: absolute;
@@ -197,14 +183,7 @@
     }
 
     .order-card {
-      grid-template-columns: 1fr;
-      gap: 30px;
-    }
-
-    .order-pane {
-      width: 100%;
       max-width: 500px;
-      box-sizing: border-box;
     }
   }
 </style>
@@ -217,7 +196,6 @@
     <div class=row><span>Rejected Work</span><span id=upstream_rejected_work class=copyable></span></div>
     <div class=row><span>Delivered Work</span><span id=upstream_total_work></span></div>
     <div class=row><span>Delivered Hashdays</span><span id=upstream_hash_days class=copyable></span></div>
-    <div class=row><span>Efficiency</span><span id=upstream_efficiency></span></div>
   </div>
 
   <div class=column>
@@ -316,8 +294,6 @@ async function refresh(signal) {
     ]);
 
     const s = routerData.stats;
-    set('upstream_efficiency', efficiencyPct(routerData.upstream_accepted_work, s.accepted_work, s.rejected_work));
-
     set('active_orders', routerData.active_orders);
     set('session_count', routerData.session_count);
     set('idle', routerData.idle_count);
@@ -351,43 +327,17 @@ async function refresh(signal) {
         const os = order.stats;
         const hasUpstream = !!u;
         const username = (u && u.username) || order.target.username || '';
-        const shortUser = truncateMiddle(username);
-        const shortAddress = truncateMiddle(order.address, 20, 8);
-        const upRejSharesPct = hasUpstream ? rejectionPct(u.accepted, u.rejected) : '-';
-        const upRejWorkPct = hasUpstream ? rejectionPct(u.accepted_work, u.rejected_work) : '-';
-        const orderRejSharesPct = rejectionPct(os.accepted_shares, os.rejected_shares);
-        const orderRejWorkPct = rejectionPct(os.accepted_work, os.rejected_work);
         return `<div class="order-card">
-          <div class=order-pane>
-            <div class=order-header>
-              <h2><a class=order-link href="/order/${order.id}">Order ${order.id}</a></h2>
-              <button class=order-delete data-id="${order.id}">&times;</button>
-            </div>
-            <div class=row><span>Status</span><span class="${statusClass(order.status)}">${formatStatus(order.status)}</span></div>
-            <div class=row><span>Amount</span><span>${formatAmount(order.amount)}</span></div>
-            <div class=row><span>Address</span>${copyableHtml(shortAddress, order.address)}</div>
-            <div class=row><span>Endpoint</span><span>${hasUpstream ? u.endpoint : order.target.endpoint}</span></div>
-            <div class=row><span>Ping</span><span>${hasUpstream ? `${formatPing(u.ping_ms)}ms` : '-'}</span></div>
-            <div class=row><span>Username</span>${copyableHtml(shortUser, username)}</div>
-            <div class=row><span>Rejected Shares</span><span>${hasUpstream ? copyableHtml(upRejSharesPct, rejectionDetail(u.accepted, u.rejected)) : '-'}</span></div>
-            <div class=row><span>Rejected Work</span><span>${hasUpstream ? copyableHtml(upRejWorkPct, rejectionWorkDetail(u.accepted_work, u.rejected_work)) : '-'}</span></div>
-            <div class=row><span>Delivered Work</span><span>${hasUpstream ? formatDifficulty((u.accepted_work || 0) + (u.rejected_work || 0)) || '-' : '-'}</span></div>
-            <div class=row><span>Delivered Hashdays</span><span>${hasUpstream ? formatHashDays(u.hash_days) || '-' : '-'}</span></div>
-            <div class=row><span>Efficiency</span><span>${hasUpstream ? efficiencyPct(u.accepted_work, os.accepted_work, os.rejected_work) : '-'}</span></div>
+          <div class=order-header>
+            <h2><a class=order-link href="/order/${order.id}">Order ${order.id}</a></h2>
+            <button class=order-delete data-id="${order.id}">&times;</button>
           </div>
-          <div class=order-pane>
-            <div class=row><a class=order-link href="/order/${order.id}">Sessions</a><span>${order.session_count}</span></div>
-            <div class=row><span>Idle</span><span>${order.idle_count}</span></div>
-            <div class=row><span>Disconnected</span><span>${order.disconnected_count}</span></div>
-            <div class=row><span>Hashrate</span><span>${formatHashrate(os.hashrate_1m)}</span></div>
-            <div class=row><span>SPS</span><span>${formatTruncated(os.sps_1m)}</span></div>
-            <div class=row><span>Best Share</span><span>${formatDifficulty(os.best_share)}</span></div>
-            <div class=row><span>Last Share</span><span>${os.last_share != null ? os.last_share + 's ago' : '-'}</span></div>
-            <div class=row><span>Rejected Shares</span>${copyableHtml(orderRejSharesPct, rejectionDetail(os.accepted_shares, os.rejected_shares))}</div>
-            <div class=row><span>Rejected Work</span>${copyableHtml(orderRejWorkPct, rejectionWorkDetail(os.accepted_work, os.rejected_work))}</div>
-            <div class=row><span>Received Work</span><span>${formatDifficulty(os.accepted_work) || '-'}</span></div>
-            <div class=row><span>Received Hashdays</span><span>${formatHashDays(os.hash_days) || '-'}</span></div>
-          </div>
+          <div class=row><span>Status</span><span class="${statusClass(order.status)}">${formatStatus(order.status)}</span></div>
+          <div class=row><span>Endpoint</span><span>${hasUpstream ? u.endpoint : order.target.endpoint}</span></div>
+          <div class=row><span>Username</span>${copyableHtml(truncateMiddle(username), username)}</div>
+          <div class=row><span>Target Work</span><span>${order.target_work != null ? formatHashDays(order.target_work) : 'Unlimited'}</span></div>
+          <div class=row><span>Delivered Hashdays</span><span>${hasUpstream ? formatHashDays(u.hash_days) || '-' : '-'}</span></div>
+          <div class=row><span>Hashrate</span><span>${formatHashrate(os.hashrate_1m)}</span></div>
         </div>`;
       }).join('');
     }

@@ -196,12 +196,6 @@ function formatTruncated(n) {
   return truncated.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
 }
 
-function efficiencyPct(upstreamAccepted, downstreamAccepted, downstreamRejected) {
-  const total = (downstreamAccepted || 0) + (downstreamRejected || 0);
-  if (total === 0) return '-';
-  return (((upstreamAccepted || 0) / total) * 100).toFixed(2) + '%';
-}
-
 function rejectionPct(accepted, rejected) {
   const total = (accepted || 0) + (rejected || 0);
   return total > 0 ? formatTruncated((rejected / total) * 100) + '%' : '0.00%';
