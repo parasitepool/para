@@ -14,7 +14,9 @@
     <h2 id=upstream-title></h2>
     <div class=row><span>Endpoint</span><span id=endpoint></span></div>
     <div class=row><span>Status</span><span id=status></span></div>
-    <div class=row><span>Ping</span><span><span id=ping_ms></span>ms</span></div>
+    <div class=row><span>Amount</span><span id=amount></span></div>
+    <div class=row><span>Payment Address</span><span id=address class=copyable></span></div>
+    <div class=row><span>Ping</span><span id=ping_ms></span></div>
     <div class=row><span>Username</span><span id=username class=copyable></span></div>
     <div class=row><span>Difficulty</span><span id=difficulty class=copyable></span></div>
     <div class=row><span>Extranonce1</span><span id=enonce1></span></div>
@@ -37,7 +39,7 @@
     <div class=row><span>SPS</span><span id=sps_1m></span></div>
     <div class=row><span>Uptime</span><span><span id=uptime_secs></span>s</span></div>
     <div class=row><span>Best Share</span><span id=best_share class=copyable></span></div>
-    <div class=row><span>Last Share</span><span><span id=last_share></span>s ago</span></div>
+    <div class=row><span>Last Share</span><span id=last_share></span></div>
     <div class=row><span>Rejected Shares</span><span id=rejected_shares class=copyable></span></div>
     <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
     <div class=row><span>Received Work</span><span id=received_work></span></div>
@@ -115,20 +117,35 @@ async function refresh(signal) {
     }
 
     const upstream = data.upstream;
-    set('endpoint', upstream.endpoint);
-    const statusText = data.status.charAt(0).toUpperCase() + data.status.slice(1);
-    set('status', statusText);
-    setClass('status', data.status === 'active' ? 'connected' : data.status);
-    set('ping_ms', upstream.ping_ms, formatPing);
-    copyable('username', truncateMiddle(upstream.username), upstream.username);
-    copyable('difficulty', formatDifficulty(upstream.difficulty), upstream.difficulty);
-    set('enonce1', upstream.enonce1);
-    set('enonce2_size', upstream.enonce2_size);
-    set('version_mask', upstream.version_mask);
-    rejectionCopyable('upstream_rejected', upstream.accepted, upstream.rejected);
-    set('upstream_total_work', (upstream.accepted_work || 0) + (upstream.rejected_work || 0), formatDifficulty);
-    copyable('upstream_hash_days', formatHashDays(upstream.hash_days), upstream.hash_days);
-    rejectionWorkCopyable('upstream_rejected_work', upstream.accepted_work, upstream.rejected_work);
+    const username = (upstream && upstream.username) || data.target.username || '';
+
+    set('endpoint', upstream ? upstream.endpoint : data.target.endpoint);
+    set('status', formatStatus(data.status));
+    setClass('status', statusClass(data.status));
+    set('amount', data.amount, formatAmount);
+    copyable('address', truncateMiddle(data.address, 20, 8), data.address);
+    set('ping_ms', upstream && upstream.ping_ms, value => `${formatPing(value)}ms`);
+    copyable('username', truncateMiddle(username), username);
+
+    if (upstream) {
+      copyable('difficulty', formatDifficulty(upstream.difficulty), upstream.difficulty);
+      set('enonce1', upstream.enonce1);
+      set('enonce2_size', upstream.enonce2_size);
+      set('version_mask', upstream.version_mask);
+      rejectionCopyable('upstream_rejected', upstream.accepted, upstream.rejected);
+      set('upstream_total_work', (upstream.accepted_work || 0) + (upstream.rejected_work || 0), formatDifficulty);
+      copyable('upstream_hash_days', formatHashDays(upstream.hash_days), upstream.hash_days);
+      rejectionWorkCopyable('upstream_rejected_work', upstream.accepted_work, upstream.rejected_work);
+    } else {
+      set('difficulty', null);
+      set('enonce1', null);
+      set('enonce2_size', null);
+      set('version_mask', null);
+      set('upstream_rejected', null);
+      set('upstream_total_work', null);
+      set('upstream_hash_days', null);
+      set('upstream_rejected_work', null);
+    }
 
     const stats = data.stats;
     set('users', data.user_count);
@@ -141,7 +158,7 @@ async function refresh(signal) {
     set('uptime_secs', data.uptime_secs);
     rejectionCopyable('rejected_shares', stats.accepted_shares, stats.rejected_shares);
     rejectionWorkCopyable('rejected_work', stats.accepted_work, stats.rejected_work);
-    set('last_share', stats.last_share);
+    set('last_share', stats.last_share, value => `${value}s ago`);
     copyable('best_share', formatDifficulty(stats.best_share), stats.best_share);
     set('received_work', stats.accepted_work, formatDifficulty);
     copyable('hash_days', formatHashDays(stats.hash_days), stats.hash_days);

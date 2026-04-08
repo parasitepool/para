@@ -234,8 +234,10 @@ pub struct OrderDetail {
     pub status: OrderStatus,
     pub target: UpstreamTarget,
     pub target_work: Option<HashDays>,
-    pub upstream_id: u32,
-    pub upstream: UpstreamInfo,
+    pub address: String,
+    pub amount: Amount,
+    pub upstream_id: Option<u32>,
+    pub upstream: Option<UpstreamInfo>,
     pub user_count: usize,
     pub worker_count: usize,
     pub session_count: usize,
@@ -249,44 +251,66 @@ pub struct OrderDetail {
 
 impl OrderDetail {
     pub(crate) fn from_order(order: &Order, metatron: &Metatron, now: Instant) -> Self {
-        let upstream_id = order.upstream.id();
+        let (upstream_id, upstream, sessions, workers, stats) =
+            if let Some(upstream) = order.upstream() {
+                let id = upstream.id();
 
-        let sessions: Vec<SessionDetail> = metatron
-            .upstream_sessions(upstream_id)
-            .iter()
-            .map(|session| SessionDetail::from_session(session, now))
-            .collect();
+                let sessions: Vec<SessionDetail> = metatron
+                    .upstream_sessions(id)
+                    .iter()
+                    .map(|session| SessionDetail::from_session(session, now))
+                    .collect();
 
-        let workers = metatron
-            .users()
-            .iter()
-            .flat_map(|user| user.workers().collect::<Vec<_>>())
-            .filter_map(|worker| {
-                let session_count = worker.upstream_session_count(upstream_id);
-                (session_count > 0).then(|| WorkerDetail {
-                    name: worker.workername().to_string(),
-                    session_count,
-                    stats: MiningStats::from_snapshot(&worker.upstream_snapshot(upstream_id), now),
-                })
-            })
-            .collect();
+                let workers: Vec<WorkerDetail> = metatron
+                    .users()
+                    .iter()
+                    .flat_map(|user| user.workers().collect::<Vec<_>>())
+                    .filter_map(|worker| {
+                        let session_count = worker.upstream_session_count(id);
+                        (session_count > 0).then(|| WorkerDetail {
+                            name: worker.workername().to_string(),
+                            session_count,
+                            stats: MiningStats::from_snapshot(&worker.upstream_snapshot(id), now),
+                        })
+                    })
+                    .collect();
+
+                (
+                    Some(id),
+                    Some(UpstreamInfo::from_upstream(upstream)),
+                    sessions,
+                    workers,
+                    MiningStats::from_snapshot(&metatron.upstream_snapshot(id), now),
+                )
+            } else {
+                (
+                    None,
+                    None,
+                    Vec::new(),
+                    Vec::new(),
+                    MiningStats::from_snapshot(&Stats::new(), now),
+                )
+            };
 
         Self {
             id: order.id,
             status: order.status(),
             target: order.target.clone(),
             target_work: order.target_work,
+            address: order.address.to_string(),
+            amount: order.amount,
             upstream_id,
-            upstream: UpstreamInfo::from_upstream(&order.upstream),
-            user_count: metatron.upstream_user_count(upstream_id),
-            worker_count: metatron.upstream_worker_count(upstream_id),
+            upstream,
+            user_count: upstream_id.map_or(0, |id| metatron.upstream_user_count(id)),
+            worker_count: upstream_id.map_or(0, |id| metatron.upstream_worker_count(id)),
             session_count: sessions.len(),
-            disconnected_count: metatron.upstream_disconnected_count(upstream_id),
-            idle_count: metatron.upstream_idle_count(upstream_id),
+            disconnected_count: upstream_id
+                .map_or(0, |id| metatron.upstream_disconnected_count(id)),
+            idle_count: upstream_id.map_or(0, |id| metatron.upstream_idle_count(id)),
             uptime_secs: metatron.uptime().as_secs(),
             workers,
             sessions,
-            stats: MiningStats::from_snapshot(&metatron.upstream_snapshot(upstream_id), now),
+            stats,
         }
     }
 }
@@ -295,4 +319,5 @@ impl OrderDetail {
 pub struct OrderRequest {
     pub target: UpstreamTarget,
     pub target_work: Option<HashDays>,
+    pub amount: Amount,
 }

@@ -16,8 +16,8 @@ pub struct Output {
 }
 
 impl Send {
-    pub(crate) fn run(self, mut wallet: Wallet, network: Network, birthday: u32) -> Result<Output> {
-        wallet.sync(birthday)?;
+    pub(crate) fn run(self, wallet: &Wallet, network: Network) -> Result<Output> {
+        wallet.sync()?;
 
         let address = self.address.require_network(network)?;
         let amount = Amount::from_sat(self.amount);

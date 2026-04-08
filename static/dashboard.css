@@ -23,8 +23,12 @@ table th { color: #888; font-weight: normal; border-bottom: 1px solid #444; }
 table td { border-bottom: 1px solid #333; }
 table tbody tr:hover { background: #1a1a1a; }
 .connected { color: #4f4; }
+.pending { color: #fa0; }
 .disconnected { color: #f44; }
+.fulfilled { color: #6cf; }
 .cancelled { color: #888; }
+.expired { color: #f84; }
+.paid_late { color: #fd5; }
 .copyable { cursor: pointer; position: relative; z-index: 10; }
 .copyable:hover { background: #222; outline: 1px solid #444; z-index: 10; box-shadow: 0 2px 8px rgba(0,0,0,0.8); }
 .copyable.hover-expand:hover::after {

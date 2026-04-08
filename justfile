@@ -91,18 +91,28 @@ router:
     --bitcoin-rpc-port 38332 \
     --address 0.0.0.0 \
     --port 42070 \
-    --upstream tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.chameleon@127.0.0.1:42069 \
     --http-port 8082 \
     --start-diff 0.00001 \
     --vardiff-window 10 \
     --vardiff-period 1 \
-    --tick-interval 1
+    --tick-interval 1 \
+    --descriptor "tr([6cf75d5c/86'/1'/0']tprv8gNWXLKSxxW1GdLWjDscZzfy5A2jWYW5Yh7XxB9EtrAB4yNeJRezY7McT86yhHSD6cRTnjtHWV9JZMJ2taba3QvXNT92Tr7L3tkFWGTUBVX/0/*)#4jdqs9ss"
 
-# Mine to anyone-can-spend P2WSH(OP_TRUE)
+wallet +args='balance':
+  cargo run \
+    wallet \
+    --chain signet \
+    --bitcoin-rpc-username satoshi \
+    --bitcoin-rpc-password nakamoto \
+    --bitcoin-rpc-port 38332 \
+    --descriptor "tr([dea3fb4a/86'/1'/0']tprv8gwiVyVAJwGJEemH1y8SfcY9SzTod9a2xE3FyvRNs48zhqALNZbArLj8yBXjo6NGFrzW3Qe8UMJQa77MqkVst45iuxTfw1mtocfRGBewmxo/0/*)#atez75tt" \
+    --birthday 13000 \
+    {{args}}
+
 miner port='42069': 
   cargo run --release -- miner \
     127.0.0.1:{{port}} \
-    --username tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.tick \
+    --username tb1pp8d9pmzh7l7ptk5n5rav8cxze74ktassddjgaz8lgcn8p9ztzqhs6x9cl8.tick \
     --password x \
     --cpu-cores 2 \
     --throttle 500K

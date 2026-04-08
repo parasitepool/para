@@ -46,7 +46,7 @@ use {
     base64::{Engine, engine::general_purpose},
     bip322::sign_simple_encoded,
     bitcoin::{
-        CompressedPublicKey, Network, PrivateKey, block::Header, hashes::Hash,
+        Amount, CompressedPublicKey, Network, PrivateKey, block::Header, hashes::Hash,
         key::UntweakedPublicKey, secp256k1::Secp256k1, sign_message::MessageSignature,
     },
     harness::bitcoind::Bitcoind,
@@ -66,6 +66,7 @@ use {
     },
     pgtemp::{PgTempDB, PgTempDBBuilder},
     reqwest::Response,
+    serde_json::json,
     std::{
         io::{BufReader, stderr},
         net::{TcpListener, TcpStream},
@@ -133,6 +134,25 @@ fn allocate_port() -> u16 {
         .local_addr()
         .unwrap()
         .port()
+}
+
+#[cfg(target_os = "linux")]
+fn spawn_regtest() -> Bitcoind {
+    let tempdir = Arc::new(TempDir::new().unwrap());
+    let rpc_port = allocate_port();
+    let zmq_port = allocate_port();
+
+    Bitcoind::spawn_no_listen(tempdir, rpc_port, zmq_port, false, Network::Regtest).unwrap()
+}
+
+#[cfg(target_os = "linux")]
+async fn generate_to_address(bitcoind: &Bitcoind, n: u64, address: &str) {
+    bitcoind
+        .client()
+        .unwrap()
+        .call_raw::<serde_json::Value>("generatetoaddress", &[json!(n), json!(address)])
+        .await
+        .unwrap();
 }
 
 #[cfg(target_os = "linux")]

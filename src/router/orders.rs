@@ -14,8 +14,13 @@ impl Orders {
     }
 
     pub(crate) fn add(&mut self, order: Arc<Order>) {
-        self.all.insert(order.id, order.clone());
-        self.active.push(order);
+        self.all.insert(order.id, order);
+    }
+
+    pub(crate) fn activate(&mut self, id: u32) {
+        if let Some(order) = self.all.get(&id) {
+            self.active.push(order.clone());
+        }
     }
 
     pub(crate) fn deactivate(&mut self, id: u32) {
@@ -39,82 +44,24 @@ impl Orders {
 
         Some(self.active[idx].clone())
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn test_order(id: u32) -> Arc<Order> {
-        Arc::new(Order {
-            id,
-            target: "foo@bar:3333".parse().unwrap(),
-            target_work: None,
-            upstream: Upstream::test(id),
-            allocator: Arc::new(EnonceAllocator::new(
-                Extranonces::Pool(PoolExtranonces::new(4, 4).unwrap()),
-                id,
-            )),
-            cancel: CancellationToken::new(),
-            status: Mutex::new(OrderStatus::Active),
-        })
+    #[cfg(test)]
+    pub(super) fn all_len(&self) -> usize {
+        self.all.len()
     }
 
-    #[tokio::test]
-    async fn add() {
-        let mut orders = Orders::new();
-        let order = test_order(0);
-
-        orders.add(order.clone());
-
-        assert_eq!(orders.all.len(), 1);
-        assert_eq!(orders.active.len(), 1);
-        assert!(orders.all.contains_key(&0));
-        assert_eq!(orders.active[0].id, 0);
+    #[cfg(test)]
+    pub(super) fn active_len(&self) -> usize {
+        self.active.len()
     }
 
-    #[tokio::test]
-    async fn deactivate_removes_from_active_but_not_all() {
-        let mut orders = Orders::new();
-        orders.add(test_order(0));
-        orders.add(test_order(1));
-
-        orders.deactivate(0);
-
-        assert_eq!(orders.all.len(), 2);
-        assert_eq!(orders.active.len(), 1);
-        assert_eq!(orders.active[0].id, 1);
+    #[cfg(test)]
+    pub(super) fn contains(&self, id: u32) -> bool {
+        self.all.contains_key(&id)
     }
 
-    #[tokio::test]
-    async fn get() {
-        let mut orders = Orders::new();
-        orders.add(test_order(0));
-
-        assert!(orders.get(0).is_some());
-        assert!(orders.get(1).is_none());
-    }
-
-    #[tokio::test]
-    async fn match_round_robin() {
-        #[track_caller]
-        fn case(orders: &Orders, counter: u64, expected: Option<u32>) {
-            assert_eq!(
-                orders.match_round_robin(counter).map(|order| order.id),
-                expected,
-            );
-        }
-
-        let mut orders = Orders::new();
-        case(&orders, 0, None);
-
-        orders.add(test_order(0));
-        orders.add(test_order(1));
-        orders.add(test_order(2));
-
-        case(&orders, 0, Some(0));
-        case(&orders, 1, Some(1));
-        case(&orders, 2, Some(2));
-        case(&orders, 3, Some(0));
+    #[cfg(test)]
+    pub(super) fn active_id(&self, idx: usize) -> u32 {
+        self.active[idx].id
     }
 }

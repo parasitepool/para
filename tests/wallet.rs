@@ -4,25 +4,7 @@ use {
         COIN_VALUE,
         subcommand::wallet::{balance, generate, receive, send},
     },
-    serde_json::json,
 };
-
-fn spawn_regtest() -> Bitcoind {
-    let tempdir = Arc::new(TempDir::new().unwrap());
-    let rpc_port = allocate_port();
-    let zmq_port = allocate_port();
-
-    Bitcoind::spawn_no_listen(tempdir, rpc_port, zmq_port, false, Network::Regtest).unwrap()
-}
-
-async fn generate_to_address(bitcoind: &Bitcoind, n: u64, address: &str) {
-    bitcoind
-        .client()
-        .unwrap()
-        .call_raw::<serde_json::Value>("generatetoaddress", &[json!(n), json!(address)])
-        .await
-        .unwrap();
-}
 
 #[tokio::test]
 #[timeout(60000)]

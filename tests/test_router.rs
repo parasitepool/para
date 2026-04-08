@@ -7,31 +7,24 @@ pub(crate) struct TestRouter {
 }
 
 impl TestRouter {
-    pub(crate) fn spawn(
-        upstreams: &[(&str, &str)],
-        bitcoind_rpc_port: u16,
-        args: impl ToArgs,
-    ) -> Self {
+    pub(crate) fn spawn(descriptor: &str, bitcoind: &Bitcoind, args: impl ToArgs) -> Self {
         let router_port = allocate_port();
         let http_port = allocate_port();
 
-        let upstream_args: Vec<String> = upstreams
-            .iter()
-            .map(|(username, endpoint)| format!("--upstream {username}@{endpoint}"))
-            .collect();
-
         let router_handle = CommandBuilder::new(format!(
             "router \
-                --chain signet \
+                --chain regtest \
                 --address 127.0.0.1 \
                 --port {router_port} \
                 --http-port {http_port} \
-                --bitcoin-rpc-username satoshi \
-                --bitcoin-rpc-password nakamoto \
-                --bitcoin-rpc-port {bitcoind_rpc_port} \
-                {} \
+                --bitcoin-rpc-username {} \
+                --bitcoin-rpc-password {} \
+                --bitcoin-rpc-port {} \
+                --descriptor {descriptor} \
                 {}",
-            upstream_args.join(" "),
+            bitcoind.rpc_user,
+            bitcoind.rpc_password,
+            bitcoind.rpc_port,
             args.to_args().join(" ")
         ))
         .capture_stderr(true)

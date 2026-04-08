@@ -47,12 +47,7 @@ impl WalletCommand {
         }
 
         let rpc_url = format!("http://{}", settings.bitcoin_rpc_url());
-        let rpc_auth = match settings.bitcoin_credentials()? {
-            Auth::UserPass(user, pass) => {
-                bdk_bitcoind_rpc::bitcoincore_rpc::Auth::UserPass(user, pass)
-            }
-            Auth::CookieFile(path) => bdk_bitcoind_rpc::bitcoincore_rpc::Auth::CookieFile(path),
-        };
+        let rpc_auth = settings.wallet_rpc_auth()?;
 
         let descriptor = self
             .descriptor
@@ -63,18 +58,19 @@ impl WalletCommand {
         let subcommand = self.subcommand;
 
         task::spawn_blocking(move || {
-            let mut wallet = Wallet::new(
+            let wallet = Wallet::new(
                 &descriptor,
                 change_descriptor.as_deref(),
                 network,
                 &rpc_url,
                 rpc_auth,
+                birthday,
             )?;
 
             match subcommand {
-                Subcommand::Balance => print_json(balance::run(&mut wallet, birthday)?),
-                Subcommand::Receive => print_json(receive::run(&mut wallet)),
-                Subcommand::Send(send) => print_json(send.run(wallet, network, birthday)?),
+                Subcommand::Balance => print_json(balance::run(&wallet)?),
+                Subcommand::Receive => print_json(receive::run(&wallet)),
+                Subcommand::Send(send) => print_json(send.run(&wallet, network)?),
                 Subcommand::Generate => unreachable!(),
             }
         })

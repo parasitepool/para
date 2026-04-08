@@ -24,6 +24,19 @@ impl RouterCommand {
 
         let bitcoin_client = Arc::new(settings.bitcoin_rpc_client().await?);
 
+        let rpc_url = format!("http://{}", settings.bitcoin_rpc_url());
+
+        let wallet = Arc::new(Wallet::new(
+            settings.descriptor().context("--descriptor is required")?,
+            settings.change_descriptor(),
+            settings.chain().network(),
+            &rpc_url,
+            settings.wallet_rpc_auth()?,
+            settings.wallet_birthday(),
+        )?);
+
+        wallet.spawn(settings.tick_interval(), cancel_token.clone(), &tasks);
+
         let address = settings.address();
         let port = settings.port();
         let listener = TcpListener::bind((address, port))
@@ -38,16 +51,8 @@ impl RouterCommand {
             settings.clone(),
             tasks.clone(),
             cancel_token.clone(),
+            wallet,
         ));
-
-        for target in settings.upstream_targets() {
-            router
-                .add_order(api::OrderRequest {
-                    target: target.clone(),
-                    target_work: None,
-                })
-                .await?;
-        }
 
         http_server::spawn(
             &settings,
@@ -95,14 +100,16 @@ impl RouterCommand {
             debug!("Spawning stratifier task for {addr}");
 
             tasks.spawn(async move {
+                let upstream = order.upstream().expect("active order").clone();
+                let allocator = order.allocator().expect("active order").clone();
                 let mut stratifier: Stratifier<Notify> = Stratifier::new(
                     addr,
                     settings,
-                    order.allocator.clone(),
+                    allocator,
                     metatron,
-                    Some(order.upstream.clone()),
+                    Some(upstream.clone()),
                     stream,
-                    order.upstream.workbase_rx(),
+                    upstream.workbase_rx(),
                     cancel_token,
                     None,
                     start_diff,

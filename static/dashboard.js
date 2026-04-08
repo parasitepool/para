@@ -164,6 +164,11 @@ function formatSi(v, unit) {
 function formatHashrate(h) { return formatSi(h, 'H/s'); }
 function formatHashDays(v) { return formatSi(v, 'Hd'); }
 
+function formatAmount(value) {
+  if (value === null || value === undefined) return '-';
+  return typeof value === 'number' ? `${value} sats` : String(value);
+}
+
 function parseSi(s, units) {
   s = s.trim();
   for (const u of units) {
@@ -217,6 +222,19 @@ function truncateMiddle(s, maxLen = 15, edgeLen = 6) {
 function formatPing(ms) {
   if (ms === null || ms === undefined) return null;
   return String(ms);
+}
+
+function formatStatus(status) {
+  if (status === null || status === undefined) return '-';
+  return status
+    .split('_')
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function statusClass(status) {
+  if (status === null || status === undefined) return '';
+  return status === 'active' ? 'connected' : status;
 }
 
 function set(id, value, formatter = v => v) {

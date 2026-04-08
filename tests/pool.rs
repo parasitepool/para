@@ -877,26 +877,15 @@ async fn share_validation() {
     assert_eq!(status.stats.accepted_shares, 1);
     assert_eq!(status.stats.rejected_shares, 9);
 
-    // Stale after new block (submitted via pre-mined block to bitcoind)
+    // Stale after new block
     let old_job_id = notify.job_id;
     let fresh_enonce2 = Extranonce::random(enonce2_size);
     let (old_ntime, old_nonce) = solve_share(&notify, &enonce1, &fresh_enonce2, difficulty);
 
-    bitcoind
-        .submit_premined_block()
+    pool.mine_block().await;
+    pool.wait_for_blocks(1, Duration::from_secs(30))
         .await
-        .expect("submit_premined_block failed");
-
-    timeout(Duration::from_secs(10), async {
-        loop {
-            match events.recv().await.unwrap() {
-                stratum::client::Event::Notify(n) if n.job_id != old_job_id => break,
-                _ => {}
-            }
-        }
-    })
-    .await
-    .expect("Timeout waiting for new block notification");
+        .expect("Pool did not register block");
 
     let baseline = pool.get_status().await.unwrap();
     let user_baseline = pool.get_user(&user_address).await.unwrap();
@@ -913,6 +902,7 @@ async fn share_validation() {
         status.stats.rejected_shares,
         baseline.stats.rejected_shares + 1
     );
+    assert_eq!(status.block_count, 1);
 
     let user = pool.get_user(&user_address).await.unwrap();
     assert_eq!(

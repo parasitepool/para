@@ -45,6 +45,10 @@ pub(crate) struct Settings {
     events_file: Option<PathBuf>,
     high_diff_port: Option<u16>,
     tick_interval: Duration,
+    descriptor: Option<String>,
+    change_descriptor: Option<String>,
+    wallet_birthday: u32,
+    invoice_timeout: Duration,
 }
 
 impl Default for Settings {
@@ -82,6 +86,10 @@ impl Default for Settings {
             events_file: None,
             high_diff_port: None,
             tick_interval: Duration::from_secs(60),
+            descriptor: None,
+            change_descriptor: None,
+            wallet_birthday: 0,
+            invoice_timeout: Duration::from_secs(3600),
         }
     }
 }
@@ -150,6 +158,7 @@ impl Settings {
             events_file: options.events_file,
             high_diff_port: options.common.high_diff_port,
             tick_interval: Duration::from_secs(60),
+            ..Self::default()
         };
 
         settings.validate()?;
@@ -198,6 +207,7 @@ impl Settings {
             events_file: None,
             high_diff_port: options.common.high_diff_port,
             tick_interval: Duration::from_secs(60),
+            ..Self::default()
         };
 
         settings.validate()?;
@@ -217,7 +227,7 @@ impl Settings {
             address: options.common.address,
             port: options.common.port,
             http_port: options.common.http_port,
-            upstream_targets: options.upstream,
+            upstream_targets: Vec::new(),
             timeout: Duration::from_secs(options.timeout),
             bitcoin_data_dir: options.common.bitcoin.bitcoin_data_dir,
             bitcoin_rpc_port,
@@ -246,6 +256,10 @@ impl Settings {
             events_file: None,
             high_diff_port: options.common.high_diff_port,
             tick_interval: Duration::from_secs(options.tick_interval),
+            descriptor: Some(options.descriptor),
+            change_descriptor: options.change_descriptor,
+            wallet_birthday: options.wallet_birthday,
+            invoice_timeout: Duration::from_secs(options.invoice_timeout),
         };
 
         settings.validate()?;
@@ -262,6 +276,15 @@ impl Settings {
         } else {
             Ok(Auth::CookieFile(self.cookie_file()?))
         }
+    }
+
+    pub(crate) fn wallet_rpc_auth(&self) -> Result<bdk_bitcoind_rpc::bitcoincore_rpc::Auth> {
+        Ok(match self.bitcoin_credentials()? {
+            Auth::UserPass(user, pass) => {
+                bdk_bitcoind_rpc::bitcoincore_rpc::Auth::UserPass(user, pass)
+            }
+            Auth::CookieFile(path) => bdk_bitcoind_rpc::bitcoincore_rpc::Auth::CookieFile(path),
+        })
     }
 
     pub(crate) fn cookie_file(&self) -> Result<PathBuf> {
@@ -566,6 +589,22 @@ impl Settings {
 
     pub(crate) fn tick_interval(&self) -> Duration {
         self.tick_interval
+    }
+
+    pub(crate) fn descriptor(&self) -> Option<&str> {
+        self.descriptor.as_deref()
+    }
+
+    pub(crate) fn change_descriptor(&self) -> Option<&str> {
+        self.change_descriptor.as_deref()
+    }
+
+    pub(crate) fn wallet_birthday(&self) -> u32 {
+        self.wallet_birthday
+    }
+
+    pub(crate) fn invoice_timeout(&self) -> Duration {
+        self.invoice_timeout
     }
 }
 
@@ -1207,10 +1246,9 @@ mod tests {
         let proxy =
             Settings::from_proxy_options(parse_proxy_options("para proxy --upstream bar@foo:1234"))
                 .unwrap();
-        let router = Settings::from_router_options(parse_router_options(
-            "para router --upstream bar@foo:1234",
-        ))
-        .unwrap();
+        let router =
+            Settings::from_router_options(parse_router_options("para router --descriptor foo"))
+                .unwrap();
 
         for settings in [&proxy, &router] {
             assert_eq!(pool.address, settings.address);
@@ -1285,7 +1323,7 @@ mod tests {
 
     #[test]
     fn router_defaults_are_sane() {
-        let options = parse_router_options("para router --upstream bar@foo:1234");
+        let options = parse_router_options("para router --descriptor foo");
         let settings = Settings::from_router_options(options).unwrap();
 
         assert_eq!(settings.address, "0.0.0.0");
@@ -1299,13 +1337,16 @@ mod tests {
         assert_eq!(settings.min_diff, None);
         assert_eq!(settings.max_diff, None);
         assert_eq!(settings.high_diff_port, None);
+        assert_eq!(settings.descriptor.as_deref(), Some("foo"));
+        assert_eq!(settings.change_descriptor, None);
+        assert_eq!(settings.wallet_birthday, 0);
+        assert_eq!(settings.invoice_timeout, Duration::from_secs(3600));
     }
 
     #[test]
     fn router_override_address_and_port() {
-        let options = parse_router_options(
-            "para router --upstream bar@foo:1234 --address 127.0.0.1 --port 9999",
-        );
+        let options =
+            parse_router_options("para router --descriptor foo --address 127.0.0.1 --port 9999");
         let settings = Settings::from_router_options(options).unwrap();
 
         assert_eq!(settings.address, "127.0.0.1");
@@ -1314,7 +1355,7 @@ mod tests {
 
     #[test]
     fn router_override_timeout() {
-        let options = parse_router_options("para router --upstream bar@foo:1234 --timeout 60");
+        let options = parse_router_options("para router --descriptor foo --timeout 60");
         let settings = Settings::from_router_options(options).unwrap();
 
         assert_eq!(settings.timeout, Duration::from_secs(60));
@@ -1322,7 +1363,7 @@ mod tests {
 
     #[test]
     fn router_enonce1_extension_size_default() {
-        let options = parse_router_options("para router --upstream bar@foo:1234");
+        let options = parse_router_options("para router --descriptor foo");
         let settings = Settings::from_router_options(options).unwrap();
         assert_eq!(settings.enonce1_extension_size, ENONCE1_EXTENSION_SIZE);
     }
@@ -1330,7 +1371,7 @@ mod tests {
     #[test]
     fn router_enonce1_extension_size_override() {
         let options =
-            parse_router_options("para router --upstream bar@foo:1234 --enonce1-extension-size 3");
+            parse_router_options("para router --descriptor foo --enonce1-extension-size 3");
         let settings = Settings::from_router_options(options).unwrap();
         assert_eq!(settings.enonce1_extension_size, 3);
     }
@@ -1338,12 +1379,12 @@ mod tests {
     #[test]
     fn router_enonce1_extension_size_boundaries() {
         let options =
-            parse_router_options("para router --upstream bar@foo:1234 --enonce1-extension-size 1");
+            parse_router_options("para router --descriptor foo --enonce1-extension-size 1");
         let settings = Settings::from_router_options(options).unwrap();
         assert_eq!(settings.enonce1_extension_size, 1);
 
         let options =
-            parse_router_options("para router --upstream bar@foo:1234 --enonce1-extension-size 6");
+            parse_router_options("para router --descriptor foo --enonce1-extension-size 6");
         let settings = Settings::from_router_options(options).unwrap();
         assert_eq!(settings.enonce1_extension_size, 6);
     }
@@ -1351,7 +1392,7 @@ mod tests {
     #[test]
     fn router_enonce1_extension_size_too_small() {
         let options =
-            parse_router_options("para router --upstream bar@foo:1234 --enonce1-extension-size 0");
+            parse_router_options("para router --descriptor foo --enonce1-extension-size 0");
         let err = Settings::from_router_options(options).unwrap_err();
         assert!(
             err.to_string()
@@ -1362,7 +1403,7 @@ mod tests {
     #[test]
     fn router_enonce1_extension_size_too_large() {
         let options =
-            parse_router_options("para router --upstream bar@foo:1234 --enonce1-extension-size 7");
+            parse_router_options("para router --descriptor foo --enonce1-extension-size 7");
         let err = Settings::from_router_options(options).unwrap_err();
         assert!(
             err.to_string()
@@ -1372,7 +1413,7 @@ mod tests {
 
     #[test]
     fn router_vardiff_defaults() {
-        let options = parse_router_options("para router --upstream bar@foo:1234");
+        let options = parse_router_options("para router --descriptor foo");
         let settings = Settings::from_router_options(options).unwrap();
         assert_eq!(settings.vardiff_period, Duration::from_secs_f64(3.33));
         assert_eq!(settings.vardiff_window, Duration::from_secs(300));
@@ -1380,22 +1421,21 @@ mod tests {
 
     #[test]
     fn router_start_diff_default() {
-        let options = parse_router_options("para router --upstream bar@foo:1234");
+        let options = parse_router_options("para router --descriptor foo");
         let settings = Settings::from_router_options(options).unwrap();
         assert_eq!(settings.start_diff, Difficulty::default());
     }
 
     #[test]
     fn router_tick_interval_default() {
-        let options = parse_router_options("para router --upstream bar@foo:1234");
+        let options = parse_router_options("para router --descriptor foo");
         let settings = Settings::from_router_options(options).unwrap();
         assert_eq!(settings.tick_interval, Duration::from_secs(60),);
     }
 
     #[test]
     fn router_tick_interval_override() {
-        let options =
-            parse_router_options("para router --upstream bar@foo:1234 --tick-interval 10");
+        let options = parse_router_options("para router --descriptor foo --tick-interval 10");
         let settings = Settings::from_router_options(options).unwrap();
         assert_eq!(settings.tick_interval, Duration::from_secs(10),);
     }

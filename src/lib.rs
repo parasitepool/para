@@ -91,8 +91,8 @@ use {
         process,
         str::FromStr,
         sync::{
-            Arc, LazyLock,
-            atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
+            Arc, LazyLock, OnceLock,
+            atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering},
         },
         thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},

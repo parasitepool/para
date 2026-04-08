@@ -39,10 +39,12 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
 
     for order in router.orders().iter() {
         let detail = OrderDetail::from_order(order, &metatron, now);
-        upstream_accepted += detail.upstream.accepted;
-        upstream_rejected += detail.upstream.rejected;
-        upstream_accepted_work += detail.upstream.accepted_work;
-        upstream_rejected_work += detail.upstream.rejected_work;
+        if let Some(ref upstream) = detail.upstream {
+            upstream_accepted += upstream.accepted;
+            upstream_rejected += upstream.rejected;
+            upstream_accepted_work += upstream.accepted_work;
+            upstream_rejected_work += upstream.rejected_work;
+        }
         orders.push(detail);
     }
 
@@ -81,10 +83,14 @@ async fn order_detail(
 async fn add_order(
     State(router): State<Arc<Router>>,
     Json(request): Json<OrderRequest>,
-) -> ServerResult<Response> {
-    let id = router.add_order(request).await?;
+) -> Response {
+    let order = router.add_order(request);
 
-    Ok(Json(json!({ "id": id })).into_response())
+    Json(json!({
+        "id": order.id,
+        "address": order.address.to_string(),
+    }))
+    .into_response()
 }
 
 async fn remove_order(

@@ -5,8 +5,21 @@ pub(crate) struct RouterOptions {
     #[command(flatten)]
     pub(crate) common: CommonOptions,
 
-    #[arg(long, help = "Upstream <USER[:PASS]@HOST:PORT>.")]
-    pub(crate) upstream: Vec<UpstreamTarget>,
+    #[arg(long, help = "Wallet external <DESCRIPTOR>.")]
+    pub(crate) descriptor: String,
+
+    #[arg(long, help = "Wallet internal (change) <DESCRIPTOR>.")]
+    pub(crate) change_descriptor: Option<String>,
+
+    #[arg(long, default_value_t = 0, help = "Wallet sync start block height.")]
+    pub(crate) wallet_birthday: u32,
+
+    #[arg(
+        long,
+        default_value_t = 3600,
+        help = "Invoice payment timeout in seconds."
+    )]
+    pub(crate) invoice_timeout: u64,
 
     #[arg(
         long,

@@ -157,6 +157,34 @@
     min-height: 1.4em;
   }
 
+  #order-payment {
+    text-align: center;
+    padding: 10px 0;
+  }
+
+  #order-payment p {
+    color: #888;
+    margin: 0 0 14px;
+    font-size: 0.9em;
+  }
+
+  #order-payment .address {
+    background: #111;
+    border: 1px solid #444;
+    padding: 10px 14px;
+    word-break: break-all;
+    color: #eee;
+    font-size: 0.85em;
+    cursor: pointer;
+    margin-bottom: 14px;
+  }
+
+  #order-payment .copied {
+    color: #4a4;
+    font-size: 0.8em;
+    min-height: 1.4em;
+  }
+
   @media (max-width: 1140px) {
     #add-order-btn {
       width: 100%;
@@ -213,19 +241,31 @@
 
   <div id=order-overlay class=hidden>
     <div id=order-modal>
-      <h2>Add Order</h2>
-      <label for=order-endpoint>Endpoint</label>
-      <input id=order-endpoint placeholder="host:port" value="localhost:42069">
-      <label for=order-username>Username</label>
-      <input id=order-username placeholder="user.worker">
-      <label for=order-password>Password</label>
-      <input id=order-password placeholder="optional">
-      <label for=order-target-work>Target Work</label>
-      <input id=order-target-work placeholder="e.g. 1.5 PHd, 500 THd, or leave empty for unlimited">
+      <h2 id=order-modal-title>Add Order</h2>
+      <div id=order-form-fields>
+        <label for=order-endpoint>Endpoint</label>
+        <input id=order-endpoint placeholder="host:port" value="localhost:42069">
+        <label for=order-username>Username</label>
+        <input id=order-username placeholder="user.worker">
+        <label for=order-password>Password</label>
+        <input id=order-password placeholder="optional">
+        <label for=order-amount>Amount (sats)</label>
+        <input id=order-amount type=number placeholder="e.g. 1000">
+        <label for=order-target-work>Target Work</label>
+        <input id=order-target-work placeholder="e.g. 1.5 PHd, 500 THd, or leave empty for unlimited">
+      </div>
       <div id=order-error></div>
-      <div class=modal-buttons>
+      <div id=order-form-buttons class=modal-buttons>
         <button id=order-cancel>Cancel</button>
         <button id=order-submit>Add</button>
+      </div>
+      <div id=order-payment class=hidden>
+        <p>Send <strong id=order-payment-amount></strong> sats to:</p>
+        <div class=address id=order-payment-address></div>
+        <div class=copied id=order-payment-copied></div>
+        <div class=modal-buttons>
+          <button id=order-payment-close>Close</button>
+        </div>
       </div>
     </div>
   </div>
@@ -302,46 +342,54 @@ async function refresh(signal) {
 
     const container = document.getElementById('upstreams-list');
     if (!container.querySelector('.copyable:hover')) {
-    const orders = (routerData.orders || []).filter(o => o.status === 'active').sort((a, b) => b.id - a.id);
-    container.innerHTML = orders.map(order => {
-      const u = order.upstream;
-      const os = order.stats;
-      const username = u.username || '';
-      const shortUser = truncateMiddle(username);
-      const upRejSharesPct = rejectionPct(u.accepted, u.rejected);
-      const upRejWorkPct = rejectionPct(u.accepted_work, u.rejected_work);
-      const orderRejSharesPct = rejectionPct(os.accepted_shares, os.rejected_shares);
-      const orderRejWorkPct = rejectionPct(os.accepted_work, os.rejected_work);
-      return `<div class="order-card">
-        <div class=order-pane>
-          <div class=order-header>
-            <h2><a class=order-link href="/order/${order.id}">Order ${order.id}</a></h2>
-            <button class=order-delete data-id="${order.id}">&times;</button>
+      const copyableHtml = (formatted, raw) =>
+        `<span class="copyable" data-formatted="${formatted}" data-full="${raw}">${formatted}</span>`;
+
+      const orders = (routerData.orders || []).sort((a, b) => b.id - a.id);
+      container.innerHTML = orders.map(order => {
+        const u = order.upstream;
+        const os = order.stats;
+        const hasUpstream = !!u;
+        const username = (u && u.username) || order.target.username || '';
+        const shortUser = truncateMiddle(username);
+        const shortAddress = truncateMiddle(order.address, 20, 8);
+        const upRejSharesPct = hasUpstream ? rejectionPct(u.accepted, u.rejected) : '-';
+        const upRejWorkPct = hasUpstream ? rejectionPct(u.accepted_work, u.rejected_work) : '-';
+        const orderRejSharesPct = rejectionPct(os.accepted_shares, os.rejected_shares);
+        const orderRejWorkPct = rejectionPct(os.accepted_work, os.rejected_work);
+        return `<div class="order-card">
+          <div class=order-pane>
+            <div class=order-header>
+              <h2><a class=order-link href="/order/${order.id}">Order ${order.id}</a></h2>
+              <button class=order-delete data-id="${order.id}">&times;</button>
+            </div>
+            <div class=row><span>Status</span><span class="${statusClass(order.status)}">${formatStatus(order.status)}</span></div>
+            <div class=row><span>Amount</span><span>${formatAmount(order.amount)}</span></div>
+            <div class=row><span>Address</span>${copyableHtml(shortAddress, order.address)}</div>
+            <div class=row><span>Endpoint</span><span>${hasUpstream ? u.endpoint : order.target.endpoint}</span></div>
+            <div class=row><span>Ping</span><span>${hasUpstream ? `${formatPing(u.ping_ms)}ms` : '-'}</span></div>
+            <div class=row><span>Username</span>${copyableHtml(shortUser, username)}</div>
+            <div class=row><span>Rejected Shares</span><span>${hasUpstream ? copyableHtml(upRejSharesPct, rejectionDetail(u.accepted, u.rejected)) : '-'}</span></div>
+            <div class=row><span>Rejected Work</span><span>${hasUpstream ? copyableHtml(upRejWorkPct, rejectionWorkDetail(u.accepted_work, u.rejected_work)) : '-'}</span></div>
+            <div class=row><span>Delivered Work</span><span>${hasUpstream ? formatDifficulty((u.accepted_work || 0) + (u.rejected_work || 0)) || '-' : '-'}</span></div>
+            <div class=row><span>Delivered Hashdays</span><span>${hasUpstream ? formatHashDays(u.hash_days) || '-' : '-'}</span></div>
+            <div class=row><span>Efficiency</span><span>${hasUpstream ? efficiencyPct(u.accepted_work, os.accepted_work, os.rejected_work) : '-'}</span></div>
           </div>
-          <div class=row><span>Endpoint</span><span>${u.endpoint}</span></div>
-          <div class=row><span>Ping</span><span>${formatPing(u.ping_ms)}ms</span></div>
-          <div class=row><span>Username</span><span class=copyable data-full="${username}" data-formatted="${shortUser}">${shortUser}</span></div>
-          <div class=row><span>Rejected Shares</span><span class=copyable data-formatted="${upRejSharesPct}" data-full="${rejectionDetail(u.accepted, u.rejected)}">${upRejSharesPct}</span></div>
-          <div class=row><span>Rejected Work</span><span class=copyable data-formatted="${upRejWorkPct}" data-full="${rejectionWorkDetail(u.accepted_work, u.rejected_work)}">${upRejWorkPct}</span></div>
-          <div class=row><span>Delivered Work</span><span>${formatDifficulty((u.accepted_work || 0) + (u.rejected_work || 0)) || '-'}</span></div>
-          <div class=row><span>Delivered Hashdays</span><span>${formatHashDays(u.hash_days) || '-'}</span></div>
-          <div class=row><span>Efficiency</span><span>${efficiencyPct(u.accepted_work, os.accepted_work, os.rejected_work)}</span></div>
-        </div>
-        <div class=order-pane>
-          <div class=row><a class=order-link href="/order/${order.id}">Sessions</a><span>${order.session_count}</span></div>
-          <div class=row><span>Idle</span><span>${order.idle_count}</span></div>
-          <div class=row><span>Disconnected</span><span>${order.disconnected_count}</span></div>
-          <div class=row><span>Hashrate</span><span>${formatHashrate(os.hashrate_1m)}</span></div>
-          <div class=row><span>SPS</span><span>${formatTruncated(os.sps_1m)}</span></div>
-          <div class=row><span>Best Share</span><span>${formatDifficulty(os.best_share)}</span></div>
-          <div class=row><span>Last Share</span><span>${os.last_share != null ? os.last_share + 's ago' : '-'}</span></div>
-          <div class=row><span>Rejected Shares</span><span class=copyable data-formatted="${orderRejSharesPct}" data-full="${rejectionDetail(os.accepted_shares, os.rejected_shares)}">${orderRejSharesPct}</span></div>
-          <div class=row><span>Rejected Work</span><span class=copyable data-formatted="${orderRejWorkPct}" data-full="${rejectionWorkDetail(os.accepted_work, os.rejected_work)}">${orderRejWorkPct}</span></div>
-          <div class=row><span>Received Work</span><span>${formatDifficulty(os.accepted_work) || '-'}</span></div>
-          <div class=row><span>Received Hashdays</span><span>${formatHashDays(os.hash_days) || '-'}</span></div>
-        </div>
-      </div>`;
-    }).join('');
+          <div class=order-pane>
+            <div class=row><a class=order-link href="/order/${order.id}">Sessions</a><span>${order.session_count}</span></div>
+            <div class=row><span>Idle</span><span>${order.idle_count}</span></div>
+            <div class=row><span>Disconnected</span><span>${order.disconnected_count}</span></div>
+            <div class=row><span>Hashrate</span><span>${formatHashrate(os.hashrate_1m)}</span></div>
+            <div class=row><span>SPS</span><span>${formatTruncated(os.sps_1m)}</span></div>
+            <div class=row><span>Best Share</span><span>${formatDifficulty(os.best_share)}</span></div>
+            <div class=row><span>Last Share</span><span>${os.last_share != null ? os.last_share + 's ago' : '-'}</span></div>
+            <div class=row><span>Rejected Shares</span>${copyableHtml(orderRejSharesPct, rejectionDetail(os.accepted_shares, os.rejected_shares))}</div>
+            <div class=row><span>Rejected Work</span>${copyableHtml(orderRejWorkPct, rejectionWorkDetail(os.accepted_work, os.rejected_work))}</div>
+            <div class=row><span>Received Work</span><span>${formatDifficulty(os.accepted_work) || '-'}</span></div>
+            <div class=row><span>Received Hashdays</span><span>${formatHashDays(os.hash_days) || '-'}</span></div>
+          </div>
+        </div>`;
+      }).join('');
     }
 
   } catch (e) { if (e.name !== 'AbortError') console.error('refresh error:', e); }
@@ -374,17 +422,48 @@ document.getElementById('upstreams-list').addEventListener('click', async (e) =>
   const endpoint = document.getElementById('order-endpoint');
   const username = document.getElementById('order-username');
   const password = document.getElementById('order-password');
+  const amount = document.getElementById('order-amount');
   const targetWork = document.getElementById('order-target-work');
   const error = document.getElementById('order-error');
+  const formFields = document.getElementById('order-form-fields');
+  const formButtons = document.getElementById('order-form-buttons');
+  const modalTitle = document.getElementById('order-modal-title');
+  const payment = document.getElementById('order-payment');
+  const paymentAmount = document.getElementById('order-payment-amount');
+  const paymentAddress = document.getElementById('order-payment-address');
+  const paymentCopied = document.getElementById('order-payment-copied');
+
+  function resetModal() {
+    endpoint.value = '';
+    username.value = '';
+    password.value = '';
+    amount.value = '';
+    targetWork.value = '';
+    error.textContent = '';
+    modalTitle.textContent = 'Add Order';
+    formFields.classList.remove('hidden');
+    formButtons.classList.remove('hidden');
+    payment.classList.add('hidden');
+    paymentCopied.textContent = '';
+  }
 
   document.getElementById('add-order-btn').addEventListener('click', () => {
-    error.textContent = '';
+    resetModal();
     overlay.classList.remove('hidden');
     endpoint.focus();
   });
 
   document.getElementById('order-cancel').addEventListener('click', () => {
     overlay.classList.add('hidden');
+  });
+
+  document.getElementById('order-payment-close').addEventListener('click', () => {
+    overlay.classList.add('hidden');
+  });
+
+  paymentAddress.addEventListener('click', () => {
+    navigator.clipboard.writeText(paymentAddress.textContent);
+    paymentCopied.textContent = 'Copied to clipboard';
   });
 
   overlay.addEventListener('click', (e) => {
@@ -399,12 +478,15 @@ document.getElementById('upstreams-list').addEventListener('click', async (e) =>
       return;
     }
 
+    const sats = parseInt(amount.value, 10);
+
     const body = {
       target: {
         endpoint: endpoint.value,
         username: username.value,
       },
       target_work: null,
+      amount: sats,
     };
 
     if (password.value) body.target.password = password.value;
@@ -431,11 +513,14 @@ document.getElementById('upstreams-list').addEventListener('click', async (e) =>
         return;
       }
 
-      overlay.classList.add('hidden');
-      endpoint.value = '';
-      username.value = '';
-      password.value = '';
-      targetWork.value = '';
+      const data = await res.json();
+      modalTitle.textContent = 'Payment Required';
+      formFields.classList.add('hidden');
+      formButtons.classList.add('hidden');
+      error.textContent = '';
+      paymentAmount.textContent = sats;
+      paymentAddress.textContent = data.address;
+      payment.classList.remove('hidden');
     } catch (e) {
       error.textContent = e.message;
     }

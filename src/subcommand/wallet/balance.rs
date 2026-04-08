@@ -7,8 +7,8 @@ pub struct Output {
     pub total: u64,
 }
 
-pub(super) fn run(wallet: &mut Wallet, birthday: u32) -> Result<Output> {
-    wallet.sync(birthday)?;
+pub(super) fn run(wallet: &Wallet) -> Result<Output> {
+    wallet.sync()?;
     let balance = wallet.balance();
 
     Ok(Output {
