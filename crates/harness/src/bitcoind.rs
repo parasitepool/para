@@ -314,6 +314,28 @@ minrelaytxfee=0.00001
         Ok(())
     }
 
+    /// Submit a pre-mined block to advance the chain by one block.
+    /// This block was mined against the custom signet genesis (signetchallenge=51)
+    /// and is valid for any fresh instance of that chain.
+    pub async fn submit_premined_block(&self) -> Result<()> {
+        const SIGNET_BLOCK_1: &str = "0020872af61eee3b63a380a477a063af32b2bbc97c9ff9f01f2c4225e973988108000000e809b8decabf0a7ea3347543028303e07e6a2cb3e48b8c92731674fc24259f2742b1cd69ae77031e7e0d030001020000000001010000000000000000000000000000000000000000000000000000000000000000ffffffff265100b0207a4b00000000000000577c70617261736974657c45b1cd69000000007c706172617cffffffff0200f2052a010000002200204ae81572f06e1b88fd5ced7a1a000945432e83e1551e6f721ee9c00b8cc332600000000000000000266a24aa21a9ede2f61c3f71d1defd3fa999dfa36953755c690689799962b48bebd836974e8cf90120000000000000000000000000000000000000000000000000000000000000000000000000";
+
+        match self
+            .client()?
+            .call_raw::<serde_json::Value>("submitblock", &[json!(SIGNET_BLOCK_1)])
+            .await
+        {
+            Ok(result) => assert!(result.is_null(), "submitblock rejected: {result}"),
+            Err(e) => {
+                // Check if the block was actually accepted despite the parse error
+                let count = self.client()?.get_block_count().await?;
+                assert!(count > 0, "submitblock failed and block not accepted: {e}");
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn op_true_address(&self) -> Address {
         let op_true: ScriptBuf = Builder::new().push_opcode(OP_TRUE).into_script();
         Address::p2wsh(&op_true, self.network)

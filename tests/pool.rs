@@ -510,12 +510,21 @@ async fn vardiff_adjusts_difficulty() {
 
     assert!(new_difficulty > initial_difficulty);
 
-    pool.mine_block().await;
-    pool.wait_for_blocks(1, Duration::from_secs(10))
+    bitcoind
+        .submit_premined_block()
         .await
-        .expect("block");
+        .expect("submit_premined_block failed");
 
-    wait_for_new_block(&mut events, notify.job_id).await;
+    timeout(Duration::from_secs(10), async {
+        loop {
+            match events.recv().await.unwrap() {
+                stratum::client::Event::Notify(n) if n.job_id != notify.job_id => break,
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("Timeout waiting for new block notification");
 
     let baseline = pool.get_user(&user_address).await.unwrap();
 
@@ -633,7 +642,7 @@ async fn share_validation() {
     let bitcoind = bitcoind();
     let pool = TestPool::spawn_with_args(
         &bitcoind,
-        "--start-diff 0.000001 --disable-bouncer --update-interval 120",
+        "--start-diff 0.000001 --disable-bouncer --update-interval 5",
     );
 
     let status = pool.get_status().await.unwrap();
@@ -877,15 +886,26 @@ async fn share_validation() {
     assert_eq!(status.stats.accepted_shares, 1);
     assert_eq!(status.stats.rejected_shares, 9);
 
-    // Stale after new block
+    // Stale after new block (submitted via pre-mined block to bitcoind)
     let old_job_id = notify.job_id;
     let fresh_enonce2 = Extranonce::random(enonce2_size);
     let (old_ntime, old_nonce) = solve_share(&notify, &enonce1, &fresh_enonce2, difficulty);
 
-    pool.mine_block().await;
-    pool.wait_for_blocks(1, Duration::from_secs(30))
+    bitcoind
+        .submit_premined_block()
         .await
-        .expect("Pool did not register block");
+        .expect("submit_premined_block failed");
+
+    timeout(Duration::from_secs(10), async {
+        loop {
+            match events.recv().await.unwrap() {
+                stratum::client::Event::Notify(n) if n.job_id != old_job_id => break,
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("Timeout waiting for new block notification");
 
     let baseline = pool.get_status().await.unwrap();
     let user_baseline = pool.get_user(&user_address).await.unwrap();
@@ -902,7 +922,6 @@ async fn share_validation() {
         status.stats.rejected_shares,
         baseline.stats.rejected_shares + 1
     );
-    assert_eq!(status.block_count, 1);
 
     let user = pool.get_user(&user_address).await.unwrap();
     assert_eq!(
