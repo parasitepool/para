@@ -54,6 +54,14 @@ impl RouterCommand {
             wallet,
         ));
 
+        for target in settings.default_orders() {
+            router.add_order(api::OrderRequest {
+                target: target.clone(),
+                target_work: None,
+                amount: Amount::ZERO,
+            });
+        }
+
         http_server::spawn(
             &settings,
             api::router::router(router.clone(), bitcoin_client, settings.chain(), logs),

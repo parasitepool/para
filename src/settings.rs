@@ -49,6 +49,7 @@ pub(crate) struct Settings {
     change_descriptor: Option<String>,
     wallet_birthday: u32,
     invoice_timeout: Duration,
+    default_orders: Vec<UpstreamTarget>,
 }
 
 impl Default for Settings {
@@ -90,6 +91,7 @@ impl Default for Settings {
             change_descriptor: None,
             wallet_birthday: 0,
             invoice_timeout: Duration::from_secs(3600),
+            default_orders: Vec::new(),
         }
     }
 }
@@ -260,6 +262,7 @@ impl Settings {
             change_descriptor: options.change_descriptor,
             wallet_birthday: options.wallet_birthday,
             invoice_timeout: Duration::from_secs(options.invoice_timeout),
+            default_orders: options.default_order,
         };
 
         settings.validate()?;
@@ -605,6 +608,10 @@ impl Settings {
 
     pub(crate) fn invoice_timeout(&self) -> Duration {
         self.invoice_timeout
+    }
+
+    pub(crate) fn default_orders(&self) -> &[UpstreamTarget] {
+        &self.default_orders
     }
 }
 

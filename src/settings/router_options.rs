@@ -37,4 +37,7 @@ pub(crate) struct RouterOptions {
 
     #[arg(long, default_value_t = 60, help = "Tick interval in seconds.")]
     pub(crate) tick_interval: u64,
+
+    #[arg(long, help = "Default upstream <USER[:PASS]@HOST:PORT>.")]
+    pub(crate) default_order: Vec<UpstreamTarget>,
 }

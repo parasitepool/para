@@ -90,12 +90,14 @@ impl Router {
     fn spawn_order_monitor(self: &Arc<Self>, order: Arc<Order>) {
         let router = self.clone();
         self.tasks.spawn(async move {
-            if !router.wait_for_payment(&order).await {
-                return;
-            }
+            if order.amount > Amount::ZERO {
+                if !router.wait_for_payment(&order).await {
+                    return;
+                }
 
-            if order.status() != OrderStatus::Pending {
-                return;
+                if order.status() != OrderStatus::Pending {
+                    return;
+                }
             }
 
             if let Err(err) = order
