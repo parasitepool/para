@@ -19,6 +19,16 @@ pub(crate) struct Router {
 }
 
 impl Router {
+    fn order_amount(&self, target_work: HashDays) -> Option<Amount> {
+        if !target_work.0.is_finite() || target_work.0 <= 0.0 {
+            return None;
+        }
+
+        self.settings
+            .price(target_work)
+            .map(|amount| amount.max(self.wallet.dust_limit()))
+    }
+
     pub(crate) fn new(
         metatron: Arc<Metatron>,
         settings: Arc<Settings>,
@@ -38,9 +48,11 @@ impl Router {
         }
     }
 
-    pub(crate) fn add_order(
+    pub(crate) fn add_order_with(
         self: &Arc<Self>,
-        request: api::OrderRequest,
+        target: UpstreamTarget,
+        target_work: Option<HashDays>,
+        amount: Amount,
         default: bool,
     ) -> Arc<Order> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
@@ -49,13 +61,13 @@ impl Router {
 
         let order = Order::new(
             id,
-            request.target,
-            request.target_work,
+            target,
+            target_work,
             self.cancel.child_token(),
             order::Payment {
                 address: address_info.address,
                 derivation_index: address_info.index,
-                amount: request.amount,
+                amount,
                 timeout: self.settings.invoice_timeout(),
             },
             default,
@@ -65,6 +77,12 @@ impl Router {
         self.spawn_order_monitor(order.clone());
 
         order
+    }
+
+    pub(crate) fn add_order(self: &Arc<Self>, request: api::OrderRequest) -> Option<Arc<Order>> {
+        let amount = self.order_amount(request.target_work)?;
+
+        Some(self.add_order_with(request.target, Some(request.target_work), amount, false))
     }
 
     fn terminate_order(&self, order: &Order, status: OrderStatus) {

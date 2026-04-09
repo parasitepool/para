@@ -13,7 +13,7 @@ pub(crate) fn router(
         .route("/api/router/order", post(add_order))
         .route("/api/router/order/{id}", get(order_detail))
         .route("/api/router/orders", get(list_orders))
-        .route("/api/router/order/{id}", delete(remove_order))
+        .route("/api/router/order/{id}/cancel", post(cancel_order))
         .with_state(state)
         .merge(common_routes())
         .layer(Extension(bitcoin_client))
@@ -68,27 +68,36 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
 async fn order_detail(
     State(router): State<Arc<Router>>,
     Path(id): Path<u32>,
-) -> ServerResult<Response> {
+) -> ServerResult<Json<OrderDetail>> {
     let order = router
         .get_order(id)
         .ok_or_not_found(|| format!("Order {id}"))?;
 
     let metatron = router.metatron();
 
-    Ok(Json(OrderDetail::from_order(&order, &metatron, Instant::now())).into_response())
+    Ok(Json(OrderDetail::from_order(
+        &order,
+        &metatron,
+        Instant::now(),
+    )))
 }
 
 async fn add_order(
     State(router): State<Arc<Router>>,
     Json(request): Json<OrderRequest>,
-) -> Response {
-    let order = router.add_order(request, false);
+) -> Result<impl IntoResponse, StatusCode> {
+    let order = router
+        .add_order(request)
+        .ok_or(StatusCode::UNPROCESSABLE_ENTITY)?;
 
-    Json(json!({
-        "id": order.id,
-        "address": order.payment.address.to_string(),
-    }))
-    .into_response()
+    Ok((
+        StatusCode::CREATED,
+        [(
+            axum::http::header::LOCATION,
+            format!("/api/router/order/{}", order.id),
+        )],
+        Json(AddOrderResponse::from_order(&order)),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -118,13 +127,13 @@ async fn list_orders(
     )
 }
 
-async fn remove_order(
+async fn cancel_order(
     State(router): State<Arc<Router>>,
     Path(id): Path<u32>,
-) -> ServerResult<Response> {
+) -> ServerResult<StatusCode> {
     router
         .cancel_order(id)
         .ok_or_not_found(|| format!("Order {id}"))?;
 
-    Ok(Json(json!({ "id": id })).into_response())
+    Ok(StatusCode::NO_CONTENT)
 }

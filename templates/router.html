@@ -227,10 +227,8 @@
         <input id=order-username placeholder="user.worker">
         <label for=order-password>Password</label>
         <input id=order-password placeholder="optional">
-        <label for=order-amount>Amount (sats)</label>
-        <input id=order-amount type=number placeholder="e.g. 1000">
         <label for=order-target-work>Target Work</label>
-        <input id=order-target-work placeholder="e.g. 1.5 PHd, 500 THd, or leave empty for unlimited">
+        <input id=order-target-work placeholder="e.g. 1.5 PHd, 500 THd">
       </div>
       <div id=order-error></div>
       <div id=order-form-buttons class=modal-buttons>
@@ -355,9 +353,9 @@ document.getElementById('upstreams-list').addEventListener('click', async (e) =>
   const btn = e.target.closest('.order-delete');
   if (!btn) return;
   const id = btn.dataset.id;
-  if (!confirm(`Remove order ${id}?`)) return;
+  if (!confirm(`Cancel order ${id}?`)) return;
   try {
-    const res = await fetch(`/api/router/order/${id}`, { method: 'DELETE' });
+    const res = await fetch(`/api/router/order/${id}/cancel`, { method: 'POST' });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       alert(data.message || `Error: ${res.status}`);
@@ -372,7 +370,6 @@ document.getElementById('upstreams-list').addEventListener('click', async (e) =>
   const endpoint = document.getElementById('order-endpoint');
   const username = document.getElementById('order-username');
   const password = document.getElementById('order-password');
-  const amount = document.getElementById('order-amount');
   const targetWork = document.getElementById('order-target-work');
   const error = document.getElementById('order-error');
   const formFields = document.getElementById('order-form-fields');
@@ -387,7 +384,6 @@ document.getElementById('upstreams-list').addEventListener('click', async (e) =>
     endpoint.value = '';
     username.value = '';
     password.value = '';
-    amount.value = '';
     targetWork.value = '';
     error.textContent = '';
     modalTitle.textContent = 'Add Order';
@@ -428,27 +424,26 @@ document.getElementById('upstreams-list').addEventListener('click', async (e) =>
       return;
     }
 
-    const sats = parseInt(amount.value, 10);
+    if (!targetWork.value.trim()) {
+      error.textContent = 'Target work is required';
+      return;
+    }
+
+    const parsed = parseHashDays(targetWork.value);
+    if (parsed === null || parsed <= 0) {
+      error.textContent = 'Target work must be positive (e.g. 1.5 PHd, 500 THd)';
+      return;
+    }
 
     const body = {
       target: {
         endpoint: endpoint.value,
         username: username.value,
       },
-      target_work: null,
-      amount: sats,
+      target_work: parsed,
     };
 
     if (password.value) body.target.password = password.value;
-
-    if (targetWork.value.trim()) {
-      const parsed = parseHashDays(targetWork.value);
-      if (parsed === null) {
-        error.textContent = 'Invalid target work (e.g. 1.5 PHd, 500 THd)';
-        return;
-      }
-      body.target_work = parsed;
-    }
 
     try {
       const res = await fetch('/api/router/order', {
@@ -458,8 +453,7 @@ document.getElementById('upstreams-list').addEventListener('click', async (e) =>
       });
 
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        error.textContent = data.message || `Error: ${res.status}`;
+        error.textContent = `Error: ${res.status}`;
         return;
       }
 
@@ -468,7 +462,7 @@ document.getElementById('upstreams-list').addEventListener('click', async (e) =>
       formFields.classList.add('hidden');
       formButtons.classList.add('hidden');
       error.textContent = '';
-      paymentAmount.textContent = sats;
+      paymentAmount.textContent = data.amount;
       paymentAddress.textContent = data.address;
       payment.classList.remove('hidden');
     } catch (e) {

@@ -233,8 +233,24 @@ pub struct RouterStatus {
 #[derive(Deserialize, Serialize, Debug)]
 pub struct OrderRequest {
     pub target: UpstreamTarget,
-    pub target_work: Option<HashDays>,
-    pub amount: Amount,
+    pub target_work: HashDays,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AddOrderResponse {
+    pub id: u32,
+    pub address: String,
+    pub amount: u64,
+}
+
+impl AddOrderResponse {
+    pub(crate) fn from_order(order: &Order) -> Self {
+        Self {
+            id: order.id,
+            address: order.payment.address.to_string(),
+            amount: order.payment.amount.to_sat(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

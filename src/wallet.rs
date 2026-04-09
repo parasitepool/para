@@ -14,6 +14,7 @@ pub struct Wallet {
     inner: Mutex<bdk_wallet::Wallet>,
     rpc: bitcoincore_rpc::Client,
     birthday: u32,
+    dust_limit: Amount,
 }
 
 impl Wallet {
@@ -37,10 +38,17 @@ impl Wallet {
         let rpc = bitcoincore_rpc::Client::new(rpc_url, rpc_auth)
             .context("failed to create rpc client")?;
 
+        let dust_limit = inner
+            .peek_address(KeychainKind::External, 0)
+            .address
+            .script_pubkey()
+            .minimal_non_dust();
+
         Ok(Self {
             inner: Mutex::new(inner),
             rpc,
             birthday,
+            dust_limit,
         })
     }
 
@@ -122,6 +130,10 @@ impl Wallet {
 
     pub fn release_address(&self, index: u32) {
         self.inner.lock().unmark_used(KeychainKind::External, index);
+    }
+
+    pub fn dust_limit(&self) -> Amount {
+        self.dust_limit
     }
 
     pub fn confirmed_received(&self, derivation_index: u32) -> Amount {

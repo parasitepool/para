@@ -89,9 +89,12 @@ impl TestRouter {
         reqwest::Client::new().get(url).send().await?.json().await
     }
 
-    pub(crate) async fn remove_order(&self, id: u32) -> reqwest::Result<reqwest::Response> {
+    pub(crate) async fn cancel_order(&self, id: u32) -> reqwest::Result<reqwest::Response> {
         reqwest::Client::new()
-            .delete(format!("{}/api/router/order/{id}", self.api_endpoint()))
+            .post(format!(
+                "{}/api/router/order/{id}/cancel",
+                self.api_endpoint()
+            ))
             .send()
             .await
     }

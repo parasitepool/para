@@ -46,7 +46,7 @@ use {
     base64::{Engine, engine::general_purpose},
     bip322::sign_simple_encoded,
     bitcoin::{
-        Amount, CompressedPublicKey, Network, PrivateKey, block::Header, hashes::Hash,
+        CompressedPublicKey, Network, PrivateKey, block::Header, hashes::Hash,
         key::UntweakedPublicKey, secp256k1::Secp256k1, sign_message::MessageSignature,
     },
     harness::bitcoind::Bitcoind,

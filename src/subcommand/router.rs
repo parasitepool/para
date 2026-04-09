@@ -35,6 +35,9 @@ impl RouterCommand {
             settings.wallet_birthday(),
         )?);
 
+        info!("Syncing wallet...");
+
+        wallet.sync().context("initial wallet sync failed")?;
         wallet.spawn(settings.tick_interval(), cancel_token.clone(), &tasks);
 
         let address = settings.address();
@@ -55,14 +58,7 @@ impl RouterCommand {
         ));
 
         for target in settings.default_orders() {
-            router.add_order(
-                api::OrderRequest {
-                    target: target.clone(),
-                    target_work: None,
-                    amount: Amount::ZERO,
-                },
-                true,
-            );
+            router.add_order_with(target.clone(), None, Amount::ZERO, true);
         }
 
         http_server::spawn(
