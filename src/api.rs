@@ -216,7 +216,7 @@ impl UpstreamInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RouterStatus {
-    pub active_orders: usize,
+    pub order_count: usize,
     pub upstream_accepted: u64,
     pub upstream_rejected: u64,
     pub upstream_accepted_work: TotalWork,
@@ -228,6 +228,13 @@ pub struct RouterStatus {
     pub uptime_secs: u64,
     pub orders: Vec<OrderDetail>,
     pub stats: MiningStats,
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+pub struct OrderRequest {
+    pub target: UpstreamTarget,
+    pub target_work: Option<HashDays>,
+    pub amount: Amount,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -299,8 +306,8 @@ impl OrderDetail {
             status: order.status(),
             target: order.target.clone(),
             target_work: order.target_work,
-            address: order.address.to_string(),
-            amount: order.amount,
+            address: order.payment.address.to_string(),
+            amount: order.payment.amount,
             upstream_id,
             upstream,
             user_count: upstream_id.map_or(0, |id| metatron.upstream_user_count(id)),
@@ -315,11 +322,4 @@ impl OrderDetail {
             stats,
         }
     }
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-pub struct OrderRequest {
-    pub target: UpstreamTarget,
-    pub target_work: Option<HashDays>,
-    pub amount: Amount,
 }

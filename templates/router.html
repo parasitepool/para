@@ -191,7 +191,7 @@
 <div class="grid grid-stack">
   <div class=column>
     <h2>Upstream</h2>
-    <div class=row><span>Active Orders</span><span id=active_orders></span></div>
+    <div class=row><span>Orders</span><span id=order_count></span></div>
     <div class=row><span>Rejected Shares</span><span id=upstream_rejected_shares class=copyable></span></div>
     <div class=row><span>Rejected Work</span><span id=upstream_rejected_work class=copyable></span></div>
     <div class=row><span>Delivered Work</span><span id=upstream_total_work></span></div>
@@ -294,7 +294,7 @@ async function refresh(signal) {
     ]);
 
     const s = routerData.stats;
-    set('active_orders', routerData.active_orders);
+    set('order_count', routerData.order_count);
     set('session_count', routerData.session_count);
     set('idle', routerData.idle_count);
     set('disconnected', routerData.disconnected_count);

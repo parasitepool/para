@@ -1,7 +1,7 @@
 use super::*;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum OrderStatus {
     Pending,
     Active,
@@ -9,35 +9,7 @@ pub enum OrderStatus {
     Cancelled,
     Disconnected,
     Expired,
-    #[serde(rename = "paid_late")]
     PaidLate,
-}
-
-impl OrderStatus {
-    pub(super) fn to_u8(self) -> u8 {
-        match self {
-            Self::Pending => 0,
-            Self::Active => 1,
-            Self::Fulfilled => 2,
-            Self::Cancelled => 3,
-            Self::Disconnected => 4,
-            Self::Expired => 5,
-            Self::PaidLate => 6,
-        }
-    }
-
-    pub(super) fn from_u8(v: u8) -> Self {
-        match v {
-            0 => Self::Pending,
-            1 => Self::Active,
-            2 => Self::Fulfilled,
-            3 => Self::Cancelled,
-            4 => Self::Disconnected,
-            5 => Self::Expired,
-            6 => Self::PaidLate,
-            _ => Self::Pending,
-        }
-    }
 }
 
 pub(crate) struct Payment {
@@ -51,15 +23,14 @@ pub struct Order {
     pub(crate) id: u32,
     pub(crate) target: UpstreamTarget,
     pub(crate) target_work: Option<HashDays>,
-    pub(super) upstream: OnceLock<Arc<Upstream>>,
-    pub(super) allocator: OnceLock<Arc<EnonceAllocator>>,
+    pub(crate) upstream: OnceLock<Arc<Upstream>>,
+    pub(crate) allocator: OnceLock<Arc<EnonceAllocator>>,
     pub(crate) cancel: CancellationToken,
-    pub(super) status: AtomicU8,
-    pub(crate) address: Address,
-    pub(crate) derivation_index: u32,
-    pub(crate) amount: Amount,
+    pub(crate) status: Mutex<OrderStatus>,
+    pub(crate) payment: Payment,
     pub(crate) created_at: Instant,
-    pub(crate) timeout: Duration,
+    pub(crate) default: bool,
+    pub(crate) stratum_sessions: Mutex<Vec<CancellationToken>>,
 }
 
 impl Order {
@@ -69,6 +40,7 @@ impl Order {
         target_work: Option<HashDays>,
         cancel: CancellationToken,
         payment: Payment,
+        default: bool,
     ) -> Arc<Self> {
         Arc::new(Self {
             id,
@@ -77,13 +49,28 @@ impl Order {
             upstream: OnceLock::new(),
             allocator: OnceLock::new(),
             cancel,
-            status: AtomicU8::new(OrderStatus::Pending.to_u8()),
-            address: payment.address,
-            derivation_index: payment.derivation_index,
-            amount: payment.amount,
+            status: Mutex::new(OrderStatus::Pending),
+            payment,
             created_at: Instant::now(),
-            timeout: payment.timeout,
+            default,
+            stratum_sessions: Mutex::new(Vec::new()),
         })
+    }
+
+    pub(crate) fn register_session(&self) -> CancellationToken {
+        let token = self.cancel.child_token();
+        let mut tokens = self.stratum_sessions.lock();
+        tokens.retain(|t| !t.is_cancelled());
+        tokens.push(token.clone());
+        token
+    }
+
+    pub(crate) fn trim_sessions(&self, count: usize) {
+        let mut tokens = self.stratum_sessions.lock();
+        let n = count.min(tokens.len());
+        for token in tokens.drain(..n) {
+            token.cancel();
+        }
     }
 
     pub(crate) async fn activate(
@@ -127,22 +114,21 @@ impl Order {
     }
 
     pub(crate) fn status(&self) -> OrderStatus {
-        OrderStatus::from_u8(self.status.load(Ordering::Relaxed))
+        *self.status.lock()
     }
 
     pub(crate) fn transition_status(&self, from: OrderStatus, to: OrderStatus) -> bool {
-        self.status
-            .compare_exchange(
-                from.to_u8(),
-                to.to_u8(),
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            )
-            .is_ok()
+        let mut status = self.status.lock();
+        if *status == from {
+            *status = to;
+            true
+        } else {
+            false
+        }
     }
 
     pub(crate) fn set_status(&self, status: OrderStatus) {
-        self.status.store(status.to_u8(), Ordering::Relaxed);
+        *self.status.lock() = status;
     }
 
     pub(crate) fn mark_active(&self) -> bool {
@@ -154,18 +140,20 @@ impl Order {
     }
 
     pub(crate) fn ready_for_activation(&self, received: Amount, elapsed: Duration) -> bool {
-        if elapsed >= self.timeout {
-            let _ = self.transition_status(OrderStatus::Pending, OrderStatus::Expired);
+        let mut status = self.status.lock();
+
+        if elapsed >= self.payment.timeout && *status == OrderStatus::Pending {
+            *status = OrderStatus::Expired;
         }
 
-        if received < self.amount {
+        if received < self.payment.amount {
             return false;
         }
 
-        match self.status() {
+        match *status {
             OrderStatus::Pending => true,
             OrderStatus::Expired => {
-                let _ = self.transition_status(OrderStatus::Expired, OrderStatus::PaidLate);
+                *status = OrderStatus::PaidLate;
                 false
             }
             _ => false,
@@ -174,6 +162,11 @@ impl Order {
 
     pub(crate) fn is_active(&self) -> bool {
         self.status() == OrderStatus::Active
+    }
+
+    #[cfg(test)]
+    pub(crate) fn session_token_count(&self) -> usize {
+        self.stratum_sessions.lock().len()
     }
 
     pub(crate) fn is_fulfilled(&self) -> bool {
@@ -214,6 +207,7 @@ mod tests {
                 amount: Amount::from_sat(1000),
                 timeout: Duration::from_secs(60),
             },
+            false,
         )
     }
 
@@ -234,18 +228,12 @@ mod tests {
     }
 
     #[test]
-    fn activation_requires_pending_status() {
+    fn transitions_require_pending_status() {
         let order = test_order();
         order.set_status(OrderStatus::Cancelled);
 
         assert!(!order.mark_active());
         assert_eq!(order.status(), OrderStatus::Cancelled);
-    }
-
-    #[test]
-    fn pending_disconnect_requires_pending_status() {
-        let order = test_order();
-        order.set_status(OrderStatus::Cancelled);
 
         assert!(!order.mark_disconnected_while_pending());
         assert_eq!(order.status(), OrderStatus::Cancelled);

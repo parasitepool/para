@@ -55,11 +55,14 @@ impl RouterCommand {
         ));
 
         for target in settings.default_orders() {
-            router.add_order(api::OrderRequest {
-                target: target.clone(),
-                target_work: None,
-                amount: Amount::ZERO,
-            });
+            router.add_order(
+                api::OrderRequest {
+                    target: target.clone(),
+                    target_work: None,
+                    amount: Amount::ZERO,
+                },
+                true,
+            );
         }
 
         http_server::spawn(
@@ -101,7 +104,7 @@ impl RouterCommand {
             };
 
             let settings = settings.clone();
-            let cancel_token = order.cancel.child_token();
+            let cancel_token = order.register_session();
             let metatron = metatron.clone();
             let start_diff = settings.start_diff();
 

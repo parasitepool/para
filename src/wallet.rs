@@ -311,39 +311,34 @@ mod tests {
     }
 
     #[test]
-    fn reserve_yields_unique_addresses() {
+    fn address_reservation() {
         let wallet = test_wallet();
 
         let a = wallet.reserve_address();
         let b = wallet.reserve_address();
-
         assert_ne!(a.index, b.index);
         assert_ne!(a.address, b.address);
-    }
 
-    #[test]
-    fn released_address_is_reused() {
-        let wallet = test_wallet();
-
-        let a = wallet.reserve_address();
         let address = a.address.clone();
         wallet.release_address(a.index);
-
-        let b = wallet.reserve_address();
-        assert_eq!(b.address, address);
+        let c = wallet.reserve_address();
+        assert_eq!(c.address, address);
     }
 
     #[test]
-    fn confirmed_received_detects_payment() {
+    fn confirmed_received() {
         let wallet = test_wallet();
-        let info = wallet.reserve_address();
+        let info_a = wallet.reserve_address();
+        let info_b = wallet.reserve_address();
 
-        confirm_payment(&wallet, &info.address, Amount::from_sat(1000));
+        confirm_payment(&wallet, &info_a.address, Amount::from_sat(500));
+        confirm_payment(&wallet, &info_a.address, Amount::from_sat(700));
 
         assert_eq!(
-            wallet.confirmed_received(info.index),
-            Amount::from_sat(1000),
+            wallet.confirmed_received(info_a.index),
+            Amount::from_sat(1200),
         );
+        assert_eq!(wallet.confirmed_received(info_b.index), Amount::ZERO);
     }
 
     #[test]
@@ -366,34 +361,5 @@ mod tests {
         wallet.inner.lock().apply_unconfirmed_txs([(tx, 0)]);
 
         assert_eq!(wallet.confirmed_received(info.index), Amount::ZERO);
-    }
-
-    #[test]
-    fn confirmed_received_sums_multiple_utxos() {
-        let wallet = test_wallet();
-        let info = wallet.reserve_address();
-
-        confirm_payment(&wallet, &info.address, Amount::from_sat(500));
-        confirm_payment(&wallet, &info.address, Amount::from_sat(700));
-
-        assert_eq!(
-            wallet.confirmed_received(info.index),
-            Amount::from_sat(1200),
-        );
-    }
-
-    #[test]
-    fn confirmed_received_ignores_wrong_index() {
-        let wallet = test_wallet();
-        let info_a = wallet.reserve_address();
-        let info_b = wallet.reserve_address();
-
-        confirm_payment(&wallet, &info_a.address, Amount::from_sat(1000));
-
-        assert_eq!(
-            wallet.confirmed_received(info_a.index),
-            Amount::from_sat(1000)
-        );
-        assert_eq!(wallet.confirmed_received(info_b.index), Amount::ZERO);
     }
 }

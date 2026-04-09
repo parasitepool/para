@@ -50,10 +50,7 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
     }
 
     Json(RouterStatus {
-        active_orders: orders
-            .iter()
-            .filter(|o| o.status == OrderStatus::Active)
-            .count(),
+        order_count: orders.len(),
         session_count: metatron.total_sessions(),
         disconnected_count: metatron.total_disconnected(),
         idle_count: metatron.total_idle(),
@@ -85,11 +82,11 @@ async fn add_order(
     State(router): State<Arc<Router>>,
     Json(request): Json<OrderRequest>,
 ) -> Response {
-    let order = router.add_order(request);
+    let order = router.add_order(request, false);
 
     Json(json!({
         "id": order.id,
-        "address": order.address.to_string(),
+        "address": order.payment.address.to_string(),
     }))
     .into_response()
 }
@@ -113,7 +110,7 @@ async fn list_orders(
                         .target
                         .username()
                         .address_str()
-                        .is_some_and(|a| a == addr)
+                        .is_some_and(|address| address == addr)
                 })
             })
             .map(|order| order.id)

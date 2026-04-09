@@ -2,14 +2,16 @@ use super::*;
 
 pub(crate) struct Orders {
     all: BTreeMap<u32, Arc<Order>>,
-    active: Vec<Arc<Order>>,
+    active_paid: Vec<Arc<Order>>,
+    active_default: Vec<Arc<Order>>,
 }
 
 impl Orders {
     pub(crate) fn new() -> Self {
         Self {
             all: BTreeMap::new(),
-            active: Vec::new(),
+            active_paid: Vec::new(),
+            active_default: Vec::new(),
         }
     }
 
@@ -19,12 +21,25 @@ impl Orders {
 
     pub(crate) fn activate(&mut self, id: u32) {
         if let Some(order) = self.all.get(&id) {
-            self.active.push(order.clone());
+            if order.default {
+                self.active_default.push(order.clone());
+            } else {
+                self.active_paid.push(order.clone());
+            }
         }
     }
 
     pub(crate) fn deactivate(&mut self, id: u32) {
-        self.active.retain(|order| order.id != id);
+        self.active_paid.retain(|order| order.id != id);
+        self.active_default.retain(|order| order.id != id);
+    }
+
+    pub(crate) fn active_paid(&self) -> &[Arc<Order>] {
+        &self.active_paid
+    }
+
+    pub(crate) fn active_default(&self) -> &[Arc<Order>] {
+        &self.active_default
     }
 
     pub(crate) fn get(&self, id: u32) -> Option<Arc<Order>> {
@@ -35,14 +50,32 @@ impl Orders {
         self.all.values().cloned().collect()
     }
 
-    pub(crate) fn match_round_robin(&self, counter: u64) -> Option<Arc<Order>> {
-        if self.active.is_empty() {
+    pub(crate) fn match_paid(&self, counter: u64) -> Option<Arc<Order>> {
+        let pool = if self.active_paid.is_empty() {
+            &self.active_default
+        } else {
+            &self.active_paid
+        };
+
+        if pool.is_empty() {
             return None;
         }
 
-        let idx = counter as usize % self.active.len();
+        Some(pool[counter as usize % pool.len()].clone())
+    }
 
-        Some(self.active[idx].clone())
+    pub(crate) fn match_any(&self, counter: u64) -> Option<Arc<Order>> {
+        let total = self.active_paid.len() + self.active_default.len();
+
+        if total == 0 {
+            return None;
+        }
+
+        self.active_paid
+            .iter()
+            .chain(&self.active_default)
+            .nth(counter as usize % total)
+            .cloned()
     }
 
     #[cfg(test)]
@@ -52,7 +85,7 @@ impl Orders {
 
     #[cfg(test)]
     pub(super) fn active_len(&self) -> usize {
-        self.active.len()
+        self.active_paid.len() + self.active_default.len()
     }
 
     #[cfg(test)]
@@ -62,6 +95,11 @@ impl Orders {
 
     #[cfg(test)]
     pub(super) fn active_id(&self, idx: usize) -> u32 {
-        self.active[idx].id
+        self.active_paid
+            .iter()
+            .chain(&self.active_default)
+            .nth(idx)
+            .unwrap()
+            .id
     }
 }

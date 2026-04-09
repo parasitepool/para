@@ -150,6 +150,17 @@ impl Metatron {
         self.started.elapsed()
     }
 
+    pub(crate) fn upstream_session_count(&self, upstream_id: u32) -> usize {
+        self.users
+            .iter()
+            .map(|user| {
+                user.workers()
+                    .map(|worker| worker.upstream_session_count(upstream_id))
+                    .sum::<usize>()
+            })
+            .sum()
+    }
+
     pub(crate) fn upstream_sessions(&self, upstream_id: u32) -> Vec<Arc<Session>> {
         self.users
             .iter()
