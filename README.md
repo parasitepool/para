@@ -16,47 +16,21 @@
 `para` is a command-line tool for miners and pools. It is experimental
 software with no warranty. See [LICENSE](LICENSE) for more details.
 
+It implements a Rust library for the Stratum protocol and includes helpful
+command-line tools that measure ping, inspect block templates, mimic mining
+machines and run pool logic. To see a full list of available commands just
+follow the instructions below and do `para help`.
+
 This repository includes a modified fork of
 [ckpool](https://bitbucket.org/ckolivas/ckpool/src/master/), which currently
 runs on `parasite.wtf:42069`. For instructions on how to connect, please visit
-[parasite.space](https://parasite.space?help).
+[parasite.space](https://parasite.space?help). The modifications to the C
+codebase of ckpool are:
 
-In addition to adding a postgres database for share logging and some helpful
-flags it modifies the coinbase payout logic found in `stratifier.c`. For more
-information go
-[here](https://zkshark.substack.com/p/parasite-pool-igniting-the-mining).
-
-```c 
-// Generation value
-g64 = COIN;
-d64 = wb->coinbasevalue - COIN;
-wb->coinb2bin[wb->coinb2len++] = 2 + wb->insert_witness;
-
-u64 = (uint64_t*)&wb->coinb2bin[wb->coinb2len];
-*u64 = htole64(g64);
-wb->coinb2len += 8;
-
-/* Coinb2 address goes here, takes up 23~25 bytes + 1 byte for length */
-
-wb->coinb3len = 0;
-wb->coinb3bin = ckzalloc(256 + wb->insert_witness * (8 + witnessdata_size + 2));
-
-if (ckp->donvalid && ckp->donation > 0) {
-    u64 = (uint64_t*)wb->coinb3bin;
-    *u64 = htole64(d64);
-    wb->coinb3len += 8;
-
-    wb->coinb3bin[wb->coinb3len++] = sdata->dontxnlen;
-    memcpy(wb->coinb3bin + wb->coinb3len, sdata->dontxnbin, sdata->dontxnlen);
-    wb->coinb3len += sdata->dontxnlen;
-}
-```
-
-`para` is more than just glue code around ckpool though. It implements a Rust
-library for the Stratum protocol and includes helpful command-line tools that
-measure ping, inspect block templates and mimic mining machines. To see a full
-list of available commands just follow the instructions below and do `para
-help`.
+- postgres database for share logging 
+- custom coinbase [logic](https://zkshark.substack.com/p/parasite-pool-igniting-the-mining).
+- support for signet
+- miscellaneous helpful config flags
 
 Setup
 -----
