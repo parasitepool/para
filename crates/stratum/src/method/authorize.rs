@@ -36,11 +36,11 @@ impl<'de> Deserialize<'de> for Authorize {
 
         match Raw::deserialize(deserializer)? {
             Raw::One((username,)) => Ok(Authorize {
-                username: username.into(),
+                username: Username::try_from(username).map_err(serde::de::Error::custom)?,
                 password: None,
             }),
             Raw::Two((username, password)) => Ok(Authorize {
-                username: username.into(),
+                username: Username::try_from(username).map_err(serde::de::Error::custom)?,
                 password,
             }),
         }
@@ -68,9 +68,11 @@ mod tests {
     #[test]
     fn authorize_with_password_roundtrip() {
         case(
-            r#"["slush.miner1","password"]"#,
+            r#"["bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.miner1","password"]"#,
             Authorize {
-                username: "slush.miner1".into(),
+                username: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.miner1"
+                    .parse()
+                    .unwrap(),
                 password: Some("password".into()),
             },
         );
@@ -79,31 +81,44 @@ mod tests {
     #[test]
     fn authorize_omitted_password_roundtrip() {
         let expected = Authorize {
-            username: "user".into(),
+            username: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.default"
+                .parse()
+                .unwrap(),
             password: None,
         };
-        let parsed: Result<Authorize, _> = serde_json::from_str(r#"["user"]"#);
+        let parsed: Result<Authorize, _> =
+            serde_json::from_str(r#"["bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.default"]"#);
         let parsed = parsed.expect("should accept omitted password");
 
         assert_eq!(parsed, expected);
 
         let v = serde_json::to_value(&parsed).unwrap();
-        assert_eq!(v, serde_json::json!(["user"]));
+        assert_eq!(
+            v,
+            serde_json::json!(["bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.default"])
+        );
     }
 
     #[test]
     fn authorize_null_password_normalizes() {
-        let parsed: Authorize = serde_json::from_str(r#"["user",null]"#).unwrap();
+        let parsed: Authorize =
+            serde_json::from_str(r#"["bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.default",null]"#)
+                .unwrap();
         assert_eq!(
             parsed,
             Authorize {
-                username: "user".into(),
+                username: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.default"
+                    .parse()
+                    .unwrap(),
                 password: None,
             }
         );
 
         let v = serde_json::to_value(&parsed).unwrap();
-        assert_eq!(v, serde_json::json!(["user"]));
+        assert_eq!(
+            v,
+            serde_json::json!(["bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.default"])
+        );
     }
 
     #[test]

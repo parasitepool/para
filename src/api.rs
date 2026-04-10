@@ -80,7 +80,7 @@ pub struct PoolStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserDetail {
-    pub address: String,
+    pub address: Address<NetworkUnchecked>,
     pub session_count: usize,
     pub authorized_at: u64,
     pub workers: Vec<WorkerDetail>,
@@ -105,7 +105,7 @@ impl UserDetail {
         let user_stats = user.snapshot();
 
         Self {
-            address: user.address.to_string(),
+            address: user.address.as_unchecked().clone(),
             session_count: user.session_count(),
             authorized_at: user.authorized,
             workers,
@@ -137,7 +137,7 @@ impl WorkerDetail {
 pub struct SessionDetail {
     pub id: SessionId,
     pub upstream_id: u32,
-    pub address: String,
+    pub address: Address<NetworkUnchecked>,
     pub worker_name: String,
     pub username: String,
     pub enonce1: Extranonce,
@@ -151,7 +151,7 @@ impl SessionDetail {
         Self {
             id: session.id(),
             upstream_id: session.id().upstream_id(),
-            address: session.address().to_string(),
+            address: session.address().as_unchecked().clone(),
             worker_name: session.workername().to_string(),
             username: session.username().to_string(),
             enonce1: session.enonce1().clone(),
@@ -230,7 +230,7 @@ pub struct RouterStatus {
     pub stats: MiningStats,
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct OrderRequest {
     pub target: UpstreamTarget,
     pub target_work: HashDays,
@@ -239,7 +239,7 @@ pub struct OrderRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AddOrderResponse {
     pub id: u32,
-    pub address: String,
+    pub address: Address<NetworkUnchecked>,
     pub amount: u64,
 }
 
@@ -247,7 +247,7 @@ impl AddOrderResponse {
     pub(crate) fn from_order(order: &Order) -> Self {
         Self {
             id: order.id,
-            address: order.payment.address.to_string(),
+            address: order.payment.address.as_unchecked().clone(),
             amount: order.payment.amount.to_sat(),
         }
     }
@@ -259,7 +259,7 @@ pub struct OrderDetail {
     pub status: OrderStatus,
     pub target: UpstreamTarget,
     pub target_work: Option<HashDays>,
-    pub address: String,
+    pub address: Address<NetworkUnchecked>,
     pub amount: Amount,
     pub upstream_id: Option<u32>,
     pub upstream: Option<UpstreamInfo>,
@@ -322,7 +322,7 @@ impl OrderDetail {
             status: order.status(),
             target: order.target.clone(),
             target_work: order.target_work,
-            address: order.payment.address.to_string(),
+            address: order.payment.address.as_unchecked().clone(),
             amount: order.payment.amount,
             upstream_id,
             upstream,

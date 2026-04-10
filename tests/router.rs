@@ -83,7 +83,11 @@ async fn add_order(router: &TestRouter, target: &str, target_work: HashDays) -> 
 
     assert_eq!(location, format!("/api/router/order/{}", body.id));
 
-    (body.id, body.address, body.amount)
+    (
+        body.id,
+        body.address.assume_checked().to_string(),
+        body.amount,
+    )
 }
 
 async fn add_and_activate_order(
@@ -157,7 +161,9 @@ async fn add_order_with_zero_target_work_rejected() {
 
     let response = router
         .add_order(&api::OrderRequest {
-            target: "foo@bar:3333".parse().unwrap(),
+            target: "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333"
+                .parse()
+                .unwrap(),
             target_work: HashDays(0.0),
         })
         .await
@@ -178,10 +184,20 @@ async fn add_order_response_amount_uses_price_and_dust_floor() {
         "--start-diff 0.00001 --hashprice 1000",
     );
 
-    let (_, _, priced_amount) = add_order(&router, "foo@bar:3333", HashDays(2e15)).await;
+    let (_, _, priced_amount) = add_order(
+        &router,
+        "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333",
+        HashDays(2e15),
+    )
+    .await;
     assert_eq!(priced_amount, 2000);
 
-    let (_, _, dust_amount) = add_order(&router, "foo@bar:4444", HashDays(1e12)).await;
+    let (_, _, dust_amount) = add_order(
+        &router,
+        "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:4444",
+        HashDays(1e12),
+    )
+    .await;
     assert_eq!(dust_amount, dust_limit(&descriptor));
     assert!(dust_amount > 1);
 }
@@ -588,7 +604,9 @@ async fn router_rejects_incompatible_resumed_enonce1() {
 
     let upstream_username = signet_username();
     let miner_address = fund_wallet(&wallet_bitcoind, &generate_descriptor()).await;
-    let miner_username = Username::new(format!("{miner_address}.miner"));
+    let miner_username = format!("{miner_address}.miner")
+        .parse::<Username>()
+        .unwrap();
 
     let pool_a = TestPool::spawn_with_args(
         &pool_bitcoind,
@@ -694,7 +712,9 @@ async fn list_orders_by_address() {
     );
 
     let username_a = signet_username();
-    let username_b = Username::new("tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.bar");
+    let username_b = "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.bar"
+        .parse::<Username>()
+        .unwrap();
 
     add_order(&router, &format!("{username_a}@foo:3333"), HashDays(1e15)).await;
     add_order(&router, &format!("{username_a}@foo:4444"), HashDays(1e15)).await;
@@ -704,17 +724,20 @@ async fn list_orders_by_address() {
     assert_eq!(all.len(), 3);
 
     let filtered_a = router
-        .list_orders(Some(username_a.address_str().unwrap()))
+        .list_orders(Some(
+            &username_a.address().clone().assume_checked().to_string(),
+        ))
         .await
         .unwrap();
+
     assert_eq!(filtered_a.len(), 2);
 
     let filtered_b = router
-        .list_orders(Some(username_b.address_str().unwrap()))
+        .list_orders(Some(
+            &username_b.address().clone().assume_checked().to_string(),
+        ))
         .await
         .unwrap();
-    assert_eq!(filtered_b.len(), 1);
 
-    let filtered_none = router.list_orders(Some("tb1qnonexistent")).await.unwrap();
-    assert_eq!(filtered_none.len(), 0);
+    assert_eq!(filtered_b.len(), 1);
 }

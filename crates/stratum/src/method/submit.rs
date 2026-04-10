@@ -84,9 +84,11 @@ mod tests {
     #[test]
     fn submit_roundtrip_no_version_bits() {
         case(
-            r#"["slush.miner1","bf","00000001","504e86ed","b2957c02"]"#,
+            r#"["bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.miner1","bf","00000001","504e86ed","b2957c02"]"#,
             Submit {
-                username: "slush.miner1".into(),
+                username: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.miner1"
+                    .parse()
+                    .unwrap(),
                 job_id: "bf".parse().unwrap(),
                 enonce2: "00000001".parse().unwrap(),
                 ntime: "504e86ed".parse().unwrap(),
@@ -99,9 +101,11 @@ mod tests {
     #[test]
     fn submit_roundtrip_with_version_bits() {
         case(
-            r#"["slush.miner1","bf","00000001","504e86ed","b2957c02","04d46000"]"#,
+            r#"["bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.miner1","bf","00000001","504e86ed","b2957c02","04d46000"]"#,
             Submit {
-                username: "slush.miner1".into(),
+                username: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.miner1"
+                    .parse()
+                    .unwrap(),
                 job_id: "bf".parse().unwrap(),
                 enonce2: "00000001".parse().unwrap(),
                 ntime: "504e86ed".parse().unwrap(),
@@ -114,7 +118,9 @@ mod tests {
     #[test]
     fn submit_serialize_shape() {
         let a = Submit {
-            username: "u".into(),
+            username: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.worker"
+                .parse()
+                .unwrap(),
             job_id: "deadbeef".parse().unwrap(),
             enonce2: "01".parse().unwrap(),
             ntime: "00000000".parse().unwrap(),
@@ -123,7 +129,13 @@ mod tests {
         };
         assert_eq!(
             serde_json::to_value(&a).unwrap(),
-            serde_json::json!(["u", "deadbeef", "01", "00000000", "00000000"])
+            serde_json::json!([
+                "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.worker",
+                "deadbeef",
+                "01",
+                "00000000",
+                "00000000"
+            ])
         );
 
         let b = Submit {
@@ -132,7 +144,14 @@ mod tests {
         };
         assert_eq!(
             serde_json::to_value(&b).unwrap(),
-            serde_json::json!(["u", "deadbeef", "01", "00000000", "00000000", "ffffffff"])
+            serde_json::json!([
+                "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.worker",
+                "deadbeef",
+                "01",
+                "00000000",
+                "00000000",
+                "ffffffff"
+            ])
         );
     }
 

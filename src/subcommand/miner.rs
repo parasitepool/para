@@ -126,7 +126,7 @@ mod tests {
     fn parse_args_with_cpu_cores() {
         let miner = parse_miner_args(
             "para miner parasite.wtf:42069 \
-                --username test.worker \
+                --username bc1q8jx6g9ujlqmdx3jnt3ap6ll2fdwqjdkdgs959m.worker1.aed48ef@parasite.sati.pro \
                 --password x \
                 --cpu-cores 8
             ",
@@ -139,7 +139,7 @@ mod tests {
     fn parse_args_with_default_mode() {
         let miner = parse_miner_args(
             "para miner parasite.wtf:42069 \
-            --username test.worker \
+            --username bc1q8jx6g9ujlqmdx3jnt3ap6ll2fdwqjdkdgs959m.worker1.aed48ef@parasite.sati.pro \
             --password x",
         );
 
@@ -150,7 +150,7 @@ mod tests {
     fn parse_args_with_mode_share_found() {
         let miner = parse_miner_args(
             "para miner parasite.wtf:42069 \
-            --username test.worker \
+            --username bc1q8jx6g9ujlqmdx3jnt3ap6ll2fdwqjdkdgs959m.worker1.aed48ef@parasite.sati.pro \
             --password x \
             --mode share-found",
         );
@@ -162,7 +162,7 @@ mod tests {
     fn parse_args_with_mode_block_found() {
         let miner = parse_miner_args(
             "para miner parasite.wtf:42069 \
-            --username test.worker \
+            --username bc1q8jx6g9ujlqmdx3jnt3ap6ll2fdwqjdkdgs959m.worker1.aed48ef@parasite.sati.pro \
             --password x \
             --mode block-found",
         );

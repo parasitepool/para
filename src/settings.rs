@@ -632,6 +632,9 @@ impl Settings {
 mod tests {
     use {super::*, crate::arguments::Arguments};
 
+    const PROXY_ADDRESS: &str = "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc";
+    const PROXY_USERNAME: &str = "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker";
+
     fn parse_pool_options(args: &str) -> PoolOptions {
         match Arguments::try_parse_from(args.split_whitespace()) {
             Ok(arguments) => match arguments.subcommand {
@@ -659,6 +662,14 @@ mod tests {
                 subcommand => panic!("unexpected subcommand: {subcommand:?}"),
             },
             Err(err) => panic!("error parsing arguments: {err}"),
+        }
+    }
+
+    fn proxy_command(extra: &str) -> String {
+        if extra.is_empty() {
+            format!("para proxy --upstream {PROXY_USERNAME}@foo:1234")
+        } else {
+            format!("para proxy --upstream {PROXY_USERNAME}@foo:1234 {extra}")
         }
     }
 
@@ -1011,7 +1022,7 @@ mod tests {
             check(&proxy);
         }
 
-        case("para pool", "para proxy --upstream bar@foo:1234", |s| {
+        case("para pool", &proxy_command(""), |s| {
             assert!(s.acme_domains.is_empty());
             assert!(s.acme_contacts.is_empty());
             assert_eq!(s.acme_cache, PathBuf::from("acme-cache"));
@@ -1019,7 +1030,7 @@ mod tests {
 
         case(
             "para pool --acme-domain foo.bar --acme-domain baz.qux",
-            "para proxy --upstream bar@foo:1234 --acme-domain foo.bar --acme-domain baz.qux",
+            &proxy_command("--acme-domain foo.bar --acme-domain baz.qux"),
             |s| {
                 assert_eq!(s.acme_domains, vec!["foo.bar", "baz.qux"]);
             },
@@ -1027,7 +1038,7 @@ mod tests {
 
         case(
             "para pool --acme-contact foo@bar --acme-contact baz@qux",
-            "para proxy --upstream bar@foo:1234 --acme-contact foo@bar --acme-contact baz@qux",
+            &proxy_command("--acme-contact foo@bar --acme-contact baz@qux"),
             |s| {
                 assert_eq!(s.acme_contacts, vec!["foo@bar", "baz@qux"]);
             },
@@ -1035,7 +1046,7 @@ mod tests {
 
         case(
             "para pool --acme-cache /foo/bar",
-            "para proxy --upstream bar@foo:1234 --acme-cache /foo/bar",
+            &proxy_command("--acme-cache /foo/bar"),
             |s| {
                 assert_eq!(s.acme_cache, PathBuf::from("/foo/bar"));
             },
@@ -1043,7 +1054,7 @@ mod tests {
 
         case(
             "para pool --data-dir /foo",
-            "para proxy --upstream bar@foo:1234 --data-dir /foo",
+            &proxy_command("--data-dir /foo"),
             |s| {
                 assert_eq!(s.acme_cache_path(), PathBuf::from("/foo/acme-cache"));
             },
@@ -1052,13 +1063,13 @@ mod tests {
 
     #[test]
     fn proxy_defaults_are_sane() {
-        let options = parse_proxy_options("para proxy --upstream bar@foo:1234");
+        let options = parse_proxy_options(&proxy_command(""));
         let settings = Settings::from_proxy_options(options).unwrap();
 
         let upstream = settings.upstream_targets().first().unwrap();
 
         assert_eq!(upstream.endpoint(), "foo:1234");
-        assert_eq!(upstream.username().to_string(), "bar".to_string());
+        assert_eq!(upstream.username().to_string(), PROXY_USERNAME.to_string());
         assert_eq!(upstream.password(), None);
         assert_eq!(settings.address, "0.0.0.0");
         assert_eq!(settings.port, 42069);
@@ -1068,9 +1079,7 @@ mod tests {
 
     #[test]
     fn proxy_override_address_and_port() {
-        let options = parse_proxy_options(
-            "para proxy --upstream bar@foo:1234 --address 127.0.0.1 --port 9999",
-        );
+        let options = parse_proxy_options(&proxy_command("--address 127.0.0.1 --port 9999"));
         let settings = Settings::from_proxy_options(options).unwrap();
 
         assert_eq!(settings.address, "127.0.0.1");
@@ -1079,7 +1088,7 @@ mod tests {
 
     #[test]
     fn proxy_override_http_port() {
-        let options = parse_proxy_options("para proxy --upstream bar@foo:1234 --http-port 8080");
+        let options = parse_proxy_options(&proxy_command("--http-port 8080"));
         let settings = Settings::from_proxy_options(options).unwrap();
 
         assert_eq!(settings.http_port, Some(8080));
@@ -1087,7 +1096,7 @@ mod tests {
 
     #[test]
     fn proxy_override_timeout() {
-        let options = parse_proxy_options("para proxy --upstream bar@foo:1234 --timeout 60");
+        let options = parse_proxy_options(&proxy_command("--timeout 60"));
         let settings = Settings::from_proxy_options(options).unwrap();
 
         assert_eq!(settings.timeout, Duration::from_secs(60));
@@ -1095,7 +1104,9 @@ mod tests {
 
     #[test]
     fn proxy_password_override() {
-        let options = parse_proxy_options("para proxy --upstream bar:baz@foo:1234");
+        let options = parse_proxy_options(&format!(
+            "para proxy --upstream {PROXY_USERNAME}:baz@foo:1234"
+        ));
         let settings = Settings::from_proxy_options(options).unwrap();
 
         assert_eq!(settings.upstream_targets[0].password(), Some("baz"));
@@ -1103,44 +1114,45 @@ mod tests {
 
     #[test]
     fn proxy_username_with_worker() {
-        let options = parse_proxy_options("para proxy --upstream bar.baz@foo:1234");
+        let options = parse_proxy_options(&format!(
+            "para proxy --upstream {PROXY_ADDRESS}.baz@foo:1234"
+        ));
         let settings = Settings::from_proxy_options(options).unwrap();
 
-        assert_eq!(settings.upstream_targets[0].username().as_str(), "bar.baz");
+        assert_eq!(
+            settings.upstream_targets[0].username().as_str(),
+            format!("{PROXY_ADDRESS}.baz")
+        );
     }
 
     #[test]
     fn proxy_enonce1_extension_size_default() {
-        let options = parse_proxy_options("para proxy --upstream bar@foo:1234");
+        let options = parse_proxy_options(&proxy_command(""));
         let settings = Settings::from_proxy_options(options).unwrap();
         assert_eq!(settings.enonce1_extension_size, ENONCE1_EXTENSION_SIZE);
     }
 
     #[test]
     fn proxy_enonce1_extension_size_override() {
-        let options =
-            parse_proxy_options("para proxy --upstream bar@foo:1234 --enonce1-extension-size 3");
+        let options = parse_proxy_options(&proxy_command("--enonce1-extension-size 3"));
         let settings = Settings::from_proxy_options(options).unwrap();
         assert_eq!(settings.enonce1_extension_size, 3);
     }
 
     #[test]
     fn proxy_enonce1_extension_size_boundaries() {
-        let options =
-            parse_proxy_options("para proxy --upstream bar@foo:1234 --enonce1-extension-size 1");
+        let options = parse_proxy_options(&proxy_command("--enonce1-extension-size 1"));
         let settings = Settings::from_proxy_options(options).unwrap();
         assert_eq!(settings.enonce1_extension_size, 1);
 
-        let options =
-            parse_proxy_options("para proxy --upstream bar@foo:1234 --enonce1-extension-size 6");
+        let options = parse_proxy_options(&proxy_command("--enonce1-extension-size 6"));
         let settings = Settings::from_proxy_options(options).unwrap();
         assert_eq!(settings.enonce1_extension_size, 6);
     }
 
     #[test]
     fn proxy_enonce1_extension_size_too_small() {
-        let options =
-            parse_proxy_options("para proxy --upstream bar@foo:1234 --enonce1-extension-size 0");
+        let options = parse_proxy_options(&proxy_command("--enonce1-extension-size 0"));
         let err = Settings::from_proxy_options(options).unwrap_err();
         assert!(
             err.to_string()
@@ -1150,8 +1162,7 @@ mod tests {
 
     #[test]
     fn proxy_enonce1_extension_size_too_large() {
-        let options =
-            parse_proxy_options("para proxy --upstream bar@foo:1234 --enonce1-extension-size 7");
+        let options = parse_proxy_options(&proxy_command("--enonce1-extension-size 7"));
         let err = Settings::from_proxy_options(options).unwrap_err();
         assert!(
             err.to_string()
@@ -1169,11 +1180,11 @@ mod tests {
             assert_eq!(proxy.high_diff_port, expected);
         }
 
-        case("para pool", "para proxy --upstream bar@foo:1234", None);
+        case("para pool", &proxy_command(""), None);
 
         case(
             "para pool --high-diff-port 3333",
-            "para proxy --upstream bar@foo:1234 --high-diff-port 3333",
+            &proxy_command("--high-diff-port 3333"),
             Some(3333),
         );
     }
@@ -1181,9 +1192,7 @@ mod tests {
     #[test]
     fn high_diff_port_equals_port_fails() {
         let pool = parse_pool_options("para pool --port 3333 --high-diff-port 3333");
-        let proxy = parse_proxy_options(
-            "para proxy --upstream bar@foo:1234 --port 3333 --high-diff-port 3333",
-        );
+        let proxy = parse_proxy_options(&proxy_command("--port 3333 --high-diff-port 3333"));
         assert!(
             Settings::from_pool_options(pool)
                 .unwrap_err()
@@ -1201,9 +1210,7 @@ mod tests {
     #[test]
     fn high_diff_port_equals_http_port_fails() {
         let pool = parse_pool_options("para pool --http-port 8080 --high-diff-port 8080");
-        let proxy = parse_proxy_options(
-            "para proxy --upstream bar@foo:1234 --http-port 8080 --high-diff-port 8080",
-        );
+        let proxy = parse_proxy_options(&proxy_command("--http-port 8080 --high-diff-port 8080"));
         assert!(
             Settings::from_pool_options(pool)
                 .unwrap_err()
@@ -1221,9 +1228,7 @@ mod tests {
     #[test]
     fn high_diff_port_above_max_diff_fails() {
         let pool = parse_pool_options("para pool --high-diff-port 3333 --max-diff 100");
-        let proxy = parse_proxy_options(
-            "para proxy --upstream bar@foo:1234 --high-diff-port 3333 --max-diff 100",
-        );
+        let proxy = parse_proxy_options(&proxy_command("--high-diff-port 3333 --max-diff 100"));
         assert!(
             Settings::from_pool_options(pool)
                 .unwrap_err()
@@ -1243,9 +1248,9 @@ mod tests {
         let pool = parse_pool_options(
             "para pool --high-diff-port 3333 --min-diff 2000000 --start-diff 2000000",
         );
-        let proxy = parse_proxy_options(
-            "para proxy --upstream bar@foo:1234 --high-diff-port 3333 --min-diff 2000000 --start-diff 2000000",
-        );
+        let proxy = parse_proxy_options(&proxy_command(
+            "--high-diff-port 3333 --min-diff 2000000 --start-diff 2000000",
+        ));
         assert!(
             Settings::from_pool_options(pool)
                 .unwrap_err()
@@ -1263,9 +1268,7 @@ mod tests {
     #[test]
     fn shared_defaults_pool_proxy_and_router() {
         let pool = Settings::from_pool_options(parse_pool_options("para pool")).unwrap();
-        let proxy =
-            Settings::from_proxy_options(parse_proxy_options("para proxy --upstream bar@foo:1234"))
-                .unwrap();
+        let proxy = Settings::from_proxy_options(parse_proxy_options(&proxy_command(""))).unwrap();
         let router = Settings::from_router_options(parse_router_options(
             "para router --descriptor foo --hashprice 1000",
         ))
@@ -1329,7 +1332,7 @@ mod tests {
 
     #[test]
     fn proxy_vardiff_defaults() {
-        let options = parse_proxy_options("para proxy --upstream bar@foo:1234");
+        let options = parse_proxy_options(&proxy_command(""));
         let settings = Settings::from_proxy_options(options).unwrap();
         assert_eq!(settings.vardiff_period, Duration::from_secs_f64(3.33));
         assert_eq!(settings.vardiff_window, Duration::from_secs(300));
@@ -1337,7 +1340,7 @@ mod tests {
 
     #[test]
     fn proxy_start_diff_default() {
-        let options = parse_proxy_options("para proxy --upstream bar@foo:1234");
+        let options = parse_proxy_options(&proxy_command(""));
         let settings = Settings::from_proxy_options(options).unwrap();
         assert_eq!(settings.start_diff, Difficulty::default());
     }

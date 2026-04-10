@@ -41,7 +41,7 @@ impl FromStr for UpstreamTarget {
 
         Ok(Self {
             endpoint: endpoint.to_string(),
-            username: Username::new(username),
+            username: username.parse::<Username>()?,
             password,
         })
     }
@@ -71,11 +71,21 @@ mod tests {
             assert_eq!(target.endpoint, endpoint);
         }
 
-        case("foo@bar:3333", "foo", None, "bar:3333");
-        case("foo:baz@bar:3333", "foo", Some("baz"), "bar:3333");
         case(
-            "foo.worker:x@bar.com:3333",
-            "foo.worker",
+            "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333",
+            "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker",
+            None,
+            "bar:3333",
+        );
+        case(
+            "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker:baz@bar:3333",
+            "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker",
+            Some("baz"),
+            "bar:3333",
+        );
+        case(
+            "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker:x@bar.com:3333",
+            "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker",
             Some("x"),
             "bar.com:3333",
         );
@@ -83,13 +93,17 @@ mod tests {
 
     #[test]
     fn missing_at() {
-        let err = "foo:bar:3333".parse::<UpstreamTarget>().unwrap_err();
+        let err = "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker:bar:3333"
+            .parse::<UpstreamTarget>()
+            .unwrap_err();
         assert!(err.to_string().contains("missing `@`"));
     }
 
     #[test]
     fn empty_endpoint() {
-        let err = "foo@".parse::<UpstreamTarget>().unwrap_err();
+        let err = "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@"
+            .parse::<UpstreamTarget>()
+            .unwrap_err();
         assert!(err.to_string().contains("empty endpoint"));
     }
 
@@ -101,18 +115,34 @@ mod tests {
 
     #[test]
     fn password_with_colons() {
-        let target: UpstreamTarget = "foo:pass:word@bar:3333".parse().unwrap();
-        assert_eq!(target.username.as_str(), "foo");
+        let target: UpstreamTarget =
+            "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker:pass:word@bar:3333"
+                .parse()
+                .unwrap();
+        assert_eq!(
+            target.username.as_str(),
+            "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker"
+        );
         assert_eq!(target.password.as_deref(), Some("pass:word"));
         assert_eq!(target.endpoint, "bar:3333");
     }
 
     #[test]
     fn display() {
-        let target: UpstreamTarget = "foo:x@bar:3333".parse().unwrap();
-        assert_eq!(target.to_string(), "foo:x@bar:3333");
+        let target: UpstreamTarget = "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker:x@bar:3333"
+            .parse()
+            .unwrap();
+        assert_eq!(
+            target.to_string(),
+            "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker:x@bar:3333"
+        );
 
-        let target: UpstreamTarget = "foo@bar:3333".parse().unwrap();
-        assert_eq!(target.to_string(), "foo@bar:3333");
+        let target: UpstreamTarget = "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333"
+            .parse()
+            .unwrap();
+        assert_eq!(
+            target.to_string(),
+            "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333"
+        );
     }
 }

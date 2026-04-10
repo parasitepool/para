@@ -117,7 +117,7 @@ impl TestProxy {
     pub(crate) fn stratum_client_for_username(&self, username: &str) -> stratum::client::Client {
         stratum::client::Client::new(
             self.stratum_endpoint(),
-            Username::new(username),
+            username.parse().unwrap(),
             None,
             USER_AGENT.into(),
             Duration::from_secs(5),

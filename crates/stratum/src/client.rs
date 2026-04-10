@@ -374,7 +374,9 @@ mod tests {
 
         let client = Client::new(
             addr.to_string(),
-            "test".into(),
+            "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.test"
+                .parse()
+                .unwrap(),
             None,
             "test".into(),
             Duration::from_millis(200),
@@ -393,7 +395,9 @@ mod tests {
     async fn connection_timeout() {
         let client = Client::new(
             "10.255.255.1:9999".into(),
-            "test".into(),
+            "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.test"
+                .parse()
+                .unwrap(),
             None,
             "test".into(),
             Duration::from_millis(200),
@@ -410,7 +414,9 @@ mod tests {
     async fn request_fails_fast() {
         let client = Client::new(
             "127.0.0.1:9999".into(),
-            "test".into(),
+            "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.test"
+                .parse()
+                .unwrap(),
             None,
             "test".into(),
             Duration::from_secs(1),
@@ -430,7 +436,9 @@ mod tests {
 
         let client = Client::new(
             addr.to_string(),
-            "test".into(),
+            "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.test"
+                .parse()
+                .unwrap(),
             None,
             "test".into(),
             Duration::from_secs(5),

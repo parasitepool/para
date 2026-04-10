@@ -1,5 +1,40 @@
 use super::*;
 
+fn authorize_raw(endpoint: &str, username: &str) -> Option<stratum::Message> {
+    let mut stream = TcpStream::connect(endpoint).unwrap();
+    let mut reader = BufReader::new(stream.try_clone().unwrap());
+
+    writeln!(
+        stream,
+        "{}",
+        serde_json::json!({
+            "id": 1,
+            "method": "mining.subscribe",
+            "params": [USER_AGENT],
+        })
+    )
+    .unwrap();
+
+    let mut line = String::new();
+    reader.read_line(&mut line).unwrap();
+    let response: stratum::Message = serde_json::from_str(&line).unwrap();
+    assert!(matches!(response, stratum::Message::Response { .. }));
+
+    writeln!(
+        stream,
+        "{}",
+        serde_json::json!({
+            "id": 2,
+            "method": "mining.authorize",
+            "params": [username, "x"],
+        })
+    )
+    .unwrap();
+
+    line.clear();
+    (reader.read_line(&mut line).unwrap() > 0).then(|| serde_json::from_str(&line).unwrap())
+}
+
 #[test]
 #[timeout(90000)]
 fn mine_to_pool() {
@@ -302,25 +337,15 @@ async fn stratum_state_machine() {
 
     // Authorization Validation
     {
-        let client_invalid_username = pool.stratum_client_for_username("notabitcoinaddress").await;
         let client_address_wrong_network = pool
-            .stratum_client_for_username("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4")
+            .stratum_client_for_username("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.worker")
             .await;
 
-        client_invalid_username.connect().await.unwrap();
         client_address_wrong_network.connect().await.unwrap();
 
-        client_invalid_username.subscribe().await.unwrap();
         client_address_wrong_network.subscribe().await.unwrap();
 
-        assert!(
-            client_invalid_username
-                .authorize()
-                .await
-                .unwrap_err()
-                .to_string()
-                .contains("Invalid bitcoin address")
-        );
+        assert!(authorize_raw(&pool.stratum_endpoint(), "notabitcoinaddress").is_none());
 
         assert!(
             client_address_wrong_network
@@ -493,8 +518,8 @@ async fn vardiff_adjusts_difficulty() {
     let (mut notify, initial_difficulty) = wait_for_notify(&mut events).await;
     let old_job_id = notify.job_id;
     let user_address = signet_username()
-        .parse_address()
-        .unwrap()
+        .address()
+        .clone()
         .assume_checked()
         .to_string();
 
@@ -548,7 +573,9 @@ async fn vardiff_adjusts_difficulty() {
     assert_stratum_error(
         client
             .submit_with_username(
-                Username::from("different_address.different_worker"),
+                "tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.different_worker"
+                    .parse()
+                    .unwrap(),
                 old_job_id,
                 Extranonce::random(subscribe.enonce2_size),
                 Ntime::from(0),
@@ -677,11 +704,7 @@ async fn share_validation() {
 
     let (notify, difficulty) = wait_for_notify(&mut events).await;
     let username = signet_username();
-    let user_address = username
-        .parse_address()
-        .unwrap()
-        .assume_checked()
-        .to_string();
+    let user_address = username.address().clone().assume_checked().to_string();
 
     // Valid share accepted
     let enonce2 = Extranonce::random(enonce2_size);
@@ -701,7 +724,10 @@ async fn share_validation() {
     assert!(status.stats.last_share.is_some());
 
     let user = pool.get_user(&user_address).await.unwrap();
-    assert_eq!(user.address, user_address);
+    assert_eq!(
+        user.address.clone().assume_checked().to_string(),
+        user_address
+    );
     assert_eq!(user.stats.accepted_shares, 1);
     assert_eq!(user.stats.rejected_shares, 0);
     assert!(user.stats.best_share.is_some());
@@ -806,7 +832,9 @@ async fn share_validation() {
     assert_stratum_error(
         client
             .submit_with_username(
-                Username::from("different_address.different_worker"),
+                "tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.different_worker"
+                    .parse()
+                    .unwrap(),
                 notify.job_id,
                 Extranonce::random(enonce2_size),
                 notify.ntime,
@@ -1130,7 +1158,9 @@ async fn bouncer() {
     };
 
     let auth_failure_test = async {
-        let client = pool.stratum_client_for_username("invalid.user").await;
+        let client = pool
+            .stratum_client_for_username("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.worker")
+            .await;
         client.connect().await.unwrap();
         client.subscribe().await.unwrap();
 

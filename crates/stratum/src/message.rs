@@ -312,11 +312,13 @@ mod tests {
     #[test]
     fn submit() {
         case(
-            r#"{"id":4,"method":"mining.submit","params":["slush.miner1","bf","00000001","504e86ed","b2957c02"]}"#,
+            r#"{"id":4,"method":"mining.submit","params":["bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.miner1","bf","00000001","504e86ed","b2957c02"]}"#,
             Message::Request {
                 id: Id::Number(4),
                 method: Method::Submit(Submit {
-                    username: "slush.miner1".into(),
+                    username: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.miner1"
+                        .parse()
+                        .unwrap(),
                     job_id: "bf".parse().unwrap(),
                     enonce2: "00000001".parse().unwrap(),
                     ntime: "504e86ed".parse().unwrap(),
@@ -340,11 +342,13 @@ mod tests {
     #[test]
     fn submit_with_version_bits() {
         case(
-            r#"{"id":4,"method":"mining.submit","params":["slush.miner1","bf","00000001","504e86ed","b2957c02","04d46000"]}"#,
+            r#"{"id":4,"method":"mining.submit","params":["bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.miner1","bf","00000001","504e86ed","b2957c02","04d46000"]}"#,
             Message::Request {
                 id: Id::Number(4),
                 method: Method::Submit(Submit {
-                    username: "slush.miner1".into(),
+                    username: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.miner1"
+                        .parse()
+                        .unwrap(),
                     job_id: "bf".parse().unwrap(),
                     enonce2: "00000001".parse().unwrap(),
                     ntime: "504e86ed".parse().unwrap(),
@@ -380,11 +384,13 @@ mod tests {
     #[test]
     fn authorize() {
         case(
-            r#"{"id":2,"method":"mining.authorize","params":["slush.miner1","password"]}"#,
+            r#"{"id":2,"method":"mining.authorize","params":["bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.miner1","password"]}"#,
             Message::Request {
                 id: Id::Number(2),
                 method: Method::Authorize(Authorize {
-                    username: "slush.miner1".into(),
+                    username: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.miner1"
+                        .parse()
+                        .unwrap(),
                     password: Some("password".into()),
                 }),
             },
@@ -404,11 +410,13 @@ mod tests {
     #[test]
     fn authorize_optional_password() {
         case(
-            r#"{"id":2,"method":"mining.authorize","params":["slush.miner1"]}"#,
+            r#"{"id":2,"method":"mining.authorize","params":["bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.miner1"]}"#,
             Message::Request {
                 id: Id::Number(2),
                 method: Method::Authorize(Authorize {
-                    username: "slush.miner1".into(),
+                    username: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.miner1"
+                        .parse()
+                        .unwrap(),
                     password: None,
                 }),
             },

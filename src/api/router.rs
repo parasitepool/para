@@ -102,7 +102,7 @@ async fn add_order(
 
 #[derive(Deserialize)]
 struct OrdersQuery {
-    address: Option<String>,
+    address: Option<Address<NetworkUnchecked>>,
 }
 
 async fn list_orders(
@@ -114,13 +114,10 @@ async fn list_orders(
             .orders()
             .iter()
             .filter(|order| {
-                query.address.as_deref().is_none_or(|addr| {
-                    order
-                        .target
-                        .username()
-                        .address_str()
-                        .is_some_and(|address| address == addr)
-                })
+                query
+                    .address
+                    .as_ref()
+                    .is_none_or(|addr| order.target.username().address() == addr)
             })
             .map(|order| order.id)
             .collect(),

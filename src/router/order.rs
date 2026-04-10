@@ -198,7 +198,9 @@ mod tests {
     fn test_order() -> Arc<Order> {
         Order::new(
             0,
-            "foo@bar:3333".parse().unwrap(),
+            "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333"
+                .parse()
+                .unwrap(),
             None,
             CancellationToken::new(),
             Payment {

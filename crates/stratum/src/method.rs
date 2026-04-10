@@ -113,7 +113,11 @@ mod tests {
 
         case("mining.configure", "[[], {}]", "mining.configure");
         case("mining.subscribe", r#"["foo"]"#, "mining.subscribe");
-        case("mining.authorize", r#"["foo"]"#, "mining.authorize");
+        case(
+            "mining.authorize",
+            r#"["bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.worker1"]"#,
+            "mining.authorize",
+        );
         case("mining.set_difficulty", "[1]", "mining.set_difficulty");
         case(
             "mining.suggest_difficulty",
@@ -128,7 +132,7 @@ mod tests {
         );
         case(
             "mining.submit",
-            r#"["slush.miner1","bf","00000001","504e86ed","b2957c02"]"#,
+            r#"["bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.miner1","bf","00000001","504e86ed","b2957c02"]"#,
             "mining.submit",
         );
     }
@@ -177,7 +181,9 @@ mod tests {
             clean_jobs: false,
         }));
         case(Method::Submit(Submit {
-            username: "foo".into(),
+            username: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.foo"
+                .parse()
+                .unwrap(),
             job_id: "bf".parse().unwrap(),
             enonce2: "00000001".parse().unwrap(),
             ntime: "504e86ed".parse().unwrap(),
@@ -185,7 +191,9 @@ mod tests {
             version_bits: None,
         }));
         case(Method::Submit(Submit {
-            username: "foo".into(),
+            username: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.foo"
+                .parse()
+                .unwrap(),
             job_id: "bf".parse().unwrap(),
             enonce2: "00000001".parse().unwrap(),
             ntime: "504e86ed".parse().unwrap(),
@@ -197,7 +205,9 @@ mod tests {
             enonce1: None,
         }));
         case(Method::Authorize(Authorize {
-            username: "foo".into(),
+            username: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.foo"
+                .parse()
+                .unwrap(),
             password: Some("bar".into()),
         }));
         case(Method::Configure(Configure {

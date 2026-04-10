@@ -87,7 +87,9 @@ impl Ping {
             PingType::Subscribe => {
                 let client = stratum::client::Client::new(
                     addr.to_string(),
-                    "".into(),
+                    "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.ping"
+                        .parse()
+                        .unwrap(),
                     None,
                     USER_AGENT.into(),
                     Duration::from_secs(self.timeout),

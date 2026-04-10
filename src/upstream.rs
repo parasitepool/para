@@ -365,7 +365,9 @@ impl Upstream {
             id,
             client: Client::new(
                 "foo:3333".into(),
-                Username::new("bar"),
+                "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker"
+                    .parse()
+                    .unwrap(),
                 None,
                 "baz".into(),
                 Duration::from_secs(1),

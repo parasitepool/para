@@ -161,7 +161,9 @@ mod tests {
             enonce1: test_enonce1(),
             address: test_address(),
             workername: "bar".into(),
-            username: Username::new("tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.bar"),
+            username: "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.bar"
+                .parse()
+                .unwrap(),
             version_mask: None,
         })
     }
@@ -273,7 +275,9 @@ mod tests {
             test_enonce1(),
             test_address(),
             "bar".into(),
-            Username::new("tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.bar"),
+            "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.bar"
+                .parse()
+                .unwrap(),
             None,
         ));
         state = State::Working(session);

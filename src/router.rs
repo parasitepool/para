@@ -315,7 +315,9 @@ mod tests {
     ) -> Arc<Order> {
         let order = Order::new(
             id,
-            "foo@bar:3333".parse().unwrap(),
+            "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333"
+                .parse()
+                .unwrap(),
             target_work,
             CancellationToken::new(),
             order::Payment {

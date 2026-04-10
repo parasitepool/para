@@ -254,9 +254,9 @@ mod tests {
             enonce1: enonce1.parse().unwrap(),
             address: test_address(),
             workername: workername.into(),
-            username: Username::new(format!(
-                "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.{workername}"
-            )),
+            username: format!("tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.{workername}")
+                .parse()
+                .unwrap(),
             version_mask: None,
         })
     }

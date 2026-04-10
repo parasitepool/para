@@ -95,11 +95,7 @@ async fn proxy() {
         .await
         .unwrap();
 
-    let user_address = username
-        .parse_address()
-        .unwrap()
-        .assume_checked()
-        .to_string();
+    let user_address = username.address().clone().assume_checked().to_string();
 
     let status = proxy.get_status().await.unwrap();
     assert_eq!(status.user_count, 1);
@@ -113,7 +109,10 @@ async fn proxy() {
     assert!(status.stats.last_share.is_some());
 
     let user = proxy.get_user(&user_address).await.unwrap();
-    assert_eq!(user.address, user_address);
+    assert_eq!(
+        user.address.clone().assume_checked().to_string(),
+        user_address
+    );
     assert_eq!(user.stats.accepted_shares, 1);
     assert_eq!(user.stats.rejected_shares, 0);
     assert!(user.stats.best_share.is_some());

@@ -68,7 +68,7 @@ use {
     reqwest::Response,
     serde_json::json,
     std::{
-        io::{BufReader, stderr},
+        io::{BufRead, BufReader, stderr},
         net::{TcpListener, TcpStream},
         process::ChildStdout,
         sync::atomic::{AtomicUsize, Ordering},
@@ -183,9 +183,9 @@ fn next_json<T: DeserializeOwned>(r: &mut BufReader<ChildStdout>) -> T {
 
 #[cfg(target_os = "linux")]
 fn signet_username() -> Username {
-    Username::new(
-        "tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.tick.abcdef@lnurl.com",
-    )
+    "tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.tick.abcdef@lnurl.com"
+        .parse()
+        .unwrap()
 }
 
 #[cfg(target_os = "linux")]
