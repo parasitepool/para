@@ -29,7 +29,6 @@ pub struct Order {
     pub(crate) status: Mutex<OrderStatus>,
     pub(crate) payment: Payment,
     pub(crate) created_at: Instant,
-    pub(crate) default: bool,
     pub(crate) stratum_sessions: Mutex<Vec<CancellationToken>>,
 }
 
@@ -40,7 +39,6 @@ impl Order {
         target_work: Option<HashDays>,
         cancel: CancellationToken,
         payment: Payment,
-        default: bool,
     ) -> Arc<Self> {
         Arc::new(Self {
             id,
@@ -52,9 +50,18 @@ impl Order {
             status: Mutex::new(OrderStatus::Pending),
             payment,
             created_at: Instant::now(),
-            default,
             stratum_sessions: Mutex::new(Vec::new()),
         })
+    }
+
+    pub(crate) fn is_default(&self) -> bool {
+        self.target_work.is_none()
+    }
+
+    pub(crate) fn hashrate_1m(&self, metatron: &Metatron, now: Instant) -> HashRate {
+        self.upstream()
+            .map(|upstream| metatron.upstream_snapshot(upstream.id()).hashrate_1m(now))
+            .unwrap_or(HashRate::ZERO)
     }
 
     pub(crate) fn register_session(&self) -> CancellationToken {
@@ -164,6 +171,13 @@ impl Order {
         self.status() == OrderStatus::Active
     }
 
+    pub(crate) fn remaining_work(&self) -> Option<HashDays> {
+        let target = self.target_work?;
+        let accepted = self.upstream()?.accepted_work().to_hash_days();
+        let remaining = target.0 - accepted.0;
+        (remaining > 0.0).then_some(HashDays(remaining))
+    }
+
     #[cfg(test)]
     pub(crate) fn session_token_count(&self) -> usize {
         self.stratum_sessions.lock().len()
@@ -209,7 +223,6 @@ mod tests {
                 amount: Amount::from_sat(1000),
                 timeout: Duration::from_secs(60),
             },
-            false,
         )
     }
 

@@ -347,6 +347,13 @@ impl Upstream {
 
     #[cfg(test)]
     pub(crate) fn test(id: u32) -> Arc<Self> {
+        fn runtime() -> &'static tokio::runtime::Runtime {
+            static RUNTIME: std::sync::OnceLock<tokio::runtime::Runtime> =
+                std::sync::OnceLock::new();
+
+            RUNTIME.get_or_init(|| tokio::runtime::Runtime::new().unwrap())
+        }
+
         let notify = Notify {
             job_id: "bf".parse().unwrap(),
             prevhash: "4d16b6f85af6e2198f44ae2a6de67f78487ae5611b77c6c0440b921e00000000"
@@ -361,6 +368,8 @@ impl Upstream {
             clean_jobs: false,
         };
         let (_, workbase_rx) = watch::channel(Arc::new(notify));
+        let _guard = runtime().enter();
+
         Arc::new(Self {
             id,
             client: Client::new(

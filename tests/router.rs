@@ -122,89 +122,7 @@ async fn add_and_activate_order(
 
 #[tokio::test]
 #[timeout(120000)]
-async fn add_order_without_target_work_rejected() {
-    let wallet_bitcoind = spawn_regtest();
-    let descriptor = generate_descriptor();
-
-    let router = TestRouter::spawn(
-        &descriptor,
-        &wallet_bitcoind,
-        "--start-diff 0.00001 --hashprice 1000",
-    );
-
-    let response = reqwest::Client::new()
-        .post(format!("{}/api/router/order", router.api_endpoint()))
-        .json(&json!({
-            "target": {
-                "endpoint": "bar:3333",
-                "username": "foo"
-            }
-        }))
-        .send()
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
-}
-
-#[tokio::test]
-#[timeout(120000)]
-async fn add_order_with_zero_target_work_rejected() {
-    let wallet_bitcoind = spawn_regtest();
-    let descriptor = generate_descriptor();
-
-    let router = TestRouter::spawn(
-        &descriptor,
-        &wallet_bitcoind,
-        "--start-diff 0.00001 --hashprice 1000",
-    );
-
-    let response = router
-        .add_order(&api::OrderRequest {
-            target: "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333"
-                .parse()
-                .unwrap(),
-            target_work: HashDays(0.0),
-        })
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
-}
-
-#[tokio::test]
-#[timeout(120000)]
-async fn add_order_response_amount_uses_price_and_dust_floor() {
-    let wallet_bitcoind = spawn_regtest();
-    let descriptor = generate_descriptor();
-
-    let router = TestRouter::spawn(
-        &descriptor,
-        &wallet_bitcoind,
-        "--start-diff 0.00001 --hashprice 1000",
-    );
-
-    let (_, _, priced_amount) = add_order(
-        &router,
-        "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333",
-        HashDays(2e15),
-    )
-    .await;
-    assert_eq!(priced_amount, 2000);
-
-    let (_, _, dust_amount) = add_order(
-        &router,
-        "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:4444",
-        HashDays(1e12),
-    )
-    .await;
-    assert_eq!(dust_amount, dust_limit(&descriptor));
-    assert!(dust_amount > 1);
-}
-
-#[tokio::test]
-#[timeout(120000)]
-async fn router_round_robin() {
+async fn router() {
     let pool_bitcoind = bitcoind();
     let wallet_bitcoind = spawn_regtest();
     let descriptor = generate_descriptor();
@@ -331,6 +249,88 @@ async fn router_round_robin() {
         miner.kill().unwrap();
         miner.wait().unwrap();
     }
+}
+
+#[tokio::test]
+#[timeout(120000)]
+async fn add_order_without_target_work_rejected() {
+    let wallet_bitcoind = spawn_regtest();
+    let descriptor = generate_descriptor();
+
+    let router = TestRouter::spawn(
+        &descriptor,
+        &wallet_bitcoind,
+        "--start-diff 0.00001 --hashprice 1000",
+    );
+
+    let response = reqwest::Client::new()
+        .post(format!("{}/api/router/order", router.api_endpoint()))
+        .json(&json!({
+            "target": {
+                "endpoint": "bar:3333",
+                "username": "foo"
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+#[timeout(120000)]
+async fn add_order_with_zero_target_work_rejected() {
+    let wallet_bitcoind = spawn_regtest();
+    let descriptor = generate_descriptor();
+
+    let router = TestRouter::spawn(
+        &descriptor,
+        &wallet_bitcoind,
+        "--start-diff 0.00001 --hashprice 1000",
+    );
+
+    let response = router
+        .add_order(&api::OrderRequest {
+            target: "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333"
+                .parse()
+                .unwrap(),
+            target_work: HashDays(0.0),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+#[timeout(120000)]
+async fn add_order_response_amount_uses_price_and_dust_floor() {
+    let wallet_bitcoind = spawn_regtest();
+    let descriptor = generate_descriptor();
+
+    let router = TestRouter::spawn(
+        &descriptor,
+        &wallet_bitcoind,
+        "--start-diff 0.00001 --hashprice 1000",
+    );
+
+    let (_, _, priced_amount) = add_order(
+        &router,
+        "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333",
+        HashDays(2e15),
+    )
+    .await;
+    assert_eq!(priced_amount, 2000);
+
+    let (_, _, dust_amount) = add_order(
+        &router,
+        "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:4444",
+        HashDays(1e12),
+    )
+    .await;
+    assert_eq!(dust_amount, dust_limit(&descriptor));
+    assert!(dust_amount > 1);
 }
 
 #[tokio::test]
@@ -665,8 +665,6 @@ async fn router_rejects_incompatible_resumed_enonce1() {
         .await
         .unwrap();
 
-    client_a.disconnect().await;
-    drop(events_a);
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let client_b = stratum::client::Client::new(
@@ -697,6 +695,11 @@ async fn router_rejects_incompatible_resumed_enonce1() {
         .submit(notify_b.job_id, enonce2_b, ntime_b, nonce_b, None)
         .await
         .unwrap();
+
+    client_a.disconnect().await;
+    drop(events_a);
+    client_b.disconnect().await;
+    drop(events_b);
 }
 
 #[tokio::test]

@@ -58,8 +58,10 @@ impl RouterCommand {
         ));
 
         for target in settings.default_orders() {
-            router.add_order_with(target.clone(), None, Amount::ZERO, true);
+            router.add_order(target.clone(), None);
         }
+
+        router.spawn_rebalance_loop();
 
         http_server::spawn(
             &settings,
@@ -94,7 +96,7 @@ impl RouterCommand {
                 }
             };
 
-            let Some(order) = router.match_with_order() else {
+            let Some(order) = router.next_order() else {
                 warn!("No order to match with available, dropping connection from {addr}");
                 continue;
             };

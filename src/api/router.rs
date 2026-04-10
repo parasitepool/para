@@ -87,7 +87,7 @@ async fn add_order(
     Json(request): Json<OrderRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let order = router
-        .add_order(request)
+        .add_order(request.target, Some(request.target_work))
         .ok_or(StatusCode::UNPROCESSABLE_ENTITY)?;
 
     Ok((
