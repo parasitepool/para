@@ -119,6 +119,15 @@ impl Router {
     }
 
     fn terminate_order(&self, order: &Order, status: OrderStatus) {
+        let previous = order.status();
+
+        if previous != status {
+            info!(
+                "Order {} at {} transitioned from {:?} to {:?}",
+                order.id, order.target, previous, status,
+            );
+        }
+
         order.set_status(status);
         order.cancel.cancel();
     }
@@ -247,22 +256,36 @@ impl Router {
     fn rebalance(&self) {
         let now = Instant::now();
         let orders = self.orders.read();
+        let active_paid = orders.active_paid();
+        let active_default = orders.active_default();
 
-        let starving = orders
-            .active_paid()
+        let starving_paid = active_paid
             .iter()
-            .any(|order| order.hashrate_1m(&self.metatron, now) == HashRate::ZERO);
+            .filter(|order| order.hashrate_1m(&self.metatron, now) == HashRate::ZERO)
+            .map(|order| order.id)
+            .collect::<Vec<_>>();
 
-        if !starving {
+        if starving_paid.is_empty() {
             return;
         }
 
-        if let Some(order) = orders.active_default().iter().max_by(|a, b| {
+        if let Some(order) = active_default.iter().max_by(|a, b| {
             a.hashrate_1m(&self.metatron, now)
                 .0
                 .total_cmp(&b.hashrate_1m(&self.metatron, now).0)
         }) {
+            info!(
+                "Rebalancing: starving_paid_orders={starving_paid:?} trimming 1 session from default order {} at {} (hashrate_1m={})",
+                order.id,
+                order.target,
+                order.hashrate_1m(&self.metatron, now),
+            );
+
             order.trim_sessions(1);
+        } else {
+            warn!(
+                "Rebalance needed but no active default order available: starving_paid_orders={starving_paid:?}"
+            );
         }
     }
 }

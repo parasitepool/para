@@ -101,8 +101,19 @@ impl RouterCommand {
                 continue;
             };
 
+            let order_kind = if order.is_default() {
+                "default"
+            } else {
+                "paid"
+            };
+
+            info!(
+                "Routing {addr} to {order_kind} order {} at {}",
+                order.id, order.target,
+            );
+
             let settings = settings.clone();
-            let cancel_token = order.register_session();
+            let disconnect_token = order.register_session();
             let metatron = metatron.clone();
             let start_diff = settings.start_diff();
 
@@ -119,7 +130,7 @@ impl RouterCommand {
                     Some(upstream.clone()),
                     stream,
                     upstream.workbase_rx(),
-                    cancel_token,
+                    disconnect_token,
                     None,
                     start_diff,
                 );

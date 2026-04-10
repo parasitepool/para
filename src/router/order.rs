@@ -74,7 +74,21 @@ impl Order {
 
     pub(crate) fn trim_sessions(&self, count: usize) {
         let mut tokens = self.stratum_sessions.lock();
+        let before = tokens.len();
         let n = count.min(tokens.len());
+
+        if n == 0 {
+            return;
+        }
+
+        info!(
+            "Trimming {n} session(s) from order {} at {} (sessions {} -> {})",
+            self.id,
+            self.target,
+            before,
+            before - n,
+        );
+
         for token in tokens.drain(..n) {
             token.cancel();
         }

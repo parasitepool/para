@@ -118,7 +118,7 @@ impl Pool {
             let settings = settings.clone();
             let allocator = allocator.clone();
             let metatron = metatron.clone();
-            let conn_cancel_token = cancel_token.child_token();
+            let disconnect_token = cancel_token.child_token();
             let event_tx = event_tx.clone();
 
             tasks.spawn(async move {
@@ -130,7 +130,7 @@ impl Pool {
                     None,
                     stream,
                     workbase_rx,
-                    conn_cancel_token,
+                    disconnect_token,
                     event_tx,
                     start_diff,
                 );

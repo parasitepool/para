@@ -19,7 +19,7 @@ pub(crate) struct Stratifier<W: Workbase> {
     reader: FramedRead<OwnedReadHalf, LinesCodec>,
     writer: FramedWrite<OwnedWriteHalf, LinesCodec>,
     workbase_rx: watch::Receiver<Arc<W>>,
-    cancel_token: CancellationToken,
+    disconnect_token: CancellationToken,
     jobs: Jobs<W>,
     vardiff: Vardiff,
     bouncer: Bouncer,
@@ -36,7 +36,7 @@ impl<W: Workbase> Stratifier<W> {
         upstream: Option<Arc<Upstream>>,
         tcp_stream: TcpStream,
         workbase_rx: watch::Receiver<Arc<W>>,
-        cancel_token: CancellationToken,
+        disconnect_token: CancellationToken,
         event_tx: Option<mpsc::Sender<Event>>,
         start_diff: Difficulty,
     ) -> Self {
@@ -64,7 +64,7 @@ impl<W: Workbase> Stratifier<W> {
             reader: FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_MESSAGE_SIZE)),
             writer: FramedWrite::new(writer, LinesCodec::new()),
             workbase_rx,
-            cancel_token,
+            disconnect_token,
             jobs: Jobs::new(),
             vardiff,
             bouncer,
@@ -74,13 +74,18 @@ impl<W: Workbase> Stratifier<W> {
 
     pub(crate) async fn serve(&mut self) -> Result {
         let mut workbase_rx = self.workbase_rx.clone();
-        let cancel_token = self.cancel_token.clone();
+        let disconnect_token = self.disconnect_token.clone();
         let mut idle_check = interval(self.bouncer.check_interval());
 
         loop {
             tokio::select! {
-                _ = cancel_token.cancelled() => {
-                    info!("Disconnecting from {}", self.socket_addr);
+                _ = disconnect_token.cancelled() => {
+                    info!("Session disconnect, sending client.reconnect to {}", self.socket_addr);
+
+                    if let Err(err) = self.send_reconnect().await {
+                        warn!("Failed to send client.reconnect to {}: {err}", self.socket_addr);
+                    }
+
                     break;
                 }
                 _ = idle_check.tick() => {
@@ -186,9 +191,11 @@ impl<W: Workbase> Stratifier<W> {
                 changed = workbase_rx.changed() => {
                     if changed.is_err() {
                         warn!("Upstream disconnected, sending client.reconnect to {}", self.socket_addr);
-                        let _ = self.send(Message::Notification {
-                            method: Method::Reconnect(Reconnect::default()),
-                        }).await;
+
+                        if let Err(err) = self.send_reconnect().await {
+                            warn!("Failed to send client.reconnect to {}: {err}", self.socket_addr);
+                        }
+
                         break;
                     }
 
@@ -265,11 +272,12 @@ impl<W: Workbase> Stratifier<W> {
                         .unwrap_or(0)
                 );
 
-                let _ = self
-                    .send(Message::Notification {
-                        method: Method::Reconnect(Reconnect::default()),
-                    })
-                    .await;
+                let _ = self.send_reconnect().await.inspect_err(|err| {
+                    warn!(
+                        "Failed to send client.reconnect to {}: {err}",
+                        self.socket_addr
+                    );
+                });
 
                 false
             }
@@ -313,11 +321,12 @@ impl<W: Workbase> Stratifier<W> {
                         .map(|d| d.as_secs())
                         .unwrap_or(0)
                 );
-                let _ = self
-                    .send(Message::Notification {
-                        method: Method::Reconnect(Reconnect::default()),
-                    })
-                    .await;
+                let _ = self.send_reconnect().await.inspect_err(|err| {
+                    warn!(
+                        "Failed to send client.reconnect to {}: {err}",
+                        self.socket_addr
+                    );
+                });
                 false
             }
             Consequence::Drop => {
@@ -1071,6 +1080,13 @@ impl<W: Workbase> Stratifier<W> {
         let frame = serde_json::to_string(&message)?;
         self.writer.send(frame).await?;
         Ok(())
+    }
+
+    async fn send_reconnect(&mut self) -> Result<()> {
+        self.send(Message::Notification {
+            method: Method::Reconnect(Reconnect::default()),
+        })
+        .await
     }
 
     async fn send_error(

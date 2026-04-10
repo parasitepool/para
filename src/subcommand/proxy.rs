@@ -116,7 +116,7 @@ impl Proxy {
                 let allocator = allocator.clone();
                 let metatron = metatron.clone();
                 let upstream = upstream.clone();
-                let conn_cancel_token = cancel_token.child_token();
+                let disconnect_token = cancel_token.child_token();
                 let event_tx = event_tx.clone();
                 let start_diff = settings.start_diff();
 
@@ -130,7 +130,7 @@ impl Proxy {
                         Some(upstream),
                         stream,
                         workbase_rx,
-                        conn_cancel_token,
+                        disconnect_token,
                         event_tx,
                         start_diff,
                     );
