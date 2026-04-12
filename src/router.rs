@@ -43,7 +43,7 @@ impl Router {
     ) -> Option<Arc<Order>> {
         let amount = match target_work {
             Some(target_work) => {
-                if !target_work.0.is_finite() || target_work.0 <= 0.0 {
+                if target_work.as_f64() <= 0.0 {
                     return None;
                 }
                 self.settings
@@ -100,7 +100,7 @@ impl Router {
             .filter_map(|order| {
                 let remaining = order.remaining_work()?;
                 let hashrate = order.hashrate_1m(&self.metatron, now);
-                Some((order, hashrate.0 / remaining.0))
+                Some((order, hashrate.0 / remaining.as_f64()))
             })
             .min_by(|(_, a), (_, b)| a.total_cmp(b));
 
@@ -400,10 +400,10 @@ mod tests {
         let order = test_order(0, None, OrderStatus::Active);
         assert!(!order.is_fulfilled());
 
-        let order = test_order(0, Some(HashDays(1e15)), OrderStatus::Active);
+        let order = test_order(0, Some(HashDays::new(1e15).unwrap()), OrderStatus::Active);
         assert!(!order.is_fulfilled());
 
-        let target = HashDays(1e12);
+        let target = HashDays::new(1e12).unwrap();
 
         let order = test_order(0, Some(target), OrderStatus::Active);
         order
@@ -416,7 +416,7 @@ mod tests {
         order
             .upstream()
             .unwrap()
-            .set_accepted_work(HashDays(2e12).to_total_work());
+            .set_accepted_work(HashDays::new(2e12).unwrap().to_total_work());
         assert!(order.is_fulfilled());
     }
 
@@ -446,7 +446,11 @@ mod tests {
         assert_eq!(orders.active_len(), 0);
         assert!(orders.active_paid().is_empty());
 
-        orders.add(test_order(1, Some(HashDays(100.0)), OrderStatus::Active));
+        orders.add(test_order(
+            1,
+            Some(HashDays::new(100.0).unwrap()),
+            OrderStatus::Active,
+        ));
         assert_eq!(orders.active_len(), 1);
         assert_eq!(orders.active_id(0), 1);
         assert_eq!(orders.active_paid().len(), 1);
@@ -466,7 +470,11 @@ mod tests {
     fn active_default_excludes_paid() {
         let mut orders = Orders::new();
         orders.add(test_order(0, None, OrderStatus::Active));
-        orders.add(test_order(1, Some(HashDays(100.0)), OrderStatus::Active));
+        orders.add(test_order(
+            1,
+            Some(HashDays::new(100.0).unwrap()),
+            OrderStatus::Active,
+        ));
 
         assert_eq!(orders.active_default().len(), 1);
         assert_eq!(orders.active_default()[0].id, 0);
@@ -476,29 +484,26 @@ mod tests {
     fn remaining_work() {
         #[track_caller]
         fn case(order: &Order, expected: Option<f64>) {
-            assert_eq!(
-                order.remaining_work().map(|hash_days| hash_days.0),
-                expected,
-            );
+            assert_eq!(order.remaining_work().map(HashDays::as_f64), expected,);
         }
 
         case(&test_order(0, None, OrderStatus::Active), None);
 
-        let order = test_order(0, Some(HashDays(100.0)), OrderStatus::Active);
+        let order = test_order(0, Some(HashDays::new(100.0).unwrap()), OrderStatus::Active);
         case(&order, Some(100.0));
 
-        let order = test_order(0, Some(HashDays(100.0)), OrderStatus::Active);
+        let order = test_order(0, Some(HashDays::new(100.0).unwrap()), OrderStatus::Active);
         order
             .upstream()
             .unwrap()
-            .set_accepted_work(HashDays(40.0).to_total_work());
+            .set_accepted_work(HashDays::new(40.0).unwrap().to_total_work());
         case(&order, Some(60.0));
 
-        let order = test_order(0, Some(HashDays(100.0)), OrderStatus::Active);
+        let order = test_order(0, Some(HashDays::new(100.0).unwrap()), OrderStatus::Active);
         order
             .upstream()
             .unwrap()
-            .set_accepted_work(HashDays(100.0).to_total_work());
+            .set_accepted_work(HashDays::new(100.0).unwrap().to_total_work());
         case(&order, None);
     }
 
@@ -511,7 +516,7 @@ mod tests {
     #[test]
     fn next_order_falls_back_to_default_when_paid_fulfilled() {
         let router = test_router();
-        let target = HashDays(100.0);
+        let target = HashDays::new(100.0).unwrap();
         let paid = test_order(0, Some(target), OrderStatus::Active);
         paid.upstream()
             .unwrap()
@@ -529,17 +534,17 @@ mod tests {
     #[test]
     fn match_with_order_water_fills_paid_orders() {
         let router = test_router();
-        let order_a = test_order(0, Some(HashDays(100.0)), OrderStatus::Active);
-        let order_b = test_order(1, Some(HashDays(100.0)), OrderStatus::Active);
+        let order_a = test_order(0, Some(HashDays::new(100.0).unwrap()), OrderStatus::Active);
+        let order_b = test_order(1, Some(HashDays::new(100.0).unwrap()), OrderStatus::Active);
 
         order_a
             .upstream()
             .unwrap()
-            .set_accepted_work(HashDays(20.0).to_total_work());
+            .set_accepted_work(HashDays::new(20.0).unwrap().to_total_work());
         order_b
             .upstream()
             .unwrap()
-            .set_accepted_work(HashDays(60.0).to_total_work());
+            .set_accepted_work(HashDays::new(60.0).unwrap().to_total_work());
 
         let session_a = router
             .metatron
@@ -594,7 +599,7 @@ mod tests {
     #[test]
     fn rebalance_trims_fattest_default_when_paid_starving() {
         let router = test_router();
-        let paid = test_order(0, Some(HashDays(100.0)), OrderStatus::Active);
+        let paid = test_order(0, Some(HashDays::new(100.0).unwrap()), OrderStatus::Active);
         let default_a = test_order(1, None, OrderStatus::Active);
         let default_b = test_order(2, None, OrderStatus::Active);
 

@@ -618,7 +618,7 @@ impl Settings {
     }
 
     pub(crate) fn price(&self, target_work: HashDays) -> Option<Amount> {
-        let sats = (target_work.0 * self.hash_price as f64 / 1e15).ceil();
+        let sats = (target_work.as_f64() * self.hash_price as f64 / 1e15).ceil();
 
         if !sats.is_finite() || sats < 0.0 || sats > u64::MAX as f64 {
             return None;
@@ -1493,7 +1493,7 @@ mod tests {
                 ..Default::default()
             };
             assert_eq!(
-                settings.price(HashDays(target_work)).unwrap(),
+                settings.price(HashDays::new(target_work).unwrap()).unwrap(),
                 Amount::from_sat(expected),
             );
         }
@@ -1512,6 +1512,6 @@ mod tests {
             hash_price: u64::MAX,
             ..Default::default()
         };
-        assert!(settings.price(HashDays(f64::MAX)).is_none());
+        assert!(settings.price(HashDays::new(f64::MAX).unwrap()).is_none());
     }
 }

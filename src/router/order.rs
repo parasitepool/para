@@ -187,9 +187,8 @@ impl Order {
 
     pub(crate) fn remaining_work(&self) -> Option<HashDays> {
         let target = self.target_work?;
-        let accepted = self.upstream()?.accepted_work().to_hash_days();
-        let remaining = target.0 - accepted.0;
-        (remaining > 0.0).then_some(HashDays(remaining))
+        let remaining = target.to_total_work() - self.upstream()?.accepted_work();
+        (remaining != TotalWork::ZERO).then(|| remaining.to_hash_days())
     }
 
     #[cfg(test)]

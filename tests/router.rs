@@ -150,7 +150,7 @@ async fn router() {
         &wallet_bitcoind,
         &funding_descriptor,
         &format!("{pool_username}@{}", pool_a.stratum_endpoint()),
-        HashDays(1e15),
+        HashDays::new(1e15).unwrap(),
     )
     .await;
 
@@ -159,7 +159,7 @@ async fn router() {
         &wallet_bitcoind,
         &funding_descriptor,
         &format!("{pool_username}@{}", pool_b.stratum_endpoint()),
-        HashDays(1e15),
+        HashDays::new(1e15).unwrap(),
     )
     .await;
 
@@ -295,7 +295,7 @@ async fn add_order_with_zero_target_work_rejected() {
             target: "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333"
                 .parse()
                 .unwrap(),
-            target_work: HashDays(0.0),
+            target_work: HashDays::new(0.0).unwrap(),
         })
         .await
         .unwrap();
@@ -318,7 +318,7 @@ async fn add_order_response_amount_uses_price_and_dust_floor() {
     let (_, _, priced_amount) = add_order(
         &router,
         "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333",
-        HashDays(2e15),
+        HashDays::new(2e15).unwrap(),
     )
     .await;
     assert_eq!(priced_amount, 2000);
@@ -326,7 +326,7 @@ async fn add_order_response_amount_uses_price_and_dust_floor() {
     let (_, _, dust_amount) = add_order(
         &router,
         "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:4444",
-        HashDays(1e12),
+        HashDays::new(1e12).unwrap(),
     )
     .await;
     assert_eq!(dust_amount, dust_limit(&descriptor));
@@ -358,7 +358,7 @@ async fn orders() {
 
     let response = router
         .add_order(&api::OrderRequest {
-            target_work: HashDays(1e15),
+            target_work: HashDays::new(1e15).unwrap(),
             target: format!("{username}@127.0.0.1:1").parse().unwrap(),
         })
         .await
@@ -371,7 +371,7 @@ async fn orders() {
         &wallet_bitcoind,
         &funding_descriptor,
         &format!("{username}@{}", pool_a.stratum_endpoint()),
-        HashDays(1e15),
+        HashDays::new(1e15).unwrap(),
     )
     .await;
 
@@ -380,7 +380,7 @@ async fn orders() {
         &wallet_bitcoind,
         &funding_descriptor,
         &format!("{username}@{}", pool_b.stratum_endpoint()),
-        HashDays(1e15),
+        HashDays::new(1e15).unwrap(),
     )
     .await;
 
@@ -429,7 +429,7 @@ async fn cancelled_order_stays_cancelled_during_activation() {
     let (id, address, amount) = add_order(
         &router,
         &format!("{}@127.0.0.1:{stalled_port}", signet_username()),
-        HashDays(1e15),
+        HashDays::new(1e15).unwrap(),
     )
     .await;
 
@@ -475,7 +475,7 @@ async fn order_disconnected_on_upstream_disconnect() {
         &wallet_bitcoind,
         &funding_descriptor,
         &format!("{username}@{}", pool_a.stratum_endpoint()),
-        HashDays(1e15),
+        HashDays::new(1e15).unwrap(),
     )
     .await;
 
@@ -484,7 +484,7 @@ async fn order_disconnected_on_upstream_disconnect() {
         &wallet_bitcoind,
         &funding_descriptor,
         &format!("{username}@{}", pool_b.stratum_endpoint()),
-        HashDays(1e15),
+        HashDays::new(1e15).unwrap(),
     )
     .await;
 
@@ -547,7 +547,7 @@ async fn order_fulfilled_on_target_work_reached() {
         &wallet_bitcoind,
         &funding_descriptor,
         &format!("{pool_username}@{}", pool.stratum_endpoint()),
-        HashDays(1e-10),
+        HashDays::new(1e-10).unwrap(),
     )
     .await;
 
@@ -586,8 +586,8 @@ async fn order_fulfilled_on_target_work_reached() {
         .find(|o| o.status == OrderStatus::Fulfilled)
         .unwrap();
 
-    assert_eq!(fulfilled.target_work, Some(HashDays(1e-10)));
-    assert!(fulfilled.upstream.as_ref().unwrap().hash_days >= HashDays(1e-10));
+    assert_eq!(fulfilled.target_work, Some(HashDays::new(1e-10).unwrap()));
+    assert!(fulfilled.upstream.as_ref().unwrap().hash_days >= HashDays::new(1e-10).unwrap());
 
     miner.kill().unwrap();
     miner.wait().unwrap();
@@ -628,7 +628,7 @@ async fn router_rejects_incompatible_resumed_enonce1() {
         &wallet_bitcoind,
         &funding_descriptor,
         &format!("{}@{}", upstream_username, pool_a.stratum_endpoint()),
-        HashDays(1e15),
+        HashDays::new(1e15).unwrap(),
     )
     .await;
 
@@ -637,7 +637,7 @@ async fn router_rejects_incompatible_resumed_enonce1() {
         &wallet_bitcoind,
         &funding_descriptor,
         &format!("{}@{}", upstream_username, pool_b.stratum_endpoint()),
-        HashDays(1e15),
+        HashDays::new(1e15).unwrap(),
     )
     .await;
 
@@ -719,9 +719,26 @@ async fn list_orders_by_address() {
         .parse::<Username>()
         .unwrap();
 
-    add_order(&router, &format!("{username_a}@foo:3333"), HashDays(1e15)).await;
-    add_order(&router, &format!("{username_a}@foo:4444"), HashDays(1e15)).await;
-    add_order(&router, &format!("{username_b}@foo:5555"), HashDays(1e15)).await;
+    add_order(
+        &router,
+        &format!("{username_a}@foo:3333"),
+        HashDays::new(1e15).unwrap(),
+    )
+    .await;
+
+    add_order(
+        &router,
+        &format!("{username_a}@foo:4444"),
+        HashDays::new(1e15).unwrap(),
+    )
+    .await;
+
+    add_order(
+        &router,
+        &format!("{username_b}@foo:5555"),
+        HashDays::new(1e15).unwrap(),
+    )
+    .await;
 
     let all = router.list_orders(None).await.unwrap();
     assert_eq!(all.len(), 3);
