@@ -54,6 +54,24 @@
 const apiBase = '{{ self.api_base }}';
 const userAddress = window.location.pathname.split('/').pop();
 
+function renderWorkerRows(workers) {
+  return workers.sort((a, b) => b.stats.hashrate_1m - a.stats.hashrate_1m).map(worker => {
+    const stats = worker.stats;
+    const lastShare = stats.last_share != null ? `${stats.last_share}s ago` : '-';
+    const bestShare = formatDifficulty(stats.best_share);
+
+    return `<tr>
+      <td>${worker.name || '(default)'}</td>
+      <td>${worker.session_count}</td>
+      <td>${formatHashrate(stats.hashrate_1m)}</td>
+      <td>${formatTruncated(stats.sps_1m)}</td>
+      <td>${bestShare || '-'}</td>
+      <td>${stats.hash_days != null ? formatHashDays(stats.hash_days) : '-'}</td>
+      <td>${lastShare}</td>
+    </tr>`;
+  }).join('');
+}
+
 async function refresh(signal) {
   try {
     const user = await fetch(`${apiBase}/user/${userAddress}`, { signal }).then(r => r.json()).catch(() => null);

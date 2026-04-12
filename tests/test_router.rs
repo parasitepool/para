@@ -1,4 +1,7 @@
-use {super::*, api::RouterStatus};
+use {
+    super::*,
+    api::{OrderDetail, RouterStatus},
+};
 
 pub(crate) struct TestRouter {
     router_handle: Child,
@@ -78,6 +81,15 @@ impl TestRouter {
             .post(format!("{}/api/router/order", self.api_endpoint()))
             .json(order)
             .send()
+            .await
+    }
+
+    pub(crate) async fn get_order(&self, id: u32) -> reqwest::Result<OrderDetail> {
+        reqwest::Client::new()
+            .get(format!("{}/api/router/order/{id}", self.api_endpoint()))
+            .send()
+            .await?
+            .json()
             .await
     }
 

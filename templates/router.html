@@ -227,8 +227,10 @@
         <input id=order-username placeholder="user.worker">
         <label for=order-password>Password</label>
         <input id=order-password placeholder="optional">
-        <label for=order-target-work>Target Work</label>
-        <input id=order-target-work placeholder="e.g. 1.5 PHd, 500 THd">
+        <label for=order-hashdays>Hash Days</label>
+        <input id=order-hashdays placeholder="e.g. 1.5 PHd, 500 THd">
+        <label for=order-price>Price (sats/PHd)</label>
+        <input id=order-price placeholder="e.g. 1000" inputmode="numeric">
       </div>
       <div id=order-error></div>
       <div id=order-form-buttons class=modal-buttons>
@@ -291,7 +293,7 @@ async function refresh(signal) {
       fetch('/api/bitcoin/status', { signal }).then(r => r.json()).catch(() => ({}))
     ]);
 
-    const s = routerData.stats;
+    const s = routerData.downstream_stats;
     set('order_count', routerData.order_count);
     set('session_count', routerData.session_count);
     set('idle', routerData.idle_count);
@@ -304,11 +306,19 @@ async function refresh(signal) {
 
     rejectionCopyable('rejected_shares', s.accepted_shares, s.rejected_shares);
     rejectionWorkCopyable('rejected_work', s.accepted_work, s.rejected_work);
-    rejectionCopyable('upstream_rejected_shares', routerData.upstream_accepted, routerData.upstream_rejected);
+    rejectionCopyable(
+      'upstream_rejected_shares',
+      routerData.upstream_accepted_shares,
+      routerData.upstream_rejected_shares,
+    );
     rejectionWorkCopyable('upstream_rejected_work', routerData.upstream_accepted_work, routerData.upstream_rejected_work);
 
     set('upstream_total_work', (routerData.upstream_accepted_work || 0) + (routerData.upstream_rejected_work || 0), formatDifficulty);
-    copyable('upstream_hash_days', formatHashDays(routerData.upstream_hash_days), routerData.upstream_hash_days);
+    copyable(
+      'upstream_hash_days',
+      formatHashDays(routerData.upstream_delivered_hash_days),
+      routerData.upstream_delivered_hash_days,
+    );
     set('received_work', s.accepted_work, formatDifficulty);
 
     renderBitcoinData(bitcoinData);
@@ -324,16 +334,16 @@ async function refresh(signal) {
         const u = order.upstream;
         const os = order.stats;
         const hasUpstream = !!u;
-        const username = (u && u.username) || order.target.username || '';
+        const username = (u && u.username) || order.upstream_target.username || '';
         return `<div class="order-card">
           <div class=order-header>
             <h2><a class=order-link href="/order/${order.id}">Order ${order.id}</a></h2>
             <button class=order-delete data-id="${order.id}">&times;</button>
           </div>
           <div class=row><span>Status</span><span class="${statusClass(order.status)}">${formatStatus(order.status)}</span></div>
-          <div class=row><span>Endpoint</span><span>${hasUpstream ? u.endpoint : order.target.endpoint}</span></div>
+          <div class=row><span>Endpoint</span><span>${hasUpstream ? u.endpoint : order.upstream_target.endpoint}</span></div>
           <div class=row><span>Username</span>${copyableHtml(truncateMiddle(username), username)}</div>
-          <div class=row><span>Target Work</span><span>${order.target_work != null ? formatHashDays(order.target_work) : 'Unlimited'}</span></div>
+          <div class=row><span>Hash Days</span><span>${order.hashdays != null ? formatHashDays(order.hashdays) : 'Unlimited'}</span></div>
           <div class=row><span>Delivered Hashdays</span><span>${hasUpstream ? formatHashDays(u.hash_days) || '-' : '-'}</span></div>
           <div class=row><span>Hashrate</span><span>${formatHashrate(os.hashrate_1m)}</span></div>
         </div>`;
@@ -370,7 +380,8 @@ document.getElementById('upstreams-list').addEventListener('click', async (e) =>
   const endpoint = document.getElementById('order-endpoint');
   const username = document.getElementById('order-username');
   const password = document.getElementById('order-password');
-  const targetWork = document.getElementById('order-target-work');
+  const hashdays = document.getElementById('order-hashdays');
+  const price = document.getElementById('order-price');
   const error = document.getElementById('order-error');
   const formFields = document.getElementById('order-form-fields');
   const formButtons = document.getElementById('order-form-buttons');
@@ -384,7 +395,8 @@ document.getElementById('upstreams-list').addEventListener('click', async (e) =>
     endpoint.value = '';
     username.value = '';
     password.value = '';
-    targetWork.value = '';
+    hashdays.value = '';
+    price.value = '';
     error.textContent = '';
     modalTitle.textContent = 'Add Order';
     formFields.classList.remove('hidden');
@@ -424,26 +436,33 @@ document.getElementById('upstreams-list').addEventListener('click', async (e) =>
       return;
     }
 
-    if (!targetWork.value.trim()) {
-      error.textContent = 'Target work is required';
+    if (!hashdays.value.trim()) {
+      error.textContent = 'Hash days is required';
       return;
     }
 
-    const parsed = parseHashDays(targetWork.value);
-    if (parsed === null || parsed <= 0) {
-      error.textContent = 'Target work must be positive (e.g. 1.5 PHd, 500 THd)';
+    const parsedHashdays = parseHashDays(hashdays.value);
+    if (parsedHashdays === null || parsedHashdays <= 0) {
+      error.textContent = 'Hash days must be positive (e.g. 1.5 PHd, 500 THd)';
+      return;
+    }
+
+    const parsedPrice = parseInt(price.value, 10);
+    if (!Number.isFinite(parsedPrice) || parsedPrice < 0) {
+      error.textContent = 'Price (sats/PHd) must be a non-negative integer';
       return;
     }
 
     const body = {
-      target: {
+      upstream_target: {
         endpoint: endpoint.value,
         username: username.value,
       },
-      target_work: parsed,
+      hashdays: parsedHashdays,
+      price: parsedPrice,
     };
 
-    if (password.value) body.target.password = password.value;
+    if (password.value) body.upstream_target.password = password.value;
 
     try {
       const res = await fetch('/api/router/order', {
@@ -453,7 +472,8 @@ document.getElementById('upstreams-list').addEventListener('click', async (e) =>
       });
 
       if (!res.ok) {
-        error.textContent = `Error: ${res.status}`;
+        const text = await res.text().catch(() => '');
+        error.textContent = text || `Error: ${res.status}`;
         return;
       }
 
@@ -462,8 +482,8 @@ document.getElementById('upstreams-list').addEventListener('click', async (e) =>
       formFields.classList.add('hidden');
       formButtons.classList.add('hidden');
       error.textContent = '';
-      paymentAmount.textContent = data.amount;
-      paymentAddress.textContent = data.address;
+      paymentAmount.textContent = data.payment_amount;
+      paymentAddress.textContent = data.payment_address;
       payment.classList.remove('hidden');
     } catch (e) {
       error.textContent = e.message;

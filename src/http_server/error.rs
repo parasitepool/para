@@ -1,8 +1,10 @@
-use super::*;
+use {super::*, crate::router::error::RouterError};
 
 pub(crate) enum ServerError {
     Internal(Error),
     NotFound(String),
+    BadRequest(String),
+    UnprocessableEntity(String),
 }
 
 pub(crate) type ServerResult<T> = Result<T, ServerError>;
@@ -21,6 +23,10 @@ impl IntoResponse for ServerError {
                     .into_response()
             }
             Self::NotFound(message) => (StatusCode::NOT_FOUND, message).into_response(),
+            Self::BadRequest(message) => (StatusCode::BAD_REQUEST, message).into_response(),
+            Self::UnprocessableEntity(message) => {
+                (StatusCode::UNPROCESSABLE_ENTITY, message).into_response()
+            }
         }
     }
 }
@@ -28,6 +34,19 @@ impl IntoResponse for ServerError {
 impl From<Error> for ServerError {
     fn from(error: Error) -> Self {
         Self::Internal(error)
+    }
+}
+
+impl From<RouterError> for ServerError {
+    fn from(error: RouterError) -> Self {
+        match &error {
+            RouterError::InvalidHashdays | RouterError::HashPriceOverflow => {
+                Self::BadRequest(error.to_string())
+            }
+            RouterError::HashPriceBelowMinimum { .. } => {
+                Self::UnprocessableEntity(error.to_string())
+            }
+        }
     }
 }
 

@@ -1,8 +1,10 @@
 use {super::*, orders::Orders};
 
+pub(crate) mod error;
 pub(crate) mod order;
 pub(crate) mod orders;
 
+pub(crate) use error::{RouterError, RouterResult};
 pub use order::{Order, OrderStatus};
 
 const RECLAIM_WINDOW: Duration = Duration::from_secs(24 * 3600);
@@ -38,19 +40,30 @@ impl Router {
 
     pub(crate) fn add_order(
         self: &Arc<Self>,
-        target: UpstreamTarget,
-        target_work: Option<HashDays>,
-    ) -> Option<Arc<Order>> {
-        let amount = match target_work {
-            Some(target_work) => {
-                if target_work.as_f64() <= 0.0 {
-                    return None;
-                }
-                self.settings
-                    .price(target_work)
-                    .map(|amount| amount.max(self.wallet.dust_limit()))?
+        upstream_target: UpstreamTarget,
+        hashdays: Option<HashDays>,
+        price: HashPrice,
+    ) -> RouterResult<Arc<Order>> {
+        let payment_amount = if let Some(hashdays) = hashdays {
+            if hashdays.as_f64() <= 0.0 {
+                return Err(RouterError::InvalidHashdays);
             }
-            None => Amount::ZERO,
+
+            let minimum = self.settings.hash_price();
+
+            if price < minimum {
+                return Err(RouterError::HashPriceBelowMinimum {
+                    bid: price,
+                    minimum,
+                });
+            }
+
+            price
+                .total(hashdays)
+                .ok_or(RouterError::HashPriceOverflow)?
+                .max(self.wallet.dust_limit())
+        } else {
+            Amount::ZERO
         };
 
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
@@ -59,21 +72,19 @@ impl Router {
 
         let order = Order::new(
             id,
-            target,
-            target_work,
+            upstream_target,
+            hashdays,
+            address_info.address,
+            address_info.index,
+            payment_amount,
+            self.settings.invoice_timeout(),
             self.cancel.child_token(),
-            order::Payment {
-                address: address_info.address,
-                derivation_index: address_info.index,
-                amount,
-                timeout: self.settings.invoice_timeout(),
-            },
         );
 
         self.orders.write().add(order.clone());
         self.spawn_order_monitor(order.clone());
 
-        Some(order)
+        Ok(order)
     }
 
     pub(crate) fn cancel_order(&self, id: u32) -> Option<Arc<Order>> {
@@ -124,7 +135,7 @@ impl Router {
         if previous != status {
             info!(
                 "Order {} at {} transitioned from {:?} to {:?}",
-                order.id, order.target, previous, status,
+                order.id, order.upstream_target, previous, status,
             );
         }
 
@@ -154,13 +165,13 @@ impl Router {
                 .await
             {
                 error!("Failed to connect upstream for order {}: {err}", order.id);
-                if order.mark_disconnected_while_pending() {
+                if order.transition(OrderStatus::Pending, OrderStatus::Disconnected) {
                     order.cancel.cancel();
                 }
                 return;
             }
 
-            if !order.mark_active() {
+            if !order.transition(OrderStatus::Pending, OrderStatus::Active) {
                 return;
             }
 
@@ -177,16 +188,16 @@ impl Router {
             tokio::select! {
                 biased;
                 _ = order.cancel.cancelled() => {
-                    if self.wallet.confirmed_received(order.payment.derivation_index) > Amount::ZERO {
+                    if self.wallet.confirmed_received(order.payment_derivation_index) > Amount::ZERO {
                         order.set_status(OrderStatus::PaidLate);
                     } else {
-                        self.wallet.release_address(order.payment.derivation_index);
+                        self.wallet.release_address(order.payment_derivation_index);
                     }
                     return false;
                 }
                 _ = ticker.tick() => {
                     let elapsed = order.created_at.elapsed();
-                    let received = self.wallet.confirmed_received(order.payment.derivation_index);
+                    let received = self.wallet.confirmed_received(order.payment_derivation_index);
 
                     if order.ready_for_activation(received, elapsed) {
                         return true;
@@ -195,9 +206,9 @@ impl Router {
                     match order.status() {
                         OrderStatus::PaidLate => return false,
                         OrderStatus::Expired
-                            if elapsed >= order.payment.timeout + RECLAIM_WINDOW =>
+                            if elapsed >= order.payment_timeout + RECLAIM_WINDOW =>
                         {
-                            self.wallet.release_address(order.payment.derivation_index);
+                            self.wallet.release_address(order.payment_derivation_index);
                             return false;
                         }
                         _ => {}
@@ -277,7 +288,7 @@ impl Router {
             info!(
                 "Rebalancing: starving_paid_orders={starving_paid:?} trimming 1 session from default order {} at {} (hashrate_1m={})",
                 order.id,
-                order.target,
+                order.upstream_target,
                 order.hashrate_1m(&self.metatron, now),
             );
 
@@ -297,13 +308,17 @@ impl StatusLine for Router {
         let stats = self.metatron.snapshot();
         let connected = all
             .iter()
-            .filter(|o| o.is_active() && o.upstream().is_some_and(|u| u.is_connected()))
+            .filter(|o| {
+                o.status() == OrderStatus::Active && o.upstream().is_some_and(|u| u.is_connected())
+            })
             .count();
 
         format!(
             "upstreams={}/{}  sessions={}  hashrate={:.2}",
             connected,
-            all.iter().filter(|o| o.is_active()).count(),
+            all.iter()
+                .filter(|o| o.status() == OrderStatus::Active)
+                .count(),
             self.metatron.total_sessions(),
             stats.hashrate_1m(now),
         )
@@ -366,20 +381,18 @@ mod tests {
         ))
     }
 
-    fn test_order(id: u32, target_work: Option<HashDays>, status: OrderStatus) -> Arc<Order> {
+    fn test_order(id: u32, hashdays: Option<HashDays>, status: OrderStatus) -> Arc<Order> {
         let order = Order::new(
             id,
             "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333"
                 .parse()
                 .unwrap(),
-            target_work,
+            hashdays,
+            test_address(),
+            0,
+            Amount::from_sat(1000),
+            Duration::from_secs(3600),
             CancellationToken::new(),
-            order::Payment {
-                address: test_address(),
-                derivation_index: 0,
-                amount: Amount::from_sat(1000),
-                timeout: Duration::from_secs(3600),
-            },
         );
 
         order.set_status(status);
@@ -395,29 +408,61 @@ mod tests {
         order
     }
 
-    #[tokio::test]
-    async fn is_fulfilled() {
-        let order = test_order(0, None, OrderStatus::Active);
-        assert!(!order.is_fulfilled());
+    fn hashdays(value: f64) -> HashDays {
+        HashDays::new(value).unwrap()
+    }
 
-        let order = test_order(0, Some(HashDays::new(1e15).unwrap()), OrderStatus::Active);
-        assert!(!order.is_fulfilled());
-
-        let target = HashDays::new(1e12).unwrap();
-
-        let order = test_order(0, Some(target), OrderStatus::Active);
+    fn set_accepted_work(order: &Order, value: f64) {
         order
             .upstream()
             .unwrap()
-            .set_accepted_work(target.to_total_work());
-        assert!(order.is_fulfilled());
+            .set_accepted_work(hashdays(value).to_total_work());
+    }
 
-        let order = test_order(0, Some(target), OrderStatus::Active);
-        order
-            .upstream()
-            .unwrap()
-            .set_accepted_work(HashDays::new(2e12).unwrap().to_total_work());
-        assert!(order.is_fulfilled());
+    fn add_orders(router: &Router, orders: impl IntoIterator<Item = Arc<Order>>) {
+        let mut stored = router.orders.write();
+
+        for order in orders {
+            stored.add(order);
+        }
+    }
+
+    fn record_hashrate(
+        router: &Router,
+        order_id: u32,
+        enonce1: &str,
+        workername: &str,
+        difficulty: f64,
+    ) {
+        let session = router
+            .metatron
+            .new_session(test_authorization(enonce1, workername), order_id);
+
+        let difficulty = Difficulty::from(difficulty);
+        session.record_accepted(difficulty, difficulty);
+    }
+
+    fn ids(orders: Vec<Arc<Order>>) -> Vec<u32> {
+        orders.into_iter().map(|order| order.id).collect()
+    }
+
+    #[test]
+    fn is_fulfilled() {
+        #[track_caller]
+        fn case(target: Option<f64>, accepted: Option<f64>, expected: bool) {
+            let order = test_order(0, target.map(hashdays), OrderStatus::Active);
+
+            if let Some(accepted) = accepted {
+                set_accepted_work(order.as_ref(), accepted);
+            }
+
+            assert_eq!(order.is_fulfilled(), expected);
+        }
+
+        case(None, None, false);
+        case(Some(1e15), None, false);
+        case(Some(1e12), Some(1e12), true);
+        case(Some(1e12), Some(2e12), true);
     }
 
     #[test]
@@ -437,74 +482,43 @@ mod tests {
     }
 
     #[test]
-    fn active_paid_filters_by_status() {
+    fn orders_filter_active_orders() {
         let mut orders = Orders::new();
         orders.add(test_order(0, None, OrderStatus::Pending));
+        orders.add(test_order(1, Some(hashdays(100.0)), OrderStatus::Active));
+        orders.add(test_order(2, None, OrderStatus::Active));
 
-        assert_eq!(orders.all_len(), 1);
-        assert!(orders.contains(0));
-        assert_eq!(orders.active_len(), 0);
-        assert!(orders.active_paid().is_empty());
-
-        orders.add(test_order(
-            1,
-            Some(HashDays::new(100.0).unwrap()),
-            OrderStatus::Active,
-        ));
-        assert_eq!(orders.active_len(), 1);
-        assert_eq!(orders.active_id(0), 1);
-        assert_eq!(orders.active_paid().len(), 1);
-        assert_eq!(orders.active_paid()[0].id, 1);
+        assert_eq!(ids(orders.active_paid()), vec![1]);
+        assert_eq!(ids(orders.active_default()), vec![2]);
     }
 
     #[test]
-    fn get() {
+    fn orders_get() {
         let mut orders = Orders::new();
         orders.add(test_order(0, None, OrderStatus::Pending));
 
-        assert!(orders.get(0).is_some());
+        assert_eq!(orders.get(0).unwrap().id, 0);
         assert!(orders.get(1).is_none());
-    }
-
-    #[test]
-    fn active_default_excludes_paid() {
-        let mut orders = Orders::new();
-        orders.add(test_order(0, None, OrderStatus::Active));
-        orders.add(test_order(
-            1,
-            Some(HashDays::new(100.0).unwrap()),
-            OrderStatus::Active,
-        ));
-
-        assert_eq!(orders.active_default().len(), 1);
-        assert_eq!(orders.active_default()[0].id, 0);
     }
 
     #[test]
     fn remaining_work() {
         #[track_caller]
-        fn case(order: &Order, expected: Option<f64>) {
-            assert_eq!(order.remaining_work().map(HashDays::as_f64), expected,);
+        fn case(target: Option<f64>, accepted: Option<f64>, expected: Option<f64>) {
+            let order = test_order(0, target.map(hashdays), OrderStatus::Active);
+
+            if let Some(accepted) = accepted {
+                set_accepted_work(order.as_ref(), accepted);
+            }
+
+            assert_eq!(order.remaining_work().map(HashDays::as_f64), expected);
         }
 
-        case(&test_order(0, None, OrderStatus::Active), None);
-
-        let order = test_order(0, Some(HashDays::new(100.0).unwrap()), OrderStatus::Active);
-        case(&order, Some(100.0));
-
-        let order = test_order(0, Some(HashDays::new(100.0).unwrap()), OrderStatus::Active);
-        order
-            .upstream()
-            .unwrap()
-            .set_accepted_work(HashDays::new(40.0).unwrap().to_total_work());
-        case(&order, Some(60.0));
-
-        let order = test_order(0, Some(HashDays::new(100.0).unwrap()), OrderStatus::Active);
-        order
-            .upstream()
-            .unwrap()
-            .set_accepted_work(HashDays::new(100.0).unwrap().to_total_work());
-        case(&order, None);
+        case(None, None, None);
+        case(Some(100.0), None, Some(100.0));
+        case(Some(100.0), Some(40.0), Some(60.0));
+        case(Some(100.0), Some(100.0), None);
+        case(Some(100.0), Some(120.0), None);
     }
 
     #[test]
@@ -516,70 +530,41 @@ mod tests {
     #[test]
     fn next_order_falls_back_to_default_when_paid_fulfilled() {
         let router = test_router();
-        let target = HashDays::new(100.0).unwrap();
+        let target = hashdays(100.0);
         let paid = test_order(0, Some(target), OrderStatus::Active);
-        paid.upstream()
-            .unwrap()
-            .set_accepted_work(target.to_total_work());
+        set_accepted_work(paid.as_ref(), target.as_f64());
         let default = test_order(1, None, OrderStatus::Active);
 
-        let mut orders = router.orders.write();
-        orders.add(paid);
-        orders.add(default);
-        drop(orders);
+        add_orders(router.as_ref(), [paid, default]);
 
         assert_eq!(router.next_order().unwrap().id, 1);
     }
 
     #[test]
-    fn match_with_order_water_fills_paid_orders() {
+    fn next_order_prefers_paid_order_with_lowest_hashrate_per_remaining_work() {
         let router = test_router();
-        let order_a = test_order(0, Some(HashDays::new(100.0).unwrap()), OrderStatus::Active);
-        let order_b = test_order(1, Some(HashDays::new(100.0).unwrap()), OrderStatus::Active);
+        let order_a = test_order(0, Some(hashdays(100.0)), OrderStatus::Active);
+        let order_b = test_order(1, Some(hashdays(100.0)), OrderStatus::Active);
 
-        order_a
-            .upstream()
-            .unwrap()
-            .set_accepted_work(HashDays::new(20.0).unwrap().to_total_work());
-        order_b
-            .upstream()
-            .unwrap()
-            .set_accepted_work(HashDays::new(60.0).unwrap().to_total_work());
+        set_accepted_work(order_a.as_ref(), 20.0);
+        set_accepted_work(order_b.as_ref(), 60.0);
 
-        let session_a = router
-            .metatron
-            .new_session(test_authorization("deadbeef", "foo"), 0);
-        let session_b = router
-            .metatron
-            .new_session(test_authorization("cafebabe", "bar"), 1);
+        record_hashrate(router.as_ref(), 0, "deadbeef", "foo", 100.0);
+        record_hashrate(router.as_ref(), 1, "cafebabe", "bar", 100.0);
 
-        session_a.record_accepted(Difficulty::from(100.0), Difficulty::from(100.0));
-        session_b.record_accepted(Difficulty::from(100.0), Difficulty::from(100.0));
-
-        let mut orders = router.orders.write();
-        orders.add(order_a);
-        orders.add(order_b);
-        drop(orders);
+        add_orders(router.as_ref(), [order_a, order_b]);
 
         assert_eq!(router.next_order().unwrap().id, 0);
     }
 
     #[test]
-    fn match_with_order_picks_lowest_hashrate_default() {
+    fn next_order_picks_lowest_hashrate_default() {
         let router = test_router();
         let order_a = test_order(0, None, OrderStatus::Active);
         let order_b = test_order(1, None, OrderStatus::Active);
 
-        let session_a = router
-            .metatron
-            .new_session(test_authorization("deadbeef", "foo"), 0);
-
-        session_a.record_accepted(Difficulty::from(100.0), Difficulty::from(100.0));
-
-        let mut orders = router.orders.write();
-        orders.add(order_a);
-        orders.add(order_b);
-        drop(orders);
+        record_hashrate(router.as_ref(), 0, "deadbeef", "foo", 100.0);
+        add_orders(router.as_ref(), [order_a, order_b]);
 
         assert_eq!(router.next_order().unwrap().id, 1);
     }
@@ -590,7 +575,7 @@ mod tests {
         let default = test_order(0, None, OrderStatus::Active);
         let token = default.register_session();
 
-        router.orders.write().add(default);
+        add_orders(router.as_ref(), [default]);
         router.rebalance();
 
         assert!(!token.is_cancelled());
@@ -599,28 +584,17 @@ mod tests {
     #[test]
     fn rebalance_trims_fattest_default_when_paid_starving() {
         let router = test_router();
-        let paid = test_order(0, Some(HashDays::new(100.0).unwrap()), OrderStatus::Active);
+        let paid = test_order(0, Some(hashdays(100.0)), OrderStatus::Active);
         let default_a = test_order(1, None, OrderStatus::Active);
         let default_b = test_order(2, None, OrderStatus::Active);
 
-        let session_a = router
-            .metatron
-            .new_session(test_authorization("deadbeef", "foo"), 1);
-        session_a.record_accepted(Difficulty::from(200.0), Difficulty::from(200.0));
-
-        let session_b = router
-            .metatron
-            .new_session(test_authorization("cafebabe", "bar"), 2);
-        session_b.record_accepted(Difficulty::from(100.0), Difficulty::from(100.0));
+        record_hashrate(router.as_ref(), 1, "deadbeef", "foo", 200.0);
+        record_hashrate(router.as_ref(), 2, "cafebabe", "bar", 100.0);
 
         let token_a = default_a.register_session();
         let token_b = default_b.register_session();
 
-        let mut orders = router.orders.write();
-        orders.add(paid);
-        orders.add(default_a);
-        orders.add(default_b);
-        drop(orders);
+        add_orders(router.as_ref(), [paid, default_a, default_b]);
 
         router.rebalance();
 
@@ -629,7 +603,7 @@ mod tests {
     }
 
     #[test]
-    fn trim_sessions() {
+    fn trim_sessions_cancels_oldest_tokens() {
         let order = test_order(0, None, OrderStatus::Pending);
         let token_a = order.register_session();
         let token_b = order.register_session();
@@ -650,42 +624,70 @@ mod tests {
     }
 
     #[test]
-    fn session_token_lifecycle() {
+    fn register_session_prunes_cancelled_tokens() {
         let order = test_order(0, None, OrderStatus::Pending);
         let token_a = order.register_session();
-        let _token_b = order.register_session();
+        let token_b = order.register_session();
 
         token_a.cancel();
-        let _token_c = order.register_session();
-        assert_eq!(order.session_token_count(), 2);
+        let token_c = order.register_session();
 
-        let order = test_order(0, None, OrderStatus::Pending);
-        let token = order.register_session();
+        order.trim_sessions(1);
+
+        assert!(token_a.is_cancelled());
+        assert!(token_b.is_cancelled());
+        assert!(!token_c.is_cancelled());
+
         order.cancel.cancel();
-        assert!(token.is_cancelled());
+        assert!(token_c.is_cancelled());
     }
 
     #[test]
-    fn paid_late_transition() {
-        let order = test_order(0, None, OrderStatus::Expired);
-        assert_eq!(order.status(), OrderStatus::Expired);
-        order.set_status(OrderStatus::PaidLate);
-        assert_eq!(order.status(), OrderStatus::PaidLate);
+    fn ready_for_activation() {
+        #[track_caller]
+        fn case<F>(received: Amount, elapsed: F, expected: bool, status: OrderStatus)
+        where
+            F: FnOnce(&Order) -> Duration,
+        {
+            let order = test_order(0, None, OrderStatus::Pending);
+            let elapsed = elapsed(order.as_ref());
+
+            assert_eq!(order.ready_for_activation(received, elapsed), expected);
+            assert_eq!(order.status(), status);
+        }
+
+        case(
+            Amount::from_sat(1000),
+            |_| Duration::from_secs(59),
+            true,
+            OrderStatus::Pending,
+        );
+        case(
+            Amount::ZERO,
+            |order| order.payment_timeout,
+            false,
+            OrderStatus::Expired,
+        );
+        case(
+            Amount::from_sat(1000),
+            |order| order.payment_timeout,
+            false,
+            OrderStatus::PaidLate,
+        );
     }
 
     #[test]
-    fn no_payment_after_timeout_expires() {
-        let order = test_order(0, None, OrderStatus::Pending);
+    fn transitions_require_pending_status() {
+        #[track_caller]
+        fn case(to: OrderStatus) {
+            let order = test_order(0, None, OrderStatus::Pending);
+            order.set_status(OrderStatus::Cancelled);
 
-        assert!(!order.ready_for_activation(Amount::ZERO, order.payment.timeout));
-        assert_eq!(order.status(), OrderStatus::Expired);
-    }
+            assert!(!order.transition(OrderStatus::Pending, to));
+            assert_eq!(order.status(), OrderStatus::Cancelled);
+        }
 
-    #[test]
-    fn cancel_pending_order() {
-        let order = test_order(0, None, OrderStatus::Pending);
-        assert_eq!(order.status(), OrderStatus::Pending);
-        order.cancel.cancel();
-        assert!(order.cancel.is_cancelled());
+        case(OrderStatus::Active);
+        case(OrderStatus::Disconnected);
     }
 }

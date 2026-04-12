@@ -57,8 +57,8 @@ impl RouterCommand {
             wallet,
         ));
 
-        for target in settings.default_orders() {
-            router.add_order(target.clone(), None);
+        for upstream_target in settings.default_orders() {
+            router.add_order(upstream_target.clone(), None, settings.hash_price())?;
         }
 
         router.spawn_rebalance_loop();
@@ -109,7 +109,7 @@ impl RouterCommand {
 
             info!(
                 "Routing {addr} to {order_kind} order {} at {}",
-                order.id, order.target,
+                order.id, order.upstream_target,
             );
 
             let settings = settings.clone();

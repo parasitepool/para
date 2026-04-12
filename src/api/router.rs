@@ -21,15 +21,15 @@ pub(crate) fn router(
         .layer(Extension(logs))
 }
 
-async fn home(Extension(chain): Extension<Chain>) -> Response {
-    render_page(RouterHtml, chain)
+async fn home(Extension(chain): Extension<Chain>) -> ServerResult<Response> {
+    Ok(render_page(RouterHtml, chain))
 }
 
-async fn order_page(Extension(chain): Extension<Chain>) -> Response {
-    render_page(OrderHtml, chain)
+async fn order_page(Extension(chain): Extension<Chain>) -> ServerResult<Response> {
+    Ok(render_page(OrderHtml, chain))
 }
 
-async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
+async fn status(State(router): State<Arc<Router>>) -> ServerResult<Response> {
     let now = Instant::now();
     let metatron = router.metatron();
     let mut orders = Vec::new();
@@ -49,46 +49,46 @@ async fn status(State(router): State<Arc<Router>>) -> Json<RouterStatus> {
         orders.push(detail);
     }
 
-    Json(RouterStatus {
+    Ok(Json(RouterStatus {
         order_count: orders.len(),
         session_count: metatron.total_sessions(),
         disconnected_count: metatron.total_disconnected(),
         idle_count: metatron.total_idle(),
         uptime_secs: metatron.uptime().as_secs(),
         orders,
-        upstream_accepted,
-        upstream_rejected,
+        upstream_accepted_shares: upstream_accepted,
+        upstream_rejected_shares: upstream_rejected,
         upstream_accepted_work,
         upstream_rejected_work,
-        upstream_hash_days: (upstream_accepted_work + upstream_rejected_work).to_hash_days(),
-        stats: MiningStats::from_snapshot(&metatron.snapshot(), now),
+        upstream_delivered_hash_days: (upstream_accepted_work + upstream_rejected_work)
+            .to_hash_days(),
+        downstream_stats: MiningStats::from_snapshot(&metatron.snapshot(), now),
     })
+    .into_response())
 }
 
 async fn order_detail(
     State(router): State<Arc<Router>>,
     Path(id): Path<u32>,
-) -> ServerResult<Json<OrderDetail>> {
+) -> ServerResult<Response> {
     let order = router
         .get_order(id)
         .ok_or_not_found(|| format!("Order {id}"))?;
 
     let metatron = router.metatron();
 
-    Ok(Json(OrderDetail::from_order(
-        &order,
-        &metatron,
-        Instant::now(),
-    )))
+    Ok(Json(OrderDetail::from_order(&order, &metatron, Instant::now())).into_response())
 }
 
 async fn add_order(
     State(router): State<Arc<Router>>,
     Json(request): Json<OrderRequest>,
-) -> Result<impl IntoResponse, StatusCode> {
-    let order = router
-        .add_order(request.target, Some(request.target_work))
-        .ok_or(StatusCode::UNPROCESSABLE_ENTITY)?;
+) -> ServerResult<Response> {
+    let order = router.add_order(
+        request.upstream_target,
+        Some(request.hashdays),
+        request.price,
+    )?;
 
     Ok((
         StatusCode::CREATED,
@@ -96,8 +96,9 @@ async fn add_order(
             axum::http::header::LOCATION,
             format!("/api/router/order/{}", order.id),
         )],
-        Json(AddOrderResponse::from_order(&order)),
-    ))
+        Json(OrderResponse::from_order(&order)),
+    )
+        .into_response())
 }
 
 #[derive(Deserialize)]
@@ -108,8 +109,8 @@ struct OrdersQuery {
 async fn list_orders(
     State(router): State<Arc<Router>>,
     Query(query): Query<OrdersQuery>,
-) -> Json<Vec<u32>> {
-    Json(
+) -> ServerResult<Response> {
+    Ok(Json(
         router
             .orders()
             .iter()
@@ -117,20 +118,21 @@ async fn list_orders(
                 query
                     .address
                     .as_ref()
-                    .is_none_or(|addr| order.target.username().address() == addr)
+                    .is_none_or(|addr| order.upstream_target.username().address() == addr)
             })
             .map(|order| order.id)
-            .collect(),
+            .collect::<Vec<u32>>(),
     )
+    .into_response())
 }
 
 async fn cancel_order(
     State(router): State<Arc<Router>>,
     Path(id): Path<u32>,
-) -> ServerResult<StatusCode> {
+) -> ServerResult<Response> {
     router
         .cancel_order(id)
         .ok_or_not_found(|| format!("Order {id}"))?;
 
-    Ok(StatusCode::NO_CONTENT)
+    Ok(StatusCode::NO_CONTENT.into_response())
 }

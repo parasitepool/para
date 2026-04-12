@@ -50,7 +50,7 @@ pub(crate) struct Settings {
     wallet_birthday: u32,
     invoice_timeout: Duration,
     default_orders: Vec<UpstreamTarget>,
-    hash_price: u64,
+    hash_price: HashPrice,
 }
 
 impl Default for Settings {
@@ -93,7 +93,7 @@ impl Default for Settings {
             wallet_birthday: 0,
             invoice_timeout: Duration::from_secs(3600),
             default_orders: Vec::new(),
-            hash_price: 1,
+            hash_price: HashPrice::from_sats(1),
         }
     }
 }
@@ -617,14 +617,8 @@ impl Settings {
         &self.default_orders
     }
 
-    pub(crate) fn price(&self, target_work: HashDays) -> Option<Amount> {
-        let sats = (target_work.as_f64() * self.hash_price as f64 / 1e15).ceil();
-
-        if !sats.is_finite() || sats < 0.0 || sats > u64::MAX as f64 {
-            return None;
-        }
-
-        Some(Amount::from_sat(sats as u64))
+    pub(crate) fn hash_price(&self) -> HashPrice {
+        self.hash_price
     }
 }
 
@@ -1270,7 +1264,7 @@ mod tests {
         let pool = Settings::from_pool_options(parse_pool_options("para pool")).unwrap();
         let proxy = Settings::from_proxy_options(parse_proxy_options(&proxy_command(""))).unwrap();
         let router = Settings::from_router_options(parse_router_options(
-            "para router --descriptor foo --hashprice 1000",
+            "para router --descriptor foo --hash-price 1000",
         ))
         .unwrap();
 
@@ -1347,7 +1341,7 @@ mod tests {
 
     #[test]
     fn router_defaults_are_sane() {
-        let options = parse_router_options("para router --descriptor foo --hashprice 1000");
+        let options = parse_router_options("para router --descriptor foo --hash-price 1000");
         let settings = Settings::from_router_options(options).unwrap();
 
         assert_eq!(settings.address, "0.0.0.0");
@@ -1368,20 +1362,9 @@ mod tests {
     }
 
     #[test]
-    fn router_hashprice_must_be_positive() {
-        let err = Arguments::try_parse_from(
-            "para router --descriptor foo --hashprice 0".split_whitespace(),
-        )
-        .unwrap_err();
-
-        assert!(err.to_string().contains("0"));
-        assert!(err.to_string().contains("--hashprice"));
-    }
-
-    #[test]
     fn router_override_address_and_port() {
         let options = parse_router_options(
-            "para router --descriptor foo --hashprice 1000 --address 127.0.0.1 --port 9999",
+            "para router --descriptor foo --hash-price 1000 --address 127.0.0.1 --port 9999",
         );
         let settings = Settings::from_router_options(options).unwrap();
 
@@ -1392,7 +1375,7 @@ mod tests {
     #[test]
     fn router_override_timeout() {
         let options =
-            parse_router_options("para router --descriptor foo --hashprice 1000 --timeout 60");
+            parse_router_options("para router --descriptor foo --hash-price 1000 --timeout 60");
         let settings = Settings::from_router_options(options).unwrap();
 
         assert_eq!(settings.timeout, Duration::from_secs(60));
@@ -1400,7 +1383,7 @@ mod tests {
 
     #[test]
     fn router_enonce1_extension_size_default() {
-        let options = parse_router_options("para router --descriptor foo --hashprice 1000");
+        let options = parse_router_options("para router --descriptor foo --hash-price 1000");
         let settings = Settings::from_router_options(options).unwrap();
         assert_eq!(settings.enonce1_extension_size, ENONCE1_EXTENSION_SIZE);
     }
@@ -1408,7 +1391,7 @@ mod tests {
     #[test]
     fn router_enonce1_extension_size_override() {
         let options = parse_router_options(
-            "para router --descriptor foo --hashprice 1000 --enonce1-extension-size 3",
+            "para router --descriptor foo --hash-price 1000 --enonce1-extension-size 3",
         );
         let settings = Settings::from_router_options(options).unwrap();
         assert_eq!(settings.enonce1_extension_size, 3);
@@ -1417,13 +1400,13 @@ mod tests {
     #[test]
     fn router_enonce1_extension_size_boundaries() {
         let options = parse_router_options(
-            "para router --descriptor foo --hashprice 1000 --enonce1-extension-size 1",
+            "para router --descriptor foo --hash-price 1000 --enonce1-extension-size 1",
         );
         let settings = Settings::from_router_options(options).unwrap();
         assert_eq!(settings.enonce1_extension_size, 1);
 
         let options = parse_router_options(
-            "para router --descriptor foo --hashprice 1000 --enonce1-extension-size 6",
+            "para router --descriptor foo --hash-price 1000 --enonce1-extension-size 6",
         );
         let settings = Settings::from_router_options(options).unwrap();
         assert_eq!(settings.enonce1_extension_size, 6);
@@ -1432,7 +1415,7 @@ mod tests {
     #[test]
     fn router_enonce1_extension_size_too_small() {
         let options = parse_router_options(
-            "para router --descriptor foo --hashprice 1000 --enonce1-extension-size 0",
+            "para router --descriptor foo --hash-price 1000 --enonce1-extension-size 0",
         );
         let err = Settings::from_router_options(options).unwrap_err();
         assert!(
@@ -1444,7 +1427,7 @@ mod tests {
     #[test]
     fn router_enonce1_extension_size_too_large() {
         let options = parse_router_options(
-            "para router --descriptor foo --hashprice 1000 --enonce1-extension-size 7",
+            "para router --descriptor foo --hash-price 1000 --enonce1-extension-size 7",
         );
         let err = Settings::from_router_options(options).unwrap_err();
         assert!(
@@ -1455,7 +1438,7 @@ mod tests {
 
     #[test]
     fn router_vardiff_defaults() {
-        let options = parse_router_options("para router --descriptor foo --hashprice 1000");
+        let options = parse_router_options("para router --descriptor foo --hash-price 1000");
         let settings = Settings::from_router_options(options).unwrap();
         assert_eq!(settings.vardiff_period, Duration::from_secs_f64(3.33));
         assert_eq!(settings.vardiff_window, Duration::from_secs(300));
@@ -1463,14 +1446,14 @@ mod tests {
 
     #[test]
     fn router_start_diff_default() {
-        let options = parse_router_options("para router --descriptor foo --hashprice 1000");
+        let options = parse_router_options("para router --descriptor foo --hash-price 1000");
         let settings = Settings::from_router_options(options).unwrap();
         assert_eq!(settings.start_diff, Difficulty::default());
     }
 
     #[test]
     fn router_tick_interval_default() {
-        let options = parse_router_options("para router --descriptor foo --hashprice 1000");
+        let options = parse_router_options("para router --descriptor foo --hash-price 1000");
         let settings = Settings::from_router_options(options).unwrap();
         assert_eq!(settings.tick_interval, Duration::from_secs(60),);
     }
@@ -1478,40 +1461,9 @@ mod tests {
     #[test]
     fn router_tick_interval_override() {
         let options = parse_router_options(
-            "para router --descriptor foo --hashprice 1000 --tick-interval 10",
+            "para router --descriptor foo --hash-price 1000 --tick-interval 10",
         );
         let settings = Settings::from_router_options(options).unwrap();
         assert_eq!(settings.tick_interval, Duration::from_secs(10),);
-    }
-
-    #[test]
-    fn price() {
-        #[track_caller]
-        fn case(hash_price: u64, target_work: f64, expected: u64) {
-            let settings = Settings {
-                hash_price,
-                ..Default::default()
-            };
-            assert_eq!(
-                settings.price(HashDays::new(target_work).unwrap()).unwrap(),
-                Amount::from_sat(expected),
-            );
-        }
-
-        case(50000, 1e15, 50000);
-        case(50000, 2e15, 100000);
-        case(50000, 500e12, 25000);
-        case(1000, 1e15, 1000);
-        case(1000, 1e12, 1);
-        case(0, 1e15, 0);
-    }
-
-    #[test]
-    fn price_overflow() {
-        let settings = Settings {
-            hash_price: u64::MAX,
-            ..Default::default()
-        };
-        assert!(settings.price(HashDays::new(f64::MAX).unwrap()).is_none());
     }
 }

@@ -61,11 +61,17 @@ async fn pay_address(bitcoind: &Bitcoind, funding_descriptor: &str, address: &st
     generate_to_address(bitcoind, 1, address).await;
 }
 
-async fn add_order(router: &TestRouter, target: &str, target_work: HashDays) -> (u32, String, u64) {
+async fn add_order(
+    router: &TestRouter,
+    target: &str,
+    hashdays: HashDays,
+    price: HashPrice,
+) -> (u32, String, u64) {
     let response = router
         .add_order(&api::OrderRequest {
-            target: target.parse().unwrap(),
-            target_work,
+            upstream_target: target.parse().unwrap(),
+            hashdays,
+            price,
         })
         .await
         .unwrap();
@@ -79,14 +85,14 @@ async fn add_order(router: &TestRouter, target: &str, target_work: HashDays) -> 
         .unwrap()
         .to_string();
 
-    let body: api::AddOrderResponse = response.json().await.unwrap();
+    let body: api::OrderResponse = response.json().await.unwrap();
 
-    assert_eq!(location, format!("/api/router/order/{}", body.id));
+    assert_eq!(location, format!("/api/router/order/{}", body.order_id));
 
     (
-        body.id,
-        body.address.assume_checked().to_string(),
-        body.amount,
+        body.order_id,
+        body.payment_address.assume_checked().to_string(),
+        body.payment_amount.to_sat(),
     )
 }
 
@@ -95,9 +101,10 @@ async fn add_and_activate_order(
     wallet_bitcoind: &Bitcoind,
     funding_descriptor: &str,
     target: &str,
-    target_work: HashDays,
+    hashdays: HashDays,
+    price: HashPrice,
 ) -> u32 {
-    let (id, address, amount) = add_order(router, target, target_work).await;
+    let (id, address, amount) = add_order(router, target, hashdays, price).await;
 
     pay_address(wallet_bitcoind, funding_descriptor, &address, amount).await;
 
@@ -139,7 +146,7 @@ async fn router() {
     let router = TestRouter::spawn(
         &descriptor,
         &wallet_bitcoind,
-        "--start-diff 0.00001 --tick-interval 1 --hashprice 1000",
+        "--start-diff 0.00001 --tick-interval 1 --hash-price 1000",
     );
 
     let status = router.get_status().await.unwrap();
@@ -151,6 +158,7 @@ async fn router() {
         &funding_descriptor,
         &format!("{pool_username}@{}", pool_a.stratum_endpoint()),
         HashDays::new(1e15).unwrap(),
+        HashPrice::from_sats(1000),
     )
     .await;
 
@@ -160,6 +168,7 @@ async fn router() {
         &funding_descriptor,
         &format!("{pool_username}@{}", pool_b.stratum_endpoint()),
         HashDays::new(1e15).unwrap(),
+        HashPrice::from_sats(1000),
     )
     .await;
 
@@ -253,23 +262,24 @@ async fn router() {
 
 #[tokio::test]
 #[timeout(120000)]
-async fn add_order_without_target_work_rejected() {
+async fn add_order_without_hashdays_rejected() {
     let wallet_bitcoind = spawn_regtest();
     let descriptor = generate_descriptor();
 
     let router = TestRouter::spawn(
         &descriptor,
         &wallet_bitcoind,
-        "--start-diff 0.00001 --hashprice 1000",
+        "--start-diff 0.00001 --hash-price 1000",
     );
 
     let response = reqwest::Client::new()
         .post(format!("{}/api/router/order", router.api_endpoint()))
         .json(&json!({
-            "target": {
+            "upstream_target": {
                 "endpoint": "bar:3333",
                 "username": "foo"
-            }
+            },
+            "price": 1000,
         }))
         .send()
         .await
@@ -280,57 +290,138 @@ async fn add_order_without_target_work_rejected() {
 
 #[tokio::test]
 #[timeout(120000)]
-async fn add_order_with_zero_target_work_rejected() {
+async fn add_order_with_zero_hashdays_rejected() {
     let wallet_bitcoind = spawn_regtest();
     let descriptor = generate_descriptor();
 
     let router = TestRouter::spawn(
         &descriptor,
         &wallet_bitcoind,
-        "--start-diff 0.00001 --hashprice 1000",
+        "--start-diff 0.00001 --hash-price 1000",
     );
 
     let response = router
         .add_order(&api::OrderRequest {
-            target: "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333"
+            upstream_target: "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333"
                 .parse()
                 .unwrap(),
-            target_work: HashDays::new(0.0).unwrap(),
+            hashdays: HashDays::new(0.0).unwrap(),
+            price: HashPrice::from_sats(1000),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.text().await.unwrap(), "hash days must be positive");
+}
+
+#[tokio::test]
+#[timeout(120000)]
+async fn add_order_price_overflow_rejected() {
+    let wallet_bitcoind = spawn_regtest();
+    let descriptor = generate_descriptor();
+
+    let router = TestRouter::spawn(
+        &descriptor,
+        &wallet_bitcoind,
+        "--start-diff 0.00001 --hash-price 1",
+    );
+
+    let response = router
+        .add_order(&api::OrderRequest {
+            upstream_target: "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333"
+                .parse()
+                .unwrap(),
+            hashdays: HashDays::new(f64::MAX).unwrap(),
+            price: HashPrice::from_sats(u64::MAX),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.text().await.unwrap(), "price calculation overflow");
+}
+
+#[tokio::test]
+#[timeout(120000)]
+async fn add_order_rejects_price_below_minimum() {
+    let wallet_bitcoind = spawn_regtest();
+    let descriptor = generate_descriptor();
+
+    let router = TestRouter::spawn(
+        &descriptor,
+        &wallet_bitcoind,
+        "--start-diff 0.00001 --hash-price 1000",
+    );
+
+    let response = router
+        .add_order(&api::OrderRequest {
+            upstream_target: "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333"
+                .parse()
+                .unwrap(),
+            hashdays: HashDays::new(2e15).unwrap(),
+            price: HashPrice::from_sats(999),
         })
         .await
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(response.text().await.unwrap().contains("below minimum"));
+
+    let (_, _, accepted_amount) = add_order(
+        &router,
+        "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333",
+        HashDays::new(2e15).unwrap(),
+        HashPrice::from_sats(1000),
+    )
+    .await;
+    assert_eq!(accepted_amount, 2000);
+
+    let dust = dust_limit(&descriptor);
+    let (_, _, dust_amount) = add_order(
+        &router,
+        "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:4444",
+        HashDays::new(1e12).unwrap(),
+        HashPrice::from_sats(1000),
+    )
+    .await;
+    assert_eq!(dust_amount, dust);
+    assert!(dust_amount > 1);
 }
 
 #[tokio::test]
 #[timeout(120000)]
-async fn add_order_response_amount_uses_price_and_dust_floor() {
+async fn order_detail() {
     let wallet_bitcoind = spawn_regtest();
     let descriptor = generate_descriptor();
 
     let router = TestRouter::spawn(
         &descriptor,
         &wallet_bitcoind,
-        "--start-diff 0.00001 --hashprice 1000",
+        "--start-diff 0.00001 --hash-price 1000",
     );
 
-    let (_, _, priced_amount) = add_order(
+    let hashdays = HashDays::new(1e15).unwrap();
+    let (id, address, amount) = add_order(
         &router,
         "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333",
-        HashDays::new(2e15).unwrap(),
+        hashdays,
+        HashPrice::from_sats(1000),
     )
     .await;
-    assert_eq!(priced_amount, 2000);
 
-    let (_, _, dust_amount) = add_order(
-        &router,
-        "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:4444",
-        HashDays::new(1e12).unwrap(),
-    )
-    .await;
-    assert_eq!(dust_amount, dust_limit(&descriptor));
-    assert!(dust_amount > 1);
+    let detail = router.get_order(id).await.unwrap();
+
+    assert_eq!(detail.id, id);
+    assert_eq!(detail.status, OrderStatus::Pending);
+    assert_eq!(detail.hashdays, Some(hashdays));
+    assert_eq!(detail.payment_address.assume_checked().to_string(), address);
+    assert_eq!(detail.payment_amount.to_sat(), amount);
+    assert!(detail.upstream_id.is_none());
+    assert!(detail.upstream.is_none());
+    assert!(detail.sessions.is_empty());
+    assert_eq!(detail.stats.accepted_shares, 0);
+    assert_eq!(detail.stats.rejected_shares, 0);
 }
 
 #[tokio::test]
@@ -350,7 +441,7 @@ async fn orders() {
     let router = TestRouter::spawn(
         &descriptor,
         &wallet_bitcoind,
-        "--start-diff 0.00001 --tick-interval 1 --hashprice 1000",
+        "--start-diff 0.00001 --tick-interval 1 --hash-price 1000",
     );
 
     let status = router.get_status().await.unwrap();
@@ -358,8 +449,9 @@ async fn orders() {
 
     let response = router
         .add_order(&api::OrderRequest {
-            target_work: HashDays::new(1e15).unwrap(),
-            target: format!("{username}@127.0.0.1:1").parse().unwrap(),
+            hashdays: HashDays::new(1e15).unwrap(),
+            upstream_target: format!("{username}@127.0.0.1:1").parse().unwrap(),
+            price: HashPrice::from_sats(1000),
         })
         .await
         .unwrap();
@@ -372,6 +464,7 @@ async fn orders() {
         &funding_descriptor,
         &format!("{username}@{}", pool_a.stratum_endpoint()),
         HashDays::new(1e15).unwrap(),
+        HashPrice::from_sats(1000),
     )
     .await;
 
@@ -381,6 +474,7 @@ async fn orders() {
         &funding_descriptor,
         &format!("{username}@{}", pool_b.stratum_endpoint()),
         HashDays::new(1e15).unwrap(),
+        HashPrice::from_sats(1000),
     )
     .await;
 
@@ -423,13 +517,14 @@ async fn cancelled_order_stays_cancelled_during_activation() {
     let router = TestRouter::spawn(
         &descriptor,
         &wallet_bitcoind,
-        "--tick-interval 1 --timeout 2 --hashprice 1000",
+        "--tick-interval 1 --timeout 2 --hash-price 1000",
     );
 
     let (id, address, amount) = add_order(
         &router,
         &format!("{}@127.0.0.1:{stalled_port}", signet_username()),
         HashDays::new(1e15).unwrap(),
+        HashPrice::from_sats(1000),
     )
     .await;
 
@@ -467,7 +562,7 @@ async fn order_disconnected_on_upstream_disconnect() {
     let router = TestRouter::spawn(
         &descriptor,
         &wallet_bitcoind,
-        "--start-diff 0.00001 --tick-interval 1 --hashprice 1000",
+        "--start-diff 0.00001 --tick-interval 1 --hash-price 1000",
     );
 
     add_and_activate_order(
@@ -476,6 +571,7 @@ async fn order_disconnected_on_upstream_disconnect() {
         &funding_descriptor,
         &format!("{username}@{}", pool_a.stratum_endpoint()),
         HashDays::new(1e15).unwrap(),
+        HashPrice::from_sats(1000),
     )
     .await;
 
@@ -485,6 +581,7 @@ async fn order_disconnected_on_upstream_disconnect() {
         &funding_descriptor,
         &format!("{username}@{}", pool_b.stratum_endpoint()),
         HashDays::new(1e15).unwrap(),
+        HashPrice::from_sats(1000),
     )
     .await;
 
@@ -523,7 +620,7 @@ async fn order_disconnected_on_upstream_disconnect() {
 
 #[tokio::test]
 #[timeout(120000)]
-async fn order_fulfilled_on_target_work_reached() {
+async fn order_fulfilled_on_hashdays_reached() {
     let pool_bitcoind = bitcoind();
     let wallet_bitcoind = spawn_regtest();
     let descriptor = generate_descriptor();
@@ -539,7 +636,7 @@ async fn order_fulfilled_on_target_work_reached() {
     let router = TestRouter::spawn(
         &descriptor,
         &wallet_bitcoind,
-        "--start-diff 0.00001 --tick-interval 1 --hashprice 1000",
+        "--start-diff 0.00001 --tick-interval 1 --hash-price 1000",
     );
 
     add_and_activate_order(
@@ -548,6 +645,7 @@ async fn order_fulfilled_on_target_work_reached() {
         &funding_descriptor,
         &format!("{pool_username}@{}", pool.stratum_endpoint()),
         HashDays::new(1e-10).unwrap(),
+        HashPrice::from_sats(1000),
     )
     .await;
 
@@ -586,7 +684,7 @@ async fn order_fulfilled_on_target_work_reached() {
         .find(|o| o.status == OrderStatus::Fulfilled)
         .unwrap();
 
-    assert_eq!(fulfilled.target_work, Some(HashDays::new(1e-10).unwrap()));
+    assert_eq!(fulfilled.hashdays, Some(HashDays::new(1e-10).unwrap()));
     assert!(fulfilled.upstream.as_ref().unwrap().hash_days >= HashDays::new(1e-10).unwrap());
 
     miner.kill().unwrap();
@@ -620,7 +718,7 @@ async fn router_rejects_incompatible_resumed_enonce1() {
     let router = TestRouter::spawn(
         &descriptor,
         &wallet_bitcoind,
-        "--start-diff 0.00001 --tick-interval 1 --hashprice 1000",
+        "--start-diff 0.00001 --tick-interval 1 --hash-price 1000",
     );
 
     add_and_activate_order(
@@ -629,6 +727,7 @@ async fn router_rejects_incompatible_resumed_enonce1() {
         &funding_descriptor,
         &format!("{}@{}", upstream_username, pool_a.stratum_endpoint()),
         HashDays::new(1e15).unwrap(),
+        HashPrice::from_sats(1000),
     )
     .await;
 
@@ -638,6 +737,7 @@ async fn router_rejects_incompatible_resumed_enonce1() {
         &funding_descriptor,
         &format!("{}@{}", upstream_username, pool_b.stratum_endpoint()),
         HashDays::new(1e15).unwrap(),
+        HashPrice::from_sats(1000),
     )
     .await;
 
@@ -711,7 +811,7 @@ async fn list_orders_by_address() {
     let router = TestRouter::spawn(
         &descriptor,
         &wallet_bitcoind,
-        "--start-diff 0.00001 --tick-interval 1 --hashprice 1000",
+        "--start-diff 0.00001 --tick-interval 1 --hash-price 1000",
     );
 
     let username_a = signet_username();
@@ -723,6 +823,7 @@ async fn list_orders_by_address() {
         &router,
         &format!("{username_a}@foo:3333"),
         HashDays::new(1e15).unwrap(),
+        HashPrice::from_sats(1000),
     )
     .await;
 
@@ -730,6 +831,7 @@ async fn list_orders_by_address() {
         &router,
         &format!("{username_a}@foo:4444"),
         HashDays::new(1e15).unwrap(),
+        HashPrice::from_sats(1000),
     )
     .await;
 
@@ -737,6 +839,7 @@ async fn list_orders_by_address() {
         &router,
         &format!("{username_b}@foo:5555"),
         HashDays::new(1e15).unwrap(),
+        HashPrice::from_sats(1000),
     )
     .await;
 

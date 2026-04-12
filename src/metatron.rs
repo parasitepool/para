@@ -150,25 +150,7 @@ impl Metatron {
         self.started.elapsed()
     }
 
-    pub(crate) fn upstream_sessions(&self, upstream_id: u32) -> Vec<Arc<Session>> {
-        self.users
-            .iter()
-            .flat_map(|user| user.sessions())
-            .filter(|session| session.id().upstream_id() == upstream_id)
-            .collect()
-    }
-
-    pub(crate) fn upstream_idle_count(&self, upstream_id: u32) -> usize {
-        let now = Instant::now();
-        self.users
-            .iter()
-            .flat_map(|user| user.sessions())
-            .filter(|session| session.id().upstream_id() == upstream_id && session.is_idle(now))
-            .count()
-    }
-
-    pub(crate) fn upstream_snapshot(&self, upstream_id: u32) -> Stats {
-        let now = Instant::now();
+    pub(crate) fn upstream_stats(&self, upstream_id: u32, now: Instant) -> Stats {
         self.users
             .iter()
             .flat_map(|user| user.sessions())
@@ -179,32 +161,24 @@ impl Metatron {
             })
     }
 
-    pub(crate) fn upstream_user_count(&self, upstream_id: u32) -> usize {
-        self.users
-            .iter()
-            .filter(|user| {
-                user.workers()
-                    .any(|worker| worker.upstream_session_count(upstream_id) > 0)
-            })
-            .count()
-    }
+    pub(crate) fn upstream_snapshot(
+        &self,
+        upstream_id: u32,
+        now: Instant,
+    ) -> (Vec<Arc<Session>>, Stats) {
+        let mut sessions = Vec::new();
+        let mut stats = Stats::new();
 
-    pub(crate) fn upstream_worker_count(&self, upstream_id: u32) -> usize {
-        self.users
-            .iter()
-            .map(|user| {
-                user.workers()
-                    .filter(|worker| worker.upstream_session_count(upstream_id) > 0)
-                    .count()
-            })
-            .sum()
-    }
+        for session in self.users.iter().flat_map(|user| user.sessions()) {
+            if session.id().upstream_id() != upstream_id {
+                continue;
+            }
 
-    pub(crate) fn upstream_disconnected_count(&self, upstream_id: u32) -> usize {
-        self.disconnected
-            .iter()
-            .filter(|entry| entry.value().0.id().upstream_id() == upstream_id)
-            .count()
+            stats.absorb(session.snapshot(), now);
+            sessions.push(session);
+        }
+
+        (sessions, stats)
     }
 }
 
@@ -421,35 +395,26 @@ mod tests {
     }
 
     #[test]
-    fn upstream_counts_are_isolated() {
+    fn upstream_sessions_are_isolated() {
         let metatron = Metatron::new();
+        let now = Instant::now();
 
         let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0);
         let s2 = metatron.new_session(test_auth("cafebabe", "bar"), 1);
 
-        assert_eq!(metatron.upstream_sessions(0).len(), 1);
-        assert_eq!(metatron.upstream_sessions(1).len(), 1);
-        assert_eq!(metatron.upstream_sessions(0)[0].id(), s1.id());
-        assert_eq!(metatron.upstream_sessions(1)[0].id(), s2.id());
+        let (sessions0, _) = metatron.upstream_snapshot(0, now);
+        let (sessions1, _) = metatron.upstream_snapshot(1, now);
+
+        assert_eq!(sessions0.len(), 1);
+        assert_eq!(sessions1.len(), 1);
+        assert_eq!(sessions0[0].id(), s1.id());
+        assert_eq!(sessions1[0].id(), s2.id());
     }
 
     #[test]
-    fn upstream_user_and_worker_counts_are_filtered() {
+    fn upstream_snapshot_stats_only_include_requested_upstream() {
         let metatron = Metatron::new();
-
-        metatron.new_session(test_auth("deadbeef", "foo"), 0);
-        metatron.new_session(test_auth("cafebabe", "bar"), 0);
-        metatron.new_session(test_auth("facefeed", "foo"), 1);
-
-        assert_eq!(metatron.upstream_user_count(0), 1);
-        assert_eq!(metatron.upstream_worker_count(0), 2);
-        assert_eq!(metatron.upstream_user_count(1), 1);
-        assert_eq!(metatron.upstream_worker_count(1), 1);
-    }
-
-    #[test]
-    fn upstream_snapshot_only_includes_requested_upstream() {
-        let metatron = Metatron::new();
+        let now = Instant::now();
 
         let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0);
         let s2 = metatron.new_session(test_auth("cafebabe", "bar"), 1);
@@ -457,38 +422,27 @@ mod tests {
         s1.record_accepted(Difficulty::from(100.0), Difficulty::from(200.0));
         s2.record_rejected(Difficulty::from(300.0));
 
-        let upstream_0 = metatron.upstream_snapshot(0);
-        let upstream_1 = metatron.upstream_snapshot(1);
+        let (_, stats0) = metatron.upstream_snapshot(0, now);
+        let (_, stats1) = metatron.upstream_snapshot(1, now);
 
-        assert_eq!(upstream_0.accepted_shares, 1);
-        assert_eq!(upstream_0.rejected_shares, 0);
-        assert_eq!(upstream_1.accepted_shares, 0);
-        assert_eq!(upstream_1.rejected_shares, 1);
-    }
-
-    #[test]
-    fn upstream_disconnected_count_is_filtered() {
-        let metatron = Metatron::new();
-
-        let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0);
-        let s2 = metatron.new_session(test_auth("cafebabe", "bar"), 1);
-
-        metatron.retire_session(s1);
-        metatron.retire_session(s2);
-
-        assert_eq!(metatron.upstream_disconnected_count(0), 1);
-        assert_eq!(metatron.upstream_disconnected_count(1), 1);
+        assert_eq!(stats0.accepted_shares, 1);
+        assert_eq!(stats0.rejected_shares, 0);
+        assert_eq!(stats1.accepted_shares, 0);
+        assert_eq!(stats1.rejected_shares, 1);
     }
 
     #[test]
     fn retire_removes_session_from_upstream_queries() {
         let metatron = Metatron::new();
+        let now = Instant::now();
 
         let session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
-        assert_eq!(metatron.upstream_sessions(0).len(), 1);
+        let (sessions, _) = metatron.upstream_snapshot(0, now);
+        assert_eq!(sessions.len(), 1);
 
         metatron.retire_session(session);
 
-        assert!(metatron.upstream_sessions(0).is_empty());
+        let (sessions, _) = metatron.upstream_snapshot(0, now);
+        assert!(sessions.is_empty());
     }
 }

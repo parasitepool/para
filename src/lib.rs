@@ -46,6 +46,7 @@ use {
     },
     generator::spawn_generator,
     hashdays::HashDays,
+    hashprice::HashPrice,
     hashrate::{HASHES_PER_DIFF_1, HashRate},
     job::Job,
     jobs::Jobs,
@@ -148,6 +149,7 @@ mod event_sink;
 mod extranonces;
 mod generator;
 pub mod hashdays;
+pub mod hashprice;
 pub mod hashrate;
 mod http_server;
 mod job;

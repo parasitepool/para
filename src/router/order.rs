@@ -12,70 +12,73 @@ pub enum OrderStatus {
     PaidLate,
 }
 
-pub(crate) struct Payment {
-    pub(crate) address: Address,
-    pub(crate) derivation_index: u32,
-    pub(crate) amount: Amount,
-    pub(crate) timeout: Duration,
-}
-
 pub struct Order {
     pub(crate) id: u32,
-    pub(crate) target: UpstreamTarget,
-    pub(crate) target_work: Option<HashDays>,
+    pub(crate) upstream_target: UpstreamTarget,
+    pub(crate) hashdays: Option<HashDays>,
     pub(crate) upstream: OnceLock<Arc<Upstream>>,
     pub(crate) allocator: OnceLock<Arc<EnonceAllocator>>,
-    pub(crate) cancel: CancellationToken,
     pub(crate) status: Mutex<OrderStatus>,
-    pub(crate) payment: Payment,
+    pub(crate) payment_address: Address,
+    pub(crate) payment_derivation_index: u32,
+    pub(crate) payment_amount: Amount,
+    pub(crate) payment_timeout: Duration,
     pub(crate) created_at: Instant,
-    pub(crate) stratum_sessions: Mutex<Vec<CancellationToken>>,
+    pub(crate) cancel: CancellationToken,
+    pub(crate) stratum_cancel: Mutex<Vec<CancellationToken>>,
 }
 
 impl Order {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         id: u32,
-        target: UpstreamTarget,
-        target_work: Option<HashDays>,
+        upstream_target: UpstreamTarget,
+        hashdays: Option<HashDays>,
+        payment_address: Address,
+        payment_derivation_index: u32,
+        payment_amount: Amount,
+        payment_timeout: Duration,
         cancel: CancellationToken,
-        payment: Payment,
     ) -> Arc<Self> {
         Arc::new(Self {
             id,
-            target,
-            target_work,
+            upstream_target,
+            hashdays,
             upstream: OnceLock::new(),
             allocator: OnceLock::new(),
-            cancel,
             status: Mutex::new(OrderStatus::Pending),
-            payment,
+            payment_address,
+            payment_derivation_index,
+            payment_amount,
+            payment_timeout,
             created_at: Instant::now(),
-            stratum_sessions: Mutex::new(Vec::new()),
+            cancel,
+            stratum_cancel: Mutex::new(Vec::new()),
         })
     }
 
     pub(crate) fn is_default(&self) -> bool {
-        self.target_work.is_none()
+        self.hashdays.is_none()
     }
 
     pub(crate) fn hashrate_1m(&self, metatron: &Metatron, now: Instant) -> HashRate {
         self.upstream()
-            .map(|upstream| metatron.upstream_snapshot(upstream.id()).hashrate_1m(now))
+            .map(|upstream| metatron.upstream_stats(upstream.id(), now).hashrate_1m(now))
             .unwrap_or(HashRate::ZERO)
     }
 
     pub(crate) fn register_session(&self) -> CancellationToken {
-        let token = self.cancel.child_token();
-        let mut tokens = self.stratum_sessions.lock();
-        tokens.retain(|t| !t.is_cancelled());
-        tokens.push(token.clone());
-        token
+        let cancel = self.cancel.child_token();
+        let mut cancel_tokens = self.stratum_cancel.lock();
+        cancel_tokens.retain(|token| !token.is_cancelled());
+        cancel_tokens.push(cancel.clone());
+        cancel
     }
 
     pub(crate) fn trim_sessions(&self, count: usize) {
-        let mut tokens = self.stratum_sessions.lock();
-        let before = tokens.len();
-        let n = count.min(tokens.len());
+        let mut cancel_tokens = self.stratum_cancel.lock();
+        let before = cancel_tokens.len();
+        let n = count.min(cancel_tokens.len());
 
         if n == 0 {
             return;
@@ -84,12 +87,12 @@ impl Order {
         info!(
             "Trimming {n} session(s) from order {} at {} (sessions {} -> {})",
             self.id,
-            self.target,
+            self.upstream_target,
             before,
             before - n,
         );
 
-        for token in tokens.drain(..n) {
+        for token in cancel_tokens.drain(..n) {
             token.cancel();
         }
     }
@@ -100,8 +103,14 @@ impl Order {
         enonce1_extension_size: usize,
         tasks: &TaskTracker,
     ) -> Result<()> {
-        let upstream =
-            Upstream::connect(self.id, &self.target, timeout, self.cancel.clone(), tasks).await?;
+        let upstream = Upstream::connect(
+            self.id,
+            &self.upstream_target,
+            timeout,
+            self.cancel.clone(),
+            tasks,
+        )
+        .await?;
 
         let proxy_extranonces = ProxyExtranonces::new(
             upstream.enonce1().clone(),
@@ -117,11 +126,12 @@ impl Order {
         self.upstream
             .set(upstream)
             .map_err(|_| anyhow!("activate called twice"))?;
+
         self.allocator
             .set(allocator)
             .map_err(|_| anyhow!("activate called twice"))?;
 
-        info!("Upstream {} connected", self.target);
+        info!("Upstream {} connected", self.upstream_target);
 
         Ok(())
     }
@@ -138,7 +148,7 @@ impl Order {
         *self.status.lock()
     }
 
-    pub(crate) fn transition_status(&self, from: OrderStatus, to: OrderStatus) -> bool {
+    pub(crate) fn transition(&self, from: OrderStatus, to: OrderStatus) -> bool {
         let mut status = self.status.lock();
         if *status == from {
             *status = to;
@@ -152,52 +162,33 @@ impl Order {
         *self.status.lock() = status;
     }
 
-    pub(crate) fn mark_active(&self) -> bool {
-        self.transition_status(OrderStatus::Pending, OrderStatus::Active)
-    }
-
-    pub(crate) fn mark_disconnected_while_pending(&self) -> bool {
-        self.transition_status(OrderStatus::Pending, OrderStatus::Disconnected)
-    }
-
     pub(crate) fn ready_for_activation(&self, received: Amount, elapsed: Duration) -> bool {
-        let mut status = self.status.lock();
-
-        if elapsed >= self.payment.timeout && *status == OrderStatus::Pending {
-            *status = OrderStatus::Expired;
+        if elapsed >= self.payment_timeout {
+            self.transition(OrderStatus::Pending, OrderStatus::Expired);
         }
 
-        if received < self.payment.amount {
+        if received < self.payment_amount {
             return false;
         }
 
-        match *status {
+        match self.status() {
             OrderStatus::Pending => true,
             OrderStatus::Expired => {
-                *status = OrderStatus::PaidLate;
+                self.transition(OrderStatus::Expired, OrderStatus::PaidLate);
                 false
             }
             _ => false,
         }
     }
 
-    pub(crate) fn is_active(&self) -> bool {
-        self.status() == OrderStatus::Active
-    }
-
     pub(crate) fn remaining_work(&self) -> Option<HashDays> {
-        let target = self.target_work?;
+        let target = self.hashdays?;
         let remaining = target.to_total_work() - self.upstream()?.accepted_work();
         (remaining != TotalWork::ZERO).then(|| remaining.to_hash_days())
     }
 
-    #[cfg(test)]
-    pub(crate) fn session_token_count(&self) -> usize {
-        self.stratum_sessions.lock().len()
-    }
-
     pub(crate) fn is_fulfilled(&self) -> bool {
-        let target = match self.target_work {
+        let target = match self.hashdays {
             Some(target) => target,
             None => return false,
         };
@@ -208,62 +199,5 @@ impl Order {
         };
 
         upstream.accepted_work().to_hash_days() >= target
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn test_address() -> Address {
-        "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc"
-            .parse::<Address<NetworkUnchecked>>()
-            .unwrap()
-            .assume_checked()
-    }
-
-    fn test_order() -> Arc<Order> {
-        Order::new(
-            0,
-            "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333"
-                .parse()
-                .unwrap(),
-            None,
-            CancellationToken::new(),
-            Payment {
-                address: test_address(),
-                derivation_index: 0,
-                amount: Amount::from_sat(1000),
-                timeout: Duration::from_secs(60),
-            },
-        )
-    }
-
-    #[test]
-    fn ready_for_activation_before_timeout() {
-        let order = test_order();
-
-        assert!(order.ready_for_activation(Amount::from_sat(1000), Duration::from_secs(59)));
-        assert_eq!(order.status(), OrderStatus::Pending);
-    }
-
-    #[test]
-    fn payment_after_timeout_is_paid_late() {
-        let order = test_order();
-
-        assert!(!order.ready_for_activation(Amount::from_sat(1000), Duration::from_secs(60)));
-        assert_eq!(order.status(), OrderStatus::PaidLate);
-    }
-
-    #[test]
-    fn transitions_require_pending_status() {
-        let order = test_order();
-        order.set_status(OrderStatus::Cancelled);
-
-        assert!(!order.mark_active());
-        assert_eq!(order.status(), OrderStatus::Cancelled);
-
-        assert!(!order.mark_disconnected_while_pending());
-        assert_eq!(order.status(), OrderStatus::Cancelled);
     }
 }

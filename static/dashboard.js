@@ -345,23 +345,6 @@ function renderSystemData(data) {
   set('uptime', data.uptime);
 }
 
-function renderWorkerRows(workers) {
-  return workers.sort((a, b) => b.stats.hashrate_1m - a.stats.hashrate_1m).map(w => {
-    const stats = w.stats;
-    const lastShare = stats.last_share != null ? `${stats.last_share}s ago` : '-';
-    const bestShare = formatDifficulty(stats.best_share);
-    return `<tr>
-      <td>${w.name || '(default)'}</td>
-      <td>${w.session_count}</td>
-      <td>${formatHashrate(stats.hashrate_1m)}</td>
-      <td>${formatTruncated(stats.sps_1m)}</td>
-      <td>${bestShare || '-'}</td>
-      <td>${stats.hash_days != null ? formatHashDays(stats.hash_days) : '-'}</td>
-      <td>${lastShare}</td>
-    </tr>`;
-  }).join('');
-}
-
 function renderSessionRows(sessions) {
   return sessions.sort((a, b) => b.stats.hashrate_1m - a.stats.hashrate_1m).map(session => {
     const stats = session.stats;

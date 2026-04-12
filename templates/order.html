@@ -40,19 +40,19 @@ const TERMINAL = ['fulfilled', 'cancelled', 'disconnected', 'expired', 'paid_lat
 
 function renderTerminal(data) {
   const u = data.upstream;
-  const username = (u && u.username) || data.target.username || '';
+  const username = (u && u.username) || data.upstream_target.username || '';
   const shortUser = truncateMiddle(username);
-  const shortAddress = truncateMiddle(data.address, 20, 8);
+  const shortAddress = truncateMiddle(data.payment_address, 20, 8);
   const rejShares = u ? rejectionPct(u.accepted, u.rejected) : '-';
   const rejWork = u ? rejectionPct(u.accepted_work, u.rejected_work) : '-';
 
   return `<div class="column column-full">
     <div class=row><span>Order ID</span><span>${data.id}</span></div>
     <div class=row><span>Status</span><span class="${statusClass(data.status)}">${formatStatus(data.status)}</span></div>
-    <div class=row><span>Endpoint</span><span>${u ? u.endpoint : data.target.endpoint}</span></div>
-    <div class=row><span>Target Work</span><span>${data.target_work != null ? formatHashDays(data.target_work) : 'Unlimited'}</span></div>
-    <div class=row><span>Payment Amount</span><span>${formatAmount(data.amount)}</span></div>
-    <div class=row><span>Payment Address</span><span class="copyable" data-formatted="${shortAddress}" data-full="${data.address}">${shortAddress}</span></div>
+    <div class=row><span>Endpoint</span><span>${u ? u.endpoint : data.upstream_target.endpoint}</span></div>
+    <div class=row><span>Hash Days</span><span>${data.hashdays != null ? formatHashDays(data.hashdays) : 'Unlimited'}</span></div>
+    <div class=row><span>Payment Amount</span><span>${formatAmount(data.payment_amount)}</span></div>
+    <div class=row><span>Payment Address</span><span class="copyable" data-formatted="${shortAddress}" data-full="${data.payment_address}">${shortAddress}</span></div>
     <div class=row><span>Username</span><span class="copyable" data-formatted="${shortUser}" data-full="${username}">${shortUser}</span></div>
     <div class=row><span>Rejected Shares</span><span class="copyable" data-formatted="${rejShares}" data-full="${u ? rejectionDetail(u.accepted, u.rejected) : '-'}">${rejShares}</span></div>
     <div class=row><span>Rejected Work</span><span class="copyable" data-formatted="${rejWork}" data-full="${u ? rejectionWorkDetail(u.accepted_work, u.rejected_work) : '-'}">${rejWork}</span></div>
@@ -67,9 +67,9 @@ function renderActive() {
     <h2>Upstream</h2>
     <div class=row><span>Status</span><span id=status></span></div>
     <div class=row><span>Endpoint</span><span id=endpoint></span></div>
-    <div class=row><span>Target Work</span><span id=target_work></span></div>
-    <div class=row><span>Payment Amount</span><span id=amount></span></div>
-    <div class=row><span>Payment Address</span><span id=address class=copyable></span></div>
+    <div class=row><span>Hash Days</span><span id=hashdays></span></div>
+    <div class=row><span>Payment Amount</span><span id=payment_amount></span></div>
+    <div class=row><span>Payment Address</span><span id=payment_address class=copyable></span></div>
     <div class=row><span>Ping</span><span id=ping_ms></span></div>
     <div class=row><span>Username</span><span id=username class=copyable></span></div>
     <div class=row><span>Difficulty</span><span id=difficulty class=copyable></span></div>
@@ -84,27 +84,14 @@ function renderActive() {
   </div>
   <div class=column>
     <h2>Downstream</h2>
-    <div class=row><span>Users</span><span id=users></span></div>
-    <div class=row><span>Workers</span><span id=workers></span></div>
-    <div class=row><span>Sessions</span><span id=sessions></span></div>
-    <div class=row><span>Idle</span><span id=idle></span></div>
-    <div class=row><span>Disconnected</span><span id=disconnected></span></div>
     <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
     <div class=row><span>SPS</span><span id=sps_1m></span></div>
-    <div class=row><span>Uptime</span><span><span id=uptime_secs></span>s</span></div>
     <div class=row><span>Best Share</span><span id=best_share class=copyable></span></div>
     <div class=row><span>Last Share</span><span id=last_share></span></div>
     <div class=row><span>Rejected Shares</span><span id=rejected_shares class=copyable></span></div>
     <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
     <div class=row><span>Received Work</span><span id=received_work></span></div>
     <div class=row><span>Received Hashdays</span><span id=hash_days class=copyable></span></div>
-  </div>
-  <div class="column column-full">
-    <h2>Workers</h2>
-    <table id=workers-table>
-      <thead><tr><th>Name</th><th>Sessions</th><th>Hashrate</th><th>SPS</th><th>Best Share</th><th>Hashdays</th><th>Last Share</th></tr></thead>
-      <tbody id=workers-list></tbody>
-    </table>
   </div>
   <div class="column column-full">
     <h2>Sessions</h2>
@@ -117,14 +104,14 @@ function renderActive() {
 
 function populateActive(data) {
   const upstream = data.upstream;
-  const username = (upstream && upstream.username) || data.target.username || '';
+  const username = (upstream && upstream.username) || data.upstream_target.username || '';
 
   set('status', formatStatus(data.status));
   setClass('status', statusClass(data.status));
-  set('endpoint', upstream ? upstream.endpoint : data.target.endpoint);
-  set('target_work', data.target_work != null ? formatHashDays(data.target_work) : 'Unlimited');
-  set('amount', data.amount, formatAmount);
-  copyable('address', truncateMiddle(data.address, 20, 8), data.address);
+  set('endpoint', upstream ? upstream.endpoint : data.upstream_target.endpoint);
+  set('hashdays', data.hashdays != null ? formatHashDays(data.hashdays) : 'Unlimited');
+  set('payment_amount', data.payment_amount, formatAmount);
+  copyable('payment_address', truncateMiddle(data.payment_address, 20, 8), data.payment_address);
   set('ping_ms', upstream && upstream.ping_ms, value => `${formatPing(value)}ms`);
   copyable('username', truncateMiddle(username), username);
 
@@ -151,14 +138,8 @@ function populateActive(data) {
   }
 
   const stats = data.stats;
-  set('users', data.user_count);
-  set('workers', data.worker_count);
-  set('sessions', data.session_count);
-  set('idle', data.idle_count);
-  set('disconnected', data.disconnected_count);
   set('hashrate_1m', stats.hashrate_1m, formatHashrate);
   set('sps_1m', stats.sps_1m, formatTruncated);
-  set('uptime_secs', data.uptime_secs);
   rejectionCopyable('rejected_shares', stats.accepted_shares, stats.rejected_shares);
   rejectionWorkCopyable('rejected_work', stats.accepted_work, stats.rejected_work);
   set('last_share', stats.last_share, value => `${value}s ago`);
@@ -166,7 +147,6 @@ function populateActive(data) {
   set('received_work', stats.accepted_work, formatDifficulty);
   copyable('hash_days', formatHashDays(stats.hash_days), stats.hash_days);
 
-  document.getElementById('workers-list').innerHTML = renderWorkerRows(data.workers || []);
   document.getElementById('sessions-list').innerHTML = renderSessionRows(data.sessions || []);
 }
 

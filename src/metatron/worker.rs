@@ -34,13 +34,6 @@ impl Worker {
         self.sessions.len()
     }
 
-    pub(crate) fn upstream_session_count(&self, upstream_id: u32) -> usize {
-        self.sessions
-            .iter()
-            .filter(|session| session.key().upstream_id() == upstream_id)
-            .count()
-    }
-
     pub(crate) fn sessions(&self) -> impl Iterator<Item = Arc<Session>> {
         self.sessions.iter().map(|entry| entry.value().clone())
     }
@@ -51,18 +44,6 @@ impl Worker {
         self.sessions
             .iter()
             .fold(self.lifetime.lock().clone(), |mut combined, session| {
-                combined.absorb(session.snapshot(), now);
-                combined
-            })
-    }
-
-    pub(crate) fn upstream_snapshot(&self, upstream_id: u32) -> Stats {
-        let now = Instant::now();
-
-        self.sessions
-            .iter()
-            .filter(|session| session.key().upstream_id() == upstream_id)
-            .fold(Stats::new(), |mut combined, session| {
                 combined.absorb(session.snapshot(), now);
                 combined
             })

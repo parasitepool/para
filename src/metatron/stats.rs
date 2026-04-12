@@ -21,6 +21,12 @@ pub(crate) struct Stats {
     pub(crate) sps_1hr: DecayingAverage,
 }
 
+impl Default for Stats {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Stats {
     pub(crate) fn new() -> Self {
         Self {

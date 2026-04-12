@@ -18,7 +18,7 @@ impl Orders {
     pub(crate) fn active_paid(&self) -> Vec<Arc<Order>> {
         self.inner
             .values()
-            .filter(|order| order.is_active() && !order.is_default())
+            .filter(|order| order.status() == OrderStatus::Active && !order.is_default())
             .cloned()
             .collect()
     }
@@ -26,7 +26,7 @@ impl Orders {
     pub(crate) fn active_default(&self) -> Vec<Arc<Order>> {
         self.inner
             .values()
-            .filter(|order| order.is_active() && order.is_default())
+            .filter(|order| order.status() == OrderStatus::Active && order.is_default())
             .cloned()
             .collect()
     }
@@ -37,36 +37,5 @@ impl Orders {
 
     pub(crate) fn all(&self) -> Vec<Arc<Order>> {
         self.inner.values().cloned().collect()
-    }
-
-    #[cfg(test)]
-    pub(super) fn all_len(&self) -> usize {
-        self.inner.len()
-    }
-
-    #[cfg(test)]
-    pub(super) fn active_len(&self) -> usize {
-        self.inner
-            .values()
-            .filter(|order| order.is_active())
-            .count()
-    }
-
-    #[cfg(test)]
-    pub(super) fn contains(&self, id: u32) -> bool {
-        self.inner.contains_key(&id)
-    }
-
-    #[cfg(test)]
-    pub(super) fn active_id(&self, idx: usize) -> u32 {
-        let active_paid = self.active_paid();
-        let active_default = self.active_default();
-
-        active_paid
-            .iter()
-            .chain(&active_default)
-            .nth(idx)
-            .unwrap()
-            .id
     }
 }

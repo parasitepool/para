@@ -217,38 +217,39 @@ impl UpstreamInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RouterStatus {
     pub order_count: usize,
-    pub upstream_accepted: u64,
-    pub upstream_rejected: u64,
-    pub upstream_accepted_work: TotalWork,
-    pub upstream_rejected_work: TotalWork,
-    pub upstream_hash_days: HashDays,
     pub session_count: usize,
     pub disconnected_count: usize,
     pub idle_count: usize,
     pub uptime_secs: u64,
+    pub upstream_accepted_shares: u64,
+    pub upstream_rejected_shares: u64,
+    pub upstream_accepted_work: TotalWork,
+    pub upstream_rejected_work: TotalWork,
+    pub upstream_delivered_hash_days: HashDays,
+    pub downstream_stats: MiningStats,
     pub orders: Vec<OrderDetail>,
-    pub stats: MiningStats,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct OrderRequest {
-    pub target: UpstreamTarget,
-    pub target_work: HashDays,
+    pub upstream_target: UpstreamTarget,
+    pub hashdays: HashDays,
+    pub price: HashPrice,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct AddOrderResponse {
-    pub id: u32,
-    pub address: Address<NetworkUnchecked>,
-    pub amount: u64,
+pub struct OrderResponse {
+    pub order_id: u32,
+    pub payment_address: Address<NetworkUnchecked>,
+    pub payment_amount: Amount,
 }
 
-impl AddOrderResponse {
+impl OrderResponse {
     pub(crate) fn from_order(order: &Order) -> Self {
         Self {
-            id: order.id,
-            address: order.payment.address.as_unchecked().clone(),
-            amount: order.payment.amount.to_sat(),
+            order_id: order.id,
+            payment_address: order.payment_address.as_unchecked().clone(),
+            payment_amount: order.payment_amount,
         }
     }
 }
@@ -257,85 +258,40 @@ impl AddOrderResponse {
 pub struct OrderDetail {
     pub id: u32,
     pub status: OrderStatus,
-    pub target: UpstreamTarget,
-    pub target_work: Option<HashDays>,
-    pub address: Address<NetworkUnchecked>,
-    pub amount: Amount,
+    pub upstream_target: UpstreamTarget,
+    pub hashdays: Option<HashDays>,
+    pub payment_address: Address<NetworkUnchecked>,
+    pub payment_amount: Amount,
     pub upstream_id: Option<u32>,
     pub upstream: Option<UpstreamInfo>,
-    pub user_count: usize,
-    pub worker_count: usize,
-    pub session_count: usize,
-    pub disconnected_count: usize,
-    pub idle_count: usize,
-    pub uptime_secs: u64,
-    pub workers: Vec<WorkerDetail>,
     pub sessions: Vec<SessionDetail>,
     pub stats: MiningStats,
 }
 
 impl OrderDetail {
     pub(crate) fn from_order(order: &Order, metatron: &Metatron, now: Instant) -> Self {
-        let (upstream_id, upstream, sessions, workers, stats) =
-            if let Some(upstream) = order.upstream() {
-                let id = upstream.id();
+        let upstream = order.upstream();
+        let upstream_id = upstream.map(|upstream| upstream.id());
 
-                let sessions: Vec<SessionDetail> = metatron
-                    .upstream_sessions(id)
-                    .iter()
-                    .map(|session| SessionDetail::from_session(session, now))
-                    .collect();
-
-                let workers: Vec<WorkerDetail> = metatron
-                    .users()
-                    .iter()
-                    .flat_map(|user| user.workers().collect::<Vec<_>>())
-                    .filter_map(|worker| {
-                        let session_count = worker.upstream_session_count(id);
-                        (session_count > 0).then(|| WorkerDetail {
-                            name: worker.workername().to_string(),
-                            session_count,
-                            stats: MiningStats::from_snapshot(&worker.upstream_snapshot(id), now),
-                        })
-                    })
-                    .collect();
-
-                (
-                    Some(id),
-                    Some(UpstreamInfo::from_upstream(upstream)),
-                    sessions,
-                    workers,
-                    MiningStats::from_snapshot(&metatron.upstream_snapshot(id), now),
-                )
-            } else {
-                (
-                    None,
-                    None,
-                    Vec::new(),
-                    Vec::new(),
-                    MiningStats::from_snapshot(&Stats::new(), now),
-                )
-            };
+        let (sessions, stats) = match upstream_id {
+            Some(upstream_id) => metatron.upstream_snapshot(upstream_id, now),
+            None => (Vec::new(), Stats::new()),
+        };
 
         Self {
             id: order.id,
             status: order.status(),
-            target: order.target.clone(),
-            target_work: order.target_work,
-            address: order.payment.address.as_unchecked().clone(),
-            amount: order.payment.amount,
+            upstream_target: order.upstream_target.clone(),
+            hashdays: order.hashdays,
+            payment_address: order.payment_address.as_unchecked().clone(),
+            payment_amount: order.payment_amount,
             upstream_id,
-            upstream,
-            user_count: upstream_id.map_or(0, |id| metatron.upstream_user_count(id)),
-            worker_count: upstream_id.map_or(0, |id| metatron.upstream_worker_count(id)),
-            session_count: sessions.len(),
-            disconnected_count: upstream_id
-                .map_or(0, |id| metatron.upstream_disconnected_count(id)),
-            idle_count: upstream_id.map_or(0, |id| metatron.upstream_idle_count(id)),
-            uptime_secs: metatron.uptime().as_secs(),
-            workers,
-            sessions,
-            stats,
+            upstream: upstream.map(|upstream| UpstreamInfo::from_upstream(upstream)),
+            sessions: sessions
+                .into_iter()
+                .map(|session| SessionDetail::from_session(session.as_ref(), now))
+                .collect(),
+            stats: MiningStats::from_snapshot(&stats, now),
         }
     }
 }
