@@ -1,33 +1,6 @@
 <style>
-  #upstreams-list {
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-    width: 100%;
-    box-sizing: border-box;
-    padding: 24px 0;
-  }
-
-  .order-card {
-    border: 1px solid #444;
-    padding: 20px 30px;
-    width: 100%;
-    box-sizing: border-box;
-  }
-
-  .order-link {
-    color: inherit;
-    text-decoration: none;
-  }
-
-  .order-link:hover {
-    text-decoration: underline;
-  }
-
-  .order-card .row span:last-child,
-  .order-card .row a {
-    overflow-wrap: anywhere;
-  }
+  .order-link { color: inherit; text-decoration: none; }
+  .order-link:hover { text-decoration: underline; }
 
   #add-order-btn {
     width: 1048px;
@@ -41,19 +14,10 @@
 
   #add-order-btn:hover { background: #444; }
 
-  .order-header {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    position: relative;
-    margin: 0 0 15px;
-  }
-
-  .order-header h2 { margin: 0; font-size: 1.22em; }
+  #orders-table td { vertical-align: middle; white-space: nowrap; }
+  #orders-table tbody tr { cursor: pointer; }
 
   .order-delete {
-    position: absolute;
-    right: 0;
     background: none;
     border: 1px solid #444;
     color: #888;
@@ -64,9 +28,6 @@
     font-size: 0.8em;
     line-height: 1;
     padding: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
   }
 
   .order-delete:hover { color: #f55; border-color: #f55; }
@@ -172,19 +133,7 @@
   }
 
   @media (max-width: 1140px) {
-    #add-order-btn {
-      width: 100%;
-      max-width: 500px;
-    }
-
-    #upstreams-list {
-      width: 100%;
-      max-width: 500px;
-    }
-
-    .order-card {
-      max-width: 500px;
-    }
+    #add-order-btn { width: 100%; max-width: 500px; }
   }
 </style>
 
@@ -192,9 +141,13 @@
   <div class=column>
     <h2>Upstream</h2>
     <div class=row><span>Orders</span><span id=order_count></span></div>
+    <div class=row><span>Hashrate</span><span id=upstream_hashrate_1m></span></div>
+    <div class=row><span>SPS</span><span id=upstream_sps_1m></span></div>
+    <div class=row><span>Best Share</span><span id=upstream_best_share class=copyable></span></div>
+    <div class=row><span>Last Share</span><span id=upstream_last_share></span></div>
     <div class=row><span>Rejected Shares</span><span id=upstream_rejected_shares class=copyable></span></div>
     <div class=row><span>Rejected Work</span><span id=upstream_rejected_work class=copyable></span></div>
-    <div class=row><span>Delivered Work</span><span id=upstream_total_work></span></div>
+    <div class=row><span>Delivered Work</span><span id=upstream_accepted_work></span></div>
     <div class=row><span>Delivered Hashdays</span><span id=upstream_hash_days class=copyable></span></div>
   </div>
 
@@ -203,19 +156,36 @@
     <div class=row><span>Sessions</span><span id=session_count></span></div>
     <div class=row><span>Idle</span><span id=idle></span></div>
     <div class=row><span>Disconnected</span><span id=disconnected></span></div>
-    <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
-    <div class=row><span>SPS</span><span id=sps_1m></span></div>
-    <div class=row><span>Best Share</span><span id=best_share class=copyable></span></div>
-    <div class=row><span>Last Share</span><span><span id=last_share></span>s ago</span></div>
-    <div class=row><span>Rejected Shares</span><span id=rejected_shares class=copyable></span></div>
-    <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
-    <div class=row><span>Received Work</span><span id=received_work></span></div>
-    <div class=row><span>Received Hashdays</span><span id=hash_days class=copyable></span></div>
+    <div class=row><span>Hashrate</span><span id=downstream_hashrate_1m></span></div>
+    <div class=row><span>SPS</span><span id=downstream_sps_1m></span></div>
+    <div class=row><span>Best Share</span><span id=downstream_best_share class=copyable></span></div>
+    <div class=row><span>Last Share</span><span id=downstream_last_share></span></div>
+    <div class=row><span>Rejected Shares</span><span id=downstream_rejected_shares class=copyable></span></div>
+    <div class=row><span>Rejected Work</span><span id=downstream_rejected_work class=copyable></span></div>
+    <div class=row><span>Received Work</span><span id=downstream_accepted_work></span></div>
+    <div class=row><span>Received Hashdays</span><span id=downstream_hash_days class=copyable></span></div>
   </div>
 
   <button id=add-order-btn>Add Order</button>
 
-  <div id=upstreams-list class=column-full></div>
+  <div class="column column-full">
+    <h2>Orders</h2>
+    <table id=orders-table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Status</th>
+          <th>Endpoint</th>
+          <th>Username</th>
+          <th>Hash Days</th>
+          <th>Delivered</th>
+          <th>Hashrate</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id=orders-list></tbody>
+    </table>
+  </div>
 
   <div id=order-overlay class=hidden>
     <div id=order-modal>
@@ -287,79 +257,79 @@
 <script>
 async function refresh(signal) {
   try {
-    const [routerData, systemData, bitcoinData] = await Promise.all([
+    const [routerData, ordersData, systemData, bitcoinData] = await Promise.all([
       fetch('/api/router/status', { signal }).then(r => r.json()).catch(() => ({})),
+      fetch('/api/router/orders', { signal }).then(r => r.json()).catch(() => []),
       fetch('/api/system/status', { signal }).then(r => r.json()).catch(() => ({})),
       fetch('/api/bitcoin/status', { signal }).then(r => r.json()).catch(() => ({}))
     ]);
 
-    const s = routerData.downstream_stats;
-    set('order_count', routerData.order_count);
-    set('session_count', routerData.session_count);
-    set('idle', routerData.idle_count);
-    set('disconnected', routerData.disconnected_count);
-    set('hashrate_1m', s.hashrate_1m, formatHashrate);
-    set('sps_1m', s.sps_1m, formatTruncated);
-    set('last_share', s.last_share);
-    copyable('hash_days', formatHashDays(s.hash_days), s.hash_days);
-    copyable('best_share', formatDifficulty(s.best_share), s.best_share);
+    const us = routerData.upstream || {};
+    const ds = routerData.downstream || {};
+    const uss = us.stats || {};
+    const dss = ds.stats || {};
 
-    rejectionCopyable('rejected_shares', s.accepted_shares, s.rejected_shares);
-    rejectionWorkCopyable('rejected_work', s.accepted_work, s.rejected_work);
-    rejectionCopyable(
-      'upstream_rejected_shares',
-      routerData.upstream_accepted_shares,
-      routerData.upstream_rejected_shares,
-    );
-    rejectionWorkCopyable('upstream_rejected_work', routerData.upstream_accepted_work, routerData.upstream_rejected_work);
+    set('order_count', us.order_count);
+    set('session_count', ds.session_count);
+    set('idle', ds.idle_count);
+    set('disconnected', ds.disconnected_count);
 
-    set('upstream_total_work', (routerData.upstream_accepted_work || 0) + (routerData.upstream_rejected_work || 0), formatDifficulty);
-    copyable(
-      'upstream_hash_days',
-      formatHashDays(routerData.upstream_delivered_hash_days),
-      routerData.upstream_delivered_hash_days,
-    );
-    set('received_work', s.accepted_work, formatDifficulty);
+    set('upstream_hashrate_1m', uss.hashrate_1m, formatHashrate);
+    set('upstream_sps_1m', uss.sps_1m, formatTruncated);
+    copyable('upstream_best_share', formatDifficulty(uss.best_share), uss.best_share);
+    set('upstream_last_share', uss.last_share, value => `${value}s ago`);
+    rejectionCopyable('upstream_rejected_shares', uss.accepted_shares, uss.rejected_shares);
+    rejectionWorkCopyable('upstream_rejected_work', uss.accepted_work, uss.rejected_work);
+    set('upstream_accepted_work', uss.accepted_work, formatDifficulty);
+    copyable('upstream_hash_days', formatHashDays(uss.hash_days), uss.hash_days);
+
+    set('downstream_hashrate_1m', dss.hashrate_1m, formatHashrate);
+    set('downstream_sps_1m', dss.sps_1m, formatTruncated);
+    copyable('downstream_best_share', formatDifficulty(dss.best_share), dss.best_share);
+    set('downstream_last_share', dss.last_share, value => `${value}s ago`);
+    rejectionCopyable('downstream_rejected_shares', dss.accepted_shares, dss.rejected_shares);
+    rejectionWorkCopyable('downstream_rejected_work', dss.accepted_work, dss.rejected_work);
+    set('downstream_accepted_work', dss.accepted_work, formatDifficulty);
+    copyable('downstream_hash_days', formatHashDays(dss.hash_days), dss.hash_days);
 
     renderBitcoinData(bitcoinData);
     renderSystemData(systemData);
 
-    const container = document.getElementById('upstreams-list');
-    if (!container.querySelector('.copyable:hover')) {
-      const copyableHtml = (formatted, raw) =>
-        `<span class="copyable" data-formatted="${formatted}" data-full="${raw}">${formatted}</span>`;
-
-      const orders = (routerData.orders || []).sort((a, b) => b.id - a.id);
-      container.innerHTML = orders.map(order => {
+    const tbody = document.getElementById('orders-list');
+    if (!tbody.querySelector('.copyable:hover')) {
+      const orders = (ordersData || []).slice().sort((a, b) => b.id - a.id);
+      tbody.innerHTML = orders.map(order => {
         const u = order.upstream;
-        const os = order.stats;
         const hasUpstream = !!u;
+        const endpoint = hasUpstream ? u.endpoint : order.upstream_target.endpoint;
         const username = (u && u.username) || order.upstream_target.username || '';
-        return `<div class="order-card">
-          <div class=order-header>
-            <h2><a class=order-link href="/order/${order.id}">Order ${order.id}</a></h2>
-            <button class=order-delete data-id="${order.id}">&times;</button>
-          </div>
-          <div class=row><span>Status</span><span class="${statusClass(order.status)}">${formatStatus(order.status)}</span></div>
-          <div class=row><span>Endpoint</span><span>${hasUpstream ? u.endpoint : order.upstream_target.endpoint}</span></div>
-          <div class=row><span>Username</span>${copyableHtml(truncateMiddle(username), username)}</div>
-          <div class=row><span>Hash Days</span><span>${order.hashdays != null ? formatHashDays(order.hashdays) : 'Unlimited'}</span></div>
-          <div class=row><span>Delivered Hashdays</span><span>${hasUpstream ? formatHashDays(u.hash_days) || '-' : '-'}</span></div>
-          <div class=row><span>Hashrate</span><span>${formatHashrate(os.hashrate_1m)}</span></div>
-        </div>`;
+        const shortUsername = truncateMiddle(username);
+        const target = order.hashdays != null ? formatHashDays(order.hashdays) : 'Unlimited';
+        const delivered = hasUpstream ? formatHashDays(u.stats.hash_days) || '-' : '-';
+        const hashrate = formatHashrate(order.downstream.hashrate_1m);
+        return `<tr data-id="${order.id}">
+          <td><a class=order-link href="/order/${order.id}">${order.id}</a></td>
+          <td class="${statusClass(order.status)}">${formatStatus(order.status)}</td>
+          <td>${endpoint}</td>
+          <td><span class="copyable hover-expand" data-formatted="${shortUsername}" data-full="${username}">${shortUsername}</span></td>
+          <td>${target}</td>
+          <td>${delivered}</td>
+          <td>${hashrate}</td>
+          <td><button class=order-delete data-id="${order.id}" title="Cancel order">&times;</button></td>
+        </tr>`;
       }).join('');
     }
 
   } catch (e) { if (e.name !== 'AbortError') console.error('refresh error:', e); }
 }
-initDelegatedCopyables('upstreams-list');
+initDelegatedCopyables('orders-list');
 startPolling(refresh);
 initLogControls();
 connectWs();
 setupLogToggle();
 initCopyables();
 
-document.getElementById('upstreams-list').addEventListener('click', async (e) => {
+document.getElementById('orders-list').addEventListener('click', async (e) => {
   const btn = e.target.closest('.order-delete');
   if (!btn) return;
   const id = btn.dataset.id;
@@ -373,6 +343,13 @@ document.getElementById('upstreams-list').addEventListener('click', async (e) =>
   } catch (e) {
     alert(e.message);
   }
+});
+
+document.getElementById('orders-list').addEventListener('click', (e) => {
+  if (e.target.closest('.copyable, .order-delete, a')) return;
+  const row = e.target.closest('tr[data-id]');
+  if (!row) return;
+  window.location.href = `/order/${row.dataset.id}`;
 });
 
 {

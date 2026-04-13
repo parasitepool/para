@@ -32,37 +32,20 @@ async fn order_page(Extension(chain): Extension<Chain>) -> ServerResult<Response
 async fn status(State(router): State<Arc<Router>>) -> ServerResult<Response> {
     let now = Instant::now();
     let metatron = router.metatron();
-    let mut orders = Vec::new();
-    let mut upstream_accepted = 0;
-    let mut upstream_rejected = 0;
-    let mut upstream_accepted_work = TotalWork::ZERO;
-    let mut upstream_rejected_work = TotalWork::ZERO;
+    let orders = router.orders();
+    let mut upstream = Stats::new();
 
-    for order in router.orders().iter() {
-        let detail = OrderDetail::from_order(order, &metatron, now);
-        if let Some(ref upstream) = detail.upstream {
-            upstream_accepted += upstream.accepted;
-            upstream_rejected += upstream.rejected;
-            upstream_accepted_work += upstream.accepted_work;
-            upstream_rejected_work += upstream.rejected_work;
-        }
-        orders.push(detail);
+    for order in orders.iter() {
+        upstream.absorb(metatron.upstream_stats(order.id), now);
     }
 
     Ok(Json(RouterStatus {
-        order_count: orders.len(),
-        session_count: metatron.total_sessions(),
-        disconnected_count: metatron.total_disconnected(),
-        idle_count: metatron.total_idle(),
         uptime_secs: metatron.uptime().as_secs(),
-        orders,
-        upstream_accepted_shares: upstream_accepted,
-        upstream_rejected_shares: upstream_rejected,
-        upstream_accepted_work,
-        upstream_rejected_work,
-        upstream_delivered_hash_days: (upstream_accepted_work + upstream_rejected_work)
-            .to_hash_days(),
-        downstream_stats: MiningStats::from_snapshot(&metatron.snapshot(), now),
+        upstream: RouterUpstreamInfo {
+            order_count: orders.len(),
+            stats: MiningStats::from_snapshot(&upstream, now),
+        },
+        downstream: DownstreamInfo::from_metatron(&metatron, now),
     })
     .into_response())
 }
@@ -110,6 +93,9 @@ async fn list_orders(
     State(router): State<Arc<Router>>,
     Query(query): Query<OrdersQuery>,
 ) -> ServerResult<Response> {
+    let now = Instant::now();
+    let metatron = router.metatron();
+
     Ok(Json(
         router
             .orders()
@@ -120,8 +106,8 @@ async fn list_orders(
                     .as_ref()
                     .is_none_or(|addr| order.upstream_target.username().address() == addr)
             })
-            .map(|order| order.id)
-            .collect::<Vec<u32>>(),
+            .map(|order| OrderDetail::from_order(order, &metatron, now))
+            .collect::<Vec<OrderDetail>>(),
     )
     .into_response())
 }

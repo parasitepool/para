@@ -110,9 +110,8 @@ async fn add_and_activate_order(
 
     timeout(Duration::from_secs(30), async {
         loop {
-            if let Ok(status) = router.get_status().await
-                && status
-                    .orders
+            if let Ok(orders) = router.list_orders(None).await
+                && orders
                     .iter()
                     .any(|o| o.id == id && o.status == OrderStatus::Active)
             {
@@ -150,7 +149,7 @@ async fn router() {
     );
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.order_count, 0);
+    assert_eq!(status.upstream.order_count, 0);
 
     add_and_activate_order(
         &router,
@@ -173,7 +172,7 @@ async fn router() {
     .await;
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.order_count, 2);
+    assert_eq!(status.upstream.order_count, 2);
 
     let mut miners = Vec::new();
 
@@ -191,8 +190,8 @@ async fn router() {
     timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(status) = router.get_status().await
-                && status.order_count == 2
-                && status.session_count >= 3
+                && status.upstream.order_count == 2
+                && status.downstream.session_count >= 3
             {
                 break;
             }
@@ -203,21 +202,22 @@ async fn router() {
     .expect("Timeout waiting for 2 slots and 3 sessions");
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.order_count, 2);
-    assert_eq!(status.session_count, 3);
+    assert_eq!(status.upstream.order_count, 2);
+    assert_eq!(status.downstream.session_count, 3);
 
     drop(pool_a);
 
     timeout(Duration::from_secs(30), async {
         loop {
-            if let Ok(status) = router.get_status().await
-                && status
-                    .orders
+            let status = router.get_status().await;
+            let orders = router.list_orders(None).await;
+            if let (Ok(status), Ok(orders)) = (status, orders)
+                && orders
                     .iter()
                     .filter(|o| o.status == OrderStatus::Active)
                     .count()
                     == 1
-                && status.session_count >= 3
+                && status.downstream.session_count >= 3
             {
                 break;
             }
@@ -228,16 +228,15 @@ async fn router() {
     .expect("Timeout waiting for miners to reconnect to remaining upstream");
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.order_count, 2);
-    assert_eq!(status.session_count, 3);
+    assert_eq!(status.upstream.order_count, 2);
+    assert_eq!(status.downstream.session_count, 3);
 
     drop(pool_b);
 
     timeout(Duration::from_secs(30), async {
         loop {
-            if let Ok(status) = router.get_status().await
-                && status
-                    .orders
+            if let Ok(orders) = router.list_orders(None).await
+                && orders
                     .iter()
                     .filter(|o| o.status == OrderStatus::Active)
                     .count()
@@ -252,7 +251,7 @@ async fn router() {
     .expect("Timeout waiting for all upstreams to disconnect");
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.order_count, 2);
+    assert_eq!(status.upstream.order_count, 2);
 
     for mut miner in miners {
         miner.kill().unwrap();
@@ -417,11 +416,10 @@ async fn order_detail() {
     assert_eq!(detail.hashdays, Some(hashdays));
     assert_eq!(detail.payment_address.assume_checked().to_string(), address);
     assert_eq!(detail.payment_amount.to_sat(), amount);
-    assert!(detail.upstream_id.is_none());
     assert!(detail.upstream.is_none());
     assert!(detail.sessions.is_empty());
-    assert_eq!(detail.stats.accepted_shares, 0);
-    assert_eq!(detail.stats.rejected_shares, 0);
+    assert_eq!(detail.downstream.accepted_shares, 0);
+    assert_eq!(detail.downstream.rejected_shares, 0);
 }
 
 #[tokio::test]
@@ -445,7 +443,7 @@ async fn orders() {
     );
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.order_count, 0);
+    assert_eq!(status.upstream.order_count, 0);
 
     let response = router
         .add_order(&api::OrderRequest {
@@ -479,13 +477,15 @@ async fn orders() {
     .await;
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.order_count, 3);
+    assert_eq!(status.upstream.order_count, 3);
 
     let response = router.cancel_order(9999).await.unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
-    let active_id = status
-        .orders
+    let active_id = router
+        .list_orders(None)
+        .await
+        .unwrap()
         .iter()
         .find(|o| o.status == OrderStatus::Active)
         .unwrap()
@@ -494,7 +494,7 @@ async fn orders() {
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.order_count, 3);
+    assert_eq!(status.upstream.order_count, 3);
 }
 
 #[tokio::test]
@@ -537,10 +537,11 @@ async fn cancelled_order_stays_cancelled_during_activation() {
     sleep(Duration::from_secs(3)).await;
 
     let status = router.get_status().await.unwrap();
-    let order = status.orders.iter().find(|order| order.id == id).unwrap();
+    let orders = router.list_orders(None).await.unwrap();
+    let order = orders.iter().find(|order| order.id == id).unwrap();
 
     assert_eq!(order.status, OrderStatus::Cancelled);
-    assert_eq!(status.order_count, 1);
+    assert_eq!(status.upstream.order_count, 1);
 
     stalled_server.abort();
 }
@@ -586,17 +587,14 @@ async fn order_disconnected_on_upstream_disconnect() {
     .await;
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.order_count, 2);
+    assert_eq!(status.upstream.order_count, 2);
 
     drop(pool_b);
 
     timeout(Duration::from_secs(30), async {
         loop {
-            if let Ok(status) = router.get_status().await
-                && status
-                    .orders
-                    .iter()
-                    .any(|o| o.status == OrderStatus::Disconnected)
+            if let Ok(orders) = router.list_orders(None).await
+                && orders.iter().any(|o| o.status == OrderStatus::Disconnected)
             {
                 break;
             }
@@ -607,10 +605,12 @@ async fn order_disconnected_on_upstream_disconnect() {
     .expect("Timeout waiting for order to be marked disconnected after upstream disconnect");
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.order_count, 2);
+    assert_eq!(status.upstream.order_count, 2);
     assert_eq!(
-        status
-            .orders
+        router
+            .list_orders(None)
+            .await
+            .unwrap()
             .iter()
             .filter(|o| o.status == OrderStatus::Disconnected)
             .count(),
@@ -650,7 +650,7 @@ async fn order_fulfilled_on_hashdays_reached() {
     .await;
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.order_count, 1);
+    assert_eq!(status.upstream.order_count, 1);
 
     let mut miner = CommandBuilder::new(format!(
         "miner {} --mode continuous --username {} --cpu-cores 1",
@@ -661,11 +661,8 @@ async fn order_fulfilled_on_hashdays_reached() {
 
     timeout(Duration::from_secs(60), async {
         loop {
-            if let Ok(status) = router.get_status().await
-                && status
-                    .orders
-                    .iter()
-                    .any(|o| o.status == OrderStatus::Fulfilled)
+            if let Ok(orders) = router.list_orders(None).await
+                && orders.iter().any(|o| o.status == OrderStatus::Fulfilled)
             {
                 break;
             }
@@ -676,16 +673,16 @@ async fn order_fulfilled_on_hashdays_reached() {
     .expect("Timeout waiting for order to be fulfilled");
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.order_count, 1);
+    assert_eq!(status.upstream.order_count, 1);
 
-    let fulfilled = status
-        .orders
+    let orders = router.list_orders(None).await.unwrap();
+    let fulfilled = orders
         .iter()
         .find(|o| o.status == OrderStatus::Fulfilled)
         .unwrap();
 
     assert_eq!(fulfilled.hashdays, Some(HashDays::new(1e-10).unwrap()));
-    assert!(fulfilled.upstream.as_ref().unwrap().hash_days >= HashDays::new(1e-10).unwrap());
+    assert!(fulfilled.upstream.as_ref().unwrap().stats.hash_days >= HashDays::new(1e-10).unwrap());
 
     miner.kill().unwrap();
     miner.wait().unwrap();

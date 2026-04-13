@@ -79,6 +79,29 @@ pub struct PoolStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DownstreamInfo {
+    pub user_count: usize,
+    pub worker_count: usize,
+    pub session_count: usize,
+    pub disconnected_count: usize,
+    pub idle_count: usize,
+    pub stats: MiningStats,
+}
+
+impl DownstreamInfo {
+    pub(crate) fn from_metatron(metatron: &Metatron, now: Instant) -> Self {
+        Self {
+            user_count: metatron.total_users(),
+            worker_count: metatron.total_workers(),
+            session_count: metatron.total_sessions(),
+            disconnected_count: metatron.total_disconnected(),
+            idle_count: metatron.total_idle(),
+            stats: MiningStats::from_snapshot(&metatron.snapshot(), now),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserDetail {
     pub address: Address<NetworkUnchecked>,
     pub session_count: usize,
@@ -163,14 +186,9 @@ impl SessionDetail {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyStatus {
-    pub user_count: usize,
-    pub worker_count: usize,
-    pub session_count: usize,
-    pub disconnected_count: usize,
-    pub idle_count: usize,
     pub uptime_secs: u64,
     pub upstream: UpstreamInfo,
-    pub stats: MiningStats,
+    pub downstream: DownstreamInfo,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -183,16 +201,11 @@ pub struct UpstreamInfo {
     pub enonce1: Extranonce,
     pub enonce2_size: usize,
     pub version_mask: Option<Version>,
-    pub accepted: u64,
-    pub rejected: u64,
-    pub accepted_work: TotalWork,
-    pub rejected_work: TotalWork,
-    pub hash_days: HashDays,
-    pub best_share: Option<Difficulty>,
+    pub stats: MiningStats,
 }
 
 impl UpstreamInfo {
-    pub(crate) fn from_upstream(upstream: &Upstream, metatron: &Metatron) -> Self {
+    pub(crate) fn from_upstream(upstream: &Upstream, metatron: &Metatron, now: Instant) -> Self {
         let stats = metatron.upstream_stats(upstream.id());
         Self {
             endpoint: upstream.endpoint().to_string(),
@@ -203,30 +216,22 @@ impl UpstreamInfo {
             enonce1: upstream.enonce1().clone(),
             enonce2_size: upstream.enonce2_size(),
             version_mask: upstream.version_mask(),
-            accepted: stats.accepted_shares,
-            rejected: stats.rejected_shares,
-            accepted_work: stats.accepted_work,
-            rejected_work: stats.rejected_work,
-            hash_days: (stats.accepted_work + stats.rejected_work).to_hash_days(),
-            best_share: stats.best_share,
+            stats: MiningStats::from_snapshot(&stats, now),
         }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RouterStatus {
+pub struct RouterUpstreamInfo {
     pub order_count: usize,
-    pub session_count: usize,
-    pub disconnected_count: usize,
-    pub idle_count: usize,
+    pub stats: MiningStats,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RouterStatus {
     pub uptime_secs: u64,
-    pub upstream_accepted_shares: u64,
-    pub upstream_rejected_shares: u64,
-    pub upstream_accepted_work: TotalWork,
-    pub upstream_rejected_work: TotalWork,
-    pub upstream_delivered_hash_days: HashDays,
-    pub downstream_stats: MiningStats,
-    pub orders: Vec<OrderDetail>,
+    pub upstream: RouterUpstreamInfo,
+    pub downstream: DownstreamInfo,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -261,19 +266,17 @@ pub struct OrderDetail {
     pub hashdays: Option<HashDays>,
     pub payment_address: Address<NetworkUnchecked>,
     pub payment_amount: Amount,
-    pub upstream_id: Option<u32>,
     pub upstream: Option<UpstreamInfo>,
+    pub downstream: MiningStats,
     pub sessions: Vec<SessionDetail>,
-    pub stats: MiningStats,
 }
 
 impl OrderDetail {
     pub(crate) fn from_order(order: &Order, metatron: &Metatron, now: Instant) -> Self {
         let upstream = order.upstream();
-        let upstream_id = upstream.map(|upstream| upstream.id());
 
-        let (sessions, stats) = match upstream_id {
-            Some(upstream_id) => metatron.downstream_snapshot(upstream_id, now),
+        let (sessions, downstream) = match upstream {
+            Some(upstream) => metatron.downstream_snapshot(upstream.id(), now),
             None => (Vec::new(), Stats::new()),
         };
 
@@ -284,13 +287,12 @@ impl OrderDetail {
             hashdays: order.hashdays,
             payment_address: order.payment_address.as_unchecked().clone(),
             payment_amount: order.payment_amount,
-            upstream_id,
-            upstream: upstream.map(|upstream| UpstreamInfo::from_upstream(upstream, metatron)),
+            upstream: upstream.map(|upstream| UpstreamInfo::from_upstream(upstream, metatron, now)),
+            downstream: MiningStats::from_snapshot(&downstream, now),
             sessions: sessions
                 .into_iter()
                 .map(|session| SessionDetail::from_session(session.as_ref(), now))
                 .collect(),
-            stats: MiningStats::from_snapshot(&stats, now),
         }
     }
 }

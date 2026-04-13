@@ -93,7 +93,10 @@ impl TestRouter {
             .await
     }
 
-    pub(crate) async fn list_orders(&self, address: Option<&str>) -> reqwest::Result<Vec<u32>> {
+    pub(crate) async fn list_orders(
+        &self,
+        address: Option<&str>,
+    ) -> reqwest::Result<Vec<OrderDetail>> {
         let mut url = format!("{}/api/router/orders", self.api_endpoint());
         if let Some(addr) = address {
             url.push_str(&format!("?address={addr}"));

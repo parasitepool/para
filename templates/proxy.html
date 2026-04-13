@@ -9,9 +9,13 @@
     <div class=row><span>Extranonce1</span><span id=upstream_enonce1></span></div>
     <div class=row><span>Extranonce2 Size</span><span id=upstream_enonce2_size></span></div>
     <div class=row><span>Version Mask</span><span id=upstream_version_mask></span></div>
-    <div class=row><span>Rejected Shares</span><span id=upstream_rejected class=copyable></span></div>
+    <div class=row><span>Hashrate</span><span id=upstream_hashrate_1m></span></div>
+    <div class=row><span>SPS</span><span id=upstream_sps_1m></span></div>
+    <div class=row><span>Best Share</span><span id=upstream_best_share class=copyable></span></div>
+    <div class=row><span>Last Share</span><span id=upstream_last_share></span></div>
+    <div class=row><span>Rejected Shares</span><span id=upstream_rejected_shares class=copyable></span></div>
     <div class=row><span>Rejected Work</span><span id=upstream_rejected_work class=copyable></span></div>
-    <div class=row><span>Delivered Work</span><span id=upstream_total_work></span></div>
+    <div class=row><span>Delivered Work</span><span id=upstream_accepted_work></span></div>
     <div class=row><span>Delivered Hashdays</span><span id=upstream_hash_days class=copyable></span></div>
   </div>
 
@@ -22,14 +26,14 @@
     <div class=row><span>Sessions</span><span id=sessions></span></div>
     <div class=row><span>Idle</span><span id=idle></span></div>
     <div class=row><span>Disconnected</span><span id=disconnected></span></div>
-    <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
-    <div class=row><span>SPS</span><span id=sps_1m></span></div>
-    <div class=row><span>Best Share</span><span id=best_share class=copyable></span></div>
-    <div class=row><span>Last Share</span><span><span id=last_share></span>s ago</span></div>
-    <div class=row><span>Rejected Shares</span><span id=rejected_shares class=copyable></span></div>
-    <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
-    <div class=row><span>Received Work</span><span id=received_work></span></div>
-    <div class=row><span>Received Hashdays</span><span id=hash_days class=copyable></span></div>
+    <div class=row><span>Hashrate</span><span id=downstream_hashrate_1m></span></div>
+    <div class=row><span>SPS</span><span id=downstream_sps_1m></span></div>
+    <div class=row><span>Best Share</span><span id=downstream_best_share class=copyable></span></div>
+    <div class=row><span>Last Share</span><span id=downstream_last_share></span></div>
+    <div class=row><span>Rejected Shares</span><span id=downstream_rejected_shares class=copyable></span></div>
+    <div class=row><span>Rejected Work</span><span id=downstream_rejected_work class=copyable></span></div>
+    <div class=row><span>Received Work</span><span id=downstream_accepted_work></span></div>
+    <div class=row><span>Received Hashdays</span><span id=downstream_hash_days class=copyable></span></div>
   </div>
 
   <div class=column>
@@ -77,7 +81,10 @@ async function refresh(signal) {
       fetch('/api/bitcoin/status', { signal }).then(r => r.json()).catch(() => ({}))
     ]);
 
-    const u = proxyData.upstream;
+    const u = proxyData.upstream || {};
+    const d = proxyData.downstream || {};
+    const us = u.stats || {};
+    const ds = d.stats || {};
 
     set('upstream_endpoint', u.endpoint);
     set('upstream_status', u.connected ? 'Connected' : 'Disconnected');
@@ -87,26 +94,29 @@ async function refresh(signal) {
     set('upstream_enonce1', u.enonce1);
     set('upstream_enonce2_size', u.enonce2_size);
     set('upstream_version_mask', u.version_mask);
-    rejectionCopyable('upstream_rejected', u.accepted, u.rejected);
-    set('upstream_total_work', (u.accepted_work || 0) + (u.rejected_work || 0), formatDifficulty);
-    copyable('upstream_hash_days', formatHashDays(u.hash_days), u.hash_days);
-    rejectionWorkCopyable('upstream_rejected_work', u.accepted_work, u.rejected_work);
     set('upstream_ping', u.ping_ms, formatPing);
+    set('upstream_hashrate_1m', us.hashrate_1m, formatHashrate);
+    set('upstream_sps_1m', us.sps_1m, formatTruncated);
+    copyable('upstream_best_share', formatDifficulty(us.best_share), us.best_share);
+    set('upstream_last_share', us.last_share, value => `${value}s ago`);
+    rejectionCopyable('upstream_rejected_shares', us.accepted_shares, us.rejected_shares);
+    rejectionWorkCopyable('upstream_rejected_work', us.accepted_work, us.rejected_work);
+    set('upstream_accepted_work', us.accepted_work, formatDifficulty);
+    copyable('upstream_hash_days', formatHashDays(us.hash_days), us.hash_days);
 
-    set('users', proxyData.user_count);
-    set('workers', proxyData.worker_count);
-    set('sessions', proxyData.session_count);
-    set('idle', proxyData.idle_count);
-    set('disconnected', proxyData.disconnected_count);
-    const s = proxyData.stats;
-    set('hashrate_1m', s.hashrate_1m, formatHashrate);
-    set('sps_1m', s.sps_1m, formatTruncated);
-    copyable('best_share', formatDifficulty(s.best_share), s.best_share);
-    set('last_share', s.last_share);
-    rejectionCopyable('rejected_shares', s.accepted_shares, s.rejected_shares);
-    rejectionWorkCopyable('rejected_work', s.accepted_work, s.rejected_work);
-    set('received_work', s.accepted_work, formatDifficulty);
-    copyable('hash_days', formatHashDays(s.hash_days), s.hash_days);
+    set('users', d.user_count);
+    set('workers', d.worker_count);
+    set('sessions', d.session_count);
+    set('idle', d.idle_count);
+    set('disconnected', d.disconnected_count);
+    set('downstream_hashrate_1m', ds.hashrate_1m, formatHashrate);
+    set('downstream_sps_1m', ds.sps_1m, formatTruncated);
+    copyable('downstream_best_share', formatDifficulty(ds.best_share), ds.best_share);
+    set('downstream_last_share', ds.last_share, value => `${value}s ago`);
+    rejectionCopyable('downstream_rejected_shares', ds.accepted_shares, ds.rejected_shares);
+    rejectionWorkCopyable('downstream_rejected_work', ds.accepted_work, ds.rejected_work);
+    set('downstream_accepted_work', ds.accepted_work, formatDifficulty);
+    copyable('downstream_hash_days', formatHashDays(ds.hash_days), ds.hash_days);
 
     renderBitcoinData(bitcoinData);
     renderSystemData(systemData);

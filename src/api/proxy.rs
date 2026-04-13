@@ -56,14 +56,10 @@ async fn user_page(Extension(chain): Extension<Chain>) -> Response {
 }
 
 async fn status(State(metrics): State<Arc<Metrics>>) -> Json<ProxyStatus> {
+    let now = Instant::now();
     Json(ProxyStatus {
-        user_count: metrics.metatron.total_users(),
-        worker_count: metrics.metatron.total_workers(),
-        session_count: metrics.metatron.total_sessions(),
-        disconnected_count: metrics.metatron.total_disconnected(),
-        idle_count: metrics.metatron.total_idle(),
         uptime_secs: metrics.metatron.uptime().as_secs(),
-        upstream: UpstreamInfo::from_upstream(&metrics.upstream(), &metrics.metatron),
-        stats: MiningStats::from_snapshot(&metrics.metatron.snapshot(), Instant::now()),
+        upstream: UpstreamInfo::from_upstream(&metrics.upstream(), &metrics.metatron, now),
+        downstream: DownstreamInfo::from_metatron(&metrics.metatron, now),
     })
 }
