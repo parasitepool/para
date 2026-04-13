@@ -63,7 +63,7 @@ async fn status(State(metrics): State<Arc<Metrics>>) -> Json<ProxyStatus> {
         disconnected_count: metrics.metatron.total_disconnected(),
         idle_count: metrics.metatron.total_idle(),
         uptime_secs: metrics.metatron.uptime().as_secs(),
-        upstream: UpstreamInfo::from_upstream(&metrics.upstream()),
+        upstream: UpstreamInfo::from_upstream(&metrics.upstream(), &metrics.metatron),
         stats: MiningStats::from_snapshot(&metrics.metatron.snapshot(), Instant::now()),
     })
 }

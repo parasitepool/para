@@ -50,6 +50,39 @@ impl Stats {
         }
     }
 
+    pub(crate) fn record_accepted(
+        &mut self,
+        pool_diff: Difficulty,
+        share_diff: Difficulty,
+        now: Instant,
+    ) {
+        let diff = pool_diff.as_f64();
+
+        self.accepted_shares += 1;
+        self.dsps_1m.record(diff, now);
+        self.dsps_5m.record(diff, now);
+        self.dsps_15m.record(diff, now);
+        self.dsps_1hr.record(diff, now);
+        self.dsps_6hr.record(diff, now);
+        self.dsps_1d.record(diff, now);
+        self.dsps_7d.record(diff, now);
+        self.sps_1m.record(1.0, now);
+        self.sps_5m.record(1.0, now);
+        self.sps_15m.record(1.0, now);
+        self.sps_1hr.record(1.0, now);
+        self.accepted_work += TotalWork::from_difficulty(pool_diff);
+        self.last_share = Some(now);
+
+        if self.best_share.is_none_or(|best| share_diff > best) {
+            self.best_share = Some(share_diff);
+        }
+    }
+
+    pub(crate) fn record_rejected(&mut self, pool_diff: Difficulty) {
+        self.rejected_shares += 1;
+        self.rejected_work += TotalWork::from_difficulty(pool_diff);
+    }
+
     pub(crate) fn absorb(&mut self, other: Stats, now: Instant) {
         self.accepted_shares += other.accepted_shares;
         self.rejected_shares += other.rejected_shares;

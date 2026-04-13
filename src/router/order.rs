@@ -62,9 +62,7 @@ impl Order {
     }
 
     pub(crate) fn hashrate_1m(&self, metatron: &Metatron, now: Instant) -> HashRate {
-        self.upstream()
-            .map(|upstream| metatron.upstream_stats(upstream.id(), now).hashrate_1m(now))
-            .unwrap_or(HashRate::ZERO)
+        metatron.downstream_stats(self.id, now).hashrate_1m(now)
     }
 
     pub(crate) fn register_session(&self) -> CancellationToken {
@@ -102,6 +100,7 @@ impl Order {
         timeout: Duration,
         enonce1_extension_size: usize,
         tasks: &TaskTracker,
+        metatron: Arc<Metatron>,
     ) -> Result<()> {
         let upstream = Upstream::connect(
             self.id,
@@ -109,6 +108,7 @@ impl Order {
             timeout,
             self.cancel.clone(),
             tasks,
+            metatron,
         )
         .await?;
 
@@ -181,23 +181,18 @@ impl Order {
         }
     }
 
-    pub(crate) fn remaining_work(&self) -> Option<HashDays> {
+    pub(crate) fn remaining_work(&self, metatron: &Metatron) -> Option<HashDays> {
         let target = self.hashdays?;
-        let remaining = target.to_total_work() - self.upstream()?.accepted_work();
+        let remaining = target.to_total_work() - metatron.upstream_accepted_work(self.id);
         (remaining != TotalWork::ZERO).then(|| remaining.to_hash_days())
     }
 
-    pub(crate) fn is_fulfilled(&self) -> bool {
+    pub(crate) fn is_fulfilled(&self, metatron: &Metatron) -> bool {
         let target = match self.hashdays {
             Some(target) => target,
             None => return false,
         };
 
-        let upstream = match self.upstream.get() {
-            Some(upstream) => upstream,
-            None => return false,
-        };
-
-        upstream.accepted_work().to_hash_days() >= target
+        metatron.upstream_accepted_work(self.id).to_hash_days() >= target
     }
 }

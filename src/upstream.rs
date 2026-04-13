@@ -18,15 +18,11 @@ pub(crate) struct Upstream {
     endpoint: String,
     enonce1: Extranonce,
     enonce2_size: usize,
+    version_mask: Option<Version>,
+    metatron: Arc<Metatron>,
     connected: Arc<AtomicBool>,
     ping: Arc<RwLock<Duration>>,
     difficulty: Arc<RwLock<Difficulty>>,
-    accepted: Arc<AtomicU64>,
-    rejected: Arc<AtomicU64>,
-    accepted_work: Arc<Mutex<TotalWork>>,
-    rejected_work: Arc<Mutex<TotalWork>>,
-    best_share: Mutex<Option<Difficulty>>,
-    version_mask: Option<Version>,
     disconnect_notify: Arc<tokio::sync::Notify>,
     workbase_rx: watch::Receiver<Arc<Notify>>,
 }
@@ -38,6 +34,7 @@ impl Upstream {
         timeout: Duration,
         cancel: CancellationToken,
         tasks: &TaskTracker,
+        metatron: Arc<Metatron>,
     ) -> Result<Arc<Self>> {
         let upstream_addr = resolve_stratum_endpoint(target.endpoint())
             .await
@@ -202,11 +199,7 @@ impl Upstream {
             connected,
             ping: Arc::new(RwLock::new(ping)),
             difficulty,
-            accepted: Arc::new(AtomicU64::new(0)),
-            rejected: Arc::new(AtomicU64::new(0)),
-            accepted_work: Arc::new(Mutex::new(TotalWork::ZERO)),
-            rejected_work: Arc::new(Mutex::new(TotalWork::ZERO)),
-            best_share: Mutex::new(None),
+            metatron,
             version_mask,
             disconnect_notify,
             workbase_rx,
@@ -233,10 +226,9 @@ impl Upstream {
         );
 
         let client = self.client.clone();
-        let accepted = self.accepted.clone();
-        let rejected = self.rejected.clone();
-        let accepted_work = self.accepted_work.clone();
-        let rejected_work = self.rejected_work.clone();
+        let metatron = self.metatron.clone();
+        let id = self.id;
+        let share_diff = submit.share_diff;
         let ping = self.ping.clone();
 
         tokio::spawn(async move {
@@ -251,16 +243,13 @@ impl Upstream {
                 .await
             {
                 Ok(duration) => {
-                    accepted.fetch_add(1, Ordering::Relaxed);
-                    *accepted_work.lock() += TotalWork::from_difficulty(upstream_diff);
-                    let mut ping = ping.write();
-                    *ping = duration;
+                    metatron.record_upstream_accepted(id, upstream_diff, share_diff);
+                    *ping.write() = duration;
 
                     debug!("Upstream accepted share");
                 }
                 Err(err) => {
-                    rejected.fetch_add(1, Ordering::Relaxed);
-                    *rejected_work.lock() += TotalWork::from_difficulty(upstream_diff);
+                    metatron.record_upstream_rejected(id, upstream_diff);
                     match err {
                         ClientError::SubmitFalse => warn!("Upstream rejected share"),
                         ClientError::Rejected { reason, .. } => {
@@ -305,35 +294,8 @@ impl Upstream {
         self.client.username()
     }
 
-    pub(crate) fn accepted(&self) -> u64 {
-        self.accepted.load(Ordering::Relaxed)
-    }
-
-    pub(crate) fn rejected(&self) -> u64 {
-        self.rejected.load(Ordering::Relaxed)
-    }
-
-    pub(crate) fn accepted_work(&self) -> TotalWork {
-        *self.accepted_work.lock()
-    }
-
-    pub(crate) fn rejected_work(&self) -> TotalWork {
-        *self.rejected_work.lock()
-    }
-
     pub(crate) fn version_mask(&self) -> Option<Version> {
         self.version_mask
-    }
-
-    pub(crate) fn best_share(&self) -> Option<Difficulty> {
-        *self.best_share.lock()
-    }
-
-    pub(crate) fn record_best_share(&self, share_diff: Difficulty) {
-        let mut best = self.best_share.lock();
-        if best.is_none_or(|b| share_diff > b) {
-            *best = Some(share_diff);
-        }
     }
 
     pub(crate) fn ping_ms(&self) -> u128 {
@@ -341,12 +303,7 @@ impl Upstream {
     }
 
     #[cfg(test)]
-    pub(crate) fn set_accepted_work(&self, work: TotalWork) {
-        *self.accepted_work.lock() = work;
-    }
-
-    #[cfg(test)]
-    pub(crate) fn test(id: u32) -> Arc<Self> {
+    pub(crate) fn test(id: u32, metatron: Arc<Metatron>) -> Arc<Self> {
         fn runtime() -> &'static tokio::runtime::Runtime {
             static RUNTIME: std::sync::OnceLock<tokio::runtime::Runtime> =
                 std::sync::OnceLock::new();
@@ -387,11 +344,7 @@ impl Upstream {
             connected: Arc::new(AtomicBool::new(true)),
             ping: Arc::new(RwLock::new(Duration::ZERO)),
             difficulty: Arc::new(RwLock::new(Difficulty::from(1u64))),
-            accepted: Arc::new(AtomicU64::new(0)),
-            rejected: Arc::new(AtomicU64::new(0)),
-            accepted_work: Arc::new(Mutex::new(TotalWork::ZERO)),
-            rejected_work: Arc::new(Mutex::new(TotalWork::ZERO)),
-            best_share: Mutex::new(None),
+            metatron,
             version_mask: None,
             disconnect_notify: Arc::new(tokio::sync::Notify::new()),
             workbase_rx,

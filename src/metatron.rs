@@ -14,20 +14,22 @@ pub(crate) mod worker;
 
 pub(crate) struct Metatron {
     blocks: AtomicU64,
-    started: Instant,
-    users: DashMap<Address, Arc<User>>,
-    disconnected: DashMap<Extranonce, (Arc<Session>, Instant)>,
     counter: AtomicU32,
+    disconnected: DashMap<Extranonce, (Arc<Session>, Instant)>,
+    started: Instant,
+    upstream: DashMap<u32, Mutex<Stats>>,
+    users: DashMap<Address, Arc<User>>,
 }
 
 impl Metatron {
     pub(crate) fn new() -> Self {
         Self {
             blocks: AtomicU64::new(0),
-            started: Instant::now(),
-            users: DashMap::new(),
-            disconnected: DashMap::new(),
             counter: AtomicU32::new(0),
+            disconnected: DashMap::new(),
+            started: Instant::now(),
+            upstream: DashMap::new(),
+            users: DashMap::new(),
         }
     }
 
@@ -150,7 +152,53 @@ impl Metatron {
         self.started.elapsed()
     }
 
-    pub(crate) fn upstream_stats(&self, upstream_id: u32, now: Instant) -> Stats {
+    pub(crate) fn record_upstream_accepted(
+        &self,
+        upstream_id: u32,
+        upstream_diff: Difficulty,
+        share_diff: Difficulty,
+    ) {
+        let now = Instant::now();
+        if let Some(entry) = self.upstream.get(&upstream_id) {
+            entry.lock().record_accepted(upstream_diff, share_diff, now);
+            return;
+        }
+
+        self.upstream
+            .entry(upstream_id)
+            .or_insert_with(|| Mutex::new(Stats::new()))
+            .lock()
+            .record_accepted(upstream_diff, share_diff, now);
+    }
+
+    pub(crate) fn record_upstream_rejected(&self, upstream_id: u32, upstream_diff: Difficulty) {
+        if let Some(entry) = self.upstream.get(&upstream_id) {
+            entry.lock().record_rejected(upstream_diff);
+            return;
+        }
+
+        self.upstream
+            .entry(upstream_id)
+            .or_insert_with(|| Mutex::new(Stats::new()))
+            .lock()
+            .record_rejected(upstream_diff);
+    }
+
+    pub(crate) fn upstream_stats(&self, upstream_id: u32) -> Stats {
+        self.upstream
+            .get(&upstream_id)
+            .map(|entry| entry.lock().clone())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn upstream_accepted_work(&self, upstream_id: u32) -> TotalWork {
+        self.upstream
+            .get(&upstream_id)
+            .map(|entry| entry.lock().accepted_work)
+            .unwrap_or(TotalWork::ZERO)
+    }
+
+    pub(crate) fn downstream_stats(&self, upstream_id: u32, now: Instant) -> Stats {
         self.users
             .iter()
             .flat_map(|user| user.sessions())
@@ -161,7 +209,7 @@ impl Metatron {
             })
     }
 
-    pub(crate) fn upstream_snapshot(
+    pub(crate) fn downstream_snapshot(
         &self,
         upstream_id: u32,
         now: Instant,
@@ -179,6 +227,15 @@ impl Metatron {
         }
 
         (sessions, stats)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_upstream_accepted_work(&self, upstream_id: u32, work: TotalWork) {
+        self.upstream
+            .entry(upstream_id)
+            .or_insert_with(|| Mutex::new(Stats::new()))
+            .lock()
+            .accepted_work = work;
     }
 }
 
@@ -402,8 +459,8 @@ mod tests {
         let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0);
         let s2 = metatron.new_session(test_auth("cafebabe", "bar"), 1);
 
-        let (sessions0, _) = metatron.upstream_snapshot(0, now);
-        let (sessions1, _) = metatron.upstream_snapshot(1, now);
+        let (sessions0, _) = metatron.downstream_snapshot(0, now);
+        let (sessions1, _) = metatron.downstream_snapshot(1, now);
 
         assert_eq!(sessions0.len(), 1);
         assert_eq!(sessions1.len(), 1);
@@ -412,7 +469,7 @@ mod tests {
     }
 
     #[test]
-    fn upstream_snapshot_stats_only_include_requested_upstream() {
+    fn downstream_snapshot_stats_only_include_requested_upstream() {
         let metatron = Metatron::new();
         let now = Instant::now();
 
@@ -422,8 +479,8 @@ mod tests {
         s1.record_accepted(Difficulty::from(100.0), Difficulty::from(200.0));
         s2.record_rejected(Difficulty::from(300.0));
 
-        let (_, stats0) = metatron.upstream_snapshot(0, now);
-        let (_, stats1) = metatron.upstream_snapshot(1, now);
+        let (_, stats0) = metatron.downstream_snapshot(0, now);
+        let (_, stats1) = metatron.downstream_snapshot(1, now);
 
         assert_eq!(stats0.accepted_shares, 1);
         assert_eq!(stats0.rejected_shares, 0);
@@ -432,17 +489,105 @@ mod tests {
     }
 
     #[test]
-    fn retire_removes_session_from_upstream_queries() {
+    fn retire_removes_session_from_downstream_queries() {
         let metatron = Metatron::new();
         let now = Instant::now();
 
         let session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
-        let (sessions, _) = metatron.upstream_snapshot(0, now);
+        let (sessions, _) = metatron.downstream_snapshot(0, now);
         assert_eq!(sessions.len(), 1);
 
         metatron.retire_session(session);
 
-        let (sessions, _) = metatron.upstream_snapshot(0, now);
+        let (sessions, _) = metatron.downstream_snapshot(0, now);
         assert!(sessions.is_empty());
+    }
+
+    #[test]
+    fn upstream_stats_record_accepted_accumulates() {
+        let metatron = Metatron::new();
+        let upstream_diff = Difficulty::from(100.0);
+
+        metatron.record_upstream_accepted(0, upstream_diff, Difficulty::from(150.0));
+        metatron.record_upstream_accepted(0, upstream_diff, Difficulty::from(400.0));
+
+        let stats = metatron.upstream_stats(0);
+        assert_eq!(stats.accepted_shares, 2);
+        assert_eq!(stats.rejected_shares, 0);
+        let expected = TotalWork::from_difficulty(upstream_diff);
+        assert_eq!(stats.accepted_work, expected + expected);
+        assert_eq!(stats.best_share, Some(Difficulty::from(400.0)));
+        assert!(stats.last_share.is_some());
+    }
+
+    #[test]
+    fn upstream_stats_record_rejected_accumulates() {
+        let metatron = Metatron::new();
+        let upstream_diff = Difficulty::from(100.0);
+
+        metatron.record_upstream_rejected(0, upstream_diff);
+        metatron.record_upstream_rejected(0, upstream_diff);
+
+        let stats = metatron.upstream_stats(0);
+        assert_eq!(stats.accepted_shares, 0);
+        assert_eq!(stats.rejected_shares, 2);
+        let expected = TotalWork::from_difficulty(upstream_diff);
+        assert_eq!(stats.rejected_work, expected + expected);
+    }
+
+    #[test]
+    fn upstream_stats_isolated_between_upstreams() {
+        let metatron = Metatron::new();
+        let upstream_diff = Difficulty::from(100.0);
+
+        metatron.record_upstream_accepted(0, upstream_diff, Difficulty::from(200.0));
+        metatron.record_upstream_rejected(1, upstream_diff);
+
+        let stats0 = metatron.upstream_stats(0);
+        let stats1 = metatron.upstream_stats(1);
+
+        assert_eq!(stats0.accepted_shares, 1);
+        assert_eq!(stats0.rejected_shares, 0);
+        assert_eq!(stats1.accepted_shares, 0);
+        assert_eq!(stats1.rejected_shares, 1);
+    }
+
+    #[test]
+    fn upstream_accepted_work_matches_recorded_diff() {
+        let metatron = Metatron::new();
+        let upstream_diff = Difficulty::from(250.0);
+
+        assert_eq!(metatron.upstream_accepted_work(0), TotalWork::ZERO);
+
+        metatron.record_upstream_accepted(0, upstream_diff, Difficulty::from(300.0));
+        let expected = TotalWork::from_difficulty(upstream_diff);
+        assert_eq!(metatron.upstream_accepted_work(0), expected);
+
+        metatron.record_upstream_accepted(0, upstream_diff, Difficulty::from(300.0));
+        assert_eq!(metatron.upstream_accepted_work(0), expected + expected);
+    }
+
+    #[test]
+    fn upstream_stats_unknown_id_returns_default() {
+        let metatron = Metatron::new();
+        let stats = metatron.upstream_stats(999);
+        assert_eq!(stats.accepted_shares, 0);
+        assert_eq!(stats.rejected_shares, 0);
+        assert_eq!(stats.accepted_work, TotalWork::ZERO);
+        assert_eq!(stats.best_share, None);
+    }
+
+    #[test]
+    fn upstream_best_share_keeps_max() {
+        let metatron = Metatron::new();
+
+        metatron.record_upstream_accepted(0, Difficulty::from(50.0), Difficulty::from(200.0));
+        metatron.record_upstream_accepted(0, Difficulty::from(50.0), Difficulty::from(50.0));
+        metatron.record_upstream_accepted(0, Difficulty::from(50.0), Difficulty::from(800.0));
+
+        assert_eq!(
+            metatron.upstream_stats(0).best_share,
+            Some(Difficulty::from(800.0))
+        );
     }
 }

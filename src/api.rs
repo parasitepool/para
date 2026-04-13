@@ -192,9 +192,8 @@ pub struct UpstreamInfo {
 }
 
 impl UpstreamInfo {
-    pub(crate) fn from_upstream(upstream: &Upstream) -> Self {
-        let accepted_work = upstream.accepted_work();
-        let rejected_work = upstream.rejected_work();
+    pub(crate) fn from_upstream(upstream: &Upstream, metatron: &Metatron) -> Self {
+        let stats = metatron.upstream_stats(upstream.id());
         Self {
             endpoint: upstream.endpoint().to_string(),
             connected: upstream.is_connected(),
@@ -204,12 +203,12 @@ impl UpstreamInfo {
             enonce1: upstream.enonce1().clone(),
             enonce2_size: upstream.enonce2_size(),
             version_mask: upstream.version_mask(),
-            accepted: upstream.accepted(),
-            rejected: upstream.rejected(),
-            accepted_work,
-            rejected_work,
-            hash_days: (accepted_work + rejected_work).to_hash_days(),
-            best_share: upstream.best_share(),
+            accepted: stats.accepted_shares,
+            rejected: stats.rejected_shares,
+            accepted_work: stats.accepted_work,
+            rejected_work: stats.rejected_work,
+            hash_days: (stats.accepted_work + stats.rejected_work).to_hash_days(),
+            best_share: stats.best_share,
         }
     }
 }
@@ -274,7 +273,7 @@ impl OrderDetail {
         let upstream_id = upstream.map(|upstream| upstream.id());
 
         let (sessions, stats) = match upstream_id {
-            Some(upstream_id) => metatron.upstream_snapshot(upstream_id, now),
+            Some(upstream_id) => metatron.downstream_snapshot(upstream_id, now),
             None => (Vec::new(), Stats::new()),
         };
 
@@ -286,7 +285,7 @@ impl OrderDetail {
             payment_address: order.payment_address.as_unchecked().clone(),
             payment_amount: order.payment_amount,
             upstream_id,
-            upstream: upstream.map(|upstream| UpstreamInfo::from_upstream(upstream)),
+            upstream: upstream.map(|upstream| UpstreamInfo::from_upstream(upstream, metatron)),
             sessions: sessions
                 .into_iter()
                 .map(|session| SessionDetail::from_session(session.as_ref(), now))

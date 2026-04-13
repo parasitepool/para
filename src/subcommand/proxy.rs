@@ -50,6 +50,7 @@ impl Proxy {
             timeout,
             &cancel_token,
             &tasks,
+            metatron.clone(),
             &mut backoff,
         )
         .await
@@ -150,6 +151,7 @@ impl Proxy {
                 timeout,
                 &cancel_token,
                 &tasks,
+                metatron.clone(),
                 &mut backoff,
             )
             .await
@@ -187,12 +189,22 @@ async fn connect_upstream(
     timeout: Duration,
     cancel_token: &CancellationToken,
     tasks: &TaskTracker,
+    metatron: Arc<Metatron>,
     backoff: &mut Duration,
 ) -> Option<Arc<Upstream>> {
     let mut max_backoff_attempts = 0;
 
     loop {
-        match Upstream::connect(upstream_id, target, timeout, cancel_token.clone(), tasks).await {
+        match Upstream::connect(
+            upstream_id,
+            target,
+            timeout,
+            cancel_token.clone(),
+            tasks,
+            metatron.clone(),
+        )
+        .await
+        {
             Ok(upstream) => {
                 *backoff = Duration::from_secs(1);
                 return Some(upstream);

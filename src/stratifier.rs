@@ -959,10 +959,6 @@ impl<W: Workbase> Stratifier<W> {
 
         session.record_accepted(pool_diff, share_diff);
 
-        if let Some(upstream) = &self.upstream {
-            upstream.record_best_share(share_diff);
-        }
-
         self.submit_to_upstream(&job, &submit, share_diff, session.enonce1())
             .await;
 
