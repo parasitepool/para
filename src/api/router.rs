@@ -69,7 +69,7 @@ async fn add_order(
 ) -> ServerResult<Response> {
     let order = router.add_order(
         request.upstream_target,
-        Some(request.hashdays),
+        OrderKind::Bucket(request.hashdays),
         request.price,
     )?;
 

@@ -133,6 +133,7 @@ impl Pool {
                     disconnect_token,
                     event_tx,
                     start_diff,
+                    None,
                 );
 
                 if let Err(err) = stratifier.serve().await {

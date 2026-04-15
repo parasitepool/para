@@ -413,7 +413,7 @@ async fn order_detail() {
 
     assert_eq!(detail.id, id);
     assert_eq!(detail.status, OrderStatus::Pending);
-    assert_eq!(detail.hashdays, Some(hashdays));
+    assert_eq!(detail.kind, OrderKind::Bucket(hashdays));
     assert_eq!(detail.payment_address.assume_checked().to_string(), address);
     assert_eq!(detail.payment_amount.to_sat(), amount);
     assert!(detail.upstream.is_none());
@@ -681,7 +681,10 @@ async fn order_fulfilled_on_hashdays_reached() {
         .find(|o| o.status == OrderStatus::Fulfilled)
         .unwrap();
 
-    assert_eq!(fulfilled.hashdays, Some(HashDays::new(1e-10).unwrap()));
+    assert_eq!(
+        fulfilled.kind,
+        OrderKind::Bucket(HashDays::new(1e-10).unwrap())
+    );
     assert!(fulfilled.upstream.as_ref().unwrap().stats.hash_days >= HashDays::new(1e-10).unwrap());
 
     miner.kill().unwrap();

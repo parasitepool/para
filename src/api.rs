@@ -9,7 +9,7 @@ use {
 };
 
 pub use {
-    crate::router::{Order, OrderStatus},
+    crate::router::{Order, OrderKind, OrderStatus},
     http_server::{BitcoinStatus, SystemStatus},
 };
 
@@ -263,7 +263,7 @@ pub struct OrderDetail {
     pub id: u32,
     pub status: OrderStatus,
     pub upstream_target: UpstreamTarget,
-    pub hashdays: Option<HashDays>,
+    pub kind: OrderKind,
     pub payment_address: Address<NetworkUnchecked>,
     pub payment_amount: Amount,
     pub upstream: Option<UpstreamInfo>,
@@ -284,7 +284,7 @@ impl OrderDetail {
             id: order.id,
             status: order.status(),
             upstream_target: order.upstream_target.clone(),
-            hashdays: order.hashdays,
+            kind: order.kind,
             payment_address: order.payment_address.as_unchecked().clone(),
             payment_amount: order.payment_amount,
             upstream: upstream.map(|upstream| UpstreamInfo::from_upstream(upstream, metatron, now)),

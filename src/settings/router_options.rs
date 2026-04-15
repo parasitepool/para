@@ -37,6 +37,9 @@ pub(crate) struct RouterOptions {
     #[arg(long, help = "<HASH_PRICE> in sats/PHd.")]
     pub(crate) hash_price: HashPrice,
 
-    #[arg(long, help = "Default upstream <USER[:PASS]@HOST:PORT>.")]
-    pub(crate) default_order: Vec<UpstreamTarget>,
+    #[arg(
+        long,
+        help = "Sink order with upstream target <USER[:PASS]@HOST:PORT>."
+    )]
+    pub(crate) sink_order: Vec<UpstreamTarget>,
 }

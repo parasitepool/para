@@ -25,6 +25,7 @@ pub(crate) struct Upstream {
     difficulty: Arc<RwLock<Difficulty>>,
     disconnect_notify: Arc<tokio::sync::Notify>,
     workbase_rx: watch::Receiver<Arc<Notify>>,
+    tasks: TaskTracker,
 }
 
 impl Upstream {
@@ -163,7 +164,7 @@ impl Upstream {
                     event = events.recv() => {
                         match event {
                             Ok(Event::Notify(notify)) => {
-                                info!(
+                                debug!(
                                     "Received notify: job_id={}, clean_jobs={}",
                                     notify.job_id, notify.clean_jobs
                                 );
@@ -203,6 +204,7 @@ impl Upstream {
             version_mask,
             disconnect_notify,
             workbase_rx,
+            tasks: tasks.clone(),
         }))
     }
 
@@ -231,7 +233,7 @@ impl Upstream {
         let share_diff = submit.share_diff;
         let ping = self.ping.clone();
 
-        tokio::spawn(async move {
+        self.tasks.spawn(async move {
             match client
                 .submit(
                     submit.job_id,
@@ -348,6 +350,7 @@ impl Upstream {
             version_mask: None,
             disconnect_notify: Arc::new(tokio::sync::Notify::new()),
             workbase_rx,
+            tasks: TaskTracker::new(),
         })
     }
 }

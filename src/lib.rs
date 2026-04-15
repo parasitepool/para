@@ -62,7 +62,7 @@ use {
     metrics::Metrics,
     parking_lot::{Mutex, RwLock},
     reqwest::Url,
-    router::Router,
+    router::{Order, OrderKind, Router},
     rust_embed::RustEmbed,
     rustls_acme::{
         AcmeConfig,
@@ -93,7 +93,7 @@ use {
         str::FromStr,
         sync::{
             Arc, LazyLock, OnceLock,
-            atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
+            atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering},
         },
         thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},

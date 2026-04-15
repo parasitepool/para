@@ -54,6 +54,10 @@ impl Session {
         self.id
     }
 
+    pub(crate) fn hashrate_1m(&self, now: Instant) -> HashRate {
+        self.stats.lock().hashrate_1m(now)
+    }
+
     pub(crate) fn enonce1(&self) -> &Extranonce {
         &self.enonce1
     }
@@ -85,6 +89,10 @@ impl Session {
 
     pub(crate) fn snapshot(&self) -> Stats {
         self.stats.lock().clone()
+    }
+
+    pub(crate) fn accepted_shares(&self) -> u64 {
+        self.stats.lock().accepted_shares
     }
 
     pub(crate) fn record_accepted(&self, pool_diff: Difficulty, share_diff: Difficulty) {

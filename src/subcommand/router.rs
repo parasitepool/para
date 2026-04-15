@@ -50,15 +50,19 @@ impl RouterCommand {
         metatron.spawn(cancel_token.clone(), &tasks);
 
         let router = Arc::new(Router::new(
-            metatron.clone(),
             settings.clone(),
+            metatron.clone(),
+            wallet,
             tasks.clone(),
             cancel_token.clone(),
-            wallet,
         ));
 
-        for upstream_target in settings.default_orders() {
-            router.add_order(upstream_target.clone(), None, settings.hash_price())?;
+        for upstream_target in settings.sink_orders() {
+            router.add_order(
+                upstream_target.clone(),
+                OrderKind::Sink,
+                settings.hash_price(),
+            )?;
         }
 
         router.spawn_rebalance_loop();
@@ -101,21 +105,15 @@ impl RouterCommand {
                 continue;
             };
 
-            let order_kind = if order.is_default() {
-                "default"
-            } else {
-                "paid"
-            };
-
             info!(
-                "Routing {addr} to {order_kind} order {} at {}",
-                order.id, order.upstream_target,
+                "Routing {addr} to {} order {} at {}",
+                order.kind, order.id, order.upstream_target,
             );
 
             let settings = settings.clone();
-            let disconnect_token = order.register_session();
             let metatron = metatron.clone();
             let start_diff = settings.start_diff();
+            let cancel = order.cancel.child_token();
 
             debug!("Spawning stratifier task for {addr}");
 
@@ -130,13 +128,14 @@ impl RouterCommand {
                     Some(upstream.clone()),
                     stream,
                     upstream.workbase_rx(),
-                    disconnect_token,
+                    cancel,
                     None,
                     start_diff,
+                    Some(order.clone()),
                 );
 
                 if let Err(err) = stratifier.serve().await {
-                    error!("Stratifier error for {addr}: {err}");
+                    error!("Stratifier error for {addr} on order {}: {err}", order.id);
                 }
             });
         }

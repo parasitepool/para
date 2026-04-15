@@ -304,7 +304,7 @@ async function refresh(signal) {
         const endpoint = hasUpstream ? u.endpoint : order.upstream_target.endpoint;
         const username = (u && u.username) || order.upstream_target.username || '';
         const shortUsername = truncateMiddle(username);
-        const target = order.hashdays != null ? formatHashDays(order.hashdays) : 'Unlimited';
+        const target = order.kind === 'sink' ? 'Unlimited' : formatHashDays(order.kind.bucket);
         const delivered = hasUpstream ? formatHashDays(u.stats.hash_days) || '-' : '-';
         const hashrate = formatHashrate(order.downstream.hashrate_1m);
         return `<tr data-id="${order.id}">

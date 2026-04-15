@@ -93,7 +93,7 @@ function populateOrder(data) {
   setClass('status', statusClass(data.status));
   set('endpoint', endpoint);
   copyable('username', truncateMiddle(username), username);
-  set('target_hash_days', data.hashdays != null ? formatHashDays(data.hashdays) : 'Unlimited');
+  set('target_hash_days', data.kind === 'sink' ? 'Unlimited' : formatHashDays(data.kind.bucket));
   copyable('delivered_hash_days', formatHashDays(deliveredHashdays), deliveredHashdays);
   set('payment_amount', data.payment_amount, formatAmount);
   copyable('payment_address', truncateMiddle(data.payment_address, 20, 8), data.payment_address);

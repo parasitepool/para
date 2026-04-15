@@ -21,6 +21,10 @@ impl HashDays {
     pub fn to_total_work(self) -> TotalWork {
         TotalWork::from_raw(self.0 * 86_400.0 / HASHES_PER_DIFF_1 as f64)
     }
+
+    pub fn target_hashrate(self) -> HashRate {
+        HashRate::from_dsps(self.to_total_work().as_f64() / 86_400.0)
+    }
 }
 
 impl TryFrom<f64> for HashDays {
@@ -145,5 +149,28 @@ mod tests {
     #[test]
     fn serde_rejects_invalid_values() {
         assert!(serde_json::from_str::<HashDays>("-1.0").is_err());
+    }
+
+    #[test]
+    fn target_hashrate() {
+        #[track_caller]
+        fn case(hashdays: f64, expected_hashrate: f64) {
+            let actual = HashDays::new(hashdays).unwrap().target_hashrate().0;
+            let rel_err = if expected_hashrate == 0.0 {
+                actual
+            } else {
+                ((actual - expected_hashrate) / expected_hashrate).abs()
+            };
+            assert!(
+                rel_err < 1e-10,
+                "target_hashrate({hashdays}): got {actual}, want {expected_hashrate}",
+            );
+        }
+
+        case(0.0, 0.0);
+        case(1e15, 1e15);
+        case(2e15, 2e15);
+        case(0.5e15, 0.5e15);
+        case(1e12, 1e12);
     }
 }

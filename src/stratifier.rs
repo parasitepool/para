@@ -19,11 +19,12 @@ pub(crate) struct Stratifier<W: Workbase> {
     reader: FramedRead<OwnedReadHalf, LinesCodec>,
     writer: FramedWrite<OwnedWriteHalf, LinesCodec>,
     workbase_rx: watch::Receiver<Arc<W>>,
-    disconnect_token: CancellationToken,
+    cancel: CancellationToken,
     jobs: Jobs<W>,
     vardiff: Vardiff,
     bouncer: Bouncer,
     event_tx: Option<mpsc::Sender<Event>>,
+    order: Option<Arc<Order>>,
 }
 
 impl<W: Workbase> Stratifier<W> {
@@ -36,9 +37,10 @@ impl<W: Workbase> Stratifier<W> {
         upstream: Option<Arc<Upstream>>,
         tcp_stream: TcpStream,
         workbase_rx: watch::Receiver<Arc<W>>,
-        disconnect_token: CancellationToken,
+        cancel: CancellationToken,
         event_tx: Option<mpsc::Sender<Event>>,
         start_diff: Difficulty,
+        order: Option<Arc<Order>>,
     ) -> Self {
         let _ = tcp_stream.set_nodelay(true);
 
@@ -64,23 +66,24 @@ impl<W: Workbase> Stratifier<W> {
             reader: FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_MESSAGE_SIZE)),
             writer: FramedWrite::new(writer, LinesCodec::new()),
             workbase_rx,
-            disconnect_token,
+            cancel,
             jobs: Jobs::new(),
             vardiff,
             bouncer,
             event_tx,
+            order,
         }
     }
 
     pub(crate) async fn serve(&mut self) -> Result {
         let mut workbase_rx = self.workbase_rx.clone();
-        let disconnect_token = self.disconnect_token.clone();
+        let cancel = self.cancel.clone();
         let mut idle_check = interval(self.bouncer.check_interval());
 
         loop {
             tokio::select! {
-                _ = disconnect_token.cancelled() => {
-                    info!("Session disconnect, sending client.reconnect to {}", self.socket_addr);
+                _ = cancel.cancelled() => {
+                    info!("Session cancelled, sending client.reconnect to {}", self.socket_addr);
 
                     if let Err(err) = self.send_reconnect().await {
                         warn!("Failed to send client.reconnect to {}: {err}", self.socket_addr);
@@ -150,10 +153,17 @@ impl<W: Workbase> Stratifier<W> {
                         Method::Submit(submit) => {
                             let session = match &self.state {
                                 State::Authorized(auth) => {
-                                    let session = self
-                                        .metatron
-                                        .new_session(auth.clone(), self.allocator.upstream_id());
+                                    let session = self.metatron.new_session(
+                                        auth.clone(),
+                                        self.allocator.upstream_id(),
+                                    );
+
+                                    if let Some(order) = &self.order {
+                                        order.add_session(session.clone(), self.cancel.clone());
+                                    }
+
                                     self.state = State::Working(session.clone());
+
                                     session
                                 },
                                 State::Working(session) => session.clone(),
@@ -1111,6 +1121,10 @@ impl<W: Workbase> Stratifier<W> {
 
 impl<W: Workbase> Drop for Stratifier<W> {
     fn drop(&mut self) {
+        if let Some(order) = &self.order {
+            order.unassign();
+        }
+
         if let Some(session) = self.state.working() {
             info!(
                 "Retiring session for {} with workername {} and enonce1 {}",
@@ -1118,6 +1132,10 @@ impl<W: Workbase> Drop for Stratifier<W> {
                 session.workername(),
                 session.enonce1()
             );
+
+            if let Some(order) = &self.order {
+                order.remove_session(session.id());
+            }
 
             self.metatron.retire_session(session);
         }

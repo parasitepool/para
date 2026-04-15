@@ -49,7 +49,7 @@ pub(crate) struct Settings {
     change_descriptor: Option<String>,
     wallet_birthday: u32,
     invoice_timeout: Duration,
-    default_orders: Vec<UpstreamTarget>,
+    sink_orders: Vec<UpstreamTarget>,
     hash_price: HashPrice,
 }
 
@@ -92,7 +92,7 @@ impl Default for Settings {
             change_descriptor: None,
             wallet_birthday: 0,
             invoice_timeout: Duration::from_secs(3600),
-            default_orders: Vec::new(),
+            sink_orders: Vec::new(),
             hash_price: HashPrice::from_sats(1),
         }
     }
@@ -264,7 +264,7 @@ impl Settings {
             change_descriptor: options.change_descriptor,
             wallet_birthday: options.wallet_birthday,
             invoice_timeout: Duration::from_secs(options.invoice_timeout),
-            default_orders: options.default_order,
+            sink_orders: options.sink_order,
             hash_price: options.hash_price,
         };
 
@@ -613,8 +613,8 @@ impl Settings {
         self.invoice_timeout
     }
 
-    pub(crate) fn default_orders(&self) -> &[UpstreamTarget] {
-        &self.default_orders
+    pub(crate) fn sink_orders(&self) -> &[UpstreamTarget] {
+        &self.sink_orders
     }
 
     pub(crate) fn hash_price(&self) -> HashPrice {
