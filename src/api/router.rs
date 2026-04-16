@@ -30,24 +30,7 @@ async fn order_page(Extension(chain): Extension<Chain>) -> ServerResult<Response
 }
 
 async fn status(State(router): State<Arc<Router>>) -> ServerResult<Response> {
-    let now = Instant::now();
-    let metatron = router.metatron();
-    let orders = router.orders();
-    let mut upstream = Stats::new();
-
-    for order in orders.iter() {
-        upstream.absorb(metatron.upstream_stats(order.id), now);
-    }
-
-    Ok(Json(RouterStatus {
-        uptime_secs: metatron.uptime().as_secs(),
-        upstream: RouterUpstreamInfo {
-            order_count: orders.len(),
-            stats: MiningStats::from_snapshot(&upstream, now),
-        },
-        downstream: DownstreamInfo::from_metatron(&metatron, now),
-    })
-    .into_response())
+    Ok(Json(router.status()).into_response())
 }
 
 async fn order_detail(

@@ -16,6 +16,8 @@
 
   #orders-table td { vertical-align: middle; white-space: nowrap; }
   #orders-table tbody tr { cursor: pointer; }
+  #orders-table th:nth-child(3), #orders-table td:nth-child(3) { width: 100%; }
+  #orders-table th:last-child, #orders-table td:last-child { width: 1%; text-align: right; }
 
   .order-delete {
     background: none;
@@ -140,8 +142,10 @@
 <div class="grid grid-stack">
   <div class=column>
     <h2>Upstream</h2>
-    <div class=row><span>Orders</span><span id=order_count></span></div>
-    <div class=row><span>Hashrate</span><span id=upstream_hashrate_1m></span></div>
+    <div class=row><span>Capacity</span><span id=capacity_hashrate></span></div>
+    <div class=row><span>Available</span><span id=available_hashrate></span></div>
+    <div class=row><span>Bucket Orders</span><span id=bucket_order_count></span></div>
+    <div class=row><span>Sink Orders</span><span id=sink_order_count></span></div>
     <div class=row><span>SPS</span><span id=upstream_sps_1m></span></div>
     <div class=row><span>Best Share</span><span id=upstream_best_share class=copyable></span></div>
     <div class=row><span>Last Share</span><span id=upstream_last_share></span></div>
@@ -177,7 +181,7 @@
           <th>Status</th>
           <th>Endpoint</th>
           <th>Username</th>
-          <th>Hash Days</th>
+          <th>Hashdays</th>
           <th>Delivered</th>
           <th>Hashrate</th>
           <th></th>
@@ -197,7 +201,7 @@
         <input id=order-username placeholder="user.worker">
         <label for=order-password>Password</label>
         <input id=order-password placeholder="optional">
-        <label for=order-hashdays>Hash Days</label>
+        <label for=order-hashdays>Hashdays</label>
         <input id=order-hashdays placeholder="e.g. 1.5 PHd, 500 THd">
         <label for=order-price>Price (sats/PHd)</label>
         <input id=order-price placeholder="e.g. 1000" inputmode="numeric">
@@ -264,17 +268,18 @@ async function refresh(signal) {
       fetch('/api/bitcoin/status', { signal }).then(r => r.json()).catch(() => ({}))
     ]);
 
-    const us = routerData.upstream || {};
+    const uss = routerData.upstream || {};
     const ds = routerData.downstream || {};
-    const uss = us.stats || {};
     const dss = ds.stats || {};
 
-    set('order_count', us.order_count);
+    set('bucket_order_count', routerData.bucket_order_count);
+    set('sink_order_count', routerData.sink_order_count);
+    set('capacity_hashrate', routerData.capacity_hashrate, formatHashrate);
+    set('available_hashrate', routerData.available_hashrate, formatHashrate);
     set('session_count', ds.session_count);
     set('idle', ds.idle_count);
     set('disconnected', ds.disconnected_count);
 
-    set('upstream_hashrate_1m', uss.hashrate_1m, formatHashrate);
     set('upstream_sps_1m', uss.sps_1m, formatTruncated);
     copyable('upstream_best_share', formatDifficulty(uss.best_share), uss.best_share);
     set('upstream_last_share', uss.last_share, value => `${value}s ago`);
@@ -306,7 +311,7 @@ async function refresh(signal) {
         const shortUsername = truncateMiddle(username);
         const target = order.kind === 'sink' ? 'Unlimited' : formatHashDays(order.kind.bucket);
         const delivered = hasUpstream ? formatHashDays(u.stats.hash_days) || '-' : '-';
-        const hashrate = formatHashrate(order.downstream.hashrate_1m);
+        const hashrate = hasUpstream ? formatHashrate(u.stats.hashrate_1m) : '-';
         return `<tr data-id="${order.id}">
           <td><a class=order-link href="/order/${order.id}">${order.id}</a></td>
           <td class="${statusClass(order.status)}">${formatStatus(order.status)}</td>
@@ -414,13 +419,13 @@ document.getElementById('orders-list').addEventListener('click', (e) => {
     }
 
     if (!hashdays.value.trim()) {
-      error.textContent = 'Hash days is required';
+      error.textContent = 'Hashdays is required';
       return;
     }
 
     const parsedHashdays = parseHashDays(hashdays.value);
     if (parsedHashdays === null || parsedHashdays <= 0) {
-      error.textContent = 'Hash days must be positive (e.g. 1.5 PHd, 500 THd)';
+      error.textContent = 'Hashdays must be positive (e.g. 1.5 PHd, 500 THd)';
       return;
     }
 

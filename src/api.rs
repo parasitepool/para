@@ -222,15 +222,14 @@ impl UpstreamInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RouterUpstreamInfo {
-    pub order_count: usize,
-    pub stats: MiningStats,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RouterStatus {
     pub uptime_secs: u64,
-    pub upstream: RouterUpstreamInfo,
+    pub hash_price: HashPrice,
+    pub capacity_hashrate: HashRate,
+    pub available_hashrate: HashRate,
+    pub bucket_order_count: usize,
+    pub sink_order_count: usize,
+    pub upstream: MiningStats,
     pub downstream: DownstreamInfo,
 }
 

@@ -149,7 +149,7 @@ async fn router() {
     );
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.upstream.order_count, 0);
+    assert_eq!(status.bucket_order_count, 0);
 
     add_and_activate_order(
         &router,
@@ -172,7 +172,7 @@ async fn router() {
     .await;
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.upstream.order_count, 2);
+    assert_eq!(status.bucket_order_count, 2);
 
     let mut miners = Vec::new();
 
@@ -190,7 +190,7 @@ async fn router() {
     timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(status) = router.get_status().await
-                && status.upstream.order_count == 2
+                && status.bucket_order_count == 2
                 && status.downstream.session_count >= 3
             {
                 break;
@@ -202,7 +202,7 @@ async fn router() {
     .expect("Timeout waiting for 2 slots and 3 sessions");
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.upstream.order_count, 2);
+    assert_eq!(status.bucket_order_count, 2);
     assert_eq!(status.downstream.session_count, 3);
 
     drop(pool_a);
@@ -228,7 +228,7 @@ async fn router() {
     .expect("Timeout waiting for miners to reconnect to remaining upstream");
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.upstream.order_count, 2);
+    assert_eq!(status.bucket_order_count, 1);
     assert_eq!(status.downstream.session_count, 3);
 
     drop(pool_b);
@@ -251,7 +251,7 @@ async fn router() {
     .expect("Timeout waiting for all upstreams to disconnect");
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.upstream.order_count, 2);
+    assert_eq!(status.bucket_order_count, 0);
 
     for mut miner in miners {
         miner.kill().unwrap();
@@ -443,7 +443,7 @@ async fn orders() {
     );
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.upstream.order_count, 0);
+    assert_eq!(status.bucket_order_count, 0);
 
     let response = router
         .add_order(&api::OrderRequest {
@@ -477,7 +477,7 @@ async fn orders() {
     .await;
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.upstream.order_count, 3);
+    assert_eq!(status.bucket_order_count, 2);
 
     let response = router.cancel_order(9999).await.unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
@@ -494,7 +494,7 @@ async fn orders() {
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.upstream.order_count, 3);
+    assert_eq!(status.bucket_order_count, 1);
 }
 
 #[tokio::test]
@@ -541,7 +541,7 @@ async fn cancelled_order_stays_cancelled_during_activation() {
     let order = orders.iter().find(|order| order.id == id).unwrap();
 
     assert_eq!(order.status, OrderStatus::Cancelled);
-    assert_eq!(status.upstream.order_count, 1);
+    assert_eq!(status.bucket_order_count, 0);
 
     stalled_server.abort();
 }
@@ -587,7 +587,7 @@ async fn order_disconnected_on_upstream_disconnect() {
     .await;
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.upstream.order_count, 2);
+    assert_eq!(status.bucket_order_count, 2);
 
     drop(pool_b);
 
@@ -605,7 +605,7 @@ async fn order_disconnected_on_upstream_disconnect() {
     .expect("Timeout waiting for order to be marked disconnected after upstream disconnect");
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.upstream.order_count, 2);
+    assert_eq!(status.bucket_order_count, 1);
     assert_eq!(
         router
             .list_orders(None)
@@ -650,7 +650,7 @@ async fn order_fulfilled_on_hashdays_reached() {
     .await;
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.upstream.order_count, 1);
+    assert_eq!(status.bucket_order_count, 1);
 
     let mut miner = CommandBuilder::new(format!(
         "miner {} --mode continuous --username {} --cpu-cores 1",
@@ -673,7 +673,7 @@ async fn order_fulfilled_on_hashdays_reached() {
     .expect("Timeout waiting for order to be fulfilled");
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.upstream.order_count, 1);
+    assert_eq!(status.bucket_order_count, 0);
 
     let orders = router.list_orders(None).await.unwrap();
     let fulfilled = orders

@@ -1,4 +1,8 @@
-use {super::*, orders::Orders};
+use {
+    super::*,
+    crate::api::{DownstreamInfo, MiningStats, RouterStatus},
+    orders::Orders,
+};
 
 pub(crate) mod error;
 pub(crate) mod order;
@@ -142,6 +146,44 @@ impl Router {
 
     pub(crate) fn metatron(&self) -> Arc<Metatron> {
         self.metatron.clone()
+    }
+
+    pub(crate) fn status(&self) -> RouterStatus {
+        let now = Instant::now();
+        let metatron = &self.metatron;
+        let orders = self.orders.read().all();
+        let mut upstream = Stats::new();
+        let mut bucket_order_count = 0;
+        let mut sink_order_count = 0;
+        let mut capacity_hashrate = HashRate::ZERO;
+        let mut available_hashrate = HashRate::ZERO;
+
+        for order in &orders {
+            if order.status() != OrderStatus::Active {
+                continue;
+            }
+            let stats = metatron.upstream_stats(order.id);
+            let hashrate = stats.hashrate_1m(now);
+            capacity_hashrate += hashrate;
+            if order.is_sink() {
+                sink_order_count += 1;
+                available_hashrate += hashrate;
+            } else {
+                bucket_order_count += 1;
+            }
+            upstream.absorb(stats, now);
+        }
+
+        RouterStatus {
+            uptime_secs: metatron.uptime().as_secs(),
+            hash_price: self.settings.hash_price(),
+            capacity_hashrate,
+            available_hashrate,
+            bucket_order_count,
+            sink_order_count,
+            upstream: MiningStats::from_snapshot(&upstream, now),
+            downstream: DownstreamInfo::from_metatron(metatron, now),
+        }
     }
 
     fn terminate_order(&self, order: &Order, status: OrderStatus) {
