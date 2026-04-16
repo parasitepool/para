@@ -16,8 +16,13 @@
 
   #orders-table td { vertical-align: middle; white-space: nowrap; }
   #orders-table tbody tr { cursor: pointer; }
-  #orders-table th:nth-child(3), #orders-table td:nth-child(3) { width: 100%; }
-  #orders-table th:last-child, #orders-table td:last-child { width: 1%; text-align: right; }
+  #orders-table th:nth-child(3), #orders-table td:nth-child(3) {
+    width: 100%;
+    max-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #orders-table th:last-child, #orders-table td:last-child { width: 1%; text-align: center; }
 
   .order-delete {
     background: none;
