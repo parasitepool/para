@@ -211,40 +211,40 @@ impl Order {
             return;
         };
 
-        let target = hashdays.target_hashrate();
         let current = self.hashrate_1m(now);
+        let target = hashdays.target_hashrate();
+        let ceiling = HashRate(target.0 * HYSTERESIS_HIGH);
 
-        if current.0 <= target.0 * HYSTERESIS_HIGH {
+        if current <= ceiling {
             return;
         }
 
-        let min = current - HashRate(target.0 * HYSTERESIS_HIGH);
-        let max = current - target;
+        let mut min_trim = current - ceiling;
+        let mut max_trim = current - target;
 
-        let mut best = None;
+        let mut candidates: Vec<(SessionId, HashRate)> = self
+            .sessions
+            .lock()
+            .values()
+            .map(|(session, _)| (session.id(), session.hashrate_1m(now)))
+            .collect();
 
-        for (session, _) in self.sessions.lock().values() {
-            let hashrate = session.hashrate_1m(now);
+        candidates.sort_by(|a, b| a.1.total_cmp(&b.1));
+        candidates.reverse();
 
-            if hashrate < min || hashrate > max {
+        for (id, hashrate) in candidates {
+            if min_trim <= HashRate::ZERO {
+                break;
+            }
+
+            if hashrate > max_trim {
                 continue;
             }
 
-            let replace = match best {
-                None => true,
-                Some((_, best_hashrate)) => hashrate > best_hashrate,
-            };
-
-            if replace {
-                best = Some((session.id(), hashrate));
-            }
+            self.trim_session(id, now);
+            min_trim -= hashrate;
+            max_trim -= hashrate;
         }
-
-        let Some((id, _)) = best else {
-            return;
-        };
-
-        self.trim_session(id, now);
     }
 
     pub(crate) fn trim_session(&self, id: SessionId, now: Instant) {
@@ -435,6 +435,85 @@ mod tests {
         assert!(!cancel_fat.is_cancelled());
         assert!(cancel_mid.is_cancelled());
         assert!(!cancel_small.is_cancelled());
+    }
+
+    #[test]
+    fn trim_sheds_many_small_sessions() {
+        let metatron = Arc::new(Metatron::new());
+        let bucket = test_order(&metatron, OrderKind::Bucket(HashDays::new(1e9).unwrap()));
+
+        let cancels: Vec<CancellationToken> = (0..10)
+            .map(|i| {
+                let enonce = format!("{i:08x}");
+                register_session(&metatron, &bucket, &enonce, 3.0)
+            })
+            .collect();
+
+        bucket.trim();
+
+        let cancelled = cancels.iter().filter(|c| c.is_cancelled()).count();
+        assert!(
+            cancelled >= 2,
+            "expected multiple small sessions trimmed, got {cancelled}",
+        );
+    }
+
+    #[test]
+    fn trim_stops_at_hysteresis_ceiling() {
+        let metatron = Arc::new(Metatron::new());
+        let bucket = test_order(&metatron, OrderKind::Bucket(HashDays::new(1e9).unwrap()));
+
+        let cancels: Vec<CancellationToken> = (0..8)
+            .map(|i| {
+                let enonce = format!("{i:08x}");
+                register_session(&metatron, &bucket, &enonce, 3.0)
+            })
+            .collect();
+
+        bucket.trim();
+
+        let surviving = cancels.iter().filter(|c| !c.is_cancelled()).count();
+        assert!(
+            surviving >= 1,
+            "trim drained below ceiling instead of stopping at it",
+        );
+    }
+
+    #[test]
+    fn trim_skips_sessions_larger_than_headroom() {
+        let metatron = Arc::new(Metatron::new());
+        let bucket = test_order(&metatron, OrderKind::Bucket(HashDays::new(1e9).unwrap()));
+
+        let cancel_huge = register_session(&metatron, &bucket, "aaaa", 20.0);
+        let cancel_a = register_session(&metatron, &bucket, "bbbb", 3.0);
+        let cancel_b = register_session(&metatron, &bucket, "cccc", 3.0);
+        let cancel_c = register_session(&metatron, &bucket, "dddd", 3.0);
+        let cancel_d = register_session(&metatron, &bucket, "eeee", 3.0);
+
+        bucket.trim();
+
+        assert!(!cancel_huge.is_cancelled());
+        let trimmed = [&cancel_a, &cancel_b, &cancel_c, &cancel_d]
+            .iter()
+            .filter(|c| c.is_cancelled())
+            .count();
+        assert!(trimmed >= 1);
+    }
+
+    #[test]
+    fn trim_skips_session_after_max_trim_shrinks() {
+        let metatron = Arc::new(Metatron::new());
+        let bucket = test_order(&metatron, OrderKind::Bucket(HashDays::new(1e9).unwrap()));
+
+        let cancel_a = register_session(&metatron, &bucket, "aaaa", 18.0);
+        let cancel_b = register_session(&metatron, &bucket, "bbbb", 17.0);
+        let cancel_c = register_session(&metatron, &bucket, "cccc", 7.0);
+
+        bucket.trim();
+
+        assert!(cancel_a.is_cancelled());
+        assert!(!cancel_b.is_cancelled());
+        assert!(cancel_c.is_cancelled());
     }
 
     #[test]

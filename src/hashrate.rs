@@ -23,6 +23,10 @@ impl HashRate {
 
         Self(total_difficulty * HASHES_PER_DIFF_1 as f64 / window.as_secs_f64())
     }
+
+    pub fn total_cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.total_cmp(&other.0)
+    }
 }
 
 impl Display for HashRate {

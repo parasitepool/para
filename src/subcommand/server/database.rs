@@ -575,7 +575,7 @@ impl Database {
         }
 
         let mut result: Vec<PendingPayout> = grouped.into_values().collect();
-        result.sort_by(|a, b| b.amount_sats.cmp(&a.amount_sats));
+        result.sort_by_key(|b| std::cmp::Reverse(b.amount_sats));
 
         Ok(result)
     }
@@ -623,7 +623,7 @@ impl Database {
             });
         }
 
-        result.sort_by(|a, b| b.amount_sats.cmp(&a.amount_sats));
+        result.sort_by_key(|b| std::cmp::Reverse(b.amount_sats));
 
         Ok(result)
     }
@@ -698,8 +698,7 @@ impl Database {
         .map_err(|err| anyhow!(err))?;
 
         let mut grouped: HashMap<String, PendingPayout> = HashMap::new();
-        let mut payout_id = 1i64;
-        for row in rows {
+        for (payout_id, row) in (1i64..).zip(rows) {
             let entry = grouped
                 .entry(row.ln_address.clone())
                 .or_insert_with(|| PendingPayout {
@@ -710,11 +709,10 @@ impl Database {
                 });
             entry.amount_sats += row.amount;
             entry.payout_ids.push(payout_id);
-            payout_id += 1;
         }
 
         let mut result: Vec<PendingPayout> = grouped.into_values().collect();
-        result.sort_by(|a, b| b.amount_sats.cmp(&a.amount_sats));
+        result.sort_by_key(|b| std::cmp::Reverse(b.amount_sats));
 
         Ok(result)
     }
