@@ -130,6 +130,8 @@ impl Router {
 
             let prefer_order = if order.is_ramping_up() != current.is_ramping_up() {
                 !order.is_ramping_up()
+            } else if order.is_sink() && current.is_sink() {
+                order.hashrate_1m(now) < current.hashrate_1m(now)
             } else {
                 order.remaining_work() > current.remaining_work()
             };
@@ -688,6 +690,40 @@ mod tests {
         add_orders(router.as_ref(), [active]);
 
         assert!(router.next_order().is_none());
+    }
+
+    #[test]
+    fn next_order_prefers_sink_with_least_hashrate() {
+        #[track_caller]
+        fn case(a_diff: f64, b_diff: f64, expected: u32) {
+            let router = test_router();
+            let sink_a = test_order(0, OrderKind::Sink, OrderStatus::Active, &router.metatron);
+            let sink_b = test_order(1, OrderKind::Sink, OrderStatus::Active, &router.metatron);
+
+            if a_diff > 0.0 {
+                let session = router
+                    .metatron
+                    .new_session(test_authorization("deadbeef", "foo"), 0);
+                sink_a.add_session(session.clone(), CancellationToken::new());
+                session.record_accepted(Difficulty::from(a_diff), Difficulty::from(a_diff));
+            }
+
+            if b_diff > 0.0 {
+                let session = router
+                    .metatron
+                    .new_session(test_authorization("cafebabe", "bar"), 1);
+                sink_b.add_session(session.clone(), CancellationToken::new());
+                session.record_accepted(Difficulty::from(b_diff), Difficulty::from(b_diff));
+            }
+
+            add_orders(router.as_ref(), [sink_a, sink_b]);
+
+            assert_eq!(router.next_order().unwrap().id, expected);
+        }
+
+        case(100.0, 0.0, 1);
+        case(200.0, 100.0, 1);
+        case(100.0, 200.0, 0);
     }
 
     #[test]
