@@ -62,7 +62,7 @@ use {
                 account::{Account, AccountMetadataUpdate, AccountUpdate},
                 database::{Database, HighestDiff, Payout, PendingPayout},
             },
-            sync::{ShareBatch, Sync, SyncResponse},
+            sync::{FoundBlockRecord, ShareBatch, Sync, SyncResponse},
         },
     },
     pgtemp::{PgTempDB, PgTempDBBuilder},

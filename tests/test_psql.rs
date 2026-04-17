@@ -72,7 +72,7 @@ pub(crate) fn create_test_block(blockheight: i64) -> FoundBlockRecord {
         id: blockheight as i32,
         blockheight: blockheight as i32,
         blockhash: format!(
-            "00000000000000000008a89e854d57e5667df88f1bc3ba94de4c2d1f8c{:08x}",
+            "00000000000000000002a7c4c1e48d76c5a37902165a270156b7a8da{:08x}",
             blockheight
         ),
         confirmed: Some(true),
@@ -160,14 +160,14 @@ pub(crate) async fn setup_test_schema(db_url: String) -> Result<(), Box<dyn std:
                 CREATE TABLE IF NOT EXISTS blocks (
                     id SERIAL PRIMARY KEY,
                     blockheight INTEGER UNIQUE NOT NULL,
-                    blockhash TEXT NOT NULL,
-                    confirmed BOOLEAN,
-                    workername TEXT,
-                    username TEXT,
+                    blockhash VARCHAR(64) NOT NULL,
+                    confirmed BOOLEAN DEFAULT FALSE,
+                    workername VARCHAR(255),
+                    username VARCHAR(128),
                     diff DOUBLE PRECISION,
-                    time_found TEXT,
+                    time_found TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                     coinbasevalue BIGINT,
-                    rewards_processed BOOLEAN
+                    rewards_processed BOOLEAN DEFAULT FALSE
                 )
                 "#,
     )
@@ -206,7 +206,10 @@ pub(crate) async fn setup_test_schema(db_url: String) -> Result<(), Box<dyn std:
                     transaction_id    VARCHAR(64),
                     created_at        TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                     updated_at        TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                    processed_at      TIMESTAMP WITH TIME ZONE
+                    processed_at      TIMESTAMP WITH TIME ZONE,
+
+                    CONSTRAINT valid_blockheight_range CHECK (blockheight_end >= blockheight_start),
+                    CONSTRAINT unique_payout_per_block UNIQUE (account_id, blockheight_end)
                 )
                 "#,
     )
@@ -484,21 +487,20 @@ pub(crate) async fn insert_test_block(
         r#"
                 INSERT INTO blocks (
                     blockheight, blockhash, confirmed, workername, username,
-                    diff, time_found, coinbasevalue, rewards_processed
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    diff, coinbasevalue, rewards_processed
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 ON CONFLICT (blockheight) DO NOTHING
                 "#,
     )
     .bind(blockheight)
     .bind(format!(
-        "00000000000000000008a89e854d57e5667df88f1bc3ba94de4c2d1f8c{:08x}",
+        "00000000000000000002a7c4c1e48d76c5a37902165a270156b7a8da{:08x}",
         blockheight
     ))
     .bind(true)
     .bind("test_worker")
     .bind("test_user")
     .bind(1000000.0)
-    .bind("2024-01-01 12:00:00")
     .bind(625000000i64)
     .bind(false)
     .execute(&pool)

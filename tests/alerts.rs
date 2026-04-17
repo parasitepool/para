@@ -1,18 +1,29 @@
 use super::*;
 
 #[derive(Debug, Deserialize, Serialize)]
-struct NtfyMessage {
-    id: String,
-    time: i64,
-    event: String,
-    topic: String,
-    message: Option<String>,
-    title: Option<String>,
-    priority: Option<u8>,
-    tags: Option<Vec<String>>,
+pub(crate) struct NtfyAttachment {
+    pub name: String,
+    pub url: String,
+    pub size: Option<u64>,
 }
 
-async fn listen_for_ntfy_message(channel: &str, timeout_duration: Duration) -> NtfyMessage {
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct NtfyMessage {
+    pub id: String,
+    pub time: i64,
+    pub event: String,
+    pub topic: String,
+    pub message: Option<String>,
+    pub title: Option<String>,
+    pub priority: Option<u8>,
+    pub tags: Option<Vec<String>>,
+    pub attachment: Option<NtfyAttachment>,
+}
+
+pub(crate) async fn listen_for_ntfy_messages(
+    channel: &str,
+    timeout_duration: Duration,
+) -> Vec<NtfyMessage> {
     let client = reqwest::Client::new();
     let url = format!("https://ntfy.sh/{}/json?poll=1&since=30s", channel);
 
@@ -25,20 +36,28 @@ async fn listen_for_ntfy_message(channel: &str, timeout_duration: Duration) -> N
 
     let text = response.text().await.unwrap();
 
-    let messages: Vec<NtfyMessage> = text
-        .lines()
+    text.lines()
         .filter(|line| !line.is_empty())
         .map(serde_json::from_str)
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
-
-    messages
+        .collect::<Result<Vec<NtfyMessage>, _>>()
+        .unwrap()
         .into_iter()
-        .find(|msg| msg.event == "message")
+        .filter(|msg| msg.event == "message")
+        .collect()
+}
+
+pub(crate) async fn listen_for_ntfy_message(
+    channel: &str,
+    timeout_duration: Duration,
+) -> NtfyMessage {
+    listen_for_ntfy_messages(channel, timeout_duration)
+        .await
+        .into_iter()
+        .next()
         .unwrap()
 }
 
-fn generate_test_channel() -> String {
+pub(crate) fn generate_test_channel() -> String {
     use std::{
         sync::atomic::{AtomicU64, Ordering},
         time::{SystemTime, UNIX_EPOCH},
@@ -77,6 +96,7 @@ fn test_format_block_found_notification() {
         hash: "00000000000000000002a7c4c1e48d76c5a37902165a270156b7a8d72728a054".to_string(),
         value: 625000000,
         miner: "test_pool".to_string(),
+        test: false,
     };
 
     let (title, message, priority, tags) = handler.format_notification(notification);
@@ -103,6 +123,7 @@ async fn test_send_block_notification() {
         hash: "00000000000000000002a7c4c1e48d76c5a37902165a270156b7a8d72728a054".to_string(),
         value: 625000000,
         miner: "test_pool".to_string(),
+        test: false,
     };
 
     let send_result = handler.send(notification).await;

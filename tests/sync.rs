@@ -149,6 +149,190 @@ async fn test_sync_empty_batch() {
 }
 
 #[tokio::test]
+#[ignore]
+async fn test_sync_batch_block_find_notification_e2e() {
+    let channel = alerts::generate_test_channel();
+
+    let server = TestServer::spawn_with_db_args(format!("--alerts-ntfy-channel {channel}")).await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    let blockheight: i32 = 9_999_999;
+    let sentinel_hash = format!("deadbeefdeadbeef{:048x}", blockheight);
+    assert_eq!(sentinel_hash.len(), 64);
+    let hostname = "test-block-find-e2e".to_string();
+
+    let mut shares = create_shares_for_user("test_user", &[blockheight], 1);
+    shares.extend(create_shares_for_user("other_user", &[blockheight], 2));
+    assert_eq!(shares.len(), 2);
+
+    let shares_batch = ShareBatch {
+        block: None,
+        shares: shares.clone(),
+        hostname: hostname.clone(),
+        batch_id: BATCH_COUNTER.fetch_add(1, Ordering::SeqCst) as u64,
+        total_shares: shares.len(),
+        start_id: 1,
+        end_id: 2,
+    };
+    let resp1: SyncResponse = server.post_json("/sync/batch", &shares_batch).await;
+    assert_eq!(resp1.status, "OK");
+    assert_eq!(resp1.received_count, 2);
+
+    let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
+
+    let stored_shares: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM remote_shares WHERE origin = $1")
+            .bind(&hostname)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(stored_shares, 2);
+
+    let accounts: Vec<(String, Option<String>, i64)> =
+        sqlx::query_as("SELECT username, lnurl, total_diff FROM accounts ORDER BY username")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(accounts.len(), 2);
+    assert_eq!(accounts[0].0, "other_user");
+    assert_eq!(accounts[1].0, "test_user");
+    assert!(
+        accounts[0].1.is_some(),
+        "other_user lnurl should be populated"
+    );
+    assert!(
+        accounts[1].1.is_some(),
+        "test_user lnurl should be populated"
+    );
+    assert!(accounts[0].2 > 0);
+    assert!(accounts[1].2 > 0);
+
+    // --- Batch 2: block-only batch triggering payouts + notification ---
+    let test_block = FoundBlockRecord {
+        id: blockheight,
+        blockheight,
+        blockhash: sentinel_hash.clone(),
+        confirmed: Some(true),
+        workername: Some("test_worker".to_string()),
+        username: Some("test_user".to_string()),
+        diff: Some(1_000_000.0),
+        coinbasevalue: Some(625_000_000),
+        rewards_processed: Some(false),
+    };
+
+    let block_batch = ShareBatch {
+        block: Some(test_block.clone()),
+        shares: vec![],
+        hostname: hostname.clone(),
+        batch_id: BATCH_COUNTER.fetch_add(1, Ordering::SeqCst) as u64,
+        total_shares: 0,
+        start_id: 3,
+        end_id: 3,
+    };
+    let resp2: SyncResponse = server.post_json("/sync/batch", &block_batch).await;
+    assert_eq!(resp2.status, "OK");
+
+    let stored: (i32, String) =
+        sqlx::query_as("SELECT blockheight, blockhash FROM blocks WHERE blockheight = $1")
+            .bind(blockheight)
+            .fetch_one(&pool)
+            .await
+            .expect("block row should exist after upsert");
+    assert_eq!(stored.1, sentinel_hash);
+
+    let payouts: Vec<(String, i64, i64, String)> = sqlx::query_as(
+        "SELECT a.username, p.amount, p.diff_paid, p.status
+           FROM payouts p JOIN accounts a ON a.id = p.account_id
+           WHERE p.blockheight_end = $1
+           ORDER BY a.username",
+    )
+    .bind(blockheight)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(payouts.len(), 2, "expected finder + one participant payout");
+
+    let (other, test) = (&payouts[0], &payouts[1]);
+    assert_eq!(other.0, "other_user");
+    assert_eq!(other.3, "pending");
+    assert!(other.1 > 0, "participant should receive a non-zero amount");
+
+    assert_eq!(test.0, "test_user");
+    assert_eq!(test.3, "success");
+    assert_eq!(test.1, 0, "finder payout amount should be zero");
+
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    let received = crate::alerts::listen_for_ntfy_messages(&channel, Duration::from_secs(10)).await;
+    assert!(
+        received.len() >= 2,
+        "expected >=2 messages (block + attachment), got {}: {received:?}",
+        received.len()
+    );
+
+    let block_msg = received
+        .iter()
+        .find(|m| m.title.as_deref().unwrap_or("").contains("New Block Found"))
+        .expect("block-found notification missing");
+    let block_title = block_msg.title.clone().unwrap_or_default();
+    let block_body = block_msg.message.clone().unwrap_or_default();
+    assert!(
+        block_title.contains("[TEST]"),
+        "title missing [TEST]: {block_title:?}"
+    );
+    assert!(
+        block_title.contains(&blockheight.to_string()),
+        "title missing height: {block_title:?}"
+    );
+    assert!(
+        block_body.contains("[TEST]"),
+        "body missing [TEST]: {block_body:?}"
+    );
+    assert!(
+        block_body.contains("6.25000000 BTC"),
+        "body missing coinbase: {block_body:?}"
+    );
+    assert!(
+        block_body.contains("test_user"),
+        "body missing miner: {block_body:?}"
+    );
+    assert_eq!(block_msg.priority, Some(5));
+
+    let attach_msg = received
+        .iter()
+        .find(|m| m.attachment.is_some())
+        .expect("payouts attachment message missing");
+    let attachment = attach_msg.attachment.as_ref().unwrap();
+    assert_eq!(attachment.name, format!("payouts-{blockheight}.json"));
+    assert!(
+        attach_msg.title.as_deref().unwrap_or("").contains("[TEST]"),
+        "attachment title missing [TEST]: {:?}",
+        attach_msg.title
+    );
+
+    // Fetch the attachment and verify its payouts match the DB state.
+    let body = reqwest::get(&attachment.url)
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    let payouts_json: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let payouts_arr = payouts_json.as_array().expect("payouts JSON is an array");
+    // Only other_user has a pending payout (finder has status='success').
+    assert_eq!(
+        payouts_arr.len(),
+        1,
+        "expected 1 pending payout, got: {body}"
+    );
+    let entry = &payouts_arr[0];
+    assert_eq!(entry["btc_address"], "other_user");
+    assert!(entry["amount_sats"].as_i64().unwrap() > 0);
+
+    pool.close().await;
+}
+
+#[tokio::test]
 async fn test_sync_batch_with_block_only() {
     let server = TestServer::spawn_with_db().await;
     let db_url = server.database_url().unwrap();

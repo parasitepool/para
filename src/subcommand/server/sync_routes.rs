@@ -73,6 +73,9 @@ pub(crate) async fn sync_batch(
             Err(e) => error!("Warning: Failed to upsert block: {}", e),
         }
 
+        // Sentinel hash prefix marks a test block-find for the notification path.
+        let is_test = block.blockhash.starts_with("deadbeefdeadbeef");
+
         let notification_result = notifications::notify_block_found(
             config.alerts_ntfy_channel(),
             block.blockheight,
@@ -82,12 +85,25 @@ pub(crate) async fn sync_batch(
                 .username
                 .clone()
                 .unwrap_or_else(|| "unknown".to_string()),
+            is_test,
         )
         .await;
 
         match notification_result {
             Ok(_) => info!("Block notification sent successfully"),
             Err(e) => error!("Failed to send block notification: {}", e),
+        }
+
+        if new_block_height.is_some()
+            && let Ok(pending) = database.get_pending_payouts().await
+        {
+            notifications::notify_payouts_attachment(
+                config.alerts_ntfy_channel(),
+                block.blockheight,
+                &pending,
+                is_test,
+            )
+            .await;
         }
     }
 
