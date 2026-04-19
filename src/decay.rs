@@ -4,10 +4,14 @@ use super::*;
 /// Returns 0.0 at x=0, saturates to 1.0 as x increases.
 /// Used for EMA warmup bias correction.
 fn exponential_saturation(x: f64) -> f64 {
-    // Maximum ratio where `1 - e^(-x)` is distinguishable from 1.0.
-    // Beyond this, `e^(-x) < f64::EPSILON` and the subtraction rounds to exactly 1.0.
-    // Derived from: `-ln(f64::EPSILON) = 36.04`
-    -(-x.min(36.0)).exp_m1()
+    // Clamp at 40 so the result is exactly 1.0 for large inputs, not one ULP
+    // shy of it. Saturation under round-to-nearest-even needs `e^(-x)` below
+    // half-ULP at 1.0 (`2^-53 ≈ 1.11e-16`), which mathematically holds for
+    // `x ≥ -ln(2^-53) ≈ 36.74`. In practice libm's `exp_m1` is ~1 ULP loose,
+    // so it doesn't round to exactly `-1.0` until `x ≳ 37.5`; 40 gives margin.
+    // Without this, callers doing `1 - exponential_saturation(x)` stay stuck
+    // at the residue times the stored value instead of decaying to zero.
+    -(-x.min(40.0)).exp_m1()
 }
 
 /// Calculates time bias based on how much history we have.
@@ -103,18 +107,15 @@ mod tests {
     }
 
     #[test]
-    fn exponential_saturation_saturates_at_cap() {
-        let at_cap = exponential_saturation(36.0);
-        assert!((at_cap - 1.0).abs() < 1e-10, "expected ~1.0, got {at_cap}");
-    }
+    fn exponential_saturation_saturates_to_exact_one() {
+        #[track_caller]
+        fn case(x: f64) {
+            assert_eq!(exponential_saturation(x), 1.0);
+        }
 
-    #[test]
-    fn exponential_saturation_clamps_large_values() {
-        let beyond_cap = exponential_saturation(100.0);
-        assert!(
-            (beyond_cap - 1.0).abs() < 1e-10,
-            "expected ~1.0, got {beyond_cap}"
-        );
+        case(40.0);
+        case(100.0);
+        case(1e9);
     }
 
     #[test]
@@ -127,6 +128,11 @@ mod tests {
     fn time_bias_approaches_one() {
         let bias = calculate_time_bias(secs(600), secs(60));
         assert!(bias > 0.99, "expected near 1.0, got {bias}");
+    }
+
+    #[test]
+    fn time_bias_saturates_to_exact_one() {
+        assert_eq!(calculate_time_bias(secs(60 * 40), secs(60)), 1.0);
     }
 
     #[test]
@@ -222,15 +228,13 @@ mod tests {
     }
 
     #[test]
-    fn large_elapsed_saturates_and_stays_finite() {
+    fn large_elapsed_decays_to_exact_zero() {
         let start = Instant::now();
         let mut avg = DecayingAverage::with_start_time(secs(1), start);
 
-        avg.record(100.0, start + secs(1));
+        avg.record(1e15, start + secs(1));
 
-        let value = avg.value_at(start + secs(1000));
-        assert!(value.is_finite(), "value should be finite");
-        assert!(value < 1e-10, "value should be effectively zero: {}", value);
+        assert_eq!(avg.value_at(start + secs(1000)), 0.0);
     }
 
     #[test]
