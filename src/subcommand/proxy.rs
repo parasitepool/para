@@ -32,7 +32,6 @@ impl Proxy {
 
         info!("Stratum proxy listening for downstream miners on {address}:{port}");
 
-        let mut backoff = Duration::from_secs(1);
         let timeout = settings.timeout();
         let upstream_target = settings
             .upstream_targets()
@@ -51,7 +50,6 @@ impl Proxy {
             &cancel_token,
             &tasks,
             metatron.clone(),
-            &mut backoff,
         )
         .await
         else {
@@ -153,7 +151,6 @@ impl Proxy {
                 &cancel_token,
                 &tasks,
                 metatron.clone(),
-                &mut backoff,
             )
             .await
             else {
@@ -191,12 +188,9 @@ async fn connect_upstream(
     cancel_token: &CancellationToken,
     tasks: &TaskTracker,
     metatron: Arc<Metatron>,
-    backoff: &mut Duration,
 ) -> Option<Arc<Upstream>> {
-    let mut max_backoff_attempts = 0;
-
-    loop {
-        match Upstream::connect(
+    retry_with_backoff(cancel_token, "upstream", || {
+        Upstream::connect(
             upstream_id,
             target,
             timeout,
@@ -204,34 +198,7 @@ async fn connect_upstream(
             tasks,
             metatron.clone(),
         )
-        .await
-        {
-            Ok(upstream) => {
-                *backoff = Duration::from_secs(1);
-                return Some(upstream);
-            }
-            Err(e) => {
-                warn!("Failed to connect to upstream: {e}");
-            }
-        }
-
-        warn!("Retrying in {}s...", backoff.as_secs());
-
-        tokio::select! {
-            _ = sleep(*backoff) => {}
-            _ = cancel_token.cancelled() => return None
-        }
-
-        *backoff = (*backoff * 2).min(Duration::from_secs(60));
-
-        if *backoff >= Duration::from_secs(60) {
-            max_backoff_attempts += 1;
-            if max_backoff_attempts >= 3 {
-                error!(
-                    "Upstream unreachable after {max_backoff_attempts} attempts at max backoff, exiting"
-                );
-                return None;
-            }
-        }
-    }
+    })
+    .await
+    .ok()
 }

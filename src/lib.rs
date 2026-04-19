@@ -62,6 +62,7 @@ use {
     metrics::Metrics,
     parking_lot::{Mutex, RwLock},
     reqwest::Url,
+    retry::{Backoff, BackoffEnd, retry_with_backoff},
     router::{Order, OrderKind, Router},
     rust_embed::RustEmbed,
     rustls_acme::{
@@ -93,7 +94,7 @@ use {
         str::FromStr,
         sync::{
             Arc, LazyLock, OnceLock,
-            atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering},
+            atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering},
         },
         thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -157,6 +158,7 @@ mod jobs;
 mod logs;
 mod metatron;
 mod metrics;
+mod retry;
 mod router;
 pub mod settings;
 mod signal;
@@ -190,19 +192,28 @@ fn target_as_block_hash(target: bitcoin::Target) -> BlockHash {
     BlockHash::from_raw_hash(Hash::from_byte_array(target.to_le_bytes()))
 }
 
-async fn resolve_stratum_endpoint(stratum_endpoint: &str) -> Result<SocketAddr> {
-    let endpoint = if stratum_endpoint.contains(':') {
+fn ensure_port(stratum_endpoint: &str) -> String {
+    if stratum_endpoint.parse::<SocketAddr>().is_ok() {
+        return stratum_endpoint.to_string();
+    }
+
+    if stratum_endpoint.starts_with('[') && stratum_endpoint.ends_with(']') {
+        return format!("{stratum_endpoint}:42069");
+    }
+
+    if let Ok(addr) = stratum_endpoint.parse::<std::net::IpAddr>() {
+        return if addr.is_ipv6() {
+            format!("[{stratum_endpoint}]:42069")
+        } else {
+            format!("{stratum_endpoint}:42069")
+        };
+    }
+
+    if stratum_endpoint.contains(':') {
         stratum_endpoint.to_string()
     } else {
-        format!("{}:42069", stratum_endpoint)
-    };
-
-    let addr = tokio::net::lookup_host(&endpoint)
-        .await?
-        .next()
-        .with_context(|| "Failed to resolve hostname")?;
-
-    Ok(addr)
+        format!("{stratum_endpoint}:42069")
+    }
 }
 
 fn integration_test() -> bool {
@@ -245,4 +256,25 @@ pub fn main() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ensure_port_cases() {
+        #[track_caller]
+        fn case(input: &str, expected: &str) {
+            assert_eq!(ensure_port(input), expected);
+        }
+
+        case("foo", "foo:42069");
+        case("foo:3333", "foo:3333");
+        case("192.168.1.1", "192.168.1.1:42069");
+        case("192.168.1.1:3333", "192.168.1.1:3333");
+        case("::1", "[::1]:42069");
+        case("[::1]", "[::1]:42069");
+        case("[::1]:3333", "[::1]:3333");
+    }
 }

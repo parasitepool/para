@@ -3,6 +3,7 @@ use {super::*, para::subcommand::template::Output};
 #[test]
 #[timeout(90000)]
 #[ignore]
+#[serial(heavy)]
 fn template_with_ckpool() {
     let bitcoind = bitcoind();
     let ckpool = TestCkpool::spawn(&bitcoind);

@@ -18,6 +18,7 @@ fn ping_pool() {
 #[test]
 #[timeout(90000)]
 #[ignore]
+#[serial(heavy)]
 fn ping_ckpool() {
     let bitcoind = bitcoind();
     let ckpool = TestCkpool::spawn(&bitcoind);

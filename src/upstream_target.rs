@@ -40,7 +40,7 @@ impl FromStr for UpstreamTarget {
         ensure!(!username.is_empty(), "empty username in `{s}`");
 
         Ok(Self {
-            endpoint: endpoint.to_string(),
+            endpoint: ensure_port(endpoint),
             username: username.parse::<Username>()?,
             password,
         })
@@ -88,6 +88,12 @@ mod tests {
             "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker",
             Some("x"),
             "bar.com:3333",
+        );
+        case(
+            "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar",
+            "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker",
+            None,
+            "bar:42069",
         );
     }
 

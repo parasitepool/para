@@ -214,7 +214,7 @@ async fn router() {
             if let (Ok(status), Ok(orders)) = (status, orders)
                 && orders
                     .iter()
-                    .filter(|o| o.status == OrderStatus::Active)
+                    .filter(|o| o.upstream.as_ref().is_some_and(|u| u.connected))
                     .count()
                     == 1
                 && status.downstream.session_count >= 3
@@ -228,19 +228,27 @@ async fn router() {
     .expect("Timeout waiting for miners to reconnect to remaining upstream");
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.bucket_order_count, 1);
+    let orders = router.list_orders(None).await.unwrap();
+    assert_eq!(
+        orders
+            .iter()
+            .filter(|o| o.upstream.as_ref().is_some_and(|u| u.connected))
+            .count(),
+        1,
+    );
     assert_eq!(status.downstream.session_count, 3);
 
     drop(pool_b);
 
     timeout(Duration::from_secs(30), async {
         loop {
-            if let Ok(orders) = router.list_orders(None).await
+            let status = router.get_status().await;
+            let orders = router.list_orders(None).await;
+            if let (Ok(status), Ok(orders)) = (status, orders)
                 && orders
                     .iter()
-                    .filter(|o| o.status == OrderStatus::Active)
-                    .count()
-                    == 0
+                    .all(|o| o.upstream.as_ref().is_some_and(|u| !u.connected))
+                && status.downstream.session_count == 0
             {
                 break;
             }
@@ -250,8 +258,12 @@ async fn router() {
     .await
     .expect("Timeout waiting for all upstreams to disconnect");
 
-    let status = router.get_status().await.unwrap();
-    assert_eq!(status.bucket_order_count, 0);
+    let orders = router.list_orders(None).await.unwrap();
+    assert!(
+        orders
+            .iter()
+            .all(|o| o.upstream.as_ref().is_some_and(|u| !u.connected))
+    );
 
     for mut miner in miners {
         miner.kill().unwrap();
@@ -548,17 +560,19 @@ async fn cancelled_order_stays_cancelled_during_activation() {
 
 #[tokio::test]
 #[timeout(120000)]
-async fn order_disconnected_on_upstream_disconnect() {
+async fn order_survives_upstream_bounce_and_drops_sessions() {
     let pool_bitcoind = bitcoind();
     let wallet_bitcoind = spawn_regtest();
     let descriptor = generate_descriptor();
     let funding_descriptor = generate_descriptor();
     fund_wallet(&wallet_bitcoind, &funding_descriptor).await;
 
-    let username = signet_username();
+    let pool_username = signet_username();
+    let miner_address = fund_wallet(&wallet_bitcoind, &generate_descriptor()).await;
+    let miner_username = format!("{miner_address}.miner");
 
-    let pool_a = TestPool::spawn_with_args(&pool_bitcoind, "--start-diff 0.00001");
-    let pool_b = TestPool::spawn_with_args(&pool_bitcoind, "--start-diff 0.00001");
+    let port = allocate_port();
+    let pool = TestPool::spawn_on_port(&pool_bitcoind, port, "--start-diff 0.00001");
 
     let router = TestRouter::spawn(
         &descriptor,
@@ -566,56 +580,85 @@ async fn order_disconnected_on_upstream_disconnect() {
         "--start-diff 0.00001 --tick-interval 1 --hash-price 1000",
     );
 
-    add_and_activate_order(
+    let id = add_and_activate_order(
         &router,
         &wallet_bitcoind,
         &funding_descriptor,
-        &format!("{username}@{}", pool_a.stratum_endpoint()),
+        &format!("{pool_username}@127.0.0.1:{port}"),
         HashDays::new(1e15).unwrap(),
         HashPrice::from_sats(1000),
     )
     .await;
 
-    add_and_activate_order(
-        &router,
-        &wallet_bitcoind,
-        &funding_descriptor,
-        &format!("{username}@{}", pool_b.stratum_endpoint()),
-        HashDays::new(1e15).unwrap(),
-        HashPrice::from_sats(1000),
-    )
-    .await;
-
-    let status = router.get_status().await.unwrap();
-    assert_eq!(status.bucket_order_count, 2);
-
-    drop(pool_b);
+    let mut miner = CommandBuilder::new(format!(
+        "miner {} --mode continuous --username {} --cpu-cores 1",
+        router.stratum_endpoint(),
+        miner_username
+    ))
+    .spawn();
 
     timeout(Duration::from_secs(30), async {
         loop {
-            if let Ok(orders) = router.list_orders(None).await
-                && orders.iter().any(|o| o.status == OrderStatus::Disconnected)
+            if let Ok(status) = router.get_status().await
+                && status.downstream.session_count >= 1
             {
                 break;
             }
-            sleep(Duration::from_millis(200)).await;
+            sleep(Duration::from_millis(50)).await;
         }
     })
     .await
-    .expect("Timeout waiting for order to be marked disconnected after upstream disconnect");
+    .expect("miner session should establish");
 
-    let status = router.get_status().await.unwrap();
-    assert_eq!(status.bucket_order_count, 1);
-    assert_eq!(
-        router
-            .list_orders(None)
-            .await
-            .unwrap()
-            .iter()
-            .filter(|o| o.status == OrderStatus::Disconnected)
-            .count(),
-        1
+    let initial_enonce1 = router
+        .get_order(id)
+        .await
+        .unwrap()
+        .upstream
+        .unwrap()
+        .enonce1;
+
+    drop(pool);
+
+    timeout(Duration::from_secs(10), async {
+        loop {
+            let status = router.get_status().await;
+            let detail = router.get_order(id).await;
+            if let (Ok(status), Ok(detail)) = (status, detail)
+                && detail.status == OrderStatus::Active
+                && detail.upstream.as_ref().is_some_and(|upstream| !upstream.connected)
+                && status.downstream.session_count == 0
+            {
+                break;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect(
+        "on upstream drop: order stays Active, upstream.connected flips to false, sessions drop to zero",
     );
+
+    let _pool = TestPool::spawn_on_port(&pool_bitcoind, port, "--start-diff 0.00001");
+
+    timeout(Duration::from_secs(30), async {
+        loop {
+            let detail = router.get_order(id).await.unwrap();
+            if detail.status == OrderStatus::Active
+                && let Some(upstream) = detail.upstream
+                && upstream.connected
+                && upstream.enonce1 != initial_enonce1
+            {
+                break;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("order should reconnect with a fresh enonce1 once the upstream is back");
+
+    miner.kill().unwrap();
+    miner.wait().unwrap();
 }
 
 #[tokio::test]

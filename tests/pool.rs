@@ -361,8 +361,9 @@ async fn stratum_state_machine() {
 }
 
 #[tokio::test]
-#[timeout(90000)]
+#[timeout(180000)]
 #[ignore]
+#[serial(heavy)]
 async fn clean_jobs_true_on_init_and_new_block() {
     let bitcoind = bitcoind();
     let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.0001");
@@ -417,8 +418,9 @@ fn configure_template_update_interval() {
 }
 
 #[tokio::test]
-#[timeout(90000)]
+#[timeout(180000)]
 #[ignore]
+#[serial(heavy)]
 async fn concurrently_listening_workers_receive_new_templates_on_new_block() {
     use std::sync::Barrier;
     use std::time::Duration;

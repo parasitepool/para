@@ -20,12 +20,25 @@ pub(crate) struct Upstream {
     enonce2_size: usize,
     version_mask: Option<Version>,
     metatron: Arc<Metatron>,
-    connected: Arc<AtomicBool>,
+    connected: watch::Sender<bool>,
     ping: Arc<RwLock<Duration>>,
     difficulty: Arc<RwLock<Difficulty>>,
-    disconnect_notify: Arc<tokio::sync::Notify>,
     workbase_rx: watch::Receiver<Arc<Notify>>,
     tasks: TaskTracker,
+}
+
+struct Disconnect(watch::Sender<bool>);
+
+impl Drop for Disconnect {
+    fn drop(&mut self) {
+        self.0.send_if_modified(|connected| {
+            if !*connected {
+                return false;
+            }
+            *connected = false;
+            true
+        });
+    }
 }
 
 impl Upstream {
@@ -37,24 +50,14 @@ impl Upstream {
         tasks: &TaskTracker,
         metatron: Arc<Metatron>,
     ) -> Result<Arc<Self>> {
-        let upstream_addr = resolve_stratum_endpoint(target.endpoint())
-            .await
-            .with_context(|| {
-                format!(
-                    "failed to resolve upstream endpoint `{}`",
-                    target.endpoint()
-                )
-            })?;
-
         info!(
-            "Connecting to upstream {} ({}) as {}",
+            "Connecting to upstream {} as {}",
             target.endpoint(),
-            upstream_addr,
             target.username()
         );
 
         let client = Client::with_cancel(
-            upstream_addr.to_string(),
+            target.endpoint().into(),
             target.username().clone(),
             target.password().map(String::from),
             USER_AGENT.into(),
@@ -144,15 +147,15 @@ impl Upstream {
         };
 
         let difficulty = Arc::new(RwLock::new(initial_difficulty));
-        let connected = Arc::new(AtomicBool::new(true));
-        let disconnect_notify = Arc::new(tokio::sync::Notify::new());
+        let (connected, _) = watch::channel(true);
         let (workbase_tx, workbase_rx) = watch::channel(Arc::new(first_notify));
 
-        let connected_clone = connected.clone();
         let difficulty_clone = difficulty.clone();
-        let disconnect_clone = disconnect_notify.clone();
+        let disconnect = Disconnect(connected.clone());
 
         tasks.spawn(async move {
+            let _disconnect = disconnect;
+
             loop {
                 tokio::select! {
                     biased;
@@ -186,9 +189,6 @@ impl Upstream {
                     }
                 }
             }
-
-            connected_clone.store(false, Ordering::Relaxed);
-            disconnect_clone.notify_waiters();
         });
 
         Ok(Arc::new(Self {
@@ -202,7 +202,6 @@ impl Upstream {
             difficulty,
             metatron,
             version_mask,
-            disconnect_notify,
             workbase_rx,
             tasks: tasks.clone(),
         }))
@@ -281,11 +280,16 @@ impl Upstream {
     }
 
     pub(crate) fn is_connected(&self) -> bool {
-        self.connected.load(Ordering::Relaxed)
+        *self.connected.borrow()
     }
 
     pub(crate) async fn disconnected(&self) {
-        self.disconnect_notify.notified().await;
+        let mut rx = self.connected.subscribe();
+        while *rx.borrow_and_update() {
+            if rx.changed().await.is_err() {
+                return;
+            }
+        }
     }
 
     pub(crate) fn endpoint(&self) -> &str {
@@ -302,6 +306,11 @@ impl Upstream {
 
     pub(crate) fn ping_ms(&self) -> u128 {
         self.ping.read().as_millis()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_connected(&self, value: bool) {
+        self.connected.send_replace(value);
     }
 
     #[cfg(test)]
@@ -343,14 +352,44 @@ impl Upstream {
             endpoint: "foo:3333".into(),
             enonce1: Extranonce::random(4),
             enonce2_size: 4,
-            connected: Arc::new(AtomicBool::new(true)),
+            connected: watch::channel(true).0,
             ping: Arc::new(RwLock::new(Duration::ZERO)),
             difficulty: Arc::new(RwLock::new(Difficulty::from(1u64))),
             metatron,
             version_mask: None,
-            disconnect_notify: Arc::new(tokio::sync::Notify::new()),
             workbase_rx,
             tasks: TaskTracker::new(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn disconnected_returns_immediately_when_already_disconnected() {
+        let upstream = Upstream::test(0, Arc::new(Metatron::new()));
+
+        upstream.set_connected(false);
+
+        timeout(Duration::from_millis(100), upstream.disconnected())
+            .await
+            .expect("disconnected() must return immediately when not connected");
+    }
+
+    #[tokio::test]
+    async fn disconnected_resolves_when_set_connected_flips_to_false() {
+        let upstream = Upstream::test(0, Arc::new(Metatron::new()));
+        let flipper = upstream.clone();
+
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            flipper.set_connected(false);
+        });
+
+        timeout(Duration::from_millis(500), upstream.disconnected())
+            .await
+            .expect("disconnected() must resolve once set_connected flips to false");
     }
 }

@@ -35,7 +35,11 @@ impl Orders {
         self.inner
             .values()
             .filter(|order| {
-                order.status() == OrderStatus::Active && (order.is_sink() || order.is_starving(now))
+                order.status() == OrderStatus::Active
+                    && order
+                        .upstream()
+                        .is_some_and(|upstream| upstream.is_connected())
+                    && (order.is_sink() || order.is_starving(now))
             })
             .cloned()
             .collect()

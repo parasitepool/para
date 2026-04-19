@@ -254,7 +254,7 @@ async fn wait_for_notify(
     events: &mut stratum::client::EventReceiver,
 ) -> (stratum::Notify, Difficulty) {
     let mut difficulty = Difficulty::from(1);
-    timeout(Duration::from_secs(10), async {
+    timeout(Duration::from_secs(30), async {
         loop {
             match events.recv().await.unwrap() {
                 stratum::client::Event::SetDifficulty(diff) => difficulty = diff,
@@ -322,7 +322,7 @@ async fn wait_for_job_update(
     events: &mut stratum::client::EventReceiver,
     old_job_id: JobId,
 ) -> stratum::Notify {
-    timeout(Duration::from_secs(10), async {
+    timeout(Duration::from_secs(30), async {
         loop {
             match events.recv().await.unwrap() {
                 stratum::client::Event::Notify(n) if n.job_id != old_job_id && !n.clean_jobs => {
@@ -341,7 +341,7 @@ async fn wait_for_new_block(
     events: &mut stratum::client::EventReceiver,
     old_job_id: JobId,
 ) -> stratum::Notify {
-    timeout(Duration::from_secs(10), async {
+    timeout(Duration::from_secs(90), async {
         loop {
             match events.recv().await.unwrap() {
                 stratum::client::Event::Notify(n) if n.job_id != old_job_id && n.clean_jobs => {

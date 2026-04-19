@@ -274,7 +274,7 @@ impl OrderDetail {
     pub(crate) fn from_order(order: &Order, metatron: &Metatron, now: Instant) -> Self {
         let upstream = order.upstream();
 
-        let (sessions, downstream) = match upstream {
+        let (sessions, downstream) = match &upstream {
             Some(upstream) => metatron.downstream_snapshot(upstream.id(), now),
             None => (Vec::new(), Stats::new()),
         };
@@ -286,7 +286,9 @@ impl OrderDetail {
             kind: order.kind,
             payment_address: order.payment_address.as_unchecked().clone(),
             payment_amount: order.payment_amount,
-            upstream: upstream.map(|upstream| UpstreamInfo::from_upstream(upstream, metatron, now)),
+            upstream: upstream
+                .as_ref()
+                .map(|upstream| UpstreamInfo::from_upstream(upstream, metatron, now)),
             downstream: MiningStats::from_snapshot(&downstream, now),
             sessions: sessions
                 .into_iter()

@@ -16,18 +16,11 @@ pub(crate) struct Ping {
 
 impl Ping {
     pub(crate) async fn run(&self, cancel_token: CancellationToken) -> Result {
-        let addr = resolve_stratum_endpoint(&self.stratum_endpoint)
-            .await
-            .with_context(|| {
-                format!(
-                    "failed to resolve stratum endpoint `{}`",
-                    self.stratum_endpoint
-                )
-            })?;
+        let endpoint = ensure_port(&self.stratum_endpoint);
 
         let ping_type = PingType::new(self.username.clone(), self.password.as_deref());
 
-        println!("{} {} ({})", ping_type, self.stratum_endpoint, addr);
+        println!("{} {}", ping_type, endpoint);
 
         let stats = Arc::new(PingStats::new());
         let sequence = AtomicU64::new(0);
@@ -51,12 +44,12 @@ impl Ping {
                             println!("Ping cancelled for seq={seq}");
                             break;
                         }
-                        result = self.ping_once(addr, &ping_type) => {
+                        result = self.ping_once(&endpoint, &ping_type) => {
                             match result {
                                 Ok((duration, size)) => {
                                     success = true;
                                     stats.record_success(duration);
-                                    println!("Response from {addr}: seq={seq} size={size} time={:.3}ms", duration.as_secs_f64() * 1000.0);
+                                    println!("Response from {endpoint}: seq={seq} size={size} time={:.3}ms", duration.as_secs_f64() * 1000.0);
                                 }
                                 Err(e) => {
                                     println!("Request timeout for seq={seq} ({e})");
@@ -82,11 +75,11 @@ impl Ping {
         }
     }
 
-    async fn ping_once(&self, addr: SocketAddr, ping_type: &PingType) -> Result<(Duration, usize)> {
+    async fn ping_once(&self, endpoint: &str, ping_type: &PingType) -> Result<(Duration, usize)> {
         match ping_type {
             PingType::Subscribe => {
                 let client = stratum::client::Client::new(
-                    addr.to_string(),
+                    endpoint.to_string(),
                     "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.ping"
                         .parse()
                         .unwrap(),
@@ -105,7 +98,7 @@ impl Ping {
             }
             PingType::Authorized { username, password } => {
                 let client = stratum::client::Client::new(
-                    addr.to_string(),
+                    endpoint.to_string(),
                     username.clone(),
                     Some(password.clone()),
                     USER_AGENT.into(),

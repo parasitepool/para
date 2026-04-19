@@ -73,8 +73,6 @@ impl Controller {
         controller.spawn_hashers();
         controller.maybe_spawn_throbber(&cancel_token);
 
-        let mut backoff = Duration::from_secs(1);
-
         loop {
             match controller.event_loop(events, cancel_token.clone()).await? {
                 Action::Shutdown => break,
@@ -89,46 +87,26 @@ impl Controller {
                         }
                     }
 
-                    let mut max_backoff_attempts = 0u32;
+                    let mut backoff = Backoff::new();
 
                     events = loop {
-                        info!("Reconnecting in {}s...", backoff.as_secs());
-
-                        tokio::select! {
-                            _ = sleep(backoff) => {}
-                            _ = cancel_token.cancelled() => {
-                                return Ok(controller.shares);
+                        match controller.connect(disable_version_rolling).await {
+                            Ok(events) => break events,
+                            Err(err) => {
+                                warn!("upstream attempt failed: {err}");
+                                controller.client.disconnect().await;
                             }
                         }
 
-                        backoff = (backoff * 2).min(Duration::from_secs(60));
-
-                        if backoff >= Duration::from_secs(60) {
-                            max_backoff_attempts += 1;
-                            if max_backoff_attempts >= 3 {
-                                bail!(
-                                    "Upstream unreachable after {max_backoff_attempts} attempts at max backoff"
-                                );
-                            }
-                        }
-
-                        tokio::select! {
-                            result = controller.connect(disable_version_rolling) => {
-                                match result {
-                                    Ok(new_events) => break new_events,
-                                    Err(err) => {
-                                        warn!("Reconnect failed: {err}");
-                                        controller.client.disconnect().await;
-                                    }
-                                }
-                            }
-                            _ = cancel_token.cancelled() => {
-                                return Ok(controller.shares);
+                        match backoff.wait(&cancel_token, "upstream").await {
+                            Ok(()) => {}
+                            Err(BackoffEnd::Cancelled) => return Ok(controller.shares),
+                            Err(BackoffEnd::Exhausted) => {
+                                bail!("Upstream unreachable after max backoff attempts")
                             }
                         }
                     };
 
-                    backoff = Duration::from_secs(1);
                     controller.reset_hashers();
                     controller.spawn_hashers();
                     controller.maybe_spawn_throbber(&cancel_token);

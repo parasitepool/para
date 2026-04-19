@@ -249,6 +249,7 @@ async fn test_multi_sink() {
 #[ignore]
 #[cfg(target_os = "linux")]
 #[tokio::test]
+#[serial_test::serial(heavy)]
 async fn test_block_found_event() {
     use sqlx::PgPool;
 

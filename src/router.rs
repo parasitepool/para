@@ -274,36 +274,69 @@ impl Router {
 
     async fn run_active_order(self: &Arc<Self>, order: &Arc<Order>) {
         let check_interval = self.settings.tick_interval();
-        let upstream = order.upstream().expect("just activated");
 
-        tokio::select! {
-            biased;
-            _ = order.cancel.cancelled() => {
-                self.terminate_order(order, OrderStatus::Cancelled);
-            }
-            _ = upstream.disconnected() => {
-                warn!(
-                    "Upstream {} disconnected, order {} marked disconnected",
-                    upstream.endpoint(),
-                    order.id,
-                );
+        loop {
+            let upstream = order.upstream().expect("active order has upstream");
 
-                self.terminate_order(order, OrderStatus::Disconnected);
-            }
-            _ = async {
-                let mut ticker = tokio::time::interval(check_interval);
-                loop {
-                    ticker.tick().await;
+            tokio::select! {
+                biased;
+                _ = order.cancel.cancelled() => {
+                    self.terminate_order(order, OrderStatus::Cancelled);
+                    return;
+                }
+                _ = upstream.disconnected() => {
+                    warn!(
+                        "Upstream {} disconnected, attempting reconnect for order {}",
+                        upstream.endpoint(),
+                        order.id,
+                    );
+
+                    order.cancel_sessions();
 
                     if order.is_fulfilled() {
-                        break;
+                        info!("Order {} fulfilled", order.id);
+                        self.terminate_order(order, OrderStatus::Fulfilled);
+                        return;
                     }
 
-                    order.trim();
+                    let label = format!("order {}", order.id);
+                    let outcome = retry_with_backoff(&order.cancel, &label, || {
+                        order.reconnect(
+                            self.settings.timeout(),
+                            self.settings.enonce1_extension_size(),
+                            &self.tasks,
+                        )
+                    })
+                    .await;
+
+                    match outcome {
+                        Ok(()) => continue,
+                        Err(BackoffEnd::Cancelled) => {
+                            self.terminate_order(order, OrderStatus::Cancelled);
+                            return;
+                        }
+                        Err(BackoffEnd::Exhausted) => {
+                            self.terminate_order(order, OrderStatus::Disconnected);
+                            return;
+                        }
+                    }
                 }
-            } => {
-                info!("Order {} fulfilled", order.id);
-                self.terminate_order(order, OrderStatus::Fulfilled);
+                _ = async {
+                    let mut ticker = tokio::time::interval(check_interval);
+                    loop {
+                        ticker.tick().await;
+
+                        if order.is_fulfilled() {
+                            break;
+                        }
+
+                        order.trim();
+                    }
+                } => {
+                    info!("Order {} fulfilled", order.id);
+                    self.terminate_order(order, OrderStatus::Fulfilled);
+                    return;
+                }
             }
         }
     }
@@ -444,7 +477,7 @@ mod tests {
         order.set_status(status);
 
         if status == OrderStatus::Active {
-            let _ = order.upstream.set(Upstream::test(id, metatron.clone()));
+            *order.upstream.lock() = Some(Upstream::test(id, metatron.clone()));
             let _ = order.allocator.set(Arc::new(EnonceAllocator::new(
                 Extranonces::Pool(PoolExtranonces::new(4, 4).unwrap()),
                 id,
@@ -472,6 +505,30 @@ mod tests {
 
     fn ids(orders: Vec<Arc<Order>>) -> Vec<u32> {
         orders.into_iter().map(|order| order.id).collect()
+    }
+
+    fn disconnected_active_order(endpoint: &str, metatron: &Arc<Metatron>) -> Arc<Order> {
+        let order = Order::new(
+            0,
+            format!("tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@{endpoint}")
+                .parse()
+                .unwrap(),
+            OrderKind::Sink,
+            test_address(),
+            0,
+            Amount::from_sat(1000),
+            Duration::from_secs(3600),
+            CancellationToken::new(),
+            metatron.clone(),
+        );
+        order.set_status(OrderStatus::Active);
+        *order.upstream.lock() = Some(Upstream::test(0, metatron.clone()));
+        let _ = order.allocator.set(Arc::new(EnonceAllocator::new(
+            Extranonces::Pool(PoolExtranonces::new(4, 4).unwrap()),
+            0,
+        )));
+        order.upstream().unwrap().set_connected(false);
+        order
     }
 
     #[test]
@@ -508,6 +565,48 @@ mod tests {
         case(OrderStatus::Disconnected, "\"disconnected\"");
         case(OrderStatus::Expired, "\"expired\"");
         case(OrderStatus::PaidLate, "\"paid_late\"");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn run_active_order_disconnects_on_retry_exhaustion() {
+        let router = test_router();
+        let order = disconnected_active_order("127.0.0.1:1", &router.metatron);
+
+        router.run_active_order(&order).await;
+
+        assert_eq!(order.status(), OrderStatus::Disconnected);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn run_active_order_cancels_on_cancellation_during_retry() {
+        let router = test_router();
+        let order = disconnected_active_order("127.0.0.1:1", &router.metatron);
+
+        let canceller = order.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(1_500)).await;
+            canceller.cancel.cancel();
+        });
+
+        router.run_active_order(&order).await;
+
+        assert_eq!(order.status(), OrderStatus::Cancelled);
+    }
+
+    #[test]
+    fn routable_filters_disconnected_upstreams() {
+        let metatron = Arc::new(Metatron::new());
+        let mut orders = Orders::new();
+        let connected = test_order(0, OrderKind::Sink, OrderStatus::Active, &metatron);
+        let disconnected = test_order(1, OrderKind::Sink, OrderStatus::Active, &metatron);
+        disconnected.upstream().unwrap().set_connected(false);
+        let pending = test_order(2, OrderKind::Sink, OrderStatus::Pending, &metatron);
+
+        orders.add(connected);
+        orders.add(disconnected);
+        orders.add(pending);
+
+        assert_eq!(ids(orders.routable(Instant::now())), vec![0]);
     }
 
     #[test]

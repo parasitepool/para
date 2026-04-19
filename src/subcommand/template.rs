@@ -55,17 +55,10 @@ impl Template {
             self.stratum_endpoint, self.username
         );
 
-        let address = resolve_stratum_endpoint(&self.stratum_endpoint)
-            .await
-            .with_context(|| {
-                format!(
-                    "failed to resolve stratum endpoint `{}`",
-                    self.stratum_endpoint
-                )
-            })?;
+        let endpoint = ensure_port(&self.stratum_endpoint);
 
         let client = Client::new(
-            address.to_string(),
+            endpoint.clone(),
             self.username.clone(),
             self.password.clone(),
             USER_AGENT.into(),
@@ -74,7 +67,7 @@ impl Template {
         let mut events = client
             .connect()
             .await
-            .with_context(|| format!("failed to connect to stratum server at `{address}`"))?;
+            .with_context(|| format!("failed to connect to stratum server at `{endpoint}`"))?;
 
         let (subscription, _, _) = client
             .subscribe()

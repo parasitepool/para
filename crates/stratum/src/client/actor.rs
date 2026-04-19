@@ -168,6 +168,11 @@ impl ClientActor {
             .set_nodelay(true)
             .map_err(|source| ClientError::Io { source })?;
 
+        match stream.peer_addr() {
+            Ok(peer) => debug!("Connected to {} -> {peer}", self.inner.address),
+            Err(_) => debug!("Connected to {}", self.inner.address),
+        }
+
         let (reader, writer) = stream.into_split();
         let writer = BufWriter::new(writer);
         let framed_reader =
@@ -182,7 +187,6 @@ impl ClientActor {
             reader_handle,
         });
 
-        debug!("Connected to {}", self.inner.address);
         Ok(())
     }
 

@@ -36,7 +36,7 @@ pub struct Order {
     pub(crate) id: u32,
     pub(crate) upstream_target: UpstreamTarget,
     pub(crate) kind: OrderKind,
-    pub(crate) upstream: OnceLock<Arc<Upstream>>,
+    pub(crate) upstream: Mutex<Option<Arc<Upstream>>>,
     pub(crate) allocator: OnceLock<Arc<EnonceAllocator>>,
     pub(crate) status: Mutex<OrderStatus>,
     pub(crate) payment_address: Address,
@@ -67,7 +67,7 @@ impl Order {
             id,
             upstream_target,
             kind,
-            upstream: OnceLock::new(),
+            upstream: Mutex::new(None),
             allocator: OnceLock::new(),
             status: Mutex::new(OrderStatus::Pending),
             payment_address,
@@ -98,6 +98,19 @@ impl Order {
         self.sessions.lock().remove(&id);
     }
 
+    pub(crate) fn cancel_sessions(&self) {
+        let tokens: Vec<CancellationToken> = self
+            .sessions
+            .lock()
+            .values()
+            .map(|(_, cancel)| cancel.clone())
+            .collect();
+
+        for cancel in tokens {
+            cancel.cancel();
+        }
+    }
+
     pub(crate) fn is_sink(&self) -> bool {
         matches!(self.kind, OrderKind::Sink)
     }
@@ -110,8 +123,8 @@ impl Order {
         self.hashrate_1m(now).0 < hashdays.target_hashrate().0 * HYSTERESIS_LOW
     }
 
-    pub(crate) fn upstream(&self) -> Option<&Arc<Upstream>> {
-        self.upstream.get()
+    pub(crate) fn upstream(&self) -> Option<Arc<Upstream>> {
+        self.upstream.lock().clone()
     }
 
     pub(crate) fn allocator(&self) -> Option<&Arc<EnonceAllocator>> {
@@ -138,6 +151,51 @@ impl Order {
         enonce1_extension_size: usize,
         tasks: &TaskTracker,
     ) -> Result {
+        let (upstream, extranonces) = self
+            .connect_upstream(timeout, enonce1_extension_size, tasks)
+            .await?;
+
+        let allocator = Arc::new(EnonceAllocator::new(extranonces, self.id));
+
+        *self.upstream.lock() = Some(upstream);
+
+        self.allocator
+            .set(allocator)
+            .map_err(|_| anyhow!("activate called twice"))?;
+
+        info!("Upstream {} connected", self.upstream_target);
+
+        Ok(())
+    }
+
+    pub(crate) async fn reconnect(
+        &self,
+        timeout: Duration,
+        enonce1_extension_size: usize,
+        tasks: &TaskTracker,
+    ) -> Result {
+        let (upstream, extranonces) = self
+            .connect_upstream(timeout, enonce1_extension_size, tasks)
+            .await?;
+
+        *self.upstream.lock() = Some(upstream);
+
+        self.allocator
+            .get()
+            .expect("reconnect called before activate")
+            .update_extranonces(extranonces);
+
+        info!("Upstream {} reconnected", self.upstream_target);
+
+        Ok(())
+    }
+
+    async fn connect_upstream(
+        &self,
+        timeout: Duration,
+        enonce1_extension_size: usize,
+        tasks: &TaskTracker,
+    ) -> Result<(Arc<Upstream>, Extranonces)> {
         let upstream = Upstream::connect(
             self.id,
             &self.upstream_target,
@@ -154,22 +212,7 @@ impl Order {
             enonce1_extension_size,
         )?;
 
-        let allocator = Arc::new(EnonceAllocator::new(
-            Extranonces::Proxy(proxy_extranonces),
-            self.id,
-        ));
-
-        self.upstream
-            .set(upstream)
-            .map_err(|_| anyhow!("activate called twice"))?;
-
-        self.allocator
-            .set(allocator)
-            .map_err(|_| anyhow!("activate called twice"))?;
-
-        info!("Upstream {} connected", self.upstream_target);
-
-        Ok(())
+        Ok((upstream, Extranonces::Proxy(proxy_extranonces)))
     }
 
     pub(crate) fn is_fulfilled(&self) -> bool {
@@ -572,5 +615,21 @@ mod tests {
         }
 
         assert!(!bucket.is_ramping_up());
+    }
+
+    #[test]
+    fn cancel_sessions_cancels_every_token() {
+        let metatron = Arc::new(Metatron::new());
+        let order = test_order(&metatron, OrderKind::Sink);
+
+        let cancel_a = register_session(&metatron, &order, "aaaa", 1.0);
+        let cancel_b = register_session(&metatron, &order, "bbbb", 1.0);
+        let cancel_c = register_session(&metatron, &order, "cccc", 1.0);
+
+        order.cancel_sessions();
+
+        assert!(cancel_a.is_cancelled());
+        assert!(cancel_b.is_cancelled());
+        assert!(cancel_c.is_cancelled());
     }
 }

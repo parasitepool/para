@@ -118,7 +118,7 @@ impl RouterCommand {
             debug!("Spawning stratifier task for {addr}");
 
             tasks.spawn(async move {
-                let upstream = order.upstream().expect("active order").clone();
+                let upstream = order.upstream().expect("active order");
                 let allocator = order.allocator().expect("active order").clone();
                 let mut stratifier: Stratifier<Notify> = Stratifier::new(
                     addr,

@@ -90,26 +90,34 @@ fn test_notification_priority_values() {
 
 #[test]
 fn test_format_block_found_notification() {
-    let handler = NotificationHandler::new("test_channel".to_string());
-    let notification = NotificationType::BlockFound {
-        height: 850000,
-        hash: "00000000000000000002a7c4c1e48d76c5a37902165a270156b7a8d72728a054".to_string(),
-        value: 625000000,
-        miner: "test_pool".to_string(),
-        test: false,
-    };
+    #[track_caller]
+    fn case(test: bool) {
+        let handler = NotificationHandler::new("test_channel".to_string());
+        let notification = NotificationType::BlockFound {
+            height: 850000,
+            hash: "00000000000000000002a7c4c1e48d76c5a37902165a270156b7a8d72728a054".to_string(),
+            value: 625000000,
+            miner: "test_pool".to_string(),
+            test,
+        };
 
-    let (title, message, priority, tags) = handler.format_notification(notification);
+        let (title, message, priority, tags) = handler.format_notification(notification);
 
-    assert!(title.contains("850000"));
-    assert!(title.contains("New Block Found"));
-    assert!(message.contains("6.25000000 BTC"));
-    assert!(message.contains("test_pool"));
-    assert!(message.contains("850000"));
-    assert!(matches!(priority, NotificationPriority::Max));
-    assert!(tags.contains(&"mining".to_string()));
-    assert!(tags.contains(&"bitcoin".to_string()));
-    assert!(tags.contains(&"pick".to_string()));
+        assert_eq!(title.starts_with("[TEST] "), test);
+        assert_eq!(message.starts_with("[TEST] "), test);
+        assert!(title.contains("New Block Found"));
+        assert!(title.contains("850000"));
+        assert!(message.contains("850000"));
+        assert!(message.contains("6.25000000 BTC"));
+        assert!(message.contains("test_pool"));
+        assert!(matches!(priority, NotificationPriority::Max));
+        assert!(tags.contains(&"mining".to_string()));
+        assert!(tags.contains(&"bitcoin".to_string()));
+        assert!(tags.contains(&"pick".to_string()));
+    }
+
+    case(false);
+    case(true);
 }
 
 #[tokio::test]
