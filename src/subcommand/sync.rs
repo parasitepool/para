@@ -544,7 +544,7 @@ impl Database {
         if was_inserted && let Some(coinbasevalue) = block.coinbasevalue {
             self.populate_payouts_for_block(
                 block.blockheight,
-                coinbasevalue,
+                coinbasevalue - 100_000_000,
                 block.username.as_deref(),
             )
             .await?;

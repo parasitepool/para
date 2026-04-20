@@ -221,17 +221,17 @@ async fn test_payout_distribution_proportional_to_diff() {
     let (username_a, amount_a, diff_a) = &payouts[0];
     assert_eq!(username_a, "user_a");
     assert_eq!(*diff_a, 1000);
-    assert_eq!(*amount_a, 100000000);
+    assert_eq!(*amount_a, 83333333);
 
     let (username_b, amount_b, diff_b) = &payouts[1];
     assert_eq!(username_b, "user_b");
     assert_eq!(*diff_b, 2000);
-    assert_eq!(*amount_b, 199999999, "FLOOR should round down");
+    assert_eq!(*amount_b, 166666666, "FLOOR should round down");
 
     let (username_c, amount_c, diff_c) = &payouts[2];
     assert_eq!(username_c, "user_c");
     assert_eq!(*diff_c, 3000);
-    assert_eq!(*amount_c, 300000000);
+    assert_eq!(*amount_c, 250000000);
 
     pool.close().await;
 }
@@ -297,7 +297,7 @@ async fn test_payout_excludes_cancelled_payouts_from_calculation() {
     assert!(payout.is_some());
     let (amount, diff_paid) = payout.unwrap();
     assert_eq!(diff_paid, 2000, "Should pay for full unpaid diff");
-    assert_eq!(amount, 300000000, "Should receive full reward");
+    assert_eq!(amount, 200000000, "Should receive full reward");
 
     pool.close().await;
 }
@@ -366,7 +366,7 @@ async fn test_payout_considers_previous_successful_payouts() {
         diff_paid, 2000,
         "Should pay for only unpaid diff (3000 - 1000)"
     );
-    assert_eq!(amount, 400000000, "Should receive full reward");
+    assert_eq!(amount, 300000000, "Should receive full reward");
 
     pool.close().await;
 }
@@ -643,17 +643,17 @@ async fn test_multiple_users_with_finder_exclusion() {
     assert_eq!(other_payouts.len(), 3);
 
     assert_eq!(other_payouts[0].0, "miner_1");
-    assert_eq!(other_payouts[0].1, 166666666);
+    assert_eq!(other_payouts[0].1, 150000000);
     assert_eq!(other_payouts[0].2, "pending");
     assert_eq!(other_payouts[0].3, 1000);
 
     assert_eq!(other_payouts[1].0, "miner_2");
-    assert_eq!(other_payouts[1].1, 333333333);
+    assert_eq!(other_payouts[1].1, 299999999);
     assert_eq!(other_payouts[1].2, "pending");
     assert_eq!(other_payouts[1].3, 2000);
 
     assert_eq!(other_payouts[2].0, "miner_3");
-    assert_eq!(other_payouts[2].1, 500000000);
+    assert_eq!(other_payouts[2].1, 450000000);
     assert_eq!(other_payouts[2].2, "pending");
     assert_eq!(other_payouts[2].3, 3000);
 
