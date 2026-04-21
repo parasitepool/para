@@ -5,6 +5,9 @@ h1 sup { font-size: 0.5em; vertical-align: super; opacity: 0.7; }
 body > a:last-of-type { margin-top: auto; }
 body > a:last-of-type .logo { margin-top: 40px; margin-bottom: 0; }
 .grid { display: flex; flex-wrap: wrap; gap: 48px; justify-content: center; max-width: 1048px; margin: 0 auto; }
+.last-updated { text-align: center; color: #666; font-size: 0.8em; margin: -24px 0 24px; }
+.last-updated.stale { color: #fa0; }
+.last-updated.invisible { visibility: hidden; }
 #log-show, #log-controls, #logs { max-width: 1048px; width: 100%; margin: 0 auto; }
 .hidden { display: none !important; }
 .column { border: 1px solid #444; padding: 20px 30px; width: 500px; box-sizing: border-box; }

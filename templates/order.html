@@ -110,7 +110,7 @@ function populateStats(prefix, stats) {
   set(`${prefix}_hashrate_1m`, stats.hashrate_1m, formatHashrate);
   set(`${prefix}_sps_1m`, stats.sps_1m, formatTruncated);
   copyable(`${prefix}_best_share`, formatDifficulty(stats.best_share), stats.best_share);
-  set(`${prefix}_last_share`, stats.last_share, value => `${value}s ago`);
+  set(`${prefix}_last_share`, stats.last_share, formatAgo);
   rejectionCopyable(`${prefix}_rejected_shares`, stats.accepted_shares, stats.rejected_shares);
   rejectionWorkCopyable(`${prefix}_rejected_work`, stats.accepted_work, stats.rejected_work);
   set(`${prefix}_accepted_work`, stats.accepted_work, formatDifficulty);
@@ -118,29 +118,28 @@ function populateStats(prefix, stats) {
 }
 
 async function refresh(signal) {
-  try {
-    const data = await fetch(`/api/router/order/${orderId}`, { signal }).then(r => r.json()).catch(() => null);
+  const data = await fetchJsonAllow404(`/api/router/order/${orderId}`, { signal });
 
-    if (!data) {
-      document.querySelector('.grid').innerHTML = '<div class="column column-full"><h2>Order Not Found</h2></div>';
-      return;
-    }
+  if (!data) {
+    document.querySelector('.grid').innerHTML = '<div class="column column-full"><h2>Order Not Found</h2></div>';
+    stopPolling();
+    return;
+  }
 
-    const terminal = TERMINAL.includes(data.status);
+  const terminal = TERMINAL.includes(data.status);
 
-    populateOrder(data);
+  populateOrder(data);
 
-    if (terminal) {
-      populateStats('upstream', null);
-      populateStats('downstream', null);
-      document.getElementById('sessions-list').innerHTML = '';
-      clearInterval(pollInterval);
-    } else {
-      populateStats('upstream', data.upstream && data.upstream.stats);
-      populateStats('downstream', data.downstream);
-      document.getElementById('sessions-list').innerHTML = renderSessionRows(data.sessions || []);
-    }
-  } catch (e) { if (e.name !== 'AbortError') console.error('refresh error:', e); }
+  if (terminal) {
+    populateStats('upstream', null);
+    populateStats('downstream', null);
+    document.getElementById('sessions-list').innerHTML = '';
+    stopPolling();
+  } else {
+    populateStats('upstream', data.upstream && data.upstream.stats);
+    populateStats('downstream', data.downstream);
+    document.getElementById('sessions-list').innerHTML = renderSessionRows(data.sessions || []);
+  }
 }
 
 initCopyables();

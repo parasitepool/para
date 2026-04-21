@@ -265,72 +265,69 @@
 
 <script>
 async function refresh(signal) {
-  try {
-    const [routerData, ordersData, systemData, bitcoinData] = await Promise.all([
-      fetch('/api/router/status', { signal }).then(r => r.json()).catch(() => ({})),
-      fetch('/api/router/orders', { signal }).then(r => r.json()).catch(() => []),
-      fetch('/api/system/status', { signal }).then(r => r.json()).catch(() => ({})),
-      fetch('/api/bitcoin/status', { signal }).then(r => r.json()).catch(() => ({}))
-    ]);
+  const [routerData, ordersData, systemData, bitcoinData] = await Promise.all([
+    fetchJson('/api/router/status', { signal }),
+    fetchJson('/api/router/orders', { signal }),
+    fetchJson('/api/system/status', { signal }),
+    fetchJson('/api/bitcoin/status', { signal }),
+  ]);
 
-    const uss = routerData.upstream || {};
-    const ds = routerData.downstream || {};
-    const dss = ds.stats || {};
+  const uss = routerData.upstream || {};
+  const ds = routerData.downstream || {};
+  const dss = ds.stats || {};
 
-    set('bucket_order_count', routerData.bucket_order_count);
-    set('sink_order_count', routerData.sink_order_count);
-    set('capacity_hashrate', routerData.capacity_hashrate, formatHashrate);
-    set('available_hashrate', routerData.available_hashrate, formatHashrate);
-    set('session_count', ds.session_count);
-    set('idle', ds.idle_count);
-    set('disconnected', ds.disconnected_count);
+  set('bucket_order_count', routerData.bucket_order_count);
+  set('sink_order_count', routerData.sink_order_count);
+  set('capacity_hashrate', routerData.capacity_hashrate, formatHashrate);
+  set('available_hashrate', routerData.available_hashrate, formatHashrate);
+  set('session_count', ds.session_count);
+  set('idle', ds.idle_count);
+  set('disconnected', ds.disconnected_count);
 
-    set('upstream_sps_1m', uss.sps_1m, formatTruncated);
-    copyable('upstream_best_share', formatDifficulty(uss.best_share), uss.best_share);
-    set('upstream_last_share', uss.last_share, value => `${value}s ago`);
-    rejectionCopyable('upstream_rejected_shares', uss.accepted_shares, uss.rejected_shares);
-    rejectionWorkCopyable('upstream_rejected_work', uss.accepted_work, uss.rejected_work);
-    set('upstream_accepted_work', uss.accepted_work, formatDifficulty);
-    copyable('upstream_hash_days', formatHashDays(uss.hash_days), uss.hash_days);
+  set('upstream_sps_1m', uss.sps_1m, formatTruncated);
+  copyable('upstream_best_share', formatDifficulty(uss.best_share), uss.best_share);
+  set('upstream_last_share', uss.last_share, formatAgo);
+  rejectionCopyable('upstream_rejected_shares', uss.accepted_shares, uss.rejected_shares);
+  rejectionWorkCopyable('upstream_rejected_work', uss.accepted_work, uss.rejected_work);
+  set('upstream_accepted_work', uss.accepted_work, formatDifficulty);
+  copyable('upstream_hash_days', formatHashDays(uss.hash_days), uss.hash_days);
 
-    set('downstream_hashrate_1m', dss.hashrate_1m, formatHashrate);
-    set('downstream_sps_1m', dss.sps_1m, formatTruncated);
-    copyable('downstream_best_share', formatDifficulty(dss.best_share), dss.best_share);
-    set('downstream_last_share', dss.last_share, value => `${value}s ago`);
-    rejectionCopyable('downstream_rejected_shares', dss.accepted_shares, dss.rejected_shares);
-    rejectionWorkCopyable('downstream_rejected_work', dss.accepted_work, dss.rejected_work);
-    set('downstream_accepted_work', dss.accepted_work, formatDifficulty);
-    copyable('downstream_hash_days', formatHashDays(dss.hash_days), dss.hash_days);
+  set('downstream_hashrate_1m', dss.hashrate_1m, formatHashrate);
+  set('downstream_sps_1m', dss.sps_1m, formatTruncated);
+  copyable('downstream_best_share', formatDifficulty(dss.best_share), dss.best_share);
+  set('downstream_last_share', dss.last_share, formatAgo);
+  rejectionCopyable('downstream_rejected_shares', dss.accepted_shares, dss.rejected_shares);
+  rejectionWorkCopyable('downstream_rejected_work', dss.accepted_work, dss.rejected_work);
+  set('downstream_accepted_work', dss.accepted_work, formatDifficulty);
+  copyable('downstream_hash_days', formatHashDays(dss.hash_days), dss.hash_days);
 
-    renderBitcoinData(bitcoinData);
-    renderSystemData(systemData);
+  renderBitcoinData(bitcoinData);
+  renderSystemData(systemData);
 
-    const tbody = document.getElementById('orders-list');
-    if (!tbody.querySelector('.copyable:hover')) {
-      const orders = (ordersData || []).slice().sort((a, b) => b.id - a.id);
-      tbody.innerHTML = orders.map(order => {
-        const u = order.upstream;
-        const hasUpstream = !!u;
-        const endpoint = hasUpstream ? u.endpoint : order.upstream_target.endpoint;
-        const username = (u && u.username) || order.upstream_target.username || '';
-        const shortUsername = truncateMiddle(username);
-        const target = order.kind === 'sink' ? 'Unlimited' : formatHashDays(order.kind.bucket);
-        const delivered = hasUpstream ? formatHashDays(u.stats.hash_days) || '-' : '-';
-        const hashrate = hasUpstream ? formatHashrate(u.stats.hashrate_1m) : '-';
-        return `<tr data-id="${order.id}">
-          <td><a class=order-link href="/order/${order.id}">${order.id}</a></td>
-          <td class="${statusClass(order.status)}">${formatStatus(order.status)}</td>
-          <td>${endpoint}</td>
-          <td><span class="copyable hover-expand" data-formatted="${shortUsername}" data-full="${username}">${shortUsername}</span></td>
-          <td>${target}</td>
-          <td>${delivered}</td>
-          <td>${hashrate}</td>
-          <td><button class=order-delete data-id="${order.id}" title="Cancel order">&times;</button></td>
-        </tr>`;
-      }).join('');
-    }
-
-  } catch (e) { if (e.name !== 'AbortError') console.error('refresh error:', e); }
+  const tbody = document.getElementById('orders-list');
+  if (!tbody.querySelector('.copyable:hover')) {
+    const orders = (ordersData || []).slice().sort((a, b) => b.id - a.id);
+    tbody.innerHTML = orders.map(order => {
+      const u = order.upstream;
+      const hasUpstream = !!u;
+      const endpoint = hasUpstream ? u.endpoint : order.upstream_target.endpoint;
+      const username = (u && u.username) || order.upstream_target.username || '';
+      const shortUsername = truncateMiddle(username);
+      const target = order.kind === 'sink' ? 'Unlimited' : formatHashDays(order.kind.bucket);
+      const delivered = hasUpstream ? formatHashDays(u.stats.hash_days) || '-' : '-';
+      const hashrate = hasUpstream ? formatHashrate(u.stats.hashrate_1m) : '-';
+      return `<tr data-id="${order.id}">
+        <td><a class=order-link href="/order/${order.id}">${order.id}</a></td>
+        <td class="${statusClass(order.status)}">${formatStatus(order.status)}</td>
+        <td>${endpoint}</td>
+        <td><span class="copyable hover-expand" data-formatted="${shortUsername}" data-full="${username}">${shortUsername}</span></td>
+        <td>${target}</td>
+        <td>${delivered}</td>
+        <td>${hashrate}</td>
+        <td><button class=order-delete data-id="${order.id}" title="Cancel order">&times;</button></td>
+      </tr>`;
+    }).join('');
+  }
 }
 initDelegatedCopyables('orders-list');
 startPolling(refresh);

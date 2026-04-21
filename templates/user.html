@@ -8,7 +8,7 @@
     <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
     <div class=row><span>SPS</span><span id=sps_1m></span></div>
     <div class=row><span>Best Share</span><span id=best_share class=copyable></span></div>
-    <div class=row><span>Last Share</span><span><span id=last_share></span>s ago</span></div>
+    <div class=row><span>Last Share</span><span id=last_share></span></div>
     <div class=row><span>Rejected Shares</span><span id=rejected_shares class=copyable></span></div>
     <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
     <div class=row><span>Hashdays</span><span id=hash_days class=copyable></span></div>
@@ -57,7 +57,7 @@ const userAddress = window.location.pathname.split('/').pop();
 function renderWorkerRows(workers) {
   return workers.sort((a, b) => b.stats.hashrate_1m - a.stats.hashrate_1m).map(worker => {
     const stats = worker.stats;
-    const lastShare = stats.last_share != null ? `${stats.last_share}s ago` : '-';
+    const lastShare = stats.last_share != null ? formatAgo(stats.last_share) : '-';
     const bestShare = formatDifficulty(stats.best_share);
 
     return `<tr>
@@ -73,30 +73,29 @@ function renderWorkerRows(workers) {
 }
 
 async function refresh(signal) {
-  try {
-    const user = await fetch(`${apiBase}/user/${userAddress}`, { signal }).then(r => r.json()).catch(() => null);
+  const user = await fetchJsonAllow404(`${apiBase}/user/${userAddress}`, { signal });
 
-    if (!user) {
-      document.querySelector('.grid').innerHTML = '<div class="column column-full"><h2>User Not Found</h2></div>';
-      return;
-    }
+  if (!user) {
+    document.querySelector('.grid').innerHTML = '<div class="column column-full"><h2>User Not Found</h2></div>';
+    stopPolling();
+    return;
+  }
 
-    copyable('address', truncateMiddle(user.address, 20, 8), user.address);
-    set('workers_count', user.workers.length);
-    set('sessions', user.session_count);
-    const s = user.stats;
-    set('hashrate_1m', s.hashrate_1m, formatHashrate);
-    set('sps_1m', s.sps_1m, formatTruncated);
-    set('authorized', new Date(user.authorized_at * 1000).toLocaleString());
-    rejectionCopyable('rejected_shares', s.accepted_shares, s.rejected_shares);
-    rejectionWorkCopyable('rejected_work', s.accepted_work, s.rejected_work);
-    set('last_share', s.last_share);
-    copyable('best_share', formatDifficulty(s.best_share), s.best_share);
-    copyable('hash_days', formatHashDays(s.hash_days), s.hash_days);
+  copyable('address', truncateMiddle(user.address, 20, 8), user.address);
+  set('workers_count', user.workers.length);
+  set('sessions', user.session_count);
+  const s = user.stats;
+  set('hashrate_1m', s.hashrate_1m, formatHashrate);
+  set('sps_1m', s.sps_1m, formatTruncated);
+  set('authorized', new Date(user.authorized_at * 1000).toLocaleString());
+  rejectionCopyable('rejected_shares', s.accepted_shares, s.rejected_shares);
+  rejectionWorkCopyable('rejected_work', s.accepted_work, s.rejected_work);
+  set('last_share', s.last_share, formatAgo);
+  copyable('best_share', formatDifficulty(s.best_share), s.best_share);
+  copyable('hash_days', formatHashDays(s.hash_days), s.hash_days);
 
-    document.getElementById('workers-list').innerHTML = renderWorkerRows(user.workers || []);
-    document.getElementById('sessions-list').innerHTML = renderSessionRows(user.sessions || []);
-  } catch (e) { if (e.name !== 'AbortError') console.error('refresh error:', e); }
+  document.getElementById('workers-list').innerHTML = renderWorkerRows(user.workers || []);
+  document.getElementById('sessions-list').innerHTML = renderSessionRows(user.sessions || []);
 }
 initDelegatedCopyables('sessions-list');
 startPolling(refresh);

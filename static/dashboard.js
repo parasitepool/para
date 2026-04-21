@@ -5,7 +5,8 @@ const CONFIG = {
   LOGS_TO_SHOW: 100,
   WS_RECONNECT_DELAY: 2000,
   COPY_FEEDBACK_DURATION: 1000,
-  DEFAULT_POLL_INTERVAL: 1000
+  DEFAULT_POLL_INTERVAL: 5000,
+  STALE_AFTER_MS: 15000
 };
 
 const logState = {
@@ -350,7 +351,7 @@ function renderSessionRows(sessions) {
     const stats = session.stats;
     const sessionUser = session.username || '';
     const shortSessionUser = truncateMiddle(sessionUser);
-    const lastShare = stats.last_share != null ? `${stats.last_share}s ago` : '-';
+    const lastShare = stats.last_share != null ? formatAgo(stats.last_share) : '-';
     const bestShare = formatDifficulty(stats.best_share);
     return `<tr>
       <td><span class="copyable hover-expand session-username" data-full="${sessionUser}" data-formatted="${shortSessionUser}">${shortSessionUser}</span></td>
@@ -363,21 +364,89 @@ function renderSessionRows(sessions) {
   }).join('');
 }
 
+async function fetchJson(url, options) {
+  const r = await fetch(url, options);
+  if (!r.ok) throw new Error(`${url}: ${r.status}`);
+  return r.json();
+}
+
+async function fetchJsonAllow404(url, options) {
+  const r = await fetch(url, options);
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(`${url}: ${r.status}`);
+  return r.json();
+}
+
+let lastUpdate = null;
+let tickerInterval;
+let lastTickerText = null;
+let lastTickerStale = null;
+
+function formatAgo(seconds) {
+  if (seconds < 1) return 'just now';
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  return `${Math.floor(seconds / 3600)}h ago`;
+}
+
+function renderTicker() {
+  const el = document.getElementById('last-updated');
+  if (!el) return;
+  const elapsed = lastUpdate === null ? null : Date.now() - lastUpdate;
+  const text = elapsed === null ? 'Updating...' : `Updated ${formatAgo(Math.floor(elapsed / 1000))}`;
+  const stale = elapsed !== null && elapsed > CONFIG.STALE_AFTER_MS;
+  if (text === lastTickerText && stale === lastTickerStale) return;
+  lastTickerText = text;
+  lastTickerStale = stale;
+  el.textContent = text;
+  el.classList.toggle('stale', stale);
+}
+
+function markUpdated() {
+  lastUpdate = Date.now();
+  renderTicker();
+}
+
+function ensureTicker() {
+  const el = document.getElementById('last-updated');
+  if (el) el.classList.remove('invisible');
+  if (tickerInterval) return;
+  renderTicker();
+  tickerInterval = setInterval(renderTicker, 1000);
+}
+
 let pollInterval;
 let pollController;
 
 function startPolling(refreshFn, intervalMs) {
-  function poll() {
+  async function poll() {
     if (pollController) pollController.abort();
     pollController = new AbortController();
-    refreshFn(pollController.signal);
+    try {
+      await refreshFn(pollController.signal);
+      markUpdated();
+    } catch (e) {
+      if (e.name !== 'AbortError') console.error('refresh error:', e);
+    }
   }
+  ensureTicker();
   poll();
   clearInterval(pollInterval);
   pollInterval = setInterval(poll, intervalMs || CONFIG.DEFAULT_POLL_INTERVAL);
 }
 
+function stopPolling() {
+  clearInterval(pollInterval);
+  clearInterval(tickerInterval);
+  pollInterval = null;
+  tickerInterval = null;
+  if (pollController) pollController.abort();
+  const el = document.getElementById('last-updated');
+  if (el) el.classList.add('invisible');
+}
+
 window.addEventListener('beforeunload', () => {
   clearInterval(pollInterval);
+  clearInterval(tickerInterval);
   if (pollController) pollController.abort();
 });

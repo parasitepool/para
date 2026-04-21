@@ -8,33 +8,30 @@
 const apiBase = '{{ self.api_base }}';
 
 async function refresh(signal) {
-  try {
-    const users = await fetch(`${apiBase}/users`, { signal }).then(r => r.json()).catch(() => []);
-    const container = document.getElementById('users-list');
+  const users = await fetchJson(`${apiBase}/users`, { signal });
+  const container = document.getElementById('users-list');
 
-    if (users.length === 0) {
-      container.innerHTML = '';
-      return;
-    }
+  if (users.length === 0) {
+    container.innerHTML = '';
+    return;
+  }
 
-    const userDetails = await Promise.all(
-      users.map(addr =>
-        fetch(`${apiBase}/user/${addr}`, { signal }).then(r => r.json()).catch(() => null)
-      )
-    );
+  const userDetails = await Promise.all(
+    users.map(addr => fetchJson(`${apiBase}/user/${addr}`, { signal })
+      .catch(e => { if (e.name === 'AbortError') throw e; return null; }))
+  );
 
-    container.innerHTML = userDetails
-      .filter(u => u !== null)
-      .map(u => {
-        const addr = u.address;
-        const shortAddr = truncateMiddle(addr, 20, 8);
-        return `<div class=user-row>
-          <a href="/user/${addr}">${shortAddr}</a>
-          <span>${u.workers.length} | ${u.session_count} | ${formatHashrate(u.stats.hashrate_1m)}</span>
-        </div>`;
-      })
-      .join('');
-  } catch (e) { if (e.name !== 'AbortError') console.error('refresh error:', e); }
+  container.innerHTML = userDetails
+    .filter(u => u !== null)
+    .map(u => {
+      const addr = u.address;
+      const shortAddr = truncateMiddle(addr, 20, 8);
+      return `<div class=user-row>
+        <a href="/user/${addr}">${shortAddr}</a>
+        <span>${u.workers.length} | ${u.session_count} | ${formatHashrate(u.stats.hashrate_1m)}</span>
+      </div>`;
+    })
+    .join('');
 }
 startPolling(refresh);
 </script>
