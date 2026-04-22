@@ -252,8 +252,8 @@ impl OrderResponse {
     pub(crate) fn from_order(order: &Order) -> Self {
         Self {
             order_id: order.id,
-            payment_address: order.payment_address.as_unchecked().clone(),
-            payment_amount: order.payment_amount,
+            payment_address: order.payment.address.as_unchecked().clone(),
+            payment_amount: order.payment.amount,
         }
     }
 }
@@ -266,6 +266,9 @@ pub struct OrderDetail {
     pub kind: OrderKind,
     pub payment_address: Address<NetworkUnchecked>,
     pub payment_amount: Amount,
+    pub created_at: u64,
+    pub created_at_height: u32,
+    pub last_updated: u64,
     pub upstream: Option<UpstreamInfo>,
     pub downstream: MiningStats,
     pub sessions: Vec<SessionDetail>,
@@ -280,13 +283,21 @@ impl OrderDetail {
             None => (Vec::new(), Stats::new()),
         };
 
+        let epoch_secs = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
         Self {
             id: order.id,
             status: order.status(),
             upstream_target: order.upstream_target.clone(),
             kind: order.kind,
-            payment_address: order.payment_address.as_unchecked().clone(),
-            payment_amount: order.payment_amount,
+            payment_address: order.payment.address.as_unchecked().clone(),
+            payment_amount: order.payment.amount,
+            created_at: epoch_secs - order.created_at.elapsed().as_secs(),
+            created_at_height: order.created_at_height,
+            last_updated: epoch_secs - order.last_updated.lock().elapsed().as_secs(),
             upstream: upstream
                 .as_ref()
                 .map(|upstream| UpstreamInfo::from_upstream(upstream, metatron, now)),

@@ -48,9 +48,9 @@ pub(crate) struct Settings {
     descriptor: Option<String>,
     change_descriptor: Option<String>,
     wallet_birthday: u32,
-    invoice_timeout: Duration,
     sink_orders: Vec<UpstreamTarget>,
     hash_price: HashPrice,
+    allow_zero_conf: bool,
 }
 
 impl Default for Settings {
@@ -91,9 +91,9 @@ impl Default for Settings {
             descriptor: None,
             change_descriptor: None,
             wallet_birthday: 0,
-            invoice_timeout: Duration::from_secs(3600),
             sink_orders: Vec::new(),
             hash_price: HashPrice::from_sats(1),
+            allow_zero_conf: false,
         }
     }
 }
@@ -263,9 +263,9 @@ impl Settings {
             descriptor: Some(options.descriptor),
             change_descriptor: options.change_descriptor,
             wallet_birthday: options.wallet_birthday,
-            invoice_timeout: Duration::from_secs(options.invoice_timeout),
             sink_orders: options.sink_order,
             hash_price: options.hash_price,
+            allow_zero_conf: options.allow_zero_conf,
         };
 
         settings.validate()?;
@@ -609,8 +609,8 @@ impl Settings {
         self.wallet_birthday
     }
 
-    pub(crate) fn invoice_timeout(&self) -> Duration {
-        self.invoice_timeout
+    pub(crate) fn allow_zero_conf(&self) -> bool {
+        self.allow_zero_conf
     }
 
     pub(crate) fn sink_orders(&self) -> &[UpstreamTarget] {
@@ -1358,7 +1358,6 @@ mod tests {
         assert_eq!(settings.descriptor.as_deref(), Some("foo"));
         assert_eq!(settings.change_descriptor, None);
         assert_eq!(settings.wallet_birthday, 0);
-        assert_eq!(settings.invoice_timeout, Duration::from_secs(3600));
     }
 
     #[test]

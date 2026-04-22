@@ -320,7 +320,7 @@ async function refresh(signal) {
         <td><a class=order-link href="/order/${order.id}">${order.id}</a></td>
         <td class="${statusClass(order.status)}">${formatStatus(order.status)}</td>
         <td>${endpoint}</td>
-        <td><span class="copyable hover-expand" data-formatted="${shortUsername}" data-full="${username}">${shortUsername}</span></td>
+        <td>${shortUsername}</td>
         <td>${target}</td>
         <td>${delivered}</td>
         <td>${hashrate}</td>
@@ -329,7 +329,6 @@ async function refresh(signal) {
     }).join('');
   }
 }
-initDelegatedCopyables('orders-list');
 startPolling(refresh);
 initLogControls();
 connectWs();

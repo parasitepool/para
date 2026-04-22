@@ -1,6 +1,7 @@
 use {
     super::*,
     crate::api::{DownstreamInfo, MiningStats, RouterStatus},
+    order::{PAYMENT_TIMEOUT, RECLAIM_WINDOW},
     orders::Orders,
 };
 
@@ -9,9 +10,8 @@ pub(crate) mod order;
 pub(crate) mod orders;
 
 pub(crate) use error::{RouterError, RouterResult};
+pub(crate) use order::Payment;
 pub use order::{Order, OrderKind, OrderStatus};
-
-const RECLAIM_WINDOW: Duration = Duration::from_secs(24 * 3600);
 
 pub(crate) struct Router {
     settings: Arc<Settings>,
@@ -83,10 +83,8 @@ impl Router {
             id,
             upstream_target,
             kind,
-            address_info.address,
-            address_info.index,
-            payment_amount,
-            self.settings.invoice_timeout(),
+            Payment::new(address_info.address, address_info.index, payment_amount),
+            self.wallet.tip(),
             self.cancel.child_token(),
             self.metatron.clone(),
         );
@@ -242,32 +240,40 @@ impl Router {
 
     async fn wait_for_payment(self: &Arc<Self>, order: &Arc<Order>) -> bool {
         let mut ticker = ticker(self.settings.tick_interval());
+        let allow_zero_conf = self.settings.allow_zero_conf();
 
         loop {
             tokio::select! {
                 biased;
                 _ = order.cancel.cancelled() => {
-                    if self.wallet.confirmed_received(order.payment_derivation_index) > Amount::ZERO {
+                    let (received, _) = self.wallet.confirmed_received(order.payment.derivation_index);
+
+                    if received > Amount::ZERO {
                         order.set_status(OrderStatus::PaidLate);
                     } else {
-                        self.wallet.release_address(order.payment_derivation_index);
+                        self.wallet.release_address(order.payment.derivation_index);
                     }
+
                     return false;
                 }
                 _ = ticker.tick() => {
-                    let elapsed = order.created_at.elapsed();
-                    let received = self.wallet.confirmed_received(order.payment_derivation_index);
+                    let (received, outpoints, tip) = self.wallet.check_payment(
+                        order.payment.derivation_index,
+                        !allow_zero_conf,
+                    );
 
-                    if order.ready_for_activation(received, elapsed) {
+                    order.payment.record_outpoints(&outpoints);
+
+                    if order.ready_for_activation(received, tip) {
                         return true;
                     }
 
                     match order.status() {
                         OrderStatus::PaidLate => return false,
                         OrderStatus::Expired
-                            if elapsed >= order.payment_timeout + RECLAIM_WINDOW =>
+                            if tip >= order.created_at_height + PAYMENT_TIMEOUT + RECLAIM_WINDOW =>
                         {
-                            self.wallet.release_address(order.payment_derivation_index);
+                            self.wallet.release_address(order.payment.derivation_index);
                             return false;
                         }
                         _ => {}
@@ -471,10 +477,8 @@ mod tests {
                 .parse()
                 .unwrap(),
             kind,
-            test_address(),
+            Payment::new(test_address(), 0, Amount::from_sat(1000)),
             0,
-            Amount::from_sat(1000),
-            Duration::from_secs(3600),
             CancellationToken::new(),
             metatron.clone(),
         );
@@ -519,10 +523,8 @@ mod tests {
                 .parse()
                 .unwrap(),
             OrderKind::Sink,
-            test_address(),
+            Payment::new(test_address(), 0, Amount::from_sat(1000)),
             0,
-            Amount::from_sat(1000),
-            Duration::from_secs(3600),
             CancellationToken::new(),
             metatron.clone(),
         );
@@ -929,33 +931,24 @@ mod tests {
     #[test]
     fn ready_for_activation() {
         #[track_caller]
-        fn case<F>(received: Amount, elapsed: F, expected: bool, status: OrderStatus)
-        where
-            F: FnOnce(&Order) -> Duration,
-        {
+        fn case(received: Amount, tip: u32, expected: bool, status: OrderStatus) {
             let metatron = Arc::new(Metatron::new());
             let order = test_order(0, OrderKind::Sink, OrderStatus::Pending, &metatron);
-            let elapsed = elapsed(order.as_ref());
 
-            assert_eq!(order.ready_for_activation(received, elapsed), expected);
+            assert_eq!(order.ready_for_activation(received, tip), expected);
             assert_eq!(order.status(), status);
         }
 
         case(
             Amount::from_sat(1000),
-            |_| Duration::from_secs(59),
+            PAYMENT_TIMEOUT - 1,
             true,
             OrderStatus::Pending,
         );
-        case(
-            Amount::ZERO,
-            |order| order.payment_timeout,
-            false,
-            OrderStatus::Expired,
-        );
+        case(Amount::ZERO, PAYMENT_TIMEOUT, false, OrderStatus::Expired);
         case(
             Amount::from_sat(1000),
-            |order| order.payment_timeout,
+            PAYMENT_TIMEOUT,
             false,
             OrderStatus::PaidLate,
         );

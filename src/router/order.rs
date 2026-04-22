@@ -4,6 +4,9 @@ const RAMP_UP_SHARES: u64 = 3;
 const HYSTERESIS_LOW: f64 = 0.95;
 const HYSTERESIS_HIGH: f64 = 1.5;
 
+pub(crate) const PAYMENT_TIMEOUT: u32 = 6;
+pub(crate) const RECLAIM_WINDOW: u32 = 144;
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OrderStatus {
@@ -32,6 +35,31 @@ impl Display for OrderKind {
     }
 }
 
+pub struct Payment {
+    pub(crate) address: Address,
+    pub(crate) derivation_index: u32,
+    pub(crate) amount: Amount,
+    pub(crate) outpoints: Mutex<HashSet<OutPoint>>,
+}
+
+impl Payment {
+    pub(crate) fn new(address: Address, derivation_index: u32, amount: Amount) -> Self {
+        Self {
+            address,
+            derivation_index,
+            amount,
+            outpoints: Mutex::new(HashSet::new()),
+        }
+    }
+
+    pub(crate) fn record_outpoints(&self, new: &[OutPoint]) -> bool {
+        let mut outpoints = self.outpoints.lock();
+        let before = outpoints.len();
+        outpoints.extend(new);
+        outpoints.len() > before
+    }
+}
+
 pub struct Order {
     pub(crate) id: u32,
     pub(crate) upstream_target: UpstreamTarget,
@@ -39,11 +67,10 @@ pub struct Order {
     pub(crate) upstream: Mutex<Option<Arc<Upstream>>>,
     pub(crate) allocator: OnceLock<Arc<EnonceAllocator>>,
     pub(crate) status: Mutex<OrderStatus>,
-    pub(crate) payment_address: Address,
-    pub(crate) payment_derivation_index: u32,
-    pub(crate) payment_amount: Amount,
-    pub(crate) payment_timeout: Duration,
+    pub(crate) payment: Payment,
     pub(crate) created_at: Instant,
+    pub(crate) created_at_height: u32,
+    pub(crate) last_updated: Mutex<Instant>,
     pub(crate) cancel: CancellationToken,
     pub(crate) metatron: Arc<Metatron>,
     pub(crate) assigned: AtomicUsize,
@@ -51,18 +78,17 @@ pub struct Order {
 }
 
 impl Order {
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         id: u32,
         upstream_target: UpstreamTarget,
         kind: OrderKind,
-        payment_address: Address,
-        payment_derivation_index: u32,
-        payment_amount: Amount,
-        payment_timeout: Duration,
+        payment: Payment,
+        created_at_height: u32,
         cancel: CancellationToken,
         metatron: Arc<Metatron>,
     ) -> Arc<Self> {
+        let now = Instant::now();
+
         Arc::new(Self {
             id,
             upstream_target,
@@ -70,16 +96,19 @@ impl Order {
             upstream: Mutex::new(None),
             allocator: OnceLock::new(),
             status: Mutex::new(OrderStatus::Pending),
-            payment_address,
-            payment_derivation_index,
-            payment_amount,
-            payment_timeout,
-            created_at: Instant::now(),
+            payment,
+            created_at: now,
+            created_at_height,
+            last_updated: Mutex::new(now),
             cancel,
             metatron,
             assigned: AtomicUsize::new(0),
             sessions: Mutex::new(HashMap::new()),
         })
+    }
+
+    pub(crate) fn touch(&self) {
+        *self.last_updated.lock() = Instant::now();
     }
 
     pub(crate) fn assign(&self) {
@@ -92,10 +121,12 @@ impl Order {
 
     pub(crate) fn add_session(&self, session: Arc<Session>, cancel: CancellationToken) {
         self.sessions.lock().insert(session.id(), (session, cancel));
+        self.touch();
     }
 
     pub(crate) fn remove_session(&self, id: SessionId) {
         self.sessions.lock().remove(&id);
+        self.touch();
     }
 
     pub(crate) fn cancel_sessions(&self) {
@@ -137,6 +168,7 @@ impl Order {
 
     pub(crate) fn set_status(&self, status: OrderStatus) {
         *self.status.lock() = status;
+        self.touch();
     }
 
     pub(crate) fn hashrate_1m(&self, now: Instant) -> HashRate {
@@ -322,6 +354,7 @@ impl Order {
             previous
         };
 
+        self.touch();
         self.cancel.cancel();
 
         Some(previous)
@@ -335,6 +368,7 @@ impl Order {
             previous
         };
 
+        self.touch();
         self.cancel.cancel();
 
         previous
@@ -344,19 +378,20 @@ impl Order {
         let mut status = self.status.lock();
         if *status == from {
             *status = to;
-
+            drop(status);
+            self.touch();
             true
         } else {
             false
         }
     }
 
-    pub(crate) fn ready_for_activation(&self, received: Amount, elapsed: Duration) -> bool {
-        if elapsed >= self.payment_timeout {
+    pub(crate) fn ready_for_activation(&self, received: Amount, tip: u32) -> bool {
+        if tip >= self.created_at_height + PAYMENT_TIMEOUT {
             self.transition(OrderStatus::Pending, OrderStatus::Expired);
         }
 
-        if received < self.payment_amount {
+        if received < self.payment.amount {
             return false;
         }
 
@@ -389,10 +424,8 @@ mod tests {
                 .parse()
                 .unwrap(),
             kind,
-            test_address(),
+            Payment::new(test_address(), 0, Amount::from_sat(1000)),
             0,
-            Amount::from_sat(1000),
-            Duration::from_secs(3600),
             CancellationToken::new(),
             metatron.clone(),
         )
@@ -615,6 +648,20 @@ mod tests {
         }
 
         assert!(!bucket.is_ramping_up());
+    }
+
+    #[test]
+    fn record_outpoints() {
+        let payment = Payment::new(test_address(), 0, Amount::from_sat(1000));
+        let a = OutPoint::new(Txid::from_byte_array([1; 32]), 0);
+        let b = OutPoint::new(Txid::from_byte_array([2; 32]), 0);
+
+        assert!(!payment.record_outpoints(&[]));
+        assert!(payment.record_outpoints(&[a]));
+        assert!(!payment.record_outpoints(&[a]));
+        assert!(payment.record_outpoints(&[a, b]));
+        assert!(!payment.record_outpoints(&[a, b]));
+        assert_eq!(payment.outpoints.lock().len(), 2);
     }
 
     #[test]

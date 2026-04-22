@@ -83,19 +83,16 @@ impl Wallet {
                         let cancel_clone = cancel.clone();
                         match task::spawn_blocking(move || wallet_clone.sync(&cancel_clone))
                             .await
-                            .expect("sync task panicked")
+                            .unwrap_or_else(|err| Err(err.into()))
                         {
                             Ok(()) => {
-                                if !cancel.is_cancelled()
-                                    && !wallet.synced.swap(true, Ordering::Relaxed)
-                                {
+                                if !wallet.synced.swap(true, Ordering::Relaxed) {
                                     info!("Wallet synced");
                                 }
                             }
                             Err(e) => {
-                                if !cancel.is_cancelled() {
-                                    warn!("Wallet sync error: {e}");
-                                }
+                                wallet.synced.store(false, Ordering::Relaxed);
+                                warn!("Wallet sync error: {e}");
                             }
                         }
                     }
@@ -112,6 +109,7 @@ impl Wallet {
                 .filter(|tx| !tx.chain_position.is_confirmed())
                 .map(|tx| tx.tx_node.tx.clone())
                 .collect::<Vec<_>>();
+
             (inner.latest_checkpoint(), txs)
         };
 
@@ -165,17 +163,36 @@ impl Wallet {
         self.dust_limit
     }
 
-    pub fn confirmed_received(&self, derivation_index: u32) -> Amount {
-        let unspent: Vec<_> = self.inner.lock().list_unspent().collect();
-        unspent
-            .iter()
-            .filter(|utxo| {
-                utxo.keychain == KeychainKind::External
-                    && utxo.chain_position.is_confirmed()
-                    && utxo.derivation_index == derivation_index
-            })
-            .map(|utxo| utxo.txout.value)
-            .sum()
+    pub fn tip(&self) -> u32 {
+        self.inner.lock().latest_checkpoint().height()
+    }
+
+    pub fn confirmed_received(&self, derivation_index: u32) -> (Amount, Vec<OutPoint>) {
+        let (amount, outpoints, _) = self.check_payment(derivation_index, true);
+        (amount, outpoints)
+    }
+
+    pub fn check_payment(
+        &self,
+        derivation_index: u32,
+        confirmed_only: bool,
+    ) -> (Amount, Vec<OutPoint>, u32) {
+        let inner = self.inner.lock();
+        let tip = inner.latest_checkpoint().height();
+        let mut amount = Amount::ZERO;
+        let mut outpoints = Vec::new();
+
+        for utxo in inner.list_unspent() {
+            if utxo.keychain == KeychainKind::External
+                && utxo.derivation_index == derivation_index
+                && (!confirmed_only || utxo.chain_position.is_confirmed())
+            {
+                amount += utxo.txout.value;
+                outpoints.push(utxo.outpoint);
+            }
+        }
+
+        (amount, outpoints, tip)
     }
 
     pub fn send(&self, to: Address, amount: Amount, fee_rate: FeeRate) -> Result<Txid> {
@@ -375,11 +392,13 @@ mod tests {
         confirm_payment(&wallet, &info_a.address, Amount::from_sat(500));
         confirm_payment(&wallet, &info_a.address, Amount::from_sat(700));
 
-        assert_eq!(
-            wallet.confirmed_received(info_a.index),
-            Amount::from_sat(1200),
-        );
-        assert_eq!(wallet.confirmed_received(info_b.index), Amount::ZERO);
+        let (amount, outpoints) = wallet.confirmed_received(info_a.index);
+        assert_eq!(amount, Amount::from_sat(1200));
+        assert_eq!(outpoints.len(), 2);
+
+        let (amount, outpoints) = wallet.confirmed_received(info_b.index);
+        assert_eq!(amount, Amount::ZERO);
+        assert!(outpoints.is_empty());
     }
 
     #[test]
@@ -401,6 +420,12 @@ mod tests {
         };
         wallet.inner.lock().apply_unconfirmed_txs([(tx, 0)]);
 
-        assert_eq!(wallet.confirmed_received(info.index), Amount::ZERO);
+        let (amount, outpoints) = wallet.confirmed_received(info.index);
+        assert_eq!(amount, Amount::ZERO);
+        assert!(outpoints.is_empty());
+
+        let (amount, outpoints, _) = wallet.check_payment(info.index, false);
+        assert_eq!(amount, Amount::from_sat(1000));
+        assert_eq!(outpoints.len(), 1);
     }
 }

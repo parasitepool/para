@@ -14,9 +14,6 @@ pub(crate) struct RouterOptions {
     #[arg(long, default_value_t = 0, help = "Block height <WALLET_BIRTHDAY>.")]
     pub(crate) wallet_birthday: u32,
 
-    #[arg(long, default_value_t = 3600, help = "<INVOICE_TIMEOUT> in seconds.")]
-    pub(crate) invoice_timeout: u64,
-
     #[arg(
         long,
         default_value_t = 30,
@@ -42,4 +39,7 @@ pub(crate) struct RouterOptions {
         help = "Sink order with upstream target <USER[:PASS]@HOST:PORT>."
     )]
     pub(crate) sink_order: Vec<UpstreamTarget>,
+
+    #[arg(long, help = "Accept unconfirmed payments.")]
+    pub(crate) allow_zero_conf: bool,
 }

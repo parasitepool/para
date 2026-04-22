@@ -165,6 +165,11 @@ function formatSi(v, unit) {
 function formatHashrate(h) { return formatSi(h, 'H/s'); }
 function formatHashDays(v) { return formatSi(v, 'Hd'); }
 
+function formatTimestamp(ts) {
+  if (ts === null || ts === undefined) return '-';
+  return new Date(ts * 1000).toLocaleString();
+}
+
 function formatAmount(value) {
   if (value === null || value === undefined) return '-';
   return typeof value === 'number' ? `${value} sats` : String(value);
