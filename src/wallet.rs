@@ -15,6 +15,7 @@ pub struct Wallet {
     rpc: bitcoincore_rpc::Client,
     birthday: u32,
     dust_limit: Amount,
+    synced: AtomicBool,
 }
 
 impl Wallet {
@@ -49,7 +50,17 @@ impl Wallet {
             rpc,
             birthday,
             dust_limit,
+            synced: AtomicBool::new(false),
         })
+    }
+
+    pub fn is_synced(&self) -> bool {
+        self.synced.load(Ordering::Relaxed)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn mark_synced(&self) {
+        self.synced.store(true, Ordering::Relaxed);
     }
 
     pub(crate) fn spawn(
@@ -58,19 +69,34 @@ impl Wallet {
         cancel: CancellationToken,
         tasks: &TaskTracker,
     ) {
+        info!("Syncing wallet in background...");
+
         let wallet = self.clone();
+
         tasks.spawn(async move {
-            let mut ticker = tokio::time::interval(interval);
+            let mut ticker = ticker(interval);
             loop {
                 tokio::select! {
                     _ = cancel.cancelled() => break,
                     _ = ticker.tick() => {
-                        let wallet = wallet.clone();
-                        if let Err(e) = task::spawn_blocking(move || wallet.sync())
+                        let wallet_clone = wallet.clone();
+                        let cancel_clone = cancel.clone();
+                        match task::spawn_blocking(move || wallet_clone.sync(&cancel_clone))
                             .await
                             .expect("sync task panicked")
                         {
-                            warn!("Wallet sync error: {e}");
+                            Ok(()) => {
+                                if !cancel.is_cancelled()
+                                    && !wallet.synced.swap(true, Ordering::Relaxed)
+                                {
+                                    info!("Wallet synced");
+                                }
+                            }
+                            Err(e) => {
+                                if !cancel.is_cancelled() {
+                                    warn!("Wallet sync error: {e}");
+                                }
+                            }
                         }
                     }
                 }
@@ -78,7 +104,7 @@ impl Wallet {
         });
     }
 
-    pub fn sync(&self) -> Result {
+    pub fn sync(&self, cancel: &CancellationToken) -> Result {
         let (checkpoint, expected_mempool_txs) = {
             let inner = self.inner.lock();
             let txs = inner
@@ -93,6 +119,9 @@ impl Wallet {
 
         let mut blocks = Vec::new();
         while let Some(event) = emitter.next_block()? {
+            if cancel.is_cancelled() {
+                bail!("wallet sync cancelled");
+            }
             blocks.push(event);
         }
         let mempool = emitter.mempool()?;

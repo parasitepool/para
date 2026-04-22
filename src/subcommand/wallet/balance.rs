@@ -8,7 +8,7 @@ pub struct Output {
 }
 
 pub(super) fn run(wallet: &Wallet) -> Result<Output> {
-    wallet.sync()?;
+    wallet.sync(&CancellationToken::new())?;
     let balance = wallet.balance();
 
     Ok(Output {

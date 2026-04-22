@@ -49,11 +49,37 @@ impl TestRouter {
             }
         }
 
-        Self {
+        let router = Self {
             router_handle,
             router_port,
             http_port,
+        };
+
+        let url = format!("{}/api/router/status", router.api_endpoint());
+
+        for attempt in 0.. {
+            let url = url.clone();
+            let synced = thread::spawn(move || {
+                reqwest::blocking::get(url)
+                    .and_then(|response| response.json::<RouterStatus>())
+                    .map(|status| status.wallet_synced)
+                    .unwrap_or(false)
+            })
+            .join()
+            .unwrap();
+
+            if synced {
+                break;
+            }
+
+            if attempt >= 600 {
+                panic!("Router wallet did not sync within 60s");
+            }
+
+            thread::sleep(Duration::from_millis(100));
         }
+
+        router
     }
 
     pub(crate) fn stratum_endpoint(&self) -> String {

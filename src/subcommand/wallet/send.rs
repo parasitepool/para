@@ -17,7 +17,7 @@ pub struct Output {
 
 impl Send {
     pub(crate) fn run(self, wallet: &Wallet, network: Network) -> Result<Output> {
-        wallet.sync()?;
+        wallet.sync(&CancellationToken::new())?;
 
         let address = self.address.require_network(network)?;
         let amount = Amount::from_sat(self.amount);

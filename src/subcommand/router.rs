@@ -35,9 +35,6 @@ impl RouterCommand {
             settings.wallet_birthday(),
         )?);
 
-        info!("Syncing wallet...");
-
-        wallet.sync().context("initial wallet sync failed")?;
         wallet.spawn(settings.tick_interval(), cancel_token.clone(), &tasks);
 
         let address = settings.address();

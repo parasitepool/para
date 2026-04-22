@@ -78,7 +78,7 @@ impl<W: Workbase> Stratifier<W> {
     pub(crate) async fn serve(&mut self) -> Result {
         let mut workbase_rx = self.workbase_rx.clone();
         let cancel = self.cancel.clone();
-        let mut idle_check = interval(self.bouncer.check_interval());
+        let mut idle_check = ticker(self.bouncer.check_interval());
 
         loop {
             tokio::select! {

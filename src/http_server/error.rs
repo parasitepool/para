@@ -5,6 +5,7 @@ pub(crate) enum ServerError {
     NotFound(String),
     BadRequest(String),
     UnprocessableEntity(String),
+    ServiceUnavailable(String),
 }
 
 pub(crate) type ServerResult<T> = Result<T, ServerError>;
@@ -27,6 +28,9 @@ impl IntoResponse for ServerError {
             Self::UnprocessableEntity(message) => {
                 (StatusCode::UNPROCESSABLE_ENTITY, message).into_response()
             }
+            Self::ServiceUnavailable(message) => {
+                (StatusCode::SERVICE_UNAVAILABLE, message).into_response()
+            }
         }
     }
 }
@@ -46,6 +50,7 @@ impl From<RouterError> for ServerError {
             RouterError::HashPriceBelowMinimum { .. } => {
                 Self::UnprocessableEntity(error.to_string())
             }
+            RouterError::WalletSyncing => Self::ServiceUnavailable(error.to_string()),
         }
     }
 }

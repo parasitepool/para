@@ -11,4 +11,6 @@ pub(crate) enum RouterError {
     HashPriceOverflow,
     #[snafu(display("bid price {bid} is below minimum {minimum}"))]
     HashPriceBelowMinimum { bid: HashPrice, minimum: HashPrice },
+    #[snafu(display("wallet is still syncing, try again shortly"))]
+    WalletSyncing,
 }

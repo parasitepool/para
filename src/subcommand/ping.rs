@@ -28,8 +28,7 @@ impl Ping {
         let mut reply_count = 0;
         let mut success = false;
 
-        let mut interval = interval(Duration::from_secs(1));
-        interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        let mut interval = ticker(Duration::from_secs(1));
         interval.tick().await;
 
         loop {

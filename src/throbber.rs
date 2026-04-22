@@ -37,8 +37,7 @@ pub(crate) fn spawn_throbber<T: StatusLine>(
     tasks.spawn(async move {
         let frames = ["⣷", "⣯", "⣟", "⡿", "⢿", "⣻", "⣽", "⣾"];
         let mut frame = 0;
-        let mut ticker = interval(Duration::from_millis(200));
-        ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        let mut ticker = ticker(Duration::from_millis(200));
 
         let anchor = Throbber::new().expect("tty");
 

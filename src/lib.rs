@@ -94,7 +94,7 @@ use {
         str::FromStr,
         sync::{
             Arc, LazyLock, OnceLock,
-            atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering},
+            atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering},
         },
         thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -117,7 +117,7 @@ use {
         runtime::Runtime,
         sync::{broadcast, mpsc, watch},
         task::{self, JoinHandle},
-        time::{MissedTickBehavior, interval, sleep, timeout},
+        time::{Interval, MissedTickBehavior, interval, sleep, timeout},
     },
     tokio_util::{
         codec::{FramedRead, FramedWrite, LinesCodec},
@@ -218,6 +218,12 @@ fn ensure_port(stratum_endpoint: &str) -> String {
 
 fn integration_test() -> bool {
     std::env::var_os("PARA_INTEGRATION_TEST").is_some()
+}
+
+fn ticker(period: Duration) -> Interval {
+    let mut ticker = interval(period);
+    ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    ticker
 }
 
 pub fn main() {

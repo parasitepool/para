@@ -51,6 +51,10 @@ impl Router {
         let payment_amount = match kind {
             OrderKind::Sink => Amount::ZERO,
             OrderKind::Bucket(hashdays) => {
+                if !self.wallet.is_synced() {
+                    return Err(RouterError::WalletSyncing);
+                }
+
                 if hashdays.as_f64() <= 0.0 {
                     return Err(RouterError::InvalidHashdays);
                 }
@@ -183,6 +187,7 @@ impl Router {
             available_hashrate,
             bucket_order_count,
             sink_order_count,
+            wallet_synced: self.wallet.is_synced(),
             upstream: MiningStats::from_snapshot(&upstream, now),
             downstream: DownstreamInfo::from_metatron(metatron, now),
         }
@@ -236,7 +241,7 @@ impl Router {
     }
 
     async fn wait_for_payment(self: &Arc<Self>, order: &Arc<Order>) -> bool {
-        let mut ticker = tokio::time::interval(self.settings.tick_interval());
+        let mut ticker = ticker(self.settings.tick_interval());
 
         loop {
             tokio::select! {
@@ -322,7 +327,7 @@ impl Router {
                     }
                 }
                 _ = async {
-                    let mut ticker = tokio::time::interval(check_interval);
+                    let mut ticker = ticker(check_interval);
                     loop {
                         ticker.tick().await;
 
@@ -344,7 +349,7 @@ impl Router {
     pub(crate) fn spawn_rebalance_loop(self: &Arc<Self>) {
         let router = self.clone();
         self.tasks.spawn(async move {
-            let mut ticker = tokio::time::interval(router.settings.tick_interval());
+            let mut ticker = ticker(router.settings.tick_interval());
             loop {
                 tokio::select! {
                     biased;
@@ -970,5 +975,31 @@ mod tests {
 
         case(OrderStatus::Active);
         case(OrderStatus::Disconnected);
+    }
+
+    #[tokio::test]
+    async fn add_order_rejects_bucket_before_sync() {
+        let router = test_router();
+        let target: UpstreamTarget = "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.foo@bar:3333"
+            .parse()
+            .unwrap();
+        let price = router.settings.hash_price();
+
+        assert!(!router.wallet.is_synced());
+
+        assert!(matches!(
+            router.add_order(target.clone(), OrderKind::Bucket(hashdays(1.0)), price),
+            Err(RouterError::WalletSyncing),
+        ));
+
+        router
+            .add_order(target.clone(), OrderKind::Sink, price)
+            .unwrap();
+
+        router.wallet.mark_synced();
+
+        router
+            .add_order(target, OrderKind::Bucket(hashdays(1.0)), price)
+            .unwrap();
     }
 }

@@ -15,8 +15,7 @@ pub(crate) async fn spawn_generator(
 
     let mut subscription = Zmq::connect(settings.clone()).await?;
 
-    let mut ticker = interval(settings.update_interval());
-    ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    let mut ticker = ticker(settings.update_interval());
 
     let bitcoind_timeout = settings.bitcoind_timeout();
 

@@ -39,7 +39,7 @@ impl Metatron {
         let metatron = self.clone();
 
         tasks.spawn(async move {
-            let mut cleanup_interval = tokio::time::interval(Duration::from_secs(60));
+            let mut cleanup_interval = ticker(Duration::from_secs(60));
 
             loop {
                 tokio::select! {
