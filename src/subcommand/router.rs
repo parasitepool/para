@@ -55,13 +55,7 @@ impl RouterCommand {
         ));
 
         for upstream_target in settings.sink_orders() {
-            router
-                .add_order(
-                    upstream_target.clone(),
-                    OrderKind::Sink,
-                    settings.hash_price(),
-                )
-                .await?;
+            router.add_sink_order(upstream_target.clone()).await?;
         }
 
         router.spawn_rebalance_loop();

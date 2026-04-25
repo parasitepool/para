@@ -22,7 +22,6 @@
     <div class=row><span>Payment Address</span><span id=payment_address class=copyable></span></div>
     <div class=row><span>Created At</span><span id=created_at></span></div>
     <div class=row><span>Created At Height</span><span id=created_at_height></span></div>
-    <div class=row><span>Last Updated</span><span id=last_updated></span></div>
   </div>
 
   <div class=column>
@@ -96,13 +95,12 @@ function populateOrder(data) {
   setClass('status', statusClass(data.status));
   set('endpoint', endpoint);
   copyable('username', truncateMiddle(username), username);
-  set('target_hash_days', data.kind === 'sink' ? 'Unlimited' : formatHashDays(data.kind.bucket));
+  set('target_hash_days', data.target_hashdays == null ? 'Unlimited' : formatHashDays(data.target_hashdays));
   copyable('delivered_hash_days', formatHashDays(deliveredHashdays), deliveredHashdays);
   set('payment_amount', data.payment_amount, formatAmount);
   copyable('payment_address', truncateMiddle(data.payment_address, 20, 8), data.payment_address);
   set('created_at', data.created_at, formatTimestamp);
   set('created_at_height', data.created_at_height);
-  set('last_updated', data.last_updated, formatTimestamp);
 }
 
 function populateStats(prefix, stats) {

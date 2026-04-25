@@ -62,7 +62,7 @@ use {
     parking_lot::{Mutex, RwLock},
     reqwest::Url,
     retry::{Backoff, BackoffEnd, retry_with_backoff},
-    router::{Order, OrderKind, Router},
+    router::{Order, Router},
     rust_embed::RustEmbed,
     rustls_acme::{
         AcmeConfig,

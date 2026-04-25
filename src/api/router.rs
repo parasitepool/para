@@ -51,12 +51,11 @@ async fn add_order(
     Json(request): Json<OrderRequest>,
 ) -> ServerResult<Response> {
     let order = router
-        .add_order(
-            request.upstream_target,
-            OrderKind::Bucket(request.hashdays),
-            request.price,
-        )
+        .add_bucket_order(request.upstream_target, request.hashdays, request.price)
         .await?;
+    let Some(bucket) = &order.bucket else {
+        return Err(anyhow!("bucket order missing bucket").into());
+    };
 
     Ok((
         StatusCode::CREATED,
@@ -64,7 +63,7 @@ async fn add_order(
             axum::http::header::LOCATION,
             format!("/api/router/order/{}", order.id),
         )],
-        Json(OrderResponse::from_order(&order)),
+        Json(OrderResponse::from_order(&order, bucket)),
     )
         .into_response())
 }

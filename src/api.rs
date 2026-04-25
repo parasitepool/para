@@ -8,8 +8,10 @@ use {
     },
 };
 
+pub(crate) use crate::router::Bucket;
+
 pub use {
-    crate::router::{Order, OrderKind, OrderStatus},
+    crate::router::{Order, OrderStatus},
     http_server::{BitcoinStatus, SystemStatus},
 };
 
@@ -249,12 +251,11 @@ pub struct OrderResponse {
 }
 
 impl OrderResponse {
-    pub(crate) fn from_order(order: &Order) -> Self {
-        let payment = order.payment.as_ref().expect("bucket has payment");
+    pub(crate) fn from_order(order: &Order, bucket: &Bucket) -> Self {
         Self {
             order_id: order.id,
-            payment_address: payment.address.as_unchecked().clone(),
-            payment_amount: payment.amount,
+            payment_address: bucket.payment.address.as_unchecked().clone(),
+            payment_amount: bucket.payment.amount,
         }
     }
 }
@@ -264,12 +265,11 @@ pub struct OrderDetail {
     pub id: u32,
     pub status: OrderStatus,
     pub upstream_target: UpstreamTarget,
-    pub kind: OrderKind,
+    pub target_hashdays: Option<HashDays>,
     pub payment_address: Option<Address<NetworkUnchecked>>,
     pub payment_amount: Option<Amount>,
     pub created_at: u64,
     pub created_at_height: u32,
-    pub last_updated: u64,
     pub upstream: Option<UpstreamInfo>,
     pub downstream: MiningStats,
     pub sessions: Vec<SessionDetail>,
@@ -278,6 +278,7 @@ pub struct OrderDetail {
 impl OrderDetail {
     pub(crate) fn from_order(order: &Order, metatron: &Metatron, now: Instant) -> Self {
         let upstream = order.upstream();
+        let bucket = order.bucket.as_ref();
 
         let (sessions, downstream) = match &upstream {
             Some(upstream) => metatron.downstream_snapshot(upstream.id(), now),
@@ -293,15 +294,11 @@ impl OrderDetail {
             id: order.id,
             status: order.status(),
             upstream_target: order.upstream_target.clone(),
-            kind: order.kind,
-            payment_address: order
-                .payment
-                .as_ref()
-                .map(|payment| payment.address.as_unchecked().clone()),
-            payment_amount: order.payment.as_ref().map(|payment| payment.amount),
+            target_hashdays: bucket.map(|bucket| bucket.target),
+            payment_address: bucket.map(|bucket| bucket.payment.address.as_unchecked().clone()),
+            payment_amount: bucket.map(|bucket| bucket.payment.amount),
             created_at: epoch_secs - order.created_at.elapsed().as_secs(),
-            created_at_height: order.created_at_height,
-            last_updated: epoch_secs - order.last_updated.lock().elapsed().as_secs(),
+            created_at_height: bucket.map_or(0, |bucket| bucket.payment.created_at_height),
             upstream: upstream
                 .as_ref()
                 .map(|upstream| UpstreamInfo::from_upstream(upstream, metatron, now)),

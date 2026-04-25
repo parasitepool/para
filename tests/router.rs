@@ -425,7 +425,7 @@ async fn order_detail() {
 
     assert_eq!(detail.id, id);
     assert_eq!(detail.status, OrderStatus::Pending);
-    assert_eq!(detail.kind, OrderKind::Bucket(hashdays));
+    assert_eq!(detail.target_hashdays, Some(hashdays));
     assert_eq!(
         detail
             .payment_address
@@ -735,8 +735,8 @@ async fn order_fulfilled_on_hashdays_reached() {
         .unwrap();
 
     assert_eq!(
-        fulfilled.kind,
-        OrderKind::Bucket(HashDays::new(1e-10).unwrap())
+        fulfilled.target_hashdays,
+        Some(HashDays::new(1e-10).unwrap())
     );
     assert!(fulfilled.upstream.as_ref().unwrap().stats.hash_days >= HashDays::new(1e-10).unwrap());
 

@@ -19,35 +19,26 @@ pub enum OrderStatus {
     PaidLate,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum OrderKind {
-    Sink,
-    Bucket(HashDays),
-}
-
-impl Display for OrderKind {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Sink => f.write_str("sink"),
-            Self::Bucket(_) => f.write_str("bucket"),
-        }
-    }
-}
-
 pub struct Payment {
     pub(crate) address: Address,
     pub(crate) derivation_index: u32,
     pub(crate) amount: Amount,
+    pub(crate) created_at_height: u32,
     pub(crate) outpoints: Mutex<HashSet<OutPoint>>,
 }
 
 impl Payment {
-    pub(crate) fn new(address: Address, derivation_index: u32, amount: Amount) -> Self {
+    pub(crate) fn new(
+        address: Address,
+        derivation_index: u32,
+        amount: Amount,
+        created_at_height: u32,
+    ) -> Self {
         Self {
             address,
             derivation_index,
             amount,
+            created_at_height,
             outpoints: Mutex::new(HashSet::new()),
         }
     }
@@ -60,17 +51,19 @@ impl Payment {
     }
 }
 
+pub struct Bucket {
+    pub(crate) target: HashDays,
+    pub(crate) payment: Payment,
+}
+
 pub struct Order {
     pub(crate) id: u32,
     pub(crate) upstream_target: UpstreamTarget,
-    pub(crate) kind: OrderKind,
+    pub(crate) bucket: Option<Bucket>,
     pub(crate) upstream: Mutex<Option<Arc<Upstream>>>,
     pub(crate) allocator: OnceLock<Arc<EnonceAllocator>>,
     pub(crate) status: Mutex<OrderStatus>,
-    pub(crate) payment: Option<Payment>,
     pub(crate) created_at: Instant,
-    pub(crate) created_at_height: u32,
-    pub(crate) last_updated: Mutex<Instant>,
     pub(crate) cancel: CancellationToken,
     pub(crate) metatron: Arc<Metatron>,
     pub(crate) assigned: AtomicUsize,
@@ -81,9 +74,7 @@ impl Order {
     pub(crate) fn new(
         id: u32,
         upstream_target: UpstreamTarget,
-        kind: OrderKind,
-        payment: Option<Payment>,
-        created_at_height: u32,
+        bucket: Option<Bucket>,
         cancel: CancellationToken,
         metatron: Arc<Metatron>,
     ) -> Arc<Self> {
@@ -92,23 +83,16 @@ impl Order {
         Arc::new(Self {
             id,
             upstream_target,
-            kind,
+            bucket,
             upstream: Mutex::new(None),
             allocator: OnceLock::new(),
             status: Mutex::new(OrderStatus::Pending),
-            payment,
             created_at: now,
-            created_at_height,
-            last_updated: Mutex::new(now),
             cancel,
             metatron,
             assigned: AtomicUsize::new(0),
             sessions: Mutex::new(HashMap::new()),
         })
-    }
-
-    pub(crate) fn touch(&self) {
-        *self.last_updated.lock() = Instant::now();
     }
 
     pub(crate) fn assign(&self) {
@@ -121,12 +105,10 @@ impl Order {
 
     pub(crate) fn add_session(&self, session: Arc<Session>, cancel: CancellationToken) {
         self.sessions.lock().insert(session.id(), (session, cancel));
-        self.touch();
     }
 
     pub(crate) fn remove_session(&self, id: SessionId) {
         self.sessions.lock().remove(&id);
-        self.touch();
     }
 
     pub(crate) fn cancel_sessions(&self) {
@@ -143,15 +125,15 @@ impl Order {
     }
 
     pub(crate) fn is_sink(&self) -> bool {
-        matches!(self.kind, OrderKind::Sink)
+        self.bucket.is_none()
     }
 
     pub(crate) fn is_starving(&self, now: Instant) -> bool {
-        let OrderKind::Bucket(hashdays) = self.kind else {
+        let Some(bucket) = &self.bucket else {
             return false;
         };
 
-        self.hashrate_1m(now).0 < hashdays.target_hashrate().0 * HYSTERESIS_LOW
+        self.hashrate_1m(now).0 < bucket.target.target_hashrate().0 * HYSTERESIS_LOW
     }
 
     pub(crate) fn upstream(&self) -> Option<Arc<Upstream>> {
@@ -164,11 +146,6 @@ impl Order {
 
     pub(crate) fn status(&self) -> OrderStatus {
         *self.status.lock()
-    }
-
-    pub(crate) fn set_status(&self, status: OrderStatus) {
-        *self.status.lock() = status;
-        self.touch();
     }
 
     pub(crate) fn hashrate_1m(&self, now: Instant) -> HashRate {
@@ -256,18 +233,17 @@ impl Order {
     }
 
     pub(crate) fn is_fulfilled(&self) -> bool {
-        let OrderKind::Bucket(target) = self.kind else {
+        let Some(bucket) = &self.bucket else {
             return false;
         };
 
-        self.accepted_work().to_hash_days() >= target
+        self.accepted_work().to_hash_days() >= bucket.target
     }
 
     pub(crate) fn remaining_work(&self) -> TotalWork {
-        match self.kind {
-            OrderKind::Bucket(target) => target.to_total_work() - self.accepted_work(),
-            OrderKind::Sink => TotalWork::ZERO,
-        }
+        self.bucket.as_ref().map_or(TotalWork::ZERO, |bucket| {
+            bucket.target.to_total_work() - self.accepted_work()
+        })
     }
 
     pub(crate) fn is_ramping_up(&self) -> bool {
@@ -288,12 +264,12 @@ impl Order {
     pub(crate) fn trim(&self) {
         let now = Instant::now();
 
-        let OrderKind::Bucket(hashdays) = self.kind else {
+        let Some(bucket) = &self.bucket else {
             return;
         };
 
         let current = self.hashrate_1m(now);
-        let target = hashdays.target_hashrate();
+        let target = bucket.target.target_hashrate();
         let ceiling = HashRate(target.0 * HYSTERESIS_HIGH);
 
         if current <= ceiling {
@@ -349,7 +325,20 @@ impl Order {
         let previous = {
             let mut status = self.status.lock();
 
-            if !matches!(*status, OrderStatus::Pending | OrderStatus::Active) {
+            if !matches!(
+                (*status, to),
+                (
+                    OrderStatus::Pending,
+                    OrderStatus::Cancelled | OrderStatus::Disconnected | OrderStatus::PaidLate,
+                ) | (
+                    OrderStatus::Active,
+                    OrderStatus::Cancelled | OrderStatus::Disconnected | OrderStatus::Fulfilled,
+                ) | (
+                    OrderStatus::Expired,
+                    OrderStatus::Cancelled | OrderStatus::PaidLate
+                ) | (OrderStatus::Cancelled, OrderStatus::PaidLate)
+                    | (OrderStatus::Disconnected, OrderStatus::Cancelled)
+            ) {
                 return None;
             }
 
@@ -360,51 +349,39 @@ impl Order {
             previous
         };
 
-        self.touch();
         self.cancel.cancel();
 
         Some(previous)
-    }
-
-    pub(crate) fn force_cancel(&self) -> OrderStatus {
-        let previous = {
-            let mut status = self.status.lock();
-            let previous = *status;
-            *status = OrderStatus::Cancelled;
-            previous
-        };
-
-        self.touch();
-        self.cancel.cancel();
-
-        previous
     }
 
     pub(crate) fn transition(&self, from: OrderStatus, to: OrderStatus) -> bool {
         let mut status = self.status.lock();
         if *status == from {
             *status = to;
-            drop(status);
-            self.touch();
             true
         } else {
             false
         }
     }
 
-    pub(crate) fn ready_for_activation(&self, received: Amount, tip: u32) -> bool {
-        if tip >= self.created_at_height + PAYMENT_TIMEOUT {
+    pub(crate) fn ready_for_activation(
+        &self,
+        payment: &Payment,
+        received: Amount,
+        tip: u32,
+    ) -> bool {
+        if tip >= payment.created_at_height + PAYMENT_TIMEOUT {
             self.transition(OrderStatus::Pending, OrderStatus::Expired);
         }
 
-        if received < self.payment.as_ref().expect("bucket has payment").amount {
+        if received < payment.amount {
             return false;
         }
 
         match self.status() {
             OrderStatus::Pending => true,
             OrderStatus::Expired => {
-                self.transition(OrderStatus::Expired, OrderStatus::PaidLate);
+                self.terminate(OrderStatus::PaidLate);
                 false
             }
             _ => false,
@@ -423,19 +400,17 @@ mod tests {
             .assume_checked()
     }
 
-    fn test_order(metatron: &Arc<Metatron>, kind: OrderKind) -> Arc<Order> {
-        let payment = match kind {
-            OrderKind::Sink => None,
-            OrderKind::Bucket(_) => Some(Payment::new(test_address(), 0, Amount::from_sat(1000))),
-        };
+    fn test_order(metatron: &Arc<Metatron>, target: Option<HashDays>) -> Arc<Order> {
+        let bucket = target.map(|target| Bucket {
+            target,
+            payment: Payment::new(test_address(), 0, Amount::from_sat(1000), 0),
+        });
         Order::new(
             0,
             "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333"
                 .parse()
                 .unwrap(),
-            kind,
-            payment,
-            0,
+            bucket,
             CancellationToken::new(),
             metatron.clone(),
         )
@@ -469,14 +444,14 @@ mod tests {
     #[test]
     fn trim_sink_is_noop() {
         let metatron = Arc::new(Metatron::new());
-        let sink = test_order(&metatron, OrderKind::Sink);
+        let sink = test_order(&metatron, None);
         sink.trim();
     }
 
     #[test]
     fn trim_noop_when_not_overshooting() {
         let metatron = Arc::new(Metatron::new());
-        let bucket = test_order(&metatron, OrderKind::Bucket(HashDays::new(1e9).unwrap()));
+        let bucket = test_order(&metatron, Some(HashDays::new(1e9).unwrap()));
 
         let cancel = register_session(&metatron, &bucket, "deadbeef", 1.0);
 
@@ -487,7 +462,7 @@ mod tests {
     #[test]
     fn trim_noop_when_single_session_overshoots() {
         let metatron = Arc::new(Metatron::new());
-        let bucket = test_order(&metatron, OrderKind::Bucket(HashDays::new(1.0).unwrap()));
+        let bucket = test_order(&metatron, Some(HashDays::new(1.0).unwrap()));
 
         let cancel = register_session(&metatron, &bucket, "deadbeef", 10_000.0);
 
@@ -498,7 +473,7 @@ mod tests {
     #[test]
     fn trim_noop_when_all_sessions_too_fat() {
         let metatron = Arc::new(Metatron::new());
-        let bucket = test_order(&metatron, OrderKind::Bucket(HashDays::new(1e9).unwrap()));
+        let bucket = test_order(&metatron, Some(HashDays::new(1e9).unwrap()));
 
         let cancel_a = register_session(&metatron, &bucket, "aaaa", 12.0);
         let cancel_b = register_session(&metatron, &bucket, "bbbb", 12.0);
@@ -511,7 +486,7 @@ mod tests {
     #[test]
     fn trim_picks_fattest_in_band() {
         let metatron = Arc::new(Metatron::new());
-        let bucket = test_order(&metatron, OrderKind::Bucket(HashDays::new(1e9).unwrap()));
+        let bucket = test_order(&metatron, Some(HashDays::new(1e9).unwrap()));
 
         let cancel_fat = register_session(&metatron, &bucket, "aaaa", 13.0);
         let cancel_mid = register_session(&metatron, &bucket, "bbbb", 7.0);
@@ -526,7 +501,7 @@ mod tests {
     #[test]
     fn trim_sheds_many_small_sessions() {
         let metatron = Arc::new(Metatron::new());
-        let bucket = test_order(&metatron, OrderKind::Bucket(HashDays::new(1e9).unwrap()));
+        let bucket = test_order(&metatron, Some(HashDays::new(1e9).unwrap()));
 
         let cancels: Vec<CancellationToken> = (0..10)
             .map(|i| {
@@ -547,7 +522,7 @@ mod tests {
     #[test]
     fn trim_stops_at_hysteresis_ceiling() {
         let metatron = Arc::new(Metatron::new());
-        let bucket = test_order(&metatron, OrderKind::Bucket(HashDays::new(1e9).unwrap()));
+        let bucket = test_order(&metatron, Some(HashDays::new(1e9).unwrap()));
 
         let cancels: Vec<CancellationToken> = (0..8)
             .map(|i| {
@@ -568,7 +543,7 @@ mod tests {
     #[test]
     fn trim_skips_sessions_larger_than_headroom() {
         let metatron = Arc::new(Metatron::new());
-        let bucket = test_order(&metatron, OrderKind::Bucket(HashDays::new(1e9).unwrap()));
+        let bucket = test_order(&metatron, Some(HashDays::new(1e9).unwrap()));
 
         let cancel_huge = register_session(&metatron, &bucket, "aaaa", 20.0);
         let cancel_a = register_session(&metatron, &bucket, "bbbb", 3.0);
@@ -589,7 +564,7 @@ mod tests {
     #[test]
     fn trim_skips_session_after_max_trim_shrinks() {
         let metatron = Arc::new(Metatron::new());
-        let bucket = test_order(&metatron, OrderKind::Bucket(HashDays::new(1e9).unwrap()));
+        let bucket = test_order(&metatron, Some(HashDays::new(1e9).unwrap()));
 
         let cancel_a = register_session(&metatron, &bucket, "aaaa", 18.0);
         let cancel_b = register_session(&metatron, &bucket, "bbbb", 17.0);
@@ -605,21 +580,21 @@ mod tests {
     #[test]
     fn is_starving_false_for_sink() {
         let metatron = Arc::new(Metatron::new());
-        let sink = test_order(&metatron, OrderKind::Sink);
+        let sink = test_order(&metatron, None);
         assert!(!sink.is_starving(Instant::now()));
     }
 
     #[test]
     fn is_starving_true_for_bucket_below_low_threshold() {
         let metatron = Arc::new(Metatron::new());
-        let bucket = test_order(&metatron, OrderKind::Bucket(HashDays::new(1e20).unwrap()));
+        let bucket = test_order(&metatron, Some(HashDays::new(1e20).unwrap()));
         assert!(bucket.is_starving(Instant::now()));
     }
 
     #[test]
     fn is_starving_false_for_bucket_above_low_threshold() {
         let metatron = Arc::new(Metatron::new());
-        let bucket = test_order(&metatron, OrderKind::Bucket(HashDays::new(1.0).unwrap()));
+        let bucket = test_order(&metatron, Some(HashDays::new(1.0).unwrap()));
         register_session(&metatron, &bucket, "deadbeef", 10_000.0);
         assert!(!bucket.is_starving(Instant::now()));
     }
@@ -627,14 +602,14 @@ mod tests {
     #[test]
     fn is_ramping_up_false_when_idle() {
         let metatron = Arc::new(Metatron::new());
-        let bucket = test_order(&metatron, OrderKind::Bucket(HashDays::new(100.0).unwrap()));
+        let bucket = test_order(&metatron, Some(HashDays::new(100.0).unwrap()));
         assert!(!bucket.is_ramping_up());
     }
 
     #[test]
     fn is_ramping_up_true_when_assign_outpaces_session() {
         let metatron = Arc::new(Metatron::new());
-        let bucket = test_order(&metatron, OrderKind::Bucket(HashDays::new(100.0).unwrap()));
+        let bucket = test_order(&metatron, Some(HashDays::new(100.0).unwrap()));
 
         bucket.assign();
 
@@ -644,7 +619,7 @@ mod tests {
     #[test]
     fn is_ramping_up_until_n_shares() {
         let metatron = Arc::new(Metatron::new());
-        let bucket = test_order(&metatron, OrderKind::Bucket(HashDays::new(1e20).unwrap()));
+        let bucket = test_order(&metatron, Some(HashDays::new(1e20).unwrap()));
 
         bucket.assign();
 
@@ -662,7 +637,7 @@ mod tests {
 
     #[test]
     fn record_outpoints() {
-        let payment = Payment::new(test_address(), 0, Amount::from_sat(1000));
+        let payment = Payment::new(test_address(), 0, Amount::from_sat(1000), 0);
         let a = OutPoint::new(Txid::from_byte_array([1; 32]), 0);
         let b = OutPoint::new(Txid::from_byte_array([2; 32]), 0);
 
@@ -677,7 +652,7 @@ mod tests {
     #[test]
     fn cancel_sessions_cancels_every_token() {
         let metatron = Arc::new(Metatron::new());
-        let order = test_order(&metatron, OrderKind::Sink);
+        let order = test_order(&metatron, None);
 
         let cancel_a = register_session(&metatron, &order, "aaaa", 1.0);
         let cancel_b = register_session(&metatron, &order, "bbbb", 1.0);
@@ -688,5 +663,33 @@ mod tests {
         assert!(cancel_a.is_cancelled());
         assert!(cancel_b.is_cancelled());
         assert!(cancel_c.is_cancelled());
+    }
+
+    #[test]
+    fn terminate_guards_statuses() {
+        #[track_caller]
+        fn case(from: OrderStatus, to: OrderStatus, expected: bool) {
+            let metatron = Arc::new(Metatron::new());
+            let order = test_order(&metatron, None);
+            *order.status.lock() = from;
+
+            assert_eq!(order.terminate(to), expected.then_some(from));
+            assert_eq!(order.status(), if expected { to } else { from });
+            assert_eq!(order.cancel.is_cancelled(), expected);
+        }
+
+        case(OrderStatus::Pending, OrderStatus::Cancelled, true);
+        case(OrderStatus::Pending, OrderStatus::Disconnected, true);
+        case(OrderStatus::Pending, OrderStatus::PaidLate, true);
+        case(OrderStatus::Active, OrderStatus::Cancelled, true);
+        case(OrderStatus::Active, OrderStatus::Disconnected, true);
+        case(OrderStatus::Active, OrderStatus::Fulfilled, true);
+        case(OrderStatus::Expired, OrderStatus::Cancelled, true);
+        case(OrderStatus::Expired, OrderStatus::PaidLate, true);
+        case(OrderStatus::Cancelled, OrderStatus::PaidLate, true);
+        case(OrderStatus::Disconnected, OrderStatus::Cancelled, true);
+        case(OrderStatus::Pending, OrderStatus::Active, false);
+        case(OrderStatus::Fulfilled, OrderStatus::Cancelled, false);
+        case(OrderStatus::PaidLate, OrderStatus::Cancelled, false);
     }
 }

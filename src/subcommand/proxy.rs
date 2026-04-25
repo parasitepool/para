@@ -1,11 +1,6 @@
 use {
     super::*,
-    crate::{
-        api,
-        event_sink::build_event_sink,
-        http_server,
-        router::{OrderKind, Router},
-    },
+    crate::{api, event_sink::build_event_sink, http_server, router::Router},
 };
 
 #[derive(Parser, Debug)]
@@ -58,9 +53,7 @@ impl Proxy {
             .await
             .context("failed to build record sink")?;
 
-        router
-            .add_order(upstream_target, OrderKind::Sink, settings.hash_price())
-            .await?;
+        router.add_sink_order(upstream_target).await?;
 
         http_server::spawn(
             &settings,
