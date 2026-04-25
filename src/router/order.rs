@@ -67,7 +67,7 @@ pub struct Order {
     pub(crate) upstream: Mutex<Option<Arc<Upstream>>>,
     pub(crate) allocator: OnceLock<Arc<EnonceAllocator>>,
     pub(crate) status: Mutex<OrderStatus>,
-    pub(crate) payment: Payment,
+    pub(crate) payment: Option<Payment>,
     pub(crate) created_at: Instant,
     pub(crate) created_at_height: u32,
     pub(crate) last_updated: Mutex<Instant>,
@@ -82,7 +82,7 @@ impl Order {
         id: u32,
         upstream_target: UpstreamTarget,
         kind: OrderKind,
-        payment: Payment,
+        payment: Option<Payment>,
         created_at_height: u32,
         cancel: CancellationToken,
         metatron: Arc<Metatron>,
@@ -210,12 +210,12 @@ impl Order {
             .connect_upstream(timeout, enonce1_extension_size, tasks)
             .await?;
 
-        *self.upstream.lock() = Some(upstream);
-
         self.allocator
             .get()
             .expect("reconnect called before activate")
             .update_extranonces(extranonces);
+
+        *self.upstream.lock() = Some(upstream);
 
         info!("Upstream {} reconnected", self.upstream_target);
 
@@ -247,19 +247,25 @@ impl Order {
         Ok((upstream, Extranonces::Proxy(proxy_extranonces)))
     }
 
+    pub(crate) fn stats(&self) -> Stats {
+        self.metatron.order_stats(self.id)
+    }
+
+    pub(crate) fn accepted_work(&self) -> TotalWork {
+        self.metatron.order_accepted_work(self.id)
+    }
+
     pub(crate) fn is_fulfilled(&self) -> bool {
         let OrderKind::Bucket(target) = self.kind else {
             return false;
         };
 
-        self.metatron.upstream_accepted_work(self.id).to_hash_days() >= target
+        self.accepted_work().to_hash_days() >= target
     }
 
     pub(crate) fn remaining_work(&self) -> TotalWork {
         match self.kind {
-            OrderKind::Bucket(target) => {
-                target.to_total_work() - self.metatron.upstream_accepted_work(self.id)
-            }
+            OrderKind::Bucket(target) => target.to_total_work() - self.accepted_work(),
             OrderKind::Sink => TotalWork::ZERO,
         }
     }
@@ -391,7 +397,7 @@ impl Order {
             self.transition(OrderStatus::Pending, OrderStatus::Expired);
         }
 
-        if received < self.payment.amount {
+        if received < self.payment.as_ref().expect("bucket has payment").amount {
             return false;
         }
 
@@ -418,13 +424,17 @@ mod tests {
     }
 
     fn test_order(metatron: &Arc<Metatron>, kind: OrderKind) -> Arc<Order> {
+        let payment = match kind {
+            OrderKind::Sink => None,
+            OrderKind::Bucket(_) => Some(Payment::new(test_address(), 0, Amount::from_sat(1000))),
+        };
         Order::new(
             0,
             "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333"
                 .parse()
                 .unwrap(),
             kind,
-            Payment::new(test_address(), 0, Amount::from_sat(1000)),
+            payment,
             0,
             CancellationToken::new(),
             metatron.clone(),

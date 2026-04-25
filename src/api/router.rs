@@ -50,11 +50,13 @@ async fn add_order(
     State(router): State<Arc<Router>>,
     Json(request): Json<OrderRequest>,
 ) -> ServerResult<Response> {
-    let order = router.add_order(
-        request.upstream_target,
-        OrderKind::Bucket(request.hashdays),
-        request.price,
-    )?;
+    let order = router
+        .add_order(
+            request.upstream_target,
+            OrderKind::Bucket(request.hashdays),
+            request.price,
+        )
+        .await?;
 
     Ok((
         StatusCode::CREATED,

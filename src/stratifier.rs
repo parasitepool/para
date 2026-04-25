@@ -155,7 +155,7 @@ impl<W: Workbase> Stratifier<W> {
                                 State::Authorized(auth) => {
                                     let session = self.metatron.new_session(
                                         auth.clone(),
-                                        self.allocator.upstream_id(),
+                                        self.allocator.order_id(),
                                     );
 
                                     if let Some(order) = &self.order {
@@ -500,9 +500,10 @@ impl<W: Workbase> Stratifier<W> {
         }
 
         let enonce1 = if let Some(ref requested) = subscribe.enonce1
+            && self.allocator.is_compatible_enonce1(requested)
             && self
                 .metatron
-                .resume_session(requested, self.allocator.upstream_id())
+                .resume_session(requested, self.allocator.order_id())
         {
             info!("Resuming session with enonce1 {requested}");
             requested.clone()

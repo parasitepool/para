@@ -3,11 +3,11 @@ use super::*;
 pub(crate) struct EnonceAllocator {
     extranonces: RwLock<Extranonces>,
     enonce_counter: AtomicU64,
-    upstream_id: AtomicU32,
+    order_id: AtomicU32,
 }
 
 impl EnonceAllocator {
-    pub(crate) fn new(extranonces: Extranonces, upstream_id: u32) -> Self {
+    pub(crate) fn new(extranonces: Extranonces, order_id: u32) -> Self {
         Self {
             extranonces: RwLock::new(extranonces),
             enonce_counter: AtomicU64::new(
@@ -16,7 +16,7 @@ impl EnonceAllocator {
                     .unwrap_or_default()
                     .as_millis() as u64,
             ),
-            upstream_id: AtomicU32::new(upstream_id),
+            order_id: AtomicU32::new(order_id),
         }
     }
 
@@ -55,12 +55,20 @@ impl EnonceAllocator {
         *self.extranonces.write() = extranonces;
     }
 
-    pub(crate) fn set_upstream_id(&self, id: u32) {
-        self.upstream_id.store(id, Ordering::Relaxed);
+    pub(crate) fn order_id(&self) -> u32 {
+        self.order_id.load(Ordering::Relaxed)
     }
 
-    pub(crate) fn upstream_id(&self) -> u32 {
-        self.upstream_id.load(Ordering::Relaxed)
+    pub(crate) fn is_compatible_enonce1(&self, enonce1: &Extranonce) -> bool {
+        let extranonces = self.extranonces.read();
+        match &*extranonces {
+            Extranonces::Pool(pool) => enonce1.len() == pool.enonce1_size(),
+            Extranonces::Proxy(proxy) => {
+                let upstream = proxy.upstream_enonce1().as_bytes();
+                enonce1.len() == upstream.len() + proxy.extension_size()
+                    && enonce1.as_bytes().starts_with(upstream)
+            }
+        }
     }
 }
 
@@ -117,7 +125,7 @@ mod tests {
         let ext1 = u16::from_le_bytes(e1.as_bytes()[4..6].try_into().unwrap());
         let ext2 = u16::from_le_bytes(e2.as_bytes()[4..6].try_into().unwrap());
         assert_eq!(ext2, ext1.wrapping_add(1));
-        assert_eq!(allocator.upstream_id(), 7);
+        assert_eq!(allocator.order_id(), 7);
     }
 
     #[test]
@@ -162,10 +170,29 @@ mod tests {
     }
 
     #[test]
-    fn set_upstream_id() {
+    fn compatible_enonce1() {
+        #[track_caller]
+        fn case(allocator: &EnonceAllocator, bytes: &[u8], expected: bool) {
+            assert_eq!(
+                allocator.is_compatible_enonce1(&Extranonce::from_bytes(bytes)),
+                expected,
+            );
+        }
+
         let allocator = pool_allocator();
-        assert_eq!(allocator.upstream_id(), 0);
-        allocator.set_upstream_id(42);
-        assert_eq!(allocator.upstream_id(), 42);
+
+        case(&allocator, &[0xaa, 0xbb, 0xcc, 0xdd], true);
+        case(&allocator, &[0xaa, 0xbb, 0xcc], false);
+        case(&allocator, &[0xaa, 0xbb, 0xcc, 0xdd, 0xee], false);
+
+        let upstream_enonce1 = Extranonce::from_bytes(&[0xaa, 0xbb, 0xcc, 0xdd]);
+        let allocator = EnonceAllocator::new(
+            Extranonces::Proxy(ProxyExtranonces::new(upstream_enonce1, 8, 2).unwrap()),
+            0,
+        );
+
+        case(&allocator, &[0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff], true);
+        case(&allocator, &[0xaa, 0xbb, 0xcc, 0xdd, 0xee], false);
+        case(&allocator, &[0xaa, 0xbb, 0xcc, 0xee, 0xee, 0xff], false);
     }
 }

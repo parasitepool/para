@@ -16,7 +16,7 @@ pub use order::{Order, OrderKind, OrderStatus};
 pub(crate) struct Router {
     settings: Arc<Settings>,
     metatron: Arc<Metatron>,
-    wallet: Arc<Wallet>,
+    wallet: Option<Arc<Wallet>>,
     orders: RwLock<Orders>,
     next_id: AtomicU32,
     tasks: TaskTracker,
@@ -27,7 +27,7 @@ impl Router {
     pub(crate) fn new(
         settings: Arc<Settings>,
         metatron: Arc<Metatron>,
-        wallet: Arc<Wallet>,
+        wallet: Option<Arc<Wallet>>,
         tasks: TaskTracker,
         cancel: CancellationToken,
     ) -> Self {
@@ -42,16 +42,18 @@ impl Router {
         }
     }
 
-    pub(crate) fn add_order(
+    pub(crate) async fn add_order(
         self: &Arc<Self>,
         upstream_target: UpstreamTarget,
         kind: OrderKind,
         price: HashPrice,
     ) -> RouterResult<Arc<Order>> {
-        let payment_amount = match kind {
-            OrderKind::Sink => Amount::ZERO,
+        let (payment, created_at_height) = match kind {
+            OrderKind::Sink => (None, 0),
             OrderKind::Bucket(hashdays) => {
-                if !self.wallet.is_synced() {
+                let wallet = self.wallet.as_ref().ok_or(RouterError::WalletRequired)?;
+
+                if !wallet.is_synced() {
                     return Err(RouterError::WalletSyncing);
                 }
 
@@ -68,29 +70,64 @@ impl Router {
                     });
                 }
 
-                price
+                let amount = price
                     .total(hashdays)
                     .ok_or(RouterError::HashPriceOverflow)?
-                    .max(self.wallet.dust_limit())
+                    .max(wallet.dust_limit());
+
+                let address_info = wallet.reserve_address();
+
+                (
+                    Some(Payment::new(
+                        address_info.address,
+                        address_info.index,
+                        amount,
+                    )),
+                    wallet.tip(),
+                )
             }
         };
 
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
 
-        let address_info = self.wallet.reserve_address();
-
         let order = Order::new(
             id,
             upstream_target,
             kind,
-            Payment::new(address_info.address, address_info.index, payment_amount),
-            self.wallet.tip(),
+            payment,
+            created_at_height,
             self.cancel.child_token(),
             self.metatron.clone(),
         );
 
-        self.orders.write().add(order.clone());
-        self.spawn_order_monitor(order.clone());
+        match kind {
+            OrderKind::Sink => {
+                order
+                    .activate(
+                        self.settings.timeout(),
+                        self.settings.enonce1_extension_size(),
+                        &self.tasks,
+                    )
+                    .await
+                    .map_err(|error| RouterError::ActivationFailed { error })?;
+
+                order.set_status(OrderStatus::Active);
+
+                self.orders.write().add(order.clone());
+
+                let router = self.clone();
+                let monitored = order.clone();
+                self.tasks.spawn(async move {
+                    router.run_active_order(&monitored).await;
+                });
+
+                info!("Order {} activated", order.id);
+            }
+            OrderKind::Bucket(_) => {
+                self.orders.write().add(order.clone());
+                self.spawn_order_monitor(order.clone());
+            }
+        }
 
         Ok(order)
     }
@@ -152,11 +189,79 @@ impl Router {
         self.metatron.clone()
     }
 
+    pub(crate) async fn serve(
+        self: &Arc<Self>,
+        listener: TcpListener,
+        event_tx: Option<mpsc::Sender<crate::event_sink::Event>>,
+        cancel_token: CancellationToken,
+    ) -> Result {
+        loop {
+            let (stream, addr) = tokio::select! {
+                accept = listener.accept() => {
+                    match accept {
+                        Ok((stream, addr)) => (stream, addr),
+                        Err(err) => {
+                            error!("Accept error: {err}");
+                            continue;
+                        }
+                    }
+                }
+                _ = cancel_token.cancelled() => {
+                    info!("Shutting down router");
+                    self.tasks.close();
+                    self.tasks.wait().await;
+                    info!("All router tasks stopped");
+                    return Ok(());
+                }
+            };
+
+            let Some(order) = self.next_order() else {
+                warn!("No order to match with available, dropping connection from {addr}");
+                continue;
+            };
+
+            info!(
+                "Routing {addr} to {} order {} at {}",
+                order.kind, order.id, order.upstream_target,
+            );
+
+            let settings = self.settings.clone();
+            let metatron = self.metatron.clone();
+            let start_diff = settings.start_diff();
+            let cancel = order.cancel.child_token();
+            let event_tx = event_tx.clone();
+
+            debug!("Spawning stratifier task for {addr}");
+
+            self.tasks.spawn(async move {
+                let upstream = order.upstream().expect("active order");
+                let allocator = order.allocator().expect("active order").clone();
+                let mut stratifier: Stratifier<Notify> = Stratifier::new(
+                    addr,
+                    settings,
+                    allocator,
+                    metatron,
+                    Some(upstream.clone()),
+                    stream,
+                    upstream.workbase_rx(),
+                    cancel,
+                    event_tx,
+                    start_diff,
+                    Some(order.clone()),
+                );
+
+                if let Err(err) = stratifier.serve().await {
+                    error!("Stratifier error for {addr} on order {}: {err}", order.id);
+                }
+            });
+        }
+    }
+
     pub(crate) fn status(&self) -> RouterStatus {
         let now = Instant::now();
         let metatron = &self.metatron;
         let orders = self.orders.read().all();
-        let mut upstream = Stats::new();
+        let mut accepted = Stats::new();
         let mut bucket_order_count = 0;
         let mut sink_order_count = 0;
         let mut capacity_hashrate = HashRate::ZERO;
@@ -166,7 +271,7 @@ impl Router {
             if order.status() != OrderStatus::Active {
                 continue;
             }
-            let stats = metatron.upstream_stats(order.id);
+            let stats = order.stats();
             let hashrate = stats.hashrate_1m(now);
             capacity_hashrate += hashrate;
             if order.is_sink() {
@@ -175,7 +280,7 @@ impl Router {
             } else {
                 bucket_order_count += 1;
             }
-            upstream.absorb(stats, now);
+            accepted.absorb(stats, now);
         }
 
         RouterStatus {
@@ -185,8 +290,11 @@ impl Router {
             available_hashrate,
             bucket_order_count,
             sink_order_count,
-            wallet_synced: self.wallet.is_synced(),
-            upstream: MiningStats::from_snapshot(&upstream, now),
+            wallet_synced: self
+                .wallet
+                .as_ref()
+                .is_some_and(|wallet| wallet.is_synced()),
+            upstream: MiningStats::from_snapshot(&accepted, now),
             downstream: DownstreamInfo::from_metatron(metatron, now),
         }
     }
@@ -221,7 +329,7 @@ impl Router {
                 )
                 .await
             {
-                error!("Failed to connect upstream for order {}: {err}", order.id);
+                error!("Failed to connect upstream for order {}: {err:#}", order.id);
                 if order.transition(OrderStatus::Pending, OrderStatus::Disconnected) {
                     order.cancel.cancel();
                 }
@@ -241,28 +349,30 @@ impl Router {
     async fn wait_for_payment(self: &Arc<Self>, order: &Arc<Order>) -> bool {
         let mut ticker = ticker(self.settings.tick_interval());
         let allow_zero_conf = self.settings.allow_zero_conf();
+        let payment = order.payment.as_ref().expect("bucket has payment");
+        let wallet = self.wallet.as_ref().expect("bucket requires wallet");
 
         loop {
             tokio::select! {
                 biased;
                 _ = order.cancel.cancelled() => {
-                    let (received, _) = self.wallet.confirmed_received(order.payment.derivation_index);
+                    let (received, _) = wallet.confirmed_received(payment.derivation_index);
 
                     if received > Amount::ZERO {
                         order.set_status(OrderStatus::PaidLate);
                     } else {
-                        self.wallet.release_address(order.payment.derivation_index);
+                        wallet.release_address(payment.derivation_index);
                     }
 
                     return false;
                 }
                 _ = ticker.tick() => {
-                    let (received, outpoints, tip) = self.wallet.check_payment(
-                        order.payment.derivation_index,
+                    let (received, outpoints, tip) = wallet.check_payment(
+                        payment.derivation_index,
                         !allow_zero_conf,
                     );
 
-                    order.payment.record_outpoints(&outpoints);
+                    payment.record_outpoints(&outpoints);
 
                     if order.ready_for_activation(received, tip) {
                         return true;
@@ -273,7 +383,7 @@ impl Router {
                         OrderStatus::Expired
                             if tip >= order.created_at_height + PAYMENT_TIMEOUT + RECLAIM_WINDOW =>
                         {
-                            self.wallet.release_address(order.payment.derivation_index);
+                            wallet.release_address(payment.derivation_index);
                             return false;
                         }
                         _ => {}
@@ -459,7 +569,7 @@ mod tests {
         Arc::new(Router::new(
             Arc::new(Settings::default()),
             Arc::new(Metatron::new()),
-            Arc::new(test_wallet()),
+            Some(Arc::new(test_wallet())),
             TaskTracker::new(),
             CancellationToken::new(),
         ))
@@ -471,13 +581,17 @@ mod tests {
         status: OrderStatus,
         metatron: &Arc<Metatron>,
     ) -> Arc<Order> {
+        let payment = match kind {
+            OrderKind::Sink => None,
+            OrderKind::Bucket(_) => Some(Payment::new(test_address(), 0, Amount::from_sat(1000))),
+        };
         let order = Order::new(
             id,
             "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333"
                 .parse()
                 .unwrap(),
             kind,
-            Payment::new(test_address(), 0, Amount::from_sat(1000)),
+            payment,
             0,
             CancellationToken::new(),
             metatron.clone(),
@@ -501,7 +615,7 @@ mod tests {
     }
 
     fn set_accepted_work(metatron: &Metatron, order: &Order, value: f64) {
-        metatron.set_upstream_accepted_work(order.id, hashdays(value).to_total_work());
+        metatron.set_order_accepted_work(order.id, hashdays(value).to_total_work());
     }
 
     fn add_orders(router: &Router, orders: impl IntoIterator<Item = Arc<Order>>) {
@@ -523,7 +637,7 @@ mod tests {
                 .parse()
                 .unwrap(),
             OrderKind::Sink,
-            Payment::new(test_address(), 0, Amount::from_sat(1000)),
+            None,
             0,
             CancellationToken::new(),
             metatron.clone(),
@@ -696,7 +810,7 @@ mod tests {
         );
         router
             .metatron
-            .set_upstream_accepted_work(1, hashdays(1e10).to_total_work());
+            .set_order_accepted_work(1, hashdays(1e10).to_total_work());
 
         add_orders(router.as_ref(), [partly_filled, mostly_empty]);
 
@@ -933,7 +1047,12 @@ mod tests {
         #[track_caller]
         fn case(received: Amount, tip: u32, expected: bool, status: OrderStatus) {
             let metatron = Arc::new(Metatron::new());
-            let order = test_order(0, OrderKind::Sink, OrderStatus::Pending, &metatron);
+            let order = test_order(
+                0,
+                OrderKind::Bucket(hashdays(1.0)),
+                OrderStatus::Pending,
+                &metatron,
+            );
 
             assert_eq!(order.ready_for_activation(received, tip), expected);
             assert_eq!(order.status(), status);
@@ -978,21 +1097,37 @@ mod tests {
             .unwrap();
         let price = router.settings.hash_price();
 
-        assert!(!router.wallet.is_synced());
+        let wallet = router.wallet.as_ref().unwrap();
+        assert!(!wallet.is_synced());
 
         assert!(matches!(
-            router.add_order(target.clone(), OrderKind::Bucket(hashdays(1.0)), price),
+            router
+                .add_order(target.clone(), OrderKind::Bucket(hashdays(1.0)), price)
+                .await,
             Err(RouterError::WalletSyncing),
         ));
 
-        router
-            .add_order(target.clone(), OrderKind::Sink, price)
-            .unwrap();
-
-        router.wallet.mark_synced();
+        wallet.mark_synced();
 
         router
             .add_order(target, OrderKind::Bucket(hashdays(1.0)), price)
+            .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn add_order_returns_activation_failed_for_bad_sink() {
+        let router = test_router();
+        let target: UpstreamTarget =
+            "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.foo@127.0.0.1:notaport"
+                .parse()
+                .unwrap();
+
+        assert!(matches!(
+            router
+                .add_order(target, OrderKind::Sink, router.settings.hash_price())
+                .await,
+            Err(RouterError::ActivationFailed { .. }),
+        ));
     }
 }

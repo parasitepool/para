@@ -1,7 +1,7 @@
-use super::*;
+use {super::*, crate::router::Router};
 
 pub(crate) fn router(
-    metrics: Arc<Metrics>,
+    router: Arc<Router>,
     bitcoin_client: Arc<BitcoindClient>,
     chain: Chain,
     logs: Arc<logs::Logs>,
@@ -13,22 +13,22 @@ pub(crate) fn router(
         .route("/api/proxy/status", get(status))
         .route("/api/proxy/users", get(users))
         .route("/api/proxy/user/{address}", get(user))
-        .with_state(metrics)
+        .with_state(router)
         .merge(common_routes())
         .layer(Extension(bitcoin_client))
         .layer(Extension(chain))
         .layer(Extension(logs))
 }
 
-async fn users(State(metrics): State<Arc<Metrics>>) -> Json<Vec<String>> {
-    pool::users(State(metrics.metatron.clone())).await
+async fn users(State(router): State<Arc<Router>>) -> Json<Vec<String>> {
+    pool::users(State(router.metatron())).await
 }
 
 async fn user(
-    State(metrics): State<Arc<Metrics>>,
+    State(router): State<Arc<Router>>,
     path: Path<Address<NetworkUnchecked>>,
 ) -> ServerResult<Response> {
-    pool::user(State(metrics.metatron.clone()), path).await
+    pool::user(State(router.metatron()), path).await
 }
 
 async fn home(Extension(chain): Extension<Chain>) -> Response {
@@ -55,11 +55,21 @@ async fn user_page(Extension(chain): Extension<Chain>) -> Response {
     )
 }
 
-async fn status(State(metrics): State<Arc<Metrics>>) -> Json<ProxyStatus> {
+async fn status(State(router): State<Arc<Router>>) -> ServerResult<Response> {
     let now = Instant::now();
-    Json(ProxyStatus {
-        uptime_secs: metrics.metatron.uptime().as_secs(),
-        upstream: UpstreamInfo::from_upstream(&metrics.upstream(), &metrics.metatron, now),
-        downstream: DownstreamInfo::from_metatron(&metrics.metatron, now),
+    let metatron = router.metatron();
+    let orders = router.orders();
+    let order = orders
+        .first()
+        .ok_or_not_found(|| "Proxy upstream".to_string())?;
+    let upstream = order
+        .upstream()
+        .ok_or_not_found(|| "Proxy upstream".to_string())?;
+
+    Ok(Json(ProxyStatus {
+        uptime_secs: metatron.uptime().as_secs(),
+        upstream: UpstreamInfo::from_upstream(&upstream, &metatron, now),
+        downstream: DownstreamInfo::from_metatron(&metatron, now),
     })
+    .into_response())
 }

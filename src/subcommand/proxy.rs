@@ -1,6 +1,11 @@
 use {
     super::*,
-    crate::{api, event_sink::build_event_sink, http_server},
+    crate::{
+        api,
+        event_sink::build_event_sink,
+        http_server,
+        router::{OrderKind, Router},
+    },
 };
 
 #[derive(Parser, Debug)]
@@ -32,173 +37,42 @@ impl Proxy {
 
         info!("Stratum proxy listening for downstream miners on {address}:{port}");
 
-        let timeout = settings.timeout();
         let upstream_target = settings
             .upstream_targets()
             .first()
-            .context("no upstream target configured")?;
+            .context("no upstream target configured")?
+            .clone();
 
         let metatron = Arc::new(Metatron::new());
         metatron.spawn(cancel_token.clone(), &tasks);
 
-        let mut upstream_id = 0u32;
-
-        let Some(mut upstream) = connect_upstream(
-            upstream_id,
-            upstream_target,
-            timeout,
-            &cancel_token,
-            &tasks,
+        let router = Arc::new(Router::new(
+            settings.clone(),
             metatron.clone(),
-        )
-        .await
-        else {
-            return Ok(());
-        };
-
-        let extranonces = Extranonces::Proxy(
-            ProxyExtranonces::new(
-                upstream.enonce1().clone(),
-                upstream.enonce2_size(),
-                settings.enonce1_extension_size(),
-            )
-            .context("upstream extranonce configuration incompatible with proxy mode")?,
-        );
-
-        let allocator = Arc::new(EnonceAllocator::new(extranonces, upstream_id));
-
-        let metrics = Arc::new(Metrics::new(upstream.clone(), metatron.clone()));
-
-        http_server::spawn(
-            &settings,
-            api::proxy::router(metrics.clone(), bitcoin_client, settings.chain(), logs),
+            None,
+            tasks.clone(),
             cancel_token.clone(),
-            &tasks,
-        )?;
+        ));
 
         let event_tx = build_event_sink(&settings, cancel_token.clone(), &tasks)
             .await
             .context("failed to build record sink")?;
 
-        if !integration_test() && !logs_enabled() {
-            spawn_throbber(metrics.clone(), cancel_token.clone(), &tasks);
-        }
+        router
+            .add_order(upstream_target, OrderKind::Sink, settings.hash_price())
+            .await?;
 
-        loop {
-            loop {
-                let (stream, addr) = tokio::select! {
-                    accept = listener.accept() => {
-                        match accept {
-                            Ok((stream, addr)) => (stream, addr),
-                            Err(err) => {
-                                error!("Accept error: {err}");
-                                continue;
-                            }
-                        }
-                    }
-                    _ = upstream.disconnected() => {
-                        warn!("Upstream connection lost, reconnecting...");
-                        break;
-                    }
-                    _ = cancel_token.cancelled() => {
-                        info!("Shutting down proxy");
-                        tasks.close();
-                        tasks.wait().await;
-                        info!("All proxy tasks stopped");
-                        return Ok(());
-                    }
-                };
-
-                debug!("Spawning stratifier task for {addr}");
-
-                let settings = settings.clone();
-                let allocator = allocator.clone();
-                let metatron = metatron.clone();
-                let upstream = upstream.clone();
-                let disconnect_token = cancel_token.child_token();
-                let event_tx = event_tx.clone();
-                let start_diff = settings.start_diff();
-
-                tasks.spawn(async move {
-                    let workbase_rx = upstream.workbase_rx();
-                    let mut stratifier: Stratifier<Notify> = Stratifier::new(
-                        addr,
-                        settings,
-                        allocator,
-                        metatron,
-                        Some(upstream),
-                        stream,
-                        workbase_rx,
-                        disconnect_token,
-                        event_tx,
-                        start_diff,
-                        None,
-                    );
-
-                    if let Err(err) = stratifier.serve().await {
-                        error!("Stratifier error for {addr}: {err}");
-                    }
-                });
-            }
-
-            upstream_id += 1;
-            let new_id = upstream_id;
-
-            let Some(new_upstream) = connect_upstream(
-                new_id,
-                upstream_target,
-                timeout,
-                &cancel_token,
-                &tasks,
-                metatron.clone(),
-            )
-            .await
-            else {
-                break;
-            };
-
-            let new_extranonces = Extranonces::Proxy(
-                ProxyExtranonces::new(
-                    new_upstream.enonce1().clone(),
-                    new_upstream.enonce2_size(),
-                    settings.enonce1_extension_size(),
-                )
-                .context("upstream extranonce configuration incompatible with proxy mode")?,
-            );
-
-            allocator.update_extranonces(new_extranonces);
-            allocator.set_upstream_id(new_id);
-            metrics.update_upstream(new_upstream.clone());
-            upstream = new_upstream;
-        }
-
-        tasks.close();
-        tasks.wait().await;
-
-        info!("All proxy tasks stopped");
-
-        Ok(())
-    }
-}
-
-async fn connect_upstream(
-    upstream_id: u32,
-    target: &UpstreamTarget,
-    timeout: Duration,
-    cancel_token: &CancellationToken,
-    tasks: &TaskTracker,
-    metatron: Arc<Metatron>,
-) -> Option<Arc<Upstream>> {
-    retry_with_backoff(cancel_token, "upstream", || {
-        Upstream::connect(
-            upstream_id,
-            target,
-            timeout,
+        http_server::spawn(
+            &settings,
+            api::proxy::router(router.clone(), bitcoin_client, settings.chain(), logs),
             cancel_token.clone(),
-            tasks,
-            metatron.clone(),
-        )
-    })
-    .await
-    .ok()
+            &tasks,
+        )?;
+
+        if !integration_test() && !logs_enabled() {
+            spawn_throbber(router.clone(), cancel_token.clone(), &tasks);
+        }
+
+        router.serve(listener, event_tx, cancel_token).await
+    }
 }

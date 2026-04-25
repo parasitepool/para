@@ -50,7 +50,9 @@ impl From<RouterError> for ServerError {
             RouterError::HashPriceBelowMinimum { .. } => {
                 Self::UnprocessableEntity(error.to_string())
             }
-            RouterError::WalletSyncing => Self::ServiceUnavailable(error.to_string()),
+            RouterError::WalletSyncing
+            | RouterError::WalletRequired
+            | RouterError::ActivationFailed { .. } => Self::ServiceUnavailable(error.to_string()),
         }
     }
 }

@@ -49,17 +49,19 @@ impl RouterCommand {
         let router = Arc::new(Router::new(
             settings.clone(),
             metatron.clone(),
-            wallet,
+            Some(wallet),
             tasks.clone(),
             cancel_token.clone(),
         ));
 
         for upstream_target in settings.sink_orders() {
-            router.add_order(
-                upstream_target.clone(),
-                OrderKind::Sink,
-                settings.hash_price(),
-            )?;
+            router
+                .add_order(
+                    upstream_target.clone(),
+                    OrderKind::Sink,
+                    settings.hash_price(),
+                )
+                .await?;
         }
 
         router.spawn_rebalance_loop();
@@ -77,64 +79,6 @@ impl RouterCommand {
 
         info!("Stratum router listening for downstream miners on {address}:{port}");
 
-        loop {
-            let (stream, addr) = tokio::select! {
-                accept = listener.accept() => {
-                    match accept {
-                        Ok((stream, addr)) => (stream, addr),
-                        Err(err) => {
-                            error!("Accept error: {err}");
-                            continue;
-                        }
-                    }
-                }
-                _ = cancel_token.cancelled() => {
-                    info!("Shutting down router");
-                    tasks.close();
-                    tasks.wait().await;
-                    info!("All router tasks stopped");
-                    return Ok(());
-                }
-            };
-
-            let Some(order) = router.next_order() else {
-                warn!("No order to match with available, dropping connection from {addr}");
-                continue;
-            };
-
-            info!(
-                "Routing {addr} to {} order {} at {}",
-                order.kind, order.id, order.upstream_target,
-            );
-
-            let settings = settings.clone();
-            let metatron = metatron.clone();
-            let start_diff = settings.start_diff();
-            let cancel = order.cancel.child_token();
-
-            debug!("Spawning stratifier task for {addr}");
-
-            tasks.spawn(async move {
-                let upstream = order.upstream().expect("active order");
-                let allocator = order.allocator().expect("active order").clone();
-                let mut stratifier: Stratifier<Notify> = Stratifier::new(
-                    addr,
-                    settings,
-                    allocator,
-                    metatron,
-                    Some(upstream.clone()),
-                    stream,
-                    upstream.workbase_rx(),
-                    cancel,
-                    None,
-                    start_diff,
-                    Some(order.clone()),
-                );
-
-                if let Err(err) = stratifier.serve().await {
-                    error!("Stratifier error for {addr} on order {}: {err}", order.id);
-                }
-            });
-        }
+        router.serve(listener, None, cancel_token).await
     }
 }

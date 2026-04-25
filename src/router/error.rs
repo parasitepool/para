@@ -13,4 +13,8 @@ pub(crate) enum RouterError {
     HashPriceBelowMinimum { bid: HashPrice, minimum: HashPrice },
     #[snafu(display("wallet is still syncing, try again shortly"))]
     WalletSyncing,
+    #[snafu(display("wallet not configured, bucket orders unavailable"))]
+    WalletRequired,
+    #[snafu(display("upstream activation failed: {error:#}"))]
+    ActivationFailed { error: anyhow::Error },
 }

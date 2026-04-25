@@ -244,13 +244,13 @@ impl Upstream {
                 .await
             {
                 Ok(duration) => {
-                    metatron.record_upstream_accepted(id, upstream_diff, share_diff);
+                    metatron.record_order_accepted(id, upstream_diff, share_diff);
                     *ping.write() = duration;
 
                     debug!("Upstream accepted share");
                 }
                 Err(err) => {
-                    metatron.record_upstream_rejected(id, upstream_diff);
+                    metatron.record_order_rejected(id, upstream_diff);
                     match err {
                         ClientError::SubmitFalse => warn!("Upstream rejected share"),
                         ClientError::Rejected { reason, .. } => {

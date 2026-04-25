@@ -426,8 +426,18 @@ async fn order_detail() {
     assert_eq!(detail.id, id);
     assert_eq!(detail.status, OrderStatus::Pending);
     assert_eq!(detail.kind, OrderKind::Bucket(hashdays));
-    assert_eq!(detail.payment_address.assume_checked().to_string(), address);
-    assert_eq!(detail.payment_amount.to_sat(), amount);
+    assert_eq!(
+        detail
+            .payment_address
+            .expect("bucket has address")
+            .assume_checked()
+            .to_string(),
+        address,
+    );
+    assert_eq!(
+        detail.payment_amount.expect("bucket has amount").to_sat(),
+        amount,
+    );
     assert!(detail.upstream.is_none());
     assert!(detail.sessions.is_empty());
     assert_eq!(detail.downstream.accepted_shares, 0);

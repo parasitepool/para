@@ -159,7 +159,7 @@ impl WorkerDetail {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionDetail {
     pub id: SessionId,
-    pub upstream_id: u32,
+    pub order_id: u32,
     pub address: Address<NetworkUnchecked>,
     pub worker_name: String,
     pub username: String,
@@ -173,7 +173,7 @@ impl SessionDetail {
         let stats = session.snapshot();
         Self {
             id: session.id(),
-            upstream_id: session.id().upstream_id(),
+            order_id: session.id().order_id(),
             address: session.address().as_unchecked().clone(),
             worker_name: session.workername().to_string(),
             username: session.username().to_string(),
@@ -206,7 +206,7 @@ pub struct UpstreamInfo {
 
 impl UpstreamInfo {
     pub(crate) fn from_upstream(upstream: &Upstream, metatron: &Metatron, now: Instant) -> Self {
-        let stats = metatron.upstream_stats(upstream.id());
+        let stats = metatron.order_stats(upstream.id());
         Self {
             endpoint: upstream.endpoint().to_string(),
             connected: upstream.is_connected(),
@@ -250,10 +250,11 @@ pub struct OrderResponse {
 
 impl OrderResponse {
     pub(crate) fn from_order(order: &Order) -> Self {
+        let payment = order.payment.as_ref().expect("bucket has payment");
         Self {
             order_id: order.id,
-            payment_address: order.payment.address.as_unchecked().clone(),
-            payment_amount: order.payment.amount,
+            payment_address: payment.address.as_unchecked().clone(),
+            payment_amount: payment.amount,
         }
     }
 }
@@ -264,8 +265,8 @@ pub struct OrderDetail {
     pub status: OrderStatus,
     pub upstream_target: UpstreamTarget,
     pub kind: OrderKind,
-    pub payment_address: Address<NetworkUnchecked>,
-    pub payment_amount: Amount,
+    pub payment_address: Option<Address<NetworkUnchecked>>,
+    pub payment_amount: Option<Amount>,
     pub created_at: u64,
     pub created_at_height: u32,
     pub last_updated: u64,
@@ -293,8 +294,11 @@ impl OrderDetail {
             status: order.status(),
             upstream_target: order.upstream_target.clone(),
             kind: order.kind,
-            payment_address: order.payment.address.as_unchecked().clone(),
-            payment_amount: order.payment.amount,
+            payment_address: order
+                .payment
+                .as_ref()
+                .map(|payment| payment.address.as_unchecked().clone()),
+            payment_amount: order.payment.as_ref().map(|payment| payment.amount),
             created_at: epoch_secs - order.created_at.elapsed().as_secs(),
             created_at_height: order.created_at_height,
             last_updated: epoch_secs - order.last_updated.lock().elapsed().as_secs(),

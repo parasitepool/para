@@ -5,11 +5,11 @@ use super::*;
 pub struct SessionId(u64);
 
 impl SessionId {
-    pub fn new(upstream_id: u32, counter: u32) -> Self {
-        Self((upstream_id as u64) << 32 | counter as u64)
+    pub fn new(order_id: u32, counter: u32) -> Self {
+        Self((order_id as u64) << 32 | counter as u64)
     }
 
-    pub fn upstream_id(self) -> u32 {
+    pub fn order_id(self) -> u32 {
         (self.0 >> 32) as u32
     }
 }
@@ -114,9 +114,9 @@ mod tests {
     #[test]
     fn session_id_round_trip() {
         #[track_caller]
-        fn case(upstream_id: u32, counter: u32) {
-            let id = SessionId::new(upstream_id, counter);
-            assert_eq!(id.upstream_id(), upstream_id);
+        fn case(order_id: u32, counter: u32) {
+            let id = SessionId::new(order_id, counter);
+            assert_eq!(id.order_id(), order_id);
         }
 
         case(0, 0);

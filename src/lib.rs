@@ -59,7 +59,6 @@ use {
         user::User,
         worker::Worker,
     },
-    metrics::Metrics,
     parking_lot::{Mutex, RwLock},
     reqwest::Url,
     retry::{Backoff, BackoffEnd, retry_with_backoff},
@@ -157,7 +156,6 @@ mod job;
 mod jobs;
 mod logs;
 mod metatron;
-mod metrics;
 mod retry;
 mod router;
 pub mod settings;
