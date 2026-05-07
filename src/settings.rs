@@ -100,69 +100,103 @@ impl Default for Settings {
 
 impl Settings {
     pub(crate) fn from_bitcoin_options(options: BitcoinOptions) -> Result<Self> {
-        let chain = options.chain.unwrap_or_default();
+        let settings = Self::from_bitcoin_options_unvalidated(options);
 
-        let bitcoin_rpc_port = options
-            .bitcoin_rpc_port
-            .unwrap_or_else(|| chain.default_rpc_port());
-
-        let settings = Self {
-            bitcoin_data_dir: options.bitcoin_data_dir,
-            bitcoin_rpc_port,
-            bitcoin_rpc_cookie_file: options.bitcoin_rpc_cookie_file,
-            bitcoin_rpc_username: options.bitcoin_rpc_username,
-            bitcoin_rpc_password: options.bitcoin_rpc_password,
-            chain,
-            ..Self::default()
-        };
-
-        settings.validate()?;
+        settings.validate_bitcoin_rpc_credentials()?;
         Ok(settings)
     }
 
-    pub(crate) fn from_pool_options(options: PoolOptions) -> Result<Self> {
-        let chain = options.common.bitcoin.chain.unwrap_or_default();
+    fn from_common_options(common: CommonOptions) -> Result<Self> {
+        let CommonOptions {
+            address,
+            port,
+            http_port,
+            bitcoin,
+            start_diff,
+            min_diff,
+            max_diff,
+            vardiff_period,
+            vardiff_window,
+            acme_domain,
+            acme_contact,
+            acme_cache,
+            data_dir,
+        } = common;
 
-        let bitcoin_rpc_port = options
-            .common
-            .bitcoin
-            .bitcoin_rpc_port
-            .unwrap_or_else(|| chain.default_rpc_port());
+        Ok(Self {
+            address,
+            port,
+            http_port,
+            acme_domains: acme_domain,
+            acme_contacts: acme_contact,
+            acme_cache,
+            data_dir,
+            start_diff,
+            min_diff,
+            max_diff,
+            vardiff_period: Self::duration_from_secs_f64(vardiff_period, "vardiff_period")?,
+            vardiff_window: Self::duration_from_secs_f64(vardiff_window, "vardiff_window")?,
+            ..Self::from_bitcoin_options_unvalidated(bitcoin)
+        })
+    }
+
+    fn duration_from_secs_f64(value: f64, name: &str) -> Result<Duration> {
+        ensure!(value.is_finite(), "{name} must be finite");
+        ensure!(value > 0.0, "{name} must be greater than 0");
+
+        Duration::try_from_secs_f64(value).with_context(|| format!("{name} is out of range"))
+    }
+
+    fn from_bitcoin_options_unvalidated(options: BitcoinOptions) -> Self {
+        let BitcoinOptions {
+            chain,
+            bitcoin_data_dir,
+            bitcoin_rpc_port,
+            bitcoin_rpc_cookie_file,
+            bitcoin_rpc_username,
+            bitcoin_rpc_password,
+        } = options;
+
+        let chain = chain.unwrap_or_default();
+
+        Self {
+            bitcoin_data_dir,
+            bitcoin_rpc_port: bitcoin_rpc_port.unwrap_or_else(|| chain.default_rpc_port()),
+            bitcoin_rpc_cookie_file,
+            bitcoin_rpc_username,
+            bitcoin_rpc_password,
+            chain,
+            ..Self::default()
+        }
+    }
+
+    pub(crate) fn from_pool_options(options: PoolOptions) -> Result<Self> {
+        let PoolOptions {
+            common,
+            high_diff_port,
+            update_interval,
+            version_mask,
+            zmq_block_notifications,
+            enonce1_size,
+            enonce2_size,
+            bitcoind_timeout,
+            disable_bouncer,
+            database_url,
+            events_file,
+        } = options;
 
         let settings = Self {
-            address: options.common.address,
-            port: options.common.port,
-            http_port: options.common.http_port,
-            upstream_targets: Vec::new(),
-            timeout: Duration::from_secs(30),
-            bitcoin_data_dir: options.common.bitcoin.bitcoin_data_dir,
-            bitcoin_rpc_port,
-            bitcoin_rpc_cookie_file: options.common.bitcoin.bitcoin_rpc_cookie_file,
-            bitcoin_rpc_username: options.common.bitcoin.bitcoin_rpc_username,
-            bitcoin_rpc_password: options.common.bitcoin.bitcoin_rpc_password,
-            chain,
-            acme_domains: options.common.acme_domain,
-            acme_contacts: options.common.acme_contact,
-            acme_cache: options.common.acme_cache,
-            data_dir: options.common.data_dir,
-            update_interval: Duration::from_secs(options.update_interval),
-            version_mask: options.version_mask,
-            start_diff: options.common.start_diff,
-            min_diff: options.common.min_diff,
-            max_diff: options.common.max_diff,
-            vardiff_period: Duration::from_secs_f64(options.common.vardiff_period),
-            vardiff_window: Duration::from_secs_f64(options.common.vardiff_window),
-            zmq_block_notifications: options.zmq_block_notifications,
-            enonce1_size: options.enonce1_size,
-            enonce2_size: options.enonce2_size,
-            enonce1_extension_size: ENONCE1_EXTENSION_SIZE,
-            bitcoind_timeout: Duration::from_secs(options.bitcoind_timeout),
-            disable_bouncer: options.disable_bouncer,
-            database_url: options.database_url,
-            events_file: options.events_file,
-            high_diff_port: options.common.high_diff_port,
-            tick_interval: Duration::from_secs(60),
-            ..Self::default()
+            high_diff_port,
+            update_interval: Duration::from_secs(update_interval),
+            version_mask,
+            zmq_block_notifications,
+            enonce1_size,
+            enonce2_size,
+            bitcoind_timeout: Duration::from_secs(bitcoind_timeout),
+            disable_bouncer,
+            database_url,
+            events_file,
+            ..Self::from_common_options(common)?
         };
 
         settings.validate()?;
@@ -170,48 +204,18 @@ impl Settings {
     }
 
     pub(crate) fn from_proxy_options(options: ProxyOptions) -> Result<Self> {
-        let chain = options.common.bitcoin.chain.unwrap_or_default();
-
-        let bitcoin_rpc_port = options
-            .common
-            .bitcoin
-            .bitcoin_rpc_port
-            .unwrap_or_else(|| chain.default_rpc_port());
+        let ProxyOptions {
+            common,
+            upstream,
+            timeout,
+            enonce1_extension_size,
+        } = options;
 
         let settings = Self {
-            address: options.common.address,
-            port: options.common.port,
-            http_port: options.common.http_port,
-            upstream_targets: vec![options.upstream],
-            timeout: Duration::from_secs(options.timeout),
-            bitcoin_data_dir: options.common.bitcoin.bitcoin_data_dir,
-            bitcoin_rpc_port,
-            bitcoin_rpc_cookie_file: options.common.bitcoin.bitcoin_rpc_cookie_file,
-            bitcoin_rpc_username: options.common.bitcoin.bitcoin_rpc_username,
-            bitcoin_rpc_password: options.common.bitcoin.bitcoin_rpc_password,
-            chain,
-            acme_domains: options.common.acme_domain,
-            acme_contacts: options.common.acme_contact,
-            acme_cache: options.common.acme_cache,
-            data_dir: options.common.data_dir,
-            update_interval: Duration::from_secs(10),
-            version_mask: Version::default(),
-            start_diff: options.common.start_diff,
-            min_diff: options.common.min_diff,
-            max_diff: options.common.max_diff,
-            vardiff_period: Duration::from_secs_f64(options.common.vardiff_period),
-            vardiff_window: Duration::from_secs_f64(options.common.vardiff_window),
-            zmq_block_notifications: "tcp://127.0.0.1:28332".parse().unwrap(),
-            enonce1_size: ENONCE1_SIZE,
-            enonce2_size: MAX_ENONCE_SIZE,
-            enonce1_extension_size: options.enonce1_extension_size,
-            bitcoind_timeout: Duration::from_secs(60),
-            disable_bouncer: false,
-            database_url: None,
-            events_file: None,
-            high_diff_port: options.common.high_diff_port,
-            tick_interval: Duration::from_secs(60),
-            ..Self::default()
+            upstream_targets: vec![upstream],
+            timeout: Duration::from_secs(timeout),
+            enonce1_extension_size,
+            ..Self::from_common_options(common)?
         };
 
         settings.validate()?;
@@ -219,53 +223,30 @@ impl Settings {
     }
 
     pub(crate) fn from_router_options(options: RouterOptions) -> Result<Self> {
-        let chain = options.common.bitcoin.chain.unwrap_or_default();
-
-        let bitcoin_rpc_port = options
-            .common
-            .bitcoin
-            .bitcoin_rpc_port
-            .unwrap_or_else(|| chain.default_rpc_port());
+        let RouterOptions {
+            common,
+            descriptor,
+            change_descriptor,
+            wallet_birthday,
+            timeout,
+            enonce1_extension_size,
+            tick_interval,
+            hash_price,
+            sink_order,
+            allow_zero_conf,
+        } = options;
 
         let settings = Self {
-            address: options.common.address,
-            port: options.common.port,
-            http_port: options.common.http_port,
-            upstream_targets: Vec::new(),
-            timeout: Duration::from_secs(options.timeout),
-            bitcoin_data_dir: options.common.bitcoin.bitcoin_data_dir,
-            bitcoin_rpc_port,
-            bitcoin_rpc_cookie_file: options.common.bitcoin.bitcoin_rpc_cookie_file,
-            bitcoin_rpc_username: options.common.bitcoin.bitcoin_rpc_username,
-            bitcoin_rpc_password: options.common.bitcoin.bitcoin_rpc_password,
-            chain,
-            acme_domains: options.common.acme_domain,
-            acme_contacts: options.common.acme_contact,
-            acme_cache: options.common.acme_cache,
-            data_dir: options.common.data_dir,
-            update_interval: Duration::from_secs(10),
-            version_mask: Version::default(),
-            start_diff: options.common.start_diff,
-            min_diff: options.common.min_diff,
-            max_diff: options.common.max_diff,
-            vardiff_period: Duration::from_secs_f64(options.common.vardiff_period),
-            vardiff_window: Duration::from_secs_f64(options.common.vardiff_window),
-            zmq_block_notifications: "tcp://127.0.0.1:28332".parse().unwrap(),
-            enonce1_size: ENONCE1_SIZE,
-            enonce2_size: MAX_ENONCE_SIZE,
-            enonce1_extension_size: options.enonce1_extension_size,
-            bitcoind_timeout: Duration::from_secs(60),
-            disable_bouncer: false,
-            database_url: None,
-            events_file: None,
-            high_diff_port: options.common.high_diff_port,
-            tick_interval: Duration::from_secs(options.tick_interval),
-            descriptor: Some(options.descriptor),
-            change_descriptor: options.change_descriptor,
-            wallet_birthday: options.wallet_birthday,
-            sink_orders: options.sink_order,
-            hash_price: options.hash_price,
-            allow_zero_conf: options.allow_zero_conf,
+            timeout: Duration::from_secs(timeout),
+            enonce1_extension_size,
+            tick_interval: Duration::from_secs(tick_interval),
+            descriptor: Some(descriptor),
+            change_descriptor,
+            wallet_birthday,
+            sink_orders: sink_order,
+            hash_price,
+            allow_zero_conf,
+            ..Self::from_common_options(common)?
         };
 
         settings.validate()?;
@@ -386,6 +367,30 @@ impl Settings {
     }
 
     fn validate(&self) -> Result<()> {
+        self.validate_bitcoin_rpc_credentials()?;
+
+        ensure!(!self.timeout.is_zero(), "timeout must be greater than 0");
+        ensure!(
+            !self.update_interval.is_zero(),
+            "update_interval must be greater than 0"
+        );
+        ensure!(
+            !self.vardiff_period.is_zero(),
+            "vardiff_period must be greater than 0"
+        );
+        ensure!(
+            !self.vardiff_window.is_zero(),
+            "vardiff_window must be greater than 0"
+        );
+        ensure!(
+            !self.bitcoind_timeout.is_zero(),
+            "bitcoind_timeout must be greater than 0"
+        );
+        ensure!(
+            !self.tick_interval.is_zero(),
+            "tick_interval must be greater than 0"
+        );
+
         if let Some(min) = self.min_diff {
             ensure!(
                 self.start_diff >= min,
@@ -488,6 +493,16 @@ impl Settings {
                     min
                 );
             }
+        }
+
+        Ok(())
+    }
+
+    fn validate_bitcoin_rpc_credentials(&self) -> Result<()> {
+        match (&self.bitcoin_rpc_username, &self.bitcoin_rpc_password) {
+            (None, Some(_)) => bail!("no bitcoin RPC username specified"),
+            (Some(_), None) => bail!("no bitcoin RPC password specified"),
+            _ => {}
         }
 
         Ok(())
@@ -629,6 +644,19 @@ mod tests {
     const PROXY_ADDRESS: &str = "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc";
     const PROXY_USERNAME: &str = "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker";
 
+    #[derive(Debug, Parser)]
+    struct BitcoinOptionsCommand {
+        #[command(flatten)]
+        bitcoin: BitcoinOptions,
+    }
+
+    fn parse_bitcoin_options(args: &str) -> BitcoinOptions {
+        match BitcoinOptionsCommand::try_parse_from(args.split_whitespace()) {
+            Ok(command) => command.bitcoin,
+            Err(err) => panic!("error parsing arguments: {err}"),
+        }
+    }
+
     fn parse_pool_options(args: &str) -> PoolOptions {
         match Arguments::try_parse_from(args.split_whitespace()) {
             Ok(arguments) => match arguments.subcommand {
@@ -659,11 +687,51 @@ mod tests {
         }
     }
 
+    fn bitcoin_settings_error(args: &str) -> String {
+        Settings::from_bitcoin_options(parse_bitcoin_options(args))
+            .unwrap_err()
+            .to_string()
+    }
+
+    fn pool_settings_error(args: &str) -> String {
+        Settings::from_pool_options(parse_pool_options(args))
+            .unwrap_err()
+            .to_string()
+    }
+
+    fn proxy_settings_error(extra: &str) -> String {
+        Settings::from_proxy_options(parse_proxy_options(&proxy_command(extra)))
+            .unwrap_err()
+            .to_string()
+    }
+
+    fn router_settings_error(extra: &str) -> String {
+        Settings::from_router_options(parse_router_options(&router_command(extra)))
+            .unwrap_err()
+            .to_string()
+    }
+
+    #[track_caller]
+    fn assert_error_contains(error: String, expected: &str) {
+        assert!(
+            error.contains(expected),
+            "expected error containing `{expected}`, got `{error}`"
+        );
+    }
+
     fn proxy_command(extra: &str) -> String {
         if extra.is_empty() {
             format!("para proxy --upstream {PROXY_USERNAME}@foo:1234")
         } else {
             format!("para proxy --upstream {PROXY_USERNAME}@foo:1234 {extra}")
+        }
+    }
+
+    fn router_command(extra: &str) -> String {
+        if extra.is_empty() {
+            "para router --descriptor foo --hash-price 1000".to_string()
+        } else {
+            format!("para router --descriptor foo --hash-price 1000 {extra}")
         }
     }
 
@@ -751,18 +819,36 @@ mod tests {
     }
 
     #[test]
-    fn pool_credentials_fallback_to_cookie_when_partial_creds() {
-        let options = parse_pool_options(
-            "para pool \
-                --bitcoin-rpc-username onlyuser \
-                --bitcoin-rpc-cookie-file /tmp/test.cookie",
-        );
-        let settings = Settings::from_pool_options(options).unwrap();
-
-        match settings.bitcoin_credentials().unwrap() {
-            Auth::CookieFile(path) => assert_eq!(path, PathBuf::from("/tmp/test.cookie")),
-            other => panic!("expected CookieFile, got {other:?}"),
+    fn partial_bitcoin_rpc_credentials_errors() {
+        #[track_caller]
+        fn case(
+            bitcoin_args: &str,
+            pool_args: &str,
+            proxy_args: &str,
+            router_args: &str,
+            expected: &str,
+        ) {
+            assert_eq!(bitcoin_settings_error(bitcoin_args), expected);
+            assert_eq!(pool_settings_error(pool_args), expected);
+            assert_eq!(proxy_settings_error(proxy_args), expected);
+            assert_eq!(router_settings_error(router_args), expected);
         }
+
+        case(
+            "para --bitcoin-rpc-username onlyuser --bitcoin-rpc-cookie-file /tmp/test.cookie",
+            "para pool --bitcoin-rpc-username onlyuser --bitcoin-rpc-cookie-file /tmp/test.cookie",
+            "--bitcoin-rpc-username onlyuser --bitcoin-rpc-cookie-file /tmp/test.cookie",
+            "--bitcoin-rpc-username onlyuser --bitcoin-rpc-cookie-file /tmp/test.cookie",
+            "no bitcoin RPC password specified",
+        );
+
+        case(
+            "para --bitcoin-rpc-password onlypass --bitcoin-rpc-cookie-file /tmp/test.cookie",
+            "para pool --bitcoin-rpc-password onlypass --bitcoin-rpc-cookie-file /tmp/test.cookie",
+            "--bitcoin-rpc-password onlypass --bitcoin-rpc-cookie-file /tmp/test.cookie",
+            "--bitcoin-rpc-password onlypass --bitcoin-rpc-cookie-file /tmp/test.cookie",
+            "no bitcoin RPC username specified",
+        );
     }
 
     #[test]
@@ -868,6 +954,31 @@ mod tests {
     }
 
     #[test]
+    fn pool_vardiff_period_rejects_invalid_duration() {
+        #[track_caller]
+        fn case(args: &str, expected: &str) {
+            assert_error_contains(pool_settings_error(args), expected);
+        }
+
+        case(
+            "para pool --vardiff-period 0",
+            "vardiff_period must be greater than 0",
+        );
+        case(
+            "para pool --vardiff-period=-1",
+            "vardiff_period must be greater than 0",
+        );
+        case(
+            "para pool --vardiff-period NaN",
+            "vardiff_period must be finite",
+        );
+        case(
+            "para pool --vardiff-period inf",
+            "vardiff_period must be finite",
+        );
+    }
+
+    #[test]
     fn pool_vardiff_window() {
         let options = parse_pool_options("para pool --vardiff-window 60");
         let settings = Settings::from_pool_options(options).unwrap();
@@ -880,6 +991,60 @@ mod tests {
         let options = parse_pool_options("para pool");
         let settings = Settings::from_pool_options(options).unwrap();
         assert_eq!(settings.vardiff_window, Duration::from_secs(300));
+    }
+
+    #[test]
+    fn pool_vardiff_window_rejects_invalid_duration() {
+        #[track_caller]
+        fn case(args: &str, expected: &str) {
+            assert_error_contains(pool_settings_error(args), expected);
+        }
+
+        case(
+            "para pool --vardiff-window 0",
+            "vardiff_window must be greater than 0",
+        );
+        case(
+            "para pool --vardiff-window=-1",
+            "vardiff_window must be greater than 0",
+        );
+        case(
+            "para pool --vardiff-window NaN",
+            "vardiff_window must be finite",
+        );
+        case(
+            "para pool --vardiff-window inf",
+            "vardiff_window must be finite",
+        );
+    }
+
+    #[test]
+    fn duration_zero_fails() {
+        #[track_caller]
+        fn case(error: String, expected: &str) {
+            assert_error_contains(error, expected);
+        }
+
+        case(
+            pool_settings_error("para pool --update-interval 0"),
+            "update_interval must be greater than 0",
+        );
+        case(
+            pool_settings_error("para pool --bitcoind-timeout 0"),
+            "bitcoind_timeout must be greater than 0",
+        );
+        case(
+            proxy_settings_error("--timeout 0"),
+            "timeout must be greater than 0",
+        );
+        case(
+            router_settings_error("--timeout 0"),
+            "timeout must be greater than 0",
+        );
+        case(
+            router_settings_error("--tick-interval 0"),
+            "tick_interval must be greater than 0",
+        );
     }
 
     #[test]
@@ -1167,34 +1332,21 @@ mod tests {
     #[test]
     fn high_diff_port() {
         #[track_caller]
-        fn case(pool_args: &str, proxy_args: &str, expected: Option<u16>) {
+        fn case(pool_args: &str, expected: Option<u16>) {
             let pool = Settings::from_pool_options(parse_pool_options(pool_args)).unwrap();
-            let proxy = Settings::from_proxy_options(parse_proxy_options(proxy_args)).unwrap();
             assert_eq!(pool.high_diff_port, expected);
-            assert_eq!(proxy.high_diff_port, expected);
         }
 
-        case("para pool", &proxy_command(""), None);
+        case("para pool", None);
 
-        case(
-            "para pool --high-diff-port 3333",
-            &proxy_command("--high-diff-port 3333"),
-            Some(3333),
-        );
+        case("para pool --high-diff-port 3333", Some(3333));
     }
 
     #[test]
     fn high_diff_port_equals_port_fails() {
         let pool = parse_pool_options("para pool --port 3333 --high-diff-port 3333");
-        let proxy = parse_proxy_options(&proxy_command("--port 3333 --high-diff-port 3333"));
         assert!(
             Settings::from_pool_options(pool)
-                .unwrap_err()
-                .to_string()
-                .contains("must not equal port")
-        );
-        assert!(
-            Settings::from_proxy_options(proxy)
                 .unwrap_err()
                 .to_string()
                 .contains("must not equal port")
@@ -1204,15 +1356,8 @@ mod tests {
     #[test]
     fn high_diff_port_equals_http_port_fails() {
         let pool = parse_pool_options("para pool --http-port 8080 --high-diff-port 8080");
-        let proxy = parse_proxy_options(&proxy_command("--http-port 8080 --high-diff-port 8080"));
         assert!(
             Settings::from_pool_options(pool)
-                .unwrap_err()
-                .to_string()
-                .contains("must not equal http_port")
-        );
-        assert!(
-            Settings::from_proxy_options(proxy)
                 .unwrap_err()
                 .to_string()
                 .contains("must not equal http_port")
@@ -1222,15 +1367,8 @@ mod tests {
     #[test]
     fn high_diff_port_above_max_diff_fails() {
         let pool = parse_pool_options("para pool --high-diff-port 3333 --max-diff 100");
-        let proxy = parse_proxy_options(&proxy_command("--high-diff-port 3333 --max-diff 100"));
         assert!(
             Settings::from_pool_options(pool)
-                .unwrap_err()
-                .to_string()
-                .contains("high_diff_port start difficulty")
-        );
-        assert!(
-            Settings::from_proxy_options(proxy)
                 .unwrap_err()
                 .to_string()
                 .contains("high_diff_port start difficulty")
@@ -1242,17 +1380,8 @@ mod tests {
         let pool = parse_pool_options(
             "para pool --high-diff-port 3333 --min-diff 2000000 --start-diff 2000000",
         );
-        let proxy = parse_proxy_options(&proxy_command(
-            "--high-diff-port 3333 --min-diff 2000000 --start-diff 2000000",
-        ));
         assert!(
             Settings::from_pool_options(pool)
-                .unwrap_err()
-                .to_string()
-                .contains("high_diff_port start difficulty")
-        );
-        assert!(
-            Settings::from_proxy_options(proxy)
                 .unwrap_err()
                 .to_string()
                 .contains("high_diff_port start difficulty")
@@ -1277,7 +1406,6 @@ mod tests {
             assert_eq!(pool.acme_cache, settings.acme_cache);
             assert_eq!(pool.chain, settings.chain);
             assert_eq!(pool.bitcoin_rpc_port, settings.bitcoin_rpc_port);
-            assert_eq!(pool.high_diff_port, settings.high_diff_port);
             assert_eq!(pool.http_port, settings.http_port);
             assert_eq!(pool.min_diff, settings.min_diff);
             assert_eq!(pool.max_diff, settings.max_diff);

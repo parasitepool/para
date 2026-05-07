@@ -8,8 +8,8 @@ pub enum Chain {
     Mainnet,
     Regtest,
     Signet,
-    Testnet,
     #[value(alias("test"))]
+    Testnet,
     Testnet4,
 }
 
@@ -72,10 +72,10 @@ impl FromStr for Chain {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "mainnet" => Ok(Self::Mainnet),
+            "main" | "mainnet" => Ok(Self::Mainnet),
             "regtest" => Ok(Self::Regtest),
             "signet" => Ok(Self::Signet),
-            "testnet" => Ok(Self::Testnet),
+            "test" | "testnet" => Ok(Self::Testnet),
             "testnet4" => Ok(Self::Testnet4),
             _ => Err(anyhow!("Invalid chain `{s}`")),
         }
@@ -88,11 +88,18 @@ mod tests {
 
     #[test]
     fn from_str() {
-        assert_eq!("mainnet".parse::<Chain>().unwrap(), Chain::Mainnet);
-        assert_eq!("regtest".parse::<Chain>().unwrap(), Chain::Regtest);
-        assert_eq!("signet".parse::<Chain>().unwrap(), Chain::Signet);
-        assert_eq!("testnet".parse::<Chain>().unwrap(), Chain::Testnet);
-        assert_eq!("testnet4".parse::<Chain>().unwrap(), Chain::Testnet4);
+        #[track_caller]
+        fn case(input: &str, expected: Chain) {
+            assert_eq!(input.parse::<Chain>().unwrap(), expected);
+        }
+
+        case("main", Chain::Mainnet);
+        case("mainnet", Chain::Mainnet);
+        case("regtest", Chain::Regtest);
+        case("signet", Chain::Signet);
+        case("test", Chain::Testnet);
+        case("testnet", Chain::Testnet);
+        case("testnet4", Chain::Testnet4);
         assert_eq!(
             "foo".parse::<Chain>().unwrap_err().to_string(),
             "Invalid chain `foo`"

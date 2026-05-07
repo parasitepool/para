@@ -7,6 +7,12 @@ pub(crate) struct PoolOptions {
 
     #[arg(
         long,
+        help = "Listen for stratum messages on high diff port <HIGH_DIFF_PORT> with initial difficulty 1000000."
+    )]
+    pub(crate) high_diff_port: Option<u16>,
+
+    #[arg(
+        long,
         default_value_t = 10,
         help = "Block template update interval in seconds."
     )]

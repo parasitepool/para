@@ -16,12 +16,6 @@ pub(crate) struct CommonOptions {
     )]
     pub(crate) port: u16,
 
-    #[arg(
-        long,
-        help = "Listen for stratum messages on high diff port <HIGH_DIFF_PORT> with initial difficulty 1000000."
-    )]
-    pub(crate) high_diff_port: Option<u16>,
-
     #[arg(long, help = "Enable HTTP API on <HTTP_PORT>. Disabled if not set.")]
     pub(crate) http_port: Option<u16>,
 
