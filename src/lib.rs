@@ -98,6 +98,7 @@ use {
         thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     },
+    store::Store,
     stratifier::Stratifier,
     stratum::{
         Authorize, Configure, Difficulty, Extranonce, Id, JobId, MAX_MESSAGE_SIZE, MerkleNode,
@@ -160,6 +161,7 @@ mod retry;
 mod router;
 pub mod settings;
 mod signal;
+mod store;
 mod stratifier;
 pub mod subcommand;
 mod throbber;

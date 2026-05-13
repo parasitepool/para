@@ -7,6 +7,8 @@ pub(crate) struct TestRouter {
     router_handle: Child,
     router_port: u16,
     http_port: u16,
+    #[allow(unused)]
+    tempdir: Arc<TempDir>,
 }
 
 impl TestRouter {
@@ -14,7 +16,7 @@ impl TestRouter {
         let router_port = allocate_port();
         let http_port = allocate_port();
 
-        let router_handle = CommandBuilder::new(format!(
+        let (router_handle, tempdir) = CommandBuilder::new(format!(
             "router \
                 --chain regtest \
                 --address 127.0.0.1 \
@@ -34,7 +36,8 @@ impl TestRouter {
         .capture_stdout(true)
         .env("RUST_LOG", "info")
         .integration_test(true)
-        .spawn();
+        .with_data_dir()
+        .spawn_persistent();
 
         for attempt in 0.. {
             match TcpStream::connect(format!("127.0.0.1:{http_port}")) {
@@ -53,6 +56,7 @@ impl TestRouter {
             router_handle,
             router_port,
             http_port,
+            tempdir,
         };
 
         let url = format!("{}/api/router/status", router.api_endpoint());

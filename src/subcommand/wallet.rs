@@ -19,6 +19,8 @@ pub(crate) struct WalletCommand {
     change_descriptor: Option<String>,
     #[arg(long, default_value_t = 0, help = "Start sync from block <BIRTHDAY>.")]
     birthday: u32,
+    #[arg(long, alias = "datadir", help = "Store wallet data in <DATA_DIR>.")]
+    data_dir: Option<PathBuf>,
     #[command(flatten)]
     bitcoin: BitcoinOptions,
     #[command(subcommand)]
@@ -39,37 +41,29 @@ enum Subcommand {
 
 impl WalletCommand {
     pub(crate) async fn run(self) -> Result {
-        let settings = Settings::from_bitcoin_options(self.bitcoin)?;
-        let network = settings.chain().network();
-
-        if let Subcommand::Generate = self.subcommand {
-            return print_json(generate::run(network)?);
+        if matches!(&self.subcommand, Subcommand::Generate) {
+            let settings = Settings::from_bitcoin_options(self.bitcoin)?;
+            return print_json(generate::run(settings.chain().network())?);
         }
 
-        let rpc_url = format!("http://{}", settings.bitcoin_rpc_url());
-        let rpc_auth = settings.wallet_rpc_auth()?;
+        let settings = Arc::new(Settings::from_wallet_options(
+            self.bitcoin,
+            self.data_dir,
+            self.descriptor,
+            self.change_descriptor,
+            self.birthday,
+        )?);
+        let network = settings.chain().network();
 
-        let descriptor = self
-            .descriptor
-            .ok_or_else(|| anyhow!("--descriptor is required"))?;
-
-        let change_descriptor = self.change_descriptor;
-        let birthday = self.birthday;
         let subcommand = self.subcommand;
 
         task::spawn_blocking(move || {
-            let wallet = Wallet::new(
-                &descriptor,
-                change_descriptor.as_deref(),
-                network,
-                &rpc_url,
-                rpc_auth,
-                birthday,
-            )?;
+            let store = Arc::new(Store::open(settings.clone())?);
+            let wallet = Wallet::open(settings, store)?;
 
             match subcommand {
                 Subcommand::Balance => print_json(balance::run(&wallet)?),
-                Subcommand::Receive => print_json(receive::run(&wallet)),
+                Subcommand::Receive => print_json(receive::run(&wallet)?),
                 Subcommand::Send(send) => print_json(send.run(&wallet, network)?),
                 Subcommand::Generate => unreachable!(),
             }

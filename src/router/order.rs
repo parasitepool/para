@@ -24,7 +24,6 @@ pub struct Payment {
     pub(crate) derivation_index: u32,
     pub(crate) amount: Amount,
     pub(crate) created_at_height: u32,
-    pub(crate) outpoints: Mutex<HashSet<OutPoint>>,
 }
 
 impl Payment {
@@ -39,15 +38,7 @@ impl Payment {
             derivation_index,
             amount,
             created_at_height,
-            outpoints: Mutex::new(HashSet::new()),
         }
-    }
-
-    pub(crate) fn record_outpoints(&self, new: &[OutPoint]) -> bool {
-        let mut outpoints = self.outpoints.lock();
-        let before = outpoints.len();
-        outpoints.extend(new);
-        outpoints.len() > before
     }
 }
 
@@ -633,20 +624,6 @@ mod tests {
         }
 
         assert!(!bucket.is_ramping_up());
-    }
-
-    #[test]
-    fn record_outpoints() {
-        let payment = Payment::new(test_address(), 0, Amount::from_sat(1000), 0);
-        let a = OutPoint::new(Txid::from_byte_array([1; 32]), 0);
-        let b = OutPoint::new(Txid::from_byte_array([2; 32]), 0);
-
-        assert!(!payment.record_outpoints(&[]));
-        assert!(payment.record_outpoints(&[a]));
-        assert!(!payment.record_outpoints(&[a]));
-        assert!(payment.record_outpoints(&[a, b]));
-        assert!(!payment.record_outpoints(&[a, b]));
-        assert_eq!(payment.outpoints.lock().len(), 2);
     }
 
     #[test]

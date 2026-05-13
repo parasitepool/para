@@ -59,6 +59,7 @@ bitcoind-async-client.workspace = true
 boilerplate = { version = "1.1.1", features = ["axum"] }
 byteorder.workspace = true
 chrono = "0.4.41"
+ciborium = "0.2.2"
 clap.workspace = true
 dashmap = "6.1.0"
 derive_more.workspace = true
@@ -67,9 +68,11 @@ futures.workspace = true
 hex.workspace = true
 lru = "0.16.2"
 mime_guess = "2.0.5"
+miniscript = "13.0.0"
 parking_lot = "0.12.5"
 primitive-types.workspace = true
 rand.workspace = true
+redb = "4.1.0"
 reqwest = { version = "0.13.2", features = ["blocking", "json"] }
 rust-embed = "8.7.1"
 rustls = { version = "0.23.26", features = ["ring"] }
@@ -89,7 +92,6 @@ tracing-subscriber = { version =  "0.3.19", features = ["env-filter", "fmt"] }
 tracing.workspace = true
 utoipa = "5.4.0"
 utoipa-swagger-ui = { version =  "9.0.2", features = ["axum"], optional = true }
-miniscript = "13.0.0"
 zeromq = "0.5.0"
 
 [dev-dependencies]

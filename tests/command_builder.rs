@@ -81,6 +81,13 @@ impl CommandBuilder {
         command
     }
 
+    #[allow(unused)]
+    pub(crate) fn with_data_dir(mut self) -> Self {
+        self.args.push("--data-dir".into());
+        self.args.push(self.tempdir.path().to_str().unwrap().into());
+        self
+    }
+
     #[track_caller]
     pub(crate) fn spawn(self) -> Child {
         let mut command = self.command();
@@ -94,6 +101,23 @@ impl CommandBuilder {
             .unwrap();
 
         child
+    }
+
+    #[track_caller]
+    #[allow(unused)]
+    pub(crate) fn spawn_persistent(self) -> (Child, Arc<TempDir>) {
+        let tempdir = self.tempdir.clone();
+        let mut command = self.command();
+        let child = command.spawn().unwrap();
+
+        child
+            .stdin
+            .as_ref()
+            .unwrap()
+            .write_all(&self.stdin)
+            .unwrap();
+
+        (child, tempdir)
     }
 
     #[track_caller]

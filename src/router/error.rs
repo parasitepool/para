@@ -15,6 +15,8 @@ pub(crate) enum RouterError {
     WalletSyncing,
     #[snafu(display("wallet not configured, bucket orders unavailable"))]
     WalletRequired,
+    #[snafu(display("wallet persistence failed: {error:#}"))]
+    WalletPersistence { error: anyhow::Error },
     #[snafu(display("upstream activation failed: {error:#}"))]
     ActivationFailed { error: anyhow::Error },
 }

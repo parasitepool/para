@@ -8,6 +8,7 @@ pub(crate) struct TestProxy {
     proxy_handle: Child,
     proxy_port: u16,
     http_port: u16,
+    _tempdir: Arc<TempDir>,
 }
 
 fn build_proxy_command(
@@ -35,6 +36,7 @@ fn build_proxy_command(
     .capture_stdout(true)
     .env("RUST_LOG", "info")
     .integration_test(true)
+    .with_data_dir()
 }
 
 impl TestProxy {
@@ -47,7 +49,7 @@ impl TestProxy {
         let proxy_port = allocate_port();
         let http_port = allocate_port();
 
-        let proxy_handle = build_proxy_command(
+        let (proxy_handle, tempdir) = build_proxy_command(
             upstream,
             username,
             proxy_port,
@@ -55,7 +57,7 @@ impl TestProxy {
             bitcoind_rpc_port,
             args,
         )
-        .spawn();
+        .spawn_persistent();
 
         for attempt in 0.. {
             match TcpStream::connect(format!("127.0.0.1:{http_port}")) {
@@ -74,6 +76,7 @@ impl TestProxy {
             proxy_handle,
             proxy_port,
             http_port,
+            _tempdir: tempdir,
         }
     }
 
@@ -86,7 +89,7 @@ impl TestProxy {
         let proxy_port = allocate_port();
         let http_port = allocate_port();
 
-        let output = build_proxy_command(
+        let (proxy_handle, _tempdir) = build_proxy_command(
             upstream,
             username,
             proxy_port,
@@ -94,9 +97,11 @@ impl TestProxy {
             bitcoind_rpc_port,
             args,
         )
-        .spawn()
-        .wait_with_output()
-        .expect("Failed to wait for proxy process");
+        .spawn_persistent();
+
+        let output = proxy_handle
+            .wait_with_output()
+            .expect("Failed to wait for proxy process");
 
         assert!(
             !output.status.success(),

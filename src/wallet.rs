@@ -1,7 +1,7 @@
 use {
     super::*,
     bdk_bitcoind_rpc::{Emitter, bitcoincore_rpc, bitcoincore_rpc::RpcApi},
-    bdk_wallet::{KeychainKind, keys::bip39::Mnemonic},
+    bdk_wallet::{KeychainKind, chain::Merge, keys::bip39::Mnemonic},
     bitcoin::bip32::{ChildNumber, DerivationPath, Xpriv},
     miniscript::{
         Descriptor,
@@ -12,6 +12,7 @@ use {
 
 pub struct Wallet {
     inner: Mutex<bdk_wallet::Wallet>,
+    store: Arc<Store>,
     rpc: bitcoincore_rpc::Client,
     birthday: u32,
     dust_limit: Amount,
@@ -19,25 +20,50 @@ pub struct Wallet {
 }
 
 impl Wallet {
-    pub fn new(
-        descriptor: &str,
-        change_descriptor: Option<&str>,
-        network: Network,
-        rpc_url: &str,
-        rpc_auth: bitcoincore_rpc::Auth,
-        birthday: u32,
-    ) -> Result<Self> {
-        let inner = if let Some(change_descriptor) = change_descriptor {
-            bdk_wallet::Wallet::create(descriptor.to_owned(), change_descriptor.to_owned())
-        } else {
-            bdk_wallet::Wallet::create_single(descriptor.to_owned())
-        }
-        .network(network)
-        .create_wallet_no_persist()
-        .context("failed to create wallet")?;
+    pub(crate) fn open(settings: Arc<Settings>, store: Arc<Store>) -> Result<Self> {
+        let descriptor = settings.descriptor();
+        let change_descriptor = settings.change_descriptor();
+        let network = settings.chain().network();
+        let changeset = store.read_wallet_changeset()?;
 
-        let rpc = bitcoincore_rpc::Client::new(rpc_url, rpc_auth)
-            .context("failed to create rpc client")?;
+        let inner = if changeset.is_empty() {
+            let descriptor = descriptor.context("descriptor required for fresh wallet")?;
+
+            if let Some(change_descriptor) = change_descriptor {
+                bdk_wallet::Wallet::create(descriptor.to_owned(), change_descriptor.to_owned())
+            } else {
+                bdk_wallet::Wallet::create_single(descriptor.to_owned())
+            }
+            .network(network)
+            .create_wallet_no_persist()
+            .context("failed to create wallet")?
+        } else {
+            let mut params = bdk_wallet::Wallet::load().check_network(network);
+
+            if let Some(descriptor) = descriptor {
+                params = params.descriptor(KeychainKind::External, Some(descriptor.to_owned()));
+            }
+
+            if let Some(change_descriptor) = change_descriptor {
+                params =
+                    params.descriptor(KeychainKind::Internal, Some(change_descriptor.to_owned()));
+            }
+
+            if descriptor.is_some() || change_descriptor.is_some() {
+                params = params.extract_keys();
+            }
+
+            params
+                .load_wallet_no_persist(changeset)
+                .context("failed to load stored wallet")?
+                .context("stored wallet changeset is empty")?
+        };
+
+        let rpc = bitcoincore_rpc::Client::new(
+            &format!("http://{}", settings.bitcoin_rpc_url()),
+            settings.wallet_rpc_auth()?,
+        )
+        .context("failed to create rpc client")?;
 
         let dust_limit = inner
             .peek_address(KeychainKind::External, 0)
@@ -45,13 +71,18 @@ impl Wallet {
             .script_pubkey()
             .minimal_non_dust();
 
-        Ok(Self {
+        let wallet = Self {
             inner: Mutex::new(inner),
+            store,
             rpc,
-            birthday,
+            birthday: settings.wallet_birthday(),
             dust_limit,
             synced: AtomicBool::new(false),
-        })
+        };
+
+        wallet.persist_staged()?;
+
+        Ok(wallet)
     }
 
     pub fn is_synced(&self) -> bool {
@@ -81,7 +112,10 @@ impl Wallet {
                     _ = ticker.tick() => {
                         let wallet_clone = wallet.clone();
                         let cancel_clone = cancel.clone();
-                        match task::spawn_blocking(move || wallet_clone.sync(&cancel_clone))
+                        match task::spawn_blocking(move || {
+                            wallet_clone.sync(&cancel_clone)?;
+                            Ok::<(), Error>(())
+                        })
                             .await
                             .unwrap_or_else(|err| Err(err.into()))
                         {
@@ -124,39 +158,51 @@ impl Wallet {
         }
         let mempool = emitter.mempool()?;
 
-        let mut inner = self.inner.lock();
-        for event in blocks {
-            inner.apply_block_connected_to(
-                &event.block,
-                event.block_height(),
-                event.connected_to(),
-            )?;
+        {
+            let mut inner = self.inner.lock();
+            for event in blocks {
+                inner.apply_block_connected_to(
+                    &event.block,
+                    event.block_height(),
+                    event.connected_to(),
+                )?;
+            }
+            inner.apply_unconfirmed_txs(mempool.update);
+            inner.apply_evicted_txs(mempool.evicted);
+            self.persist_staged_locked(&mut inner)?;
         }
-        inner.apply_unconfirmed_txs(mempool.update);
-        inner.apply_evicted_txs(mempool.evicted);
 
         Ok(())
     }
 
-    pub fn address(&self) -> bdk_wallet::AddressInfo {
-        self.inner
-            .lock()
-            .reveal_next_address(KeychainKind::External)
+    pub fn address(&self) -> Result<bdk_wallet::AddressInfo> {
+        task::block_in_place(|| {
+            let mut inner = self.inner.lock();
+            let address = inner.reveal_next_address(KeychainKind::External);
+
+            self.persist_staged_locked(&mut inner)?;
+
+            Ok(address)
+        })
+    }
+
+    pub(crate) fn persist_staged(&self) -> Result<bool> {
+        let mut inner = self.inner.lock();
+        self.persist_staged_locked(&mut inner)
+    }
+
+    fn persist_staged_locked(&self, inner: &mut bdk_wallet::Wallet) -> Result<bool> {
+        let Some(staged) = inner.staged_mut() else {
+            return Ok(false);
+        };
+
+        self.store.persist_wallet_changeset(staged)?;
+        let _ = staged.take();
+        Ok(true)
     }
 
     pub fn balance(&self) -> bdk_wallet::Balance {
         self.inner.lock().balance()
-    }
-
-    pub fn reserve_address(&self) -> bdk_wallet::AddressInfo {
-        let mut inner = self.inner.lock();
-        let info = inner.next_unused_address(KeychainKind::External);
-        inner.mark_used(KeychainKind::External, info.index);
-        info
-    }
-
-    pub fn release_address(&self, index: u32) {
-        self.inner.lock().unmark_used(KeychainKind::External, index);
     }
 
     pub fn dust_limit(&self) -> Amount {
@@ -167,48 +213,41 @@ impl Wallet {
         self.inner.lock().latest_checkpoint().height()
     }
 
-    pub fn confirmed_received(&self, derivation_index: u32) -> (Amount, Vec<OutPoint>) {
-        let (amount, outpoints, _) = self.check_payment(derivation_index, true);
-        (amount, outpoints)
-    }
-
-    pub fn check_payment(
-        &self,
-        derivation_index: u32,
-        confirmed_only: bool,
-    ) -> (Amount, Vec<OutPoint>, u32) {
+    pub fn check_payment(&self, derivation_index: u32, confirmed_only: bool) -> Amount {
         let inner = self.inner.lock();
-        let tip = inner.latest_checkpoint().height();
         let mut amount = Amount::ZERO;
-        let mut outpoints = Vec::new();
 
-        for utxo in inner.list_unspent() {
-            if utxo.keychain == KeychainKind::External
-                && utxo.derivation_index == derivation_index
-                && (!confirmed_only || utxo.chain_position.is_confirmed())
+        for output in inner.list_output() {
+            if output.keychain == KeychainKind::External
+                && output.derivation_index == derivation_index
+                && (!confirmed_only || output.chain_position.is_confirmed())
             {
-                amount += utxo.txout.value;
-                outpoints.push(utxo.outpoint);
+                amount += output.txout.value;
             }
         }
 
-        (amount, outpoints, tip)
+        amount
     }
 
     pub fn send(&self, to: Address, amount: Amount, fee_rate: FeeRate) -> Result<Txid> {
-        let mut inner = self.inner.lock();
-        let mut builder = inner.build_tx();
-        builder.add_recipient(to.script_pubkey(), amount);
-        builder.fee_rate(fee_rate);
-        let mut psbt = builder.finish()?;
+        let tx = {
+            let mut inner = self.inner.lock();
+            let mut builder = inner.build_tx();
+            builder.add_recipient(to.script_pubkey(), amount);
+            builder.fee_rate(fee_rate);
+            let mut psbt = builder.finish()?;
 
-        #[allow(deprecated)]
-        let finalized = inner.sign(&mut psbt, bdk_wallet::SignOptions::default())?;
+            #[allow(deprecated)]
+            let finalized = inner.sign(&mut psbt, bdk_wallet::SignOptions::default())?;
 
-        ensure!(finalized, "failed to finalize transaction");
+            ensure!(finalized, "failed to finalize transaction");
 
-        let tx = psbt.extract_tx_unchecked_fee_rate();
+            psbt.extract_tx_unchecked_fee_rate()
+        };
+
         let txid = self.rpc.send_raw_transaction(&tx)?;
+
+        self.persist_staged()?;
 
         Ok(txid)
     }
@@ -275,84 +314,71 @@ impl Wallet {
 mod tests {
     use super::*;
 
-    fn test_wallet() -> Wallet {
+    struct TestWallet {
+        wallet: Arc<Wallet>,
+        store: Arc<Store>,
+        _directory: tempfile::TempDir,
+    }
+
+    impl std::ops::Deref for TestWallet {
+        type Target = Wallet;
+
+        fn deref(&self) -> &Self::Target {
+            self.wallet.as_ref()
+        }
+    }
+
+    fn test_wallet() -> TestWallet {
         let mnemonic: Mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".parse().unwrap();
 
         let (_, descriptor, change_descriptor) =
-            Wallet::generate_from_mnemonic(mnemonic, bitcoin::Network::Regtest).unwrap();
+            Wallet::generate_from_mnemonic(mnemonic, Network::Regtest).unwrap();
 
-        Wallet::new(
-            &descriptor,
-            Some(&change_descriptor),
-            bitcoin::Network::Regtest,
-            "http://127.0.0.1:1",
-            bitcoincore_rpc::Auth::None,
-            0,
-        )
-        .unwrap()
+        let directory = tempfile::tempdir().unwrap();
+        let settings = test_settings(directory.path(), Some(descriptor), Some(change_descriptor));
+        let store = Arc::new(Store::open(settings.clone()).unwrap());
+        let wallet = Arc::new(Wallet::open(settings, store.clone()).unwrap());
+
+        TestWallet {
+            wallet,
+            store,
+            _directory: directory,
+        }
     }
 
-    fn confirm_payment(wallet: &Wallet, address: &Address, amount: Amount) {
-        let mut inner = wallet.inner.lock();
-        let tip = inner.latest_checkpoint();
-
-        let tx = Transaction {
-            version: bitcoin::transaction::Version::TWO,
-            lock_time: LockTime::ZERO,
-            input: vec![TxIn {
-                previous_output: OutPoint::new(
-                    Txid::from_byte_array([tip.height() as u8 + 1; 32]),
-                    0,
-                ),
-                ..TxIn::default()
-            }],
-            output: vec![TxOut {
-                value: amount,
-                script_pubkey: address.script_pubkey(),
-            }],
-        };
-
-        let block = Block {
-            header: Header {
-                version: block::Version::from_consensus(4),
-                prev_blockhash: tip.hash(),
-                merkle_root: bitcoin::TxMerkleNode::from_raw_hash(
-                    BlockHash::all_zeros().to_raw_hash(),
-                ),
-                time: 0,
-                bits: CompactTarget::from_consensus(0x207fffff),
-                nonce: 0,
-            },
-            txdata: vec![tx],
-        };
-
-        inner
-            .apply_block_connected_to(&block, tip.height() + 1, tip.block_id())
-            .unwrap();
+    fn test_settings(
+        data_dir: &Path,
+        descriptor: Option<String>,
+        change_descriptor: Option<String>,
+    ) -> Arc<Settings> {
+        Arc::new(
+            Settings::from_wallet_options(
+                BitcoinOptions {
+                    chain: Some(Chain::Regtest),
+                    bitcoin_data_dir: None,
+                    bitcoin_rpc_port: Some(1),
+                    bitcoin_rpc_cookie_file: None,
+                    bitcoin_rpc_username: Some("user".into()),
+                    bitcoin_rpc_password: Some("pass".into()),
+                },
+                Some(data_dir.to_path_buf()),
+                descriptor,
+                change_descriptor,
+                0,
+            )
+            .unwrap(),
+        )
     }
 
-    #[test]
-    fn generate() {
-        let (mnemonic, descriptor, change_descriptor) =
-            Wallet::generate(bitcoin::Network::Regtest).unwrap();
+    fn persisted_next_external_index(store: &Store) -> u32 {
+        let changeset = store.read_wallet_changeset().unwrap();
+        let mut wallet = bdk_wallet::Wallet::load()
+            .check_network(Network::Regtest)
+            .load_wallet_no_persist(changeset)
+            .unwrap()
+            .expect("wallet state persisted");
 
-        assert_eq!(mnemonic.split_whitespace().count(), 12);
-        assert!(descriptor.starts_with("tr("));
-        assert!(change_descriptor.starts_with("tr("));
-        assert_ne!(descriptor, change_descriptor);
-
-        let wallet = Wallet::new(
-            &descriptor,
-            Some(&change_descriptor),
-            bitcoin::Network::Regtest,
-            "http://127.0.0.1:1",
-            bitcoincore_rpc::Auth::None,
-            0,
-        )
-        .unwrap();
-
-        let address = wallet.address();
-        assert!(address.address.to_string().starts_with("bcrt1p"));
+        wallet.reveal_next_address(KeychainKind::External).index
     }
 
     #[test]
@@ -369,63 +395,48 @@ mod tests {
     }
 
     #[test]
-    fn address_reservation() {
+    fn consecutive_addresses_have_increasing_indexes() {
         let wallet = test_wallet();
 
-        let a = wallet.reserve_address();
-        let b = wallet.reserve_address();
+        assert_eq!(wallet.address().unwrap().index, 0);
+        assert_eq!(wallet.address().unwrap().index, 1);
+        assert_eq!(wallet.address().unwrap().index, 2);
+    }
+
+    #[test]
+    fn address_returns_distinct_reveals() {
+        let wallet = test_wallet();
+
+        let a = wallet.address().unwrap();
+        let b = wallet.address().unwrap();
         assert_ne!(a.index, b.index);
         assert_ne!(a.address, b.address);
-
-        let address = a.address.clone();
-        wallet.release_address(a.index);
-        let c = wallet.reserve_address();
-        assert_eq!(c.address, address);
     }
 
     #[test]
-    fn confirmed_received() {
+    fn concurrent_addresses_are_persisted() {
         let wallet = test_wallet();
-        let info_a = wallet.reserve_address();
-        let info_b = wallet.reserve_address();
+        let count = 16;
+        let barrier = Arc::new(std::sync::Barrier::new(count));
 
-        confirm_payment(&wallet, &info_a.address, Amount::from_sat(500));
-        confirm_payment(&wallet, &info_a.address, Amount::from_sat(700));
+        let mut indexes = (0..count)
+            .map(|_| {
+                let wallet = wallet.wallet.clone();
+                let barrier = barrier.clone();
 
-        let (amount, outpoints) = wallet.confirmed_received(info_a.index);
-        assert_eq!(amount, Amount::from_sat(1200));
-        assert_eq!(outpoints.len(), 2);
+                thread::spawn(move || {
+                    barrier.wait();
+                    wallet.address().unwrap().index
+                })
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|thread| thread.join().unwrap())
+            .collect::<Vec<_>>();
 
-        let (amount, outpoints) = wallet.confirmed_received(info_b.index);
-        assert_eq!(amount, Amount::ZERO);
-        assert!(outpoints.is_empty());
-    }
+        indexes.sort();
 
-    #[test]
-    fn confirmed_received_ignores_unconfirmed() {
-        let wallet = test_wallet();
-        let info = wallet.reserve_address();
-
-        let tx = Transaction {
-            version: bitcoin::transaction::Version::TWO,
-            lock_time: LockTime::ZERO,
-            input: vec![TxIn {
-                previous_output: OutPoint::new(Txid::from_byte_array([1; 32]), 0),
-                ..TxIn::default()
-            }],
-            output: vec![TxOut {
-                value: Amount::from_sat(1000),
-                script_pubkey: info.address.script_pubkey(),
-            }],
-        };
-        wallet.inner.lock().apply_unconfirmed_txs([(tx, 0)]);
-
-        let (amount, outpoints) = wallet.confirmed_received(info.index);
-        assert_eq!(amount, Amount::ZERO);
-        assert!(outpoints.is_empty());
-
-        let (amount, outpoints, _) = wallet.check_payment(info.index, false);
-        assert_eq!(amount, Amount::from_sat(1000));
-        assert_eq!(outpoints.len(), 1);
+        assert_eq!(indexes, (0..count as u32).collect::<Vec<_>>());
+        assert_eq!(persisted_next_external_index(&wallet.store), count as u32);
     }
 }

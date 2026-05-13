@@ -7,12 +7,16 @@ fn generate_descriptor() -> String {
 }
 
 fn dust_limit(descriptor: &str) -> u64 {
+    let directory = TempDir::new().unwrap();
+    let data_dir = directory.path().to_str().unwrap();
+
     CommandBuilder::new(format!(
         "wallet \
          --chain regtest \
          --bitcoin-rpc-port 1 \
          --bitcoin-rpc-username foo \
          --bitcoin-rpc-password bar \
+         --data-dir {data_dir} \
          --descriptor {descriptor} \
          receive"
     ))
@@ -25,12 +29,16 @@ fn dust_limit(descriptor: &str) -> u64 {
 }
 
 async fn fund_wallet(bitcoind: &Bitcoind, descriptor: &str) -> String {
+    let directory = TempDir::new().unwrap();
+    let data_dir = directory.path().to_str().unwrap();
+
     let address = CommandBuilder::new(format!(
         "wallet \
          --chain regtest \
          --bitcoin-rpc-port {} \
          --bitcoin-rpc-username {} \
          --bitcoin-rpc-password {} \
+         --data-dir {data_dir} \
          --descriptor {descriptor} \
          receive",
         bitcoind.rpc_port, bitcoind.rpc_user, bitcoind.rpc_password,
@@ -45,20 +53,43 @@ async fn fund_wallet(bitcoind: &Bitcoind, descriptor: &str) -> String {
     address
 }
 
-async fn pay_address(bitcoind: &Bitcoind, funding_descriptor: &str, address: &str, amount: u64) {
+async fn send_to_address_without_mining(
+    bitcoind: &Bitcoind,
+    funding_descriptor: &str,
+    address: &str,
+    amount: u64,
+) -> bitcoin::Txid {
+    let directory = TempDir::new().unwrap();
+    let data_dir = directory.path().to_str().unwrap();
+
     CommandBuilder::new(format!(
         "wallet \
          --chain regtest \
          --bitcoin-rpc-port {} \
          --bitcoin-rpc-username {} \
          --bitcoin-rpc-password {} \
+         --data-dir {data_dir} \
          --descriptor {funding_descriptor} \
          send --fee-rate 1 --address {address} --amount {amount}",
         bitcoind.rpc_port, bitcoind.rpc_user, bitcoind.rpc_password,
     ))
-    .run_and_deserialize_output::<para::subcommand::wallet::send::Output>();
+    .run_and_deserialize_output::<para::subcommand::wallet::send::Output>()
+    .txid
+}
+
+async fn pay_address(bitcoind: &Bitcoind, funding_descriptor: &str, address: &str, amount: u64) {
+    send_to_address_without_mining(bitcoind, funding_descriptor, address, amount).await;
 
     generate_to_address(bitcoind, 1, address).await;
+}
+
+async fn assert_in_mempool(bitcoind: &Bitcoind, txid: bitcoin::Txid) {
+    bitcoind
+        .client()
+        .unwrap()
+        .call_raw::<serde_json::Value>("getmempoolentry", &[json!(txid.to_string())])
+        .await
+        .unwrap();
 }
 
 async fn add_order(
@@ -442,6 +473,104 @@ async fn order_detail() {
     assert!(detail.sessions.is_empty());
     assert_eq!(detail.downstream.accepted_shares, 0);
     assert_eq!(detail.downstream.rejected_shares, 0);
+}
+
+#[tokio::test]
+#[timeout(120000)]
+async fn order_activates_after_payment_output_is_spent_before_confirmation() {
+    let pool_bitcoind = bitcoind();
+    let wallet_bitcoind = spawn_regtest();
+    let descriptor = generate_descriptor();
+    let funding_descriptor = generate_descriptor();
+    let funding_address = fund_wallet(&wallet_bitcoind, &funding_descriptor).await;
+
+    let pool_username = signet_username();
+    let miner_address = fund_wallet(&wallet_bitcoind, &generate_descriptor()).await;
+    let miner_username = format!("{miner_address}.miner");
+
+    let pool = TestPool::spawn_with_args(&pool_bitcoind, "--start-diff 0.00001");
+
+    let router = TestRouter::spawn(
+        &descriptor,
+        &wallet_bitcoind,
+        "--start-diff 0.00001 --tick-interval 1 --hash-price 1000",
+    );
+
+    let (id, address, amount) = add_order(
+        &router,
+        &format!("{pool_username}@{}", pool.stratum_endpoint()),
+        HashDays::new(1e15).unwrap(),
+        HashPrice::from_sats(100_000),
+    )
+    .await;
+
+    let parent_txid =
+        send_to_address_without_mining(&wallet_bitcoind, &funding_descriptor, &address, amount)
+            .await;
+    assert_in_mempool(&wallet_bitcoind, parent_txid).await;
+
+    let child_amount = amount
+        .checked_sub(10_000)
+        .expect("test payment amount should leave room for fees");
+    let directory = TempDir::new().unwrap();
+    let data_dir = directory.path().to_str().unwrap();
+    let child_txid = CommandBuilder::new(format!(
+        "wallet \
+         --chain regtest \
+         --bitcoin-rpc-port {} \
+         --bitcoin-rpc-username {} \
+         --bitcoin-rpc-password {} \
+         --data-dir {data_dir} \
+         --descriptor {descriptor} \
+         send --fee-rate 1 --address {funding_address} --amount {child_amount}",
+        wallet_bitcoind.rpc_port, wallet_bitcoind.rpc_user, wallet_bitcoind.rpc_password,
+    ))
+    .run_and_deserialize_output::<para::subcommand::wallet::send::Output>()
+    .txid;
+    assert_in_mempool(&wallet_bitcoind, child_txid).await;
+
+    generate_to_address(&wallet_bitcoind, 1, &funding_address).await;
+
+    timeout(Duration::from_secs(30), async {
+        loop {
+            if let Ok(detail) = router.get_order(id).await
+                && detail.status == OrderStatus::Active
+                && detail
+                    .upstream
+                    .as_ref()
+                    .is_some_and(|upstream| upstream.connected)
+            {
+                break;
+            }
+            sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("order should activate after the spent payment output confirms");
+
+    let mut miner = CommandBuilder::new(format!(
+        "miner {} --mode continuous --username {} --cpu-cores 1",
+        router.stratum_endpoint(),
+        miner_username
+    ))
+    .spawn();
+
+    timeout(Duration::from_secs(60), async {
+        loop {
+            if let Ok(detail) = router.get_order(id).await
+                && (detail.downstream.accepted_shares > 0
+                    || detail.downstream.accepted_work.as_f64() > 0.0)
+            {
+                break;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("active order should receive miner work");
+
+    miner.kill().unwrap();
+    miner.wait().unwrap();
 }
 
 #[tokio::test]

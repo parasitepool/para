@@ -52,6 +52,7 @@ impl From<RouterError> for ServerError {
             }
             RouterError::WalletSyncing
             | RouterError::WalletRequired
+            | RouterError::WalletPersistence { .. }
             | RouterError::ActivationFailed { .. } => Self::ServiceUnavailable(error.to_string()),
         }
     }

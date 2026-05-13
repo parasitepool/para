@@ -6,10 +6,33 @@ use {
     },
 };
 
+fn wallet_command_error(args: String) -> String {
+    let output = CommandBuilder::new(args)
+        .spawn()
+        .wait_with_output()
+        .unwrap();
+
+    assert!(!output.status.success());
+
+    format!(
+        "{}{}",
+        std::str::from_utf8(&output.stdout).unwrap(),
+        std::str::from_utf8(&output.stderr).unwrap(),
+    )
+}
+
+fn generate_wallet() -> generate::Output {
+    CommandBuilder::new("wallet --chain regtest generate").run_and_deserialize_output()
+}
+
 #[tokio::test]
 #[timeout(60000)]
 async fn end_to_end() {
     let bitcoind = spawn_regtest();
+    let sender_dir = TempDir::new().unwrap();
+    let sender_data_dir = sender_dir.path().to_str().unwrap();
+    let receiver_dir = TempDir::new().unwrap();
+    let receiver_data_dir = receiver_dir.path().to_str().unwrap();
 
     let sender_descriptor = CommandBuilder::new("wallet --chain regtest generate")
         .run_and_deserialize_output::<generate::Output>()
@@ -21,6 +44,7 @@ async fn end_to_end() {
          --bitcoin-rpc-port {} \
          --bitcoin-rpc-username {} \
          --bitcoin-rpc-password {} \
+         --data-dir {sender_data_dir} \
          --descriptor {sender_descriptor} \
          receive",
         bitcoind.rpc_port, bitcoind.rpc_user, bitcoind.rpc_password,
@@ -41,6 +65,7 @@ async fn end_to_end() {
          --bitcoin-rpc-port {} \
          --bitcoin-rpc-username {} \
          --bitcoin-rpc-password {} \
+         --data-dir {sender_data_dir} \
          --descriptor {sender_descriptor} \
          balance",
         bitcoind.rpc_port, bitcoind.rpc_user, bitcoind.rpc_password,
@@ -59,6 +84,7 @@ async fn end_to_end() {
          --bitcoin-rpc-port {} \
          --bitcoin-rpc-username {} \
          --bitcoin-rpc-password {} \
+         --data-dir {receiver_data_dir} \
          --descriptor {receiver_descriptor} \
          receive",
         bitcoind.rpc_port, bitcoind.rpc_user, bitcoind.rpc_password,
@@ -72,6 +98,7 @@ async fn end_to_end() {
          --bitcoin-rpc-port {} \
          --bitcoin-rpc-username {} \
          --bitcoin-rpc-password {} \
+         --data-dir {sender_data_dir} \
          --descriptor {sender_descriptor} \
          send --fee-rate 3 --address {} --amount 50000",
         bitcoind.rpc_port,
@@ -102,6 +129,7 @@ async fn end_to_end() {
          --bitcoin-rpc-port {} \
          --bitcoin-rpc-username {} \
          --bitcoin-rpc-password {} \
+         --data-dir {receiver_data_dir} \
          --descriptor {receiver_descriptor} \
          balance",
         bitcoind.rpc_port, bitcoind.rpc_user, bitcoind.rpc_password,
@@ -115,6 +143,10 @@ async fn end_to_end() {
 #[timeout(60000)]
 async fn change_descriptor() {
     let bitcoind = spawn_regtest();
+    let sender_dir = TempDir::new().unwrap();
+    let sender_data_dir = sender_dir.path().to_str().unwrap();
+    let receiver_dir = TempDir::new().unwrap();
+    let receiver_data_dir = receiver_dir.path().to_str().unwrap();
 
     let generate::Output {
         descriptor,
@@ -128,6 +160,7 @@ async fn change_descriptor() {
          --bitcoin-rpc-port {} \
          --bitcoin-rpc-username {} \
          --bitcoin-rpc-password {} \
+         --data-dir {sender_data_dir} \
          --descriptor {descriptor} \
          --change-descriptor {change_descriptor} \
          receive",
@@ -153,6 +186,7 @@ async fn change_descriptor() {
          --bitcoin-rpc-port {} \
          --bitcoin-rpc-username {} \
          --bitcoin-rpc-password {} \
+         --data-dir {receiver_data_dir} \
          --descriptor {receiver_descriptor} \
          receive",
         bitcoind.rpc_port, bitcoind.rpc_user, bitcoind.rpc_password,
@@ -166,6 +200,7 @@ async fn change_descriptor() {
          --bitcoin-rpc-port {} \
          --bitcoin-rpc-username {} \
          --bitcoin-rpc-password {} \
+         --data-dir {sender_data_dir} \
          --descriptor {descriptor} \
          --change-descriptor {change_descriptor} \
          balance",
@@ -181,6 +216,7 @@ async fn change_descriptor() {
          --bitcoin-rpc-port {} \
          --bitcoin-rpc-username {} \
          --bitcoin-rpc-password {} \
+         --data-dir {sender_data_dir} \
          --descriptor {descriptor} \
          --change-descriptor {change_descriptor} \
          send --fee-rate 1 --address {} --amount 10000",
@@ -199,6 +235,7 @@ async fn change_descriptor() {
          --bitcoin-rpc-port {} \
          --bitcoin-rpc-username {} \
          --bitcoin-rpc-password {} \
+         --data-dir {sender_data_dir} \
          --descriptor {descriptor} \
          --change-descriptor {change_descriptor} \
          balance",
@@ -208,4 +245,161 @@ async fn change_descriptor() {
 
     assert!(balance_after.total < total_before);
     assert!(balance_after.total > total_before - 20000);
+}
+
+#[test]
+fn receive_persists_next_address() {
+    let directory = TempDir::new().unwrap();
+    let data_dir = directory.path().to_str().unwrap();
+    let descriptor = generate_wallet().descriptor;
+
+    let first = CommandBuilder::new(format!(
+        "wallet \
+         --chain regtest \
+         --bitcoin-rpc-port 1 \
+         --bitcoin-rpc-username foo \
+         --bitcoin-rpc-password bar \
+         --data-dir {data_dir} \
+         --descriptor {descriptor} \
+         receive",
+    ))
+    .run_and_deserialize_output::<receive::Output>()
+    .address;
+
+    let second = CommandBuilder::new(format!(
+        "wallet \
+         --chain regtest \
+         --bitcoin-rpc-port 1 \
+         --bitcoin-rpc-username foo \
+         --bitcoin-rpc-password bar \
+         --data-dir {data_dir} \
+         receive",
+    ))
+    .run_and_deserialize_output::<receive::Output>()
+    .address;
+
+    assert_ne!(first, second);
+}
+
+#[test]
+fn generate_outputs_usable_regtest_descriptors() {
+    let directory = TempDir::new().unwrap();
+    let data_dir = directory.path().to_str().unwrap();
+    let output = generate_wallet();
+
+    assert_eq!(output.mnemonic.split_whitespace().count(), 12);
+    assert!(output.descriptor.starts_with("tr("));
+    assert!(output.change_descriptor.starts_with("tr("));
+    assert_ne!(output.descriptor, output.change_descriptor);
+
+    let address = CommandBuilder::new(format!(
+        "wallet \
+         --chain regtest \
+         --bitcoin-rpc-port 1 \
+         --bitcoin-rpc-username foo \
+         --bitcoin-rpc-password bar \
+         --data-dir {data_dir} \
+         --descriptor {} \
+         --change-descriptor {} \
+         receive",
+        output.descriptor, output.change_descriptor,
+    ))
+    .run_and_deserialize_output::<receive::Output>()
+    .address;
+
+    assert!(address.assume_checked().to_string().starts_with("bcrt1p"));
+}
+
+#[test]
+fn receive_first_run_requires_descriptor() {
+    let directory = TempDir::new().unwrap();
+    let data_dir = directory.path().to_str().unwrap();
+
+    let error = wallet_command_error(format!(
+        "wallet \
+         --chain regtest \
+         --bitcoin-rpc-port 1 \
+         --bitcoin-rpc-username foo \
+         --bitcoin-rpc-password bar \
+         --data-dir {data_dir} \
+         receive",
+    ));
+
+    assert!(error.contains("descriptor required"));
+}
+
+#[test]
+fn receive_rejects_different_external_descriptor() {
+    let directory = TempDir::new().unwrap();
+    let data_dir = directory.path().to_str().unwrap();
+    let first = generate_wallet();
+    let second = generate_wallet();
+
+    CommandBuilder::new(format!(
+        "wallet \
+         --chain regtest \
+         --bitcoin-rpc-port 1 \
+         --bitcoin-rpc-username foo \
+         --bitcoin-rpc-password bar \
+         --data-dir {data_dir} \
+         --descriptor {} \
+         --change-descriptor {} \
+         receive",
+        first.descriptor, first.change_descriptor,
+    ))
+    .run_and_deserialize_output::<receive::Output>();
+
+    let error = wallet_command_error(format!(
+        "wallet \
+         --chain regtest \
+         --bitcoin-rpc-port 1 \
+         --bitcoin-rpc-username foo \
+         --bitcoin-rpc-password bar \
+         --data-dir {data_dir} \
+         --descriptor {} \
+         --change-descriptor {} \
+         receive",
+        second.descriptor, first.change_descriptor,
+    ));
+
+    assert!(error.contains("Descriptor mismatch"));
+    assert!(error.contains("External"));
+}
+
+#[test]
+fn receive_rejects_different_change_descriptor() {
+    let directory = TempDir::new().unwrap();
+    let data_dir = directory.path().to_str().unwrap();
+    let first = generate_wallet();
+    let second = generate_wallet();
+
+    CommandBuilder::new(format!(
+        "wallet \
+         --chain regtest \
+         --bitcoin-rpc-port 1 \
+         --bitcoin-rpc-username foo \
+         --bitcoin-rpc-password bar \
+         --data-dir {data_dir} \
+         --descriptor {} \
+         --change-descriptor {} \
+         receive",
+        first.descriptor, first.change_descriptor,
+    ))
+    .run_and_deserialize_output::<receive::Output>();
+
+    let error = wallet_command_error(format!(
+        "wallet \
+         --chain regtest \
+         --bitcoin-rpc-port 1 \
+         --bitcoin-rpc-username foo \
+         --bitcoin-rpc-password bar \
+         --data-dir {data_dir} \
+         --descriptor {} \
+         --change-descriptor {} \
+         receive",
+        first.descriptor, second.change_descriptor,
+    ));
+
+    assert!(error.contains("Descriptor mismatch"));
+    assert!(error.contains("Internal"));
 }

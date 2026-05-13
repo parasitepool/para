@@ -86,6 +86,7 @@ router:
   cargo run --features reload -- \
     router \
     --chain signet \
+    --data-dir copr/para \
     --bitcoin-rpc-username satoshi \
     --bitcoin-rpc-password nakamoto \
     --bitcoin-rpc-port 38332 \
@@ -104,6 +105,7 @@ router:
 wallet +args='balance':
   cargo run \
     wallet \
+    --data-dir copr/para/wallet \
     --chain signet \
     --bitcoin-rpc-username satoshi \
     --bitcoin-rpc-password nakamoto \

@@ -23,17 +23,9 @@ impl RouterCommand {
         );
 
         let bitcoin_client = Arc::new(settings.bitcoin_rpc_client().await?);
+        let store = Arc::new(Store::open(settings.clone())?);
 
-        let rpc_url = format!("http://{}", settings.bitcoin_rpc_url());
-
-        let wallet = Arc::new(Wallet::new(
-            settings.descriptor().context("--descriptor is required")?,
-            settings.change_descriptor(),
-            settings.chain().network(),
-            &rpc_url,
-            settings.wallet_rpc_auth()?,
-            settings.wallet_birthday(),
-        )?);
+        let wallet = Arc::new(Wallet::open(settings.clone(), store.clone())?);
 
         wallet.spawn(settings.tick_interval(), cancel_token.clone(), &tasks);
 

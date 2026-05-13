@@ -106,6 +106,25 @@ impl Settings {
         Ok(settings)
     }
 
+    pub(crate) fn from_wallet_options(
+        bitcoin: BitcoinOptions,
+        data_dir: Option<PathBuf>,
+        descriptor: Option<String>,
+        change_descriptor: Option<String>,
+        wallet_birthday: u32,
+    ) -> Result<Self> {
+        let settings = Self {
+            data_dir,
+            descriptor,
+            change_descriptor,
+            wallet_birthday,
+            ..Self::from_bitcoin_options_unvalidated(bitcoin)
+        };
+
+        settings.validate()?;
+        Ok(settings)
+    }
+
     fn from_common_options(common: CommonOptions) -> Result<Self> {
         let CommonOptions {
             address,
@@ -364,6 +383,17 @@ impl Settings {
         } else {
             self.acme_cache.clone()
         }
+    }
+
+    pub(crate) fn store_path(&self) -> Result<PathBuf> {
+        let data_dir = match &self.data_dir {
+            Some(data_dir) => data_dir.clone(),
+            None => dirs::data_dir()
+                .ok_or_else(|| anyhow!("failed to get data dir"))?
+                .join("para"),
+        };
+
+        Ok(self.chain.join_with_data_dir(data_dir).join("para.redb"))
     }
 
     fn validate(&self) -> Result<()> {
@@ -1217,6 +1247,33 @@ mod tests {
             |s| {
                 assert_eq!(s.acme_cache_path(), PathBuf::from("/foo/acme-cache"));
             },
+        );
+    }
+
+    #[test]
+    fn store_path_appends_chain_subdir() {
+        #[track_caller]
+        fn case(args: &str, expected: &str) {
+            let options = parse_router_options(args);
+            let settings = Settings::from_router_options(options).unwrap();
+            assert_eq!(settings.store_path().unwrap(), PathBuf::from(expected));
+        }
+
+        case(
+            "para router --descriptor foo --hash-price 1000 --data-dir /foo",
+            "/foo/para.redb",
+        );
+        case(
+            "para router --descriptor foo --hash-price 1000 --data-dir /foo --chain regtest",
+            "/foo/regtest/para.redb",
+        );
+        case(
+            "para router --descriptor foo --hash-price 1000 --data-dir /foo --chain signet",
+            "/foo/signet/para.redb",
+        );
+        case(
+            "para router --descriptor foo --hash-price 1000 --data-dir /foo --chain testnet",
+            "/foo/testnet3/para.redb",
         );
     }
 

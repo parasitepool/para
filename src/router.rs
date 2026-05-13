@@ -72,7 +72,10 @@ impl Router {
             .ok_or(RouterError::HashPriceOverflow)?
             .max(wallet.dust_limit());
 
-        let address_info = wallet.reserve_address();
+        let address_info = wallet
+            .address()
+            .map_err(|error| RouterError::WalletPersistence { error })?;
+
         let bucket = Bucket {
             target,
             payment: Payment::new(
@@ -82,6 +85,7 @@ impl Router {
                 wallet.tip(),
             ),
         };
+
         let order = self.new_order(upstream_target, Some(bucket));
 
         self.orders.write().add(order.clone());
@@ -354,23 +358,21 @@ impl Router {
             tokio::select! {
                 biased;
                 _ = order.cancel.cancelled() => {
-                    let (received, _) = wallet.confirmed_received(payment.derivation_index);
+                    let received = wallet.check_payment(payment.derivation_index, true);
 
                     if received > Amount::ZERO {
                         order.terminate(OrderStatus::PaidLate);
-                    } else {
-                        wallet.release_address(payment.derivation_index);
                     }
 
                     return false;
                 }
                 _ = ticker.tick() => {
-                    let (received, outpoints, tip) = wallet.check_payment(
+                    let received = wallet.check_payment(
                         payment.derivation_index,
                         !allow_zero_conf,
                     );
 
-                    payment.record_outpoints(&outpoints);
+                    let tip = wallet.tip();
 
                     if order.ready_for_activation(payment, received, tip) {
                         return true;
@@ -381,7 +383,6 @@ impl Router {
                         OrderStatus::Expired
                             if tip >= payment.created_at_height + PAYMENT_TIMEOUT + RECLAIM_WINDOW =>
                         {
-                            wallet.release_address(payment.derivation_index);
                             return false;
                         }
                         _ => {}
@@ -534,7 +535,31 @@ impl StatusLine for Router {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use {super::*, crate::settings::CommonOptions, bdk_wallet::KeychainKind};
+
+    struct TestWallet {
+        wallet: Arc<Wallet>,
+        _directory: tempfile::TempDir,
+    }
+
+    struct TestRouter {
+        router: Arc<Router>,
+        _wallet: Option<TestWallet>,
+    }
+
+    impl std::ops::Deref for TestRouter {
+        type Target = Arc<Router>;
+
+        fn deref(&self) -> &Self::Target {
+            &self.router
+        }
+    }
+
+    impl AsRef<Router> for TestRouter {
+        fn as_ref(&self) -> &Router {
+            self.router.as_ref()
+        }
+    }
 
     fn test_address() -> Address {
         "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc"
@@ -543,7 +568,24 @@ mod tests {
             .assume_checked()
     }
 
-    fn test_wallet() -> Wallet {
+    fn test_wallet() -> TestWallet {
+        let (descriptor, change_descriptor) = test_wallet_descriptors();
+        let directory = tempfile::tempdir().unwrap();
+        let settings = wallet_settings_with_descriptors_and_data_dir(
+            descriptor,
+            change_descriptor,
+            directory.path(),
+        );
+        let store = Arc::new(Store::open(settings.clone()).unwrap());
+        let wallet = Arc::new(Wallet::open(settings, store).unwrap());
+
+        TestWallet {
+            wallet,
+            _directory: directory,
+        }
+    }
+
+    fn test_wallet_descriptors() -> (String, String) {
         let mnemonic: bdk_wallet::keys::bip39::Mnemonic =
             "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
                 .parse()
@@ -552,25 +594,144 @@ mod tests {
         let (_, descriptor, change_descriptor) =
             Wallet::generate_from_mnemonic(mnemonic, bitcoin::Network::Regtest).unwrap();
 
-        Wallet::new(
-            &descriptor,
-            Some(&change_descriptor),
-            bitcoin::Network::Regtest,
-            "http://127.0.0.1:1",
-            bdk_bitcoind_rpc::bitcoincore_rpc::Auth::None,
-            0,
-        )
-        .unwrap()
+        (descriptor, change_descriptor)
     }
 
-    fn test_router() -> Arc<Router> {
+    fn test_router() -> TestRouter {
+        let wallet = test_wallet();
+        let router = router_with_wallet(Some(wallet.wallet.clone()));
+
+        TestRouter {
+            router,
+            _wallet: Some(wallet),
+        }
+    }
+
+    fn test_router_with_wallet(wallet: Option<Arc<Wallet>>) -> TestRouter {
+        TestRouter {
+            router: router_with_wallet(wallet),
+            _wallet: None,
+        }
+    }
+
+    fn test_settings(data_dir: &Path) -> Arc<Settings> {
+        Arc::new(
+            Settings::from_proxy_options(ProxyOptions {
+                common: CommonOptions {
+                    address: "127.0.0.1".into(),
+                    port: 0,
+                    http_port: None,
+                    bitcoin: BitcoinOptions {
+                        chain: Some(Chain::Regtest),
+                        bitcoin_data_dir: None,
+                        bitcoin_rpc_port: Some(1),
+                        bitcoin_rpc_cookie_file: None,
+                        bitcoin_rpc_username: Some("user".into()),
+                        bitcoin_rpc_password: Some("pass".into()),
+                    },
+                    start_diff: Difficulty::default(),
+                    min_diff: None,
+                    max_diff: None,
+                    vardiff_period: 3.33,
+                    vardiff_window: 300.0,
+                    acme_domain: Vec::new(),
+                    acme_contact: Vec::new(),
+                    acme_cache: PathBuf::from("acme-cache"),
+                    data_dir: Some(data_dir.to_path_buf()),
+                },
+                upstream: "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@127.0.0.1:1"
+                    .parse()
+                    .unwrap(),
+                timeout: 30,
+                enonce1_extension_size: ENONCE1_EXTENSION_SIZE,
+            })
+            .unwrap(),
+        )
+    }
+
+    fn router_with_wallet(wallet: Option<Arc<Wallet>>) -> Arc<Router> {
         Arc::new(Router::new(
             Arc::new(Settings::default()),
             Arc::new(Metatron::new()),
-            Some(Arc::new(test_wallet())),
+            wallet,
             TaskTracker::new(),
             CancellationToken::new(),
         ))
+    }
+
+    fn wallet_settings_without_descriptors() -> Arc<Settings> {
+        Arc::new(
+            Settings::from_bitcoin_options(BitcoinOptions {
+                chain: Some(Chain::Regtest),
+                bitcoin_data_dir: None,
+                bitcoin_rpc_port: Some(1),
+                bitcoin_rpc_cookie_file: None,
+                bitcoin_rpc_username: Some("user".into()),
+                bitcoin_rpc_password: Some("pass".into()),
+            })
+            .unwrap(),
+        )
+    }
+
+    fn wallet_settings_with_descriptors(data_dir: &Path) -> Arc<Settings> {
+        let (descriptor, change_descriptor) = test_wallet_descriptors();
+
+        wallet_settings_with_descriptors_and_data_dir(descriptor, change_descriptor, data_dir)
+    }
+
+    fn wallet_settings_with_descriptors_and_data_dir(
+        descriptor: String,
+        change_descriptor: String,
+        data_dir: &Path,
+    ) -> Arc<Settings> {
+        Arc::new(
+            Settings::from_wallet_options(
+                BitcoinOptions {
+                    chain: Some(Chain::Regtest),
+                    bitcoin_data_dir: None,
+                    bitcoin_rpc_port: Some(1),
+                    bitcoin_rpc_cookie_file: None,
+                    bitcoin_rpc_username: Some("user".into()),
+                    bitcoin_rpc_password: Some("pass".into()),
+                },
+                Some(data_dir.to_path_buf()),
+                Some(descriptor),
+                Some(change_descriptor),
+                0,
+            )
+            .unwrap(),
+        )
+    }
+
+    fn persisted_next_external_index(store: &Store) -> u32 {
+        let changeset = store.read_wallet_changeset().unwrap();
+        let mut wallet = bdk_wallet::Wallet::load()
+            .check_network(Network::Regtest)
+            .load_wallet_no_persist(changeset)
+            .unwrap()
+            .expect("wallet state persisted");
+
+        wallet.reveal_next_address(KeychainKind::External).index
+    }
+
+    fn test_upstream_target() -> UpstreamTarget {
+        "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.foo@bar:3333"
+            .parse()
+            .unwrap()
+    }
+
+    async fn add_test_bucket_order(router: &Arc<Router>) -> Arc<Order> {
+        let wallet = router.wallet.as_ref().unwrap();
+        wallet.mark_synced();
+
+        router
+            .add_bucket_order(
+                test_upstream_target(),
+                hashdays(1.0),
+                router.settings.hash_price(),
+            )
+            .await
+            .unwrap()
     }
 
     fn test_order(
@@ -1065,7 +1226,7 @@ mod tests {
         case(OrderStatus::Disconnected);
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn add_order_rejects_bucket_before_sync() {
         let router = test_router();
         let target: UpstreamTarget = "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.foo@bar:3333"
@@ -1089,6 +1250,102 @@ mod tests {
             .add_bucket_order(target, hashdays(1.0), price)
             .await
             .unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn bucket_order_creation_persists_revealed_address_before_returning() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::open(test_settings(directory.path())).unwrap());
+        let wallet = Arc::new(
+            Wallet::open(
+                wallet_settings_with_descriptors(directory.path()),
+                store.clone(),
+            )
+            .unwrap(),
+        );
+        let router = test_router_with_wallet(Some(wallet));
+
+        let order = add_test_bucket_order(&router).await;
+        let payment = &order.bucket.as_ref().unwrap().payment;
+
+        assert_eq!(
+            persisted_next_external_index(&store),
+            payment.derivation_index + 1,
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn expired_unpaid_bucket_order_does_not_reuse_address() {
+        let router = test_router();
+
+        let first = add_test_bucket_order(&router).await;
+        let first_payment = &first.bucket.as_ref().unwrap().payment;
+        let first_index = first_payment.derivation_index;
+        let first_address = first_payment.address.clone();
+
+        assert!(!first.ready_for_activation(
+            first_payment,
+            Amount::ZERO,
+            first_payment.created_at_height + PAYMENT_TIMEOUT,
+        ));
+        assert_eq!(first.status(), OrderStatus::Expired);
+
+        let second = add_test_bucket_order(&router).await;
+        let second_payment = &second.bucket.as_ref().unwrap().payment;
+
+        assert_eq!(second_payment.derivation_index, first_index + 1);
+        assert_ne!(second_payment.address, first_address);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn restart_after_unpaid_bucket_order_continues_at_next_address() {
+        let directory = tempfile::tempdir().unwrap();
+        let settings = test_settings(directory.path());
+        let store = Arc::new(Store::open(settings.clone()).unwrap());
+        let wallet = Arc::new(
+            Wallet::open(
+                wallet_settings_with_descriptors(directory.path()),
+                store.clone(),
+            )
+            .unwrap(),
+        );
+        let router = test_router_with_wallet(Some(wallet));
+
+        let first = add_test_bucket_order(&router).await;
+        let first_index = first.bucket.as_ref().unwrap().payment.derivation_index;
+
+        router.cancel_order(first.id).unwrap();
+        router.tasks.close();
+        timeout(Duration::from_secs(1), router.tasks.wait())
+            .await
+            .expect("order monitor should stop after cancellation");
+        drop(router);
+        drop(store);
+
+        let store = Arc::new(Store::open(settings).unwrap());
+        let wallet =
+            Arc::new(Wallet::open(wallet_settings_without_descriptors(), store.clone()).unwrap());
+        let restarted = test_router_with_wallet(Some(wallet));
+
+        let second = add_test_bucket_order(&restarted).await;
+        let second_index = second.bucket.as_ref().unwrap().payment.derivation_index;
+
+        assert_eq!(second_index, first_index + 1);
+    }
+
+    #[tokio::test]
+    async fn add_order_requires_wallet_for_bucket() {
+        let router = test_router_with_wallet(None);
+        let target: UpstreamTarget = "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.foo@bar:3333"
+            .parse()
+            .unwrap();
+
+        assert!(matches!(
+            router
+                .add_bucket_order(target, hashdays(1.0), router.settings.hash_price())
+                .await,
+            Err(RouterError::WalletRequired),
+        ));
     }
 
     #[tokio::test]
