@@ -50,9 +50,9 @@ async fn add_order(
     State(router): State<Arc<Router>>,
     Json(request): Json<OrderRequest>,
 ) -> ServerResult<Response> {
-    let order = router
-        .add_bucket_order(request.upstream_target, request.hashdays, request.price)
-        .await?;
+    let order =
+        router.add_bucket_order(request.upstream_target, request.hashdays, request.price)?;
+
     let Some(bucket) = &order.bucket else {
         return Err(anyhow!("bucket order missing bucket").into());
     };

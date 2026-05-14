@@ -82,7 +82,7 @@ fetch('/api/router/orders').then(r => r.json()).then(orders => {
   h1.append(nextLink);
 }).catch(() => {});
 
-const TERMINAL = ['fulfilled', 'cancelled', 'disconnected', 'expired', 'paid_late'];
+const TERMINAL = ['fulfilled', 'cancelled', 'disconnected', 'expired'];
 
 function populateOrder(data) {
   const upstream = data.upstream;

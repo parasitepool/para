@@ -17,6 +17,4 @@ pub(crate) enum RouterError {
     WalletRequired,
     #[snafu(display("wallet persistence failed: {error:#}"))]
     WalletPersistence { error: anyhow::Error },
-    #[snafu(display("upstream activation failed: {error:#}"))]
-    ActivationFailed { error: anyhow::Error },
 }

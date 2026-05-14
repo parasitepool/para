@@ -89,11 +89,6 @@ impl Wallet {
         self.synced.load(Ordering::Relaxed)
     }
 
-    #[cfg(test)]
-    pub(crate) fn mark_synced(&self) {
-        self.synced.store(true, Ordering::Relaxed);
-    }
-
     pub(crate) fn spawn(
         self: &Arc<Self>,
         interval: Duration,
@@ -213,20 +208,23 @@ impl Wallet {
         self.inner.lock().latest_checkpoint().height()
     }
 
-    pub fn check_payment(&self, derivation_index: u32, confirmed_only: bool) -> Amount {
+    pub fn received(&self, derivation_index: u32) -> (Amount, Amount) {
         let inner = self.inner.lock();
-        let mut amount = Amount::ZERO;
+        let mut total = Amount::ZERO;
+        let mut confirmed = Amount::ZERO;
 
         for output in inner.list_output() {
             if output.keychain == KeychainKind::External
                 && output.derivation_index == derivation_index
-                && (!confirmed_only || output.chain_position.is_confirmed())
             {
-                amount += output.txout.value;
+                total += output.txout.value;
+                if output.chain_position.is_confirmed() {
+                    confirmed += output.txout.value;
+                }
             }
         }
 
-        amount
+        (total, confirmed)
     }
 
     pub fn send(&self, to: Address, amount: Amount, fee_rate: FeeRate) -> Result<Txid> {
@@ -307,6 +305,87 @@ impl Wallet {
             descriptors.remove(0),
             descriptors.remove(0),
         ))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn mark_synced(&self) {
+        self.synced.store(true, Ordering::Relaxed);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_reveal_address(&self) -> bdk_wallet::AddressInfo {
+        let mut inner = self.inner.lock();
+        let address = inner.reveal_next_address(KeychainKind::External);
+        self.persist_staged_locked(&mut inner).unwrap();
+        address
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_receive_unconfirmed(&self, address: &Address, amount: Amount) {
+        let mut inner = self.inner.lock();
+        let tx = Self::test_payment_tx(address, amount);
+        inner.apply_unconfirmed_txs([(tx, 1)]);
+        self.persist_staged_locked(&mut inner).unwrap();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_advance_tip_to(&self, height: u32) {
+        let mut inner = self.inner.lock();
+
+        while inner.latest_checkpoint().height() < height {
+            let previous = inner.latest_checkpoint().block_id();
+            let block = Self::test_block(previous.hash, Vec::new());
+
+            inner
+                .apply_block_connected_to(&block, previous.height + 1, previous)
+                .unwrap();
+        }
+
+        self.persist_staged_locked(&mut inner).unwrap();
+    }
+
+    #[cfg(test)]
+    fn test_payment_tx(address: &Address, amount: Amount) -> Transaction {
+        Transaction {
+            version: bitcoin::transaction::Version::TWO,
+            lock_time: LockTime::ZERO,
+            input: vec![TxIn {
+                previous_output: OutPoint {
+                    txid: Txid::all_zeros(),
+                    vout: 0,
+                },
+                script_sig: ScriptBuf::new(),
+                sequence: Sequence::MAX,
+                witness: Witness::new(),
+            }],
+            output: vec![TxOut {
+                value: amount,
+                script_pubkey: address.script_pubkey(),
+            }],
+        }
+    }
+
+    #[cfg(test)]
+    fn test_block(prev_blockhash: BlockHash, txdata: Vec<Transaction>) -> Block {
+        let mut block = Block {
+            header: Header {
+                version: bitcoin::block::Version::TWO,
+                prev_blockhash,
+                merkle_root: bitcoin::TxMerkleNode::from_raw_hash(
+                    BlockHash::all_zeros().to_raw_hash(),
+                ),
+                time: 0,
+                bits: Target::MAX.to_compact_lossy(),
+                nonce: 0,
+            },
+            txdata,
+        };
+
+        if let Some(merkle_root) = block.compute_merkle_root() {
+            block.header.merkle_root = merkle_root;
+        }
+
+        block
     }
 }
 

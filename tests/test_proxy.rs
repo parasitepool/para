@@ -80,37 +80,6 @@ impl TestProxy {
         }
     }
 
-    pub(crate) fn spawn_expect_failure(
-        upstream: &str,
-        username: &str,
-        bitcoind_rpc_port: u16,
-        args: impl ToArgs,
-    ) -> String {
-        let proxy_port = allocate_port();
-        let http_port = allocate_port();
-
-        let (proxy_handle, _tempdir) = build_proxy_command(
-            upstream,
-            username,
-            proxy_port,
-            http_port,
-            bitcoind_rpc_port,
-            args,
-        )
-        .spawn_persistent();
-
-        let output = proxy_handle
-            .wait_with_output()
-            .expect("Failed to wait for proxy process");
-
-        assert!(
-            !output.status.success(),
-            "Expected proxy to fail but it succeeded"
-        );
-
-        String::from_utf8_lossy(&output.stderr).to_string()
-    }
-
     pub(crate) fn stratum_endpoint(&self) -> String {
         format!("127.0.0.1:{}", self.proxy_port)
     }

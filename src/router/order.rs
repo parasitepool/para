@@ -5,18 +5,29 @@ const HYSTERESIS_LOW: f64 = 0.95;
 const HYSTERESIS_HIGH: f64 = 1.5;
 
 pub(crate) const PAYMENT_TIMEOUT: u32 = 6;
-pub(crate) const RECLAIM_WINDOW: u32 = 144;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OrderStatus {
     Pending,
+    InMempool,
     Active,
     Fulfilled,
     Cancelled,
     Disconnected,
     Expired,
-    PaidLate,
+}
+
+impl OrderStatus {
+    pub(crate) fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            OrderStatus::Fulfilled
+                | OrderStatus::Cancelled
+                | OrderStatus::Disconnected
+                | OrderStatus::Expired
+        )
+    }
 }
 
 pub struct Payment {
@@ -102,17 +113,36 @@ impl Order {
         self.sessions.lock().remove(&id);
     }
 
-    pub(crate) fn cancel_sessions(&self) {
-        let tokens: Vec<CancellationToken> = self
-            .sessions
+    pub(crate) fn cancel_all_sessions(&self) {
+        self.sessions
             .lock()
             .values()
-            .map(|(_, cancel)| cancel.clone())
-            .collect();
+            .for_each(|(_, cancel)| cancel.cancel());
+    }
 
-        for cancel in tokens {
-            cancel.cancel();
+    pub(crate) fn terminate(&self, status: OrderStatus) {
+        if !status.is_terminal() {
+            return;
         }
+
+        let previous = {
+            let mut current = self.status.lock();
+
+            if current.is_terminal() {
+                return;
+            }
+
+            let previous = *current;
+            *current = status;
+            previous
+        };
+
+        info!(
+            "Order {} at {} transitioned from {:?} to {:?}",
+            self.id, self.upstream_target, previous, status,
+        );
+
+        self.cancel.cancel();
     }
 
     pub(crate) fn is_sink(&self) -> bool {
@@ -143,76 +173,6 @@ impl Order {
         self.metatron
             .downstream_stats(self.id, now)
             .hashrate_1m(now)
-    }
-
-    pub(crate) async fn activate(
-        &self,
-        timeout: Duration,
-        enonce1_extension_size: usize,
-        tasks: &TaskTracker,
-    ) -> Result {
-        let (upstream, extranonces) = self
-            .connect_upstream(timeout, enonce1_extension_size, tasks)
-            .await?;
-
-        let allocator = Arc::new(EnonceAllocator::new(extranonces, self.id));
-
-        *self.upstream.lock() = Some(upstream);
-
-        self.allocator
-            .set(allocator)
-            .map_err(|_| anyhow!("activate called twice"))?;
-
-        info!("Upstream {} connected", self.upstream_target);
-
-        Ok(())
-    }
-
-    pub(crate) async fn reconnect(
-        &self,
-        timeout: Duration,
-        enonce1_extension_size: usize,
-        tasks: &TaskTracker,
-    ) -> Result {
-        let (upstream, extranonces) = self
-            .connect_upstream(timeout, enonce1_extension_size, tasks)
-            .await?;
-
-        self.allocator
-            .get()
-            .expect("reconnect called before activate")
-            .update_extranonces(extranonces);
-
-        *self.upstream.lock() = Some(upstream);
-
-        info!("Upstream {} reconnected", self.upstream_target);
-
-        Ok(())
-    }
-
-    async fn connect_upstream(
-        &self,
-        timeout: Duration,
-        enonce1_extension_size: usize,
-        tasks: &TaskTracker,
-    ) -> Result<(Arc<Upstream>, Extranonces)> {
-        let upstream = Upstream::connect(
-            self.id,
-            &self.upstream_target,
-            timeout,
-            self.cancel.clone(),
-            tasks,
-            self.metatron.clone(),
-        )
-        .await?;
-
-        let proxy_extranonces = ProxyExtranonces::new(
-            upstream.enonce1().clone(),
-            upstream.enonce2_size(),
-            enonce1_extension_size,
-        )?;
-
-        Ok((upstream, Extranonces::Proxy(proxy_extranonces)))
     }
 
     pub(crate) fn stats(&self) -> Stats {
@@ -312,71 +272,53 @@ impl Order {
         cancel.cancel();
     }
 
-    pub(crate) fn terminate(&self, to: OrderStatus) -> Option<OrderStatus> {
-        let previous = {
+    pub(crate) async fn connect(
+        &self,
+        timeout: Duration,
+        enonce1_extension_size: usize,
+        tasks: &TaskTracker,
+    ) -> Result {
+        let upstream = Upstream::connect(
+            self.id,
+            &self.upstream_target,
+            timeout,
+            self.cancel.clone(),
+            tasks,
+            self.metatron.clone(),
+        )
+        .await?;
+
+        let extranonces = Extranonces::Proxy(ProxyExtranonces::new(
+            upstream.enonce1().clone(),
+            upstream.enonce2_size(),
+            enonce1_extension_size,
+        )?);
+
+        if let Some(allocator) = self.allocator.get() {
+            allocator.update_extranonces(extranonces);
+        } else {
+            let allocator = Arc::new(EnonceAllocator::new(extranonces, self.id));
+
+            self.allocator
+                .set(allocator)
+                .map_err(|_| anyhow!("allocator already initialized"))?;
+
             let mut status = self.status.lock();
 
-            if !matches!(
-                (*status, to),
-                (
-                    OrderStatus::Pending,
-                    OrderStatus::Cancelled | OrderStatus::Disconnected | OrderStatus::PaidLate,
-                ) | (
-                    OrderStatus::Active,
-                    OrderStatus::Cancelled | OrderStatus::Disconnected | OrderStatus::Fulfilled,
-                ) | (
-                    OrderStatus::Expired,
-                    OrderStatus::Cancelled | OrderStatus::PaidLate
-                ) | (OrderStatus::Cancelled, OrderStatus::PaidLate)
-                    | (OrderStatus::Disconnected, OrderStatus::Cancelled)
-            ) {
-                return None;
+            if !matches!(*status, OrderStatus::Pending | OrderStatus::InMempool) {
+                bail!("order in unexpected status {:?} during activation", *status);
             }
 
-            let previous = *status;
+            *status = OrderStatus::Active;
 
-            *status = to;
-
-            previous
-        };
-
-        self.cancel.cancel();
-
-        Some(previous)
-    }
-
-    pub(crate) fn transition(&self, from: OrderStatus, to: OrderStatus) -> bool {
-        let mut status = self.status.lock();
-        if *status == from {
-            *status = to;
-            true
-        } else {
-            false
-        }
-    }
-
-    pub(crate) fn ready_for_activation(
-        &self,
-        payment: &Payment,
-        received: Amount,
-        tip: u32,
-    ) -> bool {
-        if tip >= payment.created_at_height + PAYMENT_TIMEOUT {
-            self.transition(OrderStatus::Pending, OrderStatus::Expired);
+            info!("Order {} activated", self.id);
         }
 
-        if received < payment.amount {
-            return false;
-        }
+        *self.upstream.lock() = Some(upstream);
 
-        match self.status() {
-            OrderStatus::Pending => true,
-            OrderStatus::Expired => {
-                self.terminate(OrderStatus::PaidLate);
-                false
-            }
-            _ => false,
-        }
+        info!("Upstream {} connected", self.upstream_target);
+
+        Ok(())
     }
 }
 
@@ -627,7 +569,7 @@ mod tests {
     }
 
     #[test]
-    fn cancel_sessions_cancels_every_token() {
+    fn cancel_all_sessions() {
         let metatron = Arc::new(Metatron::new());
         let order = test_order(&metatron, None);
 
@@ -635,38 +577,10 @@ mod tests {
         let cancel_b = register_session(&metatron, &order, "bbbb", 1.0);
         let cancel_c = register_session(&metatron, &order, "cccc", 1.0);
 
-        order.cancel_sessions();
+        order.cancel_all_sessions();
 
         assert!(cancel_a.is_cancelled());
         assert!(cancel_b.is_cancelled());
         assert!(cancel_c.is_cancelled());
-    }
-
-    #[test]
-    fn terminate_guards_statuses() {
-        #[track_caller]
-        fn case(from: OrderStatus, to: OrderStatus, expected: bool) {
-            let metatron = Arc::new(Metatron::new());
-            let order = test_order(&metatron, None);
-            *order.status.lock() = from;
-
-            assert_eq!(order.terminate(to), expected.then_some(from));
-            assert_eq!(order.status(), if expected { to } else { from });
-            assert_eq!(order.cancel.is_cancelled(), expected);
-        }
-
-        case(OrderStatus::Pending, OrderStatus::Cancelled, true);
-        case(OrderStatus::Pending, OrderStatus::Disconnected, true);
-        case(OrderStatus::Pending, OrderStatus::PaidLate, true);
-        case(OrderStatus::Active, OrderStatus::Cancelled, true);
-        case(OrderStatus::Active, OrderStatus::Disconnected, true);
-        case(OrderStatus::Active, OrderStatus::Fulfilled, true);
-        case(OrderStatus::Expired, OrderStatus::Cancelled, true);
-        case(OrderStatus::Expired, OrderStatus::PaidLate, true);
-        case(OrderStatus::Cancelled, OrderStatus::PaidLate, true);
-        case(OrderStatus::Disconnected, OrderStatus::Cancelled, true);
-        case(OrderStatus::Pending, OrderStatus::Active, false);
-        case(OrderStatus::Fulfilled, OrderStatus::Cancelled, false);
-        case(OrderStatus::PaidLate, OrderStatus::Cancelled, false);
     }
 }

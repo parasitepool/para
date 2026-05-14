@@ -53,7 +53,7 @@ impl Proxy {
             .await
             .context("failed to build record sink")?;
 
-        router.add_sink_order(upstream_target).await?;
+        router.add_sink_order(upstream_target);
 
         http_server::spawn(
             &settings,

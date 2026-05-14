@@ -262,26 +262,31 @@ fn mine_through_proxy() {
     assert_eq!(output.len(), 1, "Should find exactly one share");
 }
 
-#[test]
+#[tokio::test]
 #[timeout(90000)]
-fn proxy_rejects_incompatible_upstream_enonce2_size() {
+async fn proxy_rejects_incompatible_upstream_enonce2_size() {
     let bitcoind = bitcoind();
     let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001 --enonce2-size 2");
 
-    let stderr = TestProxy::spawn_expect_failure(
+    let proxy = TestProxy::spawn_with_args(
         &pool.stratum_endpoint(),
         &signet_username().to_string(),
         pool.bitcoind_rpc_port(),
         "--start-diff 0.00001",
     );
 
-    assert!(
-        stderr.contains("upstream extranonce configuration incompatible with proxy mode")
-            || stderr.contains("too small to carve out")
-            || stderr.contains("miner enonce2 space")
-            || stderr.contains("below minimum"),
-        "Expected error about incompatible enonce configuration, got: {}",
-        stderr
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let response = reqwest::Client::new()
+        .get(format!("{}/api/proxy/status", proxy.api_endpoint()))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.status(),
+        reqwest::StatusCode::NOT_FOUND,
+        "upstream should not be available after incompatible activation",
     );
 }
 

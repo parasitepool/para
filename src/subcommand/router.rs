@@ -46,12 +46,6 @@ impl RouterCommand {
             cancel_token.clone(),
         ));
 
-        for upstream_target in settings.sink_orders() {
-            router.add_sink_order(upstream_target.clone()).await?;
-        }
-
-        router.spawn_rebalance_loop();
-
         http_server::spawn(
             &settings,
             api::router::router(router.clone(), bitcoin_client, settings.chain(), logs),
@@ -65,6 +59,11 @@ impl RouterCommand {
 
         info!("Stratum router listening for downstream miners on {address}:{port}");
 
+        for upstream_target in settings.sink_orders() {
+            router.add_sink_order(upstream_target.clone());
+        }
+
+        router.spawn_rebalancer();
         router.serve(listener, None, cancel_token).await
     }
 }

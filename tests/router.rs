@@ -509,6 +509,22 @@ async fn order_activates_after_payment_output_is_spent_before_confirmation() {
             .await;
     assert_in_mempool(&wallet_bitcoind, parent_txid).await;
 
+    timeout(Duration::from_secs(30), async {
+        loop {
+            let detail = router.get_order(id).await;
+            let status = router.get_status().await;
+            if let (Ok(detail), Ok(status)) = (detail, status)
+                && detail.status == OrderStatus::InMempool
+                && status.bucket_order_count == 0
+            {
+                break;
+            }
+            sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("unconfirmed full payment should mark the order in mempool without activating it");
+
     let child_amount = amount
         .checked_sub(10_000)
         .expect("test payment amount should leave room for fees");
@@ -657,11 +673,13 @@ async fn cancelled_order_stays_cancelled_during_activation() {
     fund_wallet(&wallet_bitcoind, &funding_descriptor).await;
 
     let stalled_port = allocate_port();
+    let (accepted_tx, mut accepted_rx) = mpsc::channel(1);
     let stalled_server = tokio::spawn(async move {
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", stalled_port))
             .await
             .unwrap();
-        let _ = listener.accept().await;
+        let (_stream, _) = listener.accept().await.unwrap();
+        accepted_tx.send(()).await.ok();
         sleep(Duration::from_secs(10)).await;
     });
 
@@ -680,7 +698,11 @@ async fn cancelled_order_stays_cancelled_during_activation() {
     .await;
 
     pay_address(&wallet_bitcoind, &funding_descriptor, &address, amount).await;
-    sleep(Duration::from_millis(1200)).await;
+
+    timeout(Duration::from_secs(30), accepted_rx.recv())
+        .await
+        .expect("Timeout waiting for activation connection")
+        .expect("stalled upstream should report activation connection");
 
     let response = router.cancel_order(id).await.unwrap();
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
