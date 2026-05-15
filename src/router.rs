@@ -1,20 +1,22 @@
 use {
     super::*,
-    crate::api::{DownstreamInfo, MiningStats, RouterStatus},
-    order::PAYMENT_TIMEOUT,
+    crate::{
+        api::{DownstreamInfo, MiningStats, RouterStatus},
+        event_sink::Event,
+    },
+    bdk_wallet::ChangeSet,
+    error::{RouterError, RouterResult},
+    order::{Bucket, Order, OrderStatus, PAYMENT_TIMEOUT, Payment},
     orders::Orders,
 };
 
-pub(crate) mod error;
-pub(crate) mod order;
+pub mod error;
+pub mod order;
 pub(crate) mod orders;
-
-pub(crate) use error::{RouterError, RouterResult};
-pub(crate) use order::{Bucket, Payment};
-pub use order::{Order, OrderStatus};
 
 pub(crate) struct Router {
     settings: Arc<Settings>,
+    store: Arc<Store>,
     metatron: Arc<Metatron>,
     wallet: Option<Arc<Wallet>>,
     orders: RwLock<Orders>,
@@ -26,6 +28,7 @@ pub(crate) struct Router {
 impl Router {
     pub(crate) fn new(
         settings: Arc<Settings>,
+        store: Arc<Store>,
         metatron: Arc<Metatron>,
         wallet: Option<Arc<Wallet>>,
         tasks: TaskTracker,
@@ -33,6 +36,7 @@ impl Router {
     ) -> Self {
         Self {
             settings,
+            store,
             metatron,
             wallet,
             orders: RwLock::new(Orders::new()),
@@ -54,6 +58,10 @@ impl Router {
 
     pub(crate) fn orders(&self) -> Vec<Arc<Order>> {
         self.orders.read().all()
+    }
+
+    pub(crate) fn metatron(&self) -> Arc<Metatron> {
+        self.metatron.clone()
     }
 
     pub(crate) fn next_order(&self) -> Option<Arc<Order>> {
@@ -88,7 +96,31 @@ impl Router {
     }
 
     pub(crate) fn add_sink_order(self: &Arc<Self>, upstream_target: UpstreamTarget) -> Arc<Order> {
-        self.add_order(upstream_target, None)
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+
+        let order = Order::new(
+            id,
+            upstream_target,
+            None,
+            self.cancel.child_token(),
+            self.metatron.clone(),
+        );
+
+        self.register_and_execute(order.clone());
+
+        order
+    }
+
+    pub(crate) fn ensure_sink_order(self: &Arc<Self>, upstream_target: UpstreamTarget) {
+        if self.orders.read().all().into_iter().any(|order| {
+            order.is_sink()
+                && !order.status().is_terminal()
+                && order.upstream_target == upstream_target
+        }) {
+            return;
+        }
+
+        self.add_sink_order(upstream_target);
     }
 
     pub(crate) fn add_bucket_order(
@@ -121,52 +153,81 @@ impl Router {
             .ok_or(RouterError::HashPriceOverflow)?
             .max(wallet.dust_limit());
 
-        let address_info = wallet
-            .address()
-            .map_err(|error| RouterError::WalletPersistence { error })?;
+        let store = &self.store;
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let cancel = self.cancel.child_token();
+        let metatron = self.metatron.clone();
 
-        let bucket = Bucket {
-            target,
-            payment: Payment::new(
-                address_info.address,
-                address_info.index,
-                amount,
-                wallet.tip(),
-            ),
+        let order = {
+            let mut orders = self.orders.write();
+            let order = wallet
+                .reveal_address_with(|address_info, created_at_height, wallet_delta| {
+                    let bucket = Bucket {
+                        target,
+                        payment: Payment::new(
+                            address_info.address,
+                            address_info.index,
+                            amount,
+                            created_at_height,
+                        ),
+                    };
+                    let order = Order::new(id, upstream_target, Some(bucket), cancel, metatron);
+
+                    store.persist_issued_order(id, &order.to_entry(), wallet_delta)?;
+
+                    Ok(order)
+                })
+                .map_err(|error| RouterError::WalletPersistence { error })?;
+
+            orders.add(order.clone());
+            order
         };
 
-        Ok(self.add_order(upstream_target, Some(bucket)))
+        self.spawn_order_execution(order.clone());
+
+        Ok(order)
     }
 
-    fn add_order(
-        self: &Arc<Self>,
-        upstream_target: UpstreamTarget,
-        bucket: Option<Bucket>,
-    ) -> Arc<Order> {
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-
-        let order = Order::new(
-            id,
-            upstream_target,
-            bucket,
-            self.cancel.child_token(),
-            self.metatron.clone(),
-        );
-
+    fn register_and_execute(self: &Arc<Self>, order: Arc<Order>) {
         self.orders.write().add(order.clone());
+        self.spawn_order_execution(order);
+    }
 
+    fn spawn_order_execution(self: &Arc<Self>, order: Arc<Order>) {
+        if order.status().is_terminal() {
+            return;
+        }
         let router = self.clone();
-        let order_clone = order.clone();
-
         self.tasks.spawn(async move {
-            router.execute_order(&order_clone).await;
+            router.execute_order(&order).await;
         });
-
-        order
     }
 
     async fn execute_order(self: &Arc<Self>, order: &Arc<Order>) {
+        if let Some(wallet) = &self.wallet
+            && order.bucket.is_some()
+        {
+            tokio::select! {
+                biased;
+                _ = order.cancel.cancelled() => {
+                    if !self.cancel.is_cancelled() {
+                        order.terminate(OrderStatus::Cancelled);
+                    }
+                    return;
+                }
+                synced = wallet.synced() => {
+                    if !synced {
+                        return;
+                    }
+                }
+            }
+        }
+
         if let Some(bucket) = &order.bucket
+            && matches!(
+                order.status(),
+                OrderStatus::Pending | OrderStatus::InMempool
+            )
             && !self.wait_for_payment(order, &bucket.payment).await
         {
             return;
@@ -186,7 +247,9 @@ impl Router {
             {
                 Ok(()) => {}
                 Err(BackoffEnd::Cancelled) => {
-                    order.terminate(OrderStatus::Cancelled);
+                    if !self.cancel.is_cancelled() {
+                        order.terminate(OrderStatus::Cancelled);
+                    }
 
                     return;
                 }
@@ -202,7 +265,9 @@ impl Router {
             tokio::select! {
                 biased;
                 _ = order.cancel.cancelled() => {
-                    order.terminate(OrderStatus::Cancelled);
+                    if !self.cancel.is_cancelled() {
+                        order.terminate(OrderStatus::Cancelled);
+                    }
                     return;
                 }
                 _ = upstream.disconnected() => {
@@ -286,8 +351,99 @@ impl Router {
         }
     }
 
-    pub(crate) fn metatron(&self) -> Arc<Metatron> {
-        self.metatron.clone()
+    pub(crate) fn restore(self: &Arc<Self>, sink_orders: &[UpstreamTarget]) -> Result {
+        let entries = self.store.read_orders()?;
+        let mut next_id = 0u32;
+
+        for (id, entry) in entries {
+            let candidate = id
+                .checked_add(1)
+                .with_context(|| format!("persisted order id {id} exhausts u32 order ids"))?;
+
+            next_id = next_id.max(candidate);
+
+            let order = Order::restore(
+                id,
+                entry,
+                self.settings.chain().network(),
+                self.cancel.child_token(),
+                self.metatron.clone(),
+            )?;
+
+            if order.is_sink()
+                && !sink_orders
+                    .iter()
+                    .any(|target| target == &order.upstream_target)
+            {
+                info!(
+                    "Marking orphan sink order {} for {} as cancelled; not in configured sinks",
+                    order.id, order.upstream_target,
+                );
+                order.terminate(OrderStatus::Cancelled);
+            }
+
+            self.register_and_execute(order);
+        }
+
+        self.next_id.store(next_id, Ordering::Relaxed);
+
+        for upstream_target in sink_orders {
+            self.ensure_sink_order(upstream_target.clone());
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn persist(&self) -> Result {
+        let orders = self.orders.read();
+        let entries = orders
+            .all()
+            .into_iter()
+            .map(|order| (order.id, order.to_entry()))
+            .collect::<Vec<_>>();
+
+        if let Some(wallet) = &self.wallet {
+            wallet.persist_staged_with(|wallet_delta| {
+                self.store.persist_snapshot(&entries, wallet_delta)
+            })
+        } else {
+            self.store.persist_snapshot(&entries, &ChangeSet::default())
+        }
+    }
+
+    fn rebalance(&self) {
+        let now = Instant::now();
+        let orders = self.orders.read().active();
+
+        if !orders.iter().any(|order| order.is_starving(now)) {
+            return;
+        }
+
+        let mut best = None;
+
+        for order in orders.iter().filter(|order| order.is_sink()) {
+            let sessions = order.sessions.lock();
+
+            for (session, _) in sessions.values() {
+                let hashrate = session.hashrate_1m(now);
+
+                let replace = match best {
+                    None => true,
+                    Some((_, _, best_hashrate)) => hashrate > best_hashrate,
+                };
+
+                if replace {
+                    best = Some((order, session.id(), hashrate));
+                }
+            }
+        }
+
+        let Some((order, id, _)) = best else {
+            warn!("Rebalance needed but no sink session available");
+            return;
+        };
+
+        order.trim_session(id, now);
     }
 
     pub(crate) fn status(&self) -> RouterStatus {
@@ -339,9 +495,27 @@ impl Router {
     pub(crate) async fn serve(
         self: &Arc<Self>,
         listener: TcpListener,
-        event_tx: Option<mpsc::Sender<crate::event_sink::Event>>,
+        event_tx: Option<mpsc::Sender<Event>>,
         cancel_token: CancellationToken,
     ) -> Result {
+        let router = self.clone();
+        self.tasks.spawn(async move {
+            let mut ticker = ticker(router.settings.tick_interval());
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = router.cancel.cancelled() => break,
+                    _ = ticker.tick() => {
+                        router.rebalance();
+
+                        if let Err(err) = router.persist() {
+                            warn!("Router persistence error: {err}");
+                        }
+                    }
+                }
+            }
+        });
+
         loop {
             let (stream, addr) = tokio::select! {
                 accept = listener.accept() => {
@@ -358,6 +532,10 @@ impl Router {
 
                     self.tasks.close();
                     self.tasks.wait().await;
+
+                    if let Err(err) = self.persist() {
+                        warn!("Final router persistence error: {err}");
+                    }
 
                     info!("All router tasks stopped");
 
@@ -388,6 +566,7 @@ impl Router {
             self.tasks.spawn(async move {
                 let upstream = order.upstream().expect("active order");
                 let allocator = order.allocator().expect("active order").clone();
+
                 let mut stratifier: Stratifier<Notify> = Stratifier::new(
                     addr,
                     settings,
@@ -408,55 +587,6 @@ impl Router {
             });
         }
     }
-
-    pub(crate) fn spawn_rebalancer(self: &Arc<Self>) {
-        let router = self.clone();
-        self.tasks.spawn(async move {
-            let mut ticker = ticker(router.settings.tick_interval());
-            loop {
-                tokio::select! {
-                    biased;
-                    _ = router.cancel.cancelled() => break,
-                    _ = ticker.tick() => router.rebalance(),
-                }
-            }
-        });
-    }
-
-    fn rebalance(&self) {
-        let now = Instant::now();
-        let orders = self.orders.read().active();
-
-        if !orders.iter().any(|order| order.is_starving(now)) {
-            return;
-        }
-
-        let mut best = None;
-
-        for order in orders.iter().filter(|order| order.is_sink()) {
-            let sessions = order.sessions.lock();
-
-            for (session, _) in sessions.values() {
-                let hashrate = session.hashrate_1m(now);
-
-                let replace = match best {
-                    None => true,
-                    Some((_, _, best_hashrate)) => hashrate > best_hashrate,
-                };
-
-                if replace {
-                    best = Some((order, session.id(), hashrate));
-                }
-            }
-        }
-
-        let Some((order, id, _)) = best else {
-            warn!("Rebalance needed but no sink session available");
-            return;
-        };
-
-        order.trim_session(id, now);
-    }
 }
 
 impl StatusLine for Router {
@@ -475,16 +605,22 @@ impl StatusLine for Router {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, crate::settings::CommonOptions, bdk_wallet::KeychainKind};
+    use {
+        super::*,
+        crate::settings::CommonOptions,
+        bdk_wallet::{ChangeSet, KeychainKind},
+    };
 
     struct TestWallet {
         wallet: Arc<Wallet>,
+        store: Arc<Store>,
         _directory: tempfile::TempDir,
     }
 
     struct TestRouter {
         router: Arc<Router>,
         _wallet: Option<TestWallet>,
+        _directory: Option<tempfile::TempDir>,
     }
 
     impl std::ops::Deref for TestRouter {
@@ -516,11 +652,13 @@ mod tests {
             change_descriptor,
             directory.path(),
         );
-        let store = Arc::new(Store::open(settings.clone()).unwrap());
-        let wallet = Arc::new(Wallet::open(settings, store).unwrap());
+        let store =
+            Arc::new(Store::open(&directory.path().join("test.redb"), Chain::Regtest).unwrap());
+        let wallet = Arc::new(Wallet::open(settings, store.clone()).unwrap());
 
         TestWallet {
             wallet,
+            store,
             _directory: directory,
         }
     }
@@ -539,18 +677,9 @@ mod tests {
 
     fn test_router() -> TestRouter {
         let wallet = test_wallet();
-        let router = router_with_wallet(Some(wallet.wallet.clone()));
-
-        TestRouter {
-            router,
-            _wallet: Some(wallet),
-        }
-    }
-
-    fn test_router_with_allow_zero_conf(allow_zero_conf: bool) -> TestRouter {
-        let wallet = test_wallet();
         let router = Arc::new(Router::new(
-            test_router_settings(allow_zero_conf),
+            Arc::new(Settings::default()),
+            wallet.store.clone(),
             Arc::new(Metatron::new()),
             Some(wallet.wallet.clone()),
             TaskTracker::new(),
@@ -560,13 +689,34 @@ mod tests {
         TestRouter {
             router,
             _wallet: Some(wallet),
+            _directory: None,
+        }
+    }
+
+    fn test_router_with_allow_zero_conf(allow_zero_conf: bool) -> TestRouter {
+        let wallet = test_wallet();
+        let router = Arc::new(Router::new(
+            test_router_settings(allow_zero_conf),
+            wallet.store.clone(),
+            Arc::new(Metatron::new()),
+            Some(wallet.wallet.clone()),
+            TaskTracker::new(),
+            CancellationToken::new(),
+        ));
+
+        TestRouter {
+            router,
+            _wallet: Some(wallet),
+            _directory: None,
         }
     }
 
     fn test_router_with_wallet(wallet: Option<Arc<Wallet>>) -> TestRouter {
+        let (router, directory) = router_with_wallet(wallet);
         TestRouter {
-            router: router_with_wallet(wallet),
+            router,
             _wallet: None,
+            _directory: Some(directory),
         }
     }
 
@@ -594,6 +744,7 @@ mod tests {
                     acme_contact: Vec::new(),
                     acme_cache: PathBuf::from("acme-cache"),
                     data_dir: Some(data_dir.to_path_buf()),
+                    store_path: None,
                 },
                 upstream: "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@127.0.0.1:1"
                     .parse()
@@ -631,6 +782,7 @@ mod tests {
                     acme_contact: Vec::new(),
                     acme_cache: PathBuf::from("acme-cache"),
                     data_dir: None,
+                    store_path: None,
                 },
                 descriptor,
                 change_descriptor: Some(change_descriptor),
@@ -646,14 +798,19 @@ mod tests {
         )
     }
 
-    fn router_with_wallet(wallet: Option<Arc<Wallet>>) -> Arc<Router> {
-        Arc::new(Router::new(
+    fn router_with_wallet(wallet: Option<Arc<Wallet>>) -> (Arc<Router>, tempfile::TempDir) {
+        let directory = tempfile::tempdir().unwrap();
+        let store =
+            Arc::new(Store::open(&directory.path().join("test.redb"), Chain::Regtest).unwrap());
+        let router = Arc::new(Router::new(
             Arc::new(Settings::default()),
+            store,
             Arc::new(Metatron::new()),
             wallet,
             TaskTracker::new(),
             CancellationToken::new(),
-        ))
+        ));
+        (router, directory)
     }
 
     fn wallet_settings_without_descriptors() -> Arc<Settings> {
@@ -692,6 +849,7 @@ mod tests {
                     bitcoin_rpc_password: Some("pass".into()),
                 },
                 Some(data_dir.to_path_buf()),
+                None,
                 Some(descriptor),
                 Some(change_descriptor),
                 0,
@@ -944,6 +1102,63 @@ mod tests {
         router.execute_order(&order).await;
 
         assert_eq!(order.status(), OrderStatus::Cancelled);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn execute_order_does_not_cancel_on_router_shutdown() {
+        let (router, _directory) = router_with_wallet(None);
+        let order = Order::new(
+            0,
+            test_upstream_target(),
+            None,
+            router.cancel.child_token(),
+            router.metatron.clone(),
+        );
+        add_orders(router.as_ref(), [order.clone()]);
+
+        let shutdown = router.cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(1_500)).await;
+            shutdown.cancel();
+        });
+
+        router.execute_order(&order).await;
+
+        assert_eq!(order.status(), OrderStatus::Pending);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn execute_order_waits_for_wallet_sync() {
+        let router = test_router();
+        let order = Order::new(
+            0,
+            test_upstream_target(),
+            Some(Bucket {
+                target: hashdays(100.0),
+                payment: Payment::new(test_address(), 0, Amount::from_sat(1000), 0),
+            }),
+            router.cancel.child_token(),
+            router.metatron.clone(),
+        );
+        *order.status.lock() = OrderStatus::InMempool;
+        add_orders(router.as_ref(), [order.clone()]);
+
+        let order_clone = order.clone();
+        let router_clone = router.router.clone();
+        let handle = tokio::spawn(async move {
+            router_clone.execute_order(&order_clone).await;
+        });
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        assert_eq!(order.status(), OrderStatus::InMempool);
+
+        router.wallet.as_ref().unwrap().mark_synced();
+        tokio::time::sleep(Duration::from_millis(1)).await;
+
+        router.cancel.cancel();
+        handle.await.unwrap();
+
+        assert_eq!(order.status(), OrderStatus::Pending);
     }
 
     #[test]
@@ -1315,6 +1530,140 @@ mod tests {
         assert!(!cancel.is_cancelled());
     }
 
+    #[test]
+    fn restore_loads_terminal_orders_and_derives_next_id() {
+        let directory = tempfile::tempdir().unwrap();
+        let store =
+            Arc::new(Store::open(&directory.path().join("test.redb"), Chain::Regtest).unwrap());
+        let metatron = Arc::new(Metatron::new());
+        let order = test_order(4, None, OrderStatus::Fulfilled, &metatron);
+
+        store
+            .persist_snapshot(&[(order.id, order.to_entry())], &ChangeSet::default())
+            .unwrap();
+
+        let router = Arc::new(Router::new(
+            Arc::new(Settings::default()),
+            store,
+            Arc::new(Metatron::new()),
+            None,
+            TaskTracker::new(),
+            CancellationToken::new(),
+        ));
+
+        router.restore(&[]).unwrap();
+
+        assert_eq!(
+            router.get_order(4).unwrap().status(),
+            OrderStatus::Fulfilled
+        );
+        assert_eq!(router.next_id.load(Ordering::Relaxed), 5);
+    }
+
+    #[test]
+    fn restore_terminates_orphan_sink_orders() {
+        let directory = tempfile::tempdir().unwrap();
+        let store =
+            Arc::new(Store::open(&directory.path().join("test.redb"), Chain::Regtest).unwrap());
+        let metatron = Arc::new(Metatron::new());
+        let order = test_order(4, None, OrderStatus::Pending, &metatron);
+
+        store
+            .persist_snapshot(&[(order.id, order.to_entry())], &ChangeSet::default())
+            .unwrap();
+
+        let router = Arc::new(Router::new(
+            Arc::new(Settings::default()),
+            store,
+            Arc::new(Metatron::new()),
+            None,
+            TaskTracker::new(),
+            CancellationToken::new(),
+        ));
+
+        router.restore(&[]).unwrap();
+
+        assert_eq!(
+            router.get_order(4).unwrap().status(),
+            OrderStatus::Cancelled
+        );
+        assert!(router.tasks.is_empty());
+        assert_eq!(router.next_id.load(Ordering::Relaxed), 5);
+    }
+
+    #[tokio::test]
+    async fn restore_keeps_configured_sink_orders() {
+        let directory = tempfile::tempdir().unwrap();
+        let store =
+            Arc::new(Store::open(&directory.path().join("test.redb"), Chain::Regtest).unwrap());
+        let metatron = Arc::new(Metatron::new());
+        let order = test_order(4, None, OrderStatus::Pending, &metatron);
+        let target = order.upstream_target.clone();
+
+        store
+            .persist_snapshot(&[(order.id, order.to_entry())], &ChangeSet::default())
+            .unwrap();
+
+        let router = Arc::new(Router::new(
+            Arc::new(Settings::default()),
+            store,
+            Arc::new(Metatron::new()),
+            None,
+            TaskTracker::new(),
+            CancellationToken::new(),
+        ));
+
+        router.restore(std::slice::from_ref(&target)).unwrap();
+
+        let sinks = router
+            .orders()
+            .into_iter()
+            .filter(|order| order.is_sink() && order.upstream_target == target)
+            .collect::<Vec<_>>();
+        assert_eq!(sinks.len(), 1);
+        assert_eq!(sinks[0].id, 4);
+        assert!(!sinks[0].status().is_terminal());
+        assert_eq!(router.next_id.load(Ordering::Relaxed), 5);
+
+        router.cancel.cancel();
+        router.tasks.close();
+        timeout(Duration::from_secs(1), router.tasks.wait())
+            .await
+            .expect("configured sink execution should stop after cancellation");
+    }
+
+    #[test]
+    fn ensure_sink_order_does_not_duplicate_live_sink_target() {
+        let router = test_router();
+        let restored = test_order(3, None, OrderStatus::Pending, &router.metatron);
+        let target = restored.upstream_target.clone();
+        add_orders(router.as_ref(), [restored]);
+
+        router.ensure_sink_order(target);
+
+        assert_eq!(router.orders().len(), 1);
+    }
+
+    #[test]
+    fn order_detail_uses_restored_order_stats_without_live_sessions() {
+        let router = test_router();
+        let order = test_order(3, None, OrderStatus::Fulfilled, &router.metatron);
+        let mut stats = Stats::new();
+        stats.accepted_shares = 1;
+        stats.accepted_work = TotalWork::from_difficulty(Difficulty::from(100.0));
+        stats.best_share = Some(Difficulty::from(200.0));
+        stats.dsps_1m = DecayingAverage::restore(10.0, Duration::from_secs(60), Instant::now());
+        router.metatron.restore_order_stats(order.id, stats);
+
+        let detail = crate::api::OrderDetail::from_order(&order, &router.metatron, Instant::now());
+
+        assert!(detail.sessions.is_empty());
+        assert_eq!(detail.stats.accepted_shares, 1);
+        assert!(detail.stats.accepted_work > TotalWork::ZERO);
+        assert!(detail.stats.hashrate_1m > HashRate::ZERO);
+        assert_eq!(detail.downstream.accepted_work, TotalWork::ZERO);
+    }
+
     fn test_authorization(
         enonce1: &str,
         workername: &str,
@@ -1374,7 +1723,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn bucket_order_creation_persists_revealed_address_before_returning() {
         let directory = tempfile::tempdir().unwrap();
-        let store = Arc::new(Store::open(test_settings(directory.path())).unwrap());
+        let store =
+            Arc::new(Store::open(&directory.path().join("test.redb"), Chain::Regtest).unwrap());
         let wallet = Arc::new(
             Wallet::open(
                 wallet_settings_with_descriptors(directory.path()),
@@ -1382,7 +1732,14 @@ mod tests {
             )
             .unwrap(),
         );
-        let router = test_router_with_wallet(Some(wallet));
+        let router = Arc::new(Router::new(
+            test_settings(directory.path()),
+            store.clone(),
+            Arc::new(Metatron::new()),
+            Some(wallet),
+            TaskTracker::new(),
+            CancellationToken::new(),
+        ));
 
         let order = add_test_bucket_order(&router);
         let payment = &order.bucket.as_ref().unwrap().payment;
@@ -1391,6 +1748,7 @@ mod tests {
             persisted_next_external_index(&store),
             payment.derivation_index + 1,
         );
+        assert_eq!(store.read_orders().unwrap().len(), 1);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1415,8 +1773,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn restart_after_unpaid_bucket_order_continues_at_next_address() {
         let directory = tempfile::tempdir().unwrap();
-        let settings = test_settings(directory.path());
-        let store = Arc::new(Store::open(settings.clone()).unwrap());
+        let store_path = directory.path().join("test.redb");
+        let store = Arc::new(Store::open(&store_path, Chain::Regtest).unwrap());
         let wallet = Arc::new(
             Wallet::open(
                 wallet_settings_with_descriptors(directory.path()),
@@ -1424,12 +1782,21 @@ mod tests {
             )
             .unwrap(),
         );
-        let router = test_router_with_wallet(Some(wallet));
+        let router = Arc::new(Router::new(
+            test_settings(directory.path()),
+            store.clone(),
+            Arc::new(Metatron::new()),
+            Some(wallet),
+            TaskTracker::new(),
+            CancellationToken::new(),
+        ));
 
         let first = add_test_bucket_order(&router);
         let first_index = first.bucket.as_ref().unwrap().payment.derivation_index;
+        router.persist().unwrap();
 
         router.cancel_order(first.id).unwrap();
+        router.persist().unwrap();
         router.tasks.close();
         timeout(Duration::from_secs(1), router.tasks.wait())
             .await
@@ -1437,10 +1804,21 @@ mod tests {
         drop(router);
         drop(store);
 
-        let store = Arc::new(Store::open(settings).unwrap());
+        let store = Arc::new(Store::open(&store_path, Chain::Regtest).unwrap());
         let wallet =
             Arc::new(Wallet::open(wallet_settings_without_descriptors(), store.clone()).unwrap());
-        let restarted = test_router_with_wallet(Some(wallet));
+        let restarted = TestRouter {
+            router: Arc::new(Router::new(
+                test_router_settings(false),
+                store,
+                Arc::new(Metatron::new()),
+                Some(wallet),
+                TaskTracker::new(),
+                CancellationToken::new(),
+            )),
+            _wallet: None,
+            _directory: None,
+        };
 
         let second = add_test_bucket_order(&restarted);
         let second_index = second.bucket.as_ref().unwrap().payment.derivation_index;

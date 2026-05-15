@@ -53,9 +53,9 @@ use {
     ntest::timeout,
     para::{
         ENONCE1_EXTENSION_SIZE, ENONCE1_SIZE, MAX_ENONCE_SIZE, USER_AGENT, api,
-        api::OrderStatus,
         hashdays::HashDays,
         hashprice::HashPrice,
+        router::order::OrderStatus,
         subcommand::{
             miner::Share,
             server::{

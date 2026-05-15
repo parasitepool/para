@@ -23,7 +23,10 @@ impl RouterCommand {
         );
 
         let bitcoin_client = Arc::new(settings.bitcoin_rpc_client().await?);
-        let store = Arc::new(Store::open(settings.clone())?);
+        let store = Arc::new(Store::open(
+            &settings.store_path("router.redb")?,
+            settings.chain(),
+        )?);
 
         let wallet = Arc::new(Wallet::open(settings.clone(), store.clone())?);
 
@@ -40,11 +43,14 @@ impl RouterCommand {
 
         let router = Arc::new(Router::new(
             settings.clone(),
+            store,
             metatron.clone(),
             Some(wallet),
             tasks.clone(),
             cancel_token.clone(),
         ));
+
+        router.restore(settings.sink_orders())?;
 
         http_server::spawn(
             &settings,
@@ -59,11 +65,6 @@ impl RouterCommand {
 
         info!("Stratum router listening for downstream miners on {address}:{port}");
 
-        for upstream_target in settings.sink_orders() {
-            router.add_sink_order(upstream_target.clone());
-        }
-
-        router.spawn_rebalancer();
         router.serve(listener, None, cancel_token).await
     }
 }

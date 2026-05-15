@@ -60,4 +60,7 @@ pub(crate) struct CommonOptions {
 
     #[arg(long, alias = "datadir", help = "Store data in <DATA_DIR>.")]
     pub(crate) data_dir: Option<PathBuf>,
+
+    #[arg(long, help = "Use <STORE_PATH> as database file.")]
+    pub(crate) store_path: Option<PathBuf>,
 }

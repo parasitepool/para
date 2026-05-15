@@ -105,7 +105,7 @@ router:
 wallet +args='balance':
   cargo run \
     wallet \
-    --data-dir copr/para/wallet \
+    --data-dir copr/para \
     --chain signet \
     --bitcoin-rpc-username satoshi \
     --bitcoin-rpc-password nakamoto \

@@ -1,7 +1,7 @@
 use {
     super::*,
     bdk_bitcoind_rpc::{Emitter, bitcoincore_rpc, bitcoincore_rpc::RpcApi},
-    bdk_wallet::{KeychainKind, chain::Merge, keys::bip39::Mnemonic},
+    bdk_wallet::{ChangeSet, KeychainKind, chain::Merge, keys::bip39::Mnemonic},
     bitcoin::bip32::{ChildNumber, DerivationPath, Xpriv},
     miniscript::{
         Descriptor,
@@ -12,21 +12,50 @@ use {
 
 pub struct Wallet {
     inner: Mutex<bdk_wallet::Wallet>,
+    settings: Arc<Settings>,
     store: Arc<Store>,
     rpc: bitcoincore_rpc::Client,
     birthday: u32,
     dust_limit: Amount,
-    synced: AtomicBool,
+    sync_tx: watch::Sender<bool>,
 }
 
 impl Wallet {
     pub(crate) fn open(settings: Arc<Settings>, store: Arc<Store>) -> Result<Self> {
+        let inner = Self::load_inner(&settings, &store)?;
+
+        let rpc = bitcoincore_rpc::Client::new(
+            &format!("http://{}", settings.bitcoin_rpc_url()),
+            settings.wallet_rpc_auth()?,
+        )
+        .context("failed to create rpc client")?;
+
+        let dust_limit = inner
+            .peek_address(KeychainKind::External, 0)
+            .address
+            .script_pubkey()
+            .minimal_non_dust();
+
+        let wallet = Self {
+            inner: Mutex::new(inner),
+            settings: settings.clone(),
+            store,
+            rpc,
+            birthday: settings.wallet_birthday(),
+            dust_limit,
+            sync_tx: watch::channel(false).0,
+        };
+
+        Ok(wallet)
+    }
+
+    fn load_inner(settings: &Settings, store: &Store) -> Result<bdk_wallet::Wallet> {
         let descriptor = settings.descriptor();
         let change_descriptor = settings.change_descriptor();
         let network = settings.chain().network();
         let changeset = store.read_wallet_changeset()?;
 
-        let inner = if changeset.is_empty() {
+        Ok(if changeset.is_empty() {
             let descriptor = descriptor.context("descriptor required for fresh wallet")?;
 
             if let Some(change_descriptor) = change_descriptor {
@@ -57,36 +86,26 @@ impl Wallet {
                 .load_wallet_no_persist(changeset)
                 .context("failed to load stored wallet")?
                 .context("stored wallet changeset is empty")?
-        };
+        })
+    }
 
-        let rpc = bitcoincore_rpc::Client::new(
-            &format!("http://{}", settings.bitcoin_rpc_url()),
-            settings.wallet_rpc_auth()?,
-        )
-        .context("failed to create rpc client")?;
-
-        let dust_limit = inner
-            .peek_address(KeychainKind::External, 0)
-            .address
-            .script_pubkey()
-            .minimal_non_dust();
-
-        let wallet = Self {
-            inner: Mutex::new(inner),
-            store,
-            rpc,
-            birthday: settings.wallet_birthday(),
-            dust_limit,
-            synced: AtomicBool::new(false),
-        };
-
-        wallet.persist_staged()?;
-
-        Ok(wallet)
+    fn reload_inner(&self, inner: &mut bdk_wallet::Wallet) -> Result {
+        *inner = Self::load_inner(&self.settings, &self.store)?;
+        Ok(())
     }
 
     pub fn is_synced(&self) -> bool {
-        self.synced.load(Ordering::Relaxed)
+        *self.sync_tx.borrow()
+    }
+
+    pub async fn synced(&self) -> bool {
+        let mut rx = self.sync_tx.subscribe();
+        while !*rx.borrow_and_update() {
+            if rx.changed().await.is_err() {
+                return false;
+            }
+        }
+        true
     }
 
     pub(crate) fn spawn(
@@ -115,12 +134,12 @@ impl Wallet {
                             .unwrap_or_else(|err| Err(err.into()))
                         {
                             Ok(()) => {
-                                if !wallet.synced.swap(true, Ordering::Relaxed) {
+                                if !wallet.sync_tx.send_replace(true) {
                                     info!("Wallet synced");
                                 }
                             }
                             Err(e) => {
-                                wallet.synced.store(false, Ordering::Relaxed);
+                                wallet.sync_tx.send_replace(false);
                                 warn!("Wallet sync error: {e}");
                             }
                         }
@@ -164,7 +183,6 @@ impl Wallet {
             }
             inner.apply_unconfirmed_txs(mempool.update);
             inner.apply_evicted_txs(mempool.evicted);
-            self.persist_staged_locked(&mut inner)?;
         }
 
         Ok(())
@@ -173,27 +191,60 @@ impl Wallet {
     pub fn address(&self) -> Result<bdk_wallet::AddressInfo> {
         task::block_in_place(|| {
             let mut inner = self.inner.lock();
-            let address = inner.reveal_next_address(KeychainKind::External);
-
-            self.persist_staged_locked(&mut inner)?;
-
-            Ok(address)
+            Ok(inner.reveal_next_address(KeychainKind::External))
         })
     }
 
-    pub(crate) fn persist_staged(&self) -> Result<bool> {
-        let mut inner = self.inner.lock();
-        self.persist_staged_locked(&mut inner)
+    pub(crate) fn reveal_address_with<T>(
+        &self,
+        persist: impl FnOnce(bdk_wallet::AddressInfo, u32, &ChangeSet) -> Result<T>,
+    ) -> Result<T> {
+        task::block_in_place(|| {
+            let mut inner = self.inner.lock();
+            let created_at_height = inner.latest_checkpoint().height();
+            let address = inner.reveal_next_address(KeychainKind::External);
+            let err = {
+                let Some(staged) = inner.staged_mut() else {
+                    return persist(address, created_at_height, &ChangeSet::default());
+                };
+
+                match persist(address, created_at_height, staged) {
+                    Ok(value) => {
+                        let _ = staged.take();
+                        return Ok(value);
+                    }
+                    Err(err) => err,
+                }
+            };
+
+            if let Err(reload_err) = self.reload_inner(&mut inner) {
+                error!("wallet rollback failed after persist error: {reload_err}");
+            }
+
+            Err(err)
+        })
     }
 
-    fn persist_staged_locked(&self, inner: &mut bdk_wallet::Wallet) -> Result<bool> {
+    #[cfg(test)]
+    pub(crate) fn take_staged(&self) -> ChangeSet {
+        let mut inner = self.inner.lock();
         let Some(staged) = inner.staged_mut() else {
-            return Ok(false);
+            return ChangeSet::default();
         };
 
-        self.store.persist_wallet_changeset(staged)?;
+        staged.take().unwrap_or_default()
+    }
+
+    pub(crate) fn persist_staged_with(&self, persist: impl FnOnce(&ChangeSet) -> Result) -> Result {
+        let mut inner = self.inner.lock();
+        let Some(staged) = inner.staged_mut() else {
+            return persist(&ChangeSet::default());
+        };
+
+        persist(staged)?;
         let _ = staged.take();
-        Ok(true)
+
+        Ok(())
     }
 
     pub fn balance(&self) -> bdk_wallet::Balance {
@@ -244,8 +295,6 @@ impl Wallet {
         };
 
         let txid = self.rpc.send_raw_transaction(&tx)?;
-
-        self.persist_staged()?;
 
         Ok(txid)
     }
@@ -309,15 +358,13 @@ impl Wallet {
 
     #[cfg(test)]
     pub(crate) fn mark_synced(&self) {
-        self.synced.store(true, Ordering::Relaxed);
+        self.sync_tx.send_replace(true);
     }
 
     #[cfg(test)]
     pub(crate) fn test_reveal_address(&self) -> bdk_wallet::AddressInfo {
         let mut inner = self.inner.lock();
-        let address = inner.reveal_next_address(KeychainKind::External);
-        self.persist_staged_locked(&mut inner).unwrap();
-        address
+        inner.reveal_next_address(KeychainKind::External)
     }
 
     #[cfg(test)]
@@ -325,7 +372,6 @@ impl Wallet {
         let mut inner = self.inner.lock();
         let tx = Self::test_payment_tx(address, amount);
         inner.apply_unconfirmed_txs([(tx, 1)]);
-        self.persist_staged_locked(&mut inner).unwrap();
     }
 
     #[cfg(test)]
@@ -340,8 +386,6 @@ impl Wallet {
                 .apply_block_connected_to(&block, previous.height + 1, previous)
                 .unwrap();
         }
-
-        self.persist_staged_locked(&mut inner).unwrap();
     }
 
     #[cfg(test)]
@@ -415,7 +459,8 @@ mod tests {
 
         let directory = tempfile::tempdir().unwrap();
         let settings = test_settings(directory.path(), Some(descriptor), Some(change_descriptor));
-        let store = Arc::new(Store::open(settings.clone()).unwrap());
+        let store =
+            Arc::new(Store::open(&directory.path().join("test.redb"), Chain::Regtest).unwrap());
         let wallet = Arc::new(Wallet::open(settings, store.clone()).unwrap());
 
         TestWallet {
@@ -441,6 +486,7 @@ mod tests {
                     bitcoin_rpc_password: Some("pass".into()),
                 },
                 Some(data_dir.to_path_buf()),
+                None,
                 descriptor,
                 change_descriptor,
                 0,
@@ -458,6 +504,13 @@ mod tests {
             .expect("wallet state persisted");
 
         wallet.reveal_next_address(KeychainKind::External).index
+    }
+
+    fn persist_staged(wallet: &TestWallet) {
+        wallet
+            .store
+            .persist_wallet_delta(&wallet.take_staged())
+            .unwrap();
     }
 
     #[test]
@@ -493,7 +546,7 @@ mod tests {
     }
 
     #[test]
-    fn concurrent_addresses_are_persisted() {
+    fn concurrent_addresses_are_staged_until_persisted() {
         let wallet = test_wallet();
         let count = 16;
         let barrier = Arc::new(std::sync::Barrier::new(count));
@@ -516,6 +569,59 @@ mod tests {
         indexes.sort();
 
         assert_eq!(indexes, (0..count as u32).collect::<Vec<_>>());
+        assert_eq!(
+            wallet.store.read_wallet_changeset().unwrap(),
+            ChangeSet::default()
+        );
+
+        persist_staged(&wallet);
+
         assert_eq!(persisted_next_external_index(&wallet.store), count as u32);
+    }
+
+    #[tokio::test]
+    async fn synced_returns_true_after_mark_synced() {
+        let wallet = test_wallet();
+        assert!(!wallet.is_synced());
+        wallet.mark_synced();
+        assert!(wallet.wallet.synced().await);
+    }
+
+    #[test]
+    fn reveal_address_with_rolls_back_on_persist_failure() {
+        let wallet = test_wallet();
+
+        let persisted = wallet
+            .reveal_address_with(|address, _, wallet_delta| {
+                wallet.store.persist_wallet_delta(wallet_delta)?;
+                Ok(address.index)
+            })
+            .unwrap();
+        assert_eq!(persisted, 0);
+        assert_eq!(persisted_next_external_index(&wallet.store), 1);
+
+        let result: Result<()> = wallet.reveal_address_with(|address, _, _| {
+            assert_eq!(address.index, 1);
+            Err(anyhow!("store write failed"))
+        });
+        assert!(result.is_err());
+
+        assert_eq!(wallet.address().unwrap().index, 1);
+    }
+
+    #[test]
+    fn failed_persist_rolls_back_staged_changes() {
+        let wallet = test_wallet();
+
+        let result: Result<()> = wallet.reveal_address_with(|address, _, _| {
+            assert_eq!(address.index, 0);
+            Err(anyhow!("store write failed"))
+        });
+        assert!(result.is_err());
+        assert_eq!(
+            wallet.store.read_wallet_changeset().unwrap(),
+            ChangeSet::default()
+        );
+        assert_eq!(wallet.address().unwrap().index, 0);
     }
 }

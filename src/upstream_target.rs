@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct UpstreamTarget {
     endpoint: String,
     username: Username,

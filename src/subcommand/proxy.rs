@@ -38,11 +38,17 @@ impl Proxy {
             .context("no upstream target configured")?
             .clone();
 
+        let store = Arc::new(Store::open(
+            &settings.store_path("proxy.redb")?,
+            settings.chain(),
+        )?);
+
         let metatron = Arc::new(Metatron::new());
         metatron.spawn(cancel_token.clone(), &tasks);
 
         let router = Arc::new(Router::new(
             settings.clone(),
+            store,
             metatron.clone(),
             None,
             tasks.clone(),

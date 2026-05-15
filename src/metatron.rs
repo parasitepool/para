@@ -191,6 +191,10 @@ impl Metatron {
             .unwrap_or_default()
     }
 
+    pub(crate) fn restore_order_stats(&self, order_id: u32, stats: Stats) {
+        self.orders.insert(order_id, Mutex::new(stats));
+    }
+
     pub(crate) fn order_accepted_work(&self, order_id: u32) -> TotalWork {
         self.orders
             .get(&order_id)

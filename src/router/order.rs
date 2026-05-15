@@ -1,4 +1,4 @@
-use super::*;
+use {super::*, crate::store::entry, epoch};
 
 const RAMP_UP_SHARES: u64 = 3;
 const HYSTERESIS_LOW: f64 = 0.95;
@@ -95,6 +95,69 @@ impl Order {
             assigned: AtomicUsize::new(0),
             sessions: Mutex::new(HashMap::new()),
         })
+    }
+
+    pub(crate) fn to_entry(&self) -> entry::OrderEntry {
+        let now = Instant::now();
+
+        entry::OrderEntry {
+            status: self.status(),
+            upstream_target: self.upstream_target.clone(),
+            bucket: self.bucket.as_ref().map(|bucket| entry::BucketEntry {
+                target: bucket.target,
+                address: bucket.payment.address.as_unchecked().clone(),
+                derivation_index: bucket.payment.derivation_index,
+                amount_sat: bucket.payment.amount.to_sat(),
+                created_at_height: bucket.payment.created_at_height,
+            }),
+            created_at_secs: epoch::instant_to_epoch_secs(self.created_at, now),
+            stats: entry::StatsEntry::from_stats(&self.stats(), now),
+        }
+    }
+
+    pub(crate) fn restore(
+        id: u32,
+        order_entry: entry::OrderEntry,
+        network: Network,
+        cancel: CancellationToken,
+        metatron: Arc<Metatron>,
+    ) -> Result<Arc<Self>> {
+        let stats = order_entry.stats.into_stats()?;
+        metatron.restore_order_stats(id, stats);
+
+        let bucket = order_entry
+            .bucket
+            .map(|bucket| -> Result<Bucket> {
+                let address = bucket
+                    .address
+                    .require_network(network)
+                    .with_context(|| format!("restore order {id} payment address"))?;
+
+                Ok(Bucket {
+                    target: bucket.target,
+                    payment: Payment::new(
+                        address,
+                        bucket.derivation_index,
+                        Amount::from_sat(bucket.amount_sat),
+                        bucket.created_at_height,
+                    ),
+                })
+            })
+            .transpose()?;
+
+        Ok(Arc::new(Self {
+            id,
+            upstream_target: order_entry.upstream_target,
+            bucket,
+            upstream: Mutex::new(None),
+            allocator: OnceLock::new(),
+            status: Mutex::new(order_entry.status),
+            created_at: epoch::epoch_secs_to_instant(order_entry.created_at_secs),
+            cancel,
+            metatron,
+            assigned: AtomicUsize::new(0),
+            sessions: Mutex::new(HashMap::new()),
+        }))
     }
 
     pub(crate) fn assign(&self) {
@@ -305,7 +368,10 @@ impl Order {
 
             let mut status = self.status.lock();
 
-            if !matches!(*status, OrderStatus::Pending | OrderStatus::InMempool) {
+            if !matches!(
+                *status,
+                OrderStatus::Pending | OrderStatus::InMempool | OrderStatus::Active
+            ) {
                 bail!("order in unexpected status {:?} during activation", *status);
             }
 

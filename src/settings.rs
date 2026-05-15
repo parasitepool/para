@@ -51,6 +51,7 @@ pub(crate) struct Settings {
     sink_orders: Vec<UpstreamTarget>,
     hash_price: HashPrice,
     allow_zero_conf: bool,
+    store_path: Option<PathBuf>,
 }
 
 impl Default for Settings {
@@ -94,6 +95,7 @@ impl Default for Settings {
             sink_orders: Vec::new(),
             hash_price: HashPrice::from_sats(1),
             allow_zero_conf: false,
+            store_path: None,
         }
     }
 }
@@ -109,12 +111,14 @@ impl Settings {
     pub(crate) fn from_wallet_options(
         bitcoin: BitcoinOptions,
         data_dir: Option<PathBuf>,
+        store_path: Option<PathBuf>,
         descriptor: Option<String>,
         change_descriptor: Option<String>,
         wallet_birthday: u32,
     ) -> Result<Self> {
         let settings = Self {
             data_dir,
+            store_path,
             descriptor,
             change_descriptor,
             wallet_birthday,
@@ -140,6 +144,7 @@ impl Settings {
             acme_contact,
             acme_cache,
             data_dir,
+            store_path,
         } = common;
 
         Ok(Self {
@@ -150,6 +155,7 @@ impl Settings {
             acme_contacts: acme_contact,
             acme_cache,
             data_dir,
+            store_path,
             start_diff,
             min_diff,
             max_diff,
@@ -385,7 +391,11 @@ impl Settings {
         }
     }
 
-    pub(crate) fn store_path(&self) -> Result<PathBuf> {
+    pub(crate) fn store_path(&self, default_name: &str) -> Result<PathBuf> {
+        if let Some(path) = &self.store_path {
+            return Ok(path.clone());
+        }
+
         let data_dir = match &self.data_dir {
             Some(data_dir) => data_dir.clone(),
             None => dirs::data_dir()
@@ -393,7 +403,9 @@ impl Settings {
                 .join("para"),
         };
 
-        Ok(self.chain.join_with_data_dir(data_dir).join("para.redb"))
+        let path = self.chain.join_with_data_dir(data_dir).join(default_name);
+
+        Ok(path)
     }
 
     fn validate(&self) -> Result<()> {
@@ -1253,27 +1265,31 @@ mod tests {
     #[test]
     fn store_path_appends_chain_subdir() {
         #[track_caller]
-        fn case(args: &str, expected: &str) {
+        fn case(args: &str, name: &str, expected: &str) {
             let options = parse_router_options(args);
             let settings = Settings::from_router_options(options).unwrap();
-            assert_eq!(settings.store_path().unwrap(), PathBuf::from(expected));
+            assert_eq!(settings.store_path(name).unwrap(), PathBuf::from(expected));
         }
 
         case(
             "para router --descriptor foo --hash-price 1000 --data-dir /foo",
-            "/foo/para.redb",
+            "router.redb",
+            "/foo/router.redb",
         );
         case(
             "para router --descriptor foo --hash-price 1000 --data-dir /foo --chain regtest",
-            "/foo/regtest/para.redb",
+            "router.redb",
+            "/foo/regtest/router.redb",
         );
         case(
             "para router --descriptor foo --hash-price 1000 --data-dir /foo --chain signet",
-            "/foo/signet/para.redb",
+            "router.redb",
+            "/foo/signet/router.redb",
         );
         case(
             "para router --descriptor foo --hash-price 1000 --data-dir /foo --chain testnet",
-            "/foo/testnet3/para.redb",
+            "router.redb",
+            "/foo/testnet3/router.redb",
         );
     }
 

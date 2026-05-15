@@ -21,6 +21,8 @@ pub(crate) struct WalletCommand {
     birthday: u32,
     #[arg(long, alias = "datadir", help = "Store wallet data in <DATA_DIR>.")]
     data_dir: Option<PathBuf>,
+    #[arg(long, help = "Use <STORE_PATH> as database file.")]
+    store_path: Option<PathBuf>,
     #[command(flatten)]
     bitcoin: BitcoinOptions,
     #[command(subcommand)]
@@ -49,6 +51,7 @@ impl WalletCommand {
         let settings = Arc::new(Settings::from_wallet_options(
             self.bitcoin,
             self.data_dir,
+            self.store_path,
             self.descriptor,
             self.change_descriptor,
             self.birthday,
@@ -58,13 +61,28 @@ impl WalletCommand {
         let subcommand = self.subcommand;
 
         task::spawn_blocking(move || {
-            let store = Arc::new(Store::open(settings.clone())?);
-            let wallet = Wallet::open(settings, store)?;
+            let store = Arc::new(Store::open(
+                &settings.store_path("wallet.redb")?,
+                settings.chain(),
+            )?);
+            let wallet = Wallet::open(settings, store.clone())?;
 
             match subcommand {
-                Subcommand::Balance => print_json(balance::run(&wallet)?),
-                Subcommand::Receive => print_json(receive::run(&wallet)?),
-                Subcommand::Send(send) => print_json(send.run(&wallet, network)?),
+                Subcommand::Balance => {
+                    let output = balance::run(&wallet)?;
+                    wallet.persist_staged_with(|delta| store.persist_wallet_delta(delta))?;
+                    print_json(output)
+                }
+                Subcommand::Receive => {
+                    let output = receive::run(&wallet)?;
+                    wallet.persist_staged_with(|delta| store.persist_wallet_delta(delta))?;
+                    print_json(output)
+                }
+                Subcommand::Send(send) => {
+                    let output = send.run(&wallet, network)?;
+                    wallet.persist_staged_with(|delta| store.persist_wallet_delta(delta))?;
+                    print_json(output)
+                }
                 Subcommand::Generate => unreachable!(),
             }
         })

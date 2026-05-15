@@ -88,7 +88,7 @@ function populateOrder(data) {
   const upstream = data.upstream;
   const endpoint = upstream ? upstream.endpoint : data.upstream_target.endpoint;
   const username = (upstream && upstream.username) || data.upstream_target.username || '';
-  const deliveredHashdays = upstream && upstream.stats.hash_days;
+  const deliveredHashdays = data.stats && data.stats.hash_days;
 
   set('id', data.id);
   set('status', formatStatus(data.status));
@@ -134,13 +134,13 @@ async function refresh(signal) {
 
   populateOrder(data);
 
+  populateStats('upstream', data.stats);
+
   if (terminal) {
-    populateStats('upstream', null);
     populateStats('downstream', null);
     document.getElementById('sessions-list').innerHTML = '';
     stopPolling();
   } else {
-    populateStats('upstream', data.upstream && data.upstream.stats);
     populateStats('downstream', data.downstream);
     document.getElementById('sessions-list').innerHTML = renderSessionRows(data.sessions || []);
   }

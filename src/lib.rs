@@ -62,7 +62,10 @@ use {
     parking_lot::{Mutex, RwLock},
     reqwest::Url,
     retry::{Backoff, BackoffEnd, retry_with_backoff},
-    router::{Order, Router},
+    router::{
+        Router,
+        order::{Bucket, Order, OrderStatus},
+    },
     rust_embed::RustEmbed,
     rustls_acme::{
         AcmeConfig,
@@ -93,7 +96,7 @@ use {
         str::FromStr,
         sync::{
             Arc, LazyLock, OnceLock,
-            atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering},
+            atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering},
         },
         thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -146,6 +149,7 @@ pub mod ckpool;
 mod coinbase_builder;
 mod decay;
 mod enonce_allocator;
+mod epoch;
 mod event_sink;
 mod extranonces;
 mod generator;
@@ -158,7 +162,7 @@ mod jobs;
 mod logs;
 mod metatron;
 mod retry;
-mod router;
+pub mod router;
 pub mod settings;
 mod signal;
 mod store;

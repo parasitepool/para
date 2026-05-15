@@ -8,12 +8,7 @@ use {
     },
 };
 
-pub(crate) use crate::router::Bucket;
-
-pub use {
-    crate::router::{Order, OrderStatus},
-    http_server::{BitcoinStatus, SystemStatus},
-};
+pub use http_server::{BitcoinStatus, SystemStatus};
 
 pub mod pool;
 pub mod proxy;
@@ -271,6 +266,7 @@ pub struct OrderDetail {
     pub created_at: u64,
     pub created_at_height: u32,
     pub upstream: Option<UpstreamInfo>,
+    pub stats: MiningStats,
     pub downstream: MiningStats,
     pub sessions: Vec<SessionDetail>,
 }
@@ -285,11 +281,6 @@ impl OrderDetail {
             None => (Vec::new(), Stats::new()),
         };
 
-        let epoch_secs = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
         Self {
             id: order.id,
             status: order.status(),
@@ -297,11 +288,12 @@ impl OrderDetail {
             target_hashdays: bucket.map(|bucket| bucket.target),
             payment_address: bucket.map(|bucket| bucket.payment.address.as_unchecked().clone()),
             payment_amount: bucket.map(|bucket| bucket.payment.amount),
-            created_at: epoch_secs - order.created_at.elapsed().as_secs(),
+            created_at: epoch::instant_to_epoch_secs(order.created_at, now) as u64,
             created_at_height: bucket.map_or(0, |bucket| bucket.payment.created_at_height),
             upstream: upstream
                 .as_ref()
                 .map(|upstream| UpstreamInfo::from_upstream(upstream, metatron, now)),
+            stats: MiningStats::from_snapshot(&order.stats(), now),
             downstream: MiningStats::from_snapshot(&downstream, now),
             sessions: sessions
                 .into_iter()

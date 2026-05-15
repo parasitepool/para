@@ -38,14 +38,30 @@ impl DecayingAverage {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn with_start_time(window: Duration, start: Instant) -> Self {
+    pub(crate) fn restore(value: f64, window: Duration, last_update: Instant) -> Self {
         assert!(!window.is_zero(), "window must be non-zero");
         Self {
-            value: 0.0,
+            value,
             window,
-            last_update: start,
+            last_update,
         }
+    }
+
+    pub(crate) fn value(&self) -> f64 {
+        self.value
+    }
+
+    pub(crate) fn window(&self) -> Duration {
+        self.window
+    }
+
+    pub(crate) fn last_update(&self) -> Instant {
+        self.last_update
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_start_time(window: Duration, start: Instant) -> Self {
+        Self::restore(0.0, window, start)
     }
 
     pub(crate) fn record(&mut self, sample: f64, now: Instant) {
