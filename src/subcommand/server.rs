@@ -295,7 +295,7 @@ impl Server {
             );
         }
 
-        match Database::new(config.database_url()).await {
+        match Database::new_with_round_summary_ttl(config.database_url(), config.ttl()).await {
             Ok(database) => {
                 if config.migrate_accounts() {
                     let pool = database.pool.clone();

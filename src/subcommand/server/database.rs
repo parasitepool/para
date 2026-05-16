@@ -1,7 +1,10 @@
 use {
     super::*,
     rounds::{Round, RoundParticipant, RoundSummary},
+    tokio::sync::Mutex as TokioMutex,
 };
+
+const DEFAULT_ROUND_SUMMARY_TTL: Duration = Duration::from_secs(30);
 
 #[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone, PartialEq, ToSchema)]
 pub struct HighestDiff {
@@ -55,13 +58,56 @@ pub struct UpdatePayoutStatusRequest {
     pub failure_reason: Option<String>,
 }
 
+#[derive(Debug)]
+struct CachedRoundSummary {
+    value: Option<RoundSummary>,
+    last_updated: Instant,
+    ttl: Duration,
+}
+
+impl CachedRoundSummary {
+    fn new(ttl: Duration) -> Self {
+        Self {
+            value: None,
+            last_updated: Instant::now() - ttl,
+            ttl,
+        }
+    }
+
+    fn value(&self) -> Option<RoundSummary> {
+        if self.last_updated.elapsed() < self.ttl {
+            self.value.clone()
+        } else {
+            None
+        }
+    }
+
+    fn update(&mut self, summary: RoundSummary) {
+        self.value = Some(summary);
+        self.last_updated = Instant::now();
+    }
+
+    fn invalidate(&mut self) {
+        self.value = None;
+        self.last_updated = Instant::now() - self.ttl;
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Database {
     pub(crate) pool: Pool<Postgres>,
+    current_round_summary: Arc<TokioMutex<CachedRoundSummary>>,
 }
 
 impl Database {
     pub async fn new(database_url: String) -> Result<Self> {
+        Self::new_with_round_summary_ttl(database_url, DEFAULT_ROUND_SUMMARY_TTL).await
+    }
+
+    pub async fn new_with_round_summary_ttl(
+        database_url: String,
+        round_summary_ttl: Duration,
+    ) -> Result<Self> {
         Ok(Self {
             pool: PgPoolOptions::new()
                 .max_connections(5)
@@ -69,6 +115,9 @@ impl Database {
                 .connect(&database_url)
                 .await
                 .with_context(|| format!("failed to connect to database at `{database_url}`"))?,
+            current_round_summary: Arc::new(TokioMutex::new(CachedRoundSummary::new(
+                round_summary_ttl,
+            ))),
         })
     }
 
@@ -808,6 +857,62 @@ impl Database {
     }
 
     pub(crate) async fn get_round_summary(&self, blockheight: Option<i32>) -> Result<RoundSummary> {
+        match blockheight {
+            None => self.get_current_round_summary().await,
+            Some(h) => match self.get_round_summary_history(h).await {
+                Ok(Some(summary)) => Ok(summary),
+                Ok(None) => {
+                    if let Err(e) = self.snapshot_round_summary(h).await {
+                        warn!("Failed to snapshot round summary {h}: {e}");
+                        return self.query_round_summary(Some(h)).await;
+                    }
+
+                    match self.get_round_summary_history(h).await {
+                        Ok(Some(summary)) => Ok(summary),
+                        Ok(None) => self.query_round_summary(Some(h)).await,
+                        Err(_) => self.query_round_summary(Some(h)).await,
+                    }
+                }
+                Err(_) => self.query_round_summary(Some(h)).await,
+            },
+        }
+    }
+
+    async fn get_current_round_summary(&self) -> Result<RoundSummary> {
+        let mut cached = self.current_round_summary.lock().await;
+        if let Some(summary) = cached.value() {
+            return Ok(summary);
+        }
+
+        let summary = self.query_round_summary(None).await?;
+        cached.update(summary.clone());
+        Ok(summary)
+    }
+
+    pub(crate) async fn invalidate_current_round_summary(&self) {
+        self.current_round_summary.lock().await.invalidate();
+    }
+
+    async fn get_round_summary_history(
+        &self,
+        blockheight: i32,
+    ) -> Result<Option<RoundSummary>, sqlx::Error> {
+        sqlx::query_as::<_, RoundSummary>(
+            "
+            SELECT
+                blockheight AS blockheight,
+                previous_blockheight,
+                total_diff
+            FROM round_summary_history
+            WHERE blockheight = $1
+            ",
+        )
+        .bind(blockheight)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    async fn query_round_summary(&self, blockheight: Option<i32>) -> Result<RoundSummary> {
         sqlx::query_as::<_, RoundSummary>(
             "
             WITH previous_block AS (
@@ -834,6 +939,46 @@ impl Database {
         .fetch_one(&self.pool)
         .await
         .map_err(|err| anyhow!(err))
+    }
+
+    pub(crate) async fn snapshot_round_summary(&self, blockheight: i32) -> Result<()> {
+        sqlx::query(
+            "
+            INSERT INTO round_summary_history (blockheight, previous_blockheight, total_diff)
+            WITH target_block AS (
+                SELECT blockheight
+                FROM blocks
+                WHERE blockheight = $1
+            ),
+            previous_block AS (
+                SELECT COALESCE(MAX(b.blockheight), 0) AS previous_blockheight
+                FROM blocks b
+                JOIN target_block tb ON b.blockheight < tb.blockheight
+            ),
+            round_total AS (
+                SELECT COALESCE(SUM(rs.diff), 0.0)::FLOAT8 AS total_diff
+                FROM remote_shares rs, previous_block pb, target_block tb
+                WHERE rs.blockheight > pb.previous_blockheight
+                    AND rs.blockheight <= tb.blockheight
+                    AND rs.reject_reason IS NULL
+            )
+            SELECT
+                tb.blockheight,
+                pb.previous_blockheight,
+                rt.total_diff
+            FROM target_block tb
+            CROSS JOIN previous_block pb
+            CROSS JOIN round_total rt
+            WHERE TRUE
+            ON CONFLICT (blockheight) DO NOTHING
+            ",
+        )
+        .bind(blockheight)
+        .execute(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))?;
+
+        Ok(())
     }
 
     async fn get_round_participation_history(
