@@ -1,6 +1,6 @@
 use {
     super::*,
-    rounds::{Round, RoundParticipant},
+    rounds::{Round, RoundParticipant, RoundSummary},
 };
 
 #[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone, PartialEq, ToSchema)]
@@ -805,6 +805,35 @@ impl Database {
                 }
             }
         }
+    }
+
+    pub(crate) async fn get_round_summary(&self, blockheight: Option<i32>) -> Result<RoundSummary> {
+        sqlx::query_as::<_, RoundSummary>(
+            "
+            WITH previous_block AS (
+                SELECT COALESCE(MAX(blockheight), 0) AS previous_blockheight
+                FROM blocks
+                WHERE ($1::INTEGER IS NULL OR blockheight < $1)
+            ),
+            round_total AS (
+                SELECT COALESCE(SUM(rs.diff), 0.0)::FLOAT8 AS total_diff
+                FROM remote_shares rs, previous_block pb
+                WHERE rs.blockheight > pb.previous_blockheight
+                    AND ($1::INTEGER IS NULL OR rs.blockheight <= $1)
+                    AND rs.reject_reason IS NULL
+            )
+            SELECT
+                $1::INTEGER AS blockheight,
+                pb.previous_blockheight,
+                rt.total_diff
+            FROM previous_block pb
+            CROSS JOIN round_total rt
+            ",
+        )
+        .bind(blockheight)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))
     }
 
     async fn get_round_participation_history(

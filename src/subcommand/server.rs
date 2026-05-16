@@ -152,7 +152,9 @@ impl Modify for SecurityAddon {
         // Round endpoints
         rounds::rounds,
         rounds::round_current,
+        rounds::round_current_summary,
         rounds::round,
+        rounds::round_summary,
         rounds::participants,
         // Sync endpoints
         sync_routes::sync_batch,
@@ -181,6 +183,7 @@ impl Modify for SecurityAddon {
         // Round schemas
         rounds::Round,
         rounds::RoundParticipant,
+        rounds::RoundSummary,
         // Server schemas
         Payment,
         SatSplit,

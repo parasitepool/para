@@ -13,6 +13,13 @@ struct RoundParticipant {
     top_diff: f64,
 }
 
+#[derive(Deserialize, Debug)]
+struct RoundSummary {
+    blockheight: Option<i32>,
+    previous_blockheight: i32,
+    total_diff: f64,
+}
+
 async fn insert_test_shares_for_round(
     database_url: String,
     users: Vec<(&str, f64)>,
@@ -1101,6 +1108,36 @@ async fn test_round_first_includes_all_prior_shares() {
 }
 
 #[tokio::test]
+async fn test_round_summary_totals_shares_since_previous_round() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    insert_test_block(db_url.clone(), 5).await.unwrap();
+    insert_test_block(db_url.clone(), 10).await.unwrap();
+
+    insert_test_shares_for_round(db_url.clone(), vec![("old", 9000.0)], 4, 100)
+        .await
+        .unwrap();
+    insert_test_shares_for_round(
+        db_url.clone(),
+        vec![("foo", 1000.0), ("bar", 2000.0)],
+        7,
+        200,
+    )
+    .await
+    .unwrap();
+    insert_test_shares_for_round(db_url.clone(), vec![("baz", 3000.0)], 10, 300)
+        .await
+        .unwrap();
+
+    let summary: RoundSummary = server.get_json_async("/rounds/10/summary").await;
+    assert_eq!(summary.blockheight, Some(10));
+    assert_eq!(summary.previous_blockheight, 5);
+    assert_eq!(summary.total_diff, 6000.0);
+}
+
+#[tokio::test]
 async fn test_round_empty() {
     let server = TestServer::spawn_with_db().await;
     setup_test_schema(server.database_url().unwrap())
@@ -1162,6 +1199,32 @@ async fn test_current_round_no_blocks_found() {
 }
 
 #[tokio::test]
+async fn test_current_round_summary_totals_since_latest_block() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    insert_test_block(db_url.clone(), 5).await.unwrap();
+
+    insert_test_shares_for_round(db_url.clone(), vec![("old", 1000.0)], 3, 100)
+        .await
+        .unwrap();
+    insert_test_shares_for_round(
+        db_url.clone(),
+        vec![("foo", 2000.0), ("bar", 500.0)],
+        7,
+        200,
+    )
+    .await
+    .unwrap();
+
+    let summary: RoundSummary = server.get_json_async("/rounds/current/summary").await;
+    assert_eq!(summary.blockheight, None);
+    assert_eq!(summary.previous_blockheight, 5);
+    assert_eq!(summary.total_diff, 2500.0);
+}
+
+#[tokio::test]
 async fn test_participants_for_blockheight() {
     let server = TestServer::spawn_with_db().await;
     let db_url = server.database_url().unwrap();
@@ -1203,6 +1266,7 @@ async fn test_participants_excludes_rejected_shares() {
     let server = TestServer::spawn_with_db().await;
     let db_url = server.database_url().unwrap();
     setup_test_schema(db_url.clone()).await.unwrap();
+    insert_test_block(db_url.clone(), 50).await.unwrap();
 
     let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
 
@@ -1238,4 +1302,7 @@ async fn test_participants_excludes_rejected_shares() {
     let participants: Vec<String> = server.get_json_async("/participants/50").await;
     assert_eq!(participants.len(), 1);
     assert_eq!(participants[0], "bar");
+
+    let summary: RoundSummary = server.get_json_async("/rounds/50/summary").await;
+    assert_eq!(summary.total_diff, 100.0);
 }
