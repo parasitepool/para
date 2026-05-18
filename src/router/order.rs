@@ -217,7 +217,7 @@ impl Order {
             return false;
         };
 
-        self.hashrate_1m(now).0 < bucket.target.target_hashrate().0 * HYSTERESIS_LOW
+        self.hashrate_1m(now).as_hps() < bucket.target.target_hashrate().as_hps() * HYSTERESIS_LOW
     }
 
     pub(crate) fn upstream(&self) -> Option<Arc<Upstream>> {
@@ -242,7 +242,7 @@ impl Order {
         self.metatron.order_stats(self.id)
     }
 
-    pub(crate) fn accepted_work(&self) -> TotalWork {
+    pub(crate) fn accepted_work(&self) -> HashWork {
         self.metatron.order_accepted_work(self.id)
     }
 
@@ -251,12 +251,12 @@ impl Order {
             return false;
         };
 
-        self.accepted_work().to_hash_days() >= bucket.target
+        self.accepted_work() >= bucket.target.to_hash_work()
     }
 
-    pub(crate) fn remaining_work(&self) -> TotalWork {
-        self.bucket.as_ref().map_or(TotalWork::ZERO, |bucket| {
-            bucket.target.to_total_work() - self.accepted_work()
+    pub(crate) fn remaining_work(&self) -> HashWork {
+        self.bucket.as_ref().map_or(HashWork::ZERO, |bucket| {
+            bucket.target.to_hash_work() - self.accepted_work()
         })
     }
 
@@ -284,7 +284,7 @@ impl Order {
 
         let current = self.hashrate_1m(now);
         let target = bucket.target.target_hashrate();
-        let ceiling = HashRate(target.0 * HYSTERESIS_HIGH);
+        let ceiling = HashRate::from_hps(target.as_hps() * HYSTERESIS_HIGH);
 
         if current <= ceiling {
             return;
@@ -303,18 +303,18 @@ impl Order {
         candidates.sort_by(|a, b| a.1.total_cmp(&b.1));
         candidates.reverse();
 
-        for (id, hashrate) in candidates {
+        for (id, hash_rate) in candidates {
             if min_trim <= HashRate::ZERO {
                 break;
             }
 
-            if hashrate > max_trim {
+            if hash_rate > max_trim {
                 continue;
             }
 
             self.trim_session(id, now);
-            min_trim -= hashrate;
-            max_trim -= hashrate;
+            min_trim -= hash_rate;
+            max_trim -= hash_rate;
         }
     }
 
@@ -596,6 +596,20 @@ mod tests {
         let bucket = test_order(&metatron, Some(HashDays::new(1.0).unwrap()));
         register_session(&metatron, &bucket, "deadbeef", 10_000.0);
         assert!(!bucket.is_starving(Instant::now()));
+    }
+
+    #[test]
+    fn is_fulfilled_compares_hash_work_to_hash_days_target() {
+        let metatron = Arc::new(Metatron::new());
+        let target = HashDays::new(1e15).unwrap();
+        let bucket = test_order(&metatron, Some(target));
+        let target_work = target.to_hash_work();
+
+        metatron.set_order_accepted_work(bucket.id, target_work - HashWork::new(1.0).unwrap());
+        assert!(!bucket.is_fulfilled());
+
+        metatron.set_order_accepted_work(bucket.id, target_work);
+        assert!(bucket.is_fulfilled());
     }
 
     #[test]

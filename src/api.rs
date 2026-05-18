@@ -31,8 +31,8 @@ pub struct MiningStats {
     pub last_share: Option<u64>,
     pub accepted_shares: u64,
     pub rejected_shares: u64,
-    pub accepted_work: TotalWork,
-    pub rejected_work: TotalWork,
+    pub accepted_work: HashWork,
+    pub rejected_work: HashWork,
     pub hash_days: HashDays,
 }
 

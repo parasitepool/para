@@ -264,6 +264,17 @@
 <div id=logs class=hidden></div>
 
 <script>
+let currentHashPrice = null;
+
+async function fetchCurrentHashPrice(signal) {
+  const r = await fetch('/api/router/status', { signal });
+  if (!r.ok) throw new Error(`/api/router/status: ${r.status}`);
+  const text = await r.text();
+  const match = text.match(/"hash_price"\s*:\s*(\d+)/);
+  if (!match) throw new Error('Router status missing hash_price');
+  return match[1];
+}
+
 async function refresh(signal) {
   const [routerData, ordersData, systemData, bitcoinData] = await Promise.all([
     fetchJson('/api/router/status', { signal }),
@@ -275,6 +286,9 @@ async function refresh(signal) {
   const uss = routerData.upstream || {};
   const ds = routerData.downstream || {};
   const dss = ds.stats || {};
+  if (Number.isSafeInteger(routerData.hash_price)) {
+    currentHashPrice = String(routerData.hash_price);
+  }
 
   set('bucket_order_count', routerData.bucket_order_count);
   set('sink_order_count', routerData.sink_order_count);
@@ -379,7 +393,7 @@ document.getElementById('orders-list').addEventListener('click', (e) => {
     username.value = '';
     password.value = '';
     hashdays.value = '';
-    price.value = '';
+    price.value = currentHashPrice || '';
     error.textContent = '';
     modalTitle.textContent = 'Add Order';
     formFields.classList.remove('hidden');
@@ -388,10 +402,17 @@ document.getElementById('orders-list').addEventListener('click', (e) => {
     paymentCopied.textContent = '';
   }
 
-  document.getElementById('add-order-btn').addEventListener('click', () => {
+  document.getElementById('add-order-btn').addEventListener('click', async () => {
     resetModal();
     overlay.classList.remove('hidden');
     endpoint.focus();
+
+    try {
+      currentHashPrice = await fetchCurrentHashPrice();
+      price.value = currentHashPrice;
+    } catch (e) {
+      console.error('Failed to fetch current hash price:', e);
+    }
   });
 
   document.getElementById('order-cancel').addEventListener('click', () => {
@@ -430,28 +451,26 @@ document.getElementById('orders-list').addEventListener('click', (e) => {
       return;
     }
 
-    const parsedPrice = parseInt(price.value, 10);
-    if (!Number.isFinite(parsedPrice) || parsedPrice < 0) {
+    const parsedPrice = price.value.trim();
+    if (!/^\d+$/.test(parsedPrice)) {
       error.textContent = 'Price (sats/PHd) must be a non-negative integer';
       return;
     }
 
-    const body = {
-      upstream_target: {
-        endpoint: endpoint.value,
-        username: username.value,
-      },
-      hashdays: parsedHashdays,
-      price: parsedPrice,
-    };
+    const target = { endpoint: endpoint.value, username: username.value };
+    if (password.value) target.password = password.value;
 
-    if (password.value) body.upstream_target.password = password.value;
+    const requestBody = JSON.stringify({
+      upstream_target: target,
+      hashdays: parsedHashdays,
+      price: 0,
+    }).replace('"price":0', `"price":${parsedPrice}`);
 
     try {
       const res = await fetch('/api/router/order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: requestBody,
       });
 
       if (!res.ok) {

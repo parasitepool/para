@@ -96,8 +96,7 @@ router:
     --start-diff 0.00001 \
     --vardiff-window 10 \
     --vardiff-period 1 \
-    --tick-interval 1 \
-    --hash-price 50000 \
+    --tick-interval 10 \
     --sink-order tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.chameleon@127.0.0.1:42069 \
     --wallet-birthday 13000 \
     --descriptor "tr([6cf75d5c/86'/1'/0']tprv8gNWXLKSxxW1GdLWjDscZzfy5A2jWYW5Yh7XxB9EtrAB4yNeJRezY7McT86yhHSD6cRTnjtHWV9JZMJ2taba3QvXNT92Tr7L3tkFWGTUBVX/0/*)#4jdqs9ss"

@@ -1,18 +1,35 @@
 use super::*;
 
-/// Expected hashes per difficulty-1 share: 2^32 =~ 4.29 billion.
-/// The precise value is 2^256/target_1 =~ 4,295,032,833 (~0.0015% higher),
-/// but 2^32 is the standard approximation used across the mining ecosystem.
-pub(crate) const HASHES_PER_DIFF_1: u64 = 1 << 32;
-
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default, Serialize, Deserialize)]
-pub struct HashRate(pub f64);
+#[serde(try_from = "f64", into = "f64")]
+pub struct HashRate(f64);
 
 impl HashRate {
     pub const ZERO: Self = Self(0.0);
 
+    pub fn new(value: f64) -> Result<Self> {
+        ensure!(
+            value.is_finite() && value >= 0.0,
+            "hash rate must be finite and >= 0, got {value}",
+        );
+
+        Ok(Self(value))
+    }
+
+    pub fn from_hps(hps: f64) -> Self {
+        Self(saturating_finite(hps))
+    }
+
+    pub fn as_hps(self) -> f64 {
+        self.0
+    }
+
     pub fn from_dsps(dsps: f64) -> Self {
-        Self(dsps * HASHES_PER_DIFF_1 as f64)
+        Self::from_hps(dsps * HASHES_PER_DIFF_1 as f64)
+    }
+
+    pub fn as_dsps(self) -> f64 {
+        self.0 / HASHES_PER_DIFF_1 as f64
     }
 
     #[cfg(test)]
@@ -21,11 +38,25 @@ impl HashRate {
             return Self::ZERO;
         }
 
-        Self(total_difficulty * HASHES_PER_DIFF_1 as f64 / window.as_secs_f64())
+        Self::from_hps(total_difficulty * HASHES_PER_DIFF_1 as f64 / window.as_secs_f64())
     }
 
     pub fn total_cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.0.total_cmp(&other.0)
+    }
+}
+
+impl TryFrom<f64> for HashRate {
+    type Error = Error;
+
+    fn try_from(value: f64) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl From<HashRate> for f64 {
+    fn from(value: HashRate) -> Self {
+        value.0
     }
 }
 
@@ -39,40 +70,40 @@ impl FromStr for HashRate {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self(parse_si(s, &["H/s", "H"])?))
+        Self::new(parse_si(s, &["H/s", "H"])?)
     }
 }
 
 impl Add for HashRate {
     type Output = Self;
     fn add(self, rhs: Self) -> Self {
-        Self(self.0 + rhs.0)
+        Self::from_hps(self.0 + rhs.0)
     }
 }
 
 impl AddAssign for HashRate {
     fn add_assign(&mut self, rhs: Self) {
-        self.0 += rhs.0;
+        *self = *self + rhs;
     }
 }
 
 impl Sub for HashRate {
     type Output = Self;
     fn sub(self, rhs: Self) -> Self {
-        Self((self.0 - rhs.0).max(0.0))
+        Self::from_hps(self.0 - rhs.0)
     }
 }
 
 impl SubAssign for HashRate {
     fn sub_assign(&mut self, rhs: Self) {
-        self.0 = (self.0 - rhs.0).max(0.0);
+        *self = *self - rhs;
     }
 }
 
 impl Mul<f64> for HashRate {
     type Output = Self;
     fn mul(self, rhs: f64) -> Self {
-        Self((self.0 * rhs).max(0.0))
+        Self::from_hps(self.0 * rhs)
     }
 }
 
@@ -82,7 +113,7 @@ impl Div<f64> for HashRate {
         if rhs == 0.0 {
             Self::ZERO
         } else {
-            Self((self.0 / rhs).max(0.0))
+            Self::from_hps(self.0 / rhs)
         }
     }
 }
@@ -94,16 +125,32 @@ mod tests {
     #[test]
     fn hashrate_from_dsps() {
         let rate = HashRate::from_dsps(1.0);
-        assert_eq!(rate.0, HASHES_PER_DIFF_1 as f64);
+        assert_eq!(rate.as_hps(), HASHES_PER_DIFF_1 as f64);
+        assert_eq!(rate.as_dsps(), 1.0);
 
         let rate = HashRate::from_dsps(20.0);
-        assert_eq!(rate.0, 20.0 * HASHES_PER_DIFF_1 as f64);
+        assert_eq!(rate.as_hps(), 20.0 * HASHES_PER_DIFF_1 as f64);
+        assert_eq!(rate.as_dsps(), 20.0);
+    }
+
+    #[test]
+    fn hashrate_from_hps() {
+        let rate = HashRate::from_hps(1e12);
+        assert_eq!(rate.as_hps(), 1e12);
+    }
+
+    #[test]
+    fn computed_constructors_saturate_invalid_values() {
+        assert_eq!(HashRate::from_hps(f64::INFINITY).as_hps(), f64::MAX);
+        assert_eq!(HashRate::from_dsps(f64::MAX).as_hps(), f64::MAX);
+        assert_eq!(HashRate::from_hps(f64::NAN), HashRate::ZERO);
+        assert_eq!(HashRate::from_hps(-1.0), HashRate::ZERO);
     }
 
     #[test]
     fn hashrate_estimate() {
         let rate = HashRate::estimate(60.0, Duration::from_secs(60));
-        assert_eq!(rate.0, HASHES_PER_DIFF_1 as f64);
+        assert_eq!(rate.as_hps(), HASHES_PER_DIFF_1 as f64);
 
         let rate = HashRate::estimate(100.0, Duration::ZERO);
         assert_eq!(rate, HashRate::ZERO);
@@ -129,7 +176,7 @@ mod tests {
         ];
 
         for (value, expected) in cases {
-            let rate = HashRate(value);
+            let rate = HashRate::from_hps(value);
             assert_eq!(rate.to_string(), expected, "for value {value}");
         }
     }
@@ -155,7 +202,7 @@ mod tests {
 
         for (input, expected) in cases {
             let rate: HashRate = input.parse().unwrap();
-            let actual = rate.0;
+            let actual = rate.as_hps();
             let rel_err = if expected == 0.0 {
                 actual
             } else {
@@ -177,28 +224,49 @@ mod tests {
     }
 
     #[test]
-    fn hashrate_arithmetic() {
-        let a = HashRate(1e12);
-        let b = HashRate(2e12);
+    fn hashrate_new_rejects_invalid_values() {
+        assert!(HashRate::new(-1.0).is_err());
+        assert!(HashRate::new(f64::NAN).is_err());
+        assert!(HashRate::new(f64::INFINITY).is_err());
+    }
 
-        assert_eq!((a + b).0, 3e12);
-        assert_eq!((b - a).0, 1e12);
-        assert_eq!((a * 2.0).0, 2e12);
-        assert_eq!((b / 2.0).0, 1e12);
+    #[test]
+    fn hashrate_arithmetic() {
+        let a = HashRate::from_hps(1e12);
+        let b = HashRate::from_hps(2e12);
+
+        assert_eq!((a + b).as_hps(), 3e12);
+        assert_eq!((b - a).as_hps(), 1e12);
+        assert_eq!((a * 2.0).as_hps(), 2e12);
+        assert_eq!((b / 2.0).as_hps(), 1e12);
+    }
+
+    #[test]
+    fn hashrate_arithmetic_saturates() {
+        let max = HashRate::from_hps(f64::MAX);
+
+        assert_eq!((max + max).as_hps(), f64::MAX);
+        assert_eq!((max * 2.0).as_hps(), f64::MAX);
+        assert_eq!((HashRate::from_hps(1.0) * f64::NAN), HashRate::ZERO);
     }
 
     #[test]
     fn hashrate_subtraction_clamps() {
-        let a = HashRate(1e12);
-        let b = HashRate(2e12);
-        assert_eq!((a - b).0, 0.0);
+        let a = HashRate::from_hps(1e12);
+        let b = HashRate::from_hps(2e12);
+        assert_eq!((a - b).as_hps(), 0.0);
     }
 
     #[test]
     fn hashrate_serde_roundtrip() {
-        let rate = HashRate(1.5e12);
+        let rate = HashRate::from_hps(1.5e12);
         let json = serde_json::to_string(&rate).unwrap();
         let parsed: HashRate = serde_json::from_str(&json).unwrap();
         assert_eq!(rate, parsed);
+    }
+
+    #[test]
+    fn hashrate_serde_rejects_invalid_values() {
+        assert!(serde_json::from_str::<HashRate>("-1.0").is_err());
     }
 }

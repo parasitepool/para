@@ -9,12 +9,16 @@ pub(crate) enum RouterError {
     InvalidHashdays,
     #[snafu(display("price calculation overflow"))]
     HashPriceOverflow,
-    #[snafu(display("bid price {bid} is below minimum {minimum}"))]
-    HashPriceBelowMinimum { bid: HashPrice, minimum: HashPrice },
+    #[snafu(display("bid price {bid} is below minimum hash value {minimum}"))]
+    HashPriceBelowMinimum { bid: HashPrice, minimum: HashValue },
     #[snafu(display("wallet is still syncing, try again shortly"))]
     WalletSyncing,
     #[snafu(display("wallet not configured, bucket orders unavailable"))]
     WalletRequired,
     #[snafu(display("wallet persistence failed: {error:#}"))]
     WalletPersistence { error: anyhow::Error },
+    #[snafu(display("active order {id} is missing upstream"))]
+    MissingActiveUpstream { id: u32 },
+    #[snafu(display("active order {id} is missing extranonce allocator"))]
+    MissingActiveAllocator { id: u32 },
 }

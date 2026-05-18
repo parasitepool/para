@@ -53,6 +53,7 @@ impl Proxy {
             None,
             tasks.clone(),
             cancel_token.clone(),
+            HashValue::from_sats(1),
         ));
 
         let event_tx = build_event_sink(&settings, cancel_token.clone(), &tasks)
@@ -63,7 +64,12 @@ impl Proxy {
 
         http_server::spawn(
             &settings,
-            api::proxy::router(router.clone(), bitcoin_client, settings.chain(), logs),
+            api::proxy::router(
+                router.clone(),
+                bitcoin_client.clone(),
+                settings.chain(),
+                logs,
+            ),
             cancel_token.clone(),
             &tasks,
         )?;
@@ -72,6 +78,6 @@ impl Proxy {
             spawn_throbber(router.clone(), cancel_token.clone(), &tasks);
         }
 
-        router.serve(listener, event_tx, cancel_token).await
+        router.serve(listener, event_tx, None, cancel_token).await
     }
 }

@@ -7,6 +7,16 @@ use super::*;
 pub struct HashPrice(Amount);
 
 impl HashPrice {
+    pub fn from_hash_value(hash_value: HashValue) -> Self {
+        let sats = (hash_value.to_sats() as f64 * 1.05).ceil();
+
+        if sats >= u64::MAX as f64 {
+            return Self::from_sats(u64::MAX);
+        }
+
+        Self::from_sats(sats as u64)
+    }
+
     pub fn from_sats(sats: u64) -> Self {
         Self(Amount::from_sat(sats))
     }
@@ -15,8 +25,8 @@ impl HashPrice {
         self.0.to_sat()
     }
 
-    pub fn total(self, hashdays: HashDays) -> Option<Amount> {
-        let sats = (self.to_sats() as f64 * hashdays.as_f64() / 1e15).ceil();
+    pub fn total(self, hash_days: HashDays) -> Option<Amount> {
+        let sats = (self.to_sats() as f64 * hash_days.as_f64() / PETA).ceil();
 
         if !sats.is_finite() || sats < 0.0 || sats > u64::MAX as f64 {
             return None;
@@ -51,10 +61,10 @@ mod tests {
     #[test]
     fn total() {
         #[track_caller]
-        fn case(price: u64, hashdays: f64, expected: u64) {
+        fn case(price: u64, hash_days: f64, expected: u64) {
             assert_eq!(
                 HashPrice::from_sats(price)
-                    .total(HashDays::new(hashdays).unwrap())
+                    .total(HashDays::new(hash_days).unwrap())
                     .unwrap(),
                 Amount::from_sat(expected),
             );
@@ -65,6 +75,16 @@ mod tests {
         case(50000, 500e12, 25000);
         case(1000, 1e15, 1000);
         case(1000, 1e12, 1);
+    }
+
+    #[test]
+    fn total_charges_sats_per_phd() {
+        assert_eq!(
+            HashPrice::from_sats(1234)
+                .total(HashDays::new(PETA).unwrap())
+                .unwrap(),
+            Amount::from_sat(1234),
+        );
     }
 
     #[test]

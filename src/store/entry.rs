@@ -22,8 +22,8 @@ pub(crate) struct BucketEntry {
 pub(crate) struct StatsEntry {
     pub(crate) accepted_shares: u64,
     pub(crate) rejected_shares: u64,
-    pub(crate) accepted_work: TotalWork,
-    pub(crate) rejected_work: TotalWork,
+    pub(crate) accepted_work: HashWork,
+    pub(crate) rejected_work: HashWork,
     pub(crate) last_share_secs_ago: Option<f64>,
     pub(crate) best_share: Option<Difficulty>,
     pub(crate) dsps_1m: DecayEntry,

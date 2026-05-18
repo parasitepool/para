@@ -195,11 +195,11 @@ impl Metatron {
         self.orders.insert(order_id, Mutex::new(stats));
     }
 
-    pub(crate) fn order_accepted_work(&self, order_id: u32) -> TotalWork {
+    pub(crate) fn order_accepted_work(&self, order_id: u32) -> HashWork {
         self.orders
             .get(&order_id)
             .map(|entry| entry.lock().accepted_work)
-            .unwrap_or(TotalWork::ZERO)
+            .unwrap_or(HashWork::ZERO)
     }
 
     pub(crate) fn downstream_stats(&self, order_id: u32, now: Instant) -> Stats {
@@ -234,7 +234,7 @@ impl Metatron {
     }
 
     #[cfg(test)]
-    pub(crate) fn set_order_accepted_work(&self, order_id: u32, work: TotalWork) {
+    pub(crate) fn set_order_accepted_work(&self, order_id: u32, work: HashWork) {
         self.orders
             .entry(order_id)
             .or_insert_with(|| Mutex::new(Stats::new()))
@@ -351,9 +351,9 @@ mod tests {
     fn accepted_work_accumulates() {
         let metatron = Metatron::new();
         let pool_diff = Difficulty::from(100.0);
-        let expected = TotalWork::from_difficulty(pool_diff);
+        let expected = HashWork::from_difficulty(pool_diff);
 
-        assert_eq!(metatron.snapshot().accepted_work, TotalWork::ZERO);
+        assert_eq!(metatron.snapshot().accepted_work, HashWork::ZERO);
 
         let foo_session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
         foo_session.record_accepted(pool_diff, Difficulty::from(200.0));
@@ -401,7 +401,7 @@ mod tests {
         assert_eq!(stats.rejected_shares, 1);
         assert_eq!(stats.best_share, Some(Difficulty::from(200.0)));
         assert!(stats.last_share.is_some());
-        let expected = TotalWork::from_difficulty(pool_diff);
+        let expected = HashWork::from_difficulty(pool_diff);
         assert_eq!(stats.accepted_work, expected + expected);
         assert_eq!(stats.rejected_work, expected);
     }
@@ -421,7 +421,7 @@ mod tests {
         let stats = metatron.snapshot();
         assert_eq!(stats.accepted_shares, 2);
         assert_eq!(stats.best_share, Some(Difficulty::from(300.0)));
-        let expected = TotalWork::from_difficulty(pool_diff);
+        let expected = HashWork::from_difficulty(pool_diff);
         assert_eq!(stats.accepted_work, expected + expected);
     }
 
@@ -439,7 +439,7 @@ mod tests {
         let stats = metatron.snapshot();
         assert_eq!(stats.accepted_shares, 2);
         assert_eq!(stats.best_share, Some(Difficulty::from(200.0)));
-        let expected = TotalWork::from_difficulty(pool_diff);
+        let expected = HashWork::from_difficulty(pool_diff);
         assert_eq!(stats.accepted_work, expected + expected);
     }
 
@@ -518,7 +518,7 @@ mod tests {
         let stats = metatron.order_stats(0);
         assert_eq!(stats.accepted_shares, 2);
         assert_eq!(stats.rejected_shares, 0);
-        let expected = TotalWork::from_difficulty(upstream_diff);
+        let expected = HashWork::from_difficulty(upstream_diff);
         assert_eq!(stats.accepted_work, expected + expected);
         assert_eq!(stats.best_share, Some(Difficulty::from(400.0)));
         assert!(stats.last_share.is_some());
@@ -535,7 +535,7 @@ mod tests {
         let stats = metatron.order_stats(0);
         assert_eq!(stats.accepted_shares, 0);
         assert_eq!(stats.rejected_shares, 2);
-        let expected = TotalWork::from_difficulty(upstream_diff);
+        let expected = HashWork::from_difficulty(upstream_diff);
         assert_eq!(stats.rejected_work, expected + expected);
     }
 
@@ -561,10 +561,10 @@ mod tests {
         let metatron = Metatron::new();
         let upstream_diff = Difficulty::from(250.0);
 
-        assert_eq!(metatron.order_accepted_work(0), TotalWork::ZERO);
+        assert_eq!(metatron.order_accepted_work(0), HashWork::ZERO);
 
         metatron.record_order_accepted(0, upstream_diff, Difficulty::from(300.0));
-        let expected = TotalWork::from_difficulty(upstream_diff);
+        let expected = HashWork::from_difficulty(upstream_diff);
         assert_eq!(metatron.order_accepted_work(0), expected);
 
         metatron.record_order_accepted(0, upstream_diff, Difficulty::from(300.0));
@@ -577,7 +577,7 @@ mod tests {
         let stats = metatron.order_stats(999);
         assert_eq!(stats.accepted_shares, 0);
         assert_eq!(stats.rejected_shares, 0);
-        assert_eq!(stats.accepted_work, TotalWork::ZERO);
+        assert_eq!(stats.accepted_work, HashWork::ZERO);
         assert_eq!(stats.best_share, None);
     }
 

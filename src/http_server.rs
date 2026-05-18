@@ -341,7 +341,7 @@ pub(crate) async fn bitcoin_status(
     Ok(Json(BitcoinStatus {
         height: info.blocks,
         network_difficulty: Difficulty::from(info.difficulty),
-        network_hashrate: HashRate(info.networkhashps),
+        network_hashrate: HashRate::from_hps(info.networkhashps),
         mempool_txs: info.pooledtx,
     }))
 }

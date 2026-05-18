@@ -4,8 +4,8 @@ use super::*;
 pub(crate) struct Stats {
     pub(crate) accepted_shares: u64,
     pub(crate) rejected_shares: u64,
-    pub(crate) accepted_work: TotalWork,
-    pub(crate) rejected_work: TotalWork,
+    pub(crate) accepted_work: HashWork,
+    pub(crate) rejected_work: HashWork,
     pub(crate) last_share: Option<Instant>,
     pub(crate) best_share: Option<Difficulty>,
     pub(crate) dsps_1m: DecayingAverage,
@@ -32,8 +32,8 @@ impl Stats {
         Self {
             accepted_shares: 0,
             rejected_shares: 0,
-            accepted_work: TotalWork::ZERO,
-            rejected_work: TotalWork::ZERO,
+            accepted_work: HashWork::ZERO,
+            rejected_work: HashWork::ZERO,
             last_share: None,
             best_share: None,
             dsps_1m: DecayingAverage::new(Duration::from_mins(1)),
@@ -70,7 +70,7 @@ impl Stats {
         self.sps_5m.record(1.0, now);
         self.sps_15m.record(1.0, now);
         self.sps_1hr.record(1.0, now);
-        self.accepted_work += TotalWork::from_difficulty(pool_diff);
+        self.accepted_work += HashWork::from_difficulty(pool_diff);
         self.last_share = Some(now);
 
         if self.best_share.is_none_or(|best| share_diff > best) {
@@ -80,7 +80,7 @@ impl Stats {
 
     pub(crate) fn record_rejected(&mut self, pool_diff: Difficulty) {
         self.rejected_shares += 1;
-        self.rejected_work += TotalWork::from_difficulty(pool_diff);
+        self.rejected_work += HashWork::from_difficulty(pool_diff);
     }
 
     pub(crate) fn absorb(&mut self, other: Stats, now: Instant) {

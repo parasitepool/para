@@ -45,9 +45,7 @@ use {
         stream::{FuturesUnordered, StreamExt},
     },
     generator::spawn_generator,
-    hashdays::HashDays,
-    hashprice::HashPrice,
-    hashrate::{HASHES_PER_DIFF_1, HashRate},
+    hash::{HashDays, HashPrice, HashRate, HashValue, HashWork},
     job::Job,
     jobs::Jobs,
     logs::logs_enabled,
@@ -105,7 +103,7 @@ use {
     stratifier::Stratifier,
     stratum::{
         Authorize, Configure, Difficulty, Extranonce, Id, JobId, MAX_MESSAGE_SIZE, MerkleNode,
-        Message, Method, Nbits, Nonce, Notify, Ntime, PrevHash, Reconnect, SetDifficulty,
+        Message, Method, Nbits, Nonce, Notify, Ntime, PETA, PrevHash, Reconnect, SetDifficulty,
         StratumError, Submit, Subscribe, SubscribeResponse, Username, Version, format_si,
         merkle_root, parse_si,
     },
@@ -127,7 +125,6 @@ use {
         sync::CancellationToken,
         task::TaskTracker,
     },
-    total_work::TotalWork,
     tracing::{Subscriber, debug, error, info, warn},
     tracing_appender::non_blocking,
     tracing_subscriber::{EnvFilter, Layer, layer::SubscriberExt, util::SubscriberInitExt},
@@ -153,9 +150,7 @@ mod epoch;
 mod event_sink;
 mod extranonces;
 mod generator;
-pub mod hashdays;
-pub mod hashprice;
-pub mod hashrate;
+pub mod hash;
 mod http_server;
 mod job;
 mod jobs;
@@ -169,7 +164,6 @@ mod store;
 mod stratifier;
 pub mod subcommand;
 mod throbber;
-mod total_work;
 mod upstream;
 mod upstream_target;
 mod vardiff;

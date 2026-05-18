@@ -55,7 +55,7 @@ impl Metrics {
         let now = Instant::now();
         state.smoothed.record(delta as f64, now);
         state.last_total = total;
-        HashRate(state.smoothed.value_at(now))
+        HashRate::from_hps(state.smoothed.value_at(now))
     }
 
     pub(crate) fn sps(&self) -> f64 {
@@ -107,14 +107,17 @@ mod tests {
         let metrics = Metrics::new();
         thread::sleep(Duration::from_millis(10));
         let rate = metrics.hashrate();
-        assert_eq!(rate, HashRate(0.0));
+        assert_eq!(rate, HashRate::ZERO);
     }
 
     #[test]
     fn avg_hashrate_is_finite() {
         let metrics = Metrics::new();
         let rate = metrics.hashrate();
-        assert!(rate.0.is_finite(), "hashrate should be finite: {rate}");
+        assert!(
+            rate.as_hps().is_finite(),
+            "hashrate should be finite: {rate}"
+        );
     }
 
     #[test]
@@ -124,8 +127,11 @@ mod tests {
         metrics.add_hashes(100_000);
 
         let rate = metrics.hashrate();
-        assert!(rate > HashRate(0.0), "hashrate should be positive: {rate}");
-        assert!(rate.0.is_finite(), "hashrate should be finite: {rate}");
+        assert!(rate > HashRate::ZERO, "hashrate should be positive: {rate}");
+        assert!(
+            rate.as_hps().is_finite(),
+            "hashrate should be finite: {rate}"
+        );
     }
 
     #[test]
@@ -140,7 +146,7 @@ mod tests {
 
         let rate = metrics.hashrate();
         assert!(
-            rate > HashRate(0.0),
+            rate > HashRate::ZERO,
             "smoothed rate should be positive: {rate}"
         );
     }

@@ -1,6 +1,6 @@
 use {
     super::*,
-    crate::{api, http_server},
+    crate::{api, generator::get_block_template, http_server},
 };
 
 #[derive(Parser, Debug)]
@@ -23,6 +23,9 @@ impl RouterCommand {
         );
 
         let bitcoin_client = Arc::new(settings.bitcoin_rpc_client().await?);
+        let template = get_block_template(&bitcoin_client, &settings).await?;
+        let initial_hash_value = HashValue::compute(template.coinbase_value, template.bits);
+
         let store = Arc::new(Store::open(
             &settings.store_path("router.redb")?,
             settings.chain(),
@@ -48,13 +51,19 @@ impl RouterCommand {
             Some(wallet),
             tasks.clone(),
             cancel_token.clone(),
+            initial_hash_value,
         ));
 
         router.restore(settings.sink_orders())?;
 
         http_server::spawn(
             &settings,
-            api::router::router(router.clone(), bitcoin_client, settings.chain(), logs),
+            api::router::router(
+                router.clone(),
+                bitcoin_client.clone(),
+                settings.chain(),
+                logs,
+            ),
             cancel_token.clone(),
             &tasks,
         )?;
@@ -65,6 +74,8 @@ impl RouterCommand {
 
         info!("Stratum router listening for downstream miners on {address}:{port}");
 
-        router.serve(listener, None, cancel_token).await
+        router
+            .serve(listener, None, Some(bitcoin_client), cancel_token)
+            .await
     }
 }

@@ -8,7 +8,7 @@ impl HashDays {
     pub fn new(value: f64) -> Result<Self> {
         ensure!(
             value.is_finite() && value >= 0.0,
-            "hashdays must be finite and >= 0, got {value}",
+            "hash days must be finite and >= 0, got {value}",
         );
 
         Ok(Self(value))
@@ -18,12 +18,22 @@ impl HashDays {
         self.0
     }
 
-    pub fn to_total_work(self) -> TotalWork {
-        TotalWork::from_raw(self.0 * 86_400.0 / HASHES_PER_DIFF_1 as f64)
+    pub(crate) const fn from_raw(value: f64) -> Self {
+        Self(value)
+    }
+
+    pub fn to_hash_work(self) -> HashWork {
+        HashWork::from_raw(saturating_finite(
+            self.0 * (SECONDS_PER_DAY / HASHES_PER_DIFF_1 as f64),
+        ))
+    }
+
+    pub fn from_hash_work(work: HashWork) -> Self {
+        work.to_hash_days()
     }
 
     pub fn target_hashrate(self) -> HashRate {
-        HashRate::from_dsps(self.to_total_work().as_f64() / 86_400.0)
+        HashRate::from_hps(self.0)
     }
 }
 
@@ -61,17 +71,49 @@ mod tests {
 
     #[test]
     fn conversion() {
-        let work = TotalWork::new(86_400.0 / HASHES_PER_DIFF_1 as f64).unwrap();
+        let work = HashWork::new(SECONDS_PER_DAY / HASHES_PER_DIFF_1 as f64).unwrap();
         let hd = work.to_hash_days();
         assert!((hd.as_f64() - 1.0).abs() < 1e-9);
     }
 
     #[test]
     fn inverse_conversion() {
-        let work = TotalWork::new(42.0).unwrap();
+        let work = HashWork::new(42.0).unwrap();
         let hd = work.to_hash_days();
-        let roundtrip = hd.to_total_work();
+        let roundtrip = hd.to_hash_work();
         assert!((roundtrip.as_f64() - 42.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn from_hash_work_matches_method() {
+        let work = HashWork::new(42.0).unwrap();
+        assert_eq!(HashDays::from_hash_work(work), work.to_hash_days());
+    }
+
+    #[test]
+    fn hash_days_to_hash_work_round_trips() {
+        let hash_days = HashDays::new(1.25e15).unwrap();
+        let roundtrip = HashDays::from_hash_work(hash_days.to_hash_work());
+        let rel_err = ((roundtrip.as_f64() - hash_days.as_f64()) / hash_days.as_f64()).abs();
+
+        assert!(
+            rel_err < 1e-12,
+            "got {}, want {}",
+            roundtrip.as_f64(),
+            hash_days.as_f64()
+        );
+    }
+
+    #[test]
+    fn to_hash_work_does_not_panic_for_extreme_finite_value() {
+        let work = HashDays::new(f64::MAX).unwrap().to_hash_work();
+
+        assert!(work.as_f64().is_finite());
+    }
+
+    #[test]
+    fn to_hash_work_nan_maps_to_zero() {
+        assert_eq!(HashDays::from_raw(f64::NAN).to_hash_work(), HashWork::ZERO);
     }
 
     #[test]
@@ -154,8 +196,8 @@ mod tests {
     #[test]
     fn target_hashrate() {
         #[track_caller]
-        fn case(hashdays: f64, expected_hashrate: f64) {
-            let actual = HashDays::new(hashdays).unwrap().target_hashrate().0;
+        fn case(hash_days: f64, expected_hashrate: f64) {
+            let actual = HashDays::new(hash_days).unwrap().target_hashrate().as_hps();
             let rel_err = if expected_hashrate == 0.0 {
                 actual
             } else {
@@ -163,7 +205,7 @@ mod tests {
             };
             assert!(
                 rel_err < 1e-10,
-                "target_hashrate({hashdays}): got {actual}, want {expected_hashrate}",
+                "target_hashrate({hash_days}): got {actual}, want {expected_hashrate}",
             );
         }
 
@@ -172,5 +214,13 @@ mod tests {
         case(2e15, 2e15);
         case(0.5e15, 0.5e15);
         case(1e12, 1e12);
+    }
+
+    #[test]
+    fn target_hashrate_saturates_extreme_finite_value() {
+        assert_eq!(
+            HashDays::new(f64::MAX).unwrap().target_hashrate().as_hps(),
+            f64::MAX,
+        );
     }
 }

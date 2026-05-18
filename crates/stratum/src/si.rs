@@ -1,15 +1,24 @@
 use super::*;
 
+pub const KILO: f64 = 1e3;
+pub const MEGA: f64 = 1e6;
+pub const GIGA: f64 = 1e9;
+pub const TERA: f64 = 1e12;
+pub const PETA: f64 = 1e15;
+pub const EXA: f64 = 1e18;
+pub const ZETTA: f64 = 1e21;
+pub const YOTTA: f64 = 1e24;
+
 pub const SI_PREFIXES: &[(&str, f64)] = &[
     ("", 1.0),
-    ("K", 1e3),
-    ("M", 1e6),
-    ("G", 1e9),
-    ("T", 1e12),
-    ("P", 1e15),
-    ("E", 1e18),
-    ("Z", 1e21),
-    ("Y", 1e24),
+    ("K", KILO),
+    ("M", MEGA),
+    ("G", GIGA),
+    ("T", TERA),
+    ("P", PETA),
+    ("E", EXA),
+    ("Z", ZETTA),
+    ("Y", YOTTA),
 ];
 
 /// Format a value with SI prefixes (K, M, G, T, P, ...)

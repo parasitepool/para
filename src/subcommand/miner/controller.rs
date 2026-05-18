@@ -41,7 +41,7 @@ impl Controller {
         let (notify_tx, notify_rx) = watch::channel(None);
 
         let throttle = throttle
-            .map(|hashrate| hashrate.0 / cpu_cores as f64)
+            .map(|hash_rate| hash_rate.as_hps() / cpu_cores as f64)
             .unwrap_or(f64::MAX);
 
         let mut controller = Self {

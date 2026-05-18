@@ -31,9 +31,6 @@ pub(crate) struct RouterOptions {
     #[arg(long, default_value_t = 60, help = "<TICK_INTERVAL> in seconds.")]
     pub(crate) tick_interval: u64,
 
-    #[arg(long, help = "<HASH_PRICE> in sats/PHd.")]
-    pub(crate) hash_price: HashPrice,
-
     #[arg(
         long,
         help = "Sink order with upstream target <USER[:PASS]@HOST:PORT>."

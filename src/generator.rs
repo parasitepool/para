@@ -144,7 +144,7 @@ async fn verify_zmq_hashblock(rpc: &BitcoindClient, settings: &Settings) -> Resu
     Ok(())
 }
 
-async fn get_block_template(
+pub(crate) async fn get_block_template(
     bitcoin_rpc_client: &BitcoindClient,
     settings: &Settings,
 ) -> Result<BlockTemplate> {

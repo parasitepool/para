@@ -49,7 +49,6 @@ pub(crate) struct Settings {
     change_descriptor: Option<String>,
     wallet_birthday: u32,
     sink_orders: Vec<UpstreamTarget>,
-    hash_price: HashPrice,
     allow_zero_conf: bool,
     store_path: Option<PathBuf>,
 }
@@ -93,7 +92,6 @@ impl Default for Settings {
             change_descriptor: None,
             wallet_birthday: 0,
             sink_orders: Vec::new(),
-            hash_price: HashPrice::from_sats(1),
             allow_zero_conf: false,
             store_path: None,
         }
@@ -256,7 +254,6 @@ impl Settings {
             timeout,
             enonce1_extension_size,
             tick_interval,
-            hash_price,
             sink_order,
             allow_zero_conf,
         } = options;
@@ -269,7 +266,6 @@ impl Settings {
             change_descriptor,
             wallet_birthday,
             sink_orders: sink_order,
-            hash_price,
             allow_zero_conf,
             ..Self::from_common_options(common)?
         };
@@ -673,10 +669,6 @@ impl Settings {
     pub(crate) fn sink_orders(&self) -> &[UpstreamTarget] {
         &self.sink_orders
     }
-
-    pub(crate) fn hash_price(&self) -> HashPrice {
-        self.hash_price
-    }
 }
 
 #[cfg(test)]
@@ -771,9 +763,9 @@ mod tests {
 
     fn router_command(extra: &str) -> String {
         if extra.is_empty() {
-            "para router --descriptor foo --hash-price 1000".to_string()
+            "para router --descriptor foo".to_string()
         } else {
-            format!("para router --descriptor foo --hash-price 1000 {extra}")
+            format!("para router --descriptor foo {extra}")
         }
     }
 
@@ -1272,22 +1264,22 @@ mod tests {
         }
 
         case(
-            "para router --descriptor foo --hash-price 1000 --data-dir /foo",
+            "para router --descriptor foo --data-dir /foo",
             "router.redb",
             "/foo/router.redb",
         );
         case(
-            "para router --descriptor foo --hash-price 1000 --data-dir /foo --chain regtest",
+            "para router --descriptor foo --data-dir /foo --chain regtest",
             "router.redb",
             "/foo/regtest/router.redb",
         );
         case(
-            "para router --descriptor foo --hash-price 1000 --data-dir /foo --chain signet",
+            "para router --descriptor foo --data-dir /foo --chain signet",
             "router.redb",
             "/foo/signet/router.redb",
         );
         case(
-            "para router --descriptor foo --hash-price 1000 --data-dir /foo --chain testnet",
+            "para router --descriptor foo --data-dir /foo --chain testnet",
             "router.redb",
             "/foo/testnet3/router.redb",
         );
@@ -1465,10 +1457,9 @@ mod tests {
     fn shared_defaults_pool_proxy_and_router() {
         let pool = Settings::from_pool_options(parse_pool_options("para pool")).unwrap();
         let proxy = Settings::from_proxy_options(parse_proxy_options(&proxy_command(""))).unwrap();
-        let router = Settings::from_router_options(parse_router_options(
-            "para router --descriptor foo --hash-price 1000",
-        ))
-        .unwrap();
+        let router =
+            Settings::from_router_options(parse_router_options("para router --descriptor foo"))
+                .unwrap();
 
         for settings in [&proxy, &router] {
             assert_eq!(pool.address, settings.address);
@@ -1542,7 +1533,7 @@ mod tests {
 
     #[test]
     fn router_defaults_are_sane() {
-        let options = parse_router_options("para router --descriptor foo --hash-price 1000");
+        let options = parse_router_options("para router --descriptor foo");
         let settings = Settings::from_router_options(options).unwrap();
 
         assert_eq!(settings.address, "0.0.0.0");
@@ -1563,9 +1554,8 @@ mod tests {
 
     #[test]
     fn router_override_address_and_port() {
-        let options = parse_router_options(
-            "para router --descriptor foo --hash-price 1000 --address 127.0.0.1 --port 9999",
-        );
+        let options =
+            parse_router_options("para router --descriptor foo --address 127.0.0.1 --port 9999");
         let settings = Settings::from_router_options(options).unwrap();
 
         assert_eq!(settings.address, "127.0.0.1");
@@ -1574,8 +1564,7 @@ mod tests {
 
     #[test]
     fn router_override_timeout() {
-        let options =
-            parse_router_options("para router --descriptor foo --hash-price 1000 --timeout 60");
+        let options = parse_router_options("para router --descriptor foo --timeout 60");
         let settings = Settings::from_router_options(options).unwrap();
 
         assert_eq!(settings.timeout, Duration::from_secs(60));
@@ -1583,40 +1572,36 @@ mod tests {
 
     #[test]
     fn router_enonce1_extension_size_default() {
-        let options = parse_router_options("para router --descriptor foo --hash-price 1000");
+        let options = parse_router_options("para router --descriptor foo");
         let settings = Settings::from_router_options(options).unwrap();
         assert_eq!(settings.enonce1_extension_size, ENONCE1_EXTENSION_SIZE);
     }
 
     #[test]
     fn router_enonce1_extension_size_override() {
-        let options = parse_router_options(
-            "para router --descriptor foo --hash-price 1000 --enonce1-extension-size 3",
-        );
+        let options =
+            parse_router_options("para router --descriptor foo --enonce1-extension-size 3");
         let settings = Settings::from_router_options(options).unwrap();
         assert_eq!(settings.enonce1_extension_size, 3);
     }
 
     #[test]
     fn router_enonce1_extension_size_boundaries() {
-        let options = parse_router_options(
-            "para router --descriptor foo --hash-price 1000 --enonce1-extension-size 1",
-        );
+        let options =
+            parse_router_options("para router --descriptor foo --enonce1-extension-size 1");
         let settings = Settings::from_router_options(options).unwrap();
         assert_eq!(settings.enonce1_extension_size, 1);
 
-        let options = parse_router_options(
-            "para router --descriptor foo --hash-price 1000 --enonce1-extension-size 6",
-        );
+        let options =
+            parse_router_options("para router --descriptor foo --enonce1-extension-size 6");
         let settings = Settings::from_router_options(options).unwrap();
         assert_eq!(settings.enonce1_extension_size, 6);
     }
 
     #[test]
     fn router_enonce1_extension_size_too_small() {
-        let options = parse_router_options(
-            "para router --descriptor foo --hash-price 1000 --enonce1-extension-size 0",
-        );
+        let options =
+            parse_router_options("para router --descriptor foo --enonce1-extension-size 0");
         let err = Settings::from_router_options(options).unwrap_err();
         assert!(
             err.to_string()
@@ -1626,9 +1611,8 @@ mod tests {
 
     #[test]
     fn router_enonce1_extension_size_too_large() {
-        let options = parse_router_options(
-            "para router --descriptor foo --hash-price 1000 --enonce1-extension-size 7",
-        );
+        let options =
+            parse_router_options("para router --descriptor foo --enonce1-extension-size 7");
         let err = Settings::from_router_options(options).unwrap_err();
         assert!(
             err.to_string()
@@ -1638,7 +1622,7 @@ mod tests {
 
     #[test]
     fn router_vardiff_defaults() {
-        let options = parse_router_options("para router --descriptor foo --hash-price 1000");
+        let options = parse_router_options("para router --descriptor foo");
         let settings = Settings::from_router_options(options).unwrap();
         assert_eq!(settings.vardiff_period, Duration::from_secs_f64(3.33));
         assert_eq!(settings.vardiff_window, Duration::from_secs(300));
@@ -1646,23 +1630,21 @@ mod tests {
 
     #[test]
     fn router_start_diff_default() {
-        let options = parse_router_options("para router --descriptor foo --hash-price 1000");
+        let options = parse_router_options("para router --descriptor foo");
         let settings = Settings::from_router_options(options).unwrap();
         assert_eq!(settings.start_diff, Difficulty::default());
     }
 
     #[test]
     fn router_tick_interval_default() {
-        let options = parse_router_options("para router --descriptor foo --hash-price 1000");
+        let options = parse_router_options("para router --descriptor foo");
         let settings = Settings::from_router_options(options).unwrap();
         assert_eq!(settings.tick_interval, Duration::from_secs(60),);
     }
 
     #[test]
     fn router_tick_interval_override() {
-        let options = parse_router_options(
-            "para router --descriptor foo --hash-price 1000 --tick-interval 10",
-        );
+        let options = parse_router_options("para router --descriptor foo --tick-interval 10");
         let settings = Settings::from_router_options(options).unwrap();
         assert_eq!(settings.tick_interval, Duration::from_secs(10),);
     }
