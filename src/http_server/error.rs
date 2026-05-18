@@ -44,9 +44,9 @@ impl From<Error> for ServerError {
 impl From<RouterError> for ServerError {
     fn from(error: RouterError) -> Self {
         match &error {
-            RouterError::InvalidHashdays | RouterError::HashPriceOverflow => {
-                Self::BadRequest(error.to_string())
-            }
+            RouterError::InvalidHashdays
+            | RouterError::HashPriceOverflow
+            | RouterError::BelowDustLimit { .. } => Self::BadRequest(error.to_string()),
             RouterError::HashPriceBelowMinimum { .. } => {
                 Self::UnprocessableEntity(error.to_string())
             }

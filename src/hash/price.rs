@@ -25,6 +25,10 @@ impl HashPrice {
         self.0.to_sat()
     }
 
+    pub fn from_total(amount: Amount, hash_days: HashDays) -> Self {
+        Self::from_sats((amount.to_sat() as f64 * PETA / hash_days.as_f64()).floor() as u64)
+    }
+
     pub fn total(self, hash_days: HashDays) -> Option<Amount> {
         let sats = (self.to_sats() as f64 * hash_days.as_f64() / PETA).ceil();
 
@@ -117,6 +121,25 @@ mod tests {
         let json = serde_json::to_string(&price).unwrap();
         assert_eq!(json, "50000");
         assert_eq!(serde_json::from_str::<HashPrice>(&json).unwrap(), price);
+    }
+
+    #[test]
+    fn from_total_round_trips_with_total() {
+        #[track_caller]
+        fn case(price: u64, hash_days: f64) {
+            let hd = HashDays::new(hash_days).unwrap();
+            let amount = HashPrice::from_sats(price).total(hd).unwrap();
+            assert_eq!(
+                HashPrice::from_total(amount, hd),
+                HashPrice::from_sats(price)
+            );
+        }
+
+        case(50000, 1e15);
+        case(50000, 2e15);
+        case(50000, 500e12);
+        case(1000, 1e15);
+        case(1234, PETA);
     }
 
     #[test]

@@ -6,28 +6,6 @@ fn generate_descriptor() -> String {
         .descriptor
 }
 
-fn dust_limit(descriptor: &str) -> u64 {
-    let directory = TempDir::new().unwrap();
-    let data_dir = directory.path().to_str().unwrap();
-
-    CommandBuilder::new(format!(
-        "wallet \
-         --chain regtest \
-         --bitcoin-rpc-port 1 \
-         --bitcoin-rpc-username foo \
-         --bitcoin-rpc-password bar \
-         --data-dir {data_dir} \
-         --descriptor {descriptor} \
-         receive"
-    ))
-    .run_and_deserialize_output::<para::subcommand::wallet::receive::Output>()
-    .address
-    .assume_checked()
-    .script_pubkey()
-    .minimal_non_dust()
-    .to_sat()
-}
-
 async fn fund_wallet(bitcoind: &Bitcoind, descriptor: &str) -> String {
     let directory = TempDir::new().unwrap();
     let data_dir = directory.path().to_str().unwrap();
@@ -415,16 +393,19 @@ async fn add_order_rejects_price_below_minimum() {
         hash_price.total(hash_days).unwrap().to_sat()
     );
 
-    let dust = dust_limit(&descriptor);
-    let (_, _, dust_amount) = add_order(
-        &router,
-        "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:4444",
-        HashDays::new(1e-10).unwrap(),
-        hash_price,
-    )
-    .await;
-    assert_eq!(dust_amount, dust);
-    assert!(dust_amount > 1);
+    let response = router
+        .add_order(&api::OrderRequest {
+            upstream_target: "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:4444"
+                .parse()
+                .unwrap(),
+            hashdays: HashDays::new(1e-10).unwrap(),
+            price: hash_price,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(response.text().await.unwrap().contains("below dust limit"));
 }
 
 #[tokio::test]
@@ -841,7 +822,7 @@ async fn order_fulfilled_on_hashdays_reached() {
         &wallet_bitcoind,
         &funding_descriptor,
         &format!("{pool_username}@{}", pool.stratum_endpoint()),
-        HashDays::new(1e-10).unwrap(),
+        HashDays::new(1.0).unwrap(),
         current_hash_price(&router).await,
     )
     .await;
@@ -878,11 +859,8 @@ async fn order_fulfilled_on_hashdays_reached() {
         .find(|o| o.status == OrderStatus::Fulfilled)
         .unwrap();
 
-    assert_eq!(
-        fulfilled.target_hashdays,
-        Some(HashDays::new(1e-10).unwrap())
-    );
-    assert!(fulfilled.upstream.as_ref().unwrap().stats.hash_days >= HashDays::new(1e-10).unwrap());
+    assert_eq!(fulfilled.target_hashdays, Some(HashDays::new(1.0).unwrap()));
+    assert!(fulfilled.upstream.as_ref().unwrap().stats.hash_days >= HashDays::new(1.0).unwrap());
 
     miner.kill().unwrap();
     miner.wait().unwrap();

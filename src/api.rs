@@ -243,6 +243,7 @@ pub struct OrderResponse {
     pub order_id: u32,
     pub payment_address: Address<NetworkUnchecked>,
     pub payment_amount: Amount,
+    pub hash_price: HashPrice,
 }
 
 impl OrderResponse {
@@ -251,6 +252,7 @@ impl OrderResponse {
             order_id: order.id,
             payment_address: bucket.payment.address.as_unchecked().clone(),
             payment_amount: bucket.payment.amount,
+            hash_price: HashPrice::from_total(bucket.payment.amount, bucket.target),
         }
     }
 }
@@ -261,6 +263,7 @@ pub struct OrderDetail {
     pub status: OrderStatus,
     pub upstream_target: UpstreamTarget,
     pub target_hashdays: Option<HashDays>,
+    pub hash_price: Option<HashPrice>,
     pub payment_address: Option<Address<NetworkUnchecked>>,
     pub payment_amount: Option<Amount>,
     pub created_at: u64,
@@ -286,6 +289,8 @@ impl OrderDetail {
             status: order.status(),
             upstream_target: order.upstream_target.clone(),
             target_hashdays: bucket.map(|bucket| bucket.target),
+            hash_price: bucket
+                .map(|bucket| HashPrice::from_total(bucket.payment.amount, bucket.target)),
             payment_address: bucket.map(|bucket| bucket.payment.address.as_unchecked().clone()),
             payment_amount: bucket.map(|bucket| bucket.payment.amount),
             created_at: epoch::instant_to_epoch_secs(order.created_at, now) as u64,

@@ -165,10 +165,14 @@ impl Router {
             });
         }
 
-        let amount = price
-            .total(target)
-            .ok_or(RouterError::HashPriceOverflow)?
-            .max(wallet.dust_limit());
+        let amount = price.total(target).ok_or(RouterError::HashPriceOverflow)?;
+
+        if amount < wallet.dust_limit() {
+            return Err(RouterError::BelowDustLimit {
+                amount,
+                dust_limit: wallet.dust_limit(),
+            });
+        }
 
         let store = &self.store;
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
@@ -938,7 +942,7 @@ mod tests {
         router
             .add_bucket_order(
                 test_upstream_target(),
-                hash_days(1.0),
+                hash_days(1e18),
                 HashPrice::from_sats(router.hash_value().to_sats()),
             )
             .unwrap()
@@ -1849,14 +1853,14 @@ mod tests {
         assert!(!wallet.is_synced());
 
         assert!(matches!(
-            router.add_bucket_order(target.clone(), hash_days(1.0), price),
+            router.add_bucket_order(target.clone(), hash_days(1e18), price),
             Err(RouterError::WalletSyncing),
         ));
 
         wallet.mark_synced();
 
         router
-            .add_bucket_order(target, hash_days(1.0), price)
+            .add_bucket_order(target, hash_days(1e18), price)
             .unwrap();
     }
 
@@ -1871,12 +1875,12 @@ mod tests {
             .unwrap();
 
         assert!(matches!(
-            router.add_bucket_order(target.clone(), hash_days(1.0), HashPrice::from_sats(99)),
+            router.add_bucket_order(target.clone(), hash_days(1e18), HashPrice::from_sats(99)),
             Err(RouterError::HashPriceBelowMinimum { .. }),
         ));
 
         router
-            .add_bucket_order(target, hash_days(1.0), HashPrice::from_sats(100))
+            .add_bucket_order(target, hash_days(1e18), HashPrice::from_sats(100))
             .unwrap();
     }
 

@@ -17,6 +17,7 @@
     <div class=row><span>Endpoint</span><span id=endpoint></span></div>
     <div class=row><span>Username</span><span id=username class=copyable></span></div>
     <div class=row><span>Target Hashdays</span><span id=target_hash_days></span></div>
+    <div class=row><span>Hash Price</span><span id=hash_price></span></div>
     <div class=row><span>Delivered Hashdays</span><span id=delivered_hash_days class=copyable></span></div>
     <div class=row><span>Payment Amount</span><span id=payment_amount></span></div>
     <div class=row><span>Payment Address</span><span id=payment_address class=copyable></span></div>
@@ -96,6 +97,7 @@ function populateOrder(data) {
   set('endpoint', endpoint);
   copyable('username', truncateMiddle(username), username);
   set('target_hash_days', data.target_hashdays == null ? 'Unlimited' : formatHashDays(data.target_hashdays));
+  set('hash_price', data.hash_price, v => v + ' sats/PHd');
   copyable('delivered_hash_days', formatHashDays(deliveredHashdays), deliveredHashdays);
   set('payment_amount', data.payment_amount, formatAmount);
   copyable('payment_address', truncateMiddle(data.payment_address, 20, 8), data.payment_address);
