@@ -321,6 +321,18 @@ pub(crate) async fn setup_test_schema(db_url: String) -> Result<(), Box<dyn std:
     .execute(&pool)
     .await?;
 
+    sqlx::query(
+        r#"
+                CREATE TABLE IF NOT EXISTS round_summary_history (
+                    blockheight INTEGER PRIMARY KEY,
+                    previous_blockheight INTEGER NOT NULL,
+                    total_diff DOUBLE PRECISION NOT NULL
+                )
+                "#,
+    )
+    .execute(&pool)
+    .await?;
+
     // Materialized views don't support IF NOT EXISTS, so check pg_matviews first
     let matview_exists: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM pg_matviews WHERE matviewname = 'round_participation_current')",

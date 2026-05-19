@@ -116,6 +116,13 @@ pub(crate) async fn sync_batch(
                         height, e
                     );
                 }
+                if let Err(e) = database.snapshot_round_summary(height).await {
+                    error!(
+                        "Failed to snapshot round summary for block {}: {}",
+                        height, e
+                    );
+                }
+                database.invalidate_current_round_summary().await;
             } else {
                 if let Err(e) = database.refresh_current_round_participation().await {
                     error!("Failed to refresh current round participation: {}", e);

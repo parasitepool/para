@@ -16,11 +16,20 @@ pub(crate) struct RoundParticipant {
     pub(crate) top_diff: f64,
 }
 
+#[derive(sqlx::FromRow, Serialize, Deserialize, Debug, Clone, ToSchema)]
+pub(crate) struct RoundSummary {
+    pub(crate) blockheight: Option<i32>,
+    pub(crate) previous_blockheight: i32,
+    pub(crate) total_diff: f64,
+}
+
 pub(crate) fn rounds_router(config: Arc<ServerConfig>, database: Database) -> axum::Router {
     let mut router = axum::Router::new()
         .route("/rounds", get(rounds))
         .route("/rounds/current", get(round_current))
+        .route("/rounds/current/summary", get(round_current_summary))
         .route("/rounds/{blockheight}", get(round))
+        .route("/rounds/{blockheight}/summary", get(round_summary))
         .route("/participants/{blockheight}", get(participants));
 
     if let Some(token) = config.api_token() {
@@ -60,6 +69,21 @@ pub(crate) async fn round_current(
 
 #[utoipa::path(
     get,
+    path = "/rounds/current/summary",
+    security(("api_token" = [])),
+    responses(
+        (status = 200, description = "Current in-progress round summary", body = RoundSummary),
+    ),
+    tag = "rounds"
+)]
+pub(crate) async fn round_current_summary(
+    Extension(database): Extension<Database>,
+) -> ServerResult<Response> {
+    Ok(Json(database.get_round_summary(None).await?).into_response())
+}
+
+#[utoipa::path(
+    get,
     path = "/rounds/{blockheight}",
     security(("api_token" = [])),
     params(
@@ -75,6 +99,25 @@ pub(crate) async fn round(
     Extension(database): Extension<Database>,
 ) -> ServerResult<Response> {
     Ok(Json(database.get_round_participation(Some(blockheight)).await?).into_response())
+}
+
+#[utoipa::path(
+    get,
+    path = "/rounds/{blockheight}/summary",
+    security(("api_token" = [])),
+    params(
+        ("blockheight" = i32, Path, description = "Block height of the found block ending this round")
+    ),
+    responses(
+        (status = 200, description = "Round summary", body = RoundSummary),
+    ),
+    tag = "rounds"
+)]
+pub(crate) async fn round_summary(
+    Path(blockheight): Path<i32>,
+    Extension(database): Extension<Database>,
+) -> ServerResult<Response> {
+    Ok(Json(database.get_round_summary(Some(blockheight)).await?).into_response())
 }
 
 #[utoipa::path(
