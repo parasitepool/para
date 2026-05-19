@@ -65,7 +65,7 @@ const h1 = document.querySelector('h1');
 document.title = document.title.replace('Order', `Order ${orderId}`);
 h1.childNodes[0].textContent = `Router | Order ${orderId}`;
 
-fetch('/api/router/orders').then(r => r.json()).then(orders => {
+fetch('/api/router/orders', withAuthOptions()).then(r => r.json()).then(orders => {
   const orderIds = (orders || []).map(o => o.id);
   if (orderIds.length < 2) return;
   const idx = orderIds.indexOf(Number(orderId));
@@ -150,5 +150,8 @@ async function refresh(signal) {
 
 initCopyables();
 initDelegatedCopyables('sessions-list');
-startPolling(refresh);
+initAuthProbe().then(ok => {
+  if (!ok) return;
+  startPolling(refresh);
+});
 </script>

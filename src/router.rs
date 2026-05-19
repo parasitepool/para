@@ -805,6 +805,8 @@ mod tests {
                     acme_cache: PathBuf::from("acme-cache"),
                     data_dir: Some(data_dir.to_path_buf()),
                     store_path: None,
+                    http_api_token: None,
+                    http_admin_token: None,
                 },
                 upstream: "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@127.0.0.1:1"
                     .parse()
@@ -843,6 +845,8 @@ mod tests {
                     acme_cache: PathBuf::from("acme-cache"),
                     data_dir: None,
                     store_path: None,
+                    http_api_token: None,
+                    http_admin_token: None,
                 },
                 descriptor,
                 change_descriptor: Some(change_descriptor),

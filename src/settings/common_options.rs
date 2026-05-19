@@ -63,4 +63,10 @@ pub(crate) struct CommonOptions {
 
     #[arg(long, help = "Use <STORE_PATH> as database file.")]
     pub(crate) store_path: Option<PathBuf>,
+
+    #[arg(long, help = "Require <HTTP_API_TOKEN> for HTTP API access.")]
+    pub(crate) http_api_token: Option<String>,
+
+    #[arg(long, help = "Require <HTTP_ADMIN_TOKEN> for HTTP admin access.")]
+    pub(crate) http_admin_token: Option<String>,
 }

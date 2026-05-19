@@ -1,10 +1,15 @@
 use {
     super::*,
+    auth::{AdminAuth, BearerAuth},
     axum::{
         Extension,
         extract::{
             Path,
             ws::{Message, WebSocketUpgrade},
+        },
+        http::{
+            HeaderMap,
+            header::{ORIGIN, REFERER, SET_COOKIE, WWW_AUTHENTICATE},
         },
     },
     error::{OptionExt, ServerError, ServerResult},
@@ -12,6 +17,7 @@ use {
 };
 
 pub(crate) mod accept_json;
+pub(crate) mod auth;
 pub(crate) mod error;
 pub(crate) mod templates;
 
@@ -185,6 +191,7 @@ fn acceptor(
 pub(crate) struct StaticAssets;
 
 pub(crate) async fn ws_logs(
+    _: AdminAuth,
     Extension(logs): Extension<Arc<logs::Logs>>,
     ws: WebSocketUpgrade,
 ) -> Response {
@@ -240,10 +247,73 @@ pub(crate) async fn ws_logs(
 
 pub(crate) fn common_routes() -> axum::Router {
     axum::Router::new()
+        .route("/login", post(login))
+        .route("/logout", post(logout))
         .route("/api/bitcoin/status", get(bitcoin_status))
         .route("/api/system/status", get(system_status))
         .route("/ws/logs", get(ws_logs))
         .route("/static/{*path}", get(static_assets))
+}
+
+#[derive(Deserialize)]
+struct LoginRequest {
+    token: String,
+}
+
+#[derive(Serialize)]
+struct LoginResponse {
+    role: &'static str,
+}
+
+async fn login(
+    Extension(auth): Extension<BearerAuth>,
+    headers: HeaderMap,
+    Json(request): Json<LoginRequest>,
+) -> Response {
+    let Some(role) = auth.role(&request.token) else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            [(WWW_AUTHENTICATE, "Bearer")],
+            Json(json!({ "error": "invalid token" })),
+        )
+            .into_response();
+    };
+
+    (
+        [(
+            SET_COOKIE,
+            BearerAuth::session_cookie(&request.token, secure_cookie(&headers)),
+        )],
+        Json(LoginResponse { role }),
+    )
+        .into_response()
+}
+
+async fn logout(headers: HeaderMap) -> Response {
+    (
+        StatusCode::NO_CONTENT,
+        [(
+            SET_COOKIE,
+            BearerAuth::clear_session_cookie(secure_cookie(&headers)),
+        )],
+    )
+        .into_response()
+}
+
+fn secure_cookie(headers: &HeaderMap) -> bool {
+    let forwarded_proto_is_https = headers
+        .get("x-forwarded-proto")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.eq_ignore_ascii_case("https"));
+
+    let origin_is_https = [ORIGIN, REFERER].into_iter().any(|name| {
+        headers
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.starts_with("https://"))
+    });
+
+    forwarded_proto_is_https || origin_is_https
 }
 
 pub(crate) async fn static_assets(Path(path): Path<String>) -> ServerResult<Response> {
@@ -274,7 +344,7 @@ fn round2(value: f64) -> f64 {
     (value * 100.0).round() / 100.0
 }
 
-pub(crate) async fn system_status() -> Json<SystemStatus> {
+pub(crate) async fn system_status(_: AdminAuth) -> Json<SystemStatus> {
     Json(task::block_in_place(|| {
         let system = System::new_all();
 
@@ -323,6 +393,7 @@ pub struct BitcoinStatus {
 }
 
 pub(crate) async fn bitcoin_status(
+    _: AdminAuth,
     Extension(client): Extension<Arc<BitcoindClient>>,
 ) -> ServerResult<Json<BitcoinStatus>> {
     #[derive(Debug, Deserialize)]

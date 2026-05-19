@@ -63,6 +63,8 @@ impl RouterCommand {
                 bitcoin_client.clone(),
                 settings.chain(),
                 logs,
+                settings.http_api_token(),
+                settings.http_admin_token(),
             ),
             cancel_token.clone(),
             &tasks,

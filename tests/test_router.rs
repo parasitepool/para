@@ -13,6 +13,15 @@ pub(crate) struct TestRouter {
 
 impl TestRouter {
     pub(crate) fn spawn(descriptor: &str, bitcoind: &Bitcoind, args: impl ToArgs) -> Self {
+        Self::spawn_with_probe_token(descriptor, bitcoind, args, None)
+    }
+
+    pub(crate) fn spawn_with_probe_token(
+        descriptor: &str,
+        bitcoind: &Bitcoind,
+        args: impl ToArgs,
+        probe_token: Option<&str>,
+    ) -> Self {
         let router_port = allocate_port();
         let http_port = allocate_port();
 
@@ -63,8 +72,15 @@ impl TestRouter {
 
         for attempt in 0.. {
             let url = url.clone();
+            let probe_token = probe_token.map(str::to_string);
             let synced = thread::spawn(move || {
-                reqwest::blocking::get(url)
+                let client = reqwest::blocking::Client::new();
+                let mut request = client.get(url);
+                if let Some(token) = probe_token {
+                    request = request.bearer_auth(token);
+                }
+                request
+                    .send()
                     .and_then(|response| response.json::<RouterStatus>())
                     .map(|status| status.wallet_synced)
                     .unwrap_or(false)

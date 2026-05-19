@@ -93,6 +93,7 @@ router:
     --address 0.0.0.0 \
     --port 42070 \
     --http-port 8082 \
+    --http-admin-token 123 \
     --start-diff 0.00001 \
     --vardiff-window 10 \
     --vardiff-period 1 \

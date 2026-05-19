@@ -1,10 +1,12 @@
-use super::*;
+use {super::*, crate::http_server::auth::BearerAuth};
 
 pub(crate) fn router(
     metatron: Arc<Metatron>,
     bitcoin_client: Arc<BitcoindClient>,
     chain: Chain,
     logs: Arc<logs::Logs>,
+    http_api_token: Option<&str>,
+    http_admin_token: Option<&str>,
 ) -> axum::Router {
     axum::Router::new()
         .route("/", get(home))
@@ -18,6 +20,7 @@ pub(crate) fn router(
         .layer(Extension(bitcoin_client))
         .layer(Extension(chain))
         .layer(Extension(logs))
+        .layer(Extension(BearerAuth::new(http_api_token, http_admin_token)))
 }
 
 async fn home(Extension(chain): Extension<Chain>) -> Response {

@@ -9,6 +9,163 @@ const CONFIG = {
   STALE_AFTER_MS: 15000
 };
 
+function withAuthOptions(options = {}) {
+  return { ...options, credentials: options.credentials || 'same-origin' };
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  })[ch]);
+}
+
+let loginOverlay = null;
+
+function showLoginOverlay() {
+  if (loginOverlay) return;
+
+  loginOverlay = document.createElement('div');
+  loginOverlay.id = 'auth-overlay';
+  loginOverlay.innerHTML = `
+    <div id="auth-modal">
+      <h2>Router Login</h2>
+      <input id="auth-token" type="password" placeholder="Bearer token" autocomplete="current-password">
+      <div id="auth-error"></div>
+      <button id="auth-submit">Login</button>
+    </div>
+  `;
+
+  const style = document.createElement('style');
+  style.textContent = `
+    #auth-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 5000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,0.82);
+    }
+    #auth-modal {
+      width: 360px;
+      max-width: 90vw;
+      padding: 26px;
+      background: #1a1a1a;
+      border: 1px solid #444;
+      box-sizing: border-box;
+    }
+    #auth-modal h2 {
+      margin: 0 0 18px;
+      color: #888;
+      font-size: 1.15em;
+      text-align: center;
+    }
+    #auth-token {
+      width: 100%;
+      box-sizing: border-box;
+      margin-bottom: 12px;
+      padding: 8px 12px;
+      background: #111;
+      border: 1px solid #444;
+      color: #eee;
+      font: inherit;
+    }
+    #auth-error {
+      min-height: 1.4em;
+      margin-bottom: 10px;
+      color: #f55;
+      font-size: 0.85em;
+    }
+    #auth-submit {
+      width: 100%;
+      padding: 8px 16px;
+      background: #333;
+      border: 1px solid #444;
+      color: #eee;
+      cursor: pointer;
+      font: inherit;
+    }
+    #auth-submit:hover { background: #444; }
+  `;
+
+  document.head.appendChild(style);
+  document.body.appendChild(loginOverlay);
+
+  const input = document.getElementById('auth-token');
+  const error = document.getElementById('auth-error');
+  const submit = document.getElementById('auth-submit');
+
+  async function login() {
+    const token = input.value;
+    if (!token) {
+      error.textContent = 'Token is required';
+      return;
+    }
+
+    error.textContent = '';
+    submit.disabled = true;
+
+    try {
+      const res = await fetch('/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ token }),
+      });
+
+      if (res.status === 401) {
+        error.textContent = 'Invalid token';
+        return;
+      }
+
+      if (!res.ok) {
+        error.textContent = `Error: ${res.status}`;
+        return;
+      }
+
+      location.reload();
+    } catch (e) {
+      error.textContent = e.message;
+    } finally {
+      submit.disabled = false;
+    }
+  }
+
+  submit.addEventListener('click', login);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') login();
+  });
+  input.focus();
+}
+
+async function initAuthProbe() {
+  try {
+    const res = await fetch('/api/router/status', withAuthOptions());
+    if (res.status === 401) {
+      showLoginOverlay();
+      return false;
+    }
+  } catch (_) {
+    return true;
+  }
+
+  const logoutBtn = document.getElementById('logout-btn');
+  if (logoutBtn) logoutBtn.classList.remove('hidden');
+
+  return true;
+}
+
+async function logout() {
+  try {
+    await fetch('/logout', { method: 'POST', credentials: 'same-origin' });
+  } catch (_) {}
+  location.reload();
+}
+
 const logState = {
   paused: false,
   allLogs: [],
@@ -68,7 +225,12 @@ function connectWs() {
 
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const ws = new WebSocket(`${protocol}//${location.host}/ws/logs`);
+  let opened = false;
   logState.ws = ws;
+
+  ws.onopen = () => {
+    opened = true;
+  };
 
   ws.onmessage = (e) => {
     const [level, ...rest] = e.data.split('\t');
@@ -87,6 +249,10 @@ function connectWs() {
   ws.onerror = () => ws.close();
   ws.onclose = () => {
     if (logState.ws !== ws) return;
+    if (!opened) {
+      logState.ws = null;
+      return;
+    }
     clearTimeout(wsReconnectTimeout);
     wsReconnectTimeout = setTimeout(connectWs, CONFIG.WS_RECONNECT_DELAY);
   };
@@ -253,8 +419,13 @@ function setClass(id, className) {
 function copyable(id, formatted, raw) {
   const el = set(id, formatted);
   if (el) {
-    el.dataset.full = String(raw);
-    el.dataset.formatted = formatted;
+    if (raw === null || raw === undefined) {
+      delete el.dataset.full;
+    } else {
+      el.dataset.full = String(raw);
+    }
+    el.dataset.formatted =
+      (formatted !== null && formatted !== undefined) ? String(formatted) : '-';
   }
   return el;
 }
@@ -336,6 +507,16 @@ function setupLogToggle() {
 }
 
 function renderBitcoinData(data) {
+  if (!data) {
+    set('btc_height', null);
+    const link = document.getElementById('btc_height_link');
+    if (link) link.removeAttribute('href');
+    copyable('network_difficulty', '-', null);
+    set('network_hashrate', null);
+    set('mempool_txs', null);
+    return;
+  }
+
   set('btc_height', data.height);
   const link = document.getElementById('btc_height_link');
   if (link && data.height != null) link.href = `https://mempool.space/block/${data.height}`;
@@ -345,6 +526,14 @@ function renderBitcoinData(data) {
 }
 
 function renderSystemData(data) {
+  if (!data) {
+    set('cpu_usage_percent', null);
+    set('memory_usage_percent', null);
+    set('disk_usage_percent', null);
+    set('uptime', null);
+    return;
+  }
+
   set('cpu_usage_percent', data.cpu_usage_percent, formatTruncated);
   set('memory_usage_percent', data.memory_usage_percent, formatTruncated);
   set('disk_usage_percent', data.disk_usage_percent, formatTruncated);
@@ -358,26 +547,43 @@ function renderSessionRows(sessions) {
     const shortSessionUser = truncateMiddle(sessionUser);
     const lastShare = stats.last_share != null ? formatAgo(stats.last_share) : '-';
     const bestShare = formatDifficulty(stats.best_share);
+    const safeSessionUser = escapeHtml(sessionUser);
+    const safeShortSessionUser = escapeHtml(shortSessionUser);
     return `<tr>
-      <td><span class="copyable hover-expand session-username" data-full="${sessionUser}" data-formatted="${shortSessionUser}">${shortSessionUser}</span></td>
-      <td>${formatHashrate(stats.hashrate_1m)}</td>
-      <td>${formatTruncated(stats.sps_1m)}</td>
-      <td>${bestShare || '-'}</td>
-      <td>${stats.hash_days != null ? formatHashDays(stats.hash_days) : '-'}</td>
-      <td>${lastShare}</td>
+      <td><span class="copyable hover-expand session-username" data-full="${safeSessionUser}" data-formatted="${safeShortSessionUser}">${safeShortSessionUser}</span></td>
+      <td>${escapeHtml(formatHashrate(stats.hashrate_1m))}</td>
+      <td>${escapeHtml(formatTruncated(stats.sps_1m))}</td>
+      <td>${escapeHtml(bestShare || '-')}</td>
+      <td>${escapeHtml(stats.hash_days != null ? formatHashDays(stats.hash_days) : '-')}</td>
+      <td>${escapeHtml(lastShare)}</td>
     </tr>`;
   }).join('');
 }
 
 async function fetchJson(url, options) {
-  const r = await fetch(url, options);
+  const r = await fetch(url, withAuthOptions(options));
+  if (r.status === 401) {
+    showLoginOverlay();
+    throw new Error(`${url}: ${r.status}`);
+  }
   if (!r.ok) throw new Error(`${url}: ${r.status}`);
   return r.json();
 }
 
 async function fetchJsonAllow404(url, options) {
-  const r = await fetch(url, options);
+  const r = await fetch(url, withAuthOptions(options));
   if (r.status === 404) return null;
+  if (r.status === 401) {
+    showLoginOverlay();
+    throw new Error(`${url}: ${r.status}`);
+  }
+  if (!r.ok) throw new Error(`${url}: ${r.status}`);
+  return r.json();
+}
+
+async function fetchJsonIfAllowed(url, options) {
+  const r = await fetch(url, withAuthOptions(options));
+  if (r.status === 401) return null;
   if (!r.ok) throw new Error(`${url}: ${r.status}`);
   return r.json();
 }

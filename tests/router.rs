@@ -111,6 +111,169 @@ async fn current_hash_price(router: &TestRouter) -> HashPrice {
     hash_price
 }
 
+#[tokio::test]
+#[timeout(120000)]
+async fn router_auth_tiers() {
+    let bitcoind = spawn_regtest();
+    let descriptor = generate_descriptor();
+
+    let router = TestRouter::spawn_with_probe_token(
+        &descriptor,
+        &bitcoind,
+        "--http-api-token api --http-admin-token admin",
+        Some("admin"),
+    );
+
+    let client = reqwest::Client::new();
+    let status_url = format!("{}/api/router/status", router.api_endpoint());
+    let system_url = format!("{}/api/system/status", router.api_endpoint());
+    let cancel_url = format!("{}/api/router/order/999999/cancel", router.api_endpoint());
+    let login_url = format!("{}/login", router.api_endpoint());
+
+    assert_eq!(
+        client.get(&status_url).send().await.unwrap().status(),
+        StatusCode::UNAUTHORIZED,
+    );
+    assert_eq!(
+        client
+            .get(&status_url)
+            .bearer_auth("api")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK,
+    );
+    assert_eq!(
+        client
+            .get(&status_url)
+            .bearer_auth("admin")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK,
+    );
+    assert_eq!(
+        client
+            .get(&system_url)
+            .bearer_auth("api")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNAUTHORIZED,
+    );
+    assert_eq!(
+        client
+            .get(&system_url)
+            .bearer_auth("admin")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK,
+    );
+    assert_eq!(
+        client
+            .post(&cancel_url)
+            .bearer_auth("api")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNAUTHORIZED,
+    );
+    assert_eq!(
+        client
+            .post(cancel_url)
+            .bearer_auth("admin")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND,
+    );
+    assert_eq!(
+        client
+            .post(&login_url)
+            .json(&json!({ "token": "wrong" }))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNAUTHORIZED,
+    );
+
+    let api_login = client
+        .post(&login_url)
+        .json(&json!({ "token": "api" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(api_login.status(), StatusCode::OK);
+    let api_cookie = api_login
+        .headers()
+        .get(reqwest::header::SET_COOKIE)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    assert_eq!(
+        client
+            .get(&status_url)
+            .header(reqwest::header::COOKIE, &api_cookie)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK,
+    );
+    assert_eq!(
+        client
+            .get(&system_url)
+            .header(reqwest::header::COOKIE, &api_cookie)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNAUTHORIZED,
+    );
+
+    let admin_login = client
+        .post(login_url)
+        .json(&json!({ "token": "admin" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(admin_login.status(), StatusCode::OK);
+    let admin_cookie = admin_login
+        .headers()
+        .get(reqwest::header::SET_COOKIE)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    assert_eq!(
+        client
+            .get(system_url)
+            .header(reqwest::header::COOKIE, admin_cookie)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK,
+    );
+}
+
 async fn add_and_activate_order(
     router: &TestRouter,
     wallet_bitcoind: &Bitcoind,

@@ -2,8 +2,14 @@
   .order-link { color: inherit; text-decoration: none; }
   .order-link:hover { text-decoration: underline; }
 
-  #add-order-btn {
+  .action-bar {
+    display: flex;
+    gap: 8px;
     width: 1048px;
+  }
+
+  .action-bar button {
+    flex: 1;
     background: #333;
     border: 1px solid #444;
     color: #eee;
@@ -12,7 +18,7 @@
     font: inherit;
   }
 
-  #add-order-btn:hover { background: #444; }
+  .action-bar button:hover { background: #444; }
 
   #orders-table td { vertical-align: middle; white-space: nowrap; }
   #orders-table tbody tr { cursor: pointer; }
@@ -140,7 +146,7 @@
   }
 
   @media (max-width: 1140px) {
-    #add-order-btn { width: 100%; max-width: 500px; }
+    .action-bar { width: 100%; max-width: 500px; }
   }
 </style>
 
@@ -175,7 +181,10 @@
     <div class=row><span>Received Hashdays</span><span id=downstream_hash_days class=copyable></span></div>
   </div>
 
-  <button id=add-order-btn>Add Order</button>
+  <div class=action-bar>
+    <button id=add-order-btn>Add Order</button>
+    <button id=logout-btn class=hidden onclick=logout()>Logout</button>
+  </div>
 
   <div class="column column-full">
     <h2>Orders</h2>
@@ -267,7 +276,7 @@
 let currentHashPrice = null;
 
 async function fetchCurrentHashPrice(signal) {
-  const r = await fetch('/api/router/status', { signal });
+  const r = await fetch('/api/router/status', withAuthOptions({ signal }));
   if (!r.ok) throw new Error(`/api/router/status: ${r.status}`);
   const text = await r.text();
   const match = text.match(/"hash_price"\s*:\s*(\d+)/);
@@ -279,8 +288,8 @@ async function refresh(signal) {
   const [routerData, ordersData, systemData, bitcoinData] = await Promise.all([
     fetchJson('/api/router/status', { signal }),
     fetchJson('/api/router/orders', { signal }),
-    fetchJson('/api/system/status', { signal }),
-    fetchJson('/api/bitcoin/status', { signal }),
+    fetchJsonIfAllowed('/api/system/status', { signal }),
+    fetchJsonIfAllowed('/api/bitcoin/status', { signal }),
   ]);
 
   const uss = routerData.upstream || {};
@@ -331,23 +340,26 @@ async function refresh(signal) {
       const delivered = order.stats ? formatHashDays(order.stats.hash_days) || '-' : '-';
       const hashrate = order.stats ? formatHashrate(order.stats.hashrate_1m) : '-';
       return `<tr data-id="${order.id}">
-        <td><a class=order-link href="/order/${order.id}">${order.id}</a></td>
-        <td class="${statusClass(order.status)}">${formatStatus(order.status)}</td>
-        <td>${endpoint}</td>
-        <td>${shortUsername}</td>
-        <td>${target}</td>
-        <td>${delivered}</td>
-        <td>${hashrate}</td>
-        <td><button class=order-delete data-id="${order.id}" title="Cancel order">&times;</button></td>
+        <td><a class=order-link href="/order/${escapeHtml(order.id)}">${escapeHtml(order.id)}</a></td>
+        <td class="${escapeHtml(statusClass(order.status))}">${escapeHtml(formatStatus(order.status))}</td>
+        <td>${escapeHtml(endpoint)}</td>
+        <td>${escapeHtml(shortUsername)}</td>
+        <td>${escapeHtml(target)}</td>
+        <td>${escapeHtml(delivered)}</td>
+        <td>${escapeHtml(hashrate)}</td>
+        <td><button class=order-delete data-id="${escapeHtml(order.id)}" title="Cancel order">&times;</button></td>
       </tr>`;
     }).join('');
   }
 }
-startPolling(refresh);
 initLogControls();
-connectWs();
 setupLogToggle();
 initCopyables();
+initAuthProbe().then(ok => {
+  if (!ok) return;
+  startPolling(refresh);
+  connectWs();
+});
 
 document.getElementById('orders-list').addEventListener('click', async (e) => {
   const btn = e.target.closest('.order-delete');
@@ -355,7 +367,7 @@ document.getElementById('orders-list').addEventListener('click', async (e) => {
   const id = btn.dataset.id;
   if (!confirm(`Cancel order ${id}?`)) return;
   try {
-    const res = await fetch(`/api/router/order/${id}/cancel`, { method: 'POST' });
+    const res = await fetch(`/api/router/order/${id}/cancel`, withAuthOptions({ method: 'POST' }));
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       alert(data.message || `Error: ${res.status}`);

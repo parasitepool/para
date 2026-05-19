@@ -38,7 +38,14 @@ impl Pool {
 
         http_server::spawn(
             &settings,
-            api::pool::router(metatron.clone(), bitcoin_client, settings.chain(), logs),
+            api::pool::router(
+                metatron.clone(),
+                bitcoin_client,
+                settings.chain(),
+                logs,
+                settings.http_api_token(),
+                settings.http_admin_token(),
+            ),
             cancel_token.clone(),
             &tasks,
         )?;

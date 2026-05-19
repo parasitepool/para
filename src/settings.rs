@@ -51,6 +51,8 @@ pub(crate) struct Settings {
     sink_orders: Vec<UpstreamTarget>,
     allow_zero_conf: bool,
     store_path: Option<PathBuf>,
+    http_api_token: Option<String>,
+    http_admin_token: Option<String>,
 }
 
 impl Default for Settings {
@@ -94,6 +96,8 @@ impl Default for Settings {
             sink_orders: Vec::new(),
             allow_zero_conf: false,
             store_path: None,
+            http_api_token: None,
+            http_admin_token: None,
         }
     }
 }
@@ -143,6 +147,8 @@ impl Settings {
             acme_cache,
             data_dir,
             store_path,
+            http_api_token,
+            http_admin_token,
         } = common;
 
         Ok(Self {
@@ -159,6 +165,8 @@ impl Settings {
             max_diff,
             vardiff_period: Self::duration_from_secs_f64(vardiff_period, "vardiff_period")?,
             vardiff_window: Self::duration_from_secs_f64(vardiff_window, "vardiff_window")?,
+            http_api_token,
+            http_admin_token,
             ..Self::from_bitcoin_options_unvalidated(bitcoin)
         })
     }
@@ -428,6 +436,10 @@ impl Settings {
             !self.tick_interval.is_zero(),
             "tick_interval must be greater than 0"
         );
+        ensure!(
+            self.http_api_token.is_none() || self.http_admin_token.is_some(),
+            "--http-admin-token is required when --http-api-token is set"
+        );
 
         if let Some(min) = self.min_diff {
             ensure!(
@@ -668,6 +680,14 @@ impl Settings {
 
     pub(crate) fn sink_orders(&self) -> &[UpstreamTarget] {
         &self.sink_orders
+    }
+
+    pub(crate) fn http_api_token(&self) -> Option<&str> {
+        self.http_api_token.as_deref()
+    }
+
+    pub(crate) fn http_admin_token(&self) -> Option<&str> {
+        self.http_admin_token.as_deref()
     }
 }
 
@@ -1550,6 +1570,35 @@ mod tests {
         assert_eq!(settings.descriptor.as_deref(), Some("foo"));
         assert_eq!(settings.change_descriptor, None);
         assert_eq!(settings.wallet_birthday, 0);
+        assert_eq!(settings.http_api_token(), None);
+        assert_eq!(settings.http_admin_token(), None);
+    }
+
+    #[test]
+    fn http_api_token_without_http_admin_token_is_error() {
+        let options = parse_router_options("para router --descriptor foo --http-api-token api");
+
+        assert!(Settings::from_router_options(options).is_err());
+    }
+
+    #[test]
+    fn router_http_admin_token() {
+        let options = parse_router_options("para router --descriptor foo --http-admin-token admin");
+        let settings = Settings::from_router_options(options).unwrap();
+
+        assert_eq!(settings.http_api_token(), None);
+        assert_eq!(settings.http_admin_token(), Some("admin"));
+    }
+
+    #[test]
+    fn router_http_api_and_admin_tokens() {
+        let options = parse_router_options(
+            "para router --descriptor foo --http-api-token api --http-admin-token admin",
+        );
+        let settings = Settings::from_router_options(options).unwrap();
+
+        assert_eq!(settings.http_api_token(), Some("api"));
+        assert_eq!(settings.http_admin_token(), Some("admin"));
     }
 
     #[test]

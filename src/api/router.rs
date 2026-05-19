@@ -1,11 +1,19 @@
-use {super::*, axum::extract::Query};
+use {
+    super::*,
+    crate::http_server::auth::{AdminAuth, ApiAuth, BearerAuth},
+    axum::extract::Query,
+};
 
 pub(crate) fn router(
     state: Arc<Router>,
     bitcoin_client: Arc<BitcoindClient>,
     chain: Chain,
     logs: Arc<logs::Logs>,
+    http_api_token: Option<&str>,
+    http_admin_token: Option<&str>,
 ) -> axum::Router {
+    let auth = BearerAuth::new(http_api_token, http_admin_token);
+
     axum::Router::new()
         .route("/", get(home))
         .route("/order/{id}", get(order_page))
@@ -19,6 +27,7 @@ pub(crate) fn router(
         .layer(Extension(bitcoin_client))
         .layer(Extension(chain))
         .layer(Extension(logs))
+        .layer(Extension(auth))
 }
 
 async fn home(Extension(chain): Extension<Chain>) -> ServerResult<Response> {
@@ -29,11 +38,12 @@ async fn order_page(Extension(chain): Extension<Chain>) -> ServerResult<Response
     Ok(render_page(OrderHtml, chain))
 }
 
-async fn status(State(router): State<Arc<Router>>) -> ServerResult<Response> {
+async fn status(_: ApiAuth, State(router): State<Arc<Router>>) -> ServerResult<Response> {
     Ok(Json(router.status()).into_response())
 }
 
 async fn order_detail(
+    _: ApiAuth,
     State(router): State<Arc<Router>>,
     Path(id): Path<u32>,
 ) -> ServerResult<Response> {
@@ -47,6 +57,7 @@ async fn order_detail(
 }
 
 async fn add_order(
+    _: ApiAuth,
     State(router): State<Arc<Router>>,
     Json(request): Json<OrderRequest>,
 ) -> ServerResult<Response> {
@@ -74,6 +85,7 @@ struct OrdersQuery {
 }
 
 async fn list_orders(
+    _: ApiAuth,
     State(router): State<Arc<Router>>,
     Query(query): Query<OrdersQuery>,
 ) -> ServerResult<Response> {
@@ -97,6 +109,7 @@ async fn list_orders(
 }
 
 async fn cancel_order(
+    _: AdminAuth,
     State(router): State<Arc<Router>>,
     Path(id): Path<u32>,
 ) -> ServerResult<Response> {
