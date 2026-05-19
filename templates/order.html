@@ -16,9 +16,9 @@
     <div class=row><span>Status</span><span id=status></span></div>
     <div class=row><span>Endpoint</span><span id=endpoint></span></div>
     <div class=row><span>Username</span><span id=username class=copyable></span></div>
-    <div class=row><span>Target Hashdays</span><span id=target_hash_days></span></div>
-    <div class=row><span>Hash Price</span><span id=hash_price></span></div>
+    <div class=row><span>Requested Hashdays</span><span id=requested_hash_days></span></div>
     <div class=row><span>Delivered Hashdays</span><span id=delivered_hash_days class=copyable></span></div>
+    <div class=row><span>Hash Price</span><span id=hash_price></span></div>
     <div class=row><span>Payment Amount</span><span id=payment_amount></span></div>
     <div class=row><span>Payment Address</span><span id=payment_address class=copyable></span></div>
     <div class=row><span>Created At</span><span id=created_at></span></div>
@@ -86,17 +86,16 @@ fetch('/api/router/orders', withAuthOptions()).then(r => r.json()).then(orders =
 const TERMINAL = ['fulfilled', 'cancelled', 'disconnected', 'expired'];
 
 function populateOrder(data) {
-  const upstream = data.upstream;
-  const endpoint = upstream ? upstream.endpoint : data.upstream_target.endpoint;
-  const username = (upstream && upstream.username) || data.upstream_target.username || '';
-  const deliveredHashdays = data.stats && data.stats.hash_days;
+  const endpoint = data.upstream_target.endpoint;
+  const username = data.upstream_target.username || '';
+  const deliveredHashdays = data.upstream.hash_days;
 
   set('id', data.id);
   set('status', formatStatus(data.status));
   setClass('status', statusClass(data.status));
   set('endpoint', endpoint);
   copyable('username', truncateMiddle(username), username);
-  set('target_hash_days', data.target_hashdays == null ? 'Unlimited' : formatHashDays(data.target_hashdays));
+  set('requested_hash_days', data.requested_hash_days == null ? 'Unlimited' : formatHashDays(data.requested_hash_days));
   set('hash_price', data.hash_price, v => v + ' sats/PHd');
   copyable('delivered_hash_days', formatHashDays(deliveredHashdays), deliveredHashdays);
   set('payment_amount', data.payment_amount, formatAmount);
@@ -116,7 +115,7 @@ function populateStats(prefix, stats) {
   set(`${prefix}_hashrate_1m`, stats.hashrate_1m, formatHashrate);
   set(`${prefix}_sps_1m`, stats.sps_1m, formatTruncated);
   copyable(`${prefix}_best_share`, formatDifficulty(stats.best_share), stats.best_share);
-  set(`${prefix}_last_share`, stats.last_share, formatAgo);
+  set(`${prefix}_last_share`, stats.last_share, formatTimestampAgo);
   rejectionCopyable(`${prefix}_rejected_shares`, stats.accepted_shares, stats.rejected_shares);
   rejectionWorkCopyable(`${prefix}_rejected_work`, stats.accepted_work, stats.rejected_work);
   set(`${prefix}_accepted_work`, stats.accepted_work, formatDifficulty);
@@ -136,7 +135,7 @@ async function refresh(signal) {
 
   populateOrder(data);
 
-  populateStats('upstream', data.stats);
+  populateStats('upstream', data.upstream);
 
   if (terminal) {
     populateStats('downstream', null);

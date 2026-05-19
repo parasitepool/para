@@ -195,7 +195,7 @@
           <th>Status</th>
           <th>Endpoint</th>
           <th>Username</th>
-          <th>Hashdays</th>
+          <th>Requested</th>
           <th>Delivered</th>
           <th>Hashrate</th>
           <th></th>
@@ -309,7 +309,7 @@ async function refresh(signal) {
 
   set('upstream_sps_1m', uss.sps_1m, formatTruncated);
   copyable('upstream_best_share', formatDifficulty(uss.best_share), uss.best_share);
-  set('upstream_last_share', uss.last_share, formatAgo);
+  set('upstream_last_share', uss.last_share, formatTimestampAgo);
   rejectionCopyable('upstream_rejected_shares', uss.accepted_shares, uss.rejected_shares);
   rejectionWorkCopyable('upstream_rejected_work', uss.accepted_work, uss.rejected_work);
   set('upstream_accepted_work', uss.accepted_work, formatDifficulty);
@@ -318,7 +318,7 @@ async function refresh(signal) {
   set('downstream_hashrate_1m', dss.hashrate_1m, formatHashrate);
   set('downstream_sps_1m', dss.sps_1m, formatTruncated);
   copyable('downstream_best_share', formatDifficulty(dss.best_share), dss.best_share);
-  set('downstream_last_share', dss.last_share, formatAgo);
+  set('downstream_last_share', dss.last_share, formatTimestampAgo);
   rejectionCopyable('downstream_rejected_shares', dss.accepted_shares, dss.rejected_shares);
   rejectionWorkCopyable('downstream_rejected_work', dss.accepted_work, dss.rejected_work);
   set('downstream_accepted_work', dss.accepted_work, formatDifficulty);
@@ -331,18 +331,14 @@ async function refresh(signal) {
   if (!tbody.querySelector('.copyable:hover')) {
     const orders = (ordersData || []).slice().sort((a, b) => b.id - a.id);
     tbody.innerHTML = orders.map(order => {
-      const u = order.upstream;
-      const hasUpstream = !!u;
-      const endpoint = hasUpstream ? u.endpoint : order.upstream_target.endpoint;
-      const username = (u && u.username) || order.upstream_target.username || '';
-      const shortUsername = truncateMiddle(username);
-      const target = order.target_hashdays == null ? 'Unlimited' : formatHashDays(order.target_hashdays);
-      const delivered = order.stats ? formatHashDays(order.stats.hash_days) || '-' : '-';
-      const hashrate = order.stats ? formatHashrate(order.stats.hashrate_1m) : '-';
+      const shortUsername = truncateMiddle(order.username);
+      const target = order.requested_hash_days == null ? 'Unlimited' : formatHashDays(order.requested_hash_days);
+      const delivered = formatHashDays(order.delivered_hash_days) || '-';
+      const hashrate = formatHashrate(order.hashrate);
       return `<tr data-id="${order.id}">
         <td><a class=order-link href="/order/${escapeHtml(order.id)}">${escapeHtml(order.id)}</a></td>
         <td class="${escapeHtml(statusClass(order.status))}">${escapeHtml(formatStatus(order.status))}</td>
-        <td>${escapeHtml(endpoint)}</td>
+        <td>${escapeHtml(order.endpoint)}</td>
         <td>${escapeHtml(shortUsername)}</td>
         <td>${escapeHtml(target)}</td>
         <td>${escapeHtml(delivered)}</td>
@@ -474,9 +470,9 @@ document.getElementById('orders-list').addEventListener('click', (e) => {
 
     const requestBody = JSON.stringify({
       upstream_target: target,
-      hashdays: parsedHashdays,
-      price: 0,
-    }).replace('"price":0', `"price":${parsedPrice}`);
+      hash_days: parsedHashdays,
+      hash_price: 0,
+    }).replace('"hash_price":0', `"hash_price":${parsedPrice}`);
 
     try {
       const res = await fetch('/api/router/order', {

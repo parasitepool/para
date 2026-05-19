@@ -545,7 +545,7 @@ function renderSessionRows(sessions) {
     const stats = session.stats;
     const sessionUser = session.username || '';
     const shortSessionUser = truncateMiddle(sessionUser);
-    const lastShare = stats.last_share != null ? formatAgo(stats.last_share) : '-';
+    const lastShare = stats.last_share != null ? formatTimestampAgo(stats.last_share) : '-';
     const bestShare = formatDifficulty(stats.best_share);
     const safeSessionUser = escapeHtml(sessionUser);
     const safeShortSessionUser = escapeHtml(shortSessionUser);
@@ -598,6 +598,10 @@ function formatAgo(seconds) {
   if (seconds < 60) return `${seconds}s ago`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
   return `${Math.floor(seconds / 3600)}h ago`;
+}
+
+function formatTimestampAgo(ts) {
+  return formatAgo(Math.floor(Date.now() / 1000) - ts);
 }
 
 function renderTicker() {

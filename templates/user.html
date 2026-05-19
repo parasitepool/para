@@ -57,7 +57,7 @@ const userAddress = window.location.pathname.split('/').pop();
 function renderWorkerRows(workers) {
   return workers.sort((a, b) => b.stats.hashrate_1m - a.stats.hashrate_1m).map(worker => {
     const stats = worker.stats;
-    const lastShare = stats.last_share != null ? formatAgo(stats.last_share) : '-';
+    const lastShare = stats.last_share != null ? formatTimestampAgo(stats.last_share) : '-';
     const bestShare = formatDifficulty(stats.best_share);
 
     return `<tr>
@@ -90,7 +90,7 @@ async function refresh(signal) {
   set('authorized', new Date(user.authorized_at * 1000).toLocaleString());
   rejectionCopyable('rejected_shares', s.accepted_shares, s.rejected_shares);
   rejectionWorkCopyable('rejected_work', s.accepted_work, s.rejected_work);
-  set('last_share', s.last_share, formatAgo);
+  set('last_share', s.last_share, formatTimestampAgo);
   copyable('best_share', formatDifficulty(s.best_share), s.best_share);
   copyable('hash_days', formatHashDays(s.hash_days), s.hash_days);
 

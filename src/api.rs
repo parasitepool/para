@@ -53,7 +53,7 @@ impl MiningStats {
             best_share: stats.best_share,
             last_share: stats
                 .last_share
-                .map(|time| now.duration_since(time).as_secs()),
+                .map(|time| epoch::instant_to_epoch_secs(time, now) as u64),
             accepted_shares: stats.accepted_shares,
             rejected_shares: stats.rejected_shares,
             accepted_work: stats.accepted_work,
@@ -234,8 +234,8 @@ pub struct RouterStatus {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct OrderRequest {
     pub upstream_target: UpstreamTarget,
-    pub hashdays: HashDays,
-    pub price: HashPrice,
+    pub hash_days: HashDays,
+    pub hash_price: HashPrice,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -258,28 +258,53 @@ impl OrderResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrderSummary {
+    pub id: u32,
+    pub status: OrderStatus,
+    pub endpoint: String,
+    pub username: String,
+    pub requested_hash_days: Option<HashDays>,
+    pub hashrate: HashRate,
+    pub delivered_hash_days: HashDays,
+}
+
+impl OrderSummary {
+    pub(crate) fn from_order(order: &Order, now: Instant) -> Self {
+        let stats = order.stats();
+        Self {
+            id: order.id,
+            status: order.status(),
+            endpoint: order.upstream_target.endpoint().to_string(),
+            username: order.upstream_target.username().to_string(),
+            requested_hash_days: order.bucket.as_ref().map(|bucket| bucket.target),
+            hashrate: stats.hashrate_1m(now),
+            delivered_hash_days: stats.accepted_work.to_hash_days(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrderDetail {
     pub id: u32,
     pub status: OrderStatus,
     pub upstream_target: UpstreamTarget,
-    pub target_hashdays: Option<HashDays>,
+    pub requested_hash_days: Option<HashDays>,
     pub hash_price: Option<HashPrice>,
     pub payment_address: Option<Address<NetworkUnchecked>>,
     pub payment_amount: Option<Amount>,
     pub created_at: u64,
     pub created_at_height: u32,
-    pub upstream: Option<UpstreamInfo>,
-    pub stats: MiningStats,
+    pub upstream: MiningStats,
     pub downstream: MiningStats,
     pub sessions: Vec<SessionDetail>,
 }
 
 impl OrderDetail {
     pub(crate) fn from_order(order: &Order, metatron: &Metatron, now: Instant) -> Self {
-        let upstream = order.upstream();
+        let upstream_conn = order.upstream();
         let bucket = order.bucket.as_ref();
 
-        let (sessions, downstream) = match &upstream {
+        let (sessions, downstream) = match &upstream_conn {
             Some(upstream) => metatron.downstream_snapshot(upstream.id(), now),
             None => (Vec::new(), Stats::new()),
         };
@@ -288,17 +313,14 @@ impl OrderDetail {
             id: order.id,
             status: order.status(),
             upstream_target: order.upstream_target.clone(),
-            target_hashdays: bucket.map(|bucket| bucket.target),
+            requested_hash_days: bucket.map(|bucket| bucket.target),
             hash_price: bucket
                 .map(|bucket| HashPrice::from_total(bucket.payment.amount, bucket.target)),
             payment_address: bucket.map(|bucket| bucket.payment.address.as_unchecked().clone()),
             payment_amount: bucket.map(|bucket| bucket.payment.amount),
             created_at: epoch::instant_to_epoch_secs(order.created_at, now) as u64,
             created_at_height: bucket.map_or(0, |bucket| bucket.payment.created_at_height),
-            upstream: upstream
-                .as_ref()
-                .map(|upstream| UpstreamInfo::from_upstream(upstream, metatron, now)),
-            stats: MiningStats::from_snapshot(&order.stats(), now),
+            upstream: MiningStats::from_snapshot(&order.stats(), now),
             downstream: MiningStats::from_snapshot(&downstream, now),
             sessions: sessions
                 .into_iter()

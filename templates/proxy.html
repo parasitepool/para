@@ -97,7 +97,7 @@ async function refresh(signal) {
   set('upstream_hashrate_1m', us.hashrate_1m, formatHashrate);
   set('upstream_sps_1m', us.sps_1m, formatTruncated);
   copyable('upstream_best_share', formatDifficulty(us.best_share), us.best_share);
-  set('upstream_last_share', us.last_share, formatAgo);
+  set('upstream_last_share', us.last_share, formatTimestampAgo);
   rejectionCopyable('upstream_rejected_shares', us.accepted_shares, us.rejected_shares);
   rejectionWorkCopyable('upstream_rejected_work', us.accepted_work, us.rejected_work);
   set('upstream_accepted_work', us.accepted_work, formatDifficulty);
@@ -111,7 +111,7 @@ async function refresh(signal) {
   set('downstream_hashrate_1m', ds.hashrate_1m, formatHashrate);
   set('downstream_sps_1m', ds.sps_1m, formatTruncated);
   copyable('downstream_best_share', formatDifficulty(ds.best_share), ds.best_share);
-  set('downstream_last_share', ds.last_share, formatAgo);
+  set('downstream_last_share', ds.last_share, formatTimestampAgo);
   rejectionCopyable('downstream_rejected_shares', ds.accepted_shares, ds.rejected_shares);
   rejectionWorkCopyable('downstream_rejected_work', ds.accepted_work, ds.rejected_work);
   set('downstream_accepted_work', ds.accepted_work, formatDifficulty);

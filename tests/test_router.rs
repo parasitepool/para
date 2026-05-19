@@ -1,6 +1,6 @@
 use {
     super::*,
-    api::{OrderDetail, RouterStatus},
+    api::{OrderDetail, OrderSummary, RouterStatus},
 };
 
 pub(crate) struct TestRouter {
@@ -142,7 +142,7 @@ impl TestRouter {
     pub(crate) async fn list_orders(
         &self,
         address: Option<&str>,
-    ) -> reqwest::Result<Vec<OrderDetail>> {
+    ) -> reqwest::Result<Vec<OrderSummary>> {
         let mut url = format!("{}/api/router/orders", self.api_endpoint());
         if let Some(addr) = address {
             url.push_str(&format!("?address={addr}"));

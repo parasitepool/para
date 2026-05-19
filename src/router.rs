@@ -1806,9 +1806,9 @@ mod tests {
         let detail = crate::api::OrderDetail::from_order(&order, &router.metatron, Instant::now());
 
         assert!(detail.sessions.is_empty());
-        assert_eq!(detail.stats.accepted_shares, 1);
-        assert!(detail.stats.accepted_work > HashWork::ZERO);
-        assert!(detail.stats.hashrate_1m > HashRate::ZERO);
+        assert_eq!(detail.upstream.accepted_shares, 1);
+        assert!(detail.upstream.accepted_work > HashWork::ZERO);
+        assert!(detail.upstream.hashrate_1m > HashRate::ZERO);
         assert_eq!(detail.downstream.accepted_work, HashWork::ZERO);
     }
 

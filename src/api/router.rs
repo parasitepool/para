@@ -61,8 +61,11 @@ async fn add_order(
     State(router): State<Arc<Router>>,
     Json(request): Json<OrderRequest>,
 ) -> ServerResult<Response> {
-    let order =
-        router.add_bucket_order(request.upstream_target, request.hashdays, request.price)?;
+    let order = router.add_bucket_order(
+        request.upstream_target,
+        request.hash_days,
+        request.hash_price,
+    )?;
 
     let Some(bucket) = &order.bucket else {
         return Err(anyhow!("bucket order missing bucket").into());
@@ -90,7 +93,6 @@ async fn list_orders(
     Query(query): Query<OrdersQuery>,
 ) -> ServerResult<Response> {
     let now = Instant::now();
-    let metatron = router.metatron();
 
     Ok(Json(
         router
@@ -102,8 +104,8 @@ async fn list_orders(
                     .as_ref()
                     .is_none_or(|addr| order.upstream_target.username().address() == addr)
             })
-            .map(|order| OrderDetail::from_order(order, &metatron, now))
-            .collect::<Vec<OrderDetail>>(),
+            .map(|order| OrderSummary::from_order(order, now))
+            .collect::<Vec<OrderSummary>>(),
     )
     .into_response())
 }

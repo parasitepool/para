@@ -73,14 +73,14 @@ async fn assert_in_mempool(bitcoind: &Bitcoind, txid: bitcoin::Txid) {
 async fn add_order(
     router: &TestRouter,
     target: &str,
-    hashdays: HashDays,
-    price: HashPrice,
+    hash_days: HashDays,
+    hash_price: HashPrice,
 ) -> (u32, String, u64) {
     let response = router
         .add_order(&api::OrderRequest {
             upstream_target: target.parse().unwrap(),
-            hashdays,
-            price,
+            hash_days,
+            hash_price,
         })
         .await
         .unwrap();
@@ -388,14 +388,7 @@ async fn router() {
 
     timeout(Duration::from_secs(30), async {
         loop {
-            let status = router.get_status().await;
-            let orders = router.list_orders(None).await;
-            if let (Ok(status), Ok(orders)) = (status, orders)
-                && orders
-                    .iter()
-                    .filter(|o| o.upstream.as_ref().is_some_and(|u| u.connected))
-                    .count()
-                    == 1
+            if let Ok(status) = router.get_status().await
                 && status.downstream.session_count >= 3
             {
                 break;
@@ -407,26 +400,13 @@ async fn router() {
     .expect("Timeout waiting for miners to reconnect to remaining upstream");
 
     let status = router.get_status().await.unwrap();
-    let orders = router.list_orders(None).await.unwrap();
-    assert_eq!(
-        orders
-            .iter()
-            .filter(|o| o.upstream.as_ref().is_some_and(|u| u.connected))
-            .count(),
-        1,
-    );
     assert_eq!(status.downstream.session_count, 3);
 
     drop(pool_b);
 
     timeout(Duration::from_secs(30), async {
         loop {
-            let status = router.get_status().await;
-            let orders = router.list_orders(None).await;
-            if let (Ok(status), Ok(orders)) = (status, orders)
-                && orders
-                    .iter()
-                    .all(|o| o.upstream.as_ref().is_some_and(|u| !u.connected))
+            if let Ok(status) = router.get_status().await
                 && status.downstream.session_count == 0
             {
                 break;
@@ -436,13 +416,6 @@ async fn router() {
     })
     .await
     .expect("Timeout waiting for all upstreams to disconnect");
-
-    let orders = router.list_orders(None).await.unwrap();
-    assert!(
-        orders
-            .iter()
-            .all(|o| o.upstream.as_ref().is_some_and(|u| !u.connected))
-    );
 
     for mut miner in miners {
         miner.kill().unwrap();
@@ -487,8 +460,8 @@ async fn add_order_with_zero_hashdays_rejected() {
             upstream_target: "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333"
                 .parse()
                 .unwrap(),
-            hashdays: HashDays::new(0.0).unwrap(),
-            price: current_hash_price(&router).await,
+            hash_days: HashDays::new(0.0).unwrap(),
+            hash_price: current_hash_price(&router).await,
         })
         .await
         .unwrap();
@@ -510,8 +483,8 @@ async fn add_order_price_overflow_rejected() {
             upstream_target: "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333"
                 .parse()
                 .unwrap(),
-            hashdays: HashDays::new(f64::MAX).unwrap(),
-            price: HashPrice::from_sats(u64::MAX),
+            hash_days: HashDays::new(f64::MAX).unwrap(),
+            hash_price: HashPrice::from_sats(u64::MAX),
         })
         .await
         .unwrap();
@@ -533,8 +506,8 @@ async fn add_order_rejects_price_below_minimum() {
             upstream_target: "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333"
                 .parse()
                 .unwrap(),
-            hashdays: HashDays::new(2e5).unwrap(),
-            price: HashPrice::from_sats(0),
+            hash_days: HashDays::new(2e5).unwrap(),
+            hash_price: HashPrice::from_sats(0),
         })
         .await
         .unwrap();
@@ -561,8 +534,8 @@ async fn add_order_rejects_price_below_minimum() {
             upstream_target: "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:4444"
                 .parse()
                 .unwrap(),
-            hashdays: HashDays::new(1e-10).unwrap(),
-            price: hash_price,
+            hash_days: HashDays::new(1e-10).unwrap(),
+            hash_price,
         })
         .await
         .unwrap();
@@ -592,7 +565,7 @@ async fn order_detail() {
 
     assert_eq!(detail.id, id);
     assert_eq!(detail.status, OrderStatus::Pending);
-    assert_eq!(detail.target_hashdays, Some(hash_days));
+    assert_eq!(detail.requested_hash_days, Some(hash_days));
     assert_eq!(
         detail
             .payment_address
@@ -605,7 +578,7 @@ async fn order_detail() {
         detail.payment_amount.expect("bucket has amount").to_sat(),
         amount,
     );
-    assert!(detail.upstream.is_none());
+    assert_eq!(detail.upstream.accepted_shares, 0);
     assert!(detail.sessions.is_empty());
     assert_eq!(detail.downstream.accepted_shares, 0);
     assert_eq!(detail.downstream.rejected_shares, 0);
@@ -687,10 +660,6 @@ async fn order_activates_after_payment_output_is_spent_before_confirmation() {
         loop {
             if let Ok(detail) = router.get_order(id).await
                 && detail.status == OrderStatus::Active
-                && detail
-                    .upstream
-                    .as_ref()
-                    .is_some_and(|upstream| upstream.connected)
             {
                 break;
             }
@@ -751,9 +720,9 @@ async fn orders() {
 
     let response = router
         .add_order(&api::OrderRequest {
-            hashdays: HashDays::new(1e5).unwrap(),
+            hash_days: HashDays::new(1e5).unwrap(),
             upstream_target: format!("{username}@127.0.0.1:1").parse().unwrap(),
-            price: hash_price,
+            hash_price,
         })
         .await
         .unwrap();
@@ -908,14 +877,6 @@ async fn order_survives_upstream_bounce_and_drops_sessions() {
     .await
     .expect("miner session should establish");
 
-    let initial_enonce1 = router
-        .get_order(id)
-        .await
-        .unwrap()
-        .upstream
-        .unwrap()
-        .enonce1;
-
     drop(pool);
 
     timeout(Duration::from_secs(10), async {
@@ -924,7 +885,7 @@ async fn order_survives_upstream_bounce_and_drops_sessions() {
             let detail = router.get_order(id).await;
             if let (Ok(status), Ok(detail)) = (status, detail)
                 && detail.status == OrderStatus::Active
-                && detail.upstream.as_ref().is_some_and(|upstream| !upstream.connected)
+                && detail.sessions.is_empty()
                 && status.downstream.session_count == 0
             {
                 break;
@@ -933,27 +894,21 @@ async fn order_survives_upstream_bounce_and_drops_sessions() {
         }
     })
     .await
-    .expect(
-        "on upstream drop: order stays Active, upstream.connected flips to false, sessions drop to zero",
-    );
+    .expect("on upstream drop: order stays Active, sessions drop to zero");
 
     let _pool = TestPool::spawn_on_port(&pool_bitcoind, port, "--start-diff 0.00001");
 
     timeout(Duration::from_secs(30), async {
         loop {
             let detail = router.get_order(id).await.unwrap();
-            if detail.status == OrderStatus::Active
-                && let Some(upstream) = detail.upstream
-                && upstream.connected
-                && upstream.enonce1 != initial_enonce1
-            {
+            if detail.status == OrderStatus::Active && !detail.sessions.is_empty() {
                 break;
             }
             sleep(Duration::from_millis(100)).await;
         }
     })
     .await
-    .expect("order should reconnect with a fresh enonce1 once the upstream is back");
+    .expect("order should reconnect once the upstream is back");
 
     miner.kill().unwrap();
     miner.wait().unwrap();
@@ -1022,8 +977,11 @@ async fn order_fulfilled_on_hashdays_reached() {
         .find(|o| o.status == OrderStatus::Fulfilled)
         .unwrap();
 
-    assert_eq!(fulfilled.target_hashdays, Some(HashDays::new(1.0).unwrap()));
-    assert!(fulfilled.upstream.as_ref().unwrap().stats.hash_days >= HashDays::new(1.0).unwrap());
+    assert_eq!(
+        fulfilled.requested_hash_days,
+        Some(HashDays::new(1.0).unwrap())
+    );
+    assert!(fulfilled.delivered_hash_days >= HashDays::new(1.0).unwrap());
 
     miner.kill().unwrap();
     miner.wait().unwrap();
