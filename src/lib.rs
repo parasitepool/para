@@ -10,7 +10,7 @@ use {
             header::{CONTENT_DISPOSITION, CONTENT_TYPE},
         },
         response::{IntoResponse, Response},
-        routing::{MethodRouter, get, post},
+        routing::{MethodRouter, get, post, put},
     },
     axum_server::Handle,
     base64::{Engine, engine::general_purpose},
@@ -94,7 +94,7 @@ use {
         str::FromStr,
         sync::{
             Arc, LazyLock, OnceLock,
-            atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering},
+            atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering},
         },
         thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},

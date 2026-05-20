@@ -50,6 +50,8 @@ pub(crate) struct Settings {
     wallet_birthday: u32,
     sink_orders: Vec<UpstreamTarget>,
     allow_zero_conf: bool,
+    halt: bool,
+    boost: bool,
     store_path: Option<PathBuf>,
     http_api_token: Option<String>,
     http_admin_token: Option<String>,
@@ -95,6 +97,8 @@ impl Default for Settings {
             wallet_birthday: 0,
             sink_orders: Vec::new(),
             allow_zero_conf: false,
+            halt: false,
+            boost: false,
             store_path: None,
             http_api_token: None,
             http_admin_token: None,
@@ -264,6 +268,8 @@ impl Settings {
             tick_interval,
             sink_order,
             allow_zero_conf,
+            halt,
+            boost,
         } = options;
 
         let settings = Self {
@@ -275,6 +281,8 @@ impl Settings {
             wallet_birthday,
             sink_orders: sink_order,
             allow_zero_conf,
+            halt,
+            boost,
             ..Self::from_common_options(common)?
         };
 
@@ -676,6 +684,14 @@ impl Settings {
 
     pub(crate) fn allow_zero_conf(&self) -> bool {
         self.allow_zero_conf
+    }
+
+    pub(crate) fn halt(&self) -> bool {
+        self.halt
+    }
+
+    pub(crate) fn boost(&self) -> bool {
+        self.boost
     }
 
     pub(crate) fn sink_orders(&self) -> &[UpstreamTarget] {
@@ -1572,6 +1588,23 @@ mod tests {
         assert_eq!(settings.wallet_birthday, 0);
         assert_eq!(settings.http_api_token(), None);
         assert_eq!(settings.http_admin_token(), None);
+        assert!(!settings.halt());
+        assert!(!settings.boost());
+    }
+
+    #[test]
+    fn router_halt_flag() {
+        let settings =
+            Settings::from_router_options(parse_router_options(&router_command("--halt"))).unwrap();
+        assert!(settings.halt());
+    }
+
+    #[test]
+    fn router_boost_flag() {
+        let settings =
+            Settings::from_router_options(parse_router_options(&router_command("--boost")))
+                .unwrap();
+        assert!(settings.boost());
     }
 
     #[test]

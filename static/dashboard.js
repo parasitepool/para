@@ -153,8 +153,9 @@ async function initAuthProbe() {
     return true;
   }
 
-  const logoutBtn = document.getElementById('logout-btn');
-  if (logoutBtn) logoutBtn.classList.remove('hidden');
+  for (const id of ['logout-btn', 'halt-btn', 'boost-btn']) {
+    document.getElementById(id)?.classList.remove('hidden');
+  }
 
   return true;
 }

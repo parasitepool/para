@@ -39,4 +39,10 @@ pub(crate) struct RouterOptions {
 
     #[arg(long, help = "Accept unconfirmed payments.")]
     pub(crate) allow_zero_conf: bool,
+
+    #[arg(long, help = "Start halted, rejecting new bucket orders.")]
+    pub(crate) halt: bool,
+
+    #[arg(long, help = "Direct all hashrate to bucket orders.")]
+    pub(crate) boost: bool,
 }

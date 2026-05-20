@@ -227,6 +227,8 @@ pub struct RouterStatus {
     pub bucket_order_count: usize,
     pub sink_order_count: usize,
     pub wallet_synced: bool,
+    pub halt: bool,
+    pub boost: bool,
     pub upstream: MiningStats,
     pub downstream: DownstreamInfo,
 }

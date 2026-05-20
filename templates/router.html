@@ -19,6 +19,60 @@
   }
 
   .action-bar button:hover { background: #444; }
+  .action-bar button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  #halt-btn.active { background: #663300; border-color: #886600; color: #ffcc00; }
+  #boost-btn.active { background: #1a4d1a; border-color: #2d7a2d; color: #5fdf5f; }
+
+  .confirm-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+  }
+
+  .confirm-overlay.hidden { display: none; }
+
+  .confirm-modal {
+    background: #1a1a1a;
+    border: 1px solid #444;
+    padding: 30px;
+    width: 400px;
+    max-width: 90vw;
+    text-align: center;
+  }
+
+  .confirm-modal h2 {
+    margin: 0 0 16px;
+    font-size: 1.22em;
+    color: #888;
+  }
+
+  .confirm-modal p {
+    color: #aaa;
+    margin: 0 0 20px;
+    font-size: 0.9em;
+  }
+
+  .confirm-modal .modal-buttons {
+    display: flex;
+    gap: 10px;
+  }
+
+  .confirm-modal .modal-buttons button {
+    flex: 1;
+    background: #333;
+    border: 1px solid #444;
+    color: #eee;
+    padding: 8px 16px;
+    cursor: pointer;
+    font: inherit;
+  }
+
+  .confirm-modal .modal-buttons button:hover { background: #444; }
 
   #orders-table td { vertical-align: middle; white-space: nowrap; }
   #orders-table tbody tr { cursor: pointer; }
@@ -183,6 +237,8 @@
 
   <div class=action-bar>
     <button id=add-order-btn>Add Order</button>
+    <button id=boost-btn class=hidden>Boost: OFF</button>
+    <button id=halt-btn class=hidden>Halt: OFF</button>
     <button id=logout-btn class=hidden onclick=logout()>Logout</button>
   </div>
 
@@ -232,6 +288,28 @@
         <div class=modal-buttons>
           <button id=order-payment-close>Close</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div id=halt-overlay class="confirm-overlay hidden">
+    <div class=confirm-modal>
+      <h2 id=halt-modal-title></h2>
+      <p id=halt-modal-desc></p>
+      <div class=modal-buttons>
+        <button id=halt-cancel>Cancel</button>
+        <button id=halt-confirm>Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <div id=boost-overlay class="confirm-overlay hidden">
+    <div class=confirm-modal>
+      <h2 id=boost-modal-title></h2>
+      <p id=boost-modal-desc></p>
+      <div class=modal-buttons>
+        <button id=boost-cancel>Cancel</button>
+        <button id=boost-confirm>Confirm</button>
       </div>
     </div>
   </div>
@@ -297,6 +375,24 @@ async function refresh(signal) {
   const dss = ds.stats || {};
   if (Number.isSafeInteger(routerData.hash_price)) {
     currentHashPrice = String(routerData.hash_price);
+  }
+
+  const haltBtn = document.getElementById('halt-btn');
+  const boostBtn = document.getElementById('boost-btn');
+  const addOrderBtn = document.getElementById('add-order-btn');
+  if (haltBtn) {
+    haltBtn.dataset.active = routerData.halt;
+    haltBtn.textContent = routerData.halt ? 'Halt: ON' : 'Halt: OFF';
+    haltBtn.classList.toggle('active', routerData.halt);
+  }
+  if (boostBtn) {
+    boostBtn.dataset.active = routerData.boost;
+    boostBtn.textContent = routerData.boost ? 'Boost: ON' : 'Boost: OFF';
+    boostBtn.classList.toggle('active', routerData.boost);
+  }
+  if (addOrderBtn) {
+    addOrderBtn.disabled = routerData.halt;
+    addOrderBtn.title = routerData.halt ? 'Router is halted' : '';
   }
 
   set('bucket_order_count', routerData.bucket_order_count);
@@ -500,4 +596,56 @@ document.getElementById('orders-list').addEventListener('click', (e) => {
     }
   });
 }
+
+function initConfirmModal(prefix, endpoint, enableTitle, disableTitle, enableDesc, disableDesc) {
+  const overlay = document.getElementById(`${prefix}-overlay`);
+  const title = document.getElementById(`${prefix}-modal-title`);
+  const desc = document.getElementById(`${prefix}-modal-desc`);
+  const btn = document.getElementById(`${prefix}-btn`);
+
+  btn.addEventListener('click', () => {
+    const on = btn.dataset.active === 'true';
+    title.textContent = on ? disableTitle : enableTitle;
+    desc.textContent = on ? disableDesc : enableDesc;
+    overlay.classList.remove('hidden');
+  });
+
+  document.getElementById(`${prefix}-cancel`).addEventListener('click', () => {
+    overlay.classList.add('hidden');
+  });
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) overlay.classList.add('hidden');
+  });
+
+  document.getElementById(`${prefix}-confirm`).addEventListener('click', async () => {
+    const on = btn.dataset.active === 'true';
+    overlay.classList.add('hidden');
+    try {
+      const res = await fetch(endpoint, withAuthOptions({
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !on }),
+      }));
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        alert(text || `Error: ${res.status}`);
+        return;
+      }
+      location.reload();
+    } catch (e) {
+      alert(e.message);
+    }
+  });
+}
+
+initConfirmModal('halt', '/api/router/halt',
+  'Enable Halt', 'Disable Halt',
+  'New bucket orders will be rejected until halt is disabled.',
+  'New bucket orders will be accepted again.');
+
+initConfirmModal('boost', '/api/router/boost',
+  'Enable Boost', 'Disable Boost',
+  'All sink hashrate will be directed to bucket orders.',
+  'Hashrate will be distributed normally across orders.');
 </script>

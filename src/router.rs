@@ -23,6 +23,8 @@ pub(crate) struct Router {
     orders: RwLock<Orders>,
     next_id: AtomicU32,
     hash_value: AtomicU64,
+    halt: AtomicBool,
+    boost: AtomicBool,
     tasks: TaskTracker,
     cancel: CancellationToken,
 }
@@ -37,6 +39,9 @@ impl Router {
         cancel: CancellationToken,
         initial_hash_value: HashValue,
     ) -> Self {
+        let halt = settings.halt();
+        let boost = settings.boost();
+
         Self {
             settings,
             store,
@@ -45,6 +50,8 @@ impl Router {
             orders: RwLock::new(Orders::new()),
             next_id: AtomicU32::new(0),
             hash_value: AtomicU64::new(initial_hash_value.to_sats()),
+            halt: AtomicBool::new(halt),
+            boost: AtomicBool::new(boost),
             tasks,
             cancel,
         }
@@ -56,6 +63,22 @@ impl Router {
 
     pub(crate) fn hash_price(&self) -> HashPrice {
         HashPrice::from_hash_value(self.hash_value())
+    }
+
+    pub(crate) fn halt(&self) -> bool {
+        self.halt.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn set_halt(&self, enabled: bool) {
+        self.halt.store(enabled, Ordering::Relaxed);
+    }
+
+    pub(crate) fn boost(&self) -> bool {
+        self.boost.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn set_boost(&self, enabled: bool) {
+        self.boost.store(enabled, Ordering::Relaxed);
     }
 
     pub(crate) fn set_hash_value(&self, hash_value: HashValue) {
@@ -83,7 +106,8 @@ impl Router {
 
     pub(crate) fn next_order(&self) -> Option<Arc<Order>> {
         let now = Instant::now();
-        let routable = self.orders.read().routable(now);
+        let boost = self.boost();
+        let routable = self.orders.read().routable(now, boost);
 
         let mut best: Option<&Arc<Order>> = None;
 
@@ -97,6 +121,8 @@ impl Router {
                 !order.is_ramping_up()
             } else if order.is_sink() && current.is_sink() {
                 order.hashrate_1m(now) < current.hashrate_1m(now)
+            } else if boost && order.is_starving(now) != current.is_starving(now) {
+                order.is_starving(now)
             } else {
                 order.remaining_work() > current.remaining_work()
             };
@@ -146,6 +172,10 @@ impl Router {
         target: HashDays,
         price: HashPrice,
     ) -> RouterResult<Arc<Order>> {
+        if self.halt() {
+            return Err(RouterError::Halted);
+        }
+
         let wallet = self.wallet.as_ref().ok_or(RouterError::WalletRequired)?;
 
         if !wallet.is_synced() {
@@ -322,7 +352,9 @@ impl Router {
                             break;
                         }
 
-                        order.trim();
+                        if !self.boost() {
+                            order.trim();
+                        }
                     }
                 } => {
                     info!("Order {} fulfilled", order.id);
@@ -454,32 +486,53 @@ impl Router {
 
     fn rebalance(&self) {
         let now = Instant::now();
+        let boost = self.boost();
         let orders = self.orders.read().active();
 
-        if !orders.iter().any(|order| order.is_starving(now)) {
+        if !boost && !orders.iter().any(|order| order.is_starving(now)) {
             return;
         }
 
-        let mut best = None;
+        let has_unfulfilled_bucket = orders
+            .iter()
+            .any(|order| !order.is_sink() && !order.is_fulfilled());
 
-        for order in orders.iter().filter(|order| order.is_sink()) {
-            let sessions = order.sessions.lock();
-
-            for (session, _) in sessions.values() {
-                let hash_rate = session.hashrate_1m(now);
-
-                let replace = match best {
-                    None => true,
-                    Some((_, _, best_hashrate)) => hash_rate > best_hashrate,
-                };
-
-                if replace {
-                    best = Some((order, session.id(), hash_rate));
-                }
-            }
+        if !has_unfulfilled_bucket {
+            return;
         }
 
-        let Some((order, id, _)) = best else {
+        if boost {
+            for order in orders.iter().filter(|order| order.is_sink()) {
+                let ids: Vec<_> = order
+                    .sessions
+                    .lock()
+                    .values()
+                    .map(|(session, _)| session.id())
+                    .collect();
+
+                for id in ids {
+                    order.trim_session(id, now);
+                }
+            }
+
+            if orders
+                .iter()
+                .any(|order| !order.is_sink() && order.is_starving(now))
+                && let Some((order, id)) = fattest_session(
+                    orders
+                        .iter()
+                        .filter(|order| !order.is_sink() && !order.is_starving(now)),
+                    now,
+                )
+            {
+                order.trim_session(id, now);
+            }
+
+            return;
+        }
+
+        let Some((order, id)) = fattest_session(orders.iter().filter(|order| order.is_sink()), now)
+        else {
             warn!("Rebalance needed but no sink session available");
             return;
         };
@@ -528,6 +581,8 @@ impl Router {
                 .wallet
                 .as_ref()
                 .is_some_and(|wallet| wallet.is_synced()),
+            halt: self.halt(),
+            boost: self.boost(),
             upstream: MiningStats::from_snapshot(&accepted, now),
             downstream: DownstreamInfo::from_metatron(metatron, now),
         }
@@ -645,6 +700,32 @@ impl Router {
             });
         }
     }
+}
+
+fn fattest_session<'a>(
+    orders: impl Iterator<Item = &'a Arc<Order>>,
+    now: Instant,
+) -> Option<(&'a Arc<Order>, SessionId)> {
+    let mut best = None;
+
+    for order in orders {
+        let sessions = order.sessions.lock();
+
+        for (session, _) in sessions.values() {
+            let hash_rate = session.hashrate_1m(now);
+
+            let replace = match best {
+                None => true,
+                Some((_, _, best_hashrate)) => hash_rate > best_hashrate,
+            };
+
+            if replace {
+                best = Some((order, session.id(), hash_rate));
+            }
+        }
+    }
+
+    best.map(|(order, id, _)| (order, id))
 }
 
 impl StatusLine for Router {
@@ -856,6 +937,8 @@ mod tests {
                 tick_interval: 60,
                 sink_order: Vec::new(),
                 allow_zero_conf,
+                halt: false,
+                boost: false,
             })
             .unwrap(),
         )
@@ -1261,7 +1344,7 @@ mod tests {
         orders.add(pending);
         orders.add(in_mempool);
 
-        assert_eq!(ids(orders.routable(Instant::now())), vec![0]);
+        assert_eq!(ids(orders.routable(Instant::now(), false)), vec![0]);
     }
 
     #[test]
@@ -2020,5 +2103,198 @@ mod tests {
             ),
             Err(RouterError::WalletRequired),
         ));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn halt() {
+        let router = test_router();
+        router.wallet.as_ref().unwrap().mark_synced();
+
+        assert!(!router.halt());
+        assert!(!router.status().halt);
+
+        router.set_halt(true);
+        assert!(router.status().halt);
+
+        let target = test_upstream_target();
+        let price = HashPrice::from_sats(router.hash_value().to_sats());
+
+        assert!(matches!(
+            router.add_bucket_order(target.clone(), hash_days(1e18), price),
+            Err(RouterError::Halted),
+        ));
+
+        router.set_halt(false);
+        router
+            .add_bucket_order(target, hash_days(1e18), price)
+            .unwrap();
+    }
+
+    #[test]
+    fn boost() {
+        let router = test_router();
+
+        assert!(!router.boost());
+        assert!(!router.status().boost);
+
+        router.set_boost(true);
+        assert!(router.status().boost);
+
+        router.set_boost(false);
+        assert!(!router.status().boost);
+    }
+
+    #[test]
+    fn routable_with_boost_includes_non_starving_bucket() {
+        let metatron = Arc::new(Metatron::new());
+        let mut orders = Orders::new();
+        let bucket = test_order(0, Some(hash_days(100.0)), OrderStatus::Active, &metatron);
+
+        let session = metatron.new_session(test_authorization("deadbeef", "foo"), 0);
+        session.record_accepted(Difficulty::from(1000.0), Difficulty::from(1000.0));
+        bucket.add_session(session, CancellationToken::new());
+
+        orders.add(bucket);
+
+        assert!(orders.routable(Instant::now(), false).is_empty());
+        assert_eq!(ids(orders.routable(Instant::now(), true)), vec![0]);
+    }
+
+    #[test]
+    fn routable_with_boost_excludes_fulfilled_bucket() {
+        let metatron = Arc::new(Metatron::new());
+        let mut orders = Orders::new();
+        let bucket = test_order(0, Some(hash_days(100.0)), OrderStatus::Active, &metatron);
+        set_accepted_work(&metatron, &bucket, 100.0);
+
+        let session = metatron.new_session(test_authorization("deadbeef", "foo"), 0);
+        session.record_accepted(Difficulty::from(1000.0), Difficulty::from(1000.0));
+        bucket.add_session(session, CancellationToken::new());
+
+        orders.add(bucket);
+
+        assert!(orders.routable(Instant::now(), true).is_empty());
+    }
+
+    #[test]
+    fn next_order_boost_prefers_starving_bucket() {
+        let router = test_router();
+        router.set_boost(true);
+
+        let starving = test_order(
+            0,
+            Some(hash_days(100.0)),
+            OrderStatus::Active,
+            &router.metatron,
+        );
+
+        let fed = test_order(
+            1,
+            Some(hash_days(100.0)),
+            OrderStatus::Active,
+            &router.metatron,
+        );
+        let session = router
+            .metatron
+            .new_session(test_authorization("deadbeef", "foo"), 1);
+        session.record_accepted(Difficulty::from(1000.0), Difficulty::from(1000.0));
+        fed.add_session(session, CancellationToken::new());
+
+        add_orders(router.as_ref(), [fed, starving]);
+
+        assert_eq!(router.next_order().unwrap().id, 0);
+    }
+
+    #[test]
+    fn rebalance_boost_trims_all_sink_sessions() {
+        let router = test_router();
+        router.set_boost(true);
+
+        let bucket = test_order(
+            0,
+            Some(hash_days(100.0)),
+            OrderStatus::Active,
+            &router.metatron,
+        );
+        let sink = test_order(1, None, OrderStatus::Active, &router.metatron);
+
+        let cancel_a = CancellationToken::new();
+        let cancel_b = CancellationToken::new();
+        let session_a = router
+            .metatron
+            .new_session(test_authorization("deadbeef", "foo"), 1);
+        let session_b = router
+            .metatron
+            .new_session(test_authorization("cafebabe", "bar"), 1);
+        sink.add_session(session_a.clone(), cancel_a.clone());
+        sink.add_session(session_b.clone(), cancel_b.clone());
+        session_a.record_accepted(Difficulty::from(200.0), Difficulty::from(200.0));
+        session_b.record_accepted(Difficulty::from(100.0), Difficulty::from(100.0));
+
+        add_orders(router.as_ref(), [bucket, sink]);
+
+        router.rebalance();
+
+        assert!(cancel_a.is_cancelled());
+        assert!(cancel_b.is_cancelled());
+    }
+
+    #[test]
+    fn rebalance_boost_trims_fattest_non_starving_bucket_when_bucket_starving() {
+        let router = test_router();
+        router.set_boost(true);
+
+        let starving = test_order(
+            0,
+            Some(hash_days(100.0)),
+            OrderStatus::Active,
+            &router.metatron,
+        );
+
+        let fed = test_order(
+            1,
+            Some(hash_days(100.0)),
+            OrderStatus::Active,
+            &router.metatron,
+        );
+        let cancel = CancellationToken::new();
+        let session = router
+            .metatron
+            .new_session(test_authorization("deadbeef", "foo"), 1);
+        fed.add_session(session.clone(), cancel.clone());
+        session.record_accepted(Difficulty::from(1000.0), Difficulty::from(1000.0));
+
+        add_orders(router.as_ref(), [starving, fed]);
+
+        router.rebalance();
+
+        assert!(cancel.is_cancelled());
+    }
+
+    #[test]
+    fn rebalance_boost_noop_when_all_buckets_fulfilled() {
+        let router = test_router();
+        router.set_boost(true);
+
+        let bucket = test_order(
+            0,
+            Some(hash_days(100.0)),
+            OrderStatus::Active,
+            &router.metatron,
+        );
+        set_accepted_work(&router.metatron, &bucket, 100.0);
+
+        let sink = test_order(1, None, OrderStatus::Active, &router.metatron);
+        let cancel = CancellationToken::new();
+        let session = router
+            .metatron
+            .new_session(test_authorization("deadbeef", "foo"), 1);
+        sink.add_session(session, cancel.clone());
+
+        add_orders(router.as_ref(), [bucket, sink]);
+
+        router.rebalance();
+
+        assert!(!cancel.is_cancelled());
     }
 }

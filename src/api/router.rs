@@ -22,6 +22,8 @@ pub(crate) fn router(
         .route("/api/router/order/{id}", get(order_detail))
         .route("/api/router/orders", get(list_orders))
         .route("/api/router/order/{id}/cancel", post(cancel_order))
+        .route("/api/router/halt", put(set_halt))
+        .route("/api/router/boost", put(set_boost))
         .with_state(state)
         .merge(common_routes())
         .layer(Extension(bitcoin_client))
@@ -107,6 +109,45 @@ async fn list_orders(
             .map(|order| OrderSummary::from_order(order, now))
             .collect::<Vec<OrderSummary>>(),
     )
+    .into_response())
+}
+
+#[derive(Deserialize)]
+struct ToggleRequest {
+    enabled: bool,
+}
+
+#[derive(Serialize)]
+struct HaltResponse {
+    halt: bool,
+}
+
+async fn set_halt(
+    _: AdminAuth,
+    State(router): State<Arc<Router>>,
+    Json(request): Json<ToggleRequest>,
+) -> ServerResult<Response> {
+    router.set_halt(request.enabled);
+    Ok(Json(HaltResponse {
+        halt: router.halt(),
+    })
+    .into_response())
+}
+
+#[derive(Serialize)]
+struct BoostResponse {
+    boost: bool,
+}
+
+async fn set_boost(
+    _: AdminAuth,
+    State(router): State<Arc<Router>>,
+    Json(request): Json<ToggleRequest>,
+) -> ServerResult<Response> {
+    router.set_boost(request.enabled);
+    Ok(Json(BoostResponse {
+        boost: router.boost(),
+    })
     .into_response())
 }
 

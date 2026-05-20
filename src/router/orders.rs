@@ -31,7 +31,7 @@ impl Orders {
             .collect()
     }
 
-    pub(crate) fn routable(&self, now: Instant) -> Vec<Arc<Order>> {
+    pub(crate) fn routable(&self, now: Instant, boost: bool) -> Vec<Arc<Order>> {
         self.inner
             .values()
             .filter(|order| {
@@ -39,7 +39,9 @@ impl Orders {
                     && order
                         .upstream()
                         .is_some_and(|upstream| upstream.is_connected())
-                    && (order.is_sink() || order.is_starving(now))
+                    && (order.is_sink()
+                        || order.is_starving(now)
+                        || (boost && !order.is_fulfilled()))
             })
             .cloned()
             .collect()
