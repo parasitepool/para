@@ -268,6 +268,7 @@ pub struct OrderSummary {
     pub requested_hash_days: Option<HashDays>,
     pub hashrate: HashRate,
     pub delivered_hash_days: HashDays,
+    pub best_share: Option<Difficulty>,
 }
 
 impl OrderSummary {
@@ -281,6 +282,7 @@ impl OrderSummary {
             requested_hash_days: order.bucket.as_ref().map(|bucket| bucket.target),
             hashrate: stats.hashrate_1m(now),
             delivered_hash_days: stats.accepted_work.to_hash_days(),
+            best_share: stats.best_share,
         }
     }
 }
