@@ -298,7 +298,7 @@ mod tests {
                 created_at_height: 42,
             }),
             created_at_secs: crate::epoch::instant_to_epoch_secs(now, now),
-            stats: entry::StatsEntry::from_stats(&stats, now),
+            stats: stats.to_entry(now),
         }
     }
 

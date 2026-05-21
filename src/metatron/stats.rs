@@ -1,4 +1,10 @@
-use super::*;
+use {
+    super::*,
+    crate::{
+        epoch::{epoch_secs_to_instant, instant_to_epoch_secs},
+        store::entry::StatsEntry,
+    },
+};
 
 #[derive(Clone)]
 pub(crate) struct Stats {
@@ -28,6 +34,57 @@ impl Default for Stats {
 }
 
 impl Stats {
+    pub(crate) fn to_entry(&self, now: Instant) -> StatsEntry {
+        StatsEntry {
+            accepted_shares: self.accepted_shares,
+            rejected_shares: self.rejected_shares,
+            accepted_work: self.accepted_work,
+            rejected_work: self.rejected_work,
+            last_share_secs: self
+                .last_share
+                .map(|last_share| instant_to_epoch_secs(last_share, now)),
+            best_share: self.best_share,
+            dsps_1m: self.dsps_1m.to_entry(now),
+            dsps_5m: self.dsps_5m.to_entry(now),
+            dsps_15m: self.dsps_15m.to_entry(now),
+            dsps_1hr: self.dsps_1hr.to_entry(now),
+            dsps_6hr: self.dsps_6hr.to_entry(now),
+            dsps_1d: self.dsps_1d.to_entry(now),
+            dsps_7d: self.dsps_7d.to_entry(now),
+            sps_1m: self.sps_1m.to_entry(now),
+            sps_5m: self.sps_5m.to_entry(now),
+            sps_15m: self.sps_15m.to_entry(now),
+            sps_1hr: self.sps_1hr.to_entry(now),
+        }
+    }
+
+    pub(crate) fn from_entry(entry: StatsEntry) -> Result<Self> {
+        let last_share = entry
+            .last_share_secs
+            .filter(|secs| secs.is_finite())
+            .map(epoch_secs_to_instant);
+
+        Ok(Self {
+            accepted_shares: entry.accepted_shares,
+            rejected_shares: entry.rejected_shares,
+            accepted_work: entry.accepted_work,
+            rejected_work: entry.rejected_work,
+            last_share,
+            best_share: entry.best_share,
+            dsps_1m: DecayingAverage::from_entry(entry.dsps_1m)?,
+            dsps_5m: DecayingAverage::from_entry(entry.dsps_5m)?,
+            dsps_15m: DecayingAverage::from_entry(entry.dsps_15m)?,
+            dsps_1hr: DecayingAverage::from_entry(entry.dsps_1hr)?,
+            dsps_6hr: DecayingAverage::from_entry(entry.dsps_6hr)?,
+            dsps_1d: DecayingAverage::from_entry(entry.dsps_1d)?,
+            dsps_7d: DecayingAverage::from_entry(entry.dsps_7d)?,
+            sps_1m: DecayingAverage::from_entry(entry.sps_1m)?,
+            sps_5m: DecayingAverage::from_entry(entry.sps_5m)?,
+            sps_15m: DecayingAverage::from_entry(entry.sps_15m)?,
+            sps_1hr: DecayingAverage::from_entry(entry.sps_1hr)?,
+        })
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             accepted_shares: 0,

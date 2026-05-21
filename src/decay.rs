@@ -1,4 +1,10 @@
-use super::*;
+use {
+    super::*,
+    crate::{
+        epoch::{epoch_secs_to_instant, instant_to_epoch_secs},
+        store::entry::DecayingAverageEntry,
+    },
+};
 
 /// Computes `1 - e^(-x)` with numerical stability.
 /// Returns 0.0 at x=0, saturates to 1.0 as x increases.
@@ -23,9 +29,9 @@ pub(crate) fn calculate_time_bias(elapsed: Duration, window: Duration) -> f64 {
 
 #[derive(Debug, Clone)]
 pub(crate) struct DecayingAverage {
-    value: f64,
-    window: Duration,
-    last_update: Instant,
+    pub(crate) value: f64,
+    pub(crate) window: Duration,
+    pub(crate) last_update: Instant,
 }
 
 impl DecayingAverage {
@@ -47,16 +53,30 @@ impl DecayingAverage {
         }
     }
 
-    pub(crate) fn value(&self) -> f64 {
-        self.value
+    pub(crate) fn to_entry(&self, now: Instant) -> DecayingAverageEntry {
+        DecayingAverageEntry {
+            value: self.value,
+            window_secs: self.window.as_secs_f64(),
+            last_update_secs: instant_to_epoch_secs(self.last_update, now),
+        }
     }
 
-    pub(crate) fn window(&self) -> Duration {
-        self.window
-    }
+    pub(crate) fn from_entry(entry: DecayingAverageEntry) -> Result<Self> {
+        ensure!(entry.value.is_finite(), "value must be finite");
+        ensure!(
+            entry.window_secs.is_finite() && entry.window_secs > 0.0,
+            "window_secs must be finite and positive",
+        );
+        ensure!(
+            entry.last_update_secs.is_finite(),
+            "last_update_secs must be finite",
+        );
 
-    pub(crate) fn last_update(&self) -> Instant {
-        self.last_update
+        Ok(Self::restore(
+            entry.value,
+            Duration::from_secs_f64(entry.window_secs),
+            epoch_secs_to_instant(entry.last_update_secs),
+        ))
     }
 
     #[cfg(test)]

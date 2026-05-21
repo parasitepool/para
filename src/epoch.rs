@@ -10,7 +10,8 @@ fn duration_from_finite_secs(secs: f64) -> Duration {
     Duration::from_secs_f64(secs)
 }
 
-pub(crate) fn duration_from_secs_ago(secs: f64, field: &str) -> Result<Duration> {
+#[cfg(test)]
+fn duration_from_secs_ago(secs: f64, field: &str) -> Result<Duration> {
     ensure!(secs.is_finite(), "{field} must be finite");
     Ok(duration_from_finite_secs(secs))
 }

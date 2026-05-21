@@ -111,7 +111,7 @@ impl Order {
                 created_at_height: bucket.payment.created_at_height,
             }),
             created_at_secs: epoch::instant_to_epoch_secs(self.created_at, now),
-            stats: entry::StatsEntry::from_stats(&self.stats(), now),
+            stats: self.stats().to_entry(now),
         }
     }
 
@@ -122,7 +122,7 @@ impl Order {
         cancel: CancellationToken,
         metatron: Arc<Metatron>,
     ) -> Result<Arc<Self>> {
-        let stats = order_entry.stats.into_stats()?;
+        let stats = Stats::from_entry(order_entry.stats)?;
         metatron.restore_order_stats(id, stats);
 
         let bucket = order_entry
