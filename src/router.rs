@@ -502,28 +502,8 @@ impl Router {
         }
 
         if boost {
-            for order in orders.iter().filter(|order| order.is_sink()) {
-                let ids: Vec<_> = order
-                    .sessions
-                    .lock()
-                    .values()
-                    .map(|(session, _)| session.id())
-                    .collect();
-
-                for id in ids {
-                    order.trim_session(id, now);
-                }
-            }
-
-            if orders
-                .iter()
-                .any(|order| !order.is_sink() && order.is_starving(now))
-                && let Some((order, id)) = fattest_session(
-                    orders
-                        .iter()
-                        .filter(|order| !order.is_sink() && !order.is_starving(now)),
-                    now,
-                )
+            if let Some((order, id)) =
+                fattest_session(orders.iter().filter(|order| order.is_sink()), now)
             {
                 order.trim_session(id, now);
             }
@@ -2206,7 +2186,7 @@ mod tests {
     }
 
     #[test]
-    fn rebalance_boost_trims_all_sink_sessions() {
+    fn rebalance_boost_trims_fattest_sink_session() {
         let router = test_router();
         router.set_boost(true);
 
@@ -2236,11 +2216,11 @@ mod tests {
         router.rebalance();
 
         assert!(cancel_a.is_cancelled());
-        assert!(cancel_b.is_cancelled());
+        assert!(!cancel_b.is_cancelled());
     }
 
     #[test]
-    fn rebalance_boost_trims_fattest_non_starving_bucket_when_bucket_starving() {
+    fn rebalance_boost_does_not_trim_bucket_sessions() {
         let router = test_router();
         router.set_boost(true);
 
@@ -2268,7 +2248,7 @@ mod tests {
 
         router.rebalance();
 
-        assert!(cancel.is_cancelled());
+        assert!(!cancel.is_cancelled());
     }
 
     #[test]
