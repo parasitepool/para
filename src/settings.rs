@@ -52,6 +52,7 @@ pub(crate) struct Settings {
     allow_zero_conf: bool,
     halt: bool,
     boost: bool,
+    capacity_work: HashDays,
     store_path: Option<PathBuf>,
     http_api_token: Option<String>,
     http_admin_token: Option<String>,
@@ -99,6 +100,7 @@ impl Default for Settings {
             allow_zero_conf: false,
             halt: false,
             boost: false,
+            capacity_work: HashDays::from_raw(1e18),
             store_path: None,
             http_api_token: None,
             http_admin_token: None,
@@ -270,6 +272,7 @@ impl Settings {
             allow_zero_conf,
             halt,
             boost,
+            capacity_work,
         } = options;
 
         let settings = Self {
@@ -283,6 +286,7 @@ impl Settings {
             allow_zero_conf,
             halt,
             boost,
+            capacity_work: HashDays::new(capacity_work)?,
             ..Self::from_common_options(common)?
         };
 
@@ -692,6 +696,10 @@ impl Settings {
 
     pub(crate) fn boost(&self) -> bool {
         self.boost
+    }
+
+    pub(crate) fn capacity_work(&self) -> HashDays {
+        self.capacity_work
     }
 
     pub(crate) fn sink_orders(&self) -> &[UpstreamTarget] {

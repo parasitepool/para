@@ -24,6 +24,7 @@ pub(crate) fn router(
         .route("/api/router/order/{id}/cancel", post(cancel_order))
         .route("/api/router/halt", put(set_halt))
         .route("/api/router/boost", put(set_boost))
+        .route("/api/router/capacity", put(set_capacity))
         .with_state(state)
         .merge(common_routes())
         .layer(Extension(bitcoin_client))
@@ -147,6 +148,28 @@ async fn set_boost(
     router.set_boost(request.enabled);
     Ok(Json(BoostResponse {
         boost: router.boost(),
+    })
+    .into_response())
+}
+
+#[derive(Deserialize)]
+struct CapacityRequest {
+    capacity_work: HashDays,
+}
+
+#[derive(Serialize)]
+struct CapacityResponse {
+    capacity_work: HashDays,
+}
+
+async fn set_capacity(
+    _: AdminAuth,
+    State(router): State<Arc<Router>>,
+    Json(request): Json<CapacityRequest>,
+) -> ServerResult<Response> {
+    router.set_capacity_work(request.capacity_work);
+    Ok(Json(CapacityResponse {
+        capacity_work: router.capacity_work(),
     })
     .into_response())
 }

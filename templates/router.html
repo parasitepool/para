@@ -3,13 +3,13 @@
   .order-link:hover { text-decoration: underline; }
 
   .action-bar {
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
     gap: 8px;
     width: 1048px;
   }
 
   .action-bar button {
-    flex: 1;
     background: #333;
     border: 1px solid #444;
     color: #eee;
@@ -223,8 +223,80 @@
     min-height: 1.4em;
   }
 
+  #capacity-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+  }
+
+  #capacity-overlay.hidden { display: none; }
+
+  #capacity-modal {
+    background: #1a1a1a;
+    border: 1px solid #444;
+    padding: 30px;
+    width: 400px;
+    max-width: 90vw;
+  }
+
+  #capacity-modal h2 {
+    margin: 0 0 20px;
+    font-size: 1.22em;
+    text-align: center;
+    color: #888;
+  }
+
+  #capacity-modal label {
+    display: block;
+    margin-bottom: 4px;
+    color: #888;
+    font-size: 0.9em;
+  }
+
+  #capacity-modal input {
+    width: 100%;
+    background: #111;
+    border: 1px solid #444;
+    color: #eee;
+    padding: 8px 12px;
+    font: inherit;
+    box-sizing: border-box;
+    margin-bottom: 14px;
+  }
+
+  #capacity-modal input::placeholder { color: #555; }
+
+  #capacity-modal .modal-buttons {
+    display: flex;
+    gap: 10px;
+    margin-top: 6px;
+  }
+
+  #capacity-modal .modal-buttons button {
+    flex: 1;
+    background: #333;
+    border: 1px solid #444;
+    color: #eee;
+    padding: 8px 16px;
+    cursor: pointer;
+    font: inherit;
+  }
+
+  #capacity-modal .modal-buttons button:hover { background: #444; }
+
+  #capacity-error {
+    color: #f55;
+    font-size: 0.85em;
+    margin-bottom: 10px;
+    min-height: 1.4em;
+  }
+
   @media (max-width: 1140px) {
-    .action-bar { width: 100%; max-width: 500px; }
+    .action-bar { width: 100%; max-width: 500px; grid-template-columns: repeat(2, 1fr); }
     #orders-table { font-size: 0.75em; }
   }
 </style>
@@ -232,10 +304,9 @@
 <div class="grid grid-stack">
   <div class=column>
     <h2>Upstream</h2>
-    <div class=row><span>Capacity</span><span id=capacity_hashrate></span></div>
-    <div class=row><span>Available</span><span id=available_hashrate></span></div>
-    <div class=row><span>Bucket Orders</span><span id=bucket_order_count></span></div>
-    <div class=row><span>Sink Orders</span><span id=sink_order_count></span></div>
+    <div class=row><span>Capacity</span><span id=capacity_work></span></div>
+    <div class=row><span>Available</span><span id=available_work></span></div>
+    <div class=row><span>Active Orders</span><span id=active_order_count></span></div>
     <div class=row><span>SPS</span><span id=upstream_sps_1m></span></div>
     <div class=row><span>Best Share</span><span id=upstream_best_share class=copyable></span></div>
     <div class=row><span>Last Share</span><span id=upstream_last_share></span></div>
@@ -261,10 +332,11 @@
   </div>
 
   <div class=action-bar>
-    <button id=add-order-btn>Add Order</button>
+    <button id=capacity-btn class=hidden>Capacity</button>
     <button id=boost-btn class=hidden>Boost: OFF</button>
     <button id=halt-btn class=hidden>Halt: OFF</button>
-    <button id=logout-btn class=hidden onclick=logout()>Logout</button>
+    <button id=add-order-btn>Add Order</button>
+    <button id=logout-btn class=hidden>Logout</button>
   </div>
 
   <div class="column column-full">
@@ -341,6 +413,30 @@
       <div class=modal-buttons>
         <button id=boost-cancel>Cancel</button>
         <button id=boost-confirm>Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <div id=logout-overlay class="confirm-overlay hidden">
+    <div class=confirm-modal>
+      <h2>Logout</h2>
+      <p>Are you sure you want to logout?</p>
+      <div class=modal-buttons>
+        <button id=logout-cancel>Cancel</button>
+        <button id=logout-confirm>Logout</button>
+      </div>
+    </div>
+  </div>
+
+  <div id=capacity-overlay class=hidden>
+    <div id=capacity-modal>
+      <h2>Set Capacity</h2>
+      <label for=capacity-input>Capacity</label>
+      <input id=capacity-input placeholder="e.g. 1 EHd, 500 PHd">
+      <div id=capacity-error></div>
+      <div class=modal-buttons>
+        <button id=capacity-cancel>Cancel</button>
+        <button id=capacity-confirm>Set</button>
       </div>
     </div>
   </div>
@@ -523,15 +619,18 @@ async function refresh(signal) {
     boostBtn.textContent = routerData.boost ? 'Boost: ON' : 'Boost: OFF';
     boostBtn.classList.toggle('active', routerData.boost);
   }
+  const capacityBtn = document.getElementById('capacity-btn');
+  if (capacityBtn) {
+    capacityBtn.textContent = 'Capacity: ' + formatHashDays(routerData.capacity_work);
+  }
   if (addOrderBtn) {
     addOrderBtn.disabled = routerData.halt;
     addOrderBtn.title = routerData.halt ? 'Router is halted' : '';
   }
 
-  set('bucket_order_count', routerData.bucket_order_count);
-  set('sink_order_count', routerData.sink_order_count);
-  set('capacity_hashrate', routerData.capacity_hashrate, formatHashrate);
-  set('available_hashrate', routerData.available_hashrate, formatHashrate);
+  set('active_order_count', routerData.active_order_count);
+  set('capacity_work', routerData.capacity_work, formatHashDays);
+  set('available_work', routerData.available_work, formatHashDays);
   set('session_count', ds.session_count);
   set('idle', ds.idle_count);
   set('disconnected', ds.disconnected_count);
@@ -777,4 +876,72 @@ initConfirmModal('boost', '/api/router/boost',
   'Enable Boost', 'Disable Boost',
   'All sink hashrate will be directed to bucket orders.',
   'Hashrate will be distributed normally across orders.');
+
+{
+  const overlay = document.getElementById('capacity-overlay');
+  const input = document.getElementById('capacity-input');
+  const error = document.getElementById('capacity-error');
+
+  document.getElementById('capacity-btn').addEventListener('click', () => {
+    const el = document.getElementById('capacity_work');
+    input.value = el ? el.textContent : '';
+    error.textContent = '';
+    overlay.classList.remove('hidden');
+    input.focus();
+  });
+
+  document.getElementById('capacity-cancel').addEventListener('click', () => {
+    overlay.classList.add('hidden');
+  });
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) overlay.classList.add('hidden');
+  });
+
+  document.getElementById('capacity-confirm').addEventListener('click', async () => {
+    error.textContent = '';
+    const parsed = parseHashDays(input.value);
+    if (parsed === null || parsed <= 0) {
+      error.textContent = 'Capacity must be positive (e.g. 1 EHd, 500 PHd)';
+      return;
+    }
+    try {
+      const res = await fetch('/api/router/capacity', withAuthOptions({
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ capacity_work: parsed }),
+      }));
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        error.textContent = text || `Error: ${res.status}`;
+        return;
+      }
+      overlay.classList.add('hidden');
+      location.reload();
+    } catch (e) {
+      error.textContent = e.message;
+    }
+  });
+}
+
+{
+  const overlay = document.getElementById('logout-overlay');
+
+  document.getElementById('logout-btn').addEventListener('click', () => {
+    overlay.classList.remove('hidden');
+  });
+
+  document.getElementById('logout-cancel').addEventListener('click', () => {
+    overlay.classList.add('hidden');
+  });
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) overlay.classList.add('hidden');
+  });
+
+  document.getElementById('logout-confirm').addEventListener('click', () => {
+    overlay.classList.add('hidden');
+    logout();
+  });
+}
 </script>

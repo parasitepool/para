@@ -47,7 +47,8 @@ impl From<RouterError> for ServerError {
             RouterError::InvalidHashdays
             | RouterError::HashPriceOverflow
             | RouterError::BelowDustLimit { .. } => Self::BadRequest(error.to_string()),
-            RouterError::HashPriceBelowMinimum { .. } => {
+            RouterError::HashPriceBelowMinimum { .. }
+            | RouterError::InsufficientCapacity { .. } => {
                 Self::UnprocessableEntity(error.to_string())
             }
             RouterError::Halted

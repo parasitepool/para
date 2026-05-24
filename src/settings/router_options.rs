@@ -45,4 +45,11 @@ pub(crate) struct RouterOptions {
 
     #[arg(long, help = "Direct all hashrate to bucket orders.")]
     pub(crate) boost: bool,
+
+    #[arg(
+        long,
+        default_value_t = 1e18,
+        help = "Total <CAPACITY_WORK> in hash days."
+    )]
+    pub(crate) capacity_work: f64,
 }

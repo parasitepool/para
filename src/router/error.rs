@@ -17,6 +17,11 @@ pub(crate) enum RouterError {
     BelowDustLimit { amount: Amount, dust_limit: Amount },
     #[snafu(display("wallet is still syncing, try again shortly"))]
     WalletSyncing,
+    #[snafu(display("requested {requested} exceeds available capacity of {available}"))]
+    InsufficientCapacity {
+        requested: HashDays,
+        available: HashDays,
+    },
     #[snafu(display("wallet not configured, bucket orders unavailable"))]
     WalletRequired,
     #[snafu(display("wallet persistence failed: {error:#}"))]

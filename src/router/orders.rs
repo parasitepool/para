@@ -31,6 +31,19 @@ impl Orders {
             .collect()
     }
 
+    pub(crate) fn committed_work(&self) -> HashDays {
+        HashDays::from_raw(
+            self.inner
+                .values()
+                .filter(|order| {
+                    matches!(order.status(), OrderStatus::InMempool | OrderStatus::Active)
+                })
+                .filter_map(|order| order.bucket.as_ref())
+                .map(|bucket| bucket.target.as_f64())
+                .sum(),
+        )
+    }
+
     pub(crate) fn routable(&self, now: Instant, boost: bool) -> Vec<Arc<Order>> {
         self.inner
             .values()

@@ -222,10 +222,9 @@ impl UpstreamInfo {
 pub struct RouterStatus {
     pub uptime_secs: u64,
     pub hash_price: HashPrice,
-    pub capacity_hashrate: HashRate,
-    pub available_hashrate: HashRate,
-    pub bucket_order_count: usize,
-    pub sink_order_count: usize,
+    pub capacity_work: HashDays,
+    pub available_work: HashDays,
+    pub active_order_count: usize,
     pub wallet_synced: bool,
     pub halt: bool,
     pub boost: bool,

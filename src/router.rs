@@ -25,6 +25,7 @@ pub(crate) struct Router {
     hash_value: AtomicU64,
     halt: AtomicBool,
     boost: AtomicBool,
+    capacity_work: AtomicU64,
     tasks: TaskTracker,
     cancel: CancellationToken,
 }
@@ -41,6 +42,7 @@ impl Router {
     ) -> Self {
         let halt = settings.halt();
         let boost = settings.boost();
+        let capacity_work = settings.capacity_work();
 
         Self {
             settings,
@@ -52,6 +54,7 @@ impl Router {
             hash_value: AtomicU64::new(initial_hash_value.to_sats()),
             halt: AtomicBool::new(halt),
             boost: AtomicBool::new(boost),
+            capacity_work: AtomicU64::new(capacity_work.as_f64().to_bits()),
             tasks,
             cancel,
         }
@@ -79,6 +82,15 @@ impl Router {
 
     pub(crate) fn set_boost(&self, enabled: bool) {
         self.boost.store(enabled, Ordering::Relaxed);
+    }
+
+    pub(crate) fn capacity_work(&self) -> HashDays {
+        HashDays::from_raw(f64::from_bits(self.capacity_work.load(Ordering::Relaxed)))
+    }
+
+    pub(crate) fn set_capacity_work(&self, capacity: HashDays) {
+        self.capacity_work
+            .store(capacity.as_f64().to_bits(), Ordering::Relaxed);
     }
 
     pub(crate) fn set_hash_value(&self, hash_value: HashValue) {
@@ -211,6 +223,18 @@ impl Router {
 
         let order = {
             let mut orders = self.orders.write();
+
+            let committed = orders.committed_work();
+            let capacity = self.capacity_work();
+            if committed.as_f64() + target.as_f64() > capacity.as_f64() {
+                let available =
+                    HashDays::from_raw((capacity.as_f64() - committed.as_f64()).max(0.0));
+                return Err(RouterError::InsufficientCapacity {
+                    requested: target,
+                    available,
+                });
+            }
+
             let order = wallet
                 .reveal_address_with(|address_info, created_at_height, wallet_delta| {
                     let bucket = Bucket {
@@ -523,40 +547,31 @@ impl Router {
     pub(crate) fn status(&self) -> RouterStatus {
         let now = Instant::now();
         let metatron = &self.metatron;
-        let orders = self.orders.read().all();
+        let guard = self.orders.read();
+        let committed = guard.committed_work();
+        let orders = guard.all();
+        drop(guard);
         let mut accepted = Stats::new();
-        let mut bucket_order_count = 0;
-        let mut sink_order_count = 0;
-        let mut capacity_hashrate = HashRate::ZERO;
-        let mut available_hashrate = HashRate::ZERO;
+        let mut active_order_count = 0;
 
         for order in &orders {
             if order.status() != OrderStatus::Active {
                 continue;
             }
 
-            let stats = order.stats();
-            let hash_rate = stats.hashrate_1m(now);
-
-            capacity_hashrate += hash_rate;
-
-            if order.is_sink() {
-                sink_order_count += 1;
-                available_hashrate += hash_rate;
-            } else {
-                bucket_order_count += 1;
-            }
-
-            accepted.absorb(stats, now);
+            active_order_count += 1;
+            accepted.absorb(order.stats(), now);
         }
+
+        let capacity = self.capacity_work();
+        let available = HashDays::from_raw((capacity.as_f64() - committed.as_f64()).max(0.0));
 
         RouterStatus {
             uptime_secs: metatron.uptime().as_secs(),
             hash_price: self.hash_price(),
-            capacity_hashrate,
-            available_hashrate,
-            bucket_order_count,
-            sink_order_count,
+            capacity_work: capacity,
+            available_work: available,
+            active_order_count,
             wallet_synced: self
                 .wallet
                 .as_ref()
@@ -919,6 +934,7 @@ mod tests {
                 allow_zero_conf,
                 halt: false,
                 boost: false,
+                capacity_work: 1e18,
             })
             .unwrap(),
         )
@@ -2276,5 +2292,103 @@ mod tests {
         router.rebalance();
 
         assert!(!cancel.is_cancelled());
+    }
+
+    #[test]
+    fn committed_work_sums_active_and_in_mempool_buckets() {
+        let metatron = Arc::new(Metatron::new());
+        let mut orders = Orders::new();
+        orders.add(test_order(
+            0,
+            Some(hash_days(100.0)),
+            OrderStatus::Active,
+            &metatron,
+        ));
+        orders.add(test_order(
+            1,
+            Some(hash_days(200.0)),
+            OrderStatus::InMempool,
+            &metatron,
+        ));
+        orders.add(test_order(
+            2,
+            Some(hash_days(50.0)),
+            OrderStatus::Cancelled,
+            &metatron,
+        ));
+        orders.add(test_order(
+            3,
+            Some(hash_days(50.0)),
+            OrderStatus::Fulfilled,
+            &metatron,
+        ));
+        orders.add(test_order(4, None, OrderStatus::Active, &metatron));
+
+        assert_eq!(orders.committed_work().as_f64(), 300.0);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn capacity_enforcement() {
+        let router = test_router();
+        let wallet = router.wallet.as_ref().unwrap();
+        wallet.mark_synced();
+        let price = HashPrice::from_sats(router.hash_value().to_sats());
+        router.set_capacity_work(hash_days(1e18));
+
+        let order = router
+            .add_bucket_order(test_upstream_target(), hash_days(6e17), price)
+            .unwrap();
+        *order.status.lock() = OrderStatus::Active;
+
+        assert!(matches!(
+            router.add_bucket_order(test_upstream_target(), hash_days(6e17), price),
+            Err(RouterError::InsufficientCapacity { .. }),
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn capacity_enforcement_exact_fit() {
+        let router = test_router();
+        let wallet = router.wallet.as_ref().unwrap();
+        wallet.mark_synced();
+        let price = HashPrice::from_sats(router.hash_value().to_sats());
+        router.set_capacity_work(hash_days(1e18));
+
+        let order = router
+            .add_bucket_order(test_upstream_target(), hash_days(5e17), price)
+            .unwrap();
+        *order.status.lock() = OrderStatus::Active;
+
+        router
+            .add_bucket_order(test_upstream_target(), hash_days(5e17), price)
+            .unwrap();
+    }
+
+    #[test]
+    fn set_capacity_work_updates_capacity() {
+        let router = test_router();
+        let wallet = router.wallet.as_ref().unwrap();
+        wallet.mark_synced();
+
+        router.set_capacity_work(hash_days(100.0));
+        assert_eq!(router.capacity_work().as_f64(), 100.0);
+
+        router.set_capacity_work(hash_days(200.0));
+        assert_eq!(router.capacity_work().as_f64(), 200.0);
+    }
+
+    #[test]
+    fn status_reports_available_work() {
+        let router = test_router();
+        router.set_capacity_work(hash_days(500.0));
+
+        let metatron = &router.metatron;
+        let order = test_order(0, Some(hash_days(300.0)), OrderStatus::Active, metatron);
+        add_orders(router.as_ref(), [order]);
+
+        let status = router.status();
+        assert_eq!(status.capacity_work.as_f64(), 500.0);
+        assert_eq!(status.available_work.as_f64(), 200.0);
+        assert_eq!(status.active_order_count, 1);
     }
 }
