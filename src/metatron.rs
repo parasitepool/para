@@ -12,12 +12,33 @@ pub(crate) mod stats;
 pub(crate) mod user;
 pub(crate) mod worker;
 
+struct OrderSlot {
+    stats: Mutex<Stats>,
+    sessions: DashMap<SessionId, Arc<Session>>,
+}
+
+impl OrderSlot {
+    fn new() -> Self {
+        Self {
+            stats: Mutex::new(Stats::new()),
+            sessions: DashMap::new(),
+        }
+    }
+
+    fn with_stats(stats: Stats) -> Self {
+        Self {
+            stats: Mutex::new(stats),
+            sessions: DashMap::new(),
+        }
+    }
+}
+
 pub(crate) struct Metatron {
     blocks: AtomicU64,
     counter: AtomicU32,
     disconnected: DashMap<Extranonce, (Arc<Session>, Instant)>,
     started: Instant,
-    orders: DashMap<u32, Mutex<Stats>>,
+    orders: DashMap<u32, OrderSlot>,
     users: DashMap<Address, Arc<User>>,
 }
 
@@ -79,6 +100,12 @@ impl Metatron {
             .or_insert_with(|| Arc::new(User::new(auth.address.clone())))
             .new_session(&auth.workername, session.clone());
 
+        self.orders
+            .entry(order_id)
+            .or_insert_with(OrderSlot::new)
+            .sessions
+            .insert(id, session.clone());
+
         session
     }
 
@@ -87,6 +114,10 @@ impl Metatron {
             && let Some(worker) = user.workers.get(session.workername())
         {
             worker.retire_session(session.id());
+        }
+
+        if let Some(slot) = self.orders.get(&session.id().order_id()) {
+            slot.sessions.remove(&session.id());
         }
 
         self.disconnected
@@ -159,27 +190,31 @@ impl Metatron {
         share_diff: Difficulty,
     ) {
         let now = Instant::now();
-        if let Some(entry) = self.orders.get(&order_id) {
-            entry.lock().record_accepted(upstream_diff, share_diff, now);
+        if let Some(slot) = self.orders.get(&order_id) {
+            slot.stats
+                .lock()
+                .record_accepted(upstream_diff, share_diff, now);
             return;
         }
 
         self.orders
             .entry(order_id)
-            .or_insert_with(|| Mutex::new(Stats::new()))
+            .or_insert_with(OrderSlot::new)
+            .stats
             .lock()
             .record_accepted(upstream_diff, share_diff, now);
     }
 
     pub(crate) fn record_order_rejected(&self, order_id: u32, upstream_diff: Difficulty) {
-        if let Some(entry) = self.orders.get(&order_id) {
-            entry.lock().record_rejected(upstream_diff);
+        if let Some(slot) = self.orders.get(&order_id) {
+            slot.stats.lock().record_rejected(upstream_diff);
             return;
         }
 
         self.orders
             .entry(order_id)
-            .or_insert_with(|| Mutex::new(Stats::new()))
+            .or_insert_with(OrderSlot::new)
+            .stats
             .lock()
             .record_rejected(upstream_diff);
     }
@@ -187,28 +222,30 @@ impl Metatron {
     pub(crate) fn order_stats(&self, order_id: u32) -> Stats {
         self.orders
             .get(&order_id)
-            .map(|entry| entry.lock().clone())
+            .map(|slot| slot.stats.lock().clone())
             .unwrap_or_default()
     }
 
     pub(crate) fn restore_order_stats(&self, order_id: u32, stats: Stats) {
-        self.orders.insert(order_id, Mutex::new(stats));
+        self.orders.insert(order_id, OrderSlot::with_stats(stats));
     }
 
     pub(crate) fn order_accepted_work(&self, order_id: u32) -> HashWork {
         self.orders
             .get(&order_id)
-            .map(|entry| entry.lock().accepted_work)
+            .map(|slot| slot.stats.lock().accepted_work)
             .unwrap_or(HashWork::ZERO)
     }
 
     pub(crate) fn downstream_stats(&self, order_id: u32, now: Instant) -> Stats {
-        self.users
+        let Some(slot) = self.orders.get(&order_id) else {
+            return Stats::new();
+        };
+
+        slot.sessions
             .iter()
-            .flat_map(|user| user.sessions())
-            .filter(|session| session.id().order_id() == order_id)
-            .fold(Stats::new(), |mut combined, session| {
-                combined.absorb(session.snapshot(), now);
+            .fold(Stats::new(), |mut combined, entry| {
+                combined.absorb(entry.value().snapshot(), now);
                 combined
             })
     }
@@ -218,16 +255,16 @@ impl Metatron {
         order_id: u32,
         now: Instant,
     ) -> (Vec<Arc<Session>>, Stats) {
+        let Some(slot) = self.orders.get(&order_id) else {
+            return (Vec::new(), Stats::new());
+        };
+
         let mut sessions = Vec::new();
         let mut stats = Stats::new();
 
-        for session in self.users.iter().flat_map(|user| user.sessions()) {
-            if session.id().order_id() != order_id {
-                continue;
-            }
-
-            stats.absorb(session.snapshot(), now);
-            sessions.push(session);
+        for entry in slot.sessions.iter() {
+            stats.absorb(entry.value().snapshot(), now);
+            sessions.push(entry.value().clone());
         }
 
         (sessions, stats)
@@ -237,7 +274,8 @@ impl Metatron {
     pub(crate) fn set_order_accepted_work(&self, order_id: u32, work: HashWork) {
         self.orders
             .entry(order_id)
-            .or_insert_with(|| Mutex::new(Stats::new()))
+            .or_insert_with(OrderSlot::new)
+            .stats
             .lock()
             .accepted_work = work;
     }
