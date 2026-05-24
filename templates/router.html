@@ -74,30 +74,54 @@
 
   .confirm-modal .modal-buttons button:hover { background: #444; }
 
+  #orders-table th { white-space: nowrap; }
   #orders-table td { vertical-align: middle; white-space: nowrap; }
   #orders-table tbody tr { cursor: pointer; }
+  #orders-table th[data-sort] {
+    cursor: pointer;
+    user-select: none;
+  }
+  #orders-table th[data-sort]:hover { color: #eee; }
+  #orders-table th[data-sort]::after {
+    content: "";
+    display: inline-block;
+    width: 1em;
+    margin-left: 4px;
+    color: #ccc;
+  }
+  #orders-table th[data-sort].sort-asc::after { content: "\25B2"; }
+  #orders-table th[data-sort].sort-desc::after { content: "\25BC"; }
   #orders-table th:nth-child(3), #orders-table td:nth-child(3) {
     width: 100%;
     max-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  #orders-table th:last-child, #orders-table td:last-child { width: 1%; text-align: center; }
-
-  .order-delete {
-    background: none;
-    border: 1px solid #444;
+  .orders-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 12px;
     color: #888;
-    width: 24px;
-    height: 24px;
-    cursor: pointer;
-    font: inherit;
-    font-size: 0.8em;
-    line-height: 1;
-    padding: 0;
+    font-size: inherit;
   }
 
-  .order-delete:hover { color: #f55; border-color: #f55; }
+  .orders-pagination button {
+    background: none;
+    border: none;
+    color: #888;
+    cursor: pointer;
+    font: inherit;
+    padding: 4px 8px;
+  }
+
+  .orders-pagination button:hover { color: #eee; }
+  .orders-pagination button:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  #orders-page-status {
+    text-align: center;
+  }
 
   #order-overlay {
     position: fixed;
@@ -201,6 +225,7 @@
 
   @media (max-width: 1140px) {
     .action-bar { width: 100%; max-width: 500px; }
+    #orders-table { font-size: 0.75em; }
   }
 </style>
 
@@ -244,21 +269,27 @@
 
   <div class="column column-full">
     <h2>Orders</h2>
+    <div style="overflow-x:auto">
     <table id=orders-table>
       <thead>
         <tr>
-          <th>ID</th>
-          <th>Status</th>
-          <th>Endpoint</th>
-          <th>Username</th>
-          <th>Requested</th>
-          <th>Delivered</th>
-          <th>Hashrate</th>
-          <th></th>
+          <th data-sort=id aria-sort=descending>ID</th>
+          <th data-sort=status aria-sort=none>Status</th>
+          <th data-sort=endpoint aria-sort=none>Endpoint</th>
+          <th data-sort=username aria-sort=none>Username</th>
+          <th data-sort=requested_hash_days aria-sort=none>Requested</th>
+          <th data-sort=delivered_hash_days aria-sort=none>Delivered</th>
+          <th data-sort=hashrate aria-sort=none>Hashrate</th>
         </tr>
       </thead>
       <tbody id=orders-list></tbody>
     </table>
+    </div>
+    <div id=orders-pagination class=orders-pagination>
+      <button id=orders-prev type=button>&lsaquo; Prev</button>
+      <span id=orders-page-status>1/1</span>
+      <button id=orders-next type=button>Next &rsaquo;</button>
+    </div>
   </div>
 
   <div id=order-overlay class=hidden>
@@ -352,6 +383,108 @@
 
 <script>
 let currentHashPrice = null;
+let sortColumn = 'id';
+let sortDirection = 'desc';
+let currentPage = 0;
+let currentOrders = [];
+let previousOrderCount = null;
+const PAGE_SIZE = 50;
+const STATUS_PRIORITY = {
+  active: 0,
+  pending: 1,
+  in_mempool: 2,
+  fulfilled: 3,
+  cancelled: 4,
+  disconnected: 5,
+  expired: 6,
+};
+
+function compareNumber(a, b) {
+  return (Number(a) || 0) - (Number(b) || 0);
+}
+
+function compareString(a, b) {
+  return String(a ?? '').toLowerCase().localeCompare(String(b ?? '').toLowerCase());
+}
+
+function compareRequestedHashDays(a, b) {
+  const aNull = a.requested_hash_days == null;
+  const bNull = b.requested_hash_days == null;
+  if (aNull && bNull) return 0;
+  if (aNull) return 1;
+  if (bNull) return -1;
+  const value = compareNumber(a.requested_hash_days, b.requested_hash_days);
+  return sortDirection === 'asc' ? value : -value;
+}
+
+function compareStatus(a, b) {
+  const aPriority = STATUS_PRIORITY[a.status] ?? Number.MAX_SAFE_INTEGER;
+  const bPriority = STATUS_PRIORITY[b.status] ?? Number.MAX_SAFE_INTEGER;
+  const value = aPriority === bPriority ? compareString(a.status, b.status) : aPriority - bPriority;
+  return sortDirection === 'asc' ? value : -value;
+}
+
+function compareOrders(a, b) {
+  let value = 0;
+  if (sortColumn === 'status') {
+    value = compareStatus(a, b);
+  } else if (sortColumn === 'endpoint' || sortColumn === 'username') {
+    value = compareString(a[sortColumn], b[sortColumn]);
+    value = sortDirection === 'asc' ? value : -value;
+  } else if (sortColumn === 'requested_hash_days') {
+    value = compareRequestedHashDays(a, b);
+  } else {
+    value = compareNumber(a[sortColumn], b[sortColumn]);
+    value = sortDirection === 'asc' ? value : -value;
+  }
+
+  return value || compareNumber(b.id, a.id);
+}
+
+function updateOrderSortHeaders() {
+  document.querySelectorAll('#orders-table th[data-sort]').forEach(th => {
+    const active = th.dataset.sort === sortColumn;
+    th.classList.toggle('sort-asc', active && sortDirection === 'asc');
+    th.classList.toggle('sort-desc', active && sortDirection === 'desc');
+    th.setAttribute('aria-sort', active ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none');
+  });
+}
+
+function renderOrders() {
+  const tbody = document.getElementById('orders-list');
+  if (!tbody || tbody.querySelector('.copyable:hover')) return;
+
+  const sortedOrders = currentOrders.slice().sort(compareOrders);
+  const pageCount = Math.max(1, Math.ceil(sortedOrders.length / PAGE_SIZE));
+  currentPage = Math.max(0, Math.min(currentPage, pageCount - 1));
+  const pageStart = currentPage * PAGE_SIZE;
+  const pageOrders = sortedOrders.slice(pageStart, pageStart + PAGE_SIZE);
+
+  tbody.innerHTML = pageOrders.map(order => {
+    const safeId = escapeHtml(order.id);
+    const shortUsername = truncateMiddle(order.username);
+    const target = order.requested_hash_days == null ? 'Unlimited' : formatHashDays(order.requested_hash_days);
+    const delivered = formatHashDays(order.delivered_hash_days) || '-';
+    const hashrate = formatHashrate(order.hashrate);
+    return `<tr data-id="${safeId}">
+      <td><a class=order-link href="/order/${safeId}">${safeId}</a></td>
+      <td class="${escapeHtml(statusClass(order.status))}">${escapeHtml(formatStatus(order.status))}</td>
+      <td>${escapeHtml(order.endpoint)}</td>
+      <td>${escapeHtml(shortUsername)}</td>
+      <td>${escapeHtml(target)}</td>
+      <td>${escapeHtml(delivered)}</td>
+      <td>${escapeHtml(hashrate)}</td>
+    </tr>`;
+  }).join('');
+
+  const pageStatus = document.getElementById('orders-page-status');
+  const prev = document.getElementById('orders-prev');
+  const next = document.getElementById('orders-next');
+  if (pageStatus) pageStatus.textContent = `${currentPage + 1}/${pageCount}`;
+  if (prev) prev.disabled = currentPage === 0;
+  if (next) next.disabled = currentPage >= pageCount - 1;
+  updateOrderSortHeaders();
+}
 
 async function fetchCurrentHashPrice(signal) {
   const r = await fetch('/api/router/status', withAuthOptions({ signal }));
@@ -423,54 +556,50 @@ async function refresh(signal) {
   renderBitcoinData(bitcoinData);
   renderSystemData(systemData);
 
-  const tbody = document.getElementById('orders-list');
-  if (!tbody.querySelector('.copyable:hover')) {
-    const orders = (ordersData || []).slice().sort((a, b) => b.id - a.id);
-    tbody.innerHTML = orders.map(order => {
-      const shortUsername = truncateMiddle(order.username);
-      const target = order.requested_hash_days == null ? 'Unlimited' : formatHashDays(order.requested_hash_days);
-      const delivered = formatHashDays(order.delivered_hash_days) || '-';
-      const hashrate = formatHashrate(order.hashrate);
-      return `<tr data-id="${order.id}">
-        <td><a class=order-link href="/order/${escapeHtml(order.id)}">${escapeHtml(order.id)}</a></td>
-        <td class="${escapeHtml(statusClass(order.status))}">${escapeHtml(formatStatus(order.status))}</td>
-        <td>${escapeHtml(order.endpoint)}</td>
-        <td>${escapeHtml(shortUsername)}</td>
-        <td>${escapeHtml(target)}</td>
-        <td>${escapeHtml(delivered)}</td>
-        <td>${escapeHtml(hashrate)}</td>
-        <td><button class=order-delete data-id="${escapeHtml(order.id)}" title="Cancel order">&times;</button></td>
-      </tr>`;
-    }).join('');
-  }
+  const nextOrders = ordersData || [];
+  if (previousOrderCount !== null && nextOrders.length !== previousOrderCount) currentPage = 0;
+  previousOrderCount = nextOrders.length;
+  currentOrders = nextOrders;
+  renderOrders();
 }
 initLogControls();
 setupLogToggle();
 initCopyables();
+updateOrderSortHeaders();
 initAuthProbe().then(ok => {
   if (!ok) return;
   startPolling(refresh);
   connectWs();
 });
 
-document.getElementById('orders-list').addEventListener('click', async (e) => {
-  const btn = e.target.closest('.order-delete');
-  if (!btn) return;
-  const id = btn.dataset.id;
-  if (!confirm(`Cancel order ${id}?`)) return;
-  try {
-    const res = await fetch(`/api/router/order/${id}/cancel`, withAuthOptions({ method: 'POST' }));
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      alert(data.message || `Error: ${res.status}`);
+document.querySelectorAll('#orders-table th[data-sort]').forEach(th => {
+  th.addEventListener('click', () => {
+    const column = th.dataset.sort;
+    if (sortColumn === column) {
+      sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+    } else {
+      sortColumn = column;
+      sortDirection = column === 'status' ? 'asc' : 'desc';
     }
-  } catch (e) {
-    alert(e.message);
+    currentPage = 0;
+    renderOrders();
+  });
+});
+
+document.getElementById('orders-prev').addEventListener('click', () => {
+  if (currentPage > 0) {
+    currentPage -= 1;
+    renderOrders();
   }
 });
 
+document.getElementById('orders-next').addEventListener('click', () => {
+  currentPage += 1;
+  renderOrders();
+});
+
 document.getElementById('orders-list').addEventListener('click', (e) => {
-  if (e.target.closest('.copyable, .order-delete, a')) return;
+  if (e.target.closest('.copyable, a')) return;
   const row = e.target.closest('tr[data-id]');
   if (!row) return;
   window.location.href = `/order/${row.dataset.id}`;
