@@ -336,6 +336,109 @@ fn aggregate_users_with_auth_with_api_token() {
 }
 
 #[test]
+fn aggregate_users_stale_node_not_double_counted() {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let addr = address(0).to_string();
+
+    let fresh_user = User {
+        hashrate1m: HashRate(5e15),
+        hashrate5m: HashRate(5e15),
+        hashrate1hr: HashRate(5e15),
+        hashrate1d: HashRate(5e15),
+        hashrate7d: HashRate(5e15),
+        lastshare: now - 30,
+        workers: 1,
+        shares: 500,
+        bestshare: 1e11,
+        bestever: 200,
+        authorised: 1,
+        worker: vec![Worker {
+            workername: "foo".into(),
+            hashrate1m: HashRate(5e15),
+            hashrate5m: HashRate(5e15),
+            hashrate1hr: HashRate(5e15),
+            hashrate1d: HashRate(5e15),
+            hashrate7d: HashRate(5e15),
+            lastshare: now - 30,
+            shares: 500,
+            bestshare: 1e11,
+            bestever: 200,
+        }],
+    };
+
+    let stale_user = User {
+        hashrate1m: HashRate(3e15),
+        hashrate5m: HashRate(3e15),
+        hashrate1hr: HashRate(3e15),
+        hashrate1d: HashRate(3e15),
+        hashrate7d: HashRate(3e15),
+        lastshare: now - 86400,
+        workers: 0,
+        shares: 300,
+        bestshare: 2e11,
+        bestever: 400,
+        authorised: 1,
+        worker: vec![Worker {
+            workername: "foo".into(),
+            hashrate1m: HashRate(3e15),
+            hashrate5m: HashRate(3e15),
+            hashrate1hr: HashRate(3e15),
+            hashrate1d: HashRate(3e15),
+            hashrate7d: HashRate(3e15),
+            lastshare: now - 86400,
+            shares: 300,
+            bestshare: 2e11,
+            bestever: 400,
+        }],
+    };
+
+    let server_fresh = TestServer::spawn();
+    fs::write(
+        server_fresh.log_dir().join(format!("users/{addr}")),
+        serde_json::to_string(&fresh_user).unwrap(),
+    )
+    .unwrap();
+
+    let server_stale = TestServer::spawn();
+    fs::write(
+        server_stale.log_dir().join(format!("users/{addr}")),
+        serde_json::to_string(&stale_user).unwrap(),
+    )
+    .unwrap();
+
+    let aggregator = TestServer::spawn_with_args(format!(
+        "--nodes {} --nodes {}",
+        server_fresh.url(),
+        server_stale.url()
+    ));
+
+    let response = aggregator.get_json::<User>(format!("/aggregator/users/{addr}"), None);
+
+    assert_eq!(response.hashrate1m.0, 5e15);
+    assert_eq!(response.hashrate5m.0, 5e15);
+    assert_eq!(response.hashrate1hr.0, 5e15);
+    assert_eq!(response.hashrate1d.0, 5e15);
+    assert_eq!(response.hashrate7d.0, 5e15);
+
+    assert_eq!(response.shares, 800);
+    assert_eq!(response.bestshare, 2e11);
+    assert_eq!(response.bestever, 400);
+    assert_eq!(response.lastshare, now - 30);
+
+    assert_eq!(response.worker.len(), 1);
+    assert_eq!(response.worker[0].hashrate1m.0, 5e15);
+    assert_eq!(response.worker[0].hashrate7d.0, 5e15);
+    assert_eq!(response.worker[0].shares, 800);
+    assert_eq!(response.worker[0].bestshare, 2e11);
+    assert_eq!(response.worker[0].bestever, 400);
+}
+
+#[test]
 fn status_json() {
     let server = TestServer::spawn();
 

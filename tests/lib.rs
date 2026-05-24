@@ -471,7 +471,7 @@ fn zero_user() -> User {
 }
 
 fn typical_user() -> User {
-    let now = 1755043200;
+    let now = 4_000_000_000;
     User {
         hashrate1m: HashRate::from_str("10P").unwrap(),
         hashrate5m: HashRate::from_str("9.5P").unwrap(),

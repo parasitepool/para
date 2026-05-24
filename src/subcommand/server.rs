@@ -54,6 +54,7 @@ const BUDGET: Duration = Duration::from_secs(15);
 const TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_ATTEMPTS: usize = 3;
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(1500);
+const STALE_THRESHOLD: Duration = Duration::from_secs(3600);
 static MIGRATION_DONE: OnceLock<bool> = OnceLock::new();
 
 #[allow(deprecated)]

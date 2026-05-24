@@ -16,6 +16,30 @@ pub struct User {
     pub worker: Vec<Worker>,
 }
 
+impl User {
+    pub(crate) fn zero_stale_hashrates(mut self, now: u64, max_age: Duration) -> Self {
+        let max_age = max_age.as_secs();
+
+        for worker in &mut self.worker {
+            if now.saturating_sub(worker.lastshare) > max_age {
+                worker.hashrate1m = HashRate(0.0);
+                worker.hashrate5m = HashRate(0.0);
+                worker.hashrate1hr = HashRate(0.0);
+                worker.hashrate1d = HashRate(0.0);
+                worker.hashrate7d = HashRate(0.0);
+            }
+        }
+
+        self.hashrate1m = HashRate(self.worker.iter().map(|w| w.hashrate1m.0).sum());
+        self.hashrate5m = HashRate(self.worker.iter().map(|w| w.hashrate5m.0).sum());
+        self.hashrate1hr = HashRate(self.worker.iter().map(|w| w.hashrate1hr.0).sum());
+        self.hashrate1d = HashRate(self.worker.iter().map(|w| w.hashrate1d.0).sum());
+        self.hashrate7d = HashRate(self.worker.iter().map(|w| w.hashrate7d.0).sum());
+
+        self
+    }
+}
+
 impl Add for User {
     type Output = Self;
 
@@ -244,5 +268,119 @@ mod tests {
         assert_eq!(sum_with_empty.worker.len(), 1);
         assert_eq!(sum_with_empty.workers, 0);
         assert_eq!(sum_with_empty.authorised, 1721981103);
+    }
+
+    #[test]
+    fn zero_stale_hashrates_fresh() {
+        let max_age = Duration::from_secs(3600);
+        let user: User = serde_json::from_str(USER_1).unwrap();
+        let result = user.clone().zero_stale_hashrates(user.lastshare, max_age);
+
+        assert_eq!(result.hashrate1m.0, 0.0);
+        assert_eq!(result.hashrate5m.0, 0.0);
+        assert_eq!(result.hashrate1hr.0, 4.57e9);
+        assert_eq!(result.hashrate1d.0, 85.4e12);
+        assert_eq!(result.hashrate7d.0, 51.5e12);
+        assert_eq!(result.worker[0].hashrate1hr.0, 4.57e9);
+        assert_eq!(result.worker[0].hashrate1d.0, 85.4e12);
+        assert_eq!(result.worker[0].hashrate7d.0, 51.5e12);
+        assert_eq!(result.shares, user.shares);
+        assert_eq!(result.bestshare, user.bestshare);
+        assert_eq!(result.bestever, user.bestever);
+        assert_eq!(result.lastshare, user.lastshare);
+        assert_eq!(result.workers, user.workers);
+        assert_eq!(result.authorised, user.authorised);
+    }
+
+    #[test]
+    fn zero_stale_hashrates_boundary() {
+        let max_age = Duration::from_secs(3600);
+        let user: User = serde_json::from_str(USER_1).unwrap();
+
+        let at = user
+            .clone()
+            .zero_stale_hashrates(user.lastshare + 3600, max_age);
+        assert_eq!(at.hashrate1hr.0, 4.57e9);
+        assert_eq!(at.worker[0].hashrate1hr.0, 4.57e9);
+
+        let past = user
+            .clone()
+            .zero_stale_hashrates(user.lastshare + 3601, max_age);
+        assert_eq!(past.hashrate1m.0, 0.0);
+        assert_eq!(past.hashrate5m.0, 0.0);
+        assert_eq!(past.hashrate1hr.0, 0.0);
+        assert_eq!(past.hashrate1d.0, 0.0);
+        assert_eq!(past.hashrate7d.0, 0.0);
+        assert_eq!(past.worker[0].hashrate1m.0, 0.0);
+        assert_eq!(past.worker[0].hashrate7d.0, 0.0);
+        assert_eq!(past.shares, user.shares);
+        assert_eq!(past.bestshare, user.bestshare);
+        assert_eq!(past.bestever, user.bestever);
+        assert_eq!(past.lastshare, user.lastshare);
+    }
+
+    #[test]
+    fn zero_stale_hashrates_no_workers() {
+        let max_age = Duration::from_secs(3600);
+        let user: User = serde_json::from_str(USER_2).unwrap();
+        let result = user
+            .clone()
+            .zero_stale_hashrates(user.lastshare + 3601, max_age);
+
+        assert_eq!(result.hashrate1m.0, 0.0);
+        assert_eq!(result.hashrate5m.0, 0.0);
+        assert_eq!(result.hashrate1hr.0, 0.0);
+        assert_eq!(result.hashrate1d.0, 0.0);
+        assert_eq!(result.hashrate7d.0, 0.0);
+        assert_eq!(result.shares, user.shares);
+        assert_eq!(result.bestshare, user.bestshare);
+        assert_eq!(result.bestever, user.bestever);
+    }
+
+    #[test]
+    fn zero_stale_hashrates_mixed() {
+        let max_age = Duration::from_secs(3600);
+        let user: User = serde_json::from_str(USER_1).unwrap();
+
+        let mut mixed = user.clone();
+        mixed.worker.push(Worker {
+            workername: "foo".into(),
+            hashrate1m: HashRate(1e9),
+            hashrate5m: HashRate(2e9),
+            hashrate1hr: HashRate(3e9),
+            hashrate1d: HashRate(4e9),
+            hashrate7d: HashRate(5e9),
+            lastshare: user.lastshare - 7200,
+            shares: 100,
+            bestshare: 1.0,
+            bestever: 1,
+        });
+
+        let result = mixed
+            .clone()
+            .zero_stale_hashrates(user.lastshare + 100, max_age);
+
+        assert_eq!(result.hashrate1m.0, 0.0);
+        assert_eq!(result.hashrate5m.0, 0.0);
+        assert_eq!(result.hashrate1hr.0, 4.57e9);
+        assert_eq!(result.hashrate1d.0, 85.4e12);
+        assert_eq!(result.hashrate7d.0, 51.5e12);
+
+        assert_eq!(result.worker[0].hashrate1hr.0, 4.57e9);
+        assert_eq!(result.worker[0].hashrate1d.0, 85.4e12);
+        assert_eq!(result.worker[1].hashrate1m.0, 0.0);
+        assert_eq!(result.worker[1].hashrate5m.0, 0.0);
+        assert_eq!(result.worker[1].hashrate1hr.0, 0.0);
+        assert_eq!(result.worker[1].hashrate1d.0, 0.0);
+        assert_eq!(result.worker[1].hashrate7d.0, 0.0);
+
+        assert_eq!(result.worker[1].shares, 100);
+        assert_eq!(result.worker[1].bestever, 1);
+        assert_eq!(result.shares, mixed.shares);
+        assert_eq!(result.bestshare, mixed.bestshare);
+        assert_eq!(result.bestever, mixed.bestever);
+        assert_eq!(result.lastshare, mixed.lastshare);
+        assert_eq!(result.workers, mixed.workers);
+        assert_eq!(result.authorised, mixed.authorised);
     }
 }

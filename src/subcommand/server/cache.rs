@@ -197,13 +197,21 @@ impl Cache {
             })
             .collect();
 
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock before unix epoch")
+            .as_secs();
+
         let aggregated = fetches
             .fold(None, |acc, (_, res)| async move {
                 match res {
-                    Ok(status) => Some(match acc {
-                        Some(a) => a + status,
-                        None => status,
-                    }),
+                    Ok(status) => {
+                        let status = status.zero_stale_hashrates(now, STALE_THRESHOLD);
+                        Some(match acc {
+                            Some(a) => a + status,
+                            None => status,
+                        })
+                    }
                     Err(_) => acc,
                 }
             })
