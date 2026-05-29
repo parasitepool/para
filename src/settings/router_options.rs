@@ -37,9 +37,6 @@ pub(crate) struct RouterOptions {
     )]
     pub(crate) sink_order: Vec<UpstreamTarget>,
 
-    #[arg(long, help = "Accept unconfirmed payments.")]
-    pub(crate) allow_zero_conf: bool,
-
     #[arg(long, help = "Start halted, rejecting new bucket orders.")]
     pub(crate) halt: bool,
 

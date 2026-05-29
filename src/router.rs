@@ -104,6 +104,16 @@ impl Router {
         Some(order)
     }
 
+    pub(crate) fn clear_order(&self, id: u32) -> Option<Arc<Order>> {
+        let order = self.orders.read().get(id)?;
+
+        if !order.set_cleared() {
+            return None;
+        }
+
+        Some(order)
+    }
+
     pub(crate) fn get_order(&self, id: u32) -> Option<Arc<Order>> {
         self.orders.read().get(id)
     }
@@ -396,7 +406,6 @@ impl Router {
         payment: &Payment,
     ) -> RouterResult<bool> {
         let mut ticker = ticker(self.settings.tick_interval());
-        let allow_zero_conf = self.settings.allow_zero_conf();
         let wallet = self.wallet.as_ref().ok_or(RouterError::WalletRequired)?;
 
         loop {
@@ -406,24 +415,23 @@ impl Router {
                     return Ok(false);
                 }
                 _ = ticker.tick() => {
-                    let (total, confirmed) = wallet.received(payment.derivation_index);
-                    let tip = wallet.tip();
-
-                    let paid = if allow_zero_conf {
-                        total >= payment.amount
-                    } else {
-                        confirmed >= payment.amount
-                    };
-
-                    if tip >= payment.created_at_height + PAYMENT_TIMEOUT {
-                        order.terminate(OrderStatus::Expired);
-                        return Ok(false);
-                    }
+                    let deadline_height = payment.created_at_height + PAYMENT_TIMEOUT;
+                    let (total, confirmed_by_deadline) =
+                        wallet.received_by_deadline(payment.derivation_index, deadline_height);
+                    let timed_out = wallet.tip() >= deadline_height;
 
                     let mut status = order.status.lock();
 
-                    if paid && matches!(*status, OrderStatus::Pending | OrderStatus::InMempool) {
+                    if confirmed_by_deadline >= payment.amount
+                        && matches!(*status, OrderStatus::Pending | OrderStatus::InMempool)
+                    {
                         return Ok(true);
+                    }
+
+                    if timed_out {
+                        drop(status);
+                        order.terminate(OrderStatus::Expired);
+                        return Ok(false);
                     }
 
                     match (*status, total >= payment.amount) {
@@ -489,6 +497,28 @@ impl Router {
         }
 
         Ok(())
+    }
+
+    pub(crate) fn flag_orders(&self) {
+        let Some(wallet) = &self.wallet else {
+            return;
+        };
+
+        let confirmed = wallet.confirmed_by_index();
+
+        for order in self.orders.read().all() {
+            let Some(bucket) = &order.bucket else {
+                continue;
+            };
+
+            let funded = confirmed
+                .get(&bucket.payment.derivation_index)
+                .is_some_and(|amount| *amount > Amount::ZERO);
+
+            if order.status().is_terminal() && !order.is_fulfilled() && funded {
+                order.set_flagged();
+            }
+        }
     }
 
     pub(crate) fn persist(&self) -> Result {
@@ -599,6 +629,7 @@ impl Router {
                     _ = router.cancel.cancelled() => break,
                     _ = ticker.tick() => {
                         router.rebalance();
+                        router.flag_orders();
 
                         if let Some(bitcoin_client) = &bitcoin_client {
                             match get_block_template(bitcoin_client, &router.settings).await {
@@ -828,25 +859,6 @@ mod tests {
         }
     }
 
-    fn test_router_with_allow_zero_conf(allow_zero_conf: bool) -> TestRouter {
-        let wallet = test_wallet();
-        let router = Arc::new(Router::new(
-            test_router_settings(allow_zero_conf),
-            wallet.store.clone(),
-            Arc::new(Metatron::new()),
-            Some(wallet.wallet.clone()),
-            TaskTracker::new(),
-            CancellationToken::new(),
-            HashValue::from_sats(1),
-        ));
-
-        TestRouter {
-            router,
-            _wallet: Some(wallet),
-            _directory: None,
-        }
-    }
-
     fn test_router_with_wallet(wallet: Option<Arc<Wallet>>) -> TestRouter {
         let (router, directory) = router_with_wallet(wallet);
         TestRouter {
@@ -894,7 +906,7 @@ mod tests {
         )
     }
 
-    fn test_router_settings(allow_zero_conf: bool) -> Arc<Settings> {
+    fn test_router_settings() -> Arc<Settings> {
         let (descriptor, change_descriptor) = test_wallet_descriptors();
 
         Arc::new(
@@ -931,7 +943,6 @@ mod tests {
                 enonce1_extension_size: ENONCE1_EXTENSION_SIZE,
                 tick_interval: 60,
                 sink_order: Vec::new(),
-                allow_zero_conf,
                 halt: false,
                 boost: false,
                 capacity_work: 1e18,
@@ -1219,6 +1230,204 @@ mod tests {
         assert!(order.cancel.is_cancelled());
     }
 
+    #[test]
+    fn set_flagged_sets_and_logs_once() {
+        let router = test_router();
+        let order = test_order(0, None, OrderStatus::Expired, &router.metatron);
+
+        assert!(!order.is_flagged());
+
+        order.set_flagged();
+        assert!(order.is_flagged());
+
+        order.set_flagged();
+        assert!(order.is_flagged());
+    }
+
+    #[test]
+    fn set_flagged_is_noop_once_cleared() {
+        let router = test_router();
+        let order = test_order(0, None, OrderStatus::Expired, &router.metatron);
+
+        order.set_flagged();
+        assert!(order.set_cleared());
+
+        order.set_flagged();
+        assert!(!order.is_flagged());
+        assert!(order.is_cleared());
+    }
+
+    #[test]
+    fn set_cleared() {
+        let router = test_router();
+        let order = test_order(0, None, OrderStatus::Expired, &router.metatron);
+
+        order.set_flagged();
+
+        assert!(order.set_cleared());
+        assert!(order.is_cleared());
+        assert!(!order.is_flagged());
+    }
+
+    #[test]
+    fn set_cleared_noop_when_not_flagged() {
+        let router = test_router();
+        let order = test_order(0, None, OrderStatus::Expired, &router.metatron);
+
+        assert!(!order.set_cleared());
+        assert!(!order.is_cleared());
+    }
+
+    #[test]
+    fn flag_orders_flags_terminal_funded_unfulfilled_orders() {
+        let test = test_router();
+        let router = test.router.clone();
+        let wallet = router.wallet.as_ref().unwrap().clone();
+
+        #[track_caller]
+        fn funded_order(
+            router: &Router,
+            wallet: &Wallet,
+            id: u32,
+            status: OrderStatus,
+        ) -> Arc<Order> {
+            let address = wallet.test_reveal_address();
+            let order = test_order_with_payment(
+                id,
+                Payment::new(
+                    address.address.clone(),
+                    address.index,
+                    Amount::from_sat(1000),
+                    0,
+                ),
+                status,
+                &router.metatron,
+            );
+            let tx = wallet.test_receive_unconfirmed(&address.address, Amount::from_sat(1000));
+            wallet.test_confirm_tx(tx);
+            order
+        }
+
+        let expired = funded_order(&router, &wallet, 0, OrderStatus::Expired);
+        let cancelled = funded_order(&router, &wallet, 1, OrderStatus::Cancelled);
+        let disconnected = funded_order(&router, &wallet, 2, OrderStatus::Disconnected);
+        let active = funded_order(&router, &wallet, 3, OrderStatus::Active);
+
+        let unfunded = test_order_with_payment(
+            4,
+            Payment::new(
+                wallet.test_reveal_address().address,
+                99,
+                Amount::from_sat(1000),
+                0,
+            ),
+            OrderStatus::Expired,
+            &router.metatron,
+        );
+
+        let fulfilled = funded_order(&router, &wallet, 5, OrderStatus::Disconnected);
+        set_accepted_work(&router.metatron, fulfilled.as_ref(), 100.0);
+
+        add_orders(
+            &router,
+            [
+                expired.clone(),
+                cancelled.clone(),
+                disconnected.clone(),
+                active.clone(),
+                unfunded.clone(),
+                fulfilled.clone(),
+            ],
+        );
+
+        router.flag_orders();
+
+        assert!(expired.is_flagged());
+        assert!(cancelled.is_flagged());
+        assert!(disconnected.is_flagged());
+        assert!(!active.is_flagged());
+        assert!(!unfunded.is_flagged());
+        assert!(!fulfilled.is_flagged());
+    }
+
+    #[test]
+    fn flag_orders_keeps_flagged_order_flagged_after_condition_clears() {
+        let test = test_router();
+        let router = test.router.clone();
+        let wallet = router.wallet.as_ref().unwrap().clone();
+        let address = wallet.test_reveal_address();
+        let order = test_order_with_payment(
+            0,
+            Payment::new(
+                address.address.clone(),
+                address.index,
+                Amount::from_sat(1000),
+                0,
+            ),
+            OrderStatus::Expired,
+            &router.metatron,
+        );
+        let tx = wallet.test_receive_unconfirmed(&address.address, Amount::from_sat(1000));
+        wallet.test_confirm_tx(tx);
+
+        add_orders(&router, [order.clone()]);
+
+        router.flag_orders();
+        assert!(order.is_flagged());
+
+        set_accepted_work(&router.metatron, order.as_ref(), 100.0);
+        router.flag_orders();
+
+        assert!(order.is_flagged());
+    }
+
+    #[test]
+    fn flag_orders_does_not_reflag_cleared_order() {
+        let test = test_router();
+        let router = test.router.clone();
+        let wallet = router.wallet.as_ref().unwrap().clone();
+        let address = wallet.test_reveal_address();
+        let order = test_order_with_payment(
+            0,
+            Payment::new(
+                address.address.clone(),
+                address.index,
+                Amount::from_sat(1000),
+                0,
+            ),
+            OrderStatus::Expired,
+            &router.metatron,
+        );
+        let tx = wallet.test_receive_unconfirmed(&address.address, Amount::from_sat(1000));
+        wallet.test_confirm_tx(tx);
+
+        add_orders(&router, [order.clone()]);
+
+        router.flag_orders();
+        assert!(order.set_cleared());
+
+        router.flag_orders();
+        assert!(!order.is_flagged());
+        assert!(order.is_cleared());
+    }
+
+    #[test]
+    fn clear_order_requires_flagged() {
+        let test = test_router();
+        let router = test.router.clone();
+        let order = test_order(0, None, OrderStatus::Expired, &router.metatron);
+
+        add_orders(&router, [order.clone()]);
+
+        assert!(router.clear_order(0).is_none());
+
+        order.set_flagged();
+
+        assert!(router.clear_order(0).is_some());
+        assert!(order.is_cleared());
+        assert!(router.clear_order(0).is_none());
+    }
+
     #[tokio::test(start_paused = true)]
     async fn execute_order_disconnects_on_retry_exhaustion() {
         let router = test_router();
@@ -1413,8 +1622,8 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn wait_for_payment_expires_instead_of_activating_after_timeout() {
-        let test = test_router_with_allow_zero_conf(true);
-        let router = test.router.clone();
+        let router = test_router();
+        let router = router.router.clone();
         let wallet = router.wallet.as_ref().unwrap();
         let address = wallet.test_reveal_address();
         let amount = Amount::from_sat(1000);
@@ -1457,8 +1666,8 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn wait_for_payment_marks_pending_order_in_mempool_before_confirmation() {
-        let test = test_router_with_allow_zero_conf(false);
-        let router = test.router.clone();
+        let router = test_router();
+        let router = router.router.clone();
         let wallet = router.wallet.as_ref().unwrap().clone();
         let address = wallet.test_reveal_address();
         let amount = Amount::from_sat(1000);
@@ -1489,8 +1698,8 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn wait_for_payment_returns_in_mempool_to_pending_when_total_is_below_amount() {
-        let test = test_router_with_allow_zero_conf(false);
-        let router = test.router.clone();
+        let router = test_router();
+        let router = router.router.clone();
         let wallet = router.wallet.as_ref().unwrap().clone();
         let address = wallet.test_reveal_address();
         let amount = Amount::from_sat(1000);
@@ -1514,6 +1723,70 @@ mod tests {
 
         order.cancel.cancel();
         assert!(!waiter.await.unwrap());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wait_for_payment_activates_when_confirmed_at_timeout() {
+        let router = test_router();
+        let router = router.router.clone();
+        let wallet = router.wallet.as_ref().unwrap().clone();
+        let address = wallet.test_reveal_address();
+        let amount = Amount::from_sat(1000);
+        let order = test_order_with_payment(
+            0,
+            Payment::new(address.address.clone(), address.index, amount, wallet.tip()),
+            OrderStatus::Pending,
+            &router.metatron,
+        );
+
+        let tx = wallet.test_receive_unconfirmed(&address.address, amount);
+
+        let monitored = order.clone();
+        let waiter_router = router.clone();
+        let waiter = tokio::spawn(async move {
+            waiter_router
+                .wait_for_payment(&monitored, payment(&monitored))
+                .await
+                .unwrap()
+        });
+
+        tokio::task::yield_now().await;
+        assert_eq!(order.status(), OrderStatus::InMempool);
+
+        wallet.test_confirm_tx(tx);
+        wallet.test_advance_tip_to(PAYMENT_TIMEOUT);
+
+        assert!(waiter.await.unwrap());
+        assert_eq!(order.status(), OrderStatus::InMempool);
+        assert!(!order.cancel.is_cancelled());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wait_for_payment_expires_when_payment_confirms_after_timeout() {
+        let router = test_router();
+        let router = router.router.clone();
+        let wallet = router.wallet.as_ref().unwrap().clone();
+        let address = wallet.test_reveal_address();
+        let amount = Amount::from_sat(1000);
+        let order = test_order_with_payment(
+            0,
+            Payment::new(address.address.clone(), address.index, amount, wallet.tip()),
+            OrderStatus::Pending,
+            &router.metatron,
+        );
+
+        let tx = wallet.test_receive_unconfirmed(&address.address, amount);
+        wallet.test_advance_tip_to(PAYMENT_TIMEOUT);
+        wallet.test_confirm_tx(tx);
+
+        assert!(
+            !router
+                .wait_for_payment(&order, payment(&order))
+                .await
+                .unwrap()
+        );
+        assert_eq!(order.status(), OrderStatus::Expired);
+        assert!(order.cancel.is_cancelled());
     }
 
     #[test]
@@ -2066,7 +2339,7 @@ mod tests {
             Arc::new(Wallet::open(wallet_settings_without_descriptors(), store.clone()).unwrap());
         let restarted = TestRouter {
             router: Arc::new(Router::new(
-                test_router_settings(false),
+                test_router_settings(),
                 store,
                 Arc::new(Metatron::new()),
                 Some(wallet),

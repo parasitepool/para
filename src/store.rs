@@ -285,6 +285,7 @@ mod tests {
 
         entry::OrderEntry {
             status,
+            review: Review::Clean,
             upstream_target: "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333"
                 .parse()
                 .unwrap(),

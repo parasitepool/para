@@ -49,7 +49,6 @@ pub(crate) struct Settings {
     change_descriptor: Option<String>,
     wallet_birthday: u32,
     sink_orders: Vec<UpstreamTarget>,
-    allow_zero_conf: bool,
     halt: bool,
     boost: bool,
     capacity_work: HashDays,
@@ -97,7 +96,6 @@ impl Default for Settings {
             change_descriptor: None,
             wallet_birthday: 0,
             sink_orders: Vec::new(),
-            allow_zero_conf: false,
             halt: false,
             boost: false,
             capacity_work: HashDays::from_raw(1e18),
@@ -269,7 +267,6 @@ impl Settings {
             enonce1_extension_size,
             tick_interval,
             sink_order,
-            allow_zero_conf,
             halt,
             boost,
             capacity_work,
@@ -283,7 +280,6 @@ impl Settings {
             change_descriptor,
             wallet_birthday,
             sink_orders: sink_order,
-            allow_zero_conf,
             halt,
             boost,
             capacity_work: HashDays::new(capacity_work)?,
@@ -684,10 +680,6 @@ impl Settings {
 
     pub(crate) fn wallet_birthday(&self) -> u32 {
         self.wallet_birthday
-    }
-
-    pub(crate) fn allow_zero_conf(&self) -> bool {
-        self.allow_zero_conf
     }
 
     pub(crate) fn halt(&self) -> bool {

@@ -54,7 +54,7 @@ use {
     para::{
         ENONCE1_EXTENSION_SIZE, ENONCE1_SIZE, MAX_ENONCE_SIZE, USER_AGENT, api,
         hash::{HashDays, HashPrice},
-        router::order::OrderStatus,
+        router::order::{OrderStatus, Review},
         subcommand::{
             miner::Share,
             server::{

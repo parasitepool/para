@@ -22,6 +22,7 @@ pub(crate) fn router(
         .route("/api/router/order/{id}", get(order_detail))
         .route("/api/router/orders", get(list_orders))
         .route("/api/router/order/{id}/cancel", post(cancel_order))
+        .route("/api/router/order/{id}/clear", post(clear_order))
         .route("/api/router/halt", put(set_halt))
         .route("/api/router/boost", put(set_boost))
         .route("/api/router/capacity", put(set_capacity))
@@ -181,6 +182,18 @@ async fn cancel_order(
 ) -> ServerResult<Response> {
     router
         .cancel_order(id)
+        .ok_or_not_found(|| format!("Order {id}"))?;
+
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+async fn clear_order(
+    _: AdminAuth,
+    State(router): State<Arc<Router>>,
+    Path(id): Path<u32>,
+) -> ServerResult<Response> {
+    router
+        .clear_order(id)
         .ok_or_not_found(|| format!("Order {id}"))?;
 
     Ok(StatusCode::NO_CONTENT.into_response())

@@ -259,23 +259,49 @@ impl Wallet {
         self.inner.lock().latest_checkpoint().height()
     }
 
-    pub fn received(&self, derivation_index: u32) -> (Amount, Amount) {
+    pub(crate) fn received_by_deadline(
+        &self,
+        derivation_index: u32,
+        deadline_height: u32,
+    ) -> (Amount, Amount) {
         let inner = self.inner.lock();
         let mut total = Amount::ZERO;
-        let mut confirmed = Amount::ZERO;
+        let mut confirmed_by_deadline = Amount::ZERO;
 
         for output in inner.list_output() {
-            if output.keychain == KeychainKind::External
-                && output.derivation_index == derivation_index
+            if output.keychain != KeychainKind::External
+                || output.derivation_index != derivation_index
             {
-                total += output.txout.value;
-                if output.chain_position.is_confirmed() {
-                    confirmed += output.txout.value;
-                }
+                continue;
+            }
+
+            total += output.txout.value;
+
+            if output
+                .chain_position
+                .confirmation_height_upper_bound()
+                .is_some_and(|height| height <= deadline_height)
+            {
+                confirmed_by_deadline += output.txout.value;
             }
         }
 
-        (total, confirmed)
+        (total, confirmed_by_deadline)
+    }
+
+    pub fn confirmed_by_index(&self) -> HashMap<u32, Amount> {
+        let inner = self.inner.lock();
+        let mut confirmed = HashMap::new();
+
+        for output in inner.list_output() {
+            if output.keychain == KeychainKind::External && output.chain_position.is_confirmed() {
+                *confirmed
+                    .entry(output.derivation_index)
+                    .or_insert(Amount::ZERO) += output.txout.value;
+            }
+        }
+
+        confirmed
     }
 
     pub fn send(&self, to: Address, amount: Amount, fee_rate: FeeRate) -> Result<Txid> {
@@ -368,10 +394,25 @@ impl Wallet {
     }
 
     #[cfg(test)]
-    pub(crate) fn test_receive_unconfirmed(&self, address: &Address, amount: Amount) {
+    pub(crate) fn test_receive_unconfirmed(
+        &self,
+        address: &Address,
+        amount: Amount,
+    ) -> Transaction {
         let mut inner = self.inner.lock();
         let tx = Self::test_payment_tx(address, amount);
-        inner.apply_unconfirmed_txs([(tx, 1)]);
+        inner.apply_unconfirmed_txs([(tx.clone(), 1)]);
+        tx
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_confirm_tx(&self, tx: Transaction) {
+        let mut inner = self.inner.lock();
+        let previous = inner.latest_checkpoint().block_id();
+        let block = Self::test_block(previous.hash, vec![tx]);
+        inner
+            .apply_block_connected_to(&block, previous.height + 1, previous)
+            .unwrap();
     }
 
     #[cfg(test)]
@@ -390,14 +431,15 @@ impl Wallet {
 
     #[cfg(test)]
     fn test_payment_tx(address: &Address, amount: Amount) -> Transaction {
+        let txid = Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::hash(
+            address.script_pubkey().as_bytes(),
+        ));
+
         Transaction {
             version: bitcoin::transaction::Version::TWO,
             lock_time: LockTime::ZERO,
             input: vec![TxIn {
-                previous_output: OutPoint {
-                    txid: Txid::all_zeros(),
-                    vout: 0,
-                },
+                previous_output: OutPoint { txid, vout: 0 },
                 script_sig: ScriptBuf::new(),
                 sequence: Sequence::MAX,
                 witness: Witness::new(),

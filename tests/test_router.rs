@@ -4,7 +4,7 @@ use {
 };
 
 pub(crate) struct TestRouter {
-    router_handle: Child,
+    router_handle: Option<Child>,
     router_port: u16,
     http_port: u16,
     #[allow(unused)]
@@ -22,10 +22,36 @@ impl TestRouter {
         args: impl ToArgs,
         probe_token: Option<&str>,
     ) -> Self {
+        Self::launch(
+            descriptor,
+            bitcoind,
+            args,
+            Arc::new(TempDir::new().unwrap()),
+            probe_token,
+        )
+    }
+
+    pub(crate) fn restart(
+        mut self,
+        descriptor: &str,
+        bitcoind: &Bitcoind,
+        args: impl ToArgs,
+    ) -> Self {
+        self.terminate();
+        Self::launch(descriptor, bitcoind, args, self.tempdir.clone(), None)
+    }
+
+    fn launch(
+        descriptor: &str,
+        bitcoind: &Bitcoind,
+        args: impl ToArgs,
+        tempdir: Arc<TempDir>,
+        probe_token: Option<&str>,
+    ) -> Self {
         let router_port = allocate_port();
         let http_port = allocate_port();
 
-        let (router_handle, tempdir) = CommandBuilder::new(format!(
+        let router_handle = CommandBuilder::new(format!(
             "router \
                 --chain regtest \
                 --address 127.0.0.1 \
@@ -34,19 +60,20 @@ impl TestRouter {
                 --bitcoin-rpc-username {} \
                 --bitcoin-rpc-password {} \
                 --bitcoin-rpc-port {} \
+                --data-dir {} \
                 --descriptor {descriptor} \
                 {}",
             bitcoind.rpc_user,
             bitcoind.rpc_password,
             bitcoind.rpc_port,
+            tempdir.path().to_str().unwrap(),
             args.to_args().join(" ")
         ))
         .capture_stderr(true)
         .capture_stdout(true)
         .env("RUST_LOG", "info")
         .integration_test(true)
-        .with_data_dir()
-        .spawn_persistent();
+        .spawn();
 
         for attempt in 0.. {
             match TcpStream::connect(format!("127.0.0.1:{http_port}")) {
@@ -62,7 +89,7 @@ impl TestRouter {
         }
 
         let router = Self {
-            router_handle,
+            router_handle: Some(router_handle),
             router_port,
             http_port,
             tempdir,
@@ -159,10 +186,22 @@ impl TestRouter {
             .send()
             .await
     }
-}
 
-impl Drop for TestRouter {
-    fn drop(&mut self) {
+    pub(crate) async fn clear_order(&self, id: u32) -> reqwest::Result<reqwest::Response> {
+        reqwest::Client::new()
+            .post(format!(
+                "{}/api/router/order/{id}/clear",
+                self.api_endpoint()
+            ))
+            .send()
+            .await
+    }
+
+    fn terminate(&mut self) {
+        let Some(mut child) = self.router_handle.take() else {
+            return;
+        };
+
         #[cfg(unix)]
         {
             use nix::{
@@ -170,24 +209,26 @@ impl Drop for TestRouter {
                 unistd::Pid,
             };
 
-            let pid = Pid::from_raw(self.router_handle.id() as i32);
+            let pid = Pid::from_raw(child.id() as i32);
 
             let _ = kill(pid, Signal::SIGTERM);
 
             for _ in 0..100 {
-                match self.router_handle.try_wait() {
-                    Ok(Some(_status)) => {
-                        return;
-                    }
-                    Ok(None) => {
-                        thread::sleep(Duration::from_millis(50));
-                    }
+                match child.try_wait() {
+                    Ok(Some(_status)) => return,
+                    Ok(None) => thread::sleep(Duration::from_millis(50)),
                     _ => break,
                 }
             }
         }
 
-        let _ = self.router_handle.kill();
-        let _ = self.router_handle.wait();
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+}
+
+impl Drop for TestRouter {
+    fn drop(&mut self) {
+        self.terminate();
     }
 }

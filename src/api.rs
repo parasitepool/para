@@ -262,6 +262,7 @@ impl OrderResponse {
 pub struct OrderSummary {
     pub id: u32,
     pub status: OrderStatus,
+    pub review: Review,
     pub endpoint: String,
     pub username: String,
     pub requested_hash_days: Option<HashDays>,
@@ -276,6 +277,7 @@ impl OrderSummary {
         Self {
             id: order.id,
             status: order.status(),
+            review: order.review(),
             endpoint: order.upstream_target.endpoint().to_string(),
             username: order.upstream_target.username().to_string(),
             requested_hash_days: order.bucket.as_ref().map(|bucket| bucket.target),
@@ -290,6 +292,7 @@ impl OrderSummary {
 pub struct OrderDetail {
     pub id: u32,
     pub status: OrderStatus,
+    pub review: Review,
     pub upstream_target: UpstreamTarget,
     pub requested_hash_days: Option<HashDays>,
     pub hash_price: Option<HashPrice>,
@@ -315,6 +318,7 @@ impl OrderDetail {
         Self {
             id: order.id,
             status: order.status(),
+            review: order.review(),
             upstream_target: order.upstream_target.clone(),
             requested_hash_days: bucket.map(|bucket| bucket.target),
             hash_price: bucket

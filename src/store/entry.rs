@@ -3,6 +3,8 @@ use super::*;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct OrderEntry {
     pub(crate) status: OrderStatus,
+    #[serde(default)]
+    pub(crate) review: Review,
     pub(crate) upstream_target: UpstreamTarget,
     pub(crate) bucket: Option<BucketEntry>,
     pub(crate) created_at_secs: f64,
@@ -68,6 +70,7 @@ mod tests {
         let now = Instant::now();
         let entry = OrderEntry {
             status: OrderStatus::Active,
+            review: Review::Clean,
             upstream_target: "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333"
                 .parse()
                 .unwrap(),
@@ -90,6 +93,36 @@ mod tests {
         assert_eq!(decoded.bucket.unwrap().derivation_index, 9);
         assert_eq!(decoded.stats.accepted_shares, 1);
         assert_eq!(decoded.stats.rejected_shares, 1);
+    }
+
+    #[test]
+    fn order_entry_decodes_legacy_record_without_review() {
+        #[derive(Serialize)]
+        struct Legacy {
+            status: OrderStatus,
+            upstream_target: UpstreamTarget,
+            bucket: Option<BucketEntry>,
+            created_at_secs: f64,
+            stats: StatsEntry,
+        }
+
+        let now = Instant::now();
+        let legacy = Legacy {
+            status: OrderStatus::Expired,
+            upstream_target: "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333"
+                .parse()
+                .unwrap(),
+            bucket: None,
+            created_at_secs: instant_to_epoch_secs(now, now),
+            stats: test_stats(now).to_entry(now),
+        };
+
+        let mut bytes = Vec::new();
+        ciborium::into_writer(&legacy, &mut bytes).unwrap();
+        let decoded: OrderEntry = ciborium::from_reader(bytes.as_slice()).unwrap();
+
+        assert_eq!(decoded.status, OrderStatus::Expired);
+        assert_eq!(decoded.review, Review::Clean);
     }
 
     #[test]

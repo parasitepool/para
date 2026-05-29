@@ -70,6 +70,35 @@ async fn assert_in_mempool(bitcoind: &Bitcoind, txid: bitcoin::Txid) {
         .unwrap();
 }
 
+async fn mine_tx_to_address(bitcoind: &Bitcoind, txid: bitcoin::Txid, address: &str) {
+    let blocks = bitcoind
+        .client()
+        .unwrap()
+        .call_raw::<Vec<String>>("generatetoaddress", &[json!(1), json!(address)])
+        .await
+        .unwrap();
+
+    let block = bitcoind
+        .client()
+        .unwrap()
+        .call_raw::<serde_json::Value>("getblock", &[json!(blocks[0])])
+        .await
+        .unwrap();
+
+    let txids = block
+        .get("tx")
+        .and_then(|txids| txids.as_array())
+        .expect("mined block should include tx ids");
+
+    assert!(
+        txids
+            .iter()
+            .any(|mined| mined.as_str() == Some(&txid.to_string())),
+        "expected transaction {txid} in mined block {}",
+        blocks[0],
+    );
+}
+
 async fn add_order(
     router: &TestRouter,
     target: &str,
@@ -820,9 +849,80 @@ async fn cancelled_order_stays_cancelled_during_activation() {
     let order = orders.iter().find(|order| order.id == id).unwrap();
 
     assert_eq!(order.status, OrderStatus::Cancelled);
+    assert_eq!(order.review, Review::Flagged);
     assert_eq!(status.active_order_count, 0);
 
     stalled_server.abort();
+}
+
+async fn wait_for_status(router: &TestRouter, id: u32, expected: OrderStatus) {
+    timeout(Duration::from_secs(60), async {
+        loop {
+            if let Ok(order) = router.get_order(id).await
+                && order.status == expected
+            {
+                break;
+            }
+            sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("order {id} did not reach status {expected:?}"));
+}
+
+async fn wait_for_review(router: &TestRouter, id: u32, expected: Review) {
+    timeout(Duration::from_secs(60), async {
+        loop {
+            if let Ok(order) = router.get_order(id).await
+                && order.review == expected
+            {
+                break;
+            }
+            sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("order {id} did not reach review {expected:?}"));
+}
+
+#[tokio::test]
+#[timeout(120000)]
+async fn late_payment_flag_is_cleared_and_survives_restart() {
+    let bitcoind = spawn_regtest();
+    let descriptor = generate_descriptor();
+    let funding_descriptor = generate_descriptor();
+    let funding_address = fund_wallet(&bitcoind, &funding_descriptor).await;
+
+    let router = TestRouter::spawn(&descriptor, &bitcoind, "--tick-interval 1");
+
+    let (id, address, amount) = add_order(
+        &router,
+        &format!("{}@127.0.0.1:1", signet_username()),
+        HashDays::new(1e5).unwrap(),
+        current_hash_price(&router).await,
+    )
+    .await;
+
+    generate_to_address(&bitcoind, 8, &funding_address).await;
+    wait_for_status(&router, id, OrderStatus::Expired).await;
+
+    pay_address(&bitcoind, &funding_descriptor, &address, amount).await;
+    wait_for_review(&router, id, Review::Flagged).await;
+
+    let refund_txid =
+        send_to_address_without_mining(&bitcoind, &descriptor, &funding_address, amount / 2).await;
+    mine_tx_to_address(&bitcoind, refund_txid, &funding_address).await;
+    wait_for_review(&router, id, Review::Flagged).await;
+
+    let response = router.clear_order(id).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    wait_for_review(&router, id, Review::Cleared).await;
+
+    let router = router.restart(&descriptor, &bitcoind, "--tick-interval 1");
+
+    let order = router.get_order(id).await.unwrap();
+    assert_eq!(order.status, OrderStatus::Expired);
+    assert_eq!(order.review, Review::Cleared);
 }
 
 #[tokio::test]

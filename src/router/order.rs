@@ -30,6 +30,15 @@ impl OrderStatus {
     }
 }
 
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Review {
+    #[default]
+    Clean,
+    Flagged,
+    Cleared,
+}
+
 pub struct Payment {
     pub(crate) address: Address,
     pub(crate) derivation_index: u32,
@@ -65,6 +74,7 @@ pub struct Order {
     pub(crate) upstream: Mutex<Option<Arc<Upstream>>>,
     pub(crate) allocator: OnceLock<Arc<EnonceAllocator>>,
     pub(crate) status: Mutex<OrderStatus>,
+    pub(crate) review: Mutex<Review>,
     pub(crate) created_at: Instant,
     pub(crate) cancel: CancellationToken,
     pub(crate) metatron: Arc<Metatron>,
@@ -89,6 +99,7 @@ impl Order {
             upstream: Mutex::new(None),
             allocator: OnceLock::new(),
             status: Mutex::new(OrderStatus::Pending),
+            review: Mutex::new(Review::Clean),
             created_at: now,
             cancel,
             metatron,
@@ -102,6 +113,7 @@ impl Order {
 
         entry::OrderEntry {
             status: self.status(),
+            review: self.review(),
             upstream_target: self.upstream_target.clone(),
             bucket: self.bucket.as_ref().map(|bucket| entry::BucketEntry {
                 target: bucket.target,
@@ -152,6 +164,7 @@ impl Order {
             upstream: Mutex::new(None),
             allocator: OnceLock::new(),
             status: Mutex::new(order_entry.status),
+            review: Mutex::new(order_entry.review),
             created_at: epoch::epoch_secs_to_instant(order_entry.created_at_secs),
             cancel,
             metatron,
@@ -206,6 +219,48 @@ impl Order {
         );
 
         self.cancel.cancel();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_flagged(&self) -> bool {
+        *self.review.lock() == Review::Flagged
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_cleared(&self) -> bool {
+        *self.review.lock() == Review::Cleared
+    }
+
+    pub(crate) fn review(&self) -> Review {
+        *self.review.lock()
+    }
+
+    pub(crate) fn set_flagged(&self) {
+        let mut review = self.review.lock();
+
+        if *review != Review::Clean {
+            return;
+        }
+
+        *review = Review::Flagged;
+        warn!(
+            "Order {} at {} flagged for review",
+            self.id, self.upstream_target,
+        );
+    }
+
+    pub(crate) fn set_cleared(&self) -> bool {
+        let mut review = self.review.lock();
+
+        if *review != Review::Flagged {
+            return false;
+        }
+
+        *review = Review::Cleared;
+
+        info!("Order {} at {} cleared", self.id, self.upstream_target);
+
+        true
     }
 
     pub(crate) fn is_sink(&self) -> bool {

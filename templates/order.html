@@ -8,7 +8,7 @@
     color: #eee;
   }
 
-  #cancel-order {
+  #cancel-order, #clear-order {
     margin: 8px 0;
     width: 100%;
     background: #333;
@@ -19,7 +19,7 @@
     font: inherit;
   }
 
-  #cancel-order:hover { background: #444; }
+  #cancel-order:hover, #clear-order:hover { background: #444; }
 
   .confirm-overlay {
     position: fixed;
@@ -77,6 +77,7 @@
     <h2>Order</h2>
     <div class=row><span>ID</span><span id=id></span></div>
     <div class=row><span>Status</span><span id=status></span></div>
+    <div class=row><span>Review</span><span id=review></span></div>
     <div class=row><span>Endpoint</span><span id=endpoint></span></div>
     <div class=row><span>Username</span><span id=username class=copyable></span></div>
     <div class=row><span>Requested Hashdays</span><span id=requested_hash_days></span></div>
@@ -88,6 +89,7 @@
     <div class=row><span>Created At Height</span><span id=created_at_height></span></div>
   </div>
   <button id=cancel-order class=hidden>Cancel Order</button>
+  <button id=clear-order class=hidden>Mark Cleared</button>
 
   <div class=column>
     <h2>Upstream</h2>
@@ -133,6 +135,17 @@
   </div>
 </div>
 
+<div id=clear-overlay class="confirm-overlay hidden">
+  <div class=confirm-modal>
+    <h2>Mark Cleared</h2>
+    <p>This order will be marked as cleared, dismissing it from review.</p>
+    <div class=modal-buttons>
+      <button id=clear-dismiss>Cancel</button>
+      <button id=clear-confirm>Confirm</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const orderId = window.location.pathname.split('/').filter(Boolean).pop();
 
@@ -168,6 +181,9 @@ function populateOrder(data) {
   set('id', data.id);
   set('status', formatStatus(data.status));
   setClass('status', statusClass(data.status));
+  const review = data.review === 'clean' ? null : data.review;
+  set('review', review, formatStatus);
+  setClass('review', review || '');
   set('endpoint', endpoint);
   copyable('username', truncateMiddle(username), username);
   set('requested_hash_days', data.requested_hash_days == null ? 'Unlimited' : formatHashDays(data.requested_hash_days));
@@ -208,6 +224,7 @@ async function refresh(signal) {
 
   const terminal = TERMINAL.includes(data.status);
   document.getElementById('cancel-order').classList.toggle('hidden', terminal);
+  document.getElementById('clear-order').classList.toggle('hidden', data.review !== 'flagged');
 
   populateOrder(data);
 
@@ -216,21 +233,20 @@ async function refresh(signal) {
   if (terminal) {
     populateStats('downstream', null);
     document.getElementById('sessions-list').innerHTML = '';
-    stopPolling();
   } else {
     populateStats('downstream', data.downstream);
     document.getElementById('sessions-list').innerHTML = renderSessionRows(data.sessions || []);
   }
 }
 
-{
-  const overlay = document.getElementById('cancel-overlay');
+function setupOverlay(triggerId, overlayId, dismissId, confirmId, endpoint) {
+  const overlay = document.getElementById(overlayId);
 
-  document.getElementById('cancel-order').addEventListener('click', () => {
+  document.getElementById(triggerId).addEventListener('click', () => {
     overlay.classList.remove('hidden');
   });
 
-  document.getElementById('cancel-dismiss').addEventListener('click', () => {
+  document.getElementById(dismissId).addEventListener('click', () => {
     overlay.classList.add('hidden');
   });
 
@@ -238,11 +254,13 @@ async function refresh(signal) {
     if (e.target === overlay) overlay.classList.add('hidden');
   });
 
-  document.getElementById('cancel-confirm').addEventListener('click', async () => {
+  document.getElementById(confirmId).addEventListener('click', async () => {
     overlay.classList.add('hidden');
     try {
-      const res = await fetch(`/api/router/order/${orderId}/cancel`, withAuthOptions({ method: 'POST' }));
-      if (!res.ok) {
+      const res = await fetch(`/api/router/order/${orderId}/${endpoint}`, withAuthOptions({ method: 'POST' }));
+      if (res.ok) {
+        refresh(new AbortController().signal);
+      } else {
         const data = await res.json().catch(() => ({}));
         alert(data.message || `Error: ${res.status}`);
       }
@@ -251,6 +269,9 @@ async function refresh(signal) {
     }
   });
 }
+
+setupOverlay('cancel-order', 'cancel-overlay', 'cancel-dismiss', 'cancel-confirm', 'cancel');
+setupOverlay('clear-order', 'clear-overlay', 'clear-dismiss', 'clear-confirm', 'clear');
 
 initCopyables();
 initDelegatedCopyables('sessions-list');

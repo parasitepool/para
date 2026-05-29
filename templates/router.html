@@ -521,6 +521,9 @@ function compareStatus(a, b) {
 }
 
 function compareOrders(a, b) {
+  const aFlagged = a.review === 'flagged';
+  const bFlagged = b.review === 'flagged';
+  if (aFlagged !== bFlagged) return aFlagged ? -1 : 1;
   let value = 0;
   if (sortColumn === 'status') {
     value = compareStatus(a, b);
@@ -562,9 +565,11 @@ function renderOrders() {
     const target = order.requested_hash_days == null ? 'Unlimited' : formatHashDays(order.requested_hash_days);
     const delivered = formatHashDays(order.delivered_hash_days) || '-';
     const hashrate = formatHashrate(order.hashrate);
+    const reviewMarker = order.review === 'flagged' ? ' <span class="flagged">⚑</span>'
+      : order.review === 'cleared' ? ' <span class="cleared">✓</span>' : '';
     return `<tr data-id="${safeId}">
       <td><a class=order-link href="/order/${safeId}">${safeId}</a></td>
-      <td class="${escapeHtml(statusClass(order.status))}">${escapeHtml(formatStatus(order.status))}</td>
+      <td class="${escapeHtml(statusClass(order.status))}">${escapeHtml(formatStatus(order.status))}${reviewMarker}</td>
       <td>${escapeHtml(order.endpoint)}</td>
       <td>${escapeHtml(shortUsername)}</td>
       <td>${escapeHtml(target)}</td>
