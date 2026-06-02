@@ -1,13 +1,4 @@
 <style>
-  .nav-arrow {
-    color: #888;
-    text-decoration: none;
-    padding: 0 8px;
-  }
-  .nav-arrow:hover {
-    color: #eee;
-  }
-
   #cancel-order, #clear-order {
     margin: 8px 0;
     width: 100%;
@@ -153,24 +144,6 @@ const h1 = document.querySelector('h1');
 document.title = document.title.replace('Order', `Order ${orderId}`);
 h1.childNodes[0].textContent = `Router | Order ${orderId}`;
 
-fetch('/api/router/orders', withAuthOptions()).then(r => r.json()).then(orders => {
-  const orderIds = (orders || []).map(o => o.id);
-  if (orderIds.length < 2) return;
-  const idx = orderIds.indexOf(Number(orderId));
-  const prev = orderIds[(idx - 1 + orderIds.length) % orderIds.length];
-  const next = orderIds[(idx + 1) % orderIds.length];
-  const prevLink = document.createElement('a');
-  prevLink.href = `/order/${prev}`;
-  prevLink.className = 'nav-arrow';
-  prevLink.textContent = '\u25C0';
-  const nextLink = document.createElement('a');
-  nextLink.href = `/order/${next}`;
-  nextLink.className = 'nav-arrow';
-  nextLink.textContent = '\u25B6';
-  h1.prepend(prevLink);
-  h1.append(nextLink);
-}).catch(() => {});
-
 const TERMINAL = ['fulfilled', 'cancelled', 'disconnected', 'expired'];
 
 function populateOrder(data) {
@@ -181,9 +154,8 @@ function populateOrder(data) {
   set('id', data.id);
   set('status', formatStatus(data.status));
   setClass('status', statusClass(data.status));
-  const review = data.review === 'clean' ? null : data.review;
-  set('review', review, formatStatus);
-  setClass('review', review || '');
+  set('review', data.review, formatStatus);
+  setClass('review', data.review || '');
   set('endpoint', endpoint);
   copyable('username', truncateMiddle(username), username);
   set('requested_hash_days', data.requested_hash_days == null ? 'Unlimited' : formatHashDays(data.requested_hash_days));

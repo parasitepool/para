@@ -607,6 +607,7 @@ async fn order_detail() {
         detail.payment_amount.expect("bucket has amount").to_sat(),
         amount,
     );
+    assert!(detail.created_at_height.is_some());
     assert_eq!(detail.upstream.accepted_shares, 0);
     assert!(detail.sessions.is_empty());
     assert_eq!(detail.downstream.accepted_shares, 0);
@@ -1201,7 +1202,7 @@ async fn router_rejects_incompatible_resumed_enonce1() {
 
 #[tokio::test]
 #[timeout(120000)]
-async fn list_orders_by_address() {
+async fn filter_orders() {
     let wallet_bitcoind = spawn_regtest();
     let descriptor = generate_descriptor();
 
@@ -1217,7 +1218,7 @@ async fn list_orders_by_address() {
         .unwrap();
     let hash_price = current_hash_price(&router).await;
 
-    add_order(
+    let (id_a1, payment_a1, _) = add_order(
         &router,
         &format!("{username_a}@foo:3333"),
         HashDays::new(1e5).unwrap(),
@@ -1225,7 +1226,7 @@ async fn list_orders_by_address() {
     )
     .await;
 
-    add_order(
+    let (id_a2, payment_a2, _) = add_order(
         &router,
         &format!("{username_a}@foo:4444"),
         HashDays::new(1e5).unwrap(),
@@ -1233,7 +1234,7 @@ async fn list_orders_by_address() {
     )
     .await;
 
-    add_order(
+    let (id_b, payment_b, _) = add_order(
         &router,
         &format!("{username_b}@foo:5555"),
         HashDays::new(1e5).unwrap(),
@@ -1242,6 +1243,7 @@ async fn list_orders_by_address() {
     .await;
 
     let all = router.list_orders(None).await.unwrap();
+
     assert_eq!(all.len(), 3);
 
     let filtered_a = router
@@ -1261,4 +1263,111 @@ async fn list_orders_by_address() {
         .unwrap();
 
     assert_eq!(filtered_b.len(), 1);
+
+    let filtered_payment = router.list_orders(Some(&payment_a1)).await.unwrap();
+
+    assert_eq!(filtered_payment.len(), 1);
+    assert_eq!(filtered_payment[0].id, id_a1);
+
+    let search_payment = router
+        .list_orders_query(&format!("search={}", urlencoding::encode(&payment_a2)))
+        .await
+        .unwrap()
+        .json::<Vec<api::OrderSummary>>()
+        .await
+        .unwrap();
+
+    assert_eq!(search_payment.len(), 1);
+    assert_eq!(search_payment[0].id, id_a2);
+
+    let search_endpoint = router
+        .list_orders_query(&format!("search={}", urlencoding::encode("foo:5555")))
+        .await
+        .unwrap()
+        .json::<Vec<api::OrderSummary>>()
+        .await
+        .unwrap();
+
+    assert_eq!(search_endpoint.len(), 1);
+    assert_eq!(search_endpoint[0].id, id_b);
+
+    let search_target = router
+        .list_orders_query(&format!(
+            "search={}",
+            urlencoding::encode(&format!("{username_b}@foo:5555"))
+        ))
+        .await
+        .unwrap()
+        .json::<Vec<api::OrderSummary>>()
+        .await
+        .unwrap();
+
+    assert_eq!(search_target.len(), 1);
+    assert_eq!(search_target[0].id, id_b);
+
+    let response = router.cancel_order(id_a1).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    let pending_or_cancelled = router
+        .list_orders_query("status=pending&status=cancelled")
+        .await
+        .unwrap()
+        .json::<Vec<api::OrderSummary>>()
+        .await
+        .unwrap();
+
+    assert_eq!(pending_or_cancelled.len(), 3);
+
+    let cancelled_payment_search = router
+        .list_orders_query(&format!(
+            "status=cancelled&search={}",
+            urlencoding::encode(&payment_a1)
+        ))
+        .await
+        .unwrap()
+        .json::<Vec<api::OrderSummary>>()
+        .await
+        .unwrap();
+
+    assert_eq!(cancelled_payment_search.len(), 1);
+    assert_eq!(cancelled_payment_search[0].id, id_a1);
+
+    let cancelled_other_payment_search = router
+        .list_orders_query(&format!(
+            "status=cancelled&search={}",
+            urlencoding::encode(&payment_b)
+        ))
+        .await
+        .unwrap()
+        .json::<Vec<api::OrderSummary>>()
+        .await
+        .unwrap();
+
+    assert!(cancelled_other_payment_search.is_empty());
+
+    let review_clean = router
+        .list_orders_query("review=clean")
+        .await
+        .unwrap()
+        .json::<Vec<api::OrderSummary>>()
+        .await
+        .unwrap();
+
+    assert_eq!(review_clean.len(), 3);
+
+    let limited = router
+        .list_orders_query("limit=1")
+        .await
+        .unwrap()
+        .json::<Vec<api::OrderSummary>>()
+        .await
+        .unwrap();
+
+    assert_eq!(limited.len(), 1);
+    assert_eq!(limited[0].id, id_b);
+
+    let invalid_status = router.list_orders_query("status=unknown").await.unwrap();
+
+    assert_eq!(invalid_status.status(), StatusCode::BAD_REQUEST);
 }

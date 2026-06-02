@@ -177,6 +177,20 @@ impl TestRouter {
         reqwest::Client::new().get(url).send().await?.json().await
     }
 
+    pub(crate) async fn list_orders_query(
+        &self,
+        query: &str,
+    ) -> reqwest::Result<reqwest::Response> {
+        let separator = if query.is_empty() { "" } else { "?" };
+        reqwest::Client::new()
+            .get(format!(
+                "{}/api/router/orders{separator}{query}",
+                self.api_endpoint()
+            ))
+            .send()
+            .await
+    }
+
     pub(crate) async fn cancel_order(&self, id: u32) -> reqwest::Result<reqwest::Response> {
         reqwest::Client::new()
             .post(format!(

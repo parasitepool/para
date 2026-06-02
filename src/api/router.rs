@@ -1,7 +1,10 @@
 use {
     super::*,
-    crate::http_server::auth::{AdminAuth, ApiAuth, BearerAuth},
-    axum::extract::Query,
+    crate::http_server::{
+        auth::{AdminAuth, ApiAuth, BearerAuth},
+        error::ServerError,
+    },
+    axum::extract::RawQuery,
 };
 
 pub(crate) fn router(
@@ -86,32 +89,167 @@ async fn add_order(
         .into_response())
 }
 
-#[derive(Deserialize)]
+#[derive(Default)]
 struct OrdersQuery {
+    search: Option<String>,
     address: Option<Address<NetworkUnchecked>>,
+    statuses: Vec<OrderStatus>,
+    review: Option<Review>,
+    limit: Option<usize>,
+}
+
+impl OrdersQuery {
+    fn parse(raw: Option<&str>) -> ServerResult<Self> {
+        let mut query = Self::default();
+
+        let Some(raw) = raw else {
+            return Ok(query);
+        };
+
+        for pair in raw.split('&').filter(|pair| !pair.is_empty()) {
+            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+            let key = decode_query_component(key)?;
+            let value = decode_query_component(value)?;
+
+            match key.as_str() {
+                "search" if !value.trim().is_empty() => {
+                    query.search = Some(value.trim().to_lowercase());
+                }
+                "search" => query.search = None,
+                "address" if !value.trim().is_empty() => {
+                    query.address = Some(value.parse().map_err(|err| {
+                        ServerError::BadRequest(format!("invalid address filter `{value}`: {err}"))
+                    })?);
+                }
+                "address" => query.address = None,
+                "status" => {
+                    for status in value.split(',').filter(|status| !status.is_empty()) {
+                        query.statuses.push(parse_order_status(status)?);
+                    }
+                }
+                "review" if !value.trim().is_empty() => {
+                    query.review = Some(parse_review(&value)?);
+                }
+                "review" => query.review = None,
+                "limit" if !value.trim().is_empty() => {
+                    query.limit = Some(parse_usize_query_param("limit", &value)?);
+                }
+                "limit" => query.limit = None,
+                _ => {}
+            }
+        }
+
+        Ok(query)
+    }
+
+    fn matches(&self, order: &Order) -> bool {
+        if let Some(address) = &self.address
+            && !order_matches_address(order, address)
+        {
+            return false;
+        }
+
+        if !self.statuses.is_empty() && !self.statuses.contains(&order.status()) {
+            return false;
+        }
+
+        if let Some(review) = self.review
+            && order.review() != review
+        {
+            return false;
+        }
+
+        if let Some(search) = &self.search
+            && !order_matches_search(order, search)
+        {
+            return false;
+        }
+
+        true
+    }
+}
+
+fn decode_query_component(value: &str) -> ServerResult<String> {
+    let value = value.replace('+', " ");
+    urlencoding::decode(&value)
+        .map(|value| value.into_owned())
+        .map_err(|err| ServerError::BadRequest(format!("invalid query encoding: {err}")))
+}
+
+fn parse_order_status(value: &str) -> ServerResult<OrderStatus> {
+    match value {
+        "pending" => Ok(OrderStatus::Pending),
+        "in_mempool" => Ok(OrderStatus::InMempool),
+        "active" => Ok(OrderStatus::Active),
+        "fulfilled" => Ok(OrderStatus::Fulfilled),
+        "cancelled" => Ok(OrderStatus::Cancelled),
+        "disconnected" => Ok(OrderStatus::Disconnected),
+        "expired" => Ok(OrderStatus::Expired),
+        _ => Err(ServerError::BadRequest(format!(
+            "invalid order status filter `{value}`"
+        ))),
+    }
+}
+
+fn parse_review(value: &str) -> ServerResult<Review> {
+    match value {
+        "clean" => Ok(Review::Clean),
+        "flagged" => Ok(Review::Flagged),
+        "cleared" => Ok(Review::Cleared),
+        _ => Err(ServerError::BadRequest(format!(
+            "invalid review filter `{value}`"
+        ))),
+    }
+}
+
+fn parse_usize_query_param(name: &str, value: &str) -> ServerResult<usize> {
+    value
+        .parse()
+        .map_err(|err| ServerError::BadRequest(format!("invalid {name} `{value}`: {err}")))
+}
+
+fn order_matches_address(order: &Order, address: &Address<NetworkUnchecked>) -> bool {
+    order.upstream_target.username().address() == address
+        || order
+            .bucket
+            .as_ref()
+            .is_some_and(|bucket| bucket.payment.address.as_unchecked() == address)
+}
+
+fn order_matches_search(order: &Order, search: &str) -> bool {
+    order.id.to_string().contains(search)
+        || order
+            .upstream_target
+            .to_string()
+            .to_lowercase()
+            .contains(search)
+        || order.bucket.as_ref().is_some_and(|bucket| {
+            bucket
+                .payment
+                .address
+                .to_string()
+                .to_lowercase()
+                .contains(search)
+        })
 }
 
 async fn list_orders(
     _: ApiAuth,
     State(router): State<Arc<Router>>,
-    Query(query): Query<OrdersQuery>,
+    RawQuery(raw_query): RawQuery,
 ) -> ServerResult<Response> {
     let now = Instant::now();
+    let query = OrdersQuery::parse(raw_query.as_deref())?;
+    let orders = router
+        .orders()
+        .iter()
+        .rev()
+        .filter(|order| query.matches(order))
+        .take(query.limit.unwrap_or(usize::MAX))
+        .map(|order| OrderSummary::from_order(order, now))
+        .collect::<Vec<OrderSummary>>();
 
-    Ok(Json(
-        router
-            .orders()
-            .iter()
-            .filter(|order| {
-                query
-                    .address
-                    .as_ref()
-                    .is_none_or(|addr| order.upstream_target.username().address() == addr)
-            })
-            .map(|order| OrderSummary::from_order(order, now))
-            .collect::<Vec<OrderSummary>>(),
-    )
-    .into_response())
+    Ok(Json(orders).into_response())
 }
 
 #[derive(Deserialize)]

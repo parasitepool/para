@@ -77,6 +77,83 @@
   #orders-table th { white-space: nowrap; }
   #orders-table td { vertical-align: middle; white-space: nowrap; }
   #orders-table tbody tr { cursor: pointer; }
+  .orders-toolbar {
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto;
+    gap: 10px;
+    align-items: end;
+    margin-bottom: 10px;
+    font-size: 0.9em;
+  }
+  .orders-search-field {
+    grid-column: 1 / -1;
+  }
+  .orders-toolbar label,
+  .orders-field-label {
+    color: #888;
+    font-size: 1em;
+  }
+  .orders-toolbar input[type="search"],
+  .orders-toolbar select,
+  #orders-status-toggle {
+    width: 100%;
+    box-sizing: border-box;
+    margin-top: 4px;
+    padding: 7px 10px;
+    background: #111;
+    border: 1px solid #444;
+    color: #eee;
+    font: inherit;
+  }
+  .orders-multi-select {
+    position: relative;
+    margin-top: 4px;
+  }
+  #orders-status-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    text-align: left;
+  }
+  #orders-status-toggle::after {
+    content: "\25BE";
+    color: #888;
+    margin-left: 10px;
+  }
+  .orders-status-options {
+    position: absolute;
+    z-index: 1500;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    max-height: 220px;
+    overflow-y: auto;
+    padding: 6px;
+    background: #111;
+    border: 1px solid #444;
+  }
+  .orders-status-options label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 4px;
+    color: #eee;
+    cursor: pointer;
+  }
+  .orders-status-options label:hover {
+    background: #222;
+  }
+  #orders-reset {
+    min-width: 80px;
+    padding: 7px 14px;
+    background: #333;
+    border: 1px solid #444;
+    color: #eee;
+    cursor: pointer;
+    font: inherit;
+  }
+  #orders-reset:hover { background: #444; }
   #orders-table th[data-sort] {
     cursor: pointer;
     user-select: none;
@@ -91,11 +168,36 @@
   }
   #orders-table th[data-sort].sort-asc::after { content: "\25B2"; }
   #orders-table th[data-sort].sort-desc::after { content: "\25BC"; }
+  #orders-table tbody tr.unlimited-order {
+    background: #181818;
+  }
   #orders-table th:nth-child(3), #orders-table td:nth-child(3) {
     width: 100%;
     max-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  .order-progress {
+    position: relative;
+    width: 120px;
+    height: 18px;
+    overflow: hidden;
+    background: #111;
+    border: 1px solid #444;
+  }
+  .order-progress-fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    background: #2d7a2d;
+  }
+  .order-progress-label {
+    position: relative;
+    z-index: 1;
+    display: block;
+    line-height: 18px;
+    text-align: center;
+    color: #eee;
+    font-size: 0.9em;
   }
   .orders-pagination {
     display: flex;
@@ -297,6 +399,7 @@
 
   @media (max-width: 1140px) {
     .action-bar { width: 100%; max-width: 500px; grid-template-columns: repeat(2, 1fr); }
+    .orders-toolbar { grid-template-columns: 1fr; }
     #orders-table { font-size: 0.75em; }
   }
 </style>
@@ -341,6 +444,37 @@
 
   <div class="column column-full">
     <h2>Orders</h2>
+    <div class=orders-toolbar>
+      <label for=orders-search class=orders-search-field>Search
+        <input id=orders-search type=search placeholder="Address, username, endpoint">
+      </label>
+      <div>
+        <div class=orders-field-label>Status</div>
+        <div class=orders-multi-select>
+          <button id=orders-status-toggle type=button aria-expanded=false>
+            <span id=orders-status-label>Any</span>
+          </button>
+          <div id=orders-status-options class="orders-status-options hidden">
+            <label><input type=checkbox name=orders-status value=active> Active</label>
+            <label><input type=checkbox name=orders-status value=in_mempool> In Mempool</label>
+            <label><input type=checkbox name=orders-status value=pending> Pending</label>
+            <label><input type=checkbox name=orders-status value=expired> Expired</label>
+            <label><input type=checkbox name=orders-status value=disconnected> Disconnected</label>
+            <label><input type=checkbox name=orders-status value=fulfilled> Fulfilled</label>
+            <label><input type=checkbox name=orders-status value=cancelled> Cancelled</label>
+          </div>
+        </div>
+      </div>
+      <label for=orders-review>Review
+        <select id=orders-review>
+          <option value="">Any</option>
+          <option value=clean>Clean</option>
+          <option value=flagged>Flagged</option>
+          <option value=cleared>Cleared</option>
+        </select>
+      </label>
+      <button id=orders-reset type=button>Reset</button>
+    </div>
     <div style="overflow-x:auto">
     <table id=orders-table>
       <thead>
@@ -350,8 +484,8 @@
           <th data-sort=endpoint aria-sort=none>Endpoint</th>
           <th data-sort=username aria-sort=none>Username</th>
           <th data-sort=requested_hash_days aria-sort=none>Requested</th>
-          <th data-sort=delivered_hash_days aria-sort=none>Delivered</th>
           <th data-sort=hashrate aria-sort=none>Hashrate</th>
+          <th data-sort=progress aria-sort=none>Progress</th>
         </tr>
       </thead>
       <tbody id=orders-list></tbody>
@@ -479,21 +613,82 @@
 
 <script>
 let currentHashPrice = null;
-let sortColumn = 'id';
-let sortDirection = 'desc';
+const DEFAULT_SORT_COLUMN = 'id';
+const DEFAULT_SORT_DIRECTION = 'desc';
+const VALID_ORDER_SORTS = new Set([
+  'id',
+  'status',
+  'endpoint',
+  'username',
+  'requested_hash_days',
+  'hashrate',
+  'progress',
+]);
+const ORDER_STATUS_LABELS = {
+  active: 'Active',
+  in_mempool: 'In Mempool',
+  pending: 'Pending',
+  expired: 'Expired',
+  disconnected: 'Disconnected',
+  fulfilled: 'Fulfilled',
+  cancelled: 'Cancelled',
+};
+const ORDER_STATUS_PRIORITY = Object.fromEntries(
+  Object.keys(ORDER_STATUS_LABELS).map((key, i) => [key, i])
+);
+let sortColumn = DEFAULT_SORT_COLUMN;
+let sortDirection = DEFAULT_SORT_DIRECTION;
 let currentPage = 0;
 let currentOrders = [];
-let previousOrderCount = null;
-const PAGE_SIZE = 50;
-const STATUS_PRIORITY = {
-  active: 0,
-  pending: 1,
-  in_mempool: 2,
-  fulfilled: 3,
-  cancelled: 4,
-  disconnected: 5,
-  expired: 6,
-};
+let totalOrderCount = 0;
+let ordersFilterTimer = null;
+const PAGE_SIZE = 20;
+const ORDER_FILTER_DEBOUNCE_MS = 250;
+
+function selectedOrderStatuses() {
+  return Array.from(document.querySelectorAll('input[name="orders-status"]:checked'))
+    .map(input => input.value);
+}
+
+function updateStatusFilterLabel() {
+  const label = document.getElementById('orders-status-label');
+  if (!label) return;
+
+  const statuses = selectedOrderStatuses();
+  if (statuses.length === 0) {
+    label.textContent = 'Any';
+  } else if (statuses.length === 1) {
+    label.textContent = ORDER_STATUS_LABELS[statuses[0]] || statuses[0];
+  } else {
+    label.textContent = `${statuses.length} selected`;
+  }
+}
+
+function toggleStatusFilterOptions() {
+  const options = document.getElementById('orders-status-options');
+  const toggle = document.getElementById('orders-status-toggle');
+  if (!options || !toggle) return;
+
+  const hidden = options.classList.toggle('hidden');
+  toggle.setAttribute('aria-expanded', String(!hidden));
+}
+
+function formatOrderProgress(order) {
+  const progress = orderProgressValue(order);
+  if (progress === null) return '-';
+  const label = formatTruncated(progress) + '%';
+  return `<div class=order-progress title="${escapeHtml(label)}">
+    <span class=order-progress-fill style="width:${progress}%"></span>
+    <span class=order-progress-label>${escapeHtml(label)}</span>
+  </div>`;
+}
+
+function orderProgressValue(order) {
+  const requested = Number(order.requested_hash_days);
+  const delivered = Number(order.delivered_hash_days);
+  if (!Number.isFinite(requested) || requested <= 0 || !Number.isFinite(delivered)) return null;
+  return Math.min(100, Math.max(0, (delivered / requested) * 100));
+}
 
 function compareNumber(a, b) {
   return (Number(a) || 0) - (Number(b) || 0);
@@ -509,35 +704,159 @@ function compareRequestedHashDays(a, b) {
   if (aNull && bNull) return 0;
   if (aNull) return 1;
   if (bNull) return -1;
-  const value = compareNumber(a.requested_hash_days, b.requested_hash_days);
-  return sortDirection === 'asc' ? value : -value;
+  return compareNumber(a.requested_hash_days, b.requested_hash_days);
+}
+
+function compareProgress(a, b) {
+  const aProgress = orderProgressValue(a);
+  const bProgress = orderProgressValue(b);
+  if (aProgress === null && bProgress === null) return 0;
+  if (aProgress === null) return 1;
+  if (bProgress === null) return -1;
+  return aProgress - bProgress;
 }
 
 function compareStatus(a, b) {
-  const aPriority = STATUS_PRIORITY[a.status] ?? Number.MAX_SAFE_INTEGER;
-  const bPriority = STATUS_PRIORITY[b.status] ?? Number.MAX_SAFE_INTEGER;
-  const value = aPriority === bPriority ? compareString(a.status, b.status) : aPriority - bPriority;
-  return sortDirection === 'asc' ? value : -value;
+  const aValue = ORDER_STATUS_PRIORITY[a.status] ?? Number.MAX_SAFE_INTEGER;
+  const bValue = ORDER_STATUS_PRIORITY[b.status] ?? Number.MAX_SAFE_INTEGER;
+  return aValue === bValue ? compareString(a.status, b.status) : aValue - bValue;
 }
 
 function compareOrders(a, b) {
-  const aFlagged = a.review === 'flagged';
-  const bFlagged = b.review === 'flagged';
-  if (aFlagged !== bFlagged) return aFlagged ? -1 : 1;
   let value = 0;
   if (sortColumn === 'status') {
     value = compareStatus(a, b);
   } else if (sortColumn === 'endpoint' || sortColumn === 'username') {
     value = compareString(a[sortColumn], b[sortColumn]);
-    value = sortDirection === 'asc' ? value : -value;
   } else if (sortColumn === 'requested_hash_days') {
     value = compareRequestedHashDays(a, b);
+  } else if (sortColumn === 'progress') {
+    value = compareProgress(a, b);
   } else {
     value = compareNumber(a[sortColumn], b[sortColumn]);
-    value = sortDirection === 'asc' ? value : -value;
   }
 
+  value = sortDirection === 'asc' ? value : -value;
   return value || compareNumber(b.id, a.id);
+}
+
+function addOrderFilterParams(params) {
+  const search = document.getElementById('orders-search')?.value?.trim() || '';
+  const review = document.getElementById('orders-review')?.value || '';
+
+  if (search) params.set('search', search);
+  for (const status of selectedOrderStatuses()) params.append('status', status);
+  if (review) params.set('review', review);
+}
+
+function addOrderStateParams(params, includePage) {
+  addOrderFilterParams(params);
+  if (sortColumn !== DEFAULT_SORT_COLUMN || sortDirection !== DEFAULT_SORT_DIRECTION) {
+    params.set('sort', sortColumn);
+    params.set('direction', sortDirection);
+  }
+  if (includePage && currentPage > 0) params.set('page', String(currentPage + 1));
+}
+
+function buildOrdersQuery() {
+  const params = new URLSearchParams();
+  addOrderFilterParams(params);
+
+  if (!params.has('search') && !params.has('status') && !params.has('review')) {
+    params.set('limit', String(PAGE_SIZE));
+  }
+
+  return params.toString();
+}
+
+function syncOrdersUrl() {
+  const params = new URLSearchParams();
+  addOrderStateParams(params, true);
+  const query = params.toString();
+  history.replaceState(null, '', query ? `${location.pathname}?${query}` : location.pathname);
+}
+
+function loadOrdersStateFromUrl() {
+  const params = new URLSearchParams(location.search);
+  const search = document.getElementById('orders-search');
+  const review = document.getElementById('orders-review');
+
+  if (search) search.value = params.get('search') || '';
+  const statuses = new Set(params.getAll('status').flatMap(value => value.split(',')));
+  document.querySelectorAll('input[name="orders-status"]').forEach(input => {
+    input.checked = statuses.has(input.value);
+  });
+  if (review) review.value = params.get('review') || '';
+  updateStatusFilterLabel();
+
+  const requestedSort = params.get('sort');
+  sortColumn = VALID_ORDER_SORTS.has(requestedSort) ? requestedSort : DEFAULT_SORT_COLUMN;
+  sortDirection = params.get('direction') === 'asc' ? 'asc' : DEFAULT_SORT_DIRECTION;
+
+  const requestedPage = Number(params.get('page'));
+  currentPage = Number.isInteger(requestedPage) && requestedPage > 1 ? requestedPage - 1 : 0;
+}
+
+function restartOrdersPolling() {
+  clearTimeout(ordersFilterTimer);
+  ordersFilterTimer = null;
+  syncOrdersUrl();
+  startPolling(refresh);
+}
+
+function scheduleOrdersRefresh() {
+  currentPage = 0;
+  clearTimeout(ordersFilterTimer);
+  ordersFilterTimer = setTimeout(restartOrdersPolling, ORDER_FILTER_DEBOUNCE_MS);
+}
+
+function resetOrdersFilters() {
+  const search = document.getElementById('orders-search');
+  const review = document.getElementById('orders-review');
+  const options = document.getElementById('orders-status-options');
+  const toggle = document.getElementById('orders-status-toggle');
+
+  if (search) search.value = '';
+  document.querySelectorAll('input[name="orders-status"]').forEach(input => {
+    input.checked = false;
+  });
+  if (review) review.value = '';
+  if (options) options.classList.add('hidden');
+  if (toggle) toggle.setAttribute('aria-expanded', 'false');
+  updateStatusFilterLabel();
+
+  sortColumn = DEFAULT_SORT_COLUMN;
+  sortDirection = DEFAULT_SORT_DIRECTION;
+  currentPage = 0;
+  restartOrdersPolling();
+}
+
+function initOrdersControls() {
+  loadOrdersStateFromUrl();
+  document.getElementById('orders-search')?.addEventListener('input', scheduleOrdersRefresh);
+  document.getElementById('orders-status-toggle')?.addEventListener('click', toggleStatusFilterOptions);
+  document.querySelectorAll('input[name="orders-status"]').forEach(input => {
+    input.addEventListener('change', () => {
+      updateStatusFilterLabel();
+      currentPage = 0;
+      restartOrdersPolling();
+    });
+  });
+  document.getElementById('orders-review')?.addEventListener('change', () => {
+    currentPage = 0;
+    restartOrdersPolling();
+  });
+  document.getElementById('orders-reset')?.addEventListener('click', resetOrdersFilters);
+  document.addEventListener('click', e => {
+    const control = e.target.closest('.orders-multi-select');
+    if (control) return;
+
+    const options = document.getElementById('orders-status-options');
+    const toggle = document.getElementById('orders-status-toggle');
+    options?.classList.add('hidden');
+    toggle?.setAttribute('aria-expanded', 'false');
+  });
+  syncOrdersUrl();
 }
 
 function updateOrderSortHeaders() {
@@ -554,8 +873,11 @@ function renderOrders() {
   if (!tbody || tbody.querySelector('.copyable:hover')) return;
 
   const sortedOrders = currentOrders.slice().sort(compareOrders);
+  totalOrderCount = sortedOrders.length;
   const pageCount = Math.max(1, Math.ceil(sortedOrders.length / PAGE_SIZE));
+  const previousPage = currentPage;
   currentPage = Math.max(0, Math.min(currentPage, pageCount - 1));
+  if (currentPage !== previousPage) syncOrdersUrl();
   const pageStart = currentPage * PAGE_SIZE;
   const pageOrders = sortedOrders.slice(pageStart, pageStart + PAGE_SIZE);
 
@@ -563,25 +885,30 @@ function renderOrders() {
     const safeId = escapeHtml(order.id);
     const shortUsername = truncateMiddle(order.username);
     const target = order.requested_hash_days == null ? 'Unlimited' : formatHashDays(order.requested_hash_days);
-    const delivered = formatHashDays(order.delivered_hash_days) || '-';
     const hashrate = formatHashrate(order.hashrate);
+    const progress = formatOrderProgress(order);
+    const rowClass = order.requested_hash_days == null ? ' class=unlimited-order' : '';
     const reviewMarker = order.review === 'flagged' ? ' <span class="flagged">⚑</span>'
       : order.review === 'cleared' ? ' <span class="cleared">✓</span>' : '';
-    return `<tr data-id="${safeId}">
+    return `<tr data-id="${safeId}"${rowClass}>
       <td><a class=order-link href="/order/${safeId}">${safeId}</a></td>
       <td class="${escapeHtml(statusClass(order.status))}">${escapeHtml(formatStatus(order.status))}${reviewMarker}</td>
       <td>${escapeHtml(order.endpoint)}</td>
       <td>${escapeHtml(shortUsername)}</td>
       <td>${escapeHtml(target)}</td>
-      <td>${escapeHtml(delivered)}</td>
       <td>${escapeHtml(hashrate)}</td>
+      <td>${progress}</td>
     </tr>`;
   }).join('');
 
   const pageStatus = document.getElementById('orders-page-status');
   const prev = document.getElementById('orders-prev');
   const next = document.getElementById('orders-next');
-  if (pageStatus) pageStatus.textContent = `${currentPage + 1}/${pageCount}`;
+  if (pageStatus) {
+    pageStatus.textContent = totalOrderCount === 0
+      ? '0/0'
+      : `${currentPage + 1}/${pageCount} (${totalOrderCount})`;
+  }
   if (prev) prev.disabled = currentPage === 0;
   if (next) next.disabled = currentPage >= pageCount - 1;
   updateOrderSortHeaders();
@@ -596,10 +923,21 @@ async function fetchCurrentHashPrice(signal) {
   return match[1];
 }
 
+async function fetchOrders(signal) {
+  const query = buildOrdersQuery();
+  const r = await fetch(`/api/router/orders?${query}`, withAuthOptions({ signal }));
+  if (r.status === 401) {
+    showLoginOverlay();
+    throw new Error(`/api/router/orders: ${r.status}`);
+  }
+  if (!r.ok) throw new Error(`/api/router/orders: ${r.status}`);
+  return r.json();
+}
+
 async function refresh(signal) {
   const [routerData, ordersData, systemData, bitcoinData] = await Promise.all([
     fetchJson('/api/router/status', { signal }),
-    fetchJson('/api/router/orders', { signal }),
+    fetchOrders(signal),
     fetchJsonIfAllowed('/api/system/status', { signal }),
     fetchJsonIfAllowed('/api/bitcoin/status', { signal }),
   ]);
@@ -660,15 +998,13 @@ async function refresh(signal) {
   renderBitcoinData(bitcoinData);
   renderSystemData(systemData);
 
-  const nextOrders = ordersData || [];
-  if (previousOrderCount !== null && nextOrders.length !== previousOrderCount) currentPage = 0;
-  previousOrderCount = nextOrders.length;
-  currentOrders = nextOrders;
+  currentOrders = ordersData || [];
   renderOrders();
 }
 initLogControls();
 setupLogToggle();
 initCopyables();
+initOrdersControls();
 updateOrderSortHeaders();
 initAuthProbe().then(ok => {
   if (!ok) return;
@@ -686,6 +1022,7 @@ document.querySelectorAll('#orders-table th[data-sort]').forEach(th => {
       sortDirection = column === 'status' ? 'asc' : 'desc';
     }
     currentPage = 0;
+    syncOrdersUrl();
     renderOrders();
   });
 });
@@ -693,13 +1030,17 @@ document.querySelectorAll('#orders-table th[data-sort]').forEach(th => {
 document.getElementById('orders-prev').addEventListener('click', () => {
   if (currentPage > 0) {
     currentPage -= 1;
+    syncOrdersUrl();
     renderOrders();
   }
 });
 
 document.getElementById('orders-next').addEventListener('click', () => {
-  currentPage += 1;
-  renderOrders();
+  if ((currentPage + 1) * PAGE_SIZE < totalOrderCount) {
+    currentPage += 1;
+    syncOrdersUrl();
+    renderOrders();
+  }
 });
 
 document.getElementById('orders-list').addEventListener('click', (e) => {

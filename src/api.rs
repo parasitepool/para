@@ -299,7 +299,7 @@ pub struct OrderDetail {
     pub payment_address: Option<Address<NetworkUnchecked>>,
     pub payment_amount: Option<Amount>,
     pub created_at: u64,
-    pub created_at_height: u32,
+    pub created_at_height: Option<u32>,
     pub upstream: MiningStats,
     pub downstream: MiningStats,
     pub sessions: Vec<SessionDetail>,
@@ -326,7 +326,7 @@ impl OrderDetail {
             payment_address: bucket.map(|bucket| bucket.payment.address.as_unchecked().clone()),
             payment_amount: bucket.map(|bucket| bucket.payment.amount),
             created_at: epoch::instant_to_epoch_secs(order.created_at, now) as u64,
-            created_at_height: bucket.map_or(0, |bucket| bucket.payment.created_at_height),
+            created_at_height: bucket.map(|bucket| bucket.payment.created_at_height),
             upstream: MiningStats::from_snapshot(&order.stats(), now),
             downstream: MiningStats::from_snapshot(&downstream, now),
             sessions: sessions
