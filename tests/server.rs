@@ -442,7 +442,7 @@ fn aggregate_users_stale_node_not_double_counted() {
 fn status_json() {
     let server = TestServer::spawn();
 
-    let status = server.get_json::<Status>("/status", None);
+    let status = server.get_json::<NodeStatus>("/status", None);
 
     assert!(status.disk_usage_percent > 0.0);
 }

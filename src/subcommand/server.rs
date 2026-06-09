@@ -71,7 +71,7 @@ fn exclusion_list_from_params(params: HashMap<String, String>) -> Vec<String> {
         .unwrap_or_default()
 }
 
-pub type Status = StatusHtml;
+pub type NodeStatus = StatusHtml;
 
 #[derive(Debug)]
 struct AccountUpdate {

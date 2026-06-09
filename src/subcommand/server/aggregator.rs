@@ -140,7 +140,7 @@ pub(crate) async fn blockheight(
                 }
 
                 let resp = request_builder.send().await?;
-                let status: Status =
+                let status: NodeStatus =
                     serde_json::from_str(&resp.text().await?).map_err(|err| anyhow!(err))?;
 
                 Ok::<_, Error>(status.blockheight)
@@ -183,7 +183,7 @@ pub(crate) async fn dashboard(
 
                 let resp = request_builder.send().await?;
 
-                let status: Result<Status> =
+                let status: Result<NodeStatus> =
                     serde_json::from_str(&resp.text().await?).map_err(|err| anyhow!(err));
 
                 status
@@ -194,7 +194,7 @@ pub(crate) async fn dashboard(
         }
     });
 
-    let results: Vec<(&Url, Result<Status>)> = futures::future::join_all(fetches).await;
+    let results: Vec<(&Url, Result<NodeStatus>)> = futures::future::join_all(fetches).await;
 
     let mut checks = BTreeMap::new();
 

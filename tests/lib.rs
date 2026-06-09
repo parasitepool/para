@@ -4,7 +4,7 @@ use {
     para::{
         ckpool::{self, HashRate, HashRateStatus, PoolStatus, ShareStatus, User, Worker},
         subcommand::server::{
-            Status,
+            NodeStatus,
             notifications::{NotificationHandler, NotificationPriority, NotificationType},
         },
     },
