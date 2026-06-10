@@ -1,5 +1,6 @@
 use super::*;
 
+#[allow(dead_code)]
 pub(crate) struct AcceptJson(pub(crate) bool);
 
 impl<S> FromRequestParts<S> for AcceptJson
