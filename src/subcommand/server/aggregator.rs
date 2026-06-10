@@ -24,20 +24,15 @@ impl Aggregator {
 
         let cache = Arc::new(Cache::new(client.clone(), config.clone()));
 
-        let mut router = axum::Router::new()
+        let router = axum::Router::new()
             .route("/aggregator/blockheight", get(blockheight))
             .route("/aggregator/pool/pool.status", get(pool_status))
             .route("/aggregator/users/{address}", get(user_status))
-            .route("/aggregator/users", get(users));
-
-        router = if let Some(token) = config.api_token() {
-            router.layer(bearer_auth(token))
-        } else {
-            router
-        }
-        .layer(Extension(cache))
-        .layer(Extension(client))
-        .layer(Extension(config));
+            .route("/aggregator/users", get(users))
+            .layer(from_extractor::<ApiAuth>())
+            .layer(Extension(cache))
+            .layer(Extension(client))
+            .layer(Extension(config));
 
         Ok(router)
     }

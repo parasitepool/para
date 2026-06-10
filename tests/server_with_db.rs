@@ -1239,3 +1239,28 @@ async fn test_participants_excludes_rejected_shares() {
     assert_eq!(participants.len(), 1);
     assert_eq!(participants[0], "bar");
 }
+
+#[tokio::test]
+async fn auth_tiers_with_db() {
+    let server = TestServer::spawn_with_db_args("--api-token foo --admin-token bar").await;
+
+    setup_test_schema(server.database_url().unwrap())
+        .await
+        .unwrap();
+
+    async fn case(server: &TestServer, path: &str, token: &str, expected: StatusCode) {
+        let response = reqwest::Client::new()
+            .get(server.url().join(path).unwrap())
+            .bearer_auth(token)
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), expected, "{path} with token {token}");
+    }
+
+    case(&server, "/rounds", "foo", StatusCode::OK).await;
+    case(&server, "/rounds", "bar", StatusCode::OK).await;
+    case(&server, "/payouts", "foo", StatusCode::UNAUTHORIZED).await;
+    case(&server, "/payouts", "bar", StatusCode::OK).await;
+}

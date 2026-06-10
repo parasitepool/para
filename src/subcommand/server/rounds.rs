@@ -16,18 +16,14 @@ pub(crate) struct RoundParticipant {
     pub(crate) top_diff: f64,
 }
 
-pub(crate) fn rounds_router(config: Arc<ServerConfig>, database: Database) -> axum::Router {
-    let mut router = axum::Router::new()
+pub(crate) fn rounds_router(database: Database) -> axum::Router {
+    axum::Router::new()
         .route("/rounds", get(rounds))
         .route("/rounds/current", get(round_current))
         .route("/rounds/{blockheight}", get(round))
-        .route("/participants/{blockheight}", get(participants));
-
-    if let Some(token) = config.api_token() {
-        router = router.layer(bearer_auth(token))
-    };
-
-    router.layer(Extension(database))
+        .route("/participants/{blockheight}", get(participants))
+        .layer(from_extractor::<ApiAuth>())
+        .layer(Extension(database))
 }
 
 #[utoipa::path(

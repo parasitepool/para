@@ -28,7 +28,8 @@ fn pool_status_typical() {
 
 #[test]
 fn pool_status_with_auth() {
-    let server = TestServer::spawn_with_args("--api-token crazysecrettoken");
+    let server =
+        TestServer::spawn_with_args("--api-token crazysecrettoken --admin-token verysecrettoken");
 
     fs::write(
         server.log_dir().join("pool/pool.status"),
@@ -81,7 +82,8 @@ fn user_status_typical() {
 
 #[test]
 fn user_status_with_auth() {
-    let server = TestServer::spawn_with_args("--api-token crazysecrettoken");
+    let server =
+        TestServer::spawn_with_args("--api-token crazysecrettoken --admin-token verysecrettoken");
     let user = typical_user();
     let user_address = address(0);
 
@@ -130,7 +132,8 @@ fn list_users() {
 
 #[test]
 fn list_users_with_auth() {
-    let server = TestServer::spawn_with_args("--api-token crazysecrettoken");
+    let server =
+        TestServer::spawn_with_args("--api-token crazysecrettoken --admin-token verysecrettoken");
     let mut users = BTreeMap::new();
     for i in 0..9 {
         let user = typical_user();
@@ -191,7 +194,9 @@ fn aggregate_pool_status() {
 fn aggregate_pool_status_with_api_token() {
     let mut servers = Vec::new();
     for _ in 0..3 {
-        let server = TestServer::spawn_with_args("--api-token crazysecrettoken");
+        let server = TestServer::spawn_with_args(
+            "--api-token crazysecrettoken --admin-token verysecrettoken",
+        );
         fs::write(
             server.log_dir().join("pool/pool.status"),
             typical_status().to_string(),
@@ -204,7 +209,7 @@ fn aggregate_pool_status_with_api_token() {
     assert_eq!(servers.len(), 3);
 
     let aggregator = TestServer::spawn_with_args(format!(
-        "--api-token crazysecrettoken --nodes {} --nodes {} --nodes {}",
+        "--api-token crazysecrettoken --admin-token verysecrettoken --nodes {} --nodes {} --nodes {}",
         servers[0].url(),
         servers[1].url(),
         servers[2].url()
@@ -285,7 +290,9 @@ fn aggregate_users_with_auth_with_api_token() {
 
     let mut servers = Vec::new();
     for (address, user) in users.iter() {
-        let server = TestServer::spawn_with_args("--api-token crazysecrettoken");
+        let server = TestServer::spawn_with_args(
+            "--api-token crazysecrettoken --admin-token verysecrettoken",
+        );
 
         fs::write(
             server.log_dir().join(format!("users/{address}")),
@@ -299,7 +306,7 @@ fn aggregate_users_with_auth_with_api_token() {
     assert_eq!(servers.len(), 3);
 
     let aggregator = TestServer::spawn_with_args(format!(
-        "--api-token crazysecrettoken --nodes {} --nodes {} --nodes {}",
+        "--api-token crazysecrettoken --admin-token verysecrettoken --nodes {} --nodes {} --nodes {}",
         servers[0].url(),
         servers[1].url(),
         servers[2].url()
@@ -754,4 +761,51 @@ fn aggregator_cache_concurrent_user_burst() {
     for handle in handles {
         handle.join().unwrap();
     }
+}
+
+#[test]
+fn auth_tiers() {
+    let server = TestServer::spawn_with_args("--api-token foo --admin-token bar");
+
+    fs::write(
+        server.log_dir().join("pool/pool.status"),
+        typical_status().to_string(),
+    )
+    .unwrap();
+
+    #[track_caller]
+    fn case(server: &TestServer, path: &str, token: Option<&str>, expected: StatusCode) {
+        let request = reqwest::blocking::Client::new().get(server.url().join(path).unwrap());
+
+        let request = if let Some(token) = token {
+            request.bearer_auth(token)
+        } else {
+            request
+        };
+
+        assert_eq!(request.send().unwrap().status(), expected);
+    }
+
+    case(&server, "/pool/pool.status", None, StatusCode::UNAUTHORIZED);
+    case(&server, "/pool/pool.status", Some("foo"), StatusCode::OK);
+    case(&server, "/pool/pool.status", Some("bar"), StatusCode::OK);
+    case(&server, "/status", None, StatusCode::UNAUTHORIZED);
+    case(&server, "/status", Some("foo"), StatusCode::UNAUTHORIZED);
+    case(&server, "/status", Some("bar"), StatusCode::OK);
+}
+
+#[test]
+fn api_token_requires_admin_token() {
+    let output = CommandBuilder::new("server --api-token foo")
+        .command()
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+
+    assert!(
+        str::from_utf8(&output.stderr)
+            .unwrap()
+            .contains("--admin-token is required when --api-token is set")
+    );
 }

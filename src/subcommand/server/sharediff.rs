@@ -3,24 +3,17 @@ use {
     crate::subcommand::server::database::{HighestDiff, TeraShare},
 };
 
-pub(crate) fn share_difficulty_router(
-    config: Arc<ServerConfig>,
-    database: Database,
-) -> axum::Router {
-    let mut router = axum::Router::new()
+pub(crate) fn share_difficulty_router(database: Database) -> axum::Router {
+    axum::Router::new()
         .route("/highestdiff/{blockheight}", get(highestdiff))
         .route(
             "/highestdiff/{blockheight}/user/{username}",
             get(highestdiff_by_user),
         )
         .route("/highestdiff/{blockheight}/all", get(highestdiff_all_users))
-        .route("/terashares", get(get_tera_shares));
-
-    if let Some(token) = config.api_token() {
-        router = router.layer(bearer_auth(token))
-    };
-
-    router.layer(Extension(database))
+        .route("/terashares", get(get_tera_shares))
+        .layer(from_extractor::<ApiAuth>())
+        .layer(Extension(database))
 }
 
 /// Get highest difficulty share for a given blockheight

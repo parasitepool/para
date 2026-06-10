@@ -4,6 +4,7 @@ use {
         ckpool,
         http_server::{
             self, HttpConfig,
+            auth::{AdminAuth, ApiAuth, BearerAuth},
             error::{OptionExt, ServerError, ServerResult},
         },
         subcommand::{
@@ -15,7 +16,10 @@ use {
         },
     },
     aggregator::Aggregator,
-    axum::extract::{Path, Query},
+    axum::{
+        extract::{Path, Query},
+        middleware::from_extractor,
+    },
     cache::Cache,
     database::Database,
     reqwest::{Client, ClientBuilder, header},
@@ -23,10 +27,7 @@ use {
     std::sync::OnceLock,
     sysinfo::DiskRefreshKind,
     templates::{PageContent, PageHtml, home::HomeHtml, payouts::PayoutsHtml},
-    tower_http::{
-        services::ServeDir, set_header::SetResponseHeaderLayer,
-        validate_request::ValidateRequestHeaderLayer,
-    },
+    tower_http::{services::ServeDir, set_header::SetResponseHeaderLayer},
     utoipa::{
         Modify,
         openapi::security::{Http, HttpAuthScheme, SecurityScheme},
@@ -55,13 +56,6 @@ const MAX_ATTEMPTS: usize = 3;
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(1500);
 const STALE_THRESHOLD: Duration = Duration::from_secs(3600);
 static MIGRATION_DONE: OnceLock<bool> = OnceLock::new();
-
-#[allow(deprecated)]
-pub(crate) fn bearer_auth<T: Default>(
-    token: &str,
-) -> ValidateRequestHeaderLayer<tower_http::auth::require_authorization::Bearer<T>> {
-    ValidateRequestHeaderLayer::bearer(token)
-}
 
 fn exclusion_list_from_params(params: HashMap<String, String>) -> Vec<String> {
     params
@@ -211,6 +205,11 @@ pub struct Server {
 
 impl Server {
     pub async fn run(&self, handle: Handle<SocketAddr>, cancel_token: CancellationToken) -> Result {
+        ensure!(
+            self.config.api_token().is_none() || self.config.admin_token().is_some(),
+            "--admin-token is required when --api-token is set"
+        );
+
         let config = Arc::new(self.config.clone());
         let log_dir = config.log_dir();
         let pool_dir = log_dir.join("pool");
@@ -242,17 +241,12 @@ impl Server {
             .layer(SetResponseHeaderLayer::overriding(
                 CONTENT_DISPOSITION,
                 HeaderValue::from_static("inline"),
-            ));
-
-        router = if let Some(token) = config.api_token() {
-            router.layer(bearer_auth(token))
-        } else {
-            router
-        };
+            ))
+            .layer(from_extractor::<ApiAuth>());
 
         router = router
             .route("/", get(Self::home))
-            .route("/status", Self::with_auth(config.clone(), get(status)))
+            .route("/status", get(status).layer(from_extractor::<AdminAuth>()))
             .route("/static/{*path}", get(Self::static_assets));
 
         #[cfg(feature = "swagger-ui")]
@@ -288,10 +282,10 @@ impl Server {
                 }
 
                 router = router
-                    .merge(account_router(config.clone(), database.clone()))
-                    .merge(share_difficulty_router(config.clone(), database.clone()))
+                    .merge(account_router(database.clone()))
+                    .merge(share_difficulty_router(database.clone()))
                     .merge(payouts_router(config.clone(), database.clone()))
-                    .merge(rounds_router(config.clone(), database.clone()))
+                    .merge(rounds_router(database.clone()))
                     .merge(sync_router(config.clone(), database));
             }
             Err(err) => {
@@ -307,6 +301,11 @@ impl Server {
         } else {
             warn!("No aggregator nodes configured: skipping aggregator routes.");
         }
+
+        router = router.layer(Extension(BearerAuth::new(
+            config.api_token(),
+            config.admin_token(),
+        )));
 
         info!("Serving files in {}", log_dir.display());
 
@@ -340,17 +339,6 @@ impl Server {
         server_task.await??;
 
         Ok(())
-    }
-
-    fn with_auth<S>(config: Arc<ServerConfig>, method_router: MethodRouter<S>) -> MethodRouter<S>
-    where
-        S: Clone + Send + Sync + 'static,
-    {
-        if let Some(token) = config.admin_token() {
-            method_router.layer(bearer_auth(token))
-        } else {
-            method_router
-        }
     }
 
     async fn home(

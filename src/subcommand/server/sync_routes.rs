@@ -1,18 +1,14 @@
 use super::*;
 
 pub(crate) fn sync_router(config: Arc<ServerConfig>, database: Database) -> axum::Router {
-    let mut router = axum::Router::new()
+    axum::Router::new()
         .route(
             "/sync/batch",
             post(sync_batch).layer(DefaultBodyLimit::max(50 * MEBIBYTE)),
         )
-        .layer(Extension(database));
-
-    if let Some(token) = config.admin_token() {
-        router = router.layer(bearer_auth(token))
-    };
-
-    router.layer(Extension(config))
+        .layer(Extension(database))
+        .layer(from_extractor::<AdminAuth>())
+        .layer(Extension(config))
 }
 
 /// Receive a batch of shares to sync

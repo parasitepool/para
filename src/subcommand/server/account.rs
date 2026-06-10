@@ -34,20 +34,16 @@ pub struct AccountResponse {
     pub remark: Option<String>,
 }
 
-pub(crate) fn account_router(config: Arc<ServerConfig>, database: Database) -> axum::Router {
-    let mut router = axum::Router::new()
+pub(crate) fn account_router(database: Database) -> axum::Router {
+    axum::Router::new()
         .route("/account/{address}", get(account_lookup))
         .route("/account/update", post(account_update))
         .route(
             "/account/metadata",
             post(account_metadata_update).layer(DefaultBodyLimit::max(1024)),
-        );
-
-    if let Some(token) = config.api_token() {
-        router = router.layer(bearer_auth(token))
-    };
-
-    router.layer(Extension(database))
+        )
+        .layer(from_extractor::<ApiAuth>())
+        .layer(Extension(database))
 }
 
 /// Look up account by BTC address

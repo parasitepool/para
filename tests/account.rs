@@ -57,7 +57,8 @@ impl TestAccount {
 
 #[tokio::test]
 async fn account_endpoints_behind_token() {
-    let server = TestServer::spawn_with_db_args("--api-token verysecrettoken").await;
+    let server =
+        TestServer::spawn_with_db_args("--api-token verysecrettoken --admin-token foo").await;
     let db_url = server.database_url().unwrap();
     setup_test_schema(db_url.clone()).await.unwrap();
 

@@ -10,7 +10,7 @@ use {
             header::{CONTENT_DISPOSITION, CONTENT_TYPE},
         },
         response::{IntoResponse, Response},
-        routing::{MethodRouter, get, post, put},
+        routing::{get, post, put},
     },
     axum_server::Handle,
     base64::{Engine, engine::general_purpose},
