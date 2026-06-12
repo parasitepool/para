@@ -51,16 +51,16 @@ async fn test_file_sink_json() {
             .expect("Failed to get shares within timeout");
         println!(
             "Pool status: {} accepted shares",
-            status.stats.accepted_shares
+            status.downstream.stats.accepted_shares
         );
 
         let _ = miner.kill();
         let _ = miner.wait();
 
         assert!(
-            status.stats.accepted_shares >= 3,
+            status.downstream.stats.accepted_shares >= 3,
             "Expected at least 3 shares, got {}",
-            status.stats.accepted_shares
+            status.downstream.stats.accepted_shares
         );
     }
 

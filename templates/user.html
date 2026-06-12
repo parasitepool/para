@@ -16,37 +16,55 @@
 
   <div class="column column-full">
     <h2>Workers</h2>
-    <table id=workers-table>
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Sessions</th>
-          <th>Hashrate</th>
-          <th>SPS</th>
-          <th>Best Share</th>
-          <th>Hashdays</th>
-          <th>Last Share</th>
-        </tr>
-      </thead>
-      <tbody id=workers-list></tbody>
-    </table>
+    <div id=workers-root class=filter-table>
+      <div class=table-scroll>
+      <table id=workers-table>
+        <thead>
+          <tr>
+            <th data-sort=name aria-sort=none>Name</th>
+            <th data-sort=session_count aria-sort=none>Sessions</th>
+            <th data-sort=hashrate_1m aria-sort=descending>Hashrate</th>
+            <th data-sort=sps_1m aria-sort=none>SPS</th>
+            <th data-sort=best_share aria-sort=none>Best Share</th>
+            <th data-sort=hash_days aria-sort=none>Hashdays</th>
+            <th data-sort=last_share aria-sort=none>Last Share</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      </div>
+      <div class=table-pagination>
+        <button class=page-prev type=button>&lsaquo; Prev</button>
+        <span class=page-status>1/1</span>
+        <button class=page-next type=button>Next &rsaquo;</button>
+      </div>
+    </div>
   </div>
 
   <div class="column column-full">
     <h2>Sessions</h2>
-    <table id=sessions-table>
-      <thead>
-        <tr>
-          <th>Username</th>
-          <th>Hashrate</th>
-          <th>SPS</th>
-          <th>Best Share</th>
-          <th>Hashdays</th>
-          <th>Last Share</th>
-        </tr>
-      </thead>
-      <tbody id=sessions-list></tbody>
-    </table>
+    <div id=sessions-root class=filter-table>
+      <div class=table-scroll>
+      <table id=sessions-table>
+        <thead>
+          <tr>
+            <th data-sort=username aria-sort=none>Username</th>
+            <th data-sort=hashrate_1m aria-sort=descending>Hashrate</th>
+            <th data-sort=sps_1m aria-sort=none>SPS</th>
+            <th data-sort=best_share aria-sort=none>Best Share</th>
+            <th data-sort=hash_days aria-sort=none>Hashdays</th>
+            <th data-sort=last_share aria-sort=none>Last Share</th>
+          </tr>
+        </thead>
+        <tbody id=sessions-list></tbody>
+      </table>
+      </div>
+      <div class=table-pagination>
+        <button class=page-prev type=button>&lsaquo; Prev</button>
+        <span class=page-status>1/1</span>
+        <button class=page-next type=button>Next &rsaquo;</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -54,23 +72,40 @@
 const apiBase = '{{ self.api_base }}';
 const userAddress = window.location.pathname.split('/').pop();
 
-function renderWorkerRows(workers) {
-  return workers.sort((a, b) => b.stats.hashrate_1m - a.stats.hashrate_1m).map(worker => {
-    const stats = worker.stats;
-    const lastShare = stats.last_share != null ? formatTimestampAgo(stats.last_share) : '-';
-    const bestShare = formatDifficulty(stats.best_share);
+function renderWorkerRow(worker) {
+  const stats = worker.stats;
+  const lastShare = stats.last_share != null ? formatTimestampAgo(stats.last_share) : '-';
+  const bestShare = formatDifficulty(stats.best_share);
 
-    return `<tr>
-      <td>${worker.name || '(default)'}</td>
-      <td>${worker.session_count}</td>
-      <td>${formatHashrate(stats.hashrate_1m)}</td>
-      <td>${formatTruncated(stats.sps_1m)}</td>
-      <td>${bestShare || '-'}</td>
-      <td>${stats.hash_days != null ? formatHashDays(stats.hash_days) : '-'}</td>
-      <td>${lastShare}</td>
-    </tr>`;
-  }).join('');
+  return `<tr>
+    <td>${escapeHtml(worker.name || '(default)')}</td>
+    <td>${escapeHtml(worker.session_count)}</td>
+    <td>${escapeHtml(formatHashrate(stats.hashrate_1m))}</td>
+    <td>${escapeHtml(formatTruncated(stats.sps_1m))}</td>
+    <td>${escapeHtml(bestShare || '-')}</td>
+    <td>${escapeHtml(stats.hash_days != null ? formatHashDays(stats.hash_days) : '-')}</td>
+    <td>${escapeHtml(lastShare)}</td>
+  </tr>`;
 }
+
+const workersTable = initFilterTable({
+  root: document.getElementById('workers-root'),
+  prefix: 'workers',
+  defaultSort: { column: 'hashrate_1m', direction: 'desc' },
+  sorts: {
+    name: 'string',
+    hashrate_1m: compareStat('hashrate_1m'),
+    sps_1m: compareStat('sps_1m'),
+    best_share: compareNullableStat('best_share'),
+    hash_days: compareStat('hash_days'),
+    last_share: compareNullableStat('last_share'),
+  },
+  ascByDefault: ['name'],
+  tiebreak: (a, b) => compareString(a.name, b.name),
+  renderRow: renderWorkerRow,
+});
+
+const sessionsTable = initSessionsTable(document.getElementById('sessions-root'));
 
 async function refresh(signal) {
   const user = await fetchJsonAllow404(`${apiBase}/user/${userAddress}`, { signal });
@@ -94,8 +129,8 @@ async function refresh(signal) {
   copyable('best_share', formatDifficulty(s.best_share), s.best_share);
   copyable('hash_days', formatHashDays(s.hash_days), s.hash_days);
 
-  document.getElementById('workers-list').innerHTML = renderWorkerRows(user.workers || []);
-  document.getElementById('sessions-list').innerHTML = renderSessionRows(user.sessions || []);
+  workersTable.setRows(user.workers || []);
+  sessionsTable.setRows(user.sessions || []);
 }
 initDelegatedCopyables('sessions-list');
 startPolling(refresh);

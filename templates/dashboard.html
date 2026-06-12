@@ -9,9 +9,21 @@
   <script src=/static/dashboard.js></script>
 </head>
 <body>
-<a href="/"><img src=/static/parasite.svg alt="" class=logo></a>
-<h1>{{ self.content.title() }}<sup> {{ self.superscript() }}</sup></h1>
+<nav class=navbar>
+  <a href="/" class=navbar-brand>
+    <img src=/static/parasite.svg alt="" class=navbar-logo>
+    <sup>{{ self.superscript() }}</sup>
+  </a>
+  <a href="/users" class=navbar-item>Users</a>
+%% if self.auth.enabled && !self.auth.authed {
+  <a id=navbar-login class=navbar-item href="/login">Login</a>
+%% }
+%% if self.auth.authed {
+  <button id=navbar-logout>Logout</button>
+%% }
+</nav>
 <div class=wrapper>
+<h1>{{ self.content.title() }}</h1>
 <div id=last-updated class=last-updated></div>
 $$ Trusted(&self.content)
 </div>

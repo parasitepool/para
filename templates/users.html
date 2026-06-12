@@ -1,37 +1,79 @@
+<style>
+  .user-link { color: inherit; text-decoration: none; }
+  .user-link:hover { text-decoration: underline; }
+</style>
+
 <div class=grid>
   <div class="column column-full">
-    <div id=users-list></div>
+    <h2>Users</h2>
+    <div id=users-root class=filter-table>
+      <div class=table-toolbar>
+        <label for=users-search class=toolbar-search>Search
+          <input id=users-search type=search data-filter=search placeholder="Address, worker">
+        </label>
+      </div>
+      <div class=table-scroll>
+      <table id=users-table>
+        <thead>
+          <tr>
+            <th data-sort=address aria-sort=none class=col-flex>Address</th>
+            <th data-sort=worker_count aria-sort=none>Workers</th>
+            <th data-sort=session_count aria-sort=none>Sessions</th>
+            <th data-sort=hashrate aria-sort=descending>Hashrate</th>
+            <th data-sort=received_hash_days aria-sort=none>Received</th>
+            <th data-sort=best_share aria-sort=none>Best Share</th>
+            <th data-sort=last_share aria-sort=none>Last Share</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      </div>
+      <div class=table-pagination>
+        <button class=page-prev type=button>&lsaquo; Prev</button>
+        <span class=page-status>1/1</span>
+        <button class=page-next type=button>Next &rsaquo;</button>
+      </div>
+    </div>
   </div>
 </div>
 
 <script>
 const apiBase = '{{ self.api_base }}';
 
-async function refresh(signal) {
-  const users = await fetchJson(`${apiBase}/users`, { signal });
-  const container = document.getElementById('users-list');
-
-  if (users.length === 0) {
-    container.innerHTML = '';
-    return;
-  }
-
-  const userDetails = await Promise.all(
-    users.map(addr => fetchJson(`${apiBase}/user/${addr}`, { signal })
-      .catch(e => { if (e.name === 'AbortError') throw e; return null; }))
-  );
-
-  container.innerHTML = userDetails
-    .filter(u => u !== null)
-    .map(u => {
-      const addr = u.address;
-      const shortAddr = truncateMiddle(addr, 20, 8);
-      return `<div class=user-row>
-        <a href="/user/${addr}">${shortAddr}</a>
-        <span>${u.workers.length} | ${u.session_count} | ${formatHashrate(u.stats.hashrate_1m)}</span>
-      </div>`;
-    })
-    .join('');
+function renderRow(user) {
+  const safeAddress = escapeHtml(user.address);
+  const shortAddress = escapeHtml(truncateMiddle(user.address, 20, 8));
+  const lastShare = user.last_share != null ? formatTimestampAgo(user.last_share) : '-';
+  return `<tr>
+    <td class=col-flex><a class=user-link href="/user/${safeAddress}" title="${safeAddress}">${shortAddress}</a></td>
+    <td>${escapeHtml(user.worker_count)}</td>
+    <td>${escapeHtml(user.session_count)}</td>
+    <td>${escapeHtml(formatHashrate(user.hashrate))}</td>
+    <td>${escapeHtml(formatHashDays(user.received_hash_days))}</td>
+    <td>${escapeHtml(formatDifficulty(user.best_share) || '-')}</td>
+    <td>${escapeHtml(lastShare)}</td>
+  </tr>`;
 }
+
+const usersTable = initFilterTable({
+  root: document.getElementById('users-root'),
+  defaultSort: { column: 'hashrate', direction: 'desc' },
+  sorts: {
+    address: 'string',
+    best_share: (a, b) => compareNullableNumber(a.best_share, b.best_share),
+    last_share: (a, b) => compareNullableNumber(a.last_share, b.last_share),
+  },
+  ascByDefault: ['address'],
+  tiebreak: (a, b) => compareString(a.address, b.address),
+  renderRow,
+  rowHref: user => `/user/${user.address}`,
+  onFilterChange: () => startPolling(refresh),
+});
+
+async function refresh(signal) {
+  const users = await fetchJson(`${apiBase}/users?${usersTable.buildQuery()}`, { signal });
+  usersTable.setRows(users || []);
+}
+
 startPolling(refresh);
 </script>

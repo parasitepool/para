@@ -4,7 +4,7 @@
 
   .action-bar {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, 1fr);
     gap: 8px;
     width: 1048px;
   }
@@ -74,108 +74,8 @@
 
   .confirm-modal .modal-buttons button:hover { background: #444; }
 
-  #orders-table th { white-space: nowrap; }
-  #orders-table td { vertical-align: middle; white-space: nowrap; }
-  #orders-table tbody tr { cursor: pointer; }
-  .orders-toolbar {
-    display: grid;
-    grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto;
-    gap: 10px;
-    align-items: end;
-    margin-bottom: 10px;
-    font-size: 0.9em;
-  }
-  .orders-search-field {
-    grid-column: 1 / -1;
-  }
-  .orders-toolbar label,
-  .orders-field-label {
-    color: #888;
-    font-size: 1em;
-  }
-  .orders-toolbar input[type="search"],
-  .orders-toolbar select,
-  #orders-status-toggle {
-    width: 100%;
-    box-sizing: border-box;
-    margin-top: 4px;
-    padding: 7px 10px;
-    background: #111;
-    border: 1px solid #444;
-    color: #eee;
-    font: inherit;
-  }
-  .orders-multi-select {
-    position: relative;
-    margin-top: 4px;
-  }
-  #orders-status-toggle {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    cursor: pointer;
-    text-align: left;
-  }
-  #orders-status-toggle::after {
-    content: "\25BE";
-    color: #888;
-    margin-left: 10px;
-  }
-  .orders-status-options {
-    position: absolute;
-    z-index: 1500;
-    top: calc(100% + 4px);
-    left: 0;
-    right: 0;
-    max-height: 220px;
-    overflow-y: auto;
-    padding: 6px;
-    background: #111;
-    border: 1px solid #444;
-  }
-  .orders-status-options label {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 4px;
-    color: #eee;
-    cursor: pointer;
-  }
-  .orders-status-options label:hover {
-    background: #222;
-  }
-  #orders-reset {
-    min-width: 80px;
-    padding: 7px 14px;
-    background: #333;
-    border: 1px solid #444;
-    color: #eee;
-    cursor: pointer;
-    font: inherit;
-  }
-  #orders-reset:hover { background: #444; }
-  #orders-table th[data-sort] {
-    cursor: pointer;
-    user-select: none;
-  }
-  #orders-table th[data-sort]:hover { color: #eee; }
-  #orders-table th[data-sort]::after {
-    content: "";
-    display: inline-block;
-    width: 1em;
-    margin-left: 4px;
-    color: #ccc;
-  }
-  #orders-table th[data-sort].sort-asc::after { content: "\25B2"; }
-  #orders-table th[data-sort].sort-desc::after { content: "\25BC"; }
   #orders-table tbody tr.unlimited-order {
     background: #181818;
-  }
-  #orders-table th:nth-child(3), #orders-table td:nth-child(3) {
-    width: 100%;
-    max-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
   .order-progress {
     position: relative;
@@ -199,32 +99,6 @@
     color: #eee;
     font-size: 0.9em;
   }
-  .orders-pagination {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    margin-top: 12px;
-    color: #888;
-    font-size: inherit;
-  }
-
-  .orders-pagination button {
-    background: none;
-    border: none;
-    color: #888;
-    cursor: pointer;
-    font: inherit;
-    padding: 4px 8px;
-  }
-
-  .orders-pagination button:hover { color: #eee; }
-  .orders-pagination button:disabled { opacity: 0.3; cursor: not-allowed; }
-
-  #orders-page-status {
-    text-align: center;
-  }
-
   #order-overlay {
     position: fixed;
     inset: 0;
@@ -399,39 +273,17 @@
 
   @media (max-width: 1140px) {
     .action-bar { width: 100%; max-width: 500px; grid-template-columns: repeat(2, 1fr); }
-    .orders-toolbar { grid-template-columns: 1fr; }
-    #orders-table { font-size: 0.75em; }
   }
 </style>
 
 <div class="grid grid-stack">
-  <div class=column>
-    <h2>Upstream</h2>
-    <div class=row><span>Capacity</span><span id=capacity_work></span></div>
-    <div class=row><span>Available</span><span id=available_work></span></div>
-    <div class=row><span>Active Orders</span><span id=active_order_count></span></div>
-    <div class=row><span>SPS</span><span id=upstream_sps_1m></span></div>
-    <div class=row><span>Best Share</span><span id=upstream_best_share class=copyable></span></div>
-    <div class=row><span>Last Share</span><span id=upstream_last_share></span></div>
-    <div class=row><span>Rejected Shares</span><span id=upstream_rejected_shares class=copyable></span></div>
-    <div class=row><span>Rejected Work</span><span id=upstream_rejected_work class=copyable></span></div>
-    <div class=row><span>Delivered Work</span><span id=upstream_accepted_work></span></div>
-    <div class=row><span>Delivered Hashdays</span><span id=upstream_hash_days class=copyable></span></div>
-  </div>
-
-  <div class=column>
-    <h2>Downstream</h2>
-    <div class=row><span>Sessions</span><span id=session_count></span></div>
-    <div class=row><span>Idle</span><span id=idle></span></div>
-    <div class=row><span>Disconnected</span><span id=disconnected></span></div>
-    <div class=row><span>Hashrate</span><span id=downstream_hashrate_1m></span></div>
-    <div class=row><span>SPS</span><span id=downstream_sps_1m></span></div>
-    <div class=row><span>Best Share</span><span id=downstream_best_share class=copyable></span></div>
-    <div class=row><span>Last Share</span><span id=downstream_last_share></span></div>
-    <div class=row><span>Rejected Shares</span><span id=downstream_rejected_shares class=copyable></span></div>
-    <div class=row><span>Rejected Work</span><span id=downstream_rejected_work class=copyable></span></div>
-    <div class=row><span>Received Work</span><span id=downstream_accepted_work></span></div>
-    <div class=row><span>Received Hashdays</span><span id=downstream_hash_days class=copyable></span></div>
+  <div class="stats stats-3 column-full">
+    <div class=stat><div class=stat-label>Wallet</div><div class=stat-value><span id=wallet_status></span></div></div>
+    <div class=stat><div class=stat-label>Active Orders</div><div class=stat-value id=active_order_count></div></div>
+    <div class=stat><div class=stat-label>Uptime</div><div class=stat-value><span id=uptime_secs></span>s</div></div>
+    <div class=stat><div class=stat-label>Available</div><div class=stat-value id=available_work></div></div>
+    <div class=stat><div class=stat-label>Used</div><div class=stat-value id=used_work></div></div>
+    <div class=stat><div class=stat-label>Hash Price</div><div class=stat-value id=hash_price></div></div>
   </div>
 
   <div class=action-bar>
@@ -439,62 +291,87 @@
     <button id=boost-btn class=hidden>Boost: OFF</button>
     <button id=halt-btn class=hidden>Halt: OFF</button>
     <button id=add-order-btn>Add Order</button>
-    <button id=logout-btn class=hidden>Logout</button>
+  </div>
+
+  <div class="column column-full">
+    <h2>Traffic</h2>
+    <table class=compact-table>
+      <thead>
+        <tr><th></th><th>Upstream</th><th>Downstream</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Hashrate</td><td id=upstream_hashrate_1m></td><td id=downstream_hashrate_1m></td></tr>
+        <tr><td>SPS</td><td id=upstream_sps_1m></td><td id=downstream_sps_1m></td></tr>
+        <tr><td>Best Share</td><td id=upstream_best_share class=copyable></td><td id=downstream_best_share class=copyable></td></tr>
+        <tr><td>Last Share</td><td id=upstream_last_share></td><td id=downstream_last_share></td></tr>
+        <tr><td>Rejected Shares</td><td id=upstream_rejected_shares class=copyable></td><td id=downstream_rejected_shares class=copyable></td></tr>
+        <tr><td>Rejected Work</td><td id=upstream_rejected_work class=copyable></td><td id=downstream_rejected_work class=copyable></td></tr>
+        <tr><td>Accepted Work</td><td id=upstream_accepted_work></td><td id=downstream_accepted_work></td></tr>
+        <tr><td>Accepted Hashdays</td><td id=upstream_hash_days class=copyable></td><td id=downstream_hash_days class=copyable></td></tr>
+        <tr><td>Users</td><td>-</td><td id=users></td></tr>
+        <tr><td>Workers</td><td>-</td><td id=workers></td></tr>
+        <tr><td>Sessions</td><td>-</td><td id=sessions></td></tr>
+        <tr><td>Idle</td><td>-</td><td id=idle></td></tr>
+        <tr><td>Disconnected</td><td>-</td><td id=disconnected></td></tr>
+      </tbody>
+    </table>
   </div>
 
   <div class="column column-full">
     <h2>Orders</h2>
-    <div class=orders-toolbar>
-      <label for=orders-search class=orders-search-field>Search
-        <input id=orders-search type=search placeholder="Address, username, endpoint">
-      </label>
-      <div>
-        <div class=orders-field-label>Status</div>
-        <div class=orders-multi-select>
-          <button id=orders-status-toggle type=button aria-expanded=false>
-            <span id=orders-status-label>Any</span>
-          </button>
-          <div id=orders-status-options class="orders-status-options hidden">
-            <label><input type=checkbox name=orders-status value=active> Active</label>
-            <label><input type=checkbox name=orders-status value=in_mempool> In Mempool</label>
-            <label><input type=checkbox name=orders-status value=pending> Pending</label>
-            <label><input type=checkbox name=orders-status value=expired> Expired</label>
-            <label><input type=checkbox name=orders-status value=disconnected> Disconnected</label>
-            <label><input type=checkbox name=orders-status value=fulfilled> Fulfilled</label>
-            <label><input type=checkbox name=orders-status value=cancelled> Cancelled</label>
+    <div id=orders-root class=filter-table>
+      <div class="table-toolbar two-filters">
+        <label for=orders-search class=toolbar-search>Search
+          <input id=orders-search type=search data-filter=search placeholder="Address, username, endpoint">
+        </label>
+        <div>
+          <div class=toolbar-label>Status</div>
+          <div class=multi-select data-filter=status>
+            <button class=multi-select-toggle type=button aria-expanded=false>
+              <span class=multi-select-label>Any</span>
+            </button>
+            <div class="multi-select-options hidden">
+              <label><input type=checkbox value=active> Active</label>
+              <label><input type=checkbox value=in_mempool> In Mempool</label>
+              <label><input type=checkbox value=pending> Pending</label>
+              <label><input type=checkbox value=expired> Expired</label>
+              <label><input type=checkbox value=disconnected> Disconnected</label>
+              <label><input type=checkbox value=fulfilled> Fulfilled</label>
+              <label><input type=checkbox value=cancelled> Cancelled</label>
+            </div>
           </div>
         </div>
+        <label for=orders-review>Review
+          <select id=orders-review data-filter=review>
+            <option value="">Any</option>
+            <option value=clean>Clean</option>
+            <option value=flagged>Flagged</option>
+            <option value=cleared>Cleared</option>
+          </select>
+        </label>
+        <button class=table-reset type=button>Reset</button>
       </div>
-      <label for=orders-review>Review
-        <select id=orders-review>
-          <option value="">Any</option>
-          <option value=clean>Clean</option>
-          <option value=flagged>Flagged</option>
-          <option value=cleared>Cleared</option>
-        </select>
-      </label>
-      <button id=orders-reset type=button>Reset</button>
-    </div>
-    <div style="overflow-x:auto">
-    <table id=orders-table>
-      <thead>
-        <tr>
-          <th data-sort=id aria-sort=descending>ID</th>
-          <th data-sort=status aria-sort=none>Status</th>
-          <th data-sort=endpoint aria-sort=none>Endpoint</th>
-          <th data-sort=username aria-sort=none>Username</th>
-          <th data-sort=requested_hash_days aria-sort=none>Requested</th>
-          <th data-sort=hashrate aria-sort=none>Hashrate</th>
-          <th data-sort=progress aria-sort=none>Progress</th>
-        </tr>
-      </thead>
-      <tbody id=orders-list></tbody>
-    </table>
-    </div>
-    <div id=orders-pagination class=orders-pagination>
-      <button id=orders-prev type=button>&lsaquo; Prev</button>
-      <span id=orders-page-status>1/1</span>
-      <button id=orders-next type=button>Next &rsaquo;</button>
+      <div class=table-scroll>
+      <table id=orders-table>
+        <thead>
+          <tr>
+            <th data-sort=id aria-sort=descending>ID</th>
+            <th data-sort=status aria-sort=none>Status</th>
+            <th data-sort=endpoint aria-sort=none class=col-flex>Endpoint</th>
+            <th data-sort=username aria-sort=none>Username</th>
+            <th data-sort=requested_hash_days aria-sort=none>Requested</th>
+            <th data-sort=hashrate aria-sort=none>Hashrate</th>
+            <th data-sort=progress aria-sort=none>Progress</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      </div>
+      <div class=table-pagination>
+        <button class=page-prev type=button>&lsaquo; Prev</button>
+        <span class=page-status>1/1</span>
+        <button class=page-next type=button>Next &rsaquo;</button>
+      </div>
     </div>
   </div>
 
@@ -551,17 +428,6 @@
     </div>
   </div>
 
-  <div id=logout-overlay class="confirm-overlay hidden">
-    <div class=confirm-modal>
-      <h2>Logout</h2>
-      <p>Are you sure you want to logout?</p>
-      <div class=modal-buttons>
-        <button id=logout-cancel>Cancel</button>
-        <button id=logout-confirm>Logout</button>
-      </div>
-    </div>
-  </div>
-
   <div id=capacity-overlay class=hidden>
     <div id=capacity-modal>
       <h2>Set Capacity</h2>
@@ -613,65 +479,11 @@
 
 <script>
 let currentHashPrice = null;
-const DEFAULT_SORT_COLUMN = 'id';
-const DEFAULT_SORT_DIRECTION = 'desc';
-const VALID_ORDER_SORTS = new Set([
-  'id',
-  'status',
-  'endpoint',
-  'username',
-  'requested_hash_days',
-  'hashrate',
-  'progress',
-]);
-const ORDER_STATUS_LABELS = {
-  active: 'Active',
-  in_mempool: 'In Mempool',
-  pending: 'Pending',
-  expired: 'Expired',
-  disconnected: 'Disconnected',
-  fulfilled: 'Fulfilled',
-  cancelled: 'Cancelled',
-};
+let currentCapacity = null;
 const ORDER_STATUS_PRIORITY = Object.fromEntries(
-  Object.keys(ORDER_STATUS_LABELS).map((key, i) => [key, i])
+  ['active', 'in_mempool', 'pending', 'expired', 'disconnected', 'fulfilled', 'cancelled']
+    .map((status, i) => [status, i])
 );
-let sortColumn = DEFAULT_SORT_COLUMN;
-let sortDirection = DEFAULT_SORT_DIRECTION;
-let currentPage = 0;
-let currentOrders = [];
-let totalOrderCount = 0;
-let ordersFilterTimer = null;
-const PAGE_SIZE = 20;
-const ORDER_FILTER_DEBOUNCE_MS = 250;
-
-function selectedOrderStatuses() {
-  return Array.from(document.querySelectorAll('input[name="orders-status"]:checked'))
-    .map(input => input.value);
-}
-
-function updateStatusFilterLabel() {
-  const label = document.getElementById('orders-status-label');
-  if (!label) return;
-
-  const statuses = selectedOrderStatuses();
-  if (statuses.length === 0) {
-    label.textContent = 'Any';
-  } else if (statuses.length === 1) {
-    label.textContent = ORDER_STATUS_LABELS[statuses[0]] || statuses[0];
-  } else {
-    label.textContent = `${statuses.length} selected`;
-  }
-}
-
-function toggleStatusFilterOptions() {
-  const options = document.getElementById('orders-status-options');
-  const toggle = document.getElementById('orders-status-toggle');
-  if (!options || !toggle) return;
-
-  const hidden = options.classList.toggle('hidden');
-  toggle.setAttribute('aria-expanded', String(!hidden));
-}
 
 function formatOrderProgress(order) {
   const progress = orderProgressValue(order);
@@ -690,23 +502,6 @@ function orderProgressValue(order) {
   return Math.min(100, Math.max(0, (delivered / requested) * 100));
 }
 
-function compareNumber(a, b) {
-  return (Number(a) || 0) - (Number(b) || 0);
-}
-
-function compareString(a, b) {
-  return String(a ?? '').toLowerCase().localeCompare(String(b ?? '').toLowerCase());
-}
-
-function compareRequestedHashDays(a, b) {
-  const aNull = a.requested_hash_days == null;
-  const bNull = b.requested_hash_days == null;
-  if (aNull && bNull) return 0;
-  if (aNull) return 1;
-  if (bNull) return -1;
-  return compareNumber(a.requested_hash_days, b.requested_hash_days);
-}
-
 function compareProgress(a, b) {
   const aProgress = orderProgressValue(a);
   const bProgress = orderProgressValue(b);
@@ -722,197 +517,42 @@ function compareStatus(a, b) {
   return aValue === bValue ? compareString(a.status, b.status) : aValue - bValue;
 }
 
-function compareOrders(a, b) {
-  let value = 0;
-  if (sortColumn === 'status') {
-    value = compareStatus(a, b);
-  } else if (sortColumn === 'endpoint' || sortColumn === 'username') {
-    value = compareString(a[sortColumn], b[sortColumn]);
-  } else if (sortColumn === 'requested_hash_days') {
-    value = compareRequestedHashDays(a, b);
-  } else if (sortColumn === 'progress') {
-    value = compareProgress(a, b);
-  } else {
-    value = compareNumber(a[sortColumn], b[sortColumn]);
-  }
-
-  value = sortDirection === 'asc' ? value : -value;
-  return value || compareNumber(b.id, a.id);
+function renderRow(order) {
+  const safeId = escapeHtml(order.id);
+  const shortUsername = truncateMiddle(order.username);
+  const target = order.requested_hash_days == null ? 'Unlimited' : formatHashDays(order.requested_hash_days);
+  const hashrate = formatHashrate(order.hashrate);
+  const progress = formatOrderProgress(order);
+  const rowClass = order.requested_hash_days == null ? ' class=unlimited-order' : '';
+  const reviewMarker = order.review === 'flagged' ? ' <span class="flagged">⚑</span>'
+    : order.review === 'cleared' ? ' <span class="cleared">✓</span>' : '';
+  return `<tr${rowClass}>
+    <td><a class=order-link href="/order/${safeId}">${safeId}</a></td>
+    <td class="${escapeHtml(statusClass(order.status))}">${escapeHtml(formatStatus(order.status))}${reviewMarker}</td>
+    <td class=col-flex>${escapeHtml(order.endpoint)}</td>
+    <td>${escapeHtml(shortUsername)}</td>
+    <td>${escapeHtml(target)}</td>
+    <td>${escapeHtml(hashrate)}</td>
+    <td>${progress}</td>
+  </tr>`;
 }
 
-function addOrderFilterParams(params) {
-  const search = document.getElementById('orders-search')?.value?.trim() || '';
-  const review = document.getElementById('orders-review')?.value || '';
-
-  if (search) params.set('search', search);
-  for (const status of selectedOrderStatuses()) params.append('status', status);
-  if (review) params.set('review', review);
-}
-
-function addOrderStateParams(params, includePage) {
-  addOrderFilterParams(params);
-  if (sortColumn !== DEFAULT_SORT_COLUMN || sortDirection !== DEFAULT_SORT_DIRECTION) {
-    params.set('sort', sortColumn);
-    params.set('direction', sortDirection);
-  }
-  if (includePage && currentPage > 0) params.set('page', String(currentPage + 1));
-}
-
-function buildOrdersQuery() {
-  const params = new URLSearchParams();
-  addOrderFilterParams(params);
-
-  if (!params.has('search') && !params.has('status') && !params.has('review')) {
-    params.set('limit', String(PAGE_SIZE));
-  }
-
-  return params.toString();
-}
-
-function syncOrdersUrl() {
-  const params = new URLSearchParams();
-  addOrderStateParams(params, true);
-  const query = params.toString();
-  history.replaceState(null, '', query ? `${location.pathname}?${query}` : location.pathname);
-}
-
-function loadOrdersStateFromUrl() {
-  const params = new URLSearchParams(location.search);
-  const search = document.getElementById('orders-search');
-  const review = document.getElementById('orders-review');
-
-  if (search) search.value = params.get('search') || '';
-  const statuses = new Set(params.getAll('status').flatMap(value => value.split(',')));
-  document.querySelectorAll('input[name="orders-status"]').forEach(input => {
-    input.checked = statuses.has(input.value);
-  });
-  if (review) review.value = params.get('review') || '';
-  updateStatusFilterLabel();
-
-  const requestedSort = params.get('sort');
-  sortColumn = VALID_ORDER_SORTS.has(requestedSort) ? requestedSort : DEFAULT_SORT_COLUMN;
-  sortDirection = params.get('direction') === 'asc' ? 'asc' : DEFAULT_SORT_DIRECTION;
-
-  const requestedPage = Number(params.get('page'));
-  currentPage = Number.isInteger(requestedPage) && requestedPage > 1 ? requestedPage - 1 : 0;
-}
-
-function restartOrdersPolling() {
-  clearTimeout(ordersFilterTimer);
-  ordersFilterTimer = null;
-  syncOrdersUrl();
-  startPolling(refresh);
-}
-
-function scheduleOrdersRefresh() {
-  currentPage = 0;
-  clearTimeout(ordersFilterTimer);
-  ordersFilterTimer = setTimeout(restartOrdersPolling, ORDER_FILTER_DEBOUNCE_MS);
-}
-
-function resetOrdersFilters() {
-  const search = document.getElementById('orders-search');
-  const review = document.getElementById('orders-review');
-  const options = document.getElementById('orders-status-options');
-  const toggle = document.getElementById('orders-status-toggle');
-
-  if (search) search.value = '';
-  document.querySelectorAll('input[name="orders-status"]').forEach(input => {
-    input.checked = false;
-  });
-  if (review) review.value = '';
-  if (options) options.classList.add('hidden');
-  if (toggle) toggle.setAttribute('aria-expanded', 'false');
-  updateStatusFilterLabel();
-
-  sortColumn = DEFAULT_SORT_COLUMN;
-  sortDirection = DEFAULT_SORT_DIRECTION;
-  currentPage = 0;
-  restartOrdersPolling();
-}
-
-function initOrdersControls() {
-  loadOrdersStateFromUrl();
-  document.getElementById('orders-search')?.addEventListener('input', scheduleOrdersRefresh);
-  document.getElementById('orders-status-toggle')?.addEventListener('click', toggleStatusFilterOptions);
-  document.querySelectorAll('input[name="orders-status"]').forEach(input => {
-    input.addEventListener('change', () => {
-      updateStatusFilterLabel();
-      currentPage = 0;
-      restartOrdersPolling();
-    });
-  });
-  document.getElementById('orders-review')?.addEventListener('change', () => {
-    currentPage = 0;
-    restartOrdersPolling();
-  });
-  document.getElementById('orders-reset')?.addEventListener('click', resetOrdersFilters);
-  document.addEventListener('click', e => {
-    const control = e.target.closest('.orders-multi-select');
-    if (control) return;
-
-    const options = document.getElementById('orders-status-options');
-    const toggle = document.getElementById('orders-status-toggle');
-    options?.classList.add('hidden');
-    toggle?.setAttribute('aria-expanded', 'false');
-  });
-  syncOrdersUrl();
-}
-
-function updateOrderSortHeaders() {
-  document.querySelectorAll('#orders-table th[data-sort]').forEach(th => {
-    const active = th.dataset.sort === sortColumn;
-    th.classList.toggle('sort-asc', active && sortDirection === 'asc');
-    th.classList.toggle('sort-desc', active && sortDirection === 'desc');
-    th.setAttribute('aria-sort', active ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none');
-  });
-}
-
-function renderOrders() {
-  const tbody = document.getElementById('orders-list');
-  if (!tbody || tbody.querySelector('.copyable:hover')) return;
-
-  const sortedOrders = currentOrders.slice().sort(compareOrders);
-  totalOrderCount = sortedOrders.length;
-  const pageCount = Math.max(1, Math.ceil(sortedOrders.length / PAGE_SIZE));
-  const previousPage = currentPage;
-  currentPage = Math.max(0, Math.min(currentPage, pageCount - 1));
-  if (currentPage !== previousPage) syncOrdersUrl();
-  const pageStart = currentPage * PAGE_SIZE;
-  const pageOrders = sortedOrders.slice(pageStart, pageStart + PAGE_SIZE);
-
-  tbody.innerHTML = pageOrders.map(order => {
-    const safeId = escapeHtml(order.id);
-    const shortUsername = truncateMiddle(order.username);
-    const target = order.requested_hash_days == null ? 'Unlimited' : formatHashDays(order.requested_hash_days);
-    const hashrate = formatHashrate(order.hashrate);
-    const progress = formatOrderProgress(order);
-    const rowClass = order.requested_hash_days == null ? ' class=unlimited-order' : '';
-    const reviewMarker = order.review === 'flagged' ? ' <span class="flagged">⚑</span>'
-      : order.review === 'cleared' ? ' <span class="cleared">✓</span>' : '';
-    return `<tr data-id="${safeId}"${rowClass}>
-      <td><a class=order-link href="/order/${safeId}">${safeId}</a></td>
-      <td class="${escapeHtml(statusClass(order.status))}">${escapeHtml(formatStatus(order.status))}${reviewMarker}</td>
-      <td>${escapeHtml(order.endpoint)}</td>
-      <td>${escapeHtml(shortUsername)}</td>
-      <td>${escapeHtml(target)}</td>
-      <td>${escapeHtml(hashrate)}</td>
-      <td>${progress}</td>
-    </tr>`;
-  }).join('');
-
-  const pageStatus = document.getElementById('orders-page-status');
-  const prev = document.getElementById('orders-prev');
-  const next = document.getElementById('orders-next');
-  if (pageStatus) {
-    pageStatus.textContent = totalOrderCount === 0
-      ? '0/0'
-      : `${currentPage + 1}/${pageCount} (${totalOrderCount})`;
-  }
-  if (prev) prev.disabled = currentPage === 0;
-  if (next) next.disabled = currentPage >= pageCount - 1;
-  updateOrderSortHeaders();
-}
+const ordersTable = initFilterTable({
+  root: document.getElementById('orders-root'),
+  defaultSort: { column: 'id', direction: 'desc' },
+  sorts: {
+    status: compareStatus,
+    endpoint: 'string',
+    username: 'string',
+    requested_hash_days: (a, b) => compareNullableNumber(a.requested_hash_days, b.requested_hash_days),
+    progress: compareProgress,
+  },
+  ascByDefault: ['status'],
+  tiebreak: (a, b) => compareNumber(b.id, a.id),
+  renderRow,
+  rowHref: order => `/order/${order.id}`,
+  onFilterChange: () => startPolling(refresh),
+});
 
 async function fetchCurrentHashPrice(signal) {
   const r = await fetch('/api/router/status', withAuthOptions({ signal }));
@@ -924,10 +564,10 @@ async function fetchCurrentHashPrice(signal) {
 }
 
 async function fetchOrders(signal) {
-  const query = buildOrdersQuery();
+  const query = ordersTable.buildQuery();
   const r = await fetch(`/api/router/orders?${query}`, withAuthOptions({ signal }));
   if (r.status === 401) {
-    showLoginOverlay();
+    redirectToLogin();
     throw new Error(`/api/router/orders: ${r.status}`);
   }
   if (!r.ok) throw new Error(`/api/router/orders: ${r.status}`);
@@ -942,9 +582,6 @@ async function refresh(signal) {
     fetchJsonIfAllowed('/api/bitcoin/status', { signal }),
   ]);
 
-  const uss = routerData.upstream || {};
-  const ds = routerData.downstream || {};
-  const dss = ds.stats || {};
   if (Number.isSafeInteger(routerData.hash_price)) {
     currentHashPrice = String(routerData.hash_price);
   }
@@ -962,9 +599,11 @@ async function refresh(signal) {
     boostBtn.textContent = routerData.boost ? 'Boost: ON' : 'Boost: OFF';
     boostBtn.classList.toggle('active', routerData.boost);
   }
+  currentCapacity = formatHashDays(routerData.capacity_work);
+
   const capacityBtn = document.getElementById('capacity-btn');
   if (capacityBtn) {
-    capacityBtn.textContent = 'Capacity: ' + formatHashDays(routerData.capacity_work);
+    capacityBtn.textContent = 'Capacity: ' + currentCapacity;
   }
   if (addOrderBtn) {
     addOrderBtn.disabled = routerData.halt;
@@ -972,82 +611,30 @@ async function refresh(signal) {
   }
 
   set('active_order_count', routerData.active_order_count);
-  set('capacity_work', routerData.capacity_work, formatHashDays);
   set('available_work', routerData.available_work, formatHashDays);
-  set('session_count', ds.session_count);
-  set('idle', ds.idle_count);
-  set('disconnected', ds.disconnected_count);
-
-  set('upstream_sps_1m', uss.sps_1m, formatTruncated);
-  copyable('upstream_best_share', formatDifficulty(uss.best_share), uss.best_share);
-  set('upstream_last_share', uss.last_share, formatTimestampAgo);
-  rejectionCopyable('upstream_rejected_shares', uss.accepted_shares, uss.rejected_shares);
-  rejectionWorkCopyable('upstream_rejected_work', uss.accepted_work, uss.rejected_work);
-  set('upstream_accepted_work', uss.accepted_work, formatDifficulty);
-  copyable('upstream_hash_days', formatHashDays(uss.hash_days), uss.hash_days);
-
-  set('downstream_hashrate_1m', dss.hashrate_1m, formatHashrate);
-  set('downstream_sps_1m', dss.sps_1m, formatTruncated);
-  copyable('downstream_best_share', formatDifficulty(dss.best_share), dss.best_share);
-  set('downstream_last_share', dss.last_share, formatTimestampAgo);
-  rejectionCopyable('downstream_rejected_shares', dss.accepted_shares, dss.rejected_shares);
-  rejectionWorkCopyable('downstream_rejected_work', dss.accepted_work, dss.rejected_work);
-  set('downstream_accepted_work', dss.accepted_work, formatDifficulty);
-  copyable('downstream_hash_days', formatHashDays(dss.hash_days), dss.hash_days);
+  set('hash_price', routerData.hash_price, v => v + ' sats/PHd');
+  set('wallet_status', routerData.wallet_synced ? 'Synced' : 'Syncing');
+  setClass('wallet_status', routerData.wallet_synced ? 'connected' : 'pending');
+  const usedWork = routerData.capacity_work != null && routerData.available_work != null
+    ? routerData.capacity_work - routerData.available_work
+    : null;
+  set('used_work', usedWork, formatHashDays);
+  set('uptime_secs', routerData.uptime_secs);
+  populateStats('upstream', routerData.upstream);
+  populateDownstream(routerData.downstream || {});
 
   renderBitcoinData(bitcoinData);
   renderSystemData(systemData);
 
-  currentOrders = ordersData || [];
-  renderOrders();
+  ordersTable.setRows(ordersData || []);
 }
 initLogControls();
 setupLogToggle();
 initCopyables();
-initOrdersControls();
-updateOrderSortHeaders();
 initAuthProbe().then(ok => {
   if (!ok) return;
   startPolling(refresh);
   connectWs();
-});
-
-document.querySelectorAll('#orders-table th[data-sort]').forEach(th => {
-  th.addEventListener('click', () => {
-    const column = th.dataset.sort;
-    if (sortColumn === column) {
-      sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
-    } else {
-      sortColumn = column;
-      sortDirection = column === 'status' ? 'asc' : 'desc';
-    }
-    currentPage = 0;
-    syncOrdersUrl();
-    renderOrders();
-  });
-});
-
-document.getElementById('orders-prev').addEventListener('click', () => {
-  if (currentPage > 0) {
-    currentPage -= 1;
-    syncOrdersUrl();
-    renderOrders();
-  }
-});
-
-document.getElementById('orders-next').addEventListener('click', () => {
-  if ((currentPage + 1) * PAGE_SIZE < totalOrderCount) {
-    currentPage += 1;
-    syncOrdersUrl();
-    renderOrders();
-  }
-});
-
-document.getElementById('orders-list').addEventListener('click', (e) => {
-  if (e.target.closest('.copyable, a')) return;
-  const row = e.target.closest('tr[data-id]');
-  if (!row) return;
-  window.location.href = `/order/${row.dataset.id}`;
 });
 
 {
@@ -1229,8 +816,7 @@ initConfirmModal('boost', '/api/router/boost',
   const error = document.getElementById('capacity-error');
 
   document.getElementById('capacity-btn').addEventListener('click', () => {
-    const el = document.getElementById('capacity_work');
-    input.value = el ? el.textContent : '';
+    input.value = currentCapacity || '';
     error.textContent = '';
     overlay.classList.remove('hidden');
     input.focus();
@@ -1270,24 +856,4 @@ initConfirmModal('boost', '/api/router/boost',
   });
 }
 
-{
-  const overlay = document.getElementById('logout-overlay');
-
-  document.getElementById('logout-btn').addEventListener('click', () => {
-    overlay.classList.remove('hidden');
-  });
-
-  document.getElementById('logout-cancel').addEventListener('click', () => {
-    overlay.classList.add('hidden');
-  });
-
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) overlay.classList.add('hidden');
-  });
-
-  document.getElementById('logout-confirm').addEventListener('click', () => {
-    overlay.classList.add('hidden');
-    logout();
-  });
-}
 </script>

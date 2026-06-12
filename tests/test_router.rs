@@ -1,6 +1,6 @@
 use {
     super::*,
-    api::{OrderDetail, OrderSummary, RouterStatus},
+    api::{OrderDetail, OrderSummary, RouterStatus, UserDetail, UserSummary},
 };
 
 pub(crate) struct TestRouter {
@@ -160,6 +160,35 @@ impl TestRouter {
     pub(crate) async fn get_order(&self, id: u32) -> reqwest::Result<OrderDetail> {
         reqwest::Client::new()
             .get(format!("{}/api/router/order/{id}", self.api_endpoint()))
+            .send()
+            .await?
+            .json()
+            .await
+    }
+
+    pub(crate) async fn get_users(&self) -> reqwest::Result<Vec<UserSummary>> {
+        reqwest::Client::new()
+            .get(format!("{}/api/router/users", self.api_endpoint()))
+            .send()
+            .await?
+            .json()
+            .await
+    }
+
+    pub(crate) async fn users_query(&self, query: &str) -> reqwest::Result<reqwest::Response> {
+        let separator = if query.is_empty() { "" } else { "?" };
+        reqwest::Client::new()
+            .get(format!(
+                "{}/api/router/users{separator}{query}",
+                self.api_endpoint()
+            ))
+            .send()
+            .await
+    }
+
+    pub(crate) async fn get_user(&self, address: &str) -> reqwest::Result<UserDetail> {
+        reqwest::Client::new()
+            .get(format!("{}/api/router/user/{address}", self.api_endpoint()))
             .send()
             .await?
             .json()

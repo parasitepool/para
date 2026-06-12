@@ -3,13 +3,14 @@ use {
         body::Body,
         extract::FromRequestParts,
         http::{
-            Response, StatusCode,
+            HeaderMap, Response, StatusCode,
             header::{AUTHORIZATION, COOKIE, WWW_AUTHENTICATE},
             request::Parts,
         },
     },
     base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD},
     bitcoin::hashes::{Hash, sha256},
+    std::convert::Infallible,
 };
 
 pub(crate) const AUTH_COOKIE: &str = "para_auth";
@@ -23,6 +24,31 @@ pub(crate) struct BearerAuth {
 pub(crate) struct ApiAuth;
 
 pub(crate) struct AdminAuth;
+
+pub(crate) struct NavbarAuth {
+    pub(crate) enabled: bool,
+    pub(crate) authed: bool,
+}
+
+impl<S: Send + Sync> FromRequestParts<S> for NavbarAuth {
+    type Rejection = Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        let Some(auth) = parts.extensions.get::<BearerAuth>() else {
+            return Ok(Self {
+                enabled: false,
+                authed: false,
+            });
+        };
+
+        Ok(Self {
+            enabled: auth.enabled(),
+            authed: auth.enabled()
+                && BearerAuth::token(&parts.headers)
+                    .is_some_and(|token| auth.role(&token).is_some()),
+        })
+    }
+}
 
 impl BearerAuth {
     pub(crate) fn new(api_token: Option<&str>, admin_token: Option<&str>) -> Self {
@@ -104,16 +130,16 @@ impl BearerAuth {
             .is_some_and(|h| Self::hashes_equal(h, &Self::hash(token)))
     }
 
-    fn token(parts: &Parts) -> Option<String> {
-        if let Some(token) = Self::bearer_token(parts) {
+    pub(crate) fn token(headers: &HeaderMap) -> Option<String> {
+        if let Some(token) = Self::bearer_token(headers) {
             return Some(token.to_string());
         }
 
-        Self::cookie_token(parts)
+        Self::cookie_token(headers)
     }
 
-    fn bearer_token(parts: &Parts) -> Option<&str> {
-        let header = parts.headers.get(AUTHORIZATION)?.to_str().ok()?;
+    fn bearer_token(headers: &HeaderMap) -> Option<&str> {
+        let header = headers.get(AUTHORIZATION)?.to_str().ok()?;
         let (scheme, token) = header.split_once(' ')?;
 
         if scheme.eq_ignore_ascii_case("Bearer") && !token.is_empty() {
@@ -123,8 +149,8 @@ impl BearerAuth {
         }
     }
 
-    fn cookie_token(parts: &Parts) -> Option<String> {
-        let header = parts.headers.get(COOKIE)?.to_str().ok()?;
+    fn cookie_token(headers: &HeaderMap) -> Option<String> {
+        let header = headers.get(COOKIE)?.to_str().ok()?;
 
         header.split(';').find_map(|cookie| {
             let (name, value) = cookie.trim().split_once('=')?;
@@ -150,7 +176,7 @@ fn check_auth(
         return Ok(());
     }
 
-    if BearerAuth::token(parts).is_some_and(|token| accept(auth, &token)) {
+    if BearerAuth::token(&parts.headers).is_some_and(|token| accept(auth, &token)) {
         Ok(())
     } else {
         Err(unauthorized())

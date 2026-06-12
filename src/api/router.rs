@@ -1,7 +1,7 @@
 use {
     super::*,
     crate::http_server::{
-        auth::{AdminAuth, ApiAuth, BearerAuth},
+        auth::{AdminAuth, ApiAuth, BearerAuth, NavbarAuth},
         error::ServerError,
     },
     axum::extract::RawQuery,
@@ -16,6 +16,7 @@ pub(crate) fn router(
     http_admin_token: Option<&str>,
 ) -> axum::Router {
     let auth = BearerAuth::new(http_api_token, http_admin_token);
+    let metatron = state.metatron();
 
     axum::Router::new()
         .route("/", get(home))
@@ -30,6 +31,7 @@ pub(crate) fn router(
         .route("/api/router/boost", put(set_boost))
         .route("/api/router/capacity", put(set_capacity))
         .with_state(state)
+        .merge(users::routes(users::Service::Router, metatron))
         .merge(common_routes())
         .layer(Extension(bitcoin_client))
         .layer(Extension(chain))
@@ -37,12 +39,15 @@ pub(crate) fn router(
         .layer(Extension(auth))
 }
 
-async fn home(Extension(chain): Extension<Chain>) -> ServerResult<Response> {
-    Ok(render_page(RouterHtml, chain))
+async fn home(Extension(chain): Extension<Chain>, auth: NavbarAuth) -> ServerResult<Response> {
+    Ok(render_page(RouterHtml, chain, auth))
 }
 
-async fn order_page(Extension(chain): Extension<Chain>) -> ServerResult<Response> {
-    Ok(render_page(OrderHtml, chain))
+async fn order_page(
+    Extension(chain): Extension<Chain>,
+    auth: NavbarAuth,
+) -> ServerResult<Response> {
+    Ok(render_page(OrderHtml, chain, auth))
 }
 
 async fn status(_: ApiAuth, State(router): State<Arc<Router>>) -> ServerResult<Response> {
@@ -169,13 +174,6 @@ impl OrdersQuery {
     }
 }
 
-fn decode_query_component(value: &str) -> ServerResult<String> {
-    let value = value.replace('+', " ");
-    urlencoding::decode(&value)
-        .map(|value| value.into_owned())
-        .map_err(|err| ServerError::BadRequest(format!("invalid query encoding: {err}")))
-}
-
 fn parse_order_status(value: &str) -> ServerResult<OrderStatus> {
     match value {
         "pending" => Ok(OrderStatus::Pending),
@@ -200,12 +198,6 @@ fn parse_review(value: &str) -> ServerResult<Review> {
             "invalid review filter `{value}`"
         ))),
     }
-}
-
-fn parse_usize_query_param(name: &str, value: &str) -> ServerResult<usize> {
-    value
-        .parse()
-        .map_err(|err| ServerError::BadRequest(format!("invalid {name} `{value}`: {err}")))
 }
 
 fn order_matches_address(order: &Order, address: &Address<NetworkUnchecked>) -> bool {

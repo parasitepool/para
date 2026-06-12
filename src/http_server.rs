@@ -1,6 +1,6 @@
 use {
     super::*,
-    auth::{AdminAuth, BearerAuth},
+    auth::{AdminAuth, BearerAuth, NavbarAuth},
     axum::{
         Extension,
         extract::{
@@ -9,8 +9,9 @@ use {
         },
         http::{
             HeaderMap,
-            header::{ORIGIN, REFERER, SET_COOKIE, WWW_AUTHENTICATE},
+            header::{CACHE_CONTROL, ORIGIN, REFERER, SET_COOKIE, WWW_AUTHENTICATE},
         },
+        response::Redirect,
     },
     error::{OptionExt, ServerError, ServerResult},
     sysinfo::DiskRefreshKind,
@@ -247,12 +248,29 @@ pub(crate) async fn ws_logs(
 
 pub(crate) fn common_routes() -> axum::Router {
     axum::Router::new()
-        .route("/login", post(login))
+        .route("/login", get(login_page).post(login))
         .route("/logout", post(logout))
         .route("/api/bitcoin/status", get(bitcoin_status))
         .route("/api/system/status", get(system_status))
         .route("/ws/logs", get(ws_logs))
         .route("/static/{*path}", get(static_assets))
+}
+
+async fn login_page(auth: NavbarAuth) -> Response {
+    if !auth.enabled || auth.authed {
+        return Redirect::to("/").into_response();
+    }
+
+    #[cfg(feature = "reload")]
+    let body = templates::LoginHtml
+        .reload_from_path()
+        .map(|reloaded| reloaded.to_string())
+        .unwrap_or_else(|_| templates::LoginHtml.to_string());
+
+    #[cfg(not(feature = "reload"))]
+    let body = templates::LoginHtml.to_string();
+
+    ([(CONTENT_TYPE, "text/html;charset=utf-8")], body).into_response()
 }
 
 #[derive(Deserialize)]
@@ -328,6 +346,7 @@ pub(crate) async fn static_assets(Path(path): Path<String>) -> ServerResult<Resp
 
     Ok(Response::builder()
         .header(CONTENT_TYPE, mime.as_ref())
+        .header(CACHE_CONTROL, "no-cache")
         .body(content.data.into())
         .unwrap())
 }

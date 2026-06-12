@@ -1,6 +1,9 @@
 use {
     super::*,
-    crate::{http_server::auth::BearerAuth, router::Router},
+    crate::{
+        http_server::auth::{BearerAuth, NavbarAuth},
+        router::Router,
+    },
 };
 
 pub(crate) fn router(
@@ -11,14 +14,13 @@ pub(crate) fn router(
     http_api_token: Option<&str>,
     http_admin_token: Option<&str>,
 ) -> axum::Router {
+    let metatron = router.metatron();
+
     axum::Router::new()
         .route("/", get(home))
-        .route("/users", get(users_page))
-        .route("/user/{address}", get(user_page))
         .route("/api/proxy/status", get(status))
-        .route("/api/proxy/users", get(users))
-        .route("/api/proxy/user/{address}", get(user))
         .with_state(router)
+        .merge(users::routes(users::Service::Proxy, metatron))
         .merge(common_routes())
         .layer(Extension(bitcoin_client))
         .layer(Extension(chain))
@@ -26,39 +28,8 @@ pub(crate) fn router(
         .layer(Extension(BearerAuth::new(http_api_token, http_admin_token)))
 }
 
-async fn users(State(router): State<Arc<Router>>) -> Json<Vec<String>> {
-    pool::users(State(router.metatron())).await
-}
-
-async fn user(
-    State(router): State<Arc<Router>>,
-    path: Path<Address<NetworkUnchecked>>,
-) -> ServerResult<Response> {
-    pool::user(State(router.metatron()), path).await
-}
-
-async fn home(Extension(chain): Extension<Chain>) -> Response {
-    render_page(ProxyHtml, chain)
-}
-
-async fn users_page(Extension(chain): Extension<Chain>) -> Response {
-    render_page(
-        UsersHtml {
-            title: "Proxy | Users",
-            api_base: "/api/proxy",
-        },
-        chain,
-    )
-}
-
-async fn user_page(Extension(chain): Extension<Chain>) -> Response {
-    render_page(
-        UserHtml {
-            title: "Proxy | User",
-            api_base: "/api/proxy",
-        },
-        chain,
-    )
+async fn home(Extension(chain): Extension<Chain>, auth: NavbarAuth) -> Response {
+    render_page(ProxyHtml, chain, auth)
 }
 
 async fn status(State(router): State<Arc<Router>>) -> ServerResult<Response> {

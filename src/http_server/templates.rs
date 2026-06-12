@@ -4,11 +4,16 @@ use super::*;
 pub(crate) struct DashboardHtml<T: DashboardContent> {
     content: T,
     chain: Chain,
+    auth: NavbarAuth,
 }
 
 impl<T: DashboardContent> DashboardHtml<T> {
-    pub(crate) fn new(content: T, chain: Chain) -> Self {
-        Self { content, chain }
+    pub(crate) fn new(content: T, chain: Chain, auth: NavbarAuth) -> Self {
+        Self {
+            content,
+            chain,
+            auth,
+        }
     }
 
     fn superscript(&self) -> &'static str {
@@ -52,6 +57,9 @@ impl DashboardContent for RouterHtml {
         "Router"
     }
 }
+
+#[derive(Boilerplate)]
+pub(crate) struct LoginHtml;
 
 #[derive(Boilerplate)]
 pub(crate) struct OrderHtml;
@@ -106,7 +114,11 @@ impl DashboardContent for ReloadedContent {
     }
 }
 
-pub(crate) fn render_page(content: impl DashboardContent + Boilerplate, chain: Chain) -> Response {
+pub(crate) fn render_page(
+    content: impl DashboardContent + Boilerplate,
+    chain: Chain,
+    auth: NavbarAuth,
+) -> Response {
     #[cfg(feature = "reload")]
     let body = {
         let title = content.title();
@@ -115,7 +127,7 @@ pub(crate) fn render_page(content: impl DashboardContent + Boilerplate, chain: C
             .map(|r| r.to_string())
             .unwrap_or_else(|_| content.to_string());
 
-        let dashboard = DashboardHtml::new(ReloadedContent { html, title }, chain);
+        let dashboard = DashboardHtml::new(ReloadedContent { html, title }, chain, auth);
 
         dashboard
             .reload_from_path()
@@ -124,7 +136,7 @@ pub(crate) fn render_page(content: impl DashboardContent + Boilerplate, chain: C
     };
 
     #[cfg(not(feature = "reload"))]
-    let body = DashboardHtml::new(content, chain).to_string();
+    let body = DashboardHtml::new(content, chain, auth).to_string();
 
     ([(CONTENT_TYPE, "text/html;charset=utf-8")], body).into_response()
 }

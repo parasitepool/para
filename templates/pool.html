@@ -1,18 +1,32 @@
 <div class=grid>
+  <div class="stats stats-3 column-full">
+    <div class=stat><div class=stat-label>Blocks</div><div class=stat-value id=blocks></div></div>
+    <div class=stat><div class=stat-label>Est. Time to Block</div><div class=stat-value id=est_block_time></div></div>
+    <div class=stat><div class=stat-label>Uptime</div><div class=stat-value><span id=uptime_secs></span>s</div></div>
+  </div>
+
   <div class="column column-full">
-    <h2>Info</h2>
-    <div class=row><a href="/users"><span>Users</span></a><span id=users></span></div>
-    <div class=row><span>Workers</span><span id=workers></span></div>
-    <div class=row><span>Sessions</span><span id=sessions></span></div>
-    <div class=row><span>Idle</span><span id=idle></span></div>
-    <div class=row><span>Disconnected</span><span id=disconnected></span></div>
-    <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
-    <div class=row><span>SPS</span><span id=sps_1m></span></div>
-    <div class=row><span>Best Share</span><span id=best_share class=copyable></span></div>
-    <div class=row><span>Last Share</span><span id=last_share></span></div>
-    <div class=row><span>Rejected Shares</span><span id=rejected_shares class=copyable></span></div>
-    <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
-    <div class=row><span>Hashdays</span><span id=hash_days class=copyable></span></div>
+    <h2>Traffic</h2>
+    <table class=compact-table>
+      <thead>
+        <tr><th></th><th>Downstream</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Hashrate</td><td id=downstream_hashrate_1m></td></tr>
+        <tr><td>SPS</td><td id=downstream_sps_1m></td></tr>
+        <tr><td>Best Share</td><td id=downstream_best_share class=copyable></td></tr>
+        <tr><td>Last Share</td><td id=downstream_last_share></td></tr>
+        <tr><td>Rejected Shares</td><td id=downstream_rejected_shares class=copyable></td></tr>
+        <tr><td>Rejected Work</td><td id=downstream_rejected_work class=copyable></td></tr>
+        <tr><td>Accepted Work</td><td id=downstream_accepted_work></td></tr>
+        <tr><td>Accepted Hashdays</td><td id=downstream_hash_days class=copyable></td></tr>
+        <tr><td>Users</td><td id=users></td></tr>
+        <tr><td>Workers</td><td id=workers></td></tr>
+        <tr><td>Sessions</td><td id=sessions></td></tr>
+        <tr><td>Idle</td><td id=idle></td></tr>
+        <tr><td>Disconnected</td><td id=disconnected></td></tr>
+      </tbody>
+    </table>
   </div>
 
   <div class=column>
@@ -59,19 +73,17 @@ async function refresh(signal) {
     fetchJson('/api/bitcoin/status', { signal }),
   ]);
 
-  set('users', poolData.user_count);
-  set('workers', poolData.worker_count);
-  set('sessions', poolData.session_count);
-  set('idle', poolData.idle_count);
-  set('disconnected', poolData.disconnected_count);
-  const s = poolData.stats;
-  set('hashrate_1m', s.hashrate_1m, formatHashrate);
-  set('sps_1m', s.sps_1m, formatTruncated);
-  copyable('best_share', formatDifficulty(s.best_share), s.best_share);
-  set('last_share', s.last_share, formatTimestampAgo);
-  rejectionCopyable('rejected_shares', s.accepted_shares, s.rejected_shares);
-  rejectionWorkCopyable('rejected_work', s.accepted_work, s.rejected_work);
-  copyable('hash_days', formatHashDays(s.hash_days), s.hash_days);
+  set('blocks', poolData.block_count);
+  set('uptime_secs', poolData.uptime_secs);
+  populateDownstream(poolData.downstream || {});
+
+  const hashrate = poolData.downstream?.stats?.hashrate_1m;
+  const networkDifficulty = bitcoinData?.network_difficulty;
+
+  const estBlockTime = networkDifficulty > 0 && hashrate > 0
+    ? (networkDifficulty * 2 ** 32) / hashrate
+    : null;
+  set('est_block_time', estBlockTime, formatDuration);
 
   renderBitcoinData(bitcoinData);
   renderSystemData(systemData);

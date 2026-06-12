@@ -3,7 +3,7 @@ use {
     axum::extract::{Path, State},
     http_server::{
         self, common_routes,
-        error::{OptionExt, ServerResult},
+        error::{OptionExt, ServerError, ServerResult},
         templates::{OrderHtml, PoolHtml, ProxyHtml, RouterHtml, UserHtml, UsersHtml, render_page},
     },
 };
@@ -13,6 +13,7 @@ pub use http_server::{BitcoinStatus, SystemStatus};
 pub mod pool;
 pub mod proxy;
 pub mod router;
+pub(crate) mod users;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MiningStats {
@@ -65,14 +66,9 @@ impl MiningStats {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolStatus {
-    pub user_count: usize,
-    pub worker_count: usize,
     pub block_count: u64,
-    pub session_count: usize,
-    pub disconnected_count: usize,
-    pub idle_count: usize,
     pub uptime_secs: u64,
-    pub stats: MiningStats,
+    pub downstream: DownstreamInfo,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,6 +92,47 @@ impl DownstreamInfo {
             stats: MiningStats::from_snapshot(&metatron.snapshot(), now),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserSummary {
+    pub address: Address<NetworkUnchecked>,
+    pub worker_count: usize,
+    pub session_count: usize,
+    pub hashrate: HashRate,
+    pub received_hash_days: HashDays,
+    pub best_share: Option<Difficulty>,
+    pub last_share: Option<u64>,
+}
+
+impl UserSummary {
+    pub(crate) fn from_user(user: &User, now: Instant) -> Self {
+        let stats = user.snapshot();
+        Self {
+            address: user.address.as_unchecked().clone(),
+            worker_count: user.worker_count(),
+            session_count: user.session_count(),
+            hashrate: stats.hashrate_1m(now),
+            received_hash_days: stats.accepted_work.to_hash_days(),
+            best_share: stats.best_share,
+            last_share: stats
+                .last_share
+                .map(|time| epoch::instant_to_epoch_secs(time, now) as u64),
+        }
+    }
+}
+
+fn decode_query_component(value: &str) -> ServerResult<String> {
+    let value = value.replace('+', " ");
+    urlencoding::decode(&value)
+        .map(|value| value.into_owned())
+        .map_err(|err| ServerError::BadRequest(format!("invalid query encoding: {err}")))
+}
+
+fn parse_usize_query_param(name: &str, value: &str) -> ServerResult<usize> {
+    value
+        .parse()
+        .map_err(|err| ServerError::BadRequest(format!("invalid {name} `{value}`: {err}")))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

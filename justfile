@@ -62,6 +62,7 @@ pool:
     --bitcoin-rpc-password nakamoto \
     --bitcoin-rpc-port 38332 \
     --http-port 8080 \
+    --http-admin-token 123 \
     --start-diff 0.00001 \
     --vardiff-window 10 \
     --vardiff-period 1 \
@@ -75,9 +76,10 @@ proxy:
     --bitcoin-rpc-password nakamoto \
     --bitcoin-rpc-port 38332 \
     --address 0.0.0.0 \
-    --port 42070 \
+    --port 42071 \
     --upstream tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.proxy@127.0.0.1:42069 \
     --http-port 8081 \
+    --http-admin-token 123 \
     --start-diff 0.00001 \
     --vardiff-window 10 \
     --vardiff-period 1

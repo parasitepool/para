@@ -108,10 +108,28 @@
 
   <div class="column column-full">
     <h2>Sessions</h2>
-    <table id=sessions-table>
-      <thead><tr><th>Username</th><th>Hashrate</th><th>SPS</th><th>Best Share</th><th>Hashdays</th><th>Last Share</th></tr></thead>
-      <tbody id=sessions-list></tbody>
-    </table>
+    <div id=sessions-root class=filter-table>
+      <div class=table-scroll>
+      <table id=sessions-table>
+        <thead>
+          <tr>
+            <th data-sort=username aria-sort=none>Username</th>
+            <th data-sort=hashrate_1m aria-sort=descending>Hashrate</th>
+            <th data-sort=sps_1m aria-sort=none>SPS</th>
+            <th data-sort=best_share aria-sort=none>Best Share</th>
+            <th data-sort=hash_days aria-sort=none>Hashdays</th>
+            <th data-sort=last_share aria-sort=none>Last Share</th>
+          </tr>
+        </thead>
+        <tbody id=sessions-list></tbody>
+      </table>
+      </div>
+      <div class=table-pagination>
+        <button class=page-prev type=button>&lsaquo; Prev</button>
+        <span class=page-status>1/1</span>
+        <button class=page-next type=button>Next &rsaquo;</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -140,6 +158,8 @@
 <script>
 const orderId = window.location.pathname.split('/').filter(Boolean).pop();
 
+const sessionsTable = initSessionsTable(document.getElementById('sessions-root'));
+
 const h1 = document.querySelector('h1');
 document.title = document.title.replace('Order', `Order ${orderId}`);
 h1.childNodes[0].textContent = `Router | Order ${orderId}`;
@@ -167,24 +187,6 @@ function populateOrder(data) {
   set('created_at_height', data.created_at_height);
 }
 
-function populateStats(prefix, stats) {
-  if (!stats) {
-    for (const id of ['hashrate_1m', 'sps_1m', 'best_share', 'last_share',
-                      'rejected_shares', 'rejected_work', 'accepted_work', 'hash_days']) {
-      set(`${prefix}_${id}`, null);
-    }
-    return;
-  }
-  set(`${prefix}_hashrate_1m`, stats.hashrate_1m, formatHashrate);
-  set(`${prefix}_sps_1m`, stats.sps_1m, formatTruncated);
-  copyable(`${prefix}_best_share`, formatDifficulty(stats.best_share), stats.best_share);
-  set(`${prefix}_last_share`, stats.last_share, formatTimestampAgo);
-  rejectionCopyable(`${prefix}_rejected_shares`, stats.accepted_shares, stats.rejected_shares);
-  rejectionWorkCopyable(`${prefix}_rejected_work`, stats.accepted_work, stats.rejected_work);
-  set(`${prefix}_accepted_work`, stats.accepted_work, formatDifficulty);
-  copyable(`${prefix}_hash_days`, formatHashDays(stats.hash_days), stats.hash_days);
-}
-
 async function refresh(signal) {
   const data = await fetchJsonAllow404(`/api/router/order/${orderId}`, { signal });
 
@@ -204,10 +206,10 @@ async function refresh(signal) {
 
   if (terminal) {
     populateStats('downstream', null);
-    document.getElementById('sessions-list').innerHTML = '';
+    sessionsTable.setRows([]);
   } else {
     populateStats('downstream', data.downstream);
-    document.getElementById('sessions-list').innerHTML = renderSessionRows(data.sessions || []);
+    sessionsTable.setRows(data.sessions || []);
   }
 }
 

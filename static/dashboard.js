@@ -6,7 +6,8 @@ const CONFIG = {
   WS_RECONNECT_DELAY: 2000,
   COPY_FEEDBACK_DURATION: 1000,
   DEFAULT_POLL_INTERVAL: 5000,
-  STALE_AFTER_MS: 15000
+  STALE_AFTER_MS: 15000,
+  FILTER_DEBOUNCE_MS: 250
 };
 
 function withAuthOptions(options = {}) {
@@ -23,137 +24,23 @@ function escapeHtml(value) {
   })[ch]);
 }
 
-let loginOverlay = null;
 
-function showLoginOverlay() {
-  if (loginOverlay) return;
-
-  loginOverlay = document.createElement('div');
-  loginOverlay.id = 'auth-overlay';
-  loginOverlay.innerHTML = `
-    <div id="auth-modal">
-      <h2>Router Login</h2>
-      <input id="auth-token" type="password" placeholder="Bearer token" autocomplete="current-password">
-      <div id="auth-error"></div>
-      <button id="auth-submit">Login</button>
-    </div>
-  `;
-
-  const style = document.createElement('style');
-  style.textContent = `
-    #auth-overlay {
-      position: fixed;
-      inset: 0;
-      z-index: 5000;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: rgba(0,0,0,0.82);
-    }
-    #auth-modal {
-      width: 360px;
-      max-width: 90vw;
-      padding: 26px;
-      background: #1a1a1a;
-      border: 1px solid #444;
-      box-sizing: border-box;
-    }
-    #auth-modal h2 {
-      margin: 0 0 18px;
-      color: #888;
-      font-size: 1.15em;
-      text-align: center;
-    }
-    #auth-token {
-      width: 100%;
-      box-sizing: border-box;
-      margin-bottom: 12px;
-      padding: 8px 12px;
-      background: #111;
-      border: 1px solid #444;
-      color: #eee;
-      font: inherit;
-    }
-    #auth-error {
-      min-height: 1.4em;
-      margin-bottom: 10px;
-      color: #f55;
-      font-size: 0.85em;
-    }
-    #auth-submit {
-      width: 100%;
-      padding: 8px 16px;
-      background: #333;
-      border: 1px solid #444;
-      color: #eee;
-      cursor: pointer;
-      font: inherit;
-    }
-    #auth-submit:hover { background: #444; }
-  `;
-
-  document.head.appendChild(style);
-  document.body.appendChild(loginOverlay);
-
-  const input = document.getElementById('auth-token');
-  const error = document.getElementById('auth-error');
-  const submit = document.getElementById('auth-submit');
-
-  async function login() {
-    const token = input.value;
-    if (!token) {
-      error.textContent = 'Token is required';
-      return;
-    }
-
-    error.textContent = '';
-    submit.disabled = true;
-
-    try {
-      const res = await fetch('/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ token }),
-      });
-
-      if (res.status === 401) {
-        error.textContent = 'Invalid token';
-        return;
-      }
-
-      if (!res.ok) {
-        error.textContent = `Error: ${res.status}`;
-        return;
-      }
-
-      location.reload();
-    } catch (e) {
-      error.textContent = e.message;
-    } finally {
-      submit.disabled = false;
-    }
-  }
-
-  submit.addEventListener('click', login);
-  input.addEventListener('keydown', e => {
-    if (e.key === 'Enter') login();
-  });
-  input.focus();
+function redirectToLogin() {
+  location.href = `/login?next=${encodeURIComponent(location.pathname + location.search)}`;
 }
 
 async function initAuthProbe() {
   try {
     const res = await fetch('/api/router/status', withAuthOptions());
     if (res.status === 401) {
-      showLoginOverlay();
+      redirectToLogin();
       return false;
     }
   } catch (_) {
     return true;
   }
 
-  for (const id of ['logout-btn', 'halt-btn', 'boost-btn', 'capacity-btn']) {
+  for (const id of ['halt-btn', 'boost-btn', 'capacity-btn']) {
     document.getElementById(id)?.classList.remove('hidden');
   }
 
@@ -166,6 +53,18 @@ async function logout() {
   } catch (_) {}
   location.reload();
 }
+
+function initNavbar() {
+  for (const item of document.querySelectorAll('.navbar-item')) {
+    if (item.getAttribute('href') === location.pathname) {
+      item.setAttribute('aria-current', 'page');
+    }
+  }
+
+  document.getElementById('navbar-logout')?.addEventListener('click', logout);
+}
+
+document.addEventListener('DOMContentLoaded', initNavbar);
 
 const logState = {
   paused: false,
@@ -337,6 +236,17 @@ function formatTimestamp(ts) {
   return new Date(ts * 1000).toLocaleString();
 }
 
+function formatDuration(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return null;
+
+  const units = [['y', 31536000], ['d', 86400], ['h', 3600], ['m', 60]];
+  for (const [suffix, span] of units) {
+    if (seconds >= span) return (seconds / span).toFixed(1) + suffix;
+  }
+
+  return seconds.toFixed(1) + 's';
+}
+
 function formatAmount(value) {
   if (value === null || value === undefined) return '-';
   return typeof value === 'number' ? `${value} sats` : String(value);
@@ -443,21 +353,17 @@ function initCopyables() {
   document.querySelectorAll('.copyable').forEach(el => {
     el.addEventListener('click', async () => {
       const full = el.dataset.full;
-      if (!full || full === 'undefined') return;
+      if (!full) return;
       try {
         await navigator.clipboard.writeText(full);
         const formatted = el.dataset.formatted || el.textContent;
         el.textContent = 'Copied!';
-        setTimeout(() => { el.textContent = formatted; }, CONFIG.COPY_FEEDBACK_DURATION);
+        el.classList.add('copied');
+        setTimeout(() => {
+          el.textContent = formatted;
+          el.classList.remove('copied');
+        }, CONFIG.COPY_FEEDBACK_DURATION);
       } catch (e) { console.error('Copy failed:', e); }
-    });
-
-    el.addEventListener('mouseenter', () => {
-      if (el.dataset.full) el.textContent = el.dataset.full;
-    });
-
-    el.addEventListener('mouseleave', () => {
-      if (el.dataset.formatted) el.textContent = el.dataset.formatted;
     });
   });
 }
@@ -469,22 +375,18 @@ function initDelegatedCopyables(containerId, selector = '.copyable') {
     const el = e.target.closest(selector);
     if (!el) return;
     const full = el.dataset.full;
-    if (!full || full === 'undefined') return;
+    if (!full) return;
     try {
       await navigator.clipboard.writeText(full);
       const formatted = el.dataset.formatted || el.textContent;
       el.textContent = 'Copied!';
-      setTimeout(() => { el.textContent = formatted; }, CONFIG.COPY_FEEDBACK_DURATION);
+      el.classList.add('copied');
+      setTimeout(() => {
+        el.textContent = formatted;
+        el.classList.remove('copied');
+      }, CONFIG.COPY_FEEDBACK_DURATION);
     } catch (e) { console.error('Copy failed:', e); }
   });
-  container.addEventListener('mouseenter', (e) => {
-    const el = e.target.closest(selector);
-    if (el && el.dataset.full) el.textContent = el.dataset.full;
-  }, true);
-  container.addEventListener('mouseleave', (e) => {
-    const el = e.target.closest(selector);
-    if (el && el.dataset.formatted) el.textContent = el.dataset.formatted;
-  }, true);
 }
 
 function setupLogToggle() {
@@ -541,30 +443,398 @@ function renderSystemData(data) {
   set('uptime', data.uptime);
 }
 
-function renderSessionRows(sessions) {
-  return sessions.sort((a, b) => b.stats.hashrate_1m - a.stats.hashrate_1m).map(session => {
-    const stats = session.stats;
-    const sessionUser = session.username || '';
-    const shortSessionUser = truncateMiddle(sessionUser);
-    const lastShare = stats.last_share != null ? formatTimestampAgo(stats.last_share) : '-';
-    const bestShare = formatDifficulty(stats.best_share);
-    const safeSessionUser = escapeHtml(sessionUser);
-    const safeShortSessionUser = escapeHtml(shortSessionUser);
-    return `<tr>
-      <td><span class="copyable hover-expand session-username" data-full="${safeSessionUser}" data-formatted="${safeShortSessionUser}">${safeShortSessionUser}</span></td>
-      <td>${escapeHtml(formatHashrate(stats.hashrate_1m))}</td>
-      <td>${escapeHtml(formatTruncated(stats.sps_1m))}</td>
-      <td>${escapeHtml(bestShare || '-')}</td>
-      <td>${escapeHtml(stats.hash_days != null ? formatHashDays(stats.hash_days) : '-')}</td>
-      <td>${escapeHtml(lastShare)}</td>
-    </tr>`;
-  }).join('');
+function populateStats(prefix, stats) {
+  if (!stats) {
+    for (const id of ['hashrate_1m', 'sps_1m', 'best_share', 'last_share',
+                      'rejected_shares', 'rejected_work', 'accepted_work', 'hash_days']) {
+      set(`${prefix}_${id}`, null);
+    }
+    return;
+  }
+  set(`${prefix}_hashrate_1m`, stats.hashrate_1m, formatHashrate);
+  set(`${prefix}_sps_1m`, stats.sps_1m, formatTruncated);
+  copyable(`${prefix}_best_share`, formatDifficulty(stats.best_share), stats.best_share);
+  set(`${prefix}_last_share`, stats.last_share, formatTimestampAgo);
+  rejectionCopyable(`${prefix}_rejected_shares`, stats.accepted_shares, stats.rejected_shares);
+  rejectionWorkCopyable(`${prefix}_rejected_work`, stats.accepted_work, stats.rejected_work);
+  set(`${prefix}_accepted_work`, stats.accepted_work, formatDifficulty);
+  copyable(`${prefix}_hash_days`, formatHashDays(stats.hash_days), stats.hash_days);
+}
+
+function populateDownstream(downstream) {
+  set('users', downstream.user_count);
+  set('workers', downstream.worker_count);
+  set('sessions', downstream.session_count);
+  set('idle', downstream.idle_count);
+  set('disconnected', downstream.disconnected_count);
+  populateStats('downstream', downstream.stats);
+}
+
+function renderSessionRow(session) {
+  const stats = session.stats;
+  const sessionUser = session.username || '';
+  const shortSessionUser = truncateMiddle(sessionUser);
+  const lastShare = stats.last_share != null ? formatTimestampAgo(stats.last_share) : '-';
+  const bestShare = formatDifficulty(stats.best_share);
+  const safeSessionUser = escapeHtml(sessionUser);
+  const safeShortSessionUser = escapeHtml(shortSessionUser);
+  return `<tr>
+    <td><span class=copyable data-full="${safeSessionUser}" data-formatted="${safeShortSessionUser}">${safeShortSessionUser}</span></td>
+    <td>${escapeHtml(formatHashrate(stats.hashrate_1m))}</td>
+    <td>${escapeHtml(formatTruncated(stats.sps_1m))}</td>
+    <td>${escapeHtml(bestShare || '-')}</td>
+    <td>${escapeHtml(stats.hash_days != null ? formatHashDays(stats.hash_days) : '-')}</td>
+    <td>${escapeHtml(lastShare)}</td>
+  </tr>`;
+}
+
+function compareStat(key) {
+  return (a, b) => compareNumber(a.stats[key], b.stats[key]);
+}
+
+function compareNullableStat(key) {
+  return (a, b) => compareNullableNumber(a.stats[key], b.stats[key]);
+}
+
+function initSessionsTable(root) {
+  return initFilterTable({
+    root,
+    prefix: 'sessions',
+    defaultSort: { column: 'hashrate_1m', direction: 'desc' },
+    sorts: {
+      username: 'string',
+      hashrate_1m: compareStat('hashrate_1m'),
+      sps_1m: compareStat('sps_1m'),
+      best_share: compareNullableStat('best_share'),
+      hash_days: compareStat('hash_days'),
+      last_share: compareNullableStat('last_share'),
+    },
+    tiebreak: (a, b) => compareString(a.username, b.username),
+    renderRow: renderSessionRow,
+  });
+}
+
+function compareNumber(a, b) {
+  return (Number(a) || 0) - (Number(b) || 0);
+}
+
+function compareString(a, b) {
+  return String(a ?? '').toLowerCase().localeCompare(String(b ?? '').toLowerCase());
+}
+
+function compareNullableNumber(a, b) {
+  const aNull = a == null;
+  const bNull = b == null;
+  if (aNull && bNull) return 0;
+  if (aNull) return 1;
+  if (bNull) return -1;
+  return compareNumber(a, b);
+}
+
+function initFilterTable({
+  root,
+  prefix = '',
+  defaultSort,
+  sorts = {},
+  ascByDefault = [],
+  tiebreak,
+  renderRow,
+  rowHref,
+  onFilterChange,
+  pageSize = 25,
+}) {
+  const tbody = root.querySelector('tbody');
+  const headers = Array.from(root.querySelectorAll('th[data-sort]'));
+  const validSorts = new Set(headers.map(th => th.dataset.sort));
+  const searchInput = root.querySelector('input[type=search][data-filter]');
+  const multiSelects = Array.from(root.querySelectorAll('.multi-select[data-filter]'));
+  const selects = Array.from(root.querySelectorAll('select[data-filter]'));
+  const resetButton = root.querySelector('.table-reset');
+  const prevButton = root.querySelector('.page-prev');
+  const nextButton = root.querySelector('.page-next');
+  const pageStatus = root.querySelector('.page-status');
+
+  let sortColumn = defaultSort.column;
+  let sortDirection = defaultSort.direction;
+  let currentPage = 0;
+  let rows = [];
+  let pageRows = [];
+  let totalCount = 0;
+  let filterTimer = null;
+
+  function checkboxes(multi) {
+    return Array.from(multi.querySelectorAll('input[type=checkbox]'));
+  }
+
+  function updateMultiLabel(multi) {
+    const label = multi.querySelector('.multi-select-label');
+    if (!label) return;
+
+    const checked = checkboxes(multi).filter(input => input.checked);
+    if (checked.length === 0) {
+      label.textContent = 'Any';
+    } else if (checked.length === 1) {
+      label.textContent = checked[0].parentElement.textContent.trim();
+    } else {
+      label.textContent = `${checked.length} selected`;
+    }
+  }
+
+  function toggleMultiSelect(multi) {
+    const options = multi.querySelector('.multi-select-options');
+    const toggle = multi.querySelector('.multi-select-toggle');
+    if (!options || !toggle) return;
+
+    const hidden = options.classList.toggle('hidden');
+    toggle.setAttribute('aria-expanded', String(!hidden));
+  }
+
+  function closeMultiSelects() {
+    for (const multi of multiSelects) {
+      multi.querySelector('.multi-select-options')?.classList.add('hidden');
+      multi.querySelector('.multi-select-toggle')?.setAttribute('aria-expanded', 'false');
+    }
+  }
+
+  function compareRows(a, b) {
+    const sort = sorts[sortColumn];
+    let value;
+    if (typeof sort === 'function') {
+      value = sort(a, b);
+    } else if (sort === 'string') {
+      value = compareString(a[sortColumn], b[sortColumn]);
+    } else {
+      value = compareNumber(a[sortColumn], b[sortColumn]);
+    }
+
+    value = sortDirection === 'asc' ? value : -value;
+    return value || tiebreak(a, b);
+  }
+
+  function addFilterParams(params) {
+    if (searchInput) {
+      const search = searchInput.value?.trim() || '';
+      if (search) params.set(searchInput.dataset.filter, search);
+    }
+    for (const multi of multiSelects) {
+      for (const input of checkboxes(multi)) {
+        if (input.checked) params.append(multi.dataset.filter, input.value);
+      }
+    }
+    for (const select of selects) {
+      if (select.value) params.set(select.dataset.filter, select.value);
+    }
+  }
+
+  function stateParam(name) {
+    return prefix ? `${prefix}-${name}` : name;
+  }
+
+  function addStateParams(params, includePage) {
+    addFilterParams(params);
+    if (sortColumn !== defaultSort.column || sortDirection !== defaultSort.direction) {
+      params.set(stateParam('sort'), sortColumn);
+      params.set(stateParam('direction'), sortDirection);
+    }
+    if (includePage && currentPage > 0) {
+      params.set(stateParam('page'), String(currentPage + 1));
+    }
+  }
+
+  function buildQuery() {
+    const params = new URLSearchParams();
+    addFilterParams(params);
+
+    if (Array.from(params.keys()).length === 0) {
+      params.set('limit', String(pageSize));
+    }
+
+    return params.toString();
+  }
+
+  function syncUrl() {
+    const params = new URLSearchParams(location.search);
+    if (searchInput) params.delete(searchInput.dataset.filter);
+    for (const multi of multiSelects) params.delete(multi.dataset.filter);
+    for (const select of selects) params.delete(select.dataset.filter);
+    for (const name of ['sort', 'direction', 'page']) params.delete(stateParam(name));
+    addStateParams(params, true);
+    const query = params.toString();
+    history.replaceState(null, '', query ? `${location.pathname}?${query}` : location.pathname);
+  }
+
+  function loadStateFromUrl() {
+    const params = new URLSearchParams(location.search);
+
+    if (searchInput) searchInput.value = params.get(searchInput.dataset.filter) || '';
+    for (const multi of multiSelects) {
+      const values = new Set(params.getAll(multi.dataset.filter).flatMap(value => value.split(',')));
+      for (const input of checkboxes(multi)) input.checked = values.has(input.value);
+      updateMultiLabel(multi);
+    }
+    for (const select of selects) select.value = params.get(select.dataset.filter) || '';
+
+    const requestedSort = params.get(stateParam('sort'));
+    sortColumn = validSorts.has(requestedSort) ? requestedSort : defaultSort.column;
+    const requestedDirection = params.get(stateParam('direction'));
+    sortDirection = requestedDirection === 'asc' || requestedDirection === 'desc'
+      ? requestedDirection
+      : defaultSort.direction;
+
+    const requestedPage = Number(params.get(stateParam('page')));
+    currentPage = Number.isInteger(requestedPage) && requestedPage > 1 ? requestedPage - 1 : 0;
+  }
+
+  function applyFilterChange() {
+    clearTimeout(filterTimer);
+    filterTimer = null;
+    syncUrl();
+    onFilterChange?.();
+  }
+
+  function scheduleFilterChange() {
+    currentPage = 0;
+    clearTimeout(filterTimer);
+    filterTimer = setTimeout(applyFilterChange, CONFIG.FILTER_DEBOUNCE_MS);
+  }
+
+  function resetFilters() {
+    if (searchInput) searchInput.value = '';
+    for (const multi of multiSelects) {
+      for (const input of checkboxes(multi)) input.checked = false;
+      updateMultiLabel(multi);
+    }
+    for (const select of selects) select.value = '';
+    closeMultiSelects();
+
+    sortColumn = defaultSort.column;
+    sortDirection = defaultSort.direction;
+    currentPage = 0;
+    applyFilterChange();
+  }
+
+  function updateSortHeaders() {
+    for (const th of headers) {
+      const active = th.dataset.sort === sortColumn;
+      th.classList.toggle('sort-asc', active && sortDirection === 'asc');
+      th.classList.toggle('sort-desc', active && sortDirection === 'desc');
+      th.setAttribute('aria-sort', active ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none');
+    }
+  }
+
+  function render() {
+    if (!tbody || tbody.querySelector('.copyable:hover')) return;
+
+    const sorted = rows.slice().sort(compareRows);
+    totalCount = sorted.length;
+    const pageCount = Math.max(1, Math.ceil(sorted.length / pageSize));
+    const previousPage = currentPage;
+    currentPage = Math.max(0, Math.min(currentPage, pageCount - 1));
+    if (currentPage !== previousPage) syncUrl();
+    const pageStart = currentPage * pageSize;
+    pageRows = sorted.slice(pageStart, pageStart + pageSize);
+
+    tbody.innerHTML = pageRows.map(renderRow).join('');
+
+    if (pageStatus) {
+      pageStatus.textContent = totalCount === 0
+        ? '0/0'
+        : `${currentPage + 1}/${pageCount} (${totalCount})`;
+    }
+    if (prevButton) prevButton.disabled = currentPage === 0;
+    if (nextButton) nextButton.disabled = currentPage >= pageCount - 1;
+    updateSortHeaders();
+  }
+
+  function setRows(newRows) {
+    rows = newRows;
+    render();
+  }
+
+  searchInput?.addEventListener('input', scheduleFilterChange);
+
+  for (const multi of multiSelects) {
+    multi.querySelector('.multi-select-toggle')?.addEventListener('click', () => toggleMultiSelect(multi));
+    for (const input of checkboxes(multi)) {
+      input.addEventListener('change', () => {
+        updateMultiLabel(multi);
+        currentPage = 0;
+        applyFilterChange();
+      });
+    }
+  }
+
+  for (const select of selects) {
+    select.addEventListener('change', () => {
+      currentPage = 0;
+      applyFilterChange();
+    });
+  }
+
+  resetButton?.addEventListener('click', resetFilters);
+
+  if (multiSelects.length > 0) {
+    document.addEventListener('click', e => {
+      const control = e.target.closest('.multi-select');
+      if (control && root.contains(control)) return;
+      closeMultiSelects();
+    });
+  }
+
+  for (const th of headers) {
+    th.addEventListener('click', () => {
+      const column = th.dataset.sort;
+      if (sortColumn === column) {
+        sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+      } else {
+        sortColumn = column;
+        sortDirection = ascByDefault.includes(column) ? 'asc' : 'desc';
+      }
+      currentPage = 0;
+      syncUrl();
+      render();
+    });
+  }
+
+  prevButton?.addEventListener('click', () => {
+    if (currentPage > 0) {
+      currentPage -= 1;
+      syncUrl();
+      render();
+    }
+  });
+
+  nextButton?.addEventListener('click', () => {
+    if ((currentPage + 1) * pageSize < totalCount) {
+      currentPage += 1;
+      syncUrl();
+      render();
+    }
+  });
+
+  if (rowHref) {
+    root.classList.add('row-links');
+    tbody?.addEventListener('click', e => {
+      if (e.target.closest('.copyable, a')) return;
+      const row = e.target.closest('tr');
+      if (!row) return;
+      const index = Array.prototype.indexOf.call(tbody.children, row);
+      if (index < 0 || index >= pageRows.length) return;
+      window.location.href = rowHref(pageRows[index]);
+    });
+  }
+
+  loadStateFromUrl();
+  syncUrl();
+  updateSortHeaders();
+
+  return { buildQuery, setRows, render };
 }
 
 async function fetchJson(url, options) {
   const r = await fetch(url, withAuthOptions(options));
   if (r.status === 401) {
-    showLoginOverlay();
+    redirectToLogin();
     throw new Error(`${url}: ${r.status}`);
   }
   if (!r.ok) throw new Error(`${url}: ${r.status}`);
@@ -575,7 +845,7 @@ async function fetchJsonAllow404(url, options) {
   const r = await fetch(url, withAuthOptions(options));
   if (r.status === 404) return null;
   if (r.status === 401) {
-    showLoginOverlay();
+    redirectToLogin();
     throw new Error(`${url}: ${r.status}`);
   }
   if (!r.ok) throw new Error(`${url}: ${r.status}`);

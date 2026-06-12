@@ -155,13 +155,43 @@ async fn router_auth_tiers() {
 
     let client = reqwest::Client::new();
     let status_url = format!("{}/api/router/status", router.api_endpoint());
+    let users_url = format!("{}/api/router/users", router.api_endpoint());
     let system_url = format!("{}/api/system/status", router.api_endpoint());
     let cancel_url = format!("{}/api/router/order/999999/cancel", router.api_endpoint());
     let login_url = format!("{}/login", router.api_endpoint());
+    let login_page = client.get(&login_url).send().await.unwrap();
+    assert_eq!(login_page.status(), StatusCode::OK);
+    assert!(login_page.text().await.unwrap().contains("login-form"));
+
+    let home = client
+        .get(router.api_endpoint())
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+
+    assert!(home.contains("navbar-login"));
+    assert!(!home.contains("navbar-logout"));
 
     assert_eq!(
         client.get(&status_url).send().await.unwrap().status(),
         StatusCode::UNAUTHORIZED,
+    );
+    assert_eq!(
+        client.get(&users_url).send().await.unwrap().status(),
+        StatusCode::UNAUTHORIZED,
+    );
+    assert_eq!(
+        client
+            .get(&users_url)
+            .bearer_auth("api")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK,
     );
     assert_eq!(
         client
@@ -262,6 +292,30 @@ async fn router_auth_tiers() {
             .status(),
         StatusCode::OK,
     );
+    let home = client
+        .get(router.api_endpoint())
+        .header(reqwest::header::COOKIE, &api_cookie)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+
+    assert!(home.contains("navbar-logout"));
+    assert!(!home.contains("navbar-login"));
+
+    let login_redirect = client
+        .get(&login_url)
+        .header(reqwest::header::COOKIE, &api_cookie)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+
+    assert!(login_redirect.contains("navbar-logout"));
     assert_eq!(
         client
             .get(&system_url)
@@ -412,6 +466,50 @@ async fn router() {
     let status = router.get_status().await.unwrap();
     assert_eq!(status.active_order_count, 2);
     assert_eq!(status.downstream.session_count, 3);
+    assert_eq!(status.downstream.user_count, 1);
+    assert_eq!(status.downstream.worker_count, 1);
+
+    let users = router.get_users().await.unwrap();
+    assert_eq!(users.len(), 1);
+    assert_eq!(
+        users[0].address.clone().assume_checked().to_string(),
+        miner_address
+    );
+    assert_eq!(users[0].worker_count, 1);
+    assert_eq!(users[0].session_count, 3);
+
+    let matched = router
+        .users_query("search=miner")
+        .await
+        .unwrap()
+        .json::<Vec<api::UserSummary>>()
+        .await
+        .unwrap();
+
+    assert_eq!(matched.len(), 1);
+
+    let unmatched = router
+        .users_query("search=zzzzzzzz")
+        .await
+        .unwrap()
+        .json::<Vec<api::UserSummary>>()
+        .await
+        .unwrap();
+
+    assert!(unmatched.is_empty());
+
+    let invalid_limit = router.users_query("limit=foo").await.unwrap();
+    assert_eq!(invalid_limit.status(), StatusCode::BAD_REQUEST);
+
+    let user = router.get_user(&miner_address).await.unwrap();
+    assert_eq!(
+        user.address.clone().assume_checked().to_string(),
+        miner_address
+    );
+    assert_eq!(user.session_count, 3);
+    assert_eq!(user.workers.len(), 1);
+    assert_eq!(user.workers[0].name, "miner");
+    assert_eq!(user.sessions.len(), 3);
 
     drop(pool_a);
 
