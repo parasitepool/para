@@ -1,7 +1,9 @@
 use {
     super::*,
     crate::subcommand::server::{
-        database::{FailedPayout, Payout, PendingPayout, Split, UpdatePayoutStatusRequest},
+        database::{
+            FailedPayout, HistoricalPayout, Payout, PendingPayout, Split, UpdatePayoutStatusRequest,
+        },
         templates::simulate_payouts::SimulatePayoutsHtml,
     },
 };
@@ -10,6 +12,7 @@ pub(crate) fn payouts_router(config: Arc<ServerConfig>, database: Database) -> a
     axum::Router::new()
         .route("/payouts", get(payouts_all))
         .route("/payouts/failed", get(payouts_failed))
+        .route("/payouts/history", get(payouts_history))
         .route("/payouts/simulate", get(payouts_simulate))
         .route("/payouts/{blockheight}", get(payouts))
         .route("/payouts/update", post(update_payout_status))
@@ -74,6 +77,53 @@ pub(crate) async fn payouts_failed(
     Extension(database): Extension<Database>,
 ) -> ServerResult<Response> {
     Ok(Json(database.get_failed_payouts().await?).into_response())
+}
+
+/// Get all historical payouts across every status (including success/cancelled)
+#[utoipa::path(
+    get,
+    path = "/payouts/history",
+    security(("admin_token" = [])),
+    params(
+        ("status" = Option<String>, Query, description = "Filter to a single status: pending|processing|success|failure|cancelled"),
+        ("format" = Option<String>, Query, description = "Response format: 'json' (default) or 'csv'")
+    ),
+    responses(
+        (status = 200, description = "Historical payouts", body = Vec<HistoricalPayout>),
+    ),
+    tag = "payouts"
+)]
+pub(crate) async fn payouts_history(
+    Extension(database): Extension<Database>,
+    Query(params): Query<HashMap<String, String>>,
+) -> ServerResult<Response> {
+    let status = params.get("status").map(|s| s.as_str());
+
+    let payouts = database.get_all_payouts(status).await?;
+
+    let format = params.get("format").map(|f| f.as_str()).unwrap_or("json");
+
+    match format {
+        "csv" => {
+            let mut csv = String::from(
+                "payout_id,username,lightning_address,amount_sats,status,failure_reason,updated_at\n",
+            );
+            for payout in &payouts {
+                csv.push_str(&format!(
+                    "{},{},{},{},{},{},{}\n",
+                    payout.id,
+                    payout.username,
+                    payout.ln_address,
+                    payout.amount_sats,
+                    payout.status,
+                    payout.failure_reason.as_deref().unwrap_or(""),
+                    payout.updated_at,
+                ));
+            }
+            Ok(([(CONTENT_TYPE, "text/csv; charset=utf-8")], csv).into_response())
+        }
+        _ => Ok(Json(&payouts).into_response()),
+    }
 }
 
 /// Simulate payouts as if a block was found now

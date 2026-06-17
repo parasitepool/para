@@ -55,6 +55,17 @@ pub struct UpdatePayoutStatusRequest {
     pub failure_reason: Option<String>,
 }
 
+#[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone, PartialEq, ToSchema)]
+pub struct HistoricalPayout {
+    pub id: i64,
+    pub username: String,
+    pub ln_address: String,
+    pub amount_sats: i64,
+    pub status: String,
+    pub failure_reason: Option<String>,
+    pub updated_at: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct Database {
     pub(crate) pool: Pool<Postgres>,
@@ -626,6 +637,32 @@ impl Database {
         result.sort_by_key(|b| std::cmp::Reverse(b.amount_sats));
 
         Ok(result)
+    }
+
+    /// All payouts across every status
+    pub async fn get_all_payouts(&self, status: Option<&str>) -> Result<Vec<HistoricalPayout>> {
+        let rows = sqlx::query_as::<_, HistoricalPayout>(
+            "
+            SELECT
+                p.id as id,
+                a.username as username,
+                COALESCE(a.lnurl, '') as ln_address,
+                p.amount as amount_sats,
+                p.status as status,
+                p.failure_reason as failure_reason,
+                p.updated_at::text as updated_at
+            FROM payouts p
+            JOIN accounts a ON p.account_id = a.id
+            WHERE ($1::text IS NULL OR p.status = $1)
+            ORDER BY p.updated_at DESC, p.id DESC
+            ",
+        )
+        .bind(status)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))?;
+
+        Ok(rows)
     }
 
     pub async fn get_simulated_payouts(
