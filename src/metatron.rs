@@ -34,7 +34,7 @@ impl OrderSlot {
 }
 
 pub(crate) struct Metatron {
-    blocks: AtomicU64,
+    blocks: RwLock<Vec<BlockHash>>,
     counter: AtomicU32,
     disconnected: DashMap<Extranonce, (Arc<Session>, Instant)>,
     started: Instant,
@@ -45,7 +45,7 @@ pub(crate) struct Metatron {
 impl Metatron {
     pub(crate) fn new() -> Self {
         Self {
-            blocks: AtomicU64::new(0),
+            blocks: RwLock::new(Vec::new()),
             counter: AtomicU32::new(0),
             disconnected: DashMap::new(),
             started: Instant::now(),
@@ -132,8 +132,8 @@ impl Metatron {
             .is_some()
     }
 
-    pub(crate) fn add_block(&self) {
-        self.blocks.fetch_add(1, Ordering::Relaxed);
+    pub(crate) fn record_block(&self, blockhash: BlockHash) {
+        self.blocks.write().push(blockhash);
     }
 
     pub(crate) fn snapshot(&self) -> Stats {
@@ -145,8 +145,12 @@ impl Metatron {
         })
     }
 
-    pub(crate) fn total_blocks(&self) -> u64 {
-        self.blocks.load(Ordering::Relaxed)
+    pub(crate) fn block_count(&self) -> usize {
+        self.blocks.read().len()
+    }
+
+    pub(crate) fn last_block(&self) -> Option<BlockHash> {
+        self.blocks.read().last().copied()
     }
 
     pub(crate) fn total_sessions(&self) -> usize {
@@ -294,7 +298,7 @@ impl StatusLine for Metatron {
             self.total_workers(),
             stats.accepted_shares,
             stats.rejected_shares,
-            self.total_blocks(),
+            self.block_count(),
             self.uptime().as_secs()
         )
     }
@@ -330,7 +334,7 @@ mod tests {
         assert_eq!(metatron.total_sessions(), 0);
         assert_eq!(stats.accepted_shares, 0);
         assert_eq!(stats.rejected_shares, 0);
-        assert_eq!(metatron.total_blocks(), 0);
+        assert_eq!(metatron.block_count(), 0);
         assert_eq!(metatron.total_users(), 0);
         assert_eq!(metatron.total_workers(), 0);
     }
@@ -379,10 +383,19 @@ mod tests {
     }
 
     #[test]
-    fn block_count_increments() {
+    fn record_block_stores_hash() {
         let metatron = Metatron::new();
-        metatron.add_block();
-        assert_eq!(metatron.total_blocks(), 1);
+
+        let h1 = BlockHash::from_byte_array([1u8; 32]);
+        let h2 = BlockHash::from_byte_array([2u8; 32]);
+
+        metatron.record_block(h1);
+        assert_eq!(metatron.block_count(), 1);
+        assert_eq!(metatron.last_block(), Some(h1));
+
+        metatron.record_block(h2);
+        assert_eq!(metatron.block_count(), 2);
+        assert_eq!(metatron.last_block(), Some(h2));
     }
 
     #[test]

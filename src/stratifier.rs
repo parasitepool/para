@@ -887,6 +887,8 @@ impl<W: Workbase> Stratifier<W> {
         if let Ok(blockhash) = header.validate_pow(Target::from_compact(bits)) {
             info!("Block with hash {blockhash} meets network difficulty");
 
+            self.metatron.record_block(blockhash);
+
             match job.workbase.build_block(&job, &submit, header) {
                 Ok(block) => {
                     info!("Submitting potential block solve");
@@ -911,7 +913,6 @@ impl<W: Workbase> Stratifier<W> {
 
                     if success {
                         info!("SUCCESSFULLY mined block {}", block.block_hash());
-                        self.metatron.add_block();
 
                         self.send_event(Event::BlockFound(BlockFoundEvent {
                             timestamp: None,
@@ -925,7 +926,7 @@ impl<W: Workbase> Stratifier<W> {
                     }
                 }
                 Err(err) => {
-                    warn!("Failed to build block: {err}");
+                    debug!("not building block in proxy mode: {err}");
                 }
             }
         }

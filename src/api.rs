@@ -67,6 +67,7 @@ impl MiningStats {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolStatus {
     pub block_count: u64,
+    pub last_block_hash: Option<String>,
     pub uptime_secs: u64,
     pub downstream: DownstreamInfo,
 }
@@ -221,6 +222,8 @@ impl SessionDetail {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyStatus {
     pub uptime_secs: u64,
+    pub block_count: u64,
+    pub last_block_hash: Option<String>,
     pub upstream: UpstreamInfo,
     pub downstream: DownstreamInfo,
 }
@@ -258,6 +261,8 @@ impl UpstreamInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RouterStatus {
     pub uptime_secs: u64,
+    pub block_count: u64,
+    pub last_block_hash: Option<String>,
     pub hash_price: HashPrice,
     pub capacity_work: HashDays,
     pub available_work: HashDays,

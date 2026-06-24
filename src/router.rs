@@ -598,6 +598,8 @@ impl Router {
 
         RouterStatus {
             uptime_secs: metatron.uptime().as_secs(),
+            block_count: metatron.block_count() as u64,
+            last_block_hash: metatron.last_block().map(|h| h.to_string()),
             hash_price: self.hash_price(),
             capacity_work: capacity,
             available_work: available,
@@ -760,10 +762,11 @@ impl StatusLine for Router {
         let stats = self.metatron.snapshot();
 
         format!(
-            "orders={}  sessions={}  hashrate={:.2}",
+            "orders={}  sessions={}  hashrate={:.2}  blocks={}",
             self.orders.read().active().len(),
             self.metatron.total_sessions(),
             stats.hashrate_1m(now),
+            self.metatron.block_count(),
         )
     }
 }
