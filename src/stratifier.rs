@@ -85,8 +85,10 @@ impl<W: Workbase> Stratifier<W> {
                 _ = cancel.cancelled() => {
                     info!("Session cancelled, sending client.reconnect to {}", self.socket_addr);
 
-                    if let Err(err) = self.send_reconnect().await {
-                        warn!("Failed to send client.reconnect to {}: {err}", self.socket_addr);
+                    match timeout(Duration::from_millis(500), self.send_reconnect()).await {
+                        Ok(Ok(())) => {}
+                        Ok(Err(err)) => warn!("Failed to send client.reconnect to {}: {err}", self.socket_addr),
+                        Err(_) => warn!("Timed out sending client.reconnect to {}", self.socket_addr),
                     }
 
                     break;

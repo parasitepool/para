@@ -669,7 +669,7 @@ impl Router {
                     info!("Shutting down router");
 
                     self.tasks.close();
-                    self.tasks.wait().await;
+                    let _ = timeout(Duration::from_secs(2), self.tasks.wait()).await;
 
                     if let Err(err) = self.persist() {
                         warn!("Final router persistence error: {err}");
