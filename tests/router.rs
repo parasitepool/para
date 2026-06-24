@@ -1469,3 +1469,63 @@ async fn filter_orders() {
 
     assert_eq!(invalid_status.status(), StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+#[timeout(120000)]
+async fn order_transitions_to_in_mempool_then_active() {
+    let pool_bitcoind = bitcoind();
+    let wallet_bitcoind = spawn_regtest();
+    let descriptor = generate_descriptor();
+    let funding_descriptor = generate_descriptor();
+    let funding_address = fund_wallet(&wallet_bitcoind, &funding_descriptor).await;
+
+    let pool = TestPool::spawn_with_args(&pool_bitcoind, "--start-diff 0.00001");
+    let username = signet_username();
+
+    let router = TestRouter::spawn(
+        &descriptor,
+        &wallet_bitcoind,
+        "--start-diff 0.00001 --tick-interval 1",
+    );
+
+    let (id, address, amount) = add_order(
+        &router,
+        &format!("{username}@{}", pool.stratum_endpoint()),
+        HashDays::new(1e5).unwrap(),
+        current_hash_price(&router).await,
+    )
+    .await;
+
+    let detail = router.get_order(id).await.unwrap();
+    assert_eq!(detail.status, OrderStatus::Pending);
+
+    send_to_address_without_mining(&wallet_bitcoind, &funding_descriptor, &address, amount).await;
+
+    timeout(Duration::from_secs(30), async {
+        loop {
+            if let Ok(detail) = router.get_order(id).await
+                && detail.status == OrderStatus::InMempool
+            {
+                break;
+            }
+            sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("unconfirmed payment should transition order to InMempool");
+
+    generate_to_address(&wallet_bitcoind, 1, &funding_address).await;
+
+    timeout(Duration::from_secs(30), async {
+        loop {
+            if let Ok(detail) = router.get_order(id).await
+                && detail.status == OrderStatus::Active
+            {
+                break;
+            }
+            sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("confirmed payment should transition order to Active");
+}

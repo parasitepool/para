@@ -405,41 +405,43 @@ impl Router {
         order: &Arc<Order>,
         payment: &Payment,
     ) -> RouterResult<bool> {
-        let mut ticker = ticker(self.settings.tick_interval());
         let wallet = self.wallet.as_ref().ok_or(RouterError::WalletRequired)?;
+        let mut sync_rx = wallet.subscribe_sync();
 
         loop {
-            tokio::select! {
-                biased;
-                _ = order.cancel.cancelled() => {
+            let deadline_height = payment.created_at_height + PAYMENT_TIMEOUT;
+
+            let (total, confirmed_by_deadline) =
+                wallet.received_by_deadline(payment.derivation_index, deadline_height);
+
+            let timed_out = wallet.tip() >= deadline_height;
+
+            {
+                let mut status = order.status.lock();
+
+                if confirmed_by_deadline >= payment.amount
+                    && matches!(*status, OrderStatus::Pending | OrderStatus::InMempool)
+                {
+                    return Ok(true);
+                }
+
+                if timed_out {
+                    drop(status);
+                    order.terminate(OrderStatus::Expired);
                     return Ok(false);
                 }
-                _ = ticker.tick() => {
-                    let deadline_height = payment.created_at_height + PAYMENT_TIMEOUT;
-                    let (total, confirmed_by_deadline) =
-                        wallet.received_by_deadline(payment.derivation_index, deadline_height);
-                    let timed_out = wallet.tip() >= deadline_height;
 
-                    let mut status = order.status.lock();
-
-                    if confirmed_by_deadline >= payment.amount
-                        && matches!(*status, OrderStatus::Pending | OrderStatus::InMempool)
-                    {
-                        return Ok(true);
-                    }
-
-                    if timed_out {
-                        drop(status);
-                        order.terminate(OrderStatus::Expired);
-                        return Ok(false);
-                    }
-
-                    match (*status, total >= payment.amount) {
-                        (OrderStatus::Pending, true) => *status = OrderStatus::InMempool,
-                        (OrderStatus::InMempool, false) => *status = OrderStatus::Pending,
-                        _ => {}
-                    }
+                match (*status, total >= payment.amount) {
+                    (OrderStatus::Pending, true) => *status = OrderStatus::InMempool,
+                    (OrderStatus::InMempool, false) => *status = OrderStatus::Pending,
+                    _ => {}
                 }
+            }
+
+            tokio::select! {
+                biased;
+                _ = order.cancel.cancelled() => return Ok(false),
+                _ = sync_rx.changed() => {}
             }
         }
     }
@@ -448,6 +450,7 @@ impl Router {
         let upstream = order
             .upstream()
             .ok_or(RouterError::MissingActiveUpstream { id: order.id })?;
+
         let allocator = order
             .allocator()
             .cloned()
@@ -1758,6 +1761,7 @@ mod tests {
 
         wallet.test_confirm_tx(tx);
         wallet.test_advance_tip_to(PAYMENT_TIMEOUT);
+        wallet.mark_synced();
 
         assert!(waiter.await.unwrap());
         assert_eq!(order.status(), OrderStatus::InMempool);

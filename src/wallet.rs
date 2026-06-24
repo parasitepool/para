@@ -108,6 +108,10 @@ impl Wallet {
         true
     }
 
+    pub(crate) fn subscribe_sync(&self) -> watch::Receiver<bool> {
+        self.sync_tx.subscribe()
+    }
+
     pub(crate) fn spawn(
         self: &Arc<Self>,
         interval: Duration,
