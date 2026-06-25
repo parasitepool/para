@@ -127,6 +127,15 @@ impl State {
             _ => None,
         }
     }
+
+    pub(crate) fn enonce1(&self) -> Option<&Extranonce> {
+        match self {
+            State::Init | State::Configured { .. } => None,
+            State::Subscribed(sub) => Some(&sub.enonce1),
+            State::Authorized(auth) => Some(&auth.enonce1),
+            State::Working(session) => Some(session.enonce1()),
+        }
+    }
 }
 
 impl Display for State {
@@ -300,5 +309,38 @@ mod tests {
 
         assert!(state.authorize(test_authorization()));
         assert_eq!(state.to_string(), "Authorized");
+    }
+
+    #[test]
+    fn enonce1_returns_none_for_init_and_configured() {
+        let state = State::new();
+        assert!(state.enonce1().is_none());
+
+        let mut state = State::new();
+        state.configure(Version::from(0x1fffe000));
+        assert!(state.enonce1().is_none());
+    }
+
+    #[test]
+    fn enonce1_returns_some_for_subscribed_authorized_and_working() {
+        let mut state = State::new();
+        state.subscribe(test_enonce1(), "foo".into());
+        assert_eq!(state.enonce1(), Some(&test_enonce1()));
+
+        state.authorize(test_authorization());
+        assert_eq!(state.enonce1(), Some(&test_enonce1()));
+
+        let session = Arc::new(Session::new(
+            SessionId::new(0, 0),
+            test_enonce1(),
+            test_address(),
+            "bar".into(),
+            "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.bar"
+                .parse()
+                .unwrap(),
+            None,
+        ));
+        let state = State::Working(session);
+        assert_eq!(state.enonce1(), Some(&test_enonce1()));
     }
 }

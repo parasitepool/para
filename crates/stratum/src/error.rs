@@ -5,6 +5,7 @@ pub type Result<T, E = InternalError> = std::result::Result<T, E>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
 pub enum StratumError {
+    PoolFull = -12,
     UnsupportedExtension = -11,
     MethodNotAllowed = -10,
     InvalidNonce2Length = -9,
@@ -27,6 +28,7 @@ pub enum StratumError {
 impl fmt::Display for StratumError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self {
+            Self::PoolFull => "Pool full",
             Self::UnsupportedExtension => "Unsupported extension",
             Self::MethodNotAllowed => "Method not allowed",
             Self::InvalidNonce2Length => "Invalid nonce2 length",
@@ -187,6 +189,7 @@ mod tests {
 
     #[test]
     fn stratum_error_code_display() {
+        assert_eq!(StratumError::PoolFull.to_string(), "Pool full");
         assert_eq!(
             StratumError::UnsupportedExtension.to_string(),
             "Unsupported extension"
@@ -260,6 +263,7 @@ mod tests {
 
     #[test]
     fn stratum_error_code_values() {
+        assert_eq!(StratumError::PoolFull as i32, -12);
         assert_eq!(StratumError::UnsupportedExtension as i32, -11);
         assert_eq!(StratumError::MethodNotAllowed as i32, -10);
         assert_eq!(StratumError::InvalidNonce2Length as i32, -9);

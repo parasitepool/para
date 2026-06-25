@@ -36,7 +36,7 @@ impl OrderSlot {
 pub(crate) struct Metatron {
     blocks: RwLock<Vec<BlockHash>>,
     counter: AtomicU32,
-    disconnected: DashMap<Extranonce, (Arc<Session>, Instant)>,
+    disconnected: DashMap<Extranonce, (Arc<Session>, Instant, Arc<EnonceAllocator>)>,
     started: Instant,
     orders: DashMap<u32, OrderSlot>,
     users: DashMap<Address, Arc<User>>,
@@ -72,15 +72,23 @@ impl Metatron {
                     }
 
                     _ = cleanup_interval.tick() => {
-                        metatron.disconnected.retain(|_, (_, disconnected_at)| {
-                            disconnected_at.elapsed() < SESSION_TTL
-                        });
-
+                        metatron.cleanup_expired(Instant::now());
                         info!("{}", metatron.status_line());
                     }
                 }
             }
         });
+    }
+
+    fn cleanup_expired(&self, now: Instant) {
+        self.disconnected
+            .retain(|_, (session, disconnected_at, allocator)| {
+                let keep = now.duration_since(*disconnected_at) < SESSION_TTL;
+                if !keep {
+                    allocator.release_enonce1(session.enonce1());
+                }
+                keep
+            });
     }
 
     pub(crate) fn new_session(&self, auth: Arc<Authorization>, order_id: u32) -> Arc<Session> {
@@ -109,7 +117,7 @@ impl Metatron {
         session
     }
 
-    pub(crate) fn retire_session(&self, session: Arc<Session>) {
+    pub(crate) fn retire_session(&self, session: Arc<Session>, allocator: Arc<EnonceAllocator>) {
         if let Some(user) = self.users.get(session.address())
             && let Some(worker) = user.workers.get(session.workername())
         {
@@ -120,16 +128,38 @@ impl Metatron {
             slot.sessions.remove(&session.id());
         }
 
-        self.disconnected
-            .insert(session.enonce1().clone(), (session, Instant::now()));
+        self.disconnected.insert(
+            session.enonce1().clone(),
+            (session, Instant::now(), allocator),
+        );
     }
 
     pub(crate) fn resume_session(&self, enonce1: &Extranonce, order_id: u32) -> bool {
         self.disconnected
-            .remove_if(enonce1, |_, (session, _)| {
+            .remove_if(enonce1, |_, (session, _, _)| {
                 session.id().order_id() == order_id
             })
             .is_some()
+    }
+
+    pub(crate) fn evict_oldest_disconnected(&self, order_id: u32) -> bool {
+        let oldest_key = self
+            .disconnected
+            .iter()
+            .filter(|entry| entry.value().0.id().order_id() == order_id)
+            .min_by_key(|entry| entry.value().1)
+            .map(|entry| entry.key().clone());
+
+        let Some(key) = oldest_key else {
+            return false;
+        };
+
+        if let Some((_, (session, _, allocator))) = self.disconnected.remove(&key) {
+            allocator.release_enonce1(session.enonce1());
+            true
+        } else {
+            false
+        }
     }
 
     pub(crate) fn record_block(&self, blockhash: BlockHash) {
@@ -306,13 +336,20 @@ impl StatusLine for Metatron {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use {super::*, std::thread};
 
     fn test_address() -> Address {
         "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc"
             .parse::<Address<bitcoin::address::NetworkUnchecked>>()
             .unwrap()
             .assume_checked()
+    }
+
+    fn test_allocator() -> Arc<EnonceAllocator> {
+        Arc::new(EnonceAllocator::new(
+            Extranonces::Pool(PoolExtranonces::new(4, 8).unwrap()),
+            0,
+        ))
     }
 
     fn test_auth(enonce1: &str, workername: &str) -> Arc<Authorization> {
@@ -348,10 +385,10 @@ mod tests {
         let s2 = metatron.new_session(test_auth("cafebabe", "foo"), 0);
         assert_eq!(metatron.total_sessions(), 2);
 
-        metatron.retire_session(s1);
+        metatron.retire_session(s1, test_allocator());
         assert_eq!(metatron.total_sessions(), 1);
 
-        metatron.retire_session(s2);
+        metatron.retire_session(s2, test_allocator());
         assert_eq!(metatron.total_sessions(), 0);
     }
 
@@ -428,7 +465,7 @@ mod tests {
         assert!(!metatron.resume_session(&enonce1, 0));
 
         let session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
-        metatron.retire_session(session);
+        metatron.retire_session(session, test_allocator());
         assert_eq!(metatron.total_disconnected(), 1);
 
         assert!(metatron.resume_session(&enonce1, 0));
@@ -444,7 +481,7 @@ mod tests {
         session.record_accepted(pool_diff, Difficulty::from(200.0));
         session.record_accepted(pool_diff, Difficulty::from(50.0));
         session.record_rejected(pool_diff);
-        metatron.retire_session(session);
+        metatron.retire_session(session, test_allocator());
 
         let stats = metatron.snapshot();
         assert_eq!(metatron.total_sessions(), 0);
@@ -466,8 +503,8 @@ mod tests {
         let pool_diff = Difficulty::from(100.0);
         s1.record_accepted(pool_diff, Difficulty::from(50.0));
         s2.record_accepted(pool_diff, Difficulty::from(300.0));
-        metatron.retire_session(s1);
-        metatron.retire_session(s2);
+        metatron.retire_session(s1, test_allocator());
+        metatron.retire_session(s2, test_allocator());
 
         let stats = metatron.snapshot();
         assert_eq!(stats.accepted_shares, 2);
@@ -485,7 +522,7 @@ mod tests {
         let pool_diff = Difficulty::from(100.0);
         s1.record_accepted(pool_diff, Difficulty::from(50.0));
         s2.record_accepted(pool_diff, Difficulty::from(200.0));
-        metatron.retire_session(s1);
+        metatron.retire_session(s1, test_allocator());
 
         let stats = metatron.snapshot();
         assert_eq!(stats.accepted_shares, 2);
@@ -500,10 +537,106 @@ mod tests {
 
         let enonce1: Extranonce = "deadbeef".parse().unwrap();
         let session = metatron.new_session(test_auth("deadbeef", "foo"), 1);
-        metatron.retire_session(session);
+        metatron.retire_session(session, test_allocator());
 
         assert!(!metatron.resume_session(&enonce1, 0));
         assert!(metatron.resume_session(&enonce1, 1));
+    }
+
+    #[test]
+    fn evict_oldest_disconnected_picks_oldest() {
+        let upstream_enonce1 = Extranonce::from_bytes(&[0xde, 0xad, 0xbe, 0xef]);
+        let allocator = Arc::new(EnonceAllocator::new(
+            Extranonces::Proxy(ProxyExtranonces::new(upstream_enonce1, 8, 1).unwrap()),
+            0,
+        ));
+
+        let metatron = Metatron::new();
+
+        let mut enonces = Vec::new();
+        for name in ["foo", "bar", "baz"] {
+            let enonce1 = allocator.next_enonce1().unwrap();
+            enonces.push(enonce1.clone());
+            let session = metatron.new_session(test_auth(&enonce1.to_string(), name), 0);
+            metatron.retire_session(session, allocator.clone());
+            thread::sleep(Duration::from_millis(1));
+        }
+
+        assert_eq!(allocator.allocated_count(), 3);
+
+        assert!(metatron.evict_oldest_disconnected(0));
+
+        assert_eq!(allocator.allocated_count(), 2);
+        assert_eq!(metatron.total_disconnected(), 2);
+        assert!(!metatron.resume_session(&enonces[0], 0));
+        assert!(metatron.resume_session(&enonces[1], 0));
+    }
+
+    #[test]
+    fn evict_oldest_disconnected_respects_order() {
+        let upstream_enonce1 = Extranonce::from_bytes(&[0xde, 0xad, 0xbe, 0xef]);
+        let allocator = Arc::new(EnonceAllocator::new(
+            Extranonces::Proxy(ProxyExtranonces::new(upstream_enonce1, 8, 2).unwrap()),
+            0,
+        ));
+
+        let metatron = Metatron::new();
+
+        let e0 = allocator.next_enonce1().unwrap();
+        let s0 = metatron.new_session(test_auth(&e0.to_string(), "foo"), 0);
+        metatron.retire_session(s0, allocator.clone());
+
+        thread::sleep(Duration::from_millis(1));
+
+        let e1 = allocator.next_enonce1().unwrap();
+        let s1 = metatron.new_session(test_auth(&e1.to_string(), "bar"), 1);
+        metatron.retire_session(s1, allocator.clone());
+
+        assert!(metatron.evict_oldest_disconnected(1));
+
+        assert_eq!(allocator.allocated_count(), 1);
+        assert!(metatron.resume_session(&e0, 0));
+        assert!(!metatron.resume_session(&e1, 1));
+    }
+
+    #[test]
+    fn evict_oldest_disconnected_none_returns_false() {
+        let metatron = Metatron::new();
+
+        assert!(!metatron.evict_oldest_disconnected(0));
+
+        let session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+        metatron.retire_session(session, test_allocator());
+
+        assert!(!metatron.evict_oldest_disconnected(1));
+        assert_eq!(metatron.total_disconnected(), 1);
+    }
+
+    #[test]
+    fn cleanup_releases_expired_enonce1() {
+        let upstream_enonce1 = Extranonce::from_bytes(&[0xde, 0xad, 0xbe, 0xef]);
+        let allocator = Arc::new(EnonceAllocator::new(
+            Extranonces::Proxy(ProxyExtranonces::new(upstream_enonce1, 8, 1).unwrap()),
+            0,
+        ));
+
+        let enonce1 = allocator.next_enonce1().unwrap();
+
+        let metatron = Metatron::new();
+
+        let session = metatron.new_session(test_auth(&enonce1.to_string(), "foo"), 0);
+        metatron.retire_session(session, allocator.clone());
+
+        assert_eq!(allocator.allocated_count(), 1);
+        assert_eq!(metatron.total_disconnected(), 1);
+
+        metatron.cleanup_expired(Instant::now());
+        assert_eq!(metatron.total_disconnected(), 1);
+        assert_eq!(allocator.allocated_count(), 1);
+
+        metatron.cleanup_expired(Instant::now() + SESSION_TTL + Duration::from_secs(1));
+        assert_eq!(metatron.total_disconnected(), 0);
+        assert_eq!(allocator.allocated_count(), 0);
     }
 
     #[test]
@@ -552,7 +685,7 @@ mod tests {
         let (sessions, _) = metatron.downstream_snapshot(0, now);
         assert_eq!(sessions.len(), 1);
 
-        metatron.retire_session(session);
+        metatron.retire_session(session, test_allocator());
 
         let (sessions, _) = metatron.downstream_snapshot(0, now);
         assert!(sessions.is_empty());

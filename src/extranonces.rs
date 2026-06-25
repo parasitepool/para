@@ -59,6 +59,12 @@ impl PoolExtranonces {
     pub(crate) fn enonce2_size(&self) -> usize {
         self.enonce2_size
     }
+
+    pub(crate) fn max_clients(&self) -> usize {
+        1usize
+            .checked_shl((self.enonce1_size * 8) as u32)
+            .unwrap_or(usize::MAX)
+    }
 }
 
 impl ProxyExtranonces {
@@ -131,6 +137,12 @@ impl ProxyExtranonces {
         self.downstream_enonce2_size
     }
 
+    pub(crate) fn max_clients(&self) -> usize {
+        1usize
+            .checked_shl((self.extension_size * 8) as u32)
+            .unwrap_or(usize::MAX)
+    }
+
     pub(crate) fn reconstruct_enonce2_for_upstream(
         &self,
         miner_enonce1: &Extranonce,
@@ -160,6 +172,13 @@ impl Extranonces {
         match self {
             Extranonces::Pool(p) => p.enonce2_size(),
             Extranonces::Proxy(p) => p.downstream_enonce2_size(),
+        }
+    }
+
+    pub(crate) fn max_clients(&self) -> usize {
+        match self {
+            Extranonces::Pool(p) => p.max_clients(),
+            Extranonces::Proxy(p) => p.max_clients(),
         }
     }
 }
@@ -307,6 +326,28 @@ mod tests {
         let e = Extranonces::Proxy(proxy);
         assert_eq!(e.enonce1_size(), 6);
         assert_eq!(e.enonce2_size(), 6);
+    }
+
+    #[test]
+    fn pool_max_clients() {
+        assert_eq!(PoolExtranonces::new(2, 8).unwrap().max_clients(), 65536);
+        assert_eq!(PoolExtranonces::new(4, 8).unwrap().max_clients(), 1 << 32);
+    }
+
+    #[test]
+    fn proxy_max_clients() {
+        assert_eq!(
+            ProxyExtranonces::new(test_upstream_enonce1(), 8, 1)
+                .unwrap()
+                .max_clients(),
+            256,
+        );
+        assert_eq!(
+            ProxyExtranonces::new(test_upstream_enonce1(), 8, 2)
+                .unwrap()
+                .max_clients(),
+            65536,
+        );
     }
 
     #[test]

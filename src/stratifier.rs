@@ -9,6 +9,12 @@ use {
 mod bouncer;
 pub(crate) mod state;
 
+enum Acquisition {
+    Acquired(Extranonce),
+    Reroute,
+    Exhausted,
+}
+
 pub(crate) struct Stratifier<W: Workbase> {
     state: State,
     socket_addr: SocketAddr,
@@ -486,6 +492,37 @@ impl<W: Workbase> Stratifier<W> {
         Ok(())
     }
 
+    fn acquire_enonce1(&self, requested: Option<&Extranonce>) -> Acquisition {
+        if let Some(enonce1) = requested
+            && self.allocator.is_compatible_enonce1(enonce1)
+            && self
+                .metatron
+                .resume_session(enonce1, self.allocator.order_id())
+        {
+            info!("Resuming session with enonce1 {enonce1}");
+            self.allocator.track_enonce1(enonce1);
+            return Acquisition::Acquired(enonce1.clone());
+        }
+
+        if let Some(enonce1) = self.allocator.next_enonce1() {
+            return Acquisition::Acquired(enonce1);
+        }
+
+        if self
+            .metatron
+            .evict_oldest_disconnected(self.allocator.order_id())
+            && let Some(enonce1) = self.allocator.next_enonce1()
+        {
+            return Acquisition::Acquired(enonce1);
+        }
+
+        if self.order.is_some() {
+            Acquisition::Reroute
+        } else {
+            Acquisition::Exhausted
+        }
+    }
+
     async fn subscribe(&mut self, id: Id, subscribe: Subscribe) -> Result<Consequence> {
         if !self.state.can_subscribe() {
             self.send_error(
@@ -501,16 +538,18 @@ impl<W: Workbase> Stratifier<W> {
             return Ok(self.bouncer.reject());
         }
 
-        let enonce1 = if let Some(ref requested) = subscribe.enonce1
-            && self.allocator.is_compatible_enonce1(requested)
-            && self
-                .metatron
-                .resume_session(requested, self.allocator.order_id())
-        {
-            info!("Resuming session with enonce1 {requested}");
-            requested.clone()
-        } else {
-            self.allocator.next_enonce1()
+        let enonce1 = match self.acquire_enonce1(subscribe.enonce1.as_ref()) {
+            Acquisition::Acquired(enonce1) => enonce1,
+            Acquisition::Reroute => {
+                warn!("Upstream saturated, reconnecting {}", self.socket_addr);
+                self.send_reconnect().await?;
+                return Ok(Consequence::Drop);
+            }
+            Acquisition::Exhausted => {
+                warn!("Pool full, rejecting {}", self.socket_addr);
+                self.send_error(id, StratumError::PoolFull, None).await?;
+                return Ok(Consequence::Drop);
+            }
         };
 
         let enonce2_size = self.allocator.enonce2_size();
@@ -1141,7 +1180,10 @@ impl<W: Workbase> Drop for Stratifier<W> {
                 order.remove_session(session.id());
             }
 
-            self.metatron.retire_session(session);
+            self.metatron
+                .retire_session(session, self.allocator.clone());
+        } else if let Some(enonce1) = self.state.enonce1() {
+            self.allocator.release_enonce1(enonce1);
         }
 
         debug!("Shutting down stratifier for {}", self.socket_addr,);
