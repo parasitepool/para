@@ -4,6 +4,7 @@ description = "Parasite toolkit"
 version = "0.5.4"
 homepage = "https://github.com/parasitepool/para"
 autotests = false
+exclude = ["/bitcoin", "/ckpool"]
 
 authors.workspace = true
 edition.workspace = true
