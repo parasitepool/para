@@ -677,3 +677,95 @@ async fn stale_extended_enonce1_is_rejected_after_upstream_reconnect() {
 
     drop(pool2);
 }
+
+#[tokio::test]
+#[timeout(120000)]
+async fn proxy_persists_stats_across_restart() {
+    let bitcoind = bitcoind();
+    let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001");
+    let upstream = pool.stratum_endpoint();
+    let username = signet_username();
+
+    let proxy = TestProxy::spawn_with_args(
+        &upstream,
+        &username.to_string(),
+        pool.bitcoind_rpc_port(),
+        "--start-diff 0.00001",
+    );
+
+    let user_address = username.address().clone().assume_checked().to_string();
+
+    let client = proxy.stratum_client();
+    let mut events = client.connect().await.unwrap();
+
+    let (subscribe, _, _) = client.subscribe().await.unwrap();
+    client.authorize().await.unwrap();
+
+    let (notify, difficulty) = wait_for_notify(&mut events).await;
+
+    let enonce2 = Extranonce::random(subscribe.enonce2_size);
+    let (ntime, nonce) = solve_share(&notify, &subscribe.enonce1, &enonce2, difficulty);
+    client
+        .submit(notify.job_id, enonce2, ntime, nonce, None)
+        .await
+        .unwrap();
+
+    let status = proxy.get_status().await.unwrap();
+    assert_eq!(status.downstream.stats.accepted_shares, 1);
+    assert_eq!(status.downstream.user_count, 1);
+
+    timeout(Duration::from_secs(10), async {
+        loop {
+            let status = proxy.get_status().await.unwrap();
+            if status.upstream.stats.accepted_shares >= 1 {
+                break;
+            }
+            sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("upstream should accept share before restart");
+
+    let user = proxy.get_user(&user_address).await.unwrap();
+    assert_eq!(user.stats.accepted_shares, 1);
+
+    drop(client);
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let proxy = proxy.restart(
+        &upstream,
+        &username.to_string(),
+        pool.bitcoind_rpc_port(),
+        "--start-diff 0.00001",
+    );
+
+    let status = proxy.get_status().await.unwrap();
+    assert_eq!(
+        status.upstream.stats.accepted_shares, 1,
+        "upstream order stats should survive restart"
+    );
+    assert_eq!(
+        status.downstream.stats.accepted_shares, 1,
+        "downstream stats should survive restart"
+    );
+    assert_eq!(
+        status.downstream.user_count, 1,
+        "user should survive restart"
+    );
+    assert_eq!(
+        status.downstream.session_count, 0,
+        "sessions should not survive restart"
+    );
+
+    let user = proxy.get_user(&user_address).await.unwrap();
+    assert_eq!(
+        user.stats.accepted_shares, 1,
+        "user stats should survive restart"
+    );
+    assert_eq!(user.workers.len(), 1);
+    assert_eq!(
+        user.workers[0].stats.accepted_shares, 1,
+        "worker stats should survive restart"
+    );
+}

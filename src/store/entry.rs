@@ -48,6 +48,18 @@ pub(crate) struct DecayingAverageEntry {
     pub(crate) last_update_secs: f64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct WorkerEntry {
+    pub(crate) workername: String,
+    pub(crate) stats: StatsEntry,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct UserEntry {
+    pub(crate) authorized_secs: u64,
+    pub(crate) workers: Vec<WorkerEntry>,
+}
+
 #[cfg(test)]
 mod tests {
     use {super::*, crate::epoch::instant_to_epoch_secs};

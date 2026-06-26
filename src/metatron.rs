@@ -34,6 +34,7 @@ impl OrderSlot {
 }
 
 pub(crate) struct Metatron {
+    store: Arc<Store>,
     blocks: RwLock<Vec<BlockHash>>,
     counter: AtomicU32,
     disconnected: DashMap<Extranonce, (Arc<Session>, Instant, Arc<EnonceAllocator>)>,
@@ -43,15 +44,31 @@ pub(crate) struct Metatron {
 }
 
 impl Metatron {
-    pub(crate) fn new() -> Self {
-        Self {
-            blocks: RwLock::new(Vec::new()),
+    pub(crate) fn open(store: Arc<Store>) -> Result<Self> {
+        let users = store
+            .read_users()?
+            .into_iter()
+            .map(|(address, entry)| {
+                let user = Arc::new(User::from_entry(address.clone(), entry)?);
+                Ok((address, user))
+            })
+            .collect::<Result<_>>()?;
+
+        let blocks = store.read_blocks()?;
+
+        Ok(Self {
+            store,
+            blocks: RwLock::new(blocks),
             counter: AtomicU32::new(0),
             disconnected: DashMap::new(),
             started: Instant::now(),
             orders: DashMap::new(),
-            users: DashMap::new(),
-        }
+            users,
+        })
+    }
+
+    pub(crate) fn store(&self) -> &Arc<Store> {
+        &self.store
     }
 
     pub(crate) fn spawn(self: &Arc<Self>, cancel: CancellationToken, tasks: &TaskTracker) {
@@ -264,6 +281,23 @@ impl Metatron {
         self.orders.insert(order_id, OrderSlot::with_stats(stats));
     }
 
+    pub(crate) fn persist(&self) -> Result {
+        let now = Instant::now();
+
+        let users = self
+            .users
+            .iter()
+            .map(|user| (user.address.clone(), user.to_entry(now)))
+            .collect::<Vec<_>>();
+
+        self.store.persist_users(&users)?;
+
+        let blocks: Vec<BlockHash> = self.blocks.read().clone();
+        self.store.persist_blocks(&blocks)?;
+
+        Ok(())
+    }
+
     pub(crate) fn order_accepted_work(&self, order_id: u32) -> HashWork {
         self.orders
             .get(&order_id)
@@ -312,6 +346,19 @@ impl Metatron {
             .stats
             .lock()
             .accepted_work = work;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test() -> (Self, tempfile::TempDir) {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("test.redb"), Chain::Regtest).unwrap();
+        let metatron = Self::open(Arc::new(store)).unwrap();
+        (metatron, directory)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_with_store(store: Arc<Store>) -> Self {
+        Self::open(store).unwrap()
     }
 }
 
@@ -366,7 +413,7 @@ mod tests {
 
     #[test]
     fn new_metatron_starts_at_zero() {
-        let metatron = Metatron::new();
+        let (metatron, _dir) = Metatron::test();
         let stats = metatron.snapshot();
         assert_eq!(metatron.total_sessions(), 0);
         assert_eq!(stats.accepted_shares, 0);
@@ -378,7 +425,7 @@ mod tests {
 
     #[test]
     fn session_count_tracks_active_sessions() {
-        let metatron = Metatron::new();
+        let (metatron, _dir) = Metatron::test();
         assert_eq!(metatron.total_sessions(), 0);
 
         let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0);
@@ -394,7 +441,7 @@ mod tests {
 
     #[test]
     fn new_session_creates_user_and_worker() {
-        let metatron = Metatron::new();
+        let (metatron, _dir) = Metatron::test();
 
         metatron.new_session(test_auth("deadbeef", "rig1"), 0);
         assert_eq!(metatron.total_users(), 1);
@@ -407,7 +454,7 @@ mod tests {
 
     #[test]
     fn record_share_updates_stats() {
-        let metatron = Metatron::new();
+        let (metatron, _dir) = Metatron::test();
         let session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
 
         session.record_accepted(Difficulty::from(1000.0), Difficulty::from(1500.0));
@@ -421,7 +468,7 @@ mod tests {
 
     #[test]
     fn record_block_stores_hash() {
-        let metatron = Metatron::new();
+        let (metatron, _dir) = Metatron::test();
 
         let h1 = BlockHash::from_byte_array([1u8; 32]);
         let h2 = BlockHash::from_byte_array([2u8; 32]);
@@ -437,7 +484,7 @@ mod tests {
 
     #[test]
     fn accepted_work_accumulates() {
-        let metatron = Metatron::new();
+        let (metatron, _dir) = Metatron::test();
         let pool_diff = Difficulty::from(100.0);
         let expected = HashWork::from_difficulty(pool_diff);
 
@@ -460,7 +507,7 @@ mod tests {
 
     #[test]
     fn store_and_take_disconnected() {
-        let metatron = Metatron::new();
+        let (metatron, _dir) = Metatron::test();
         let enonce1: Extranonce = "deadbeef".parse().unwrap();
         assert!(!metatron.resume_session(&enonce1, 0));
 
@@ -474,7 +521,7 @@ mod tests {
 
     #[test]
     fn retire_session_folds_stats() {
-        let metatron = Metatron::new();
+        let (metatron, _dir) = Metatron::test();
         let session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
 
         let pool_diff = Difficulty::from(100.0);
@@ -496,7 +543,7 @@ mod tests {
 
     #[test]
     fn retire_accumulates_across_multiple_sessions() {
-        let metatron = Metatron::new();
+        let (metatron, _dir) = Metatron::test();
         let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0);
         let s2 = metatron.new_session(test_auth("cafebabe", "foo"), 0);
 
@@ -515,7 +562,7 @@ mod tests {
 
     #[test]
     fn stats_combine_active_sessions_and_lifetime() {
-        let metatron = Metatron::new();
+        let (metatron, _dir) = Metatron::test();
         let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0);
         let s2 = metatron.new_session(test_auth("cafebabe", "foo"), 0);
 
@@ -533,7 +580,7 @@ mod tests {
 
     #[test]
     fn take_disconnected_rejects_wrong_order() {
-        let metatron = Metatron::new();
+        let (metatron, _dir) = Metatron::test();
 
         let enonce1: Extranonce = "deadbeef".parse().unwrap();
         let session = metatron.new_session(test_auth("deadbeef", "foo"), 1);
@@ -551,7 +598,7 @@ mod tests {
             0,
         ));
 
-        let metatron = Metatron::new();
+        let (metatron, _dir) = Metatron::test();
 
         let mut enonces = Vec::new();
         for name in ["foo", "bar", "baz"] {
@@ -580,7 +627,7 @@ mod tests {
             0,
         ));
 
-        let metatron = Metatron::new();
+        let (metatron, _dir) = Metatron::test();
 
         let e0 = allocator.next_enonce1().unwrap();
         let s0 = metatron.new_session(test_auth(&e0.to_string(), "foo"), 0);
@@ -601,7 +648,7 @@ mod tests {
 
     #[test]
     fn evict_oldest_disconnected_none_returns_false() {
-        let metatron = Metatron::new();
+        let (metatron, _dir) = Metatron::test();
 
         assert!(!metatron.evict_oldest_disconnected(0));
 
@@ -622,7 +669,7 @@ mod tests {
 
         let enonce1 = allocator.next_enonce1().unwrap();
 
-        let metatron = Metatron::new();
+        let (metatron, _dir) = Metatron::test();
 
         let session = metatron.new_session(test_auth(&enonce1.to_string(), "foo"), 0);
         metatron.retire_session(session, allocator.clone());
@@ -641,7 +688,7 @@ mod tests {
 
     #[test]
     fn order_sessions_are_isolated() {
-        let metatron = Metatron::new();
+        let (metatron, _dir) = Metatron::test();
         let now = Instant::now();
 
         let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0);
@@ -658,7 +705,7 @@ mod tests {
 
     #[test]
     fn downstream_snapshot_stats_only_include_requested_order() {
-        let metatron = Metatron::new();
+        let (metatron, _dir) = Metatron::test();
         let now = Instant::now();
 
         let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0);
@@ -678,7 +725,7 @@ mod tests {
 
     #[test]
     fn retire_removes_session_from_downstream_queries() {
-        let metatron = Metatron::new();
+        let (metatron, _dir) = Metatron::test();
         let now = Instant::now();
 
         let session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
@@ -693,7 +740,7 @@ mod tests {
 
     #[test]
     fn order_stats_record_accepted_accumulates() {
-        let metatron = Metatron::new();
+        let (metatron, _dir) = Metatron::test();
         let upstream_diff = Difficulty::from(100.0);
 
         metatron.record_order_accepted(0, upstream_diff, Difficulty::from(150.0));
@@ -710,7 +757,7 @@ mod tests {
 
     #[test]
     fn order_stats_record_rejected_accumulates() {
-        let metatron = Metatron::new();
+        let (metatron, _dir) = Metatron::test();
         let upstream_diff = Difficulty::from(100.0);
 
         metatron.record_order_rejected(0, upstream_diff);
@@ -725,7 +772,7 @@ mod tests {
 
     #[test]
     fn order_stats_isolated_between_orders() {
-        let metatron = Metatron::new();
+        let (metatron, _dir) = Metatron::test();
         let upstream_diff = Difficulty::from(100.0);
 
         metatron.record_order_accepted(0, upstream_diff, Difficulty::from(200.0));
@@ -742,7 +789,7 @@ mod tests {
 
     #[test]
     fn order_accepted_work_matches_recorded_diff() {
-        let metatron = Metatron::new();
+        let (metatron, _dir) = Metatron::test();
         let upstream_diff = Difficulty::from(250.0);
 
         assert_eq!(metatron.order_accepted_work(0), HashWork::ZERO);
@@ -757,7 +804,7 @@ mod tests {
 
     #[test]
     fn order_stats_unknown_id_returns_default() {
-        let metatron = Metatron::new();
+        let (metatron, _dir) = Metatron::test();
         let stats = metatron.order_stats(999);
         assert_eq!(stats.accepted_shares, 0);
         assert_eq!(stats.rejected_shares, 0);
@@ -767,7 +814,7 @@ mod tests {
 
     #[test]
     fn order_best_share_keeps_max() {
-        let metatron = Metatron::new();
+        let (metatron, _dir) = Metatron::test();
 
         metatron.record_order_accepted(0, Difficulty::from(50.0), Difficulty::from(200.0));
         metatron.record_order_accepted(0, Difficulty::from(50.0), Difficulty::from(50.0));

@@ -369,7 +369,8 @@ mod tests {
 
     #[tokio::test]
     async fn disconnected_returns_immediately_when_already_disconnected() {
-        let upstream = Upstream::test(0, Arc::new(Metatron::new()));
+        let (metatron, _dir) = Metatron::test();
+        let upstream = Upstream::test(0, Arc::new(metatron));
 
         upstream.set_connected(false);
 
@@ -380,7 +381,8 @@ mod tests {
 
     #[tokio::test]
     async fn disconnected_resolves_when_set_connected_flips_to_false() {
-        let upstream = Upstream::test(0, Arc::new(Metatron::new()));
+        let (metatron, _dir) = Metatron::test();
+        let upstream = Upstream::test(0, Arc::new(metatron));
         let flipper = upstream.clone();
 
         tokio::spawn(async move {

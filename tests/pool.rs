@@ -1427,3 +1427,82 @@ async fn idle_drop_retires_session() {
     let status = pool.get_status().await.unwrap();
     assert_eq!(status.downstream.session_count, 0);
 }
+
+#[tokio::test]
+#[timeout(120000)]
+async fn pool_persists_stats_across_restart() {
+    let bitcoind = bitcoind();
+    let pool = TestPool::spawn_with_args(
+        &bitcoind,
+        "--start-diff 0.00001 --disable-bouncer --update-interval 120",
+    );
+
+    let username = signet_username();
+    let user_address = username.address().clone().assume_checked().to_string();
+
+    let client = pool.stratum_client().await;
+    let mut events = client.connect().await.unwrap();
+
+    let (subscribe, _, _) = client.subscribe().await.unwrap();
+    let enonce1 = subscribe.enonce1;
+    let enonce2_size = subscribe.enonce2_size;
+
+    client.authorize().await.unwrap();
+
+    let (notify, difficulty) = wait_for_notify(&mut events).await;
+
+    let enonce2 = Extranonce::random(enonce2_size);
+    let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, difficulty);
+    client
+        .submit(notify.job_id, enonce2, ntime, nonce, None)
+        .await
+        .unwrap();
+
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(status.downstream.stats.accepted_shares, 1);
+    assert_eq!(status.downstream.user_count, 1);
+    assert_eq!(status.downstream.worker_count, 1);
+
+    let user = pool.get_user(&user_address).await.unwrap();
+    assert_eq!(user.stats.accepted_shares, 1);
+    assert_eq!(user.workers.len(), 1);
+    assert_eq!(user.workers[0].stats.accepted_shares, 1);
+
+    drop(client);
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let pool = pool.restart(
+        &bitcoind,
+        "--start-diff 0.00001 --disable-bouncer --update-interval 120",
+    );
+
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(
+        status.downstream.stats.accepted_shares, 1,
+        "accepted shares should survive restart"
+    );
+    assert_eq!(
+        status.downstream.user_count, 1,
+        "user should survive restart"
+    );
+    assert_eq!(
+        status.downstream.worker_count, 1,
+        "worker should survive restart"
+    );
+    assert_eq!(
+        status.downstream.session_count, 0,
+        "sessions should not survive restart"
+    );
+
+    let user = pool.get_user(&user_address).await.unwrap();
+    assert_eq!(
+        user.stats.accepted_shares, 1,
+        "user stats should survive restart"
+    );
+    assert_eq!(user.workers.len(), 1);
+    assert_eq!(
+        user.workers[0].stats.accepted_shares, 1,
+        "worker stats should survive restart"
+    );
+}

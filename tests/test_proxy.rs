@@ -8,7 +8,7 @@ pub(crate) struct TestProxy {
     proxy_handle: Child,
     proxy_port: u16,
     http_port: u16,
-    _tempdir: Arc<TempDir>,
+    tempdir: Arc<TempDir>,
 }
 
 fn build_proxy_command(
@@ -36,7 +36,6 @@ fn build_proxy_command(
     .capture_stdout(true)
     .env("RUST_LOG", "info")
     .integration_test(true)
-    .with_data_dir()
 }
 
 impl TestProxy {
@@ -57,6 +56,7 @@ impl TestProxy {
             bitcoind_rpc_port,
             args,
         )
+        .with_data_dir()
         .spawn_persistent();
 
         for attempt in 0.. {
@@ -76,7 +76,52 @@ impl TestProxy {
             proxy_handle,
             proxy_port,
             http_port,
-            _tempdir: tempdir,
+            tempdir,
+        }
+    }
+
+    pub(crate) fn restart(
+        mut self,
+        upstream: &str,
+        username: &str,
+        bitcoind_rpc_port: u16,
+        args: impl ToArgs,
+    ) -> Self {
+        self.terminate();
+        let proxy_port = self.proxy_port;
+        let http_port = self.http_port;
+        let tempdir = self.tempdir.clone();
+
+        let (proxy_handle, _tempdir) = build_proxy_command(
+            upstream,
+            username,
+            proxy_port,
+            http_port,
+            bitcoind_rpc_port,
+            args,
+        )
+        .with_tempdir(tempdir)
+        .with_data_dir()
+        .spawn_persistent();
+
+        for attempt in 0.. {
+            match TcpStream::connect(format!("127.0.0.1:{http_port}")) {
+                Ok(_) => break,
+                Err(_) if attempt < 100 => {
+                    thread::sleep(Duration::from_millis(50));
+                }
+                Err(e) => panic!(
+                    "Failed to connect to proxy API after {} attempts: {}",
+                    attempt, e
+                ),
+            }
+        }
+
+        Self {
+            proxy_handle,
+            proxy_port,
+            http_port,
+            tempdir: _tempdir,
         }
     }
 
@@ -141,10 +186,8 @@ impl TestProxy {
             .json()
             .await
     }
-}
 
-impl Drop for TestProxy {
-    fn drop(&mut self) {
+    fn terminate(&mut self) {
         #[cfg(unix)]
         {
             use nix::{
@@ -171,5 +214,11 @@ impl Drop for TestProxy {
 
         let _ = self.proxy_handle.kill();
         let _ = self.proxy_handle.wait();
+    }
+}
+
+impl Drop for TestProxy {
+    fn drop(&mut self) {
+        self.terminate();
     }
 }

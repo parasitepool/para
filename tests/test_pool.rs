@@ -5,20 +5,35 @@ pub(crate) struct TestPool {
     pool_port: u16,
     http_port: u16,
     rpc_port: u16,
-    _tempdir: Arc<TempDir>,
+    tempdir: Arc<TempDir>,
 }
 
 impl TestPool {
     pub(crate) fn spawn_on_port(bitcoind: &Bitcoind, port: u16, args: impl ToArgs) -> Self {
-        Self::spawn_inner(bitcoind, Some(port), args)
+        Self::spawn_inner(bitcoind, Some(port), args, None)
     }
 
     pub(crate) fn spawn_with_args(bitcoind: &Bitcoind, args: impl ToArgs) -> Self {
-        Self::spawn_inner(bitcoind, None, args)
+        Self::spawn_inner(bitcoind, None, args, None)
     }
 
-    fn spawn_inner(bitcoind: &Bitcoind, port: Option<u16>, args: impl ToArgs) -> Self {
-        let tempdir = Arc::new(TempDir::new().unwrap());
+    pub(crate) fn restart(mut self, bitcoind: &Bitcoind, args: impl ToArgs) -> Self {
+        self.terminate();
+        Self::spawn_inner(
+            bitcoind,
+            Some(self.pool_port),
+            args,
+            Some(self.tempdir.clone()),
+        )
+    }
+
+    fn spawn_inner(
+        bitcoind: &Bitcoind,
+        port: Option<u16>,
+        args: impl ToArgs,
+        tempdir: Option<Arc<TempDir>>,
+    ) -> Self {
+        let tempdir = tempdir.unwrap_or_else(|| Arc::new(TempDir::new().unwrap()));
 
         let rpc_port = bitcoind.rpc_port;
         let pool_port = port.unwrap_or_else(allocate_port);
@@ -35,7 +50,9 @@ impl TestPool {
                 --bitcoin-rpc-password nakamoto
                 --bitcoin-rpc-port {rpc_port}
                 --zmq-block-notifications tcp://127.0.0.1:{zmq_port}
+                --data-dir {}
                 {}",
+            tempdir.path().display(),
             args.to_args().join(" ")
         ))
         .capture_stderr(true)
@@ -62,7 +79,7 @@ impl TestPool {
             pool_port,
             http_port,
             rpc_port,
-            _tempdir: tempdir,
+            tempdir,
         }
     }
 
@@ -226,10 +243,8 @@ impl TestPool {
     pub(crate) fn try_wait(&mut self) -> std::io::Result<Option<std::process::ExitStatus>> {
         self.pool_handle.try_wait()
     }
-}
 
-impl Drop for TestPool {
-    fn drop(&mut self) {
+    fn terminate(&mut self) {
         #[cfg(unix)]
         {
             use nix::{
@@ -256,5 +271,11 @@ impl Drop for TestPool {
 
         let _ = self.pool_handle.kill();
         let _ = self.pool_handle.wait();
+    }
+}
+
+impl Drop for TestPool {
+    fn drop(&mut self) {
+        self.terminate();
     }
 }

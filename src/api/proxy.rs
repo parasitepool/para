@@ -36,9 +36,11 @@ async fn status(State(router): State<Arc<Router>>) -> ServerResult<Response> {
     let now = Instant::now();
     let metatron = router.metatron();
     let orders = router.orders();
+
     let order = orders
         .first()
         .ok_or_not_found(|| "Proxy upstream".to_string())?;
+
     let upstream = order
         .upstream()
         .ok_or_not_found(|| "Proxy upstream".to_string())?;

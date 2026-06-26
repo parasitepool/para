@@ -497,14 +497,16 @@ mod tests {
 
     #[test]
     fn trim_sink_is_noop() {
-        let metatron = Arc::new(Metatron::new());
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
         let sink = test_order(&metatron, None);
         sink.trim();
     }
 
     #[test]
     fn trim_noop_when_not_overshooting() {
-        let metatron = Arc::new(Metatron::new());
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
         let bucket = test_order(&metatron, Some(HashDays::new(1e9).unwrap()));
 
         let cancel = register_session(&metatron, &bucket, "deadbeef", 1.0);
@@ -515,7 +517,8 @@ mod tests {
 
     #[test]
     fn trim_noop_when_single_session_overshoots() {
-        let metatron = Arc::new(Metatron::new());
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
         let bucket = test_order(&metatron, Some(HashDays::new(1.0).unwrap()));
 
         let cancel = register_session(&metatron, &bucket, "deadbeef", 10_000.0);
@@ -526,7 +529,8 @@ mod tests {
 
     #[test]
     fn trim_noop_when_all_sessions_too_fat() {
-        let metatron = Arc::new(Metatron::new());
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
         let bucket = test_order(&metatron, Some(HashDays::new(1e9).unwrap()));
 
         let cancel_a = register_session(&metatron, &bucket, "aaaa", 12.0);
@@ -539,7 +543,8 @@ mod tests {
 
     #[test]
     fn trim_picks_fattest_in_band() {
-        let metatron = Arc::new(Metatron::new());
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
         let bucket = test_order(&metatron, Some(HashDays::new(1e9).unwrap()));
 
         let cancel_fat = register_session(&metatron, &bucket, "aaaa", 13.0);
@@ -554,7 +559,8 @@ mod tests {
 
     #[test]
     fn trim_sheds_many_small_sessions() {
-        let metatron = Arc::new(Metatron::new());
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
         let bucket = test_order(&metatron, Some(HashDays::new(1e9).unwrap()));
 
         let cancels: Vec<CancellationToken> = (0..10)
@@ -575,7 +581,8 @@ mod tests {
 
     #[test]
     fn trim_stops_at_hysteresis_ceiling() {
-        let metatron = Arc::new(Metatron::new());
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
         let bucket = test_order(&metatron, Some(HashDays::new(1e9).unwrap()));
 
         let cancels: Vec<CancellationToken> = (0..8)
@@ -596,7 +603,8 @@ mod tests {
 
     #[test]
     fn trim_skips_sessions_larger_than_headroom() {
-        let metatron = Arc::new(Metatron::new());
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
         let bucket = test_order(&metatron, Some(HashDays::new(1e9).unwrap()));
 
         let cancel_huge = register_session(&metatron, &bucket, "aaaa", 20.0);
@@ -617,7 +625,8 @@ mod tests {
 
     #[test]
     fn trim_skips_session_after_max_trim_shrinks() {
-        let metatron = Arc::new(Metatron::new());
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
         let bucket = test_order(&metatron, Some(HashDays::new(1e9).unwrap()));
 
         let cancel_a = register_session(&metatron, &bucket, "aaaa", 18.0);
@@ -633,21 +642,24 @@ mod tests {
 
     #[test]
     fn is_starving_false_for_sink() {
-        let metatron = Arc::new(Metatron::new());
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
         let sink = test_order(&metatron, None);
         assert!(!sink.is_starving(Instant::now()));
     }
 
     #[test]
     fn is_starving_true_for_bucket_below_low_threshold() {
-        let metatron = Arc::new(Metatron::new());
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
         let bucket = test_order(&metatron, Some(HashDays::new(1e20).unwrap()));
         assert!(bucket.is_starving(Instant::now()));
     }
 
     #[test]
     fn is_starving_false_for_bucket_above_low_threshold() {
-        let metatron = Arc::new(Metatron::new());
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
         let bucket = test_order(&metatron, Some(HashDays::new(1.0).unwrap()));
         register_session(&metatron, &bucket, "deadbeef", 10_000.0);
         assert!(!bucket.is_starving(Instant::now()));
@@ -655,7 +667,8 @@ mod tests {
 
     #[test]
     fn is_fulfilled_compares_hash_work_to_hash_days_target() {
-        let metatron = Arc::new(Metatron::new());
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
         let target = HashDays::new(1e15).unwrap();
         let bucket = test_order(&metatron, Some(target));
         let target_work = target.to_hash_work();
@@ -669,14 +682,16 @@ mod tests {
 
     #[test]
     fn is_ramping_up_false_when_idle() {
-        let metatron = Arc::new(Metatron::new());
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
         let bucket = test_order(&metatron, Some(HashDays::new(100.0).unwrap()));
         assert!(!bucket.is_ramping_up());
     }
 
     #[test]
     fn is_ramping_up_true_when_assign_outpaces_session() {
-        let metatron = Arc::new(Metatron::new());
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
         let bucket = test_order(&metatron, Some(HashDays::new(100.0).unwrap()));
 
         bucket.assign();
@@ -686,7 +701,8 @@ mod tests {
 
     #[test]
     fn is_ramping_up_until_n_shares() {
-        let metatron = Arc::new(Metatron::new());
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
         let bucket = test_order(&metatron, Some(HashDays::new(1e20).unwrap()));
 
         bucket.assign();
@@ -705,7 +721,8 @@ mod tests {
 
     #[test]
     fn cancel_all_sessions() {
-        let metatron = Arc::new(Metatron::new());
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
         let order = test_order(&metatron, None);
 
         let cancel_a = register_session(&metatron, &order, "aaaa", 1.0);

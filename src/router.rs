@@ -33,7 +33,6 @@ pub(crate) struct Router {
 impl Router {
     pub(crate) fn new(
         settings: Arc<Settings>,
-        store: Arc<Store>,
         metatron: Arc<Metatron>,
         wallet: Option<Arc<Wallet>>,
         tasks: TaskTracker,
@@ -45,8 +44,8 @@ impl Router {
         let capacity_work = settings.capacity_work();
 
         Self {
+            store: metatron.store().clone(),
             settings,
-            store,
             metatron,
             wallet,
             orders: RwLock::new(Orders::new()),
@@ -538,7 +537,9 @@ impl Router {
             })
         } else {
             self.store.persist_snapshot(&entries, &ChangeSet::default())
-        }
+        }?;
+
+        self.metatron.persist()
     }
 
     fn rebalance(&self) {
@@ -583,20 +584,22 @@ impl Router {
         let guard = self.orders.read();
         let committed = guard.committed_work();
         let orders = guard.all();
+
         drop(guard);
+
         let mut accepted = Stats::new();
         let mut active_order_count = 0;
 
         for order in &orders {
-            if order.status() != OrderStatus::Active {
-                continue;
+            if order.status() == OrderStatus::Active {
+                active_order_count += 1;
             }
 
-            active_order_count += 1;
             accepted.absorb(order.stats(), now);
         }
 
         let capacity = self.capacity_work();
+
         let available = HashDays::from_raw((capacity.as_f64() - committed.as_f64()).max(0.0));
 
         RouterStatus {
@@ -848,10 +851,10 @@ mod tests {
 
     fn test_router() -> TestRouter {
         let wallet = test_wallet();
+        let metatron = Arc::new(Metatron::test_with_store(wallet.store.clone()));
         let router = Arc::new(Router::new(
             Arc::new(Settings::default()),
-            wallet.store.clone(),
-            Arc::new(Metatron::new()),
+            metatron,
             Some(wallet.wallet.clone()),
             TaskTracker::new(),
             CancellationToken::new(),
@@ -963,8 +966,7 @@ mod tests {
             Arc::new(Store::open(&directory.path().join("test.redb"), Chain::Regtest).unwrap());
         let router = Arc::new(Router::new(
             Arc::new(Settings::default()),
-            store,
-            Arc::new(Metatron::new()),
+            Arc::new(Metatron::test_with_store(store)),
             wallet,
             TaskTracker::new(),
             CancellationToken::new(),
@@ -1130,7 +1132,8 @@ mod tests {
     fn is_fulfilled() {
         #[track_caller]
         fn case(target: Option<HashDays>, accepted: Option<f64>, expected: bool) {
-            let metatron = Arc::new(Metatron::new());
+            let (metatron, _dir) = Metatron::test();
+            let metatron = Arc::new(metatron);
             let order = test_order(0, target, OrderStatus::Active, &metatron);
 
             if let Some(accepted) = accepted {
@@ -1542,7 +1545,8 @@ mod tests {
 
     #[test]
     fn routable_filters_disconnected_upstreams() {
-        let metatron = Arc::new(Metatron::new());
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
         let mut orders = Orders::new();
         let connected = test_order(0, None, OrderStatus::Active, &metatron);
         let disconnected = test_order(1, None, OrderStatus::Active, &metatron);
@@ -1596,7 +1600,8 @@ mod tests {
 
     #[test]
     fn orders_active_returns_only_active_status() {
-        let metatron = Arc::new(Metatron::new());
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
         let mut orders = Orders::new();
         orders.add(test_order(0, None, OrderStatus::Pending, &metatron));
         orders.add(test_order(
@@ -1618,7 +1623,8 @@ mod tests {
 
     #[test]
     fn orders_get() {
-        let metatron = Arc::new(Metatron::new());
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
         let mut orders = Orders::new();
         orders.add(test_order(0, None, OrderStatus::Pending, &metatron));
 
@@ -2039,7 +2045,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let store =
             Arc::new(Store::open(&directory.path().join("test.redb"), Chain::Regtest).unwrap());
-        let metatron = Arc::new(Metatron::new());
+        let metatron = Arc::new(Metatron::test_with_store(store.clone()));
         let order = test_order(4, None, OrderStatus::Fulfilled, &metatron);
 
         store
@@ -2048,8 +2054,7 @@ mod tests {
 
         let router = Arc::new(Router::new(
             Arc::new(Settings::default()),
-            store,
-            Arc::new(Metatron::new()),
+            metatron,
             None,
             TaskTracker::new(),
             CancellationToken::new(),
@@ -2070,7 +2075,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let store =
             Arc::new(Store::open(&directory.path().join("test.redb"), Chain::Regtest).unwrap());
-        let metatron = Arc::new(Metatron::new());
+        let metatron = Arc::new(Metatron::test_with_store(store.clone()));
         let order = test_order(4, None, OrderStatus::Pending, &metatron);
 
         store
@@ -2079,8 +2084,7 @@ mod tests {
 
         let router = Arc::new(Router::new(
             Arc::new(Settings::default()),
-            store,
-            Arc::new(Metatron::new()),
+            metatron,
             None,
             TaskTracker::new(),
             CancellationToken::new(),
@@ -2102,7 +2106,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let store =
             Arc::new(Store::open(&directory.path().join("test.redb"), Chain::Regtest).unwrap());
-        let metatron = Arc::new(Metatron::new());
+        let metatron = Arc::new(Metatron::test_with_store(store.clone()));
         let order = test_order(4, None, OrderStatus::Pending, &metatron);
         let target = order.upstream_target.clone();
 
@@ -2112,8 +2116,7 @@ mod tests {
 
         let router = Arc::new(Router::new(
             Arc::new(Settings::default()),
-            store,
-            Arc::new(Metatron::new()),
+            metatron,
             None,
             TaskTracker::new(),
             CancellationToken::new(),
@@ -2188,7 +2191,8 @@ mod tests {
 
     #[test]
     fn trim_session_cancels_matching_token() {
-        let metatron = Arc::new(Metatron::new());
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
         let order = test_order(0, None, OrderStatus::Pending, &metatron);
 
         let cancel_kept = CancellationToken::new();
@@ -2267,10 +2271,10 @@ mod tests {
             )
             .unwrap(),
         );
+        let metatron = Arc::new(Metatron::test_with_store(store.clone()));
         let router = Arc::new(Router::new(
             test_settings(directory.path()),
-            store.clone(),
-            Arc::new(Metatron::new()),
+            metatron,
             Some(wallet),
             TaskTracker::new(),
             CancellationToken::new(),
@@ -2318,10 +2322,10 @@ mod tests {
             )
             .unwrap(),
         );
+        let metatron = Arc::new(Metatron::test_with_store(store.clone()));
         let router = Arc::new(Router::new(
             test_settings(directory.path()),
-            store.clone(),
-            Arc::new(Metatron::new()),
+            metatron,
             Some(wallet),
             TaskTracker::new(),
             CancellationToken::new(),
@@ -2333,6 +2337,7 @@ mod tests {
         router.persist().unwrap();
 
         router.cancel_order(first.id).unwrap();
+        drop(first);
         router.persist().unwrap();
         router.tasks.close();
         timeout(Duration::from_secs(1), router.tasks.wait())
@@ -2344,11 +2349,11 @@ mod tests {
         let store = Arc::new(Store::open(&store_path, Chain::Regtest).unwrap());
         let wallet =
             Arc::new(Wallet::open(wallet_settings_without_descriptors(), store.clone()).unwrap());
+        let metatron = Arc::new(Metatron::test_with_store(store.clone()));
         let restarted = TestRouter {
             router: Arc::new(Router::new(
                 test_router_settings(),
-                store,
-                Arc::new(Metatron::new()),
+                metatron,
                 Some(wallet),
                 TaskTracker::new(),
                 CancellationToken::new(),
@@ -2422,7 +2427,8 @@ mod tests {
 
     #[test]
     fn routable_with_boost_includes_non_starving_bucket() {
-        let metatron = Arc::new(Metatron::new());
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
         let mut orders = Orders::new();
         let bucket = test_order(0, Some(hash_days(100.0)), OrderStatus::Active, &metatron);
 
@@ -2438,7 +2444,8 @@ mod tests {
 
     #[test]
     fn routable_with_boost_excludes_fulfilled_bucket() {
-        let metatron = Arc::new(Metatron::new());
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
         let mut orders = Orders::new();
         let bucket = test_order(0, Some(hash_days(100.0)), OrderStatus::Active, &metatron);
         set_accepted_work(&metatron, &bucket, 100.0);
@@ -2576,7 +2583,8 @@ mod tests {
 
     #[test]
     fn committed_work_sums_active_and_in_mempool_buckets() {
-        let metatron = Arc::new(Metatron::new());
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
         let mut orders = Orders::new();
         orders.add(test_order(
             0,

@@ -43,12 +43,11 @@ impl Proxy {
             settings.chain(),
         )?);
 
-        let metatron = Arc::new(Metatron::new());
+        let metatron = Arc::new(Metatron::open(store)?);
         metatron.spawn(cancel_token.clone(), &tasks);
 
         let router = Arc::new(Router::new(
             settings.clone(),
-            store,
             metatron.clone(),
             None,
             tasks.clone(),
@@ -60,7 +59,7 @@ impl Proxy {
             .await
             .context("failed to build record sink")?;
 
-        router.add_sink_order(upstream_target);
+        router.restore(std::slice::from_ref(&upstream_target))?;
 
         http_server::spawn(
             &settings,

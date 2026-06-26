@@ -1529,3 +1529,90 @@ async fn order_transitions_to_in_mempool_then_active() {
     .await
     .expect("confirmed payment should transition order to Active");
 }
+
+#[tokio::test]
+#[timeout(300000)]
+async fn router_persists_order_stats_across_restart() {
+    let pool_bitcoind = bitcoind();
+    let wallet_bitcoind = spawn_regtest();
+    let descriptor = generate_descriptor();
+    let funding_descriptor = generate_descriptor();
+    fund_wallet(&wallet_bitcoind, &funding_descriptor).await;
+
+    let pool_username = signet_username();
+    let miner_address = fund_wallet(&wallet_bitcoind, &generate_descriptor()).await;
+    let miner_username = format!("{miner_address}.miner");
+
+    let port = allocate_port();
+    let _pool = TestPool::spawn_on_port(&pool_bitcoind, port, "--start-diff 0.00001");
+
+    let router = TestRouter::spawn(
+        &descriptor,
+        &wallet_bitcoind,
+        "--start-diff 0.00001 --tick-interval 1",
+    );
+
+    let order_id = add_and_activate_order(
+        &router,
+        &wallet_bitcoind,
+        &funding_descriptor,
+        &format!("{pool_username}@127.0.0.1:{port}"),
+        HashDays::new(1e5).unwrap(),
+        current_hash_price(&router).await,
+    )
+    .await;
+
+    let mut miner = CommandBuilder::new(format!(
+        "miner --mode share-found --username {miner_username} {} --cpu-cores 1",
+        router.stratum_endpoint()
+    ))
+    .spawn();
+
+    miner.wait().unwrap();
+
+    timeout(Duration::from_secs(30), async {
+        loop {
+            if let Ok(detail) = router.get_order(order_id).await
+                && detail.status == OrderStatus::Active
+                && detail.upstream.accepted_shares >= 1
+            {
+                break;
+            }
+            sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("upstream should accept share before restart");
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let router = router.restart(
+        &descriptor,
+        &wallet_bitcoind,
+        "--start-diff 0.00001 --tick-interval 1",
+    );
+
+    timeout(Duration::from_secs(30), async {
+        loop {
+            if let Ok(detail) = router.get_order(order_id).await
+                && detail.status == OrderStatus::Active
+                && detail.upstream.accepted_shares >= 1
+            {
+                break;
+            }
+            sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("upstream order stats should survive restart");
+
+    let status = router.get_status().await.unwrap();
+    assert_eq!(
+        status.downstream.user_count, 1,
+        "downstream user should survive restart"
+    );
+    assert_eq!(
+        status.downstream.worker_count, 1,
+        "downstream worker should survive restart"
+    );
+}

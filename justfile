@@ -57,6 +57,7 @@ pool:
   cargo run --features reload -- \
     pool \
     --chain signet \
+    --data-dir copr/para \
     --address 0.0.0.0 \
     --bitcoin-rpc-username satoshi \
     --bitcoin-rpc-password nakamoto \
@@ -72,6 +73,7 @@ proxy:
   cargo run --features reload -- \
     proxy \
     --chain signet \
+    --data-dir copr/para \
     --bitcoin-rpc-username satoshi \
     --bitcoin-rpc-password nakamoto \
     --bitcoin-rpc-port 38332 \
@@ -100,7 +102,7 @@ router:
     --vardiff-window 10 \
     --vardiff-period 1 \
     --tick-interval 10 \
-    --sink-order tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.chameleon@127.0.0.1:42069 \
+    --sink-order tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw.router@127.0.0.1:42069 \
     --wallet-birthday 13000 \
     --descriptor "tr([6cf75d5c/86'/1'/0']tprv8gNWXLKSxxW1GdLWjDscZzfy5A2jWYW5Yh7XxB9EtrAB4yNeJRezY7McT86yhHSD6cRTnjtHWV9JZMJ2taba3QvXNT92Tr7L3tkFWGTUBVX/0/*)#4jdqs9ss"
 
@@ -119,9 +121,9 @@ wallet +args='balance':
 miner port='42069': 
   cargo run --release -- miner \
     127.0.0.1:{{port}} \
-    --username tb1pp8d9pmzh7l7ptk5n5rav8cxze74ktassddjgaz8lgcn8p9ztzqhs6x9cl8.tick \
+    --username tb1pp8d9pmzh7l7ptk5n5rav8cxze74ktassddjgaz8lgcn8p9ztzqhs6x9cl8.miner \
     --password x \
-    --cpu-cores 2 \
+    --cpu-cores 1 \
     --throttle 500K
 
 pool-mainnet: 

@@ -31,7 +31,9 @@ impl RouterCommand {
             settings.chain(),
         )?);
 
-        let wallet = Arc::new(Wallet::open(settings.clone(), store.clone())?);
+        let metatron = Arc::new(Metatron::open(store)?);
+
+        let wallet = Arc::new(Wallet::open(settings.clone(), metatron.store().clone())?);
 
         wallet.spawn(settings.tick_interval(), cancel_token.clone(), &tasks);
 
@@ -41,12 +43,10 @@ impl RouterCommand {
             .await
             .with_context(|| format!("failed to bind to {address}:{port}"))?;
 
-        let metatron = Arc::new(Metatron::new());
         metatron.spawn(cancel_token.clone(), &tasks);
 
         let router = Arc::new(Router::new(
             settings.clone(),
-            store,
             metatron.clone(),
             Some(wallet),
             tasks.clone(),

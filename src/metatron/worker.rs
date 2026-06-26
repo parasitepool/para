@@ -1,4 +1,4 @@
-use super::*;
+use {super::*, crate::store::entry::WorkerEntry};
 
 pub(crate) struct Worker {
     workername: String,
@@ -13,6 +13,14 @@ impl Worker {
             sessions: DashMap::new(),
             lifetime: Mutex::new(Stats::new()),
         }
+    }
+
+    pub(crate) fn from_entry(entry: WorkerEntry) -> Result<Self> {
+        Ok(Self {
+            workername: entry.workername,
+            sessions: DashMap::new(),
+            lifetime: Mutex::new(Stats::from_entry(entry.stats)?),
+        })
     }
 
     pub(super) fn new_session(&self, session: Arc<Session>) {
@@ -47,5 +55,12 @@ impl Worker {
                 combined.absorb(session.snapshot(), now);
                 combined
             })
+    }
+
+    pub(crate) fn to_entry(&self, now: Instant) -> WorkerEntry {
+        WorkerEntry {
+            workername: self.workername.clone(),
+            stats: self.snapshot().to_entry(now),
+        }
     }
 }

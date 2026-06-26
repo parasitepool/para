@@ -8,7 +8,7 @@ use {
 
 pub(crate) mod entry;
 
-const SCHEMA_VERSION: u64 = 1;
+const SCHEMA_VERSION: u64 = 2;
 
 const METADATA_KEY: u32 = 0;
 const CHANGESET_KEY: u32 = 0;
@@ -16,6 +16,8 @@ const CHANGESET_KEY: u32 = 0;
 const METADATA: TableDefinition<u32, &[u8]> = TableDefinition::new("METADATA");
 const ORDERS: TableDefinition<u32, &[u8]> = TableDefinition::new("ORDERS");
 const WALLET: TableDefinition<u32, &[u8]> = TableDefinition::new("WALLET");
+const USERS: TableDefinition<&str, &[u8]> = TableDefinition::new("USERS");
+const BLOCKS: TableDefinition<u64, &[u8]> = TableDefinition::new("BLOCKS");
 
 #[derive(Serialize, Deserialize)]
 struct Metadata {
@@ -97,6 +99,8 @@ impl Store {
 
             transaction.open_table(ORDERS)?;
             transaction.open_table(WALLET)?;
+            transaction.open_table(USERS)?;
+            transaction.open_table(BLOCKS)?;
         }
 
         transaction.commit()?;
@@ -190,6 +194,7 @@ impl Store {
 
     fn merge_wallet_delta(transaction: &WriteTransaction, wallet_delta: &ChangeSet) -> Result {
         let mut table = transaction.open_table(WALLET)?;
+
         let mut merged: ChangeSet = table
             .get(CHANGESET_KEY)?
             .map(|value| ciborium::from_reader(value.value()).context("decode wallet state"))
@@ -221,6 +226,89 @@ impl Store {
         }
 
         Ok(orders)
+    }
+
+    pub(crate) fn read_users(&self) -> Result<Vec<(Address, entry::UserEntry)>> {
+        let transaction = self.db.begin_read()?;
+        let table = transaction.open_table(USERS)?;
+        let mut users = Vec::new();
+
+        for item in table.iter()? {
+            let (key, value) = item?;
+
+            let address = Address::from_str(key.value())
+                .context("decode user address")?
+                .assume_checked();
+
+            let entry: entry::UserEntry =
+                ciborium::from_reader(value.value()).context("decode user")?;
+
+            users.push((address, entry));
+        }
+
+        Ok(users)
+    }
+
+    pub(crate) fn persist_users(&self, users: &[(Address, entry::UserEntry)]) -> Result {
+        let mut transaction = self.db.begin_write()?;
+        transaction.set_quick_repair(true);
+        transaction.set_durability(self.durability)?;
+
+        {
+            let mut table = transaction.open_table(USERS)?;
+            table.retain(|_, _| false)?;
+
+            for (address, entry) in users {
+                let mut bytes = Vec::with_capacity(256);
+
+                ciborium::into_writer(entry, &mut bytes)
+                    .with_context(|| format!("encode user {address}"))?;
+
+                table.insert(address.to_string().as_str(), bytes.as_slice())?;
+            }
+        }
+
+        transaction.commit()?;
+
+        Ok(())
+    }
+
+    pub(crate) fn read_blocks(&self) -> Result<Vec<BlockHash>> {
+        let transaction = self.db.begin_read()?;
+        let table = transaction.open_table(BLOCKS)?;
+        let mut blocks = Vec::new();
+
+        for item in table.iter()? {
+            let (_, value) = item?;
+            let hash = BlockHash::from_byte_array(
+                value
+                    .value()
+                    .try_into()
+                    .context("block hash must be 32 bytes")?,
+            );
+            blocks.push(hash);
+        }
+
+        Ok(blocks)
+    }
+
+    pub(crate) fn persist_blocks(&self, blocks: &[BlockHash]) -> Result {
+        let mut transaction = self.db.begin_write()?;
+        transaction.set_quick_repair(true);
+        transaction.set_durability(self.durability)?;
+
+        {
+            let mut table = transaction.open_table(BLOCKS)?;
+            table.retain(|_, _| false)?;
+
+            for (i, hash) in blocks.iter().enumerate() {
+                table.insert(i as u64, hash.to_byte_array().as_slice())?;
+            }
+        }
+
+        transaction.commit()?;
+
+        Ok(())
     }
 }
 

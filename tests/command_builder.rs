@@ -88,6 +88,12 @@ impl CommandBuilder {
         self
     }
 
+    #[allow(unused)]
+    pub(crate) fn with_tempdir(mut self, tempdir: Arc<TempDir>) -> Self {
+        self.tempdir = tempdir;
+        self
+    }
+
     #[track_caller]
     pub(crate) fn spawn(self) -> Child {
         let mut command = self.command();

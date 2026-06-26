@@ -1,4 +1,4 @@
-use super::*;
+use {super::*, crate::store::entry::UserEntry};
 
 pub(crate) struct User {
     pub(crate) address: Address,
@@ -56,6 +56,34 @@ impl User {
 
     pub(crate) fn workers(&self) -> impl Iterator<Item = Arc<Worker>> {
         self.workers.iter().map(|entry| entry.value().clone())
+    }
+
+    pub(crate) fn from_entry(address: Address, entry: UserEntry) -> Result<Self> {
+        let workers = entry
+            .workers
+            .into_iter()
+            .map(|worker| {
+                Worker::from_entry(worker)
+                    .map(|worker| (worker.workername().to_string(), Arc::new(worker)))
+            })
+            .collect::<Result<_>>()?;
+
+        Ok(Self {
+            address,
+            workers,
+            authorized: entry.authorized_secs,
+        })
+    }
+
+    pub(crate) fn to_entry(&self, now: Instant) -> UserEntry {
+        UserEntry {
+            authorized_secs: self.authorized,
+            workers: self
+                .workers
+                .iter()
+                .map(|worker| worker.to_entry(now))
+                .collect(),
+        }
     }
 }
 

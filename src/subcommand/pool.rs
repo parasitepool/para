@@ -33,7 +33,12 @@ impl Pool {
         .await
         .context("failed to subscribe to ZMQ block notifications")?;
 
-        let metatron = Arc::new(Metatron::new());
+        let store = Arc::new(Store::open(
+            &settings.store_path("pool.redb")?,
+            settings.chain(),
+        )?);
+
+        let metatron = Arc::new(Metatron::open(store)?);
         metatron.spawn(cancel_token.clone(), &tasks);
 
         http_server::spawn(
@@ -85,6 +90,24 @@ impl Pool {
         );
 
         let allocator = Arc::new(EnonceAllocator::new(extranonces, 0));
+
+        let persist_metatron = metatron.clone();
+        let persist_cancel = cancel_token.clone();
+        let persist_interval = settings.tick_interval();
+        tasks.spawn(async move {
+            let mut ticker = ticker(persist_interval);
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = persist_cancel.cancelled() => break,
+                    _ = ticker.tick() => {
+                        if let Err(err) = persist_metatron.persist() {
+                            warn!("Pool persistence error: {err}");
+                        }
+                    }
+                }
+            }
+        });
 
         loop {
             let (stream, addr, start_diff) = tokio::select! {
@@ -153,6 +176,10 @@ impl Pool {
 
         tasks.close();
         tasks.wait().await;
+
+        if let Err(err) = metatron.persist() {
+            warn!("Final pool persistence error: {err}");
+        }
 
         info!("All pool tasks stopped");
 
