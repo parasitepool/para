@@ -236,17 +236,6 @@ function formatTimestamp(ts) {
   return new Date(ts * 1000).toLocaleString();
 }
 
-function formatDuration(seconds) {
-  if (!Number.isFinite(seconds) || seconds < 0) return null;
-
-  const units = [['y', 31536000], ['d', 86400], ['h', 3600], ['m', 60]];
-  for (const [suffix, span] of units) {
-    if (seconds >= span) return (seconds / span).toFixed(1) + suffix;
-  }
-
-  return seconds.toFixed(1) + 's';
-}
-
 function formatAmount(value) {
   if (value === null || value === undefined) return '-';
   return typeof value === 'number' ? `${value} sats` : String(value);
@@ -299,6 +288,22 @@ function truncateMiddle(s, maxLen = 15, edgeLen = 6) {
 function formatPing(ms) {
   if (ms === null || ms === undefined) return null;
   return String(ms);
+}
+
+function formatDuration(secs) {
+  if (!Number.isFinite(secs) || secs < 0) return null;
+  const units = [
+    ['y', 31536000],
+    ['d', 86400],
+    ['h', 3600],
+    ['m', 60],
+  ];
+  for (const [suffix, size] of units) {
+    if (secs >= size) {
+      return (secs / size).toFixed(1) + suffix;
+    }
+  }
+  return secs.toFixed(1) + 's';
 }
 
 function formatStatus(status) {
@@ -440,13 +445,13 @@ function renderSystemData(data) {
   set('cpu_usage_percent', data.cpu_usage_percent, formatTruncated);
   set('memory_usage_percent', data.memory_usage_percent, formatTruncated);
   set('disk_usage_percent', data.disk_usage_percent, formatTruncated);
-  set('uptime', data.uptime);
+  set('uptime', data.uptime, formatDuration);
 }
 
 function populateStats(prefix, stats) {
   if (!stats) {
     for (const id of ['hashrate_1m', 'sps_1m', 'best_share', 'last_share',
-                      'rejected_shares', 'rejected_work', 'accepted_work', 'hash_days']) {
+                      'rejected_shares', 'rejected_work', 'delivered_work', 'delivered_hash_days']) {
       set(`${prefix}_${id}`, null);
     }
     return;
@@ -457,8 +462,8 @@ function populateStats(prefix, stats) {
   set(`${prefix}_last_share`, stats.last_share, formatTimestampAgo);
   rejectionCopyable(`${prefix}_rejected_shares`, stats.accepted_shares, stats.rejected_shares);
   rejectionWorkCopyable(`${prefix}_rejected_work`, stats.accepted_work, stats.rejected_work);
-  set(`${prefix}_accepted_work`, stats.accepted_work, formatDifficulty);
-  copyable(`${prefix}_hash_days`, formatHashDays(stats.hash_days), stats.hash_days);
+  set(`${prefix}_delivered_work`, (stats.accepted_work || 0) + (stats.rejected_work || 0), formatDifficulty);
+  copyable(`${prefix}_delivered_hash_days`, formatHashDays(stats.delivered_hash_days), stats.delivered_hash_days);
 }
 
 function populateDownstream(downstream) {
@@ -468,6 +473,21 @@ function populateDownstream(downstream) {
   set('idle', downstream.idle_count);
   set('disconnected', downstream.disconnected_count);
   populateStats('downstream', downstream.stats);
+}
+
+function populateUpstream(upstream) {
+  if (!upstream) {
+    for (const id of ['users', 'workers', 'idle', 'disconnected']) {
+      set(`upstream_${id}`, null);
+    }
+    populateStats('upstream', null);
+    return;
+  }
+  set('upstream_users', upstream.user_count);
+  set('upstream_workers', upstream.worker_count);
+  set('upstream_idle', upstream.idle_count);
+  set('upstream_disconnected', upstream.disconnected_count);
+  populateStats('upstream', upstream.stats);
 }
 
 function renderSessionRow(session) {
@@ -483,7 +503,7 @@ function renderSessionRow(session) {
     <td>${escapeHtml(formatHashrate(stats.hashrate_1m))}</td>
     <td>${escapeHtml(formatTruncated(stats.sps_1m))}</td>
     <td>${escapeHtml(bestShare || '-')}</td>
-    <td>${escapeHtml(stats.hash_days != null ? formatHashDays(stats.hash_days) : '-')}</td>
+    <td>${escapeHtml(stats.delivered_hash_days != null ? formatHashDays(stats.delivered_hash_days) : '-')}</td>
     <td>${escapeHtml(lastShare)}</td>
   </tr>`;
 }
@@ -506,7 +526,7 @@ function initSessionsTable(root) {
       hashrate_1m: compareStat('hashrate_1m'),
       sps_1m: compareStat('sps_1m'),
       best_share: compareNullableStat('best_share'),
-      hash_days: compareStat('hash_days'),
+      delivered_hash_days: compareStat('delivered_hash_days'),
       last_share: compareNullableStat('last_share'),
     },
     tiebreak: (a, b) => compareString(a.username, b.username),
@@ -539,7 +559,6 @@ function initFilterTable({
   ascByDefault = [],
   tiebreak,
   renderRow,
-  rowHref,
   onFilterChange,
   pageSize = 25,
 }) {
@@ -811,18 +830,6 @@ function initFilterTable({
       render();
     }
   });
-
-  if (rowHref) {
-    root.classList.add('row-links');
-    tbody?.addEventListener('click', e => {
-      if (e.target.closest('.copyable, a')) return;
-      const row = e.target.closest('tr');
-      if (!row) return;
-      const index = Array.prototype.indexOf.call(tbody.children, row);
-      if (index < 0 || index >= pageRows.length) return;
-      window.location.href = rowHref(pageRows[index]);
-    });
-  }
 
   loadStateFromUrl();
   syncUrl();

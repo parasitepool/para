@@ -1,7 +1,7 @@
 use {
     super::*,
     crate::{
-        api::{DownstreamInfo, MiningStats, RouterStatus},
+        api::{DownstreamInfo, MiningStats, RouterStatus, UpstreamSummary},
         event_sink::Event,
         generator::get_block_template,
     },
@@ -588,35 +588,69 @@ impl Router {
         drop(guard);
 
         let mut accepted = Stats::new();
-        let mut active_order_count = 0;
+        let mut bucket_order_count = 0;
+        let mut sink_order_count = 0;
+        let mut starving_order_count = 0;
+
+        let mut upstream_addresses: HashSet<&Address<NetworkUnchecked>> = HashSet::new();
+        let mut upstream_workers: HashSet<&str> = HashSet::new();
+        let mut upstream_idle_count = 0;
+        let mut upstream_disconnected_count = 0;
 
         for order in &orders {
-            if order.status() == OrderStatus::Active {
-                active_order_count += 1;
+            let status = order.status();
+
+            match status {
+                OrderStatus::Active => {
+                    if order.is_sink() {
+                        sink_order_count += 1;
+                    } else {
+                        bucket_order_count += 1;
+                        if order.is_starving(now) {
+                            starving_order_count += 1;
+                        }
+                    }
+                }
+                OrderStatus::Pending | OrderStatus::InMempool => upstream_idle_count += 1,
+                OrderStatus::Disconnected => upstream_disconnected_count += 1,
+                _ => {}
             }
+
+            let username = order.upstream_target.username();
+            upstream_addresses.insert(username.address());
+            upstream_workers.insert(username.as_str());
 
             accepted.absorb(order.stats(), now);
         }
 
-        let capacity = self.capacity_work();
+        let total_capacity_hash_days = self.capacity_work();
 
-        let available = HashDays::from_raw((capacity.as_f64() - committed.as_f64()).max(0.0));
+        let used_capacity_hash_days =
+            HashDays::from_raw(committed.as_f64().min(total_capacity_hash_days.as_f64()));
 
         RouterStatus {
             uptime_secs: metatron.uptime().as_secs(),
             block_count: metatron.block_count() as u64,
             last_block_hash: metatron.last_block().map(|h| h.to_string()),
             hash_price: self.hash_price(),
-            capacity_work: capacity,
-            available_work: available,
-            active_order_count,
+            total_capacity_hash_days,
+            used_capacity_hash_days,
+            bucket_order_count,
+            sink_order_count,
+            starving_order_count,
             wallet_synced: self
                 .wallet
                 .as_ref()
                 .is_some_and(|wallet| wallet.is_synced()),
             halt: self.halt(),
             boost: self.boost(),
-            upstream: MiningStats::from_snapshot(&accepted, now),
+            upstream: UpstreamSummary {
+                user_count: upstream_addresses.len(),
+                worker_count: upstream_workers.len(),
+                idle_count: upstream_idle_count,
+                disconnected_count: upstream_disconnected_count,
+                stats: MiningStats::from_snapshot(&accepted, now),
+            },
             downstream: DownstreamInfo::from_metatron(metatron, now),
         }
     }
@@ -1112,8 +1146,8 @@ mod tests {
         HashDays::new(value).unwrap()
     }
 
-    fn set_accepted_work(metatron: &Metatron, order: &Order, value: f64) {
-        metatron.set_order_accepted_work(order.id, hash_days(value).to_hash_work());
+    fn set_delivered_work(metatron: &Metatron, order: &Order, value: f64) {
+        metatron.set_order_delivered_work(order.id, hash_days(value).to_hash_work());
     }
 
     fn add_orders(router: &Router, orders: impl IntoIterator<Item = Arc<Order>>) {
@@ -1131,13 +1165,13 @@ mod tests {
     #[test]
     fn is_fulfilled() {
         #[track_caller]
-        fn case(target: Option<HashDays>, accepted: Option<f64>, expected: bool) {
+        fn case(target: Option<HashDays>, delivered: Option<f64>, expected: bool) {
             let (metatron, _dir) = Metatron::test();
             let metatron = Arc::new(metatron);
             let order = test_order(0, target, OrderStatus::Active, &metatron);
 
-            if let Some(accepted) = accepted {
-                set_accepted_work(&metatron, order.as_ref(), accepted);
+            if let Some(delivered) = delivered {
+                set_delivered_work(&metatron, order.as_ref(), delivered);
             }
 
             assert_eq!(order.is_fulfilled(), expected);
@@ -1335,7 +1369,7 @@ mod tests {
         );
 
         let fulfilled = funded_order(&router, &wallet, 5, OrderStatus::Disconnected);
-        set_accepted_work(&router.metatron, fulfilled.as_ref(), 100.0);
+        set_delivered_work(&router.metatron, fulfilled.as_ref(), 100.0);
 
         add_orders(
             &router,
@@ -1384,7 +1418,7 @@ mod tests {
         router.flag_orders();
         assert!(order.is_flagged());
 
-        set_accepted_work(&router.metatron, order.as_ref(), 100.0);
+        set_delivered_work(&router.metatron, order.as_ref(), 100.0);
         router.flag_orders();
 
         assert!(order.is_flagged());
@@ -1841,7 +1875,7 @@ mod tests {
         );
         router
             .metatron
-            .set_order_accepted_work(1, hash_days(1e10).to_hash_work());
+            .set_order_delivered_work(1, hash_days(1e10).to_hash_work());
 
         add_orders(router.as_ref(), [partly_filled, mostly_empty]);
 
@@ -2448,7 +2482,7 @@ mod tests {
         let metatron = Arc::new(metatron);
         let mut orders = Orders::new();
         let bucket = test_order(0, Some(hash_days(100.0)), OrderStatus::Active, &metatron);
-        set_accepted_work(&metatron, &bucket, 100.0);
+        set_delivered_work(&metatron, &bucket, 100.0);
 
         let session = metatron.new_session(test_authorization("deadbeef", "foo"), 0);
         session.record_accepted(Difficulty::from(1000.0), Difficulty::from(1000.0));
@@ -2565,7 +2599,7 @@ mod tests {
             OrderStatus::Active,
             &router.metatron,
         );
-        set_accepted_work(&router.metatron, &bucket, 100.0);
+        set_delivered_work(&router.metatron, &bucket, 100.0);
 
         let sink = test_order(1, None, OrderStatus::Active, &router.metatron);
         let cancel = CancellationToken::new();
@@ -2666,7 +2700,7 @@ mod tests {
     }
 
     #[test]
-    fn status_reports_available_work() {
+    fn status_reports_used_capacity_hash_days() {
         let router = test_router();
         router.set_capacity_work(hash_days(500.0));
 
@@ -2675,8 +2709,8 @@ mod tests {
         add_orders(router.as_ref(), [order]);
 
         let status = router.status();
-        assert_eq!(status.capacity_work.as_f64(), 500.0);
-        assert_eq!(status.available_work.as_f64(), 200.0);
-        assert_eq!(status.active_order_count, 1);
+        assert_eq!(status.total_capacity_hash_days.as_f64(), 500.0);
+        assert_eq!(status.used_capacity_hash_days.as_f64(), 300.0);
+        assert_eq!(status.bucket_order_count, 1);
     }
 }

@@ -34,7 +34,7 @@ pub struct MiningStats {
     pub rejected_shares: u64,
     pub accepted_work: HashWork,
     pub rejected_work: HashWork,
-    pub hash_days: HashDays,
+    pub delivered_hash_days: HashDays,
 }
 
 impl MiningStats {
@@ -59,7 +59,7 @@ impl MiningStats {
             rejected_shares: stats.rejected_shares,
             accepted_work: stats.accepted_work,
             rejected_work: stats.rejected_work,
-            hash_days: stats.accepted_work.to_hash_days(),
+            delivered_hash_days: (stats.accepted_work + stats.rejected_work).to_hash_days(),
         }
     }
 }
@@ -96,12 +96,21 @@ impl DownstreamInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpstreamSummary {
+    pub user_count: usize,
+    pub worker_count: usize,
+    pub idle_count: usize,
+    pub disconnected_count: usize,
+    pub stats: MiningStats,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserSummary {
     pub address: Address<NetworkUnchecked>,
     pub worker_count: usize,
     pub session_count: usize,
     pub hashrate: HashRate,
-    pub received_hash_days: HashDays,
+    pub delivered_hash_days: HashDays,
     pub best_share: Option<Difficulty>,
     pub last_share: Option<u64>,
 }
@@ -114,7 +123,7 @@ impl UserSummary {
             worker_count: user.worker_count(),
             session_count: user.session_count(),
             hashrate: stats.hashrate_1m(now),
-            received_hash_days: stats.accepted_work.to_hash_days(),
+            delivered_hash_days: (stats.accepted_work + stats.rejected_work).to_hash_days(),
             best_share: stats.best_share,
             last_share: stats
                 .last_share
@@ -264,13 +273,15 @@ pub struct RouterStatus {
     pub block_count: u64,
     pub last_block_hash: Option<String>,
     pub hash_price: HashPrice,
-    pub capacity_work: HashDays,
-    pub available_work: HashDays,
-    pub active_order_count: usize,
+    pub total_capacity_hash_days: HashDays,
+    pub used_capacity_hash_days: HashDays,
+    pub bucket_order_count: usize,
+    pub sink_order_count: usize,
+    pub starving_order_count: usize,
     pub wallet_synced: bool,
     pub halt: bool,
     pub boost: bool,
-    pub upstream: MiningStats,
+    pub upstream: UpstreamSummary,
     pub downstream: DownstreamInfo,
 }
 
@@ -324,7 +335,7 @@ impl OrderSummary {
             username: order.upstream_target.username().to_string(),
             requested_hash_days: order.bucket.as_ref().map(|bucket| bucket.target),
             hashrate: stats.hashrate_1m(now),
-            delivered_hash_days: stats.accepted_work.to_hash_days(),
+            delivered_hash_days: (stats.accepted_work + stats.rejected_work).to_hash_days(),
             best_share: stats.best_share,
         }
     }

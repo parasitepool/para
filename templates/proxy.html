@@ -2,7 +2,7 @@
   <div class="stats stats-3 column-full">
     <div class=stat><div class=stat-label>Status</div><div class=stat-value><span id=upstream_status></span></div></div>
     <div class=stat><div class=stat-label>Ping</div><div class=stat-value><span id=upstream_ping></span>ms</div></div>
-    <div class=stat><div class=stat-label>Uptime</div><div class=stat-value><span id=uptime_secs></span>s</div></div>
+    <div class=stat><div class=stat-label>Uptime</div><div class=stat-value id=uptime_secs></div></div>
     <div class=stat><div class=stat-label>Endpoint</div><div class=stat-value id=upstream_endpoint></div></div>
     <div class=stat><div class=stat-label>Username</div><div class=stat-value id=upstream_username class=copyable></div></div>
     <div class=stat><div class=stat-label>Difficulty</div><div class=stat-value id=upstream_difficulty class=copyable></div></div>
@@ -24,13 +24,13 @@
         <tr><td>Last Share</td><td id=upstream_last_share></td><td id=downstream_last_share></td></tr>
         <tr><td>Rejected Shares</td><td id=upstream_rejected_shares class=copyable></td><td id=downstream_rejected_shares class=copyable></td></tr>
         <tr><td>Rejected Work</td><td id=upstream_rejected_work class=copyable></td><td id=downstream_rejected_work class=copyable></td></tr>
-        <tr><td>Accepted Work</td><td id=upstream_accepted_work></td><td id=downstream_accepted_work></td></tr>
-        <tr><td>Accepted Hashdays</td><td id=upstream_hash_days class=copyable></td><td id=downstream_hash_days class=copyable></td></tr>
-        <tr><td>Users</td><td>-</td><td id=users></td></tr>
-        <tr><td>Workers</td><td>-</td><td id=workers></td></tr>
-        <tr><td>Sessions</td><td>-</td><td id=sessions></td></tr>
-        <tr><td>Idle</td><td>-</td><td id=idle></td></tr>
-        <tr><td>Disconnected</td><td>-</td><td id=disconnected></td></tr>
+        <tr><td>Delivered Work</td><td id=upstream_delivered_work></td><td id=downstream_delivered_work></td></tr>
+        <tr><td>Delivered Hashdays</td><td id=upstream_delivered_hash_days class=copyable></td><td id=downstream_delivered_hash_days class=copyable></td></tr>
+        <tr><td>Users</td><td id=upstream_users></td><td id=users></td></tr>
+        <tr><td>Workers</td><td id=upstream_workers></td><td id=workers></td></tr>
+        <tr><td>Orders / Sessions</td><td id=upstream_sessions></td><td id=sessions></td></tr>
+        <tr><td>Pending / Idle</td><td id=upstream_idle></td><td id=idle></td></tr>
+        <tr><td>Disconnected</td><td id=upstream_disconnected></td><td id=disconnected></td></tr>
       </tbody>
     </table>
   </div>
@@ -48,7 +48,7 @@
     <div class=row><span>CPU</span><span><span id=cpu_usage_percent></span>%</span></div>
     <div class=row><span>Memory</span><span><span id=memory_usage_percent></span>%</span></div>
     <div class=row><span>Disk</span><span><span id=disk_usage_percent></span>%</span></div>
-    <div class=row><span>Uptime</span><span><span id=uptime></span>s</span></div>
+    <div class=row><span>Uptime</span><span id=uptime></span></div>
   </div>
 </div>
 
@@ -90,8 +90,14 @@ async function refresh(signal) {
   set('upstream_enonce2_size', u.enonce2_size);
   set('upstream_version_mask', u.version_mask);
   set('upstream_ping', u.ping_ms, formatPing);
-  set('uptime_secs', proxyData.uptime_secs);
+  set('uptime_secs', proxyData.uptime_secs, formatDuration);
   populateStats('upstream', u.stats);
+  const connected = u.connected ? 1 : 0;
+  set('upstream_users', 1);
+  set('upstream_workers', 1);
+  set('upstream_sessions', connected);
+  set('upstream_idle', 0);
+  set('upstream_disconnected', 1 - connected);
   populateDownstream(proxyData.downstream || {});
 
   renderBitcoinData(bitcoinData);

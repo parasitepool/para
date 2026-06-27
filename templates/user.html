@@ -3,19 +3,23 @@
     <h2>Info</h2>
     <div class=row><span>Address</span><span id=address class=copyable></span></div>
     <div class=row><span>Authorized</span><span id=authorized></span></div>
-    <div class=row><span>Workers</span><span id=workers_count></span></div>
-    <div class=row><span>Sessions</span><span id=sessions></span></div>
     <div class=row><span>Hashrate</span><span id=hashrate_1m></span></div>
     <div class=row><span>SPS</span><span id=sps_1m></span></div>
     <div class=row><span>Best Share</span><span id=best_share class=copyable></span></div>
     <div class=row><span>Last Share</span><span id=last_share></span></div>
     <div class=row><span>Rejected Shares</span><span id=rejected_shares class=copyable></span></div>
     <div class=row><span>Rejected Work</span><span id=rejected_work class=copyable></span></div>
-    <div class=row><span>Hashdays</span><span id=hash_days class=copyable></span></div>
+    <div class=row><span>Delivered Hashdays</span><span id=delivered_hash_days class=copyable></span></div>
+  </div>
+
+  <div class="column-full filter-table" style="border: none; padding: 0">
+    <div class=table-toolbar>
+      <input id=user-search type=search placeholder="Search workers">
+    </div>
   </div>
 
   <div class="column column-full">
-    <h2>Workers</h2>
+    <h2>Workers (<span id=workers_count>0</span>)</h2>
     <div id=workers-root class=filter-table>
       <div class=table-scroll>
       <table id=workers-table>
@@ -26,7 +30,7 @@
             <th data-sort=hashrate_1m aria-sort=descending>Hashrate</th>
             <th data-sort=sps_1m aria-sort=none>SPS</th>
             <th data-sort=best_share aria-sort=none>Best Share</th>
-            <th data-sort=hash_days aria-sort=none>Hashdays</th>
+            <th data-sort=delivered_hash_days aria-sort=none>Delivered</th>
             <th data-sort=last_share aria-sort=none>Last Share</th>
           </tr>
         </thead>
@@ -42,7 +46,7 @@
   </div>
 
   <div class="column column-full">
-    <h2>Sessions</h2>
+    <h2>Sessions (<span id=sessions>0</span>)</h2>
     <div id=sessions-root class=filter-table>
       <div class=table-scroll>
       <table id=sessions-table>
@@ -52,7 +56,7 @@
             <th data-sort=hashrate_1m aria-sort=descending>Hashrate</th>
             <th data-sort=sps_1m aria-sort=none>SPS</th>
             <th data-sort=best_share aria-sort=none>Best Share</th>
-            <th data-sort=hash_days aria-sort=none>Hashdays</th>
+            <th data-sort=delivered_hash_days aria-sort=none>Delivered</th>
             <th data-sort=last_share aria-sort=none>Last Share</th>
           </tr>
         </thead>
@@ -71,6 +75,8 @@
 <script>
 const apiBase = '{{ self.api_base }}';
 const userAddress = window.location.pathname.split('/').pop();
+let allWorkers = [];
+let allSessions = [];
 
 function renderWorkerRow(worker) {
   const stats = worker.stats;
@@ -83,7 +89,7 @@ function renderWorkerRow(worker) {
     <td>${escapeHtml(formatHashrate(stats.hashrate_1m))}</td>
     <td>${escapeHtml(formatTruncated(stats.sps_1m))}</td>
     <td>${escapeHtml(bestShare || '-')}</td>
-    <td>${escapeHtml(stats.hash_days != null ? formatHashDays(stats.hash_days) : '-')}</td>
+    <td>${escapeHtml(stats.delivered_hash_days != null ? formatHashDays(stats.delivered_hash_days) : '-')}</td>
     <td>${escapeHtml(lastShare)}</td>
   </tr>`;
 }
@@ -97,7 +103,7 @@ const workersTable = initFilterTable({
     hashrate_1m: compareStat('hashrate_1m'),
     sps_1m: compareStat('sps_1m'),
     best_share: compareNullableStat('best_share'),
-    hash_days: compareStat('hash_days'),
+    delivered_hash_days: compareStat('delivered_hash_days'),
     last_share: compareNullableStat('last_share'),
   },
   ascByDefault: ['name'],
@@ -127,11 +133,24 @@ async function refresh(signal) {
   rejectionWorkCopyable('rejected_work', s.accepted_work, s.rejected_work);
   set('last_share', s.last_share, formatTimestampAgo);
   copyable('best_share', formatDifficulty(s.best_share), s.best_share);
-  copyable('hash_days', formatHashDays(s.hash_days), s.hash_days);
+  copyable('delivered_hash_days', formatHashDays(s.delivered_hash_days), s.delivered_hash_days);
 
-  workersTable.setRows(user.workers || []);
-  sessionsTable.setRows(user.sessions || []);
+  allWorkers = user.workers || [];
+  allSessions = user.sessions || [];
+  applySearch();
 }
+
+function applySearch() {
+  const term = document.getElementById('user-search').value.toLowerCase();
+  const workers = term ? allWorkers.filter(w => (w.name || '').toLowerCase().includes(term)) : allWorkers;
+  const sessions = term ? allSessions.filter(s => (s.username || '').toLowerCase().includes(term)) : allSessions;
+  set('workers_count', workers.length);
+  set('sessions', sessions.length);
+  workersTable.setRows(workers);
+  sessionsTable.setRows(sessions);
+}
+
+document.getElementById('user-search').addEventListener('input', applySearch);
 initDelegatedCopyables('sessions-list');
 startPolling(refresh);
 initCopyables();

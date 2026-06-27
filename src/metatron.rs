@@ -298,10 +298,13 @@ impl Metatron {
         Ok(())
     }
 
-    pub(crate) fn order_accepted_work(&self, order_id: u32) -> HashWork {
+    pub(crate) fn order_delivered_work(&self, order_id: u32) -> HashWork {
         self.orders
             .get(&order_id)
-            .map(|slot| slot.stats.lock().accepted_work)
+            .map(|slot| {
+                let stats = slot.stats.lock();
+                stats.accepted_work + stats.rejected_work
+            })
             .unwrap_or(HashWork::ZERO)
     }
 
@@ -339,13 +342,12 @@ impl Metatron {
     }
 
     #[cfg(test)]
-    pub(crate) fn set_order_accepted_work(&self, order_id: u32, work: HashWork) {
-        self.orders
-            .entry(order_id)
-            .or_insert_with(OrderSlot::new)
-            .stats
-            .lock()
-            .accepted_work = work;
+    pub(crate) fn set_order_delivered_work(&self, order_id: u32, work: HashWork) {
+        let rejected = HashWork::new(1.0).unwrap();
+        let slot = self.orders.entry(order_id).or_insert_with(OrderSlot::new);
+        let mut stats = slot.stats.lock();
+        stats.accepted_work = work - rejected;
+        stats.rejected_work = rejected;
     }
 
     #[cfg(test)]
@@ -788,18 +790,24 @@ mod tests {
     }
 
     #[test]
-    fn order_accepted_work_matches_recorded_diff() {
+    fn order_delivered_work_matches_recorded_diff() {
         let (metatron, _dir) = Metatron::test();
         let upstream_diff = Difficulty::from(250.0);
 
-        assert_eq!(metatron.order_accepted_work(0), HashWork::ZERO);
+        assert_eq!(metatron.order_delivered_work(0), HashWork::ZERO);
 
         metatron.record_order_accepted(0, upstream_diff, Difficulty::from(300.0));
         let expected = HashWork::from_difficulty(upstream_diff);
-        assert_eq!(metatron.order_accepted_work(0), expected);
+        assert_eq!(metatron.order_delivered_work(0), expected);
 
         metatron.record_order_accepted(0, upstream_diff, Difficulty::from(300.0));
-        assert_eq!(metatron.order_accepted_work(0), expected + expected);
+        assert_eq!(metatron.order_delivered_work(0), expected + expected);
+
+        metatron.record_order_rejected(0, upstream_diff);
+        assert_eq!(
+            metatron.order_delivered_work(0),
+            expected + expected + expected
+        );
     }
 
     #[test]

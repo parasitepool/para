@@ -94,7 +94,7 @@ table tbody tr:hover { background: #1a1a1a; }
 .copyable[data-full]:hover::after {
   content: attr(data-full);
   position: absolute;
-  left: 0;
+  right: 0;
   top: 50%;
   transform: translateY(-50%);
   background: #111;
@@ -168,7 +168,6 @@ table tbody tr:hover { background: #1a1a1a; }
 .log-debug { color: #88f; }
 .filter-table table th { white-space: nowrap; }
 .filter-table table td { vertical-align: middle; white-space: nowrap; }
-.filter-table.row-links table tbody tr { cursor: pointer; }
 .filter-table .table-scroll { overflow-x: auto; }
 .filter-table .table-toolbar {
   display: grid;
@@ -186,17 +185,19 @@ table tbody tr:hover { background: #1a1a1a; }
 .filter-table .toolbar-label { color: #888; font-size: 1em; }
 .filter-table .table-toolbar input[type="search"],
 .filter-table .table-toolbar select,
-.filter-table .multi-select-toggle {
+.filter-table .multi-select-toggle,
+.filter-table .table-reset {
   width: 100%;
   box-sizing: border-box;
   margin-top: 4px;
   padding: 7px 10px;
+  height: 38px;
   background: #111;
   border: 1px solid #444;
   color: #eee;
   font: inherit;
 }
-.filter-table .multi-select { position: relative; margin-top: 4px; }
+.filter-table .multi-select { position: relative; }
 .filter-table .multi-select-toggle {
   display: flex;
   align-items: center;
@@ -227,13 +228,11 @@ table tbody tr:hover { background: #1a1a1a; }
 }
 .filter-table .multi-select-options label:hover { background: #222; }
 .filter-table .table-reset {
+  width: auto;
   min-width: 80px;
-  padding: 7px 14px;
+  margin-top: 0;
   background: #333;
-  border: 1px solid #444;
-  color: #eee;
   cursor: pointer;
-  font: inherit;
 }
 .filter-table .table-reset:hover { background: #444; }
 .filter-table th[data-sort] { cursor: pointer; user-select: none; }

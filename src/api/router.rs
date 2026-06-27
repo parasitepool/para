@@ -285,12 +285,12 @@ async fn set_boost(
 
 #[derive(Deserialize)]
 struct CapacityRequest {
-    capacity_work: HashDays,
+    capacity_hash_days: HashDays,
 }
 
 #[derive(Serialize)]
 struct CapacityResponse {
-    capacity_work: HashDays,
+    capacity_hash_days: HashDays,
 }
 
 async fn set_capacity(
@@ -298,9 +298,9 @@ async fn set_capacity(
     State(router): State<Arc<Router>>,
     Json(request): Json<CapacityRequest>,
 ) -> ServerResult<Response> {
-    router.set_capacity_work(request.capacity_work);
+    router.set_capacity_work(request.capacity_hash_days);
     Ok(Json(CapacityResponse {
-        capacity_work: router.capacity_work(),
+        capacity_hash_days: router.capacity_work(),
     })
     .into_response())
 }

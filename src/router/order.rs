@@ -297,8 +297,8 @@ impl Order {
         self.metatron.order_stats(self.id)
     }
 
-    pub(crate) fn accepted_work(&self) -> HashWork {
-        self.metatron.order_accepted_work(self.id)
+    pub(crate) fn delivered_work(&self) -> HashWork {
+        self.metatron.order_delivered_work(self.id)
     }
 
     pub(crate) fn is_fulfilled(&self) -> bool {
@@ -306,12 +306,12 @@ impl Order {
             return false;
         };
 
-        self.accepted_work() >= bucket.target.to_hash_work()
+        self.delivered_work() >= bucket.target.to_hash_work()
     }
 
     pub(crate) fn remaining_work(&self) -> HashWork {
         self.bucket.as_ref().map_or(HashWork::ZERO, |bucket| {
-            bucket.target.to_hash_work() - self.accepted_work()
+            bucket.target.to_hash_work() - self.delivered_work()
         })
     }
 
@@ -673,10 +673,10 @@ mod tests {
         let bucket = test_order(&metatron, Some(target));
         let target_work = target.to_hash_work();
 
-        metatron.set_order_accepted_work(bucket.id, target_work - HashWork::new(1.0).unwrap());
+        metatron.set_order_delivered_work(bucket.id, target_work - HashWork::new(1.0).unwrap());
         assert!(!bucket.is_fulfilled());
 
-        metatron.set_order_accepted_work(bucket.id, target_work);
+        metatron.set_order_delivered_work(bucket.id, target_work);
         assert!(bucket.is_fulfilled());
     }
 

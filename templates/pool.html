@@ -2,7 +2,7 @@
   <div class="stats stats-3 column-full">
     <div class=stat><div class=stat-label>Blocks</div><div class=stat-value id=blocks></div></div>
     <div class=stat><div class=stat-label>Est. Time to Block</div><div class=stat-value id=est_block_time></div></div>
-    <div class=stat><div class=stat-label>Uptime</div><div class=stat-value><span id=uptime_secs></span>s</div></div>
+    <div class=stat><div class=stat-label>Uptime</div><div class=stat-value id=uptime_secs></div></div>
   </div>
 
   <div class="column column-full">
@@ -18,8 +18,8 @@
         <tr><td>Last Share</td><td id=downstream_last_share></td></tr>
         <tr><td>Rejected Shares</td><td id=downstream_rejected_shares class=copyable></td></tr>
         <tr><td>Rejected Work</td><td id=downstream_rejected_work class=copyable></td></tr>
-        <tr><td>Accepted Work</td><td id=downstream_accepted_work></td></tr>
-        <tr><td>Accepted Hashdays</td><td id=downstream_hash_days class=copyable></td></tr>
+        <tr><td>Delivered Work</td><td id=downstream_delivered_work></td></tr>
+        <tr><td>Delivered Hashdays</td><td id=downstream_delivered_hash_days class=copyable></td></tr>
         <tr><td>Users</td><td id=users></td></tr>
         <tr><td>Workers</td><td id=workers></td></tr>
         <tr><td>Sessions</td><td id=sessions></td></tr>
@@ -42,7 +42,7 @@
     <div class=row><span>CPU</span><span><span id=cpu_usage_percent></span>%</span></div>
     <div class=row><span>Memory</span><span><span id=memory_usage_percent></span>%</span></div>
     <div class=row><span>Disk</span><span><span id=disk_usage_percent></span>%</span></div>
-    <div class=row><span>Uptime</span><span><span id=uptime></span>s</span></div>
+    <div class=row><span>Uptime</span><span id=uptime></span></div>
   </div>
 </div>
 
@@ -74,7 +74,7 @@ async function refresh(signal) {
   ]);
 
   set('blocks', poolData.block_count);
-  set('uptime_secs', poolData.uptime_secs);
+  set('uptime_secs', poolData.uptime_secs, formatDuration);
   populateDownstream(poolData.downstream || {});
 
   const hashrate = poolData.downstream?.stats?.hashrate_1m;

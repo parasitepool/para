@@ -82,32 +82,27 @@
   <button id=cancel-order class=hidden>Cancel Order</button>
   <button id=clear-order class=hidden>Mark Cleared</button>
 
-  <div class=column>
-    <h2>Upstream</h2>
-    <div class=row><span>Hashrate</span><span id=upstream_hashrate_1m></span></div>
-    <div class=row><span>SPS</span><span id=upstream_sps_1m></span></div>
-    <div class=row><span>Best Share</span><span id=upstream_best_share class=copyable></span></div>
-    <div class=row><span>Last Share</span><span id=upstream_last_share></span></div>
-    <div class=row><span>Rejected Shares</span><span id=upstream_rejected_shares class=copyable></span></div>
-    <div class=row><span>Rejected Work</span><span id=upstream_rejected_work class=copyable></span></div>
-    <div class=row><span>Delivered Work</span><span id=upstream_accepted_work></span></div>
-    <div class=row><span>Delivered Hashdays</span><span id=upstream_hash_days class=copyable></span></div>
-  </div>
-
-  <div class=column>
-    <h2>Downstream</h2>
-    <div class=row><span>Hashrate</span><span id=downstream_hashrate_1m></span></div>
-    <div class=row><span>SPS</span><span id=downstream_sps_1m></span></div>
-    <div class=row><span>Best Share</span><span id=downstream_best_share class=copyable></span></div>
-    <div class=row><span>Last Share</span><span id=downstream_last_share></span></div>
-    <div class=row><span>Rejected Shares</span><span id=downstream_rejected_shares class=copyable></span></div>
-    <div class=row><span>Rejected Work</span><span id=downstream_rejected_work class=copyable></span></div>
-    <div class=row><span>Received Work</span><span id=downstream_accepted_work></span></div>
-    <div class=row><span>Received Hashdays</span><span id=downstream_hash_days class=copyable></span></div>
+  <div class="column column-full">
+    <h2>Traffic</h2>
+    <table class=compact-table>
+      <thead>
+        <tr><th></th><th>Upstream</th><th>Downstream</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Hashrate</td><td id=upstream_hashrate_1m></td><td id=downstream_hashrate_1m></td></tr>
+        <tr><td>SPS</td><td id=upstream_sps_1m></td><td id=downstream_sps_1m></td></tr>
+        <tr><td>Best Share</td><td id=upstream_best_share class=copyable></td><td id=downstream_best_share class=copyable></td></tr>
+        <tr><td>Last Share</td><td id=upstream_last_share></td><td id=downstream_last_share></td></tr>
+        <tr><td>Rejected Shares</td><td id=upstream_rejected_shares class=copyable></td><td id=downstream_rejected_shares class=copyable></td></tr>
+        <tr><td>Rejected Work</td><td id=upstream_rejected_work class=copyable></td><td id=downstream_rejected_work class=copyable></td></tr>
+        <tr><td>Delivered Work</td><td id=upstream_delivered_work></td><td id=downstream_delivered_work></td></tr>
+        <tr><td>Delivered Hashdays</td><td id=upstream_delivered_hash_days class=copyable></td><td id=downstream_delivered_hash_days class=copyable></td></tr>
+      </tbody>
+    </table>
   </div>
 
   <div class="column column-full">
-    <h2>Sessions</h2>
+    <h2>Sessions (<span id=session_count>0</span>)</h2>
     <div id=sessions-root class=filter-table>
       <div class=table-scroll>
       <table id=sessions-table>
@@ -117,7 +112,7 @@
             <th data-sort=hashrate_1m aria-sort=descending>Hashrate</th>
             <th data-sort=sps_1m aria-sort=none>SPS</th>
             <th data-sort=best_share aria-sort=none>Best Share</th>
-            <th data-sort=hash_days aria-sort=none>Hashdays</th>
+            <th data-sort=delivered_hash_days aria-sort=none>Hashdays</th>
             <th data-sort=last_share aria-sort=none>Last Share</th>
           </tr>
         </thead>
@@ -169,7 +164,7 @@ const TERMINAL = ['fulfilled', 'cancelled', 'disconnected', 'expired'];
 function populateOrder(data) {
   const endpoint = data.upstream_target.endpoint;
   const username = data.upstream_target.username || '';
-  const deliveredHashdays = data.upstream.hash_days;
+  const deliveredHashdays = data.upstream.delivered_hash_days;
 
   set('id', data.id);
   set('status', formatStatus(data.status));
@@ -206,9 +201,11 @@ async function refresh(signal) {
 
   if (terminal) {
     populateStats('downstream', null);
+    set('session_count', 0);
     sessionsTable.setRows([]);
   } else {
     populateStats('downstream', data.downstream);
+    set('session_count', (data.sessions || []).length);
     sessionsTable.setRows(data.sessions || []);
   }
 }
