@@ -123,8 +123,8 @@ miner port='42069':
     127.0.0.1:{{port}} \
     --username tb1pp8d9pmzh7l7ptk5n5rav8cxze74ktassddjgaz8lgcn8p9ztzqhs6x9cl8.miner \
     --password x \
-    --cpu-cores 1 \
-    --throttle 500K
+    --cpu-cores 2 \
+    --throttle 1M
 
 pool-mainnet: 
   cargo run --features reload -- \

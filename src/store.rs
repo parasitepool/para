@@ -8,10 +8,11 @@ use {
 
 pub(crate) mod entry;
 
-const SCHEMA_VERSION: u64 = 2;
+const SCHEMA_VERSION: u64 = 3;
 
 const METADATA_KEY: u32 = 0;
 const CHANGESET_KEY: u32 = 0;
+const BLOCKS_KEY: u64 = 0;
 
 const METADATA: TableDefinition<u32, &[u8]> = TableDefinition::new("METADATA");
 const ORDERS: TableDefinition<u32, &[u8]> = TableDefinition::new("ORDERS");
@@ -119,61 +120,12 @@ impl Store {
             .map(|changeset| changeset.unwrap_or_default())
     }
 
-    pub(crate) fn persist_snapshot(
-        &self,
-        orders: &[(u32, entry::OrderEntry)],
-        wallet_delta: &ChangeSet,
-    ) -> Result {
-        let mut transaction = self.db.begin_write()?;
-        transaction.set_quick_repair(true);
-        transaction.set_durability(self.durability)?;
+    pub(crate) fn begin(&self) -> Result<WriteTxn> {
+        let mut inner = self.db.begin_write()?;
+        inner.set_quick_repair(true);
+        inner.set_durability(self.durability)?;
 
-        if !wallet_delta.is_empty() {
-            Self::merge_wallet_delta(&transaction, wallet_delta)?;
-        }
-
-        {
-            let mut table = transaction.open_table(ORDERS)?;
-            table.retain(|_, _| false)?;
-
-            for (id, order) in orders {
-                let mut bytes = Vec::with_capacity(256);
-                ciborium::into_writer(order, &mut bytes)
-                    .with_context(|| format!("encode order {id}"))?;
-                table.insert(id, bytes.as_slice())?;
-            }
-        }
-
-        transaction.commit()?;
-
-        Ok(())
-    }
-
-    pub(crate) fn persist_issued_order(
-        &self,
-        id: u32,
-        order: &entry::OrderEntry,
-        wallet_delta: &ChangeSet,
-    ) -> Result {
-        let mut transaction = self.db.begin_write()?;
-        transaction.set_quick_repair(true);
-        transaction.set_durability(self.durability)?;
-
-        if !wallet_delta.is_empty() {
-            Self::merge_wallet_delta(&transaction, wallet_delta)?;
-        }
-
-        {
-            let mut table = transaction.open_table(ORDERS)?;
-            let mut bytes = Vec::with_capacity(256);
-            ciborium::into_writer(order, &mut bytes)
-                .with_context(|| format!("encode order {id}"))?;
-            table.insert(id, bytes.as_slice())?;
-        }
-
-        transaction.commit()?;
-
-        Ok(())
+        Ok(WriteTxn { inner })
     }
 
     pub(crate) fn persist_wallet_delta(&self, wallet_delta: &ChangeSet) -> Result {
@@ -181,33 +133,10 @@ impl Store {
             return Ok(());
         }
 
-        let mut transaction = self.db.begin_write()?;
-        transaction.set_quick_repair(true);
-        transaction.set_durability(self.durability)?;
+        let txn = self.begin()?;
+        txn.merge_wallet(wallet_delta)?;
 
-        Self::merge_wallet_delta(&transaction, wallet_delta)?;
-
-        transaction.commit()?;
-
-        Ok(())
-    }
-
-    fn merge_wallet_delta(transaction: &WriteTransaction, wallet_delta: &ChangeSet) -> Result {
-        let mut table = transaction.open_table(WALLET)?;
-
-        let mut merged: ChangeSet = table
-            .get(CHANGESET_KEY)?
-            .map(|value| ciborium::from_reader(value.value()).context("decode wallet state"))
-            .transpose()?
-            .unwrap_or_default();
-
-        merged.merge(wallet_delta.clone());
-
-        let mut bytes = Vec::with_capacity(64);
-        ciborium::into_writer(&merged, &mut bytes).context("encode wallet state")?;
-        table.insert(CHANGESET_KEY, bytes.as_slice())?;
-
-        Ok(())
+        txn.commit()
     }
 
     pub(crate) fn read_orders(&self) -> Result<Vec<(u32, entry::OrderEntry)>> {
@@ -249,66 +178,95 @@ impl Store {
         Ok(users)
     }
 
-    pub(crate) fn persist_users(&self, users: &[(Address, entry::UserEntry)]) -> Result {
-        let mut transaction = self.db.begin_write()?;
-        transaction.set_quick_repair(true);
-        transaction.set_durability(self.durability)?;
-
-        {
-            let mut table = transaction.open_table(USERS)?;
-            table.retain(|_, _| false)?;
-
-            for (address, entry) in users {
-                let mut bytes = Vec::with_capacity(256);
-
-                ciborium::into_writer(entry, &mut bytes)
-                    .with_context(|| format!("encode user {address}"))?;
-
-                table.insert(address.to_string().as_str(), bytes.as_slice())?;
-            }
-        }
-
-        transaction.commit()?;
-
-        Ok(())
-    }
-
     pub(crate) fn read_blocks(&self) -> Result<Vec<BlockHash>> {
         let transaction = self.db.begin_read()?;
         let table = transaction.open_table(BLOCKS)?;
-        let mut blocks = Vec::new();
 
-        for item in table.iter()? {
-            let (_, value) = item?;
-            let hash = BlockHash::from_byte_array(
-                value
-                    .value()
-                    .try_into()
-                    .context("block hash must be 32 bytes")?,
-            );
-            blocks.push(hash);
-        }
-
-        Ok(blocks)
+        table
+            .get(BLOCKS_KEY)?
+            .map(|value| ciborium::from_reader(value.value()).context("decode blocks"))
+            .transpose()
+            .map(|blocks| blocks.unwrap_or_default())
     }
+}
 
-    pub(crate) fn persist_blocks(&self, blocks: &[BlockHash]) -> Result {
-        let mut transaction = self.db.begin_write()?;
-        transaction.set_quick_repair(true);
-        transaction.set_durability(self.durability)?;
+pub(crate) struct WriteTxn {
+    inner: WriteTransaction,
+}
 
-        {
-            let mut table = transaction.open_table(BLOCKS)?;
-            table.retain(|_, _| false)?;
+impl WriteTxn {
+    pub(crate) fn write_orders(&self, orders: &[(u32, entry::OrderEntry)]) -> Result {
+        let mut table = self.inner.open_table(ORDERS)?;
+        table.retain(|_, _| false)?;
 
-            for (i, hash) in blocks.iter().enumerate() {
-                table.insert(i as u64, hash.to_byte_array().as_slice())?;
-            }
+        for (id, order) in orders {
+            let mut bytes = Vec::with_capacity(2048);
+            ciborium::into_writer(order, &mut bytes)
+                .with_context(|| format!("encode order {id}"))?;
+            table.insert(id, bytes.as_slice())?;
         }
-
-        transaction.commit()?;
 
         Ok(())
+    }
+
+    pub(crate) fn insert_order(&self, id: u32, order: &entry::OrderEntry) -> Result {
+        let mut table = self.inner.open_table(ORDERS)?;
+        let mut bytes = Vec::with_capacity(2048);
+
+        ciborium::into_writer(order, &mut bytes).with_context(|| format!("encode order {id}"))?;
+        table.insert(id, bytes.as_slice())?;
+
+        Ok(())
+    }
+
+    pub(crate) fn merge_wallet(&self, wallet_delta: &ChangeSet) -> Result {
+        if wallet_delta.is_empty() {
+            return Ok(());
+        }
+
+        let mut table = self.inner.open_table(WALLET)?;
+
+        let mut merged: ChangeSet = table
+            .get(CHANGESET_KEY)?
+            .map(|value| ciborium::from_reader(value.value()).context("decode wallet state"))
+            .transpose()?
+            .unwrap_or_default();
+
+        merged.merge(wallet_delta.clone());
+
+        let mut bytes = Vec::with_capacity(2048);
+        ciborium::into_writer(&merged, &mut bytes).context("encode wallet state")?;
+        table.insert(CHANGESET_KEY, bytes.as_slice())?;
+
+        Ok(())
+    }
+
+    pub(crate) fn write_users(&self, users: &[(Address, entry::UserEntry)]) -> Result {
+        let mut table = self.inner.open_table(USERS)?;
+        table.retain(|_, _| false)?;
+
+        for (address, entry) in users {
+            let mut bytes = Vec::with_capacity(2048);
+            ciborium::into_writer(entry, &mut bytes)
+                .with_context(|| format!("encode user {address}"))?;
+            table.insert(address.to_string().as_str(), bytes.as_slice())?;
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn write_blocks(&self, blocks: &[BlockHash]) -> Result {
+        let mut table = self.inner.open_table(BLOCKS)?;
+        let mut bytes = Vec::with_capacity(blocks.len() * 34);
+
+        ciborium::into_writer(&blocks, &mut bytes).context("encode blocks")?;
+        table.insert(BLOCKS_KEY, bytes.as_slice())?;
+
+        Ok(())
+    }
+
+    pub(crate) fn commit(self) -> Result {
+        Ok(self.inner.commit()?)
     }
 }
 
@@ -405,7 +363,9 @@ mod tests {
         let (_directory, store) = temporary_store(Chain::Regtest);
         let changeset = network_changeset(Network::Regtest);
 
-        store.persist_snapshot(&[], &changeset).unwrap();
+        let txn = store.begin().unwrap();
+        txn.merge_wallet(&changeset).unwrap();
+        txn.commit().unwrap();
 
         assert_eq!(store.read_wallet_changeset().unwrap(), changeset);
     }
@@ -415,9 +375,11 @@ mod tests {
         let (_directory, store) = temporary_store(Chain::Regtest);
         let changeset = network_changeset(Network::Regtest);
 
-        store
-            .persist_snapshot(&[(7, test_order_entry(OrderStatus::Active))], &changeset)
+        let txn = store.begin().unwrap();
+        txn.write_orders(&[(7, test_order_entry(OrderStatus::Active))])
             .unwrap();
+        txn.merge_wallet(&changeset).unwrap();
+        txn.commit().unwrap();
 
         assert_eq!(store.read_wallet_changeset().unwrap(), changeset);
         let orders = store.read_orders().unwrap();
@@ -425,12 +387,10 @@ mod tests {
         assert_eq!(orders[0].0, 7);
         assert_eq!(orders[0].1.status, OrderStatus::Active);
 
-        store
-            .persist_snapshot(
-                &[(8, test_order_entry(OrderStatus::Fulfilled))],
-                &ChangeSet::default(),
-            )
+        let txn = store.begin().unwrap();
+        txn.write_orders(&[(8, test_order_entry(OrderStatus::Fulfilled))])
             .unwrap();
+        txn.commit().unwrap();
 
         let orders = store.read_orders().unwrap();
         assert_eq!(orders.len(), 1);
@@ -443,12 +403,11 @@ mod tests {
     fn wallet_delta_does_not_replace_orders() {
         let (_directory, store) = temporary_store(Chain::Regtest);
 
-        store
-            .persist_snapshot(
-                &[(7, test_order_entry(OrderStatus::Active))],
-                &ChangeSet::default(),
-            )
+        let txn = store.begin().unwrap();
+        txn.write_orders(&[(7, test_order_entry(OrderStatus::Active))])
             .unwrap();
+        txn.commit().unwrap();
+
         store
             .persist_wallet_delta(&network_changeset(Network::Regtest))
             .unwrap();
@@ -460,22 +419,20 @@ mod tests {
     }
 
     #[test]
-    fn issued_order_persists_wallet_and_only_inserts_order() {
+    fn insert_order_appends_without_clearing() {
         let (_directory, store) = temporary_store(Chain::Regtest);
 
-        store
-            .persist_snapshot(
-                &[(7, test_order_entry(OrderStatus::Active))],
-                &ChangeSet::default(),
-            )
+        let txn = store.begin().unwrap();
+        txn.write_orders(&[(7, test_order_entry(OrderStatus::Active))])
             .unwrap();
-        store
-            .persist_issued_order(
-                8,
-                &test_order_entry(OrderStatus::Pending),
-                &network_changeset(Network::Regtest),
-            )
+        txn.commit().unwrap();
+
+        let txn = store.begin().unwrap();
+        txn.insert_order(8, &test_order_entry(OrderStatus::Pending))
             .unwrap();
+        txn.merge_wallet(&network_changeset(Network::Regtest))
+            .unwrap();
+        txn.commit().unwrap();
 
         assert_eq!(
             store.read_wallet_changeset().unwrap().network,
@@ -492,7 +449,10 @@ mod tests {
     fn persist_empty_is_noop() {
         let (_directory, store) = temporary_store(Chain::Regtest);
 
-        store.persist_snapshot(&[], &ChangeSet::default()).unwrap();
+        let txn = store.begin().unwrap();
+        txn.write_orders(&[]).unwrap();
+        txn.merge_wallet(&ChangeSet::default()).unwrap();
+        txn.commit().unwrap();
 
         assert!(!wallet_state_exists(&store));
         assert_eq!(store.read_wallet_changeset().unwrap(), ChangeSet::default());
@@ -521,7 +481,9 @@ mod tests {
 
         let mut expected = ChangeSet::default();
         for delta in deltas {
-            store.persist_snapshot(&[], &delta).unwrap();
+            let txn = store.begin().unwrap();
+            txn.merge_wallet(&delta).unwrap();
+            txn.commit().unwrap();
             expected.merge(delta);
         }
 
@@ -551,8 +513,13 @@ mod tests {
             ..Default::default()
         };
 
-        store.persist_snapshot(&[], &delta_a).unwrap();
-        store.persist_snapshot(&[], &delta_b).unwrap();
+        let txn = store.begin().unwrap();
+        txn.merge_wallet(&delta_a).unwrap();
+        txn.commit().unwrap();
+
+        let txn = store.begin().unwrap();
+        txn.merge_wallet(&delta_b).unwrap();
+        txn.commit().unwrap();
 
         let merged = store.read_wallet_changeset().unwrap();
         assert_eq!(merged.tx_graph.first_seen.get(&txid), Some(&900));
@@ -629,7 +596,9 @@ mod tests {
 
         {
             let store = Store::open(&path, Chain::Regtest).unwrap();
-            store.persist_snapshot(&[], &changeset).unwrap();
+            let txn = store.begin().unwrap();
+            txn.merge_wallet(&changeset).unwrap();
+            txn.commit().unwrap();
         }
 
         let store = Store::open(&path, Chain::Regtest).unwrap();

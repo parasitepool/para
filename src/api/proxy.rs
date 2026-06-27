@@ -48,7 +48,7 @@ async fn status(State(router): State<Arc<Router>>) -> ServerResult<Response> {
     Ok(Json(ProxyStatus {
         uptime_secs: metatron.uptime().as_secs(),
         block_count: metatron.block_count() as u64,
-        last_block_hash: metatron.last_block().map(|h| h.to_string()),
+        recent_blocks: metatron.recent_blocks(10),
         upstream: UpstreamInfo::from_upstream(&upstream, &metatron, now),
         downstream: DownstreamInfo::from_metatron(&metatron, now),
     })

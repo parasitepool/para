@@ -17,7 +17,6 @@ pub(crate) mod orders;
 
 pub(crate) struct Router {
     settings: Arc<Settings>,
-    store: Arc<Store>,
     metatron: Arc<Metatron>,
     wallet: Option<Arc<Wallet>>,
     orders: RwLock<Orders>,
@@ -44,7 +43,6 @@ impl Router {
         let capacity_work = settings.capacity_work();
 
         Self {
-            store: metatron.store().clone(),
             settings,
             metatron,
             wallet,
@@ -225,7 +223,6 @@ impl Router {
             });
         }
 
-        let store = &self.store;
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let cancel = self.cancel.child_token();
         let metatron = self.metatron.clone();
@@ -255,9 +252,10 @@ impl Router {
                             created_at_height,
                         ),
                     };
-                    let order = Order::new(id, upstream_target, Some(bucket), cancel, metatron);
+                    let order =
+                        Order::new(id, upstream_target, Some(bucket), cancel, metatron.clone());
 
-                    store.persist_issued_order(id, &order.to_entry(), wallet_delta)?;
+                    metatron.persist_order(id, &order.to_entry(), wallet_delta)?;
 
                     Ok(order)
                 })
@@ -459,7 +457,7 @@ impl Router {
     }
 
     pub(crate) fn restore(self: &Arc<Self>, sink_orders: &[UpstreamTarget]) -> Result {
-        let entries = self.store.read_orders()?;
+        let entries = self.metatron.store().read_orders()?;
         let mut next_id = 0u32;
 
         for (id, entry) in entries {
@@ -524,22 +522,19 @@ impl Router {
     }
 
     pub(crate) fn persist(&self) -> Result {
-        let orders = self.orders.read();
-        let entries = orders
+        let entries = self
+            .orders
+            .read()
             .all()
             .into_iter()
             .map(|order| (order.id, order.to_entry()))
             .collect::<Vec<_>>();
 
         if let Some(wallet) = &self.wallet {
-            wallet.persist_staged_with(|wallet_delta| {
-                self.store.persist_snapshot(&entries, wallet_delta)
-            })
+            wallet.persist_staged_with(|wallet_delta| self.metatron.persist(&entries, wallet_delta))
         } else {
-            self.store.persist_snapshot(&entries, &ChangeSet::default())
-        }?;
-
-        self.metatron.persist()
+            self.metatron.persist(&entries, &ChangeSet::default())
+        }
     }
 
     fn rebalance(&self) {
@@ -631,7 +626,7 @@ impl Router {
         RouterStatus {
             uptime_secs: metatron.uptime().as_secs(),
             block_count: metatron.block_count() as u64,
-            last_block_hash: metatron.last_block().map(|h| h.to_string()),
+            recent_blocks: metatron.recent_blocks(10),
             hash_price: self.hash_price(),
             total_capacity_hash_days,
             used_capacity_hash_days,
@@ -813,11 +808,7 @@ impl StatusLine for Router {
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::*,
-        crate::settings::CommonOptions,
-        bdk_wallet::{ChangeSet, KeychainKind},
-    };
+    use {super::*, crate::settings::CommonOptions, bdk_wallet::KeychainKind};
 
     struct TestWallet {
         wallet: Arc<Wallet>,
@@ -2082,9 +2073,9 @@ mod tests {
         let metatron = Arc::new(Metatron::test_with_store(store.clone()));
         let order = test_order(4, None, OrderStatus::Fulfilled, &metatron);
 
-        store
-            .persist_snapshot(&[(order.id, order.to_entry())], &ChangeSet::default())
-            .unwrap();
+        let txn = store.begin().unwrap();
+        txn.write_orders(&[(order.id, order.to_entry())]).unwrap();
+        txn.commit().unwrap();
 
         let router = Arc::new(Router::new(
             Arc::new(Settings::default()),
@@ -2112,9 +2103,9 @@ mod tests {
         let metatron = Arc::new(Metatron::test_with_store(store.clone()));
         let order = test_order(4, None, OrderStatus::Pending, &metatron);
 
-        store
-            .persist_snapshot(&[(order.id, order.to_entry())], &ChangeSet::default())
-            .unwrap();
+        let txn = store.begin().unwrap();
+        txn.write_orders(&[(order.id, order.to_entry())]).unwrap();
+        txn.commit().unwrap();
 
         let router = Arc::new(Router::new(
             Arc::new(Settings::default()),
@@ -2144,9 +2135,9 @@ mod tests {
         let order = test_order(4, None, OrderStatus::Pending, &metatron);
         let target = order.upstream_target.clone();
 
-        store
-            .persist_snapshot(&[(order.id, order.to_entry())], &ChangeSet::default())
-            .unwrap();
+        let txn = store.begin().unwrap();
+        txn.write_orders(&[(order.id, order.to_entry())]).unwrap();
+        txn.commit().unwrap();
 
         let router = Arc::new(Router::new(
             Arc::new(Settings::default()),

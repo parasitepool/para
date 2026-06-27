@@ -30,7 +30,7 @@ async fn home(Extension(chain): Extension<Chain>, auth: NavbarAuth) -> Response 
 async fn status(State(metatron): State<Arc<Metatron>>) -> Json<PoolStatus> {
     Json(PoolStatus {
         block_count: metatron.block_count() as u64,
-        last_block_hash: metatron.last_block().map(|h| h.to_string()),
+        recent_blocks: metatron.recent_blocks(10),
         uptime_secs: metatron.uptime().as_secs(),
         downstream: DownstreamInfo::from_metatron(&metatron, Instant::now()),
     })

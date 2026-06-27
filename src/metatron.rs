@@ -1,5 +1,6 @@
 use {
     super::*,
+    bdk_wallet::ChangeSet,
     session::{Session, SessionId},
     stats::Stats,
     stratifier::state::Authorization,
@@ -196,8 +197,8 @@ impl Metatron {
         self.blocks.read().len()
     }
 
-    pub(crate) fn last_block(&self) -> Option<BlockHash> {
-        self.blocks.read().last().copied()
+    pub(crate) fn recent_blocks(&self, n: usize) -> Vec<BlockHash> {
+        self.blocks.read().iter().rev().take(n).copied().collect()
     }
 
     pub(crate) fn total_sessions(&self) -> usize {
@@ -281,21 +282,47 @@ impl Metatron {
         self.orders.insert(order_id, OrderSlot::with_stats(stats));
     }
 
-    pub(crate) fn persist(&self) -> Result {
-        let now = Instant::now();
+    pub(crate) fn persist(
+        &self,
+        orders: &[(u32, store::entry::OrderEntry)],
+        wallet_delta: &ChangeSet,
+    ) -> Result {
+        let start = Instant::now();
 
-        let users = self
-            .users
-            .iter()
-            .map(|user| (user.address.clone(), user.to_entry(now)))
-            .collect::<Vec<_>>();
+        let txn = self.store.begin()?;
 
-        self.store.persist_users(&users)?;
+        txn.write_orders(orders)?;
+        txn.merge_wallet(wallet_delta)?;
+        txn.write_users(&self.snapshot_users())?;
+        txn.write_blocks(&self.blocks.read())?;
+        txn.commit()?;
 
-        let blocks: Vec<BlockHash> = self.blocks.read().clone();
-        self.store.persist_blocks(&blocks)?;
+        debug!("persist took {:?}", start.elapsed());
 
         Ok(())
+    }
+
+    pub(crate) fn persist_order(
+        &self,
+        id: u32,
+        order: &store::entry::OrderEntry,
+        wallet_delta: &ChangeSet,
+    ) -> Result {
+        let txn = self.store.begin()?;
+
+        txn.insert_order(id, order)?;
+        txn.merge_wallet(wallet_delta)?;
+
+        txn.commit()
+    }
+
+    fn snapshot_users(&self) -> Vec<(Address, store::entry::UserEntry)> {
+        let now = Instant::now();
+
+        self.users
+            .iter()
+            .map(|user| (user.address.clone(), user.to_entry(now)))
+            .collect()
     }
 
     pub(crate) fn order_delivered_work(&self, order_id: u32) -> HashWork {
@@ -477,11 +504,12 @@ mod tests {
 
         metatron.record_block(h1);
         assert_eq!(metatron.block_count(), 1);
-        assert_eq!(metatron.last_block(), Some(h1));
+        assert_eq!(metatron.recent_blocks(1), vec![h1]);
 
         metatron.record_block(h2);
         assert_eq!(metatron.block_count(), 2);
-        assert_eq!(metatron.last_block(), Some(h2));
+        assert_eq!(metatron.recent_blocks(1), vec![h2]);
+        assert_eq!(metatron.recent_blocks(2), vec![h2, h1]);
     }
 
     #[test]

@@ -101,7 +101,7 @@ impl Pool {
                     biased;
                     _ = persist_cancel.cancelled() => break,
                     _ = ticker.tick() => {
-                        if let Err(err) = persist_metatron.persist() {
+                        if let Err(err) = persist_metatron.persist(&[], &Default::default()) {
                             warn!("Pool persistence error: {err}");
                         }
                     }
@@ -177,7 +177,7 @@ impl Pool {
         tasks.close();
         tasks.wait().await;
 
-        if let Err(err) = metatron.persist() {
+        if let Err(err) = metatron.persist(&[], &Default::default()) {
             warn!("Final pool persistence error: {err}");
         }
 
