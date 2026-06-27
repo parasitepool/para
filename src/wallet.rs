@@ -1,7 +1,11 @@
 use {
     super::*,
     bdk_bitcoind_rpc::{Emitter, bitcoincore_rpc, bitcoincore_rpc::RpcApi},
-    bdk_wallet::{ChangeSet, KeychainKind, chain::Merge, keys::bip39::Mnemonic},
+    bdk_wallet::{
+        ChangeSet, KeychainKind,
+        chain::{CanonicalizationParams, FullTxOut, Merge, bdk_core::ConfirmationBlockTime},
+        keys::bip39::Mnemonic,
+    },
     bitcoin::bip32::{ChildNumber, DerivationPath, Xpriv},
     miniscript::{
         Descriptor,
@@ -272,25 +276,33 @@ impl Wallet {
         let mut total = Amount::ZERO;
         let mut confirmed_by_deadline = Amount::ZERO;
 
-        for output in inner.list_output() {
-            if output.keychain != KeychainKind::External
-                || output.derivation_index != derivation_index
-            {
-                continue;
-            }
+        for txout in external_txouts(&inner, derivation_index) {
+            total += txout.txout.value;
 
-            total += output.txout.value;
-
-            if output
+            if txout
                 .chain_position
                 .confirmation_height_upper_bound()
                 .is_some_and(|height| height <= deadline_height)
             {
-                confirmed_by_deadline += output.txout.value;
+                confirmed_by_deadline += txout.txout.value;
             }
         }
 
         (total, confirmed_by_deadline)
+    }
+
+    pub(crate) fn txids_by_derivation_index(&self, derivation_index: u32) -> Vec<Txid> {
+        let inner = self.inner.lock();
+        let mut txids = BTreeSet::new();
+
+        for txout in external_txouts(&inner, derivation_index) {
+            txids.insert(txout.outpoint.txid);
+            if let Some((_, spending_txid)) = txout.spent_by {
+                txids.insert(spending_txid);
+            }
+        }
+
+        txids.into_iter().collect()
     }
 
     pub fn confirmed_by_index(&self) -> HashMap<u32, Amount> {
@@ -477,6 +489,24 @@ impl Wallet {
 
         block
     }
+}
+
+fn external_txouts(
+    wallet: &bdk_wallet::Wallet,
+    derivation_index: u32,
+) -> impl Iterator<Item = FullTxOut<ConfirmationBlockTime>> + '_ {
+    let range =
+        (KeychainKind::External, derivation_index)..=(KeychainKind::External, derivation_index);
+
+    wallet
+        .tx_graph()
+        .filter_chain_txouts(
+            wallet.local_chain(),
+            wallet.local_chain().tip().block_id(),
+            CanonicalizationParams::default(),
+            wallet.spk_index().inner().outputs_in_range(range),
+        )
+        .map(|(_, full_txo)| full_txo)
 }
 
 #[cfg(test)]
@@ -669,5 +699,31 @@ mod tests {
             ChangeSet::default()
         );
         assert_eq!(wallet.address().unwrap().index, 0);
+    }
+
+    #[test]
+    fn txids_by_derivation_index() {
+        #[track_caller]
+        fn case(confirmed: bool) {
+            let wallet = test_wallet();
+            let address = wallet.test_reveal_address();
+            let tx = wallet.test_receive_unconfirmed(&address.address, Amount::from_sat(1000));
+
+            if confirmed {
+                wallet.test_confirm_tx(tx.clone());
+            }
+
+            let txids = wallet.txids_by_derivation_index(address.index);
+            assert_eq!(txids, vec![tx.compute_txid()]);
+
+            assert!(
+                wallet
+                    .txids_by_derivation_index(address.index + 1)
+                    .is_empty()
+            );
+        }
+
+        case(false);
+        case(true);
     }
 }

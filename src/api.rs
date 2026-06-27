@@ -351,6 +351,7 @@ pub struct OrderDetail {
     pub hash_price: Option<HashPrice>,
     pub payment_address: Option<Address<NetworkUnchecked>>,
     pub payment_amount: Option<Amount>,
+    pub txids: Vec<Txid>,
     pub created_at: u64,
     pub created_at_height: Option<u32>,
     pub upstream: MiningStats,
@@ -359,7 +360,12 @@ pub struct OrderDetail {
 }
 
 impl OrderDetail {
-    pub(crate) fn from_order(order: &Order, metatron: &Metatron, now: Instant) -> Self {
+    pub(crate) fn from_order(
+        order: &Order,
+        metatron: &Metatron,
+        now: Instant,
+        txids: Vec<Txid>,
+    ) -> Self {
         let upstream_conn = order.upstream();
         let bucket = order.bucket.as_ref();
 
@@ -378,6 +384,7 @@ impl OrderDetail {
                 .map(|bucket| HashPrice::from_total(bucket.payment.amount, bucket.target)),
             payment_address: bucket.map(|bucket| bucket.payment.address.as_unchecked().clone()),
             payment_amount: bucket.map(|bucket| bucket.payment.amount),
+            txids,
             created_at: epoch::instant_to_epoch_secs(order.created_at, now) as u64,
             created_at_height: bucket.map(|bucket| bucket.payment.created_at_height),
             upstream: MiningStats::from_snapshot(&order.stats(), now),

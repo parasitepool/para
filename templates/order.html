@@ -76,6 +76,7 @@
     <div class=row><span>Hash Price</span><span id=hash_price></span></div>
     <div class=row><span>Payment Amount</span><span id=payment_amount></span></div>
     <div class=row><span>Payment Address</span><span id=payment_address class=copyable></span></div>
+    <div class=row><span>Transactions</span><span id=txids></span></div>
     <div class=row><span>Created At</span><span id=created_at></span></div>
     <div class=row><span>Created At Height</span><span id=created_at_height></span></div>
   </div>
@@ -178,6 +179,35 @@ function populateOrder(data) {
   copyable('delivered_hash_days', formatHashDays(deliveredHashdays), deliveredHashdays);
   set('payment_amount', data.payment_amount, formatAmount);
   copyable('payment_address', truncateMiddle(data.payment_address, 20, 8), data.payment_address);
+  const txidsEl = document.getElementById('txids');
+  if (txidsEl) {
+    if (data.txids && data.txids.length > 0) {
+      txidsEl.innerHTML = data.txids.map(txid => {
+        const short = truncateMiddle(txid, 20, 8);
+        return `<a href="https://mempool.space/tx/${txid}" target=_blank rel=noopener `
+          + `class=copyable data-full="${txid}" data-formatted="${short}">${short}</a>`;
+      }).join('<br>');
+      txidsEl.querySelectorAll('.copyable').forEach(el => {
+        el.addEventListener('click', async (e) => {
+          e.preventDefault();
+          const full = el.dataset.full;
+          if (!full) return;
+          try {
+            await navigator.clipboard.writeText(full);
+            const formatted = el.dataset.formatted || el.textContent;
+            el.textContent = 'Copied!';
+            el.classList.add('copied');
+            setTimeout(() => {
+              el.textContent = formatted;
+              el.classList.remove('copied');
+            }, CONFIG.COPY_FEEDBACK_DURATION);
+          } catch (err) { console.error('Copy failed:', err); }
+        });
+      });
+    } else {
+      txidsEl.textContent = '-';
+    }
+  }
   set('created_at', data.created_at, formatTimestamp);
   set('created_at_height', data.created_at_height);
 }

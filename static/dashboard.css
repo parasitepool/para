@@ -106,6 +106,8 @@ table tbody tr:hover { background: #1a1a1a; }
   z-index: 1000;
   pointer-events: none;
 }
+#txids a { color: #eee; text-decoration: none; }
+#txids a:hover { text-decoration: underline; }
 .wrapper { width: fit-content; margin: 0 auto; }
 #log-show {
   display: block;

@@ -65,7 +65,23 @@ async fn order_detail(
 
     let metatron = router.metatron();
 
-    Ok(Json(OrderDetail::from_order(&order, &metatron, Instant::now())).into_response())
+    let txids = order
+        .bucket
+        .as_ref()
+        .and_then(|bucket| {
+            router
+                .wallet()
+                .map(|wallet| wallet.txids_by_derivation_index(bucket.payment.derivation_index))
+        })
+        .unwrap_or_default();
+
+    Ok(Json(OrderDetail::from_order(
+        &order,
+        &metatron,
+        Instant::now(),
+        txids,
+    ))
+    .into_response())
 }
 
 async fn add_order(

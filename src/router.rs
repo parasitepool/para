@@ -119,6 +119,10 @@ impl Router {
         self.orders.read().all()
     }
 
+    pub(crate) fn wallet(&self) -> Option<&Wallet> {
+        self.wallet.as_deref()
+    }
+
     pub(crate) fn metatron(&self) -> Arc<Metatron> {
         self.metatron.clone()
     }
@@ -2190,7 +2194,12 @@ mod tests {
         stats.dsps_1m = DecayingAverage::restore(10.0, Duration::from_secs(60), Instant::now());
         router.metatron.restore_order_stats(order.id, stats);
 
-        let detail = crate::api::OrderDetail::from_order(&order, &router.metatron, Instant::now());
+        let detail = crate::api::OrderDetail::from_order(
+            &order,
+            &router.metatron,
+            Instant::now(),
+            Vec::new(),
+        );
 
         assert!(detail.sessions.is_empty());
         assert_eq!(detail.upstream.accepted_shares, 1);

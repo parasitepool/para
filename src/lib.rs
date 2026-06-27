@@ -81,7 +81,7 @@ use {
     snafu::Snafu,
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
     std::{
-        collections::{BTreeMap, HashMap, HashSet, VecDeque},
+        collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
         env,
         fmt::{self, Display, Formatter},
         fs,
