@@ -113,12 +113,18 @@ PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
       idx_remote_shares_blockheight ON
       remote_shares (blockheight);
   "
-# Covering index for round participation queries (index-only scans)
+# Covering index for round participation queries (index-only scans).
+# Covers both sdiff (MAX top_diff) and diff (SUM total_work). Drop the older
+# sdiff-only variant first so existing deployments pick up the wider INCLUDE.
+if ! PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -tAc \
+    "SELECT indexdef FROM pg_indexes WHERE indexname='idx_remote_shares_round_participation'" | grep -q 'sdiff, diff'; then
+  PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "DROP INDEX CONCURRENTLY IF EXISTS idx_remote_shares_round_participation;"
+fi
 PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
   CREATE INDEX CONCURRENTLY IF NOT EXISTS
       idx_remote_shares_round_participation ON
       remote_shares (blockheight, username)
-      INCLUDE (sdiff)
+      INCLUDE (sdiff, diff)
       WHERE reject_reason IS NULL;
   "
 
@@ -275,18 +281,38 @@ PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
       username TEXT NOT NULL,
       blocks_participated BIGINT NOT NULL,
       top_diff DOUBLE PRECISION NOT NULL,
+      total_work DOUBLE PRECISION NOT NULL DEFAULT 0,
       PRIMARY KEY (blockheight, username)
   )
   "
+# Migration: add total_work to existing history tables. Truncate so previously
+# snapshotted rounds are lazily recomputed (with work) from remote_shares on next read.
+if ! PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -tAc \
+    "SELECT 1 FROM pg_attribute WHERE attrelid='round_participation_history'::regclass AND attname='total_work' AND NOT attisdropped" | grep -q 1; then
+  PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
+    ALTER TABLE round_participation_history ADD COLUMN total_work DOUBLE PRECISION NOT NULL DEFAULT 0;
+    TRUNCATE round_participation_history;
+  "
+fi
 
-# Materialized view for current (in-progress) round participation
+# Materialized view for current (in-progress) round participation.
+# Recreate it if it is missing, or if it predates the total_work column (schema migration).
+RECREATE_MATVIEW=0
 if ! PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -tAc "SELECT 1 FROM pg_matviews WHERE matviewname='round_participation_current'" | grep -q 1; then
+  RECREATE_MATVIEW=1
+elif ! PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -tAc \
+    "SELECT 1 FROM pg_attribute WHERE attrelid='round_participation_current'::regclass AND attname='total_work' AND NOT attisdropped" | grep -q 1; then
+  PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "DROP MATERIALIZED VIEW round_participation_current;"
+  RECREATE_MATVIEW=1
+fi
+if [ "$RECREATE_MATVIEW" = "1" ]; then
   PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
     CREATE MATERIALIZED VIEW round_participation_current AS
     SELECT
         COALESCE(rs.username, '') AS username,
         COUNT(DISTINCT rs.blockheight)::BIGINT AS blocks_participated,
-        COALESCE(MAX(rs.sdiff), 0) AS top_diff
+        COALESCE(MAX(rs.sdiff), 0) AS top_diff,
+        COALESCE(SUM(rs.diff), 0) AS total_work
     FROM remote_shares rs
     WHERE rs.blockheight > (SELECT COALESCE(MAX(blockheight), 0) FROM blocks)
         AND rs.reject_reason IS NULL

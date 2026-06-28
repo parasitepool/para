@@ -811,7 +811,7 @@ impl Database {
                 // 'current' round comes from matview
                 match sqlx::query_as::<_, RoundParticipant>(
                     "
-                    SELECT username, blocks_participated, top_diff
+                    SELECT username, blocks_participated, top_diff, total_work
                     FROM round_participation_current
                     ORDER BY top_diff DESC
                     ",
@@ -850,7 +850,7 @@ impl Database {
     ) -> Result<Vec<RoundParticipant>, sqlx::Error> {
         sqlx::query_as::<_, RoundParticipant>(
             "
-            SELECT username, blocks_participated, top_diff
+            SELECT username, blocks_participated, top_diff, total_work
             FROM round_participation_history
             WHERE blockheight = $1
             ORDER BY top_diff DESC
@@ -875,7 +875,8 @@ impl Database {
             SELECT
                 COALESCE(rs.username, '') AS username,
                 COUNT(DISTINCT rs.blockheight) AS blocks_participated,
-                COALESCE(MAX(rs.sdiff), 0) AS top_diff
+                COALESCE(MAX(rs.sdiff), 0) AS top_diff,
+                COALESCE(SUM(rs.diff), 0) AS total_work
             FROM remote_shares rs, previous_block pb
             WHERE rs.blockheight > pb.prev_height
                 AND ($1::INTEGER IS NULL OR rs.blockheight <= $1)
@@ -893,7 +894,7 @@ impl Database {
     pub(crate) async fn snapshot_round_participation(&self, blockheight: i32) -> Result<()> {
         sqlx::query(
             "
-            INSERT INTO round_participation_history (blockheight, username, blocks_participated, top_diff)
+            INSERT INTO round_participation_history (blockheight, username, blocks_participated, top_diff, total_work)
             WITH previous_block AS (
                 SELECT COALESCE(MAX(b.blockheight), 0) AS prev_height
                 FROM blocks b
@@ -903,7 +904,8 @@ impl Database {
                 $1,
                 COALESCE(rs.username, ''),
                 COUNT(DISTINCT rs.blockheight),
-                COALESCE(MAX(rs.sdiff), 0)
+                COALESCE(MAX(rs.sdiff), 0),
+                COALESCE(SUM(rs.diff), 0)
             FROM remote_shares rs, previous_block pb
             WHERE rs.blockheight > pb.prev_height
                 AND rs.blockheight <= $1

@@ -14,6 +14,8 @@ pub(crate) struct RoundParticipant {
     pub(crate) username: String,
     pub(crate) blocks_participated: i64,
     pub(crate) top_diff: f64,
+    /// Cumulative accepted work (sum of share difficulties) for this user in the round.
+    pub(crate) total_work: f64,
 }
 
 pub(crate) fn rounds_router(database: Database) -> axum::Router {
