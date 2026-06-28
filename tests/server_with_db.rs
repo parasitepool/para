@@ -1144,7 +1144,9 @@ async fn test_current_round() {
     let foo = participants.iter().find(|p| p.username == "foo").unwrap();
     assert_eq!(foo.blocks_participated, 1);
     assert_eq!(foo.top_diff, 2000.0);
-    assert_eq!(foo.total_work, 3000.0);
+    // Only the height-7 share counts; the height-3 share is from the previous
+    // round (block 5 was found), matching blocks_participated == 1 above.
+    assert_eq!(foo.total_work, 2000.0);
 
     let bar = participants.iter().find(|p| p.username == "bar").unwrap();
     assert_eq!(bar.blocks_participated, 1);
