@@ -314,6 +314,7 @@ pub(crate) async fn setup_test_schema(db_url: String) -> Result<(), Box<dyn std:
                     username TEXT NOT NULL,
                     blocks_participated BIGINT NOT NULL,
                     top_diff DOUBLE PRECISION NOT NULL,
+                    total_work DOUBLE PRECISION NOT NULL DEFAULT 0,
                     PRIMARY KEY (blockheight, username)
                 )
                 "#,
@@ -335,7 +336,8 @@ pub(crate) async fn setup_test_schema(db_url: String) -> Result<(), Box<dyn std:
                 SELECT
                     COALESCE(rs.username, '') AS username,
                     COUNT(DISTINCT rs.blockheight)::BIGINT AS blocks_participated,
-                    COALESCE(MAX(rs.sdiff), 0) AS top_diff
+                    COALESCE(MAX(rs.sdiff), 0) AS top_diff,
+                    COALESCE(SUM(rs.diff), 0) AS total_work
                 FROM remote_shares rs
                 WHERE rs.blockheight > (SELECT COALESCE(MAX(blockheight), 0) FROM blocks)
                     AND rs.reject_reason IS NULL

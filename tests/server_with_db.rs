@@ -11,6 +11,7 @@ struct RoundParticipant {
     username: String,
     blocks_participated: i64,
     top_diff: f64,
+    total_work: f64,
 }
 
 async fn insert_test_shares_for_round(
@@ -1045,14 +1046,18 @@ async fn test_round_participants() {
     let foo = participants.iter().find(|p| p.username == "foo").unwrap();
     assert_eq!(foo.blocks_participated, 2);
     assert_eq!(foo.top_diff, 3000.0);
+    // total_work sums accepted diff across the round (1000 @ bh6 + 3000 @ bh8)
+    assert_eq!(foo.total_work, 4000.0);
 
     let bar = participants.iter().find(|p| p.username == "bar").unwrap();
     assert_eq!(bar.blocks_participated, 1);
     assert_eq!(bar.top_diff, 5000.0);
+    assert_eq!(bar.total_work, 5000.0);
 
     let baz = participants.iter().find(|p| p.username == "baz").unwrap();
     assert_eq!(baz.blocks_participated, 1);
     assert_eq!(baz.top_diff, 2000.0);
+    assert_eq!(baz.total_work, 2000.0);
 }
 
 #[tokio::test]
@@ -1139,10 +1144,13 @@ async fn test_current_round() {
     let foo = participants.iter().find(|p| p.username == "foo").unwrap();
     assert_eq!(foo.blocks_participated, 1);
     assert_eq!(foo.top_diff, 2000.0);
+    // only the current round's share (2000 @ bh7) counts; bh3 is a prior round
+    assert_eq!(foo.total_work, 2000.0);
 
     let bar = participants.iter().find(|p| p.username == "bar").unwrap();
     assert_eq!(bar.blocks_participated, 1);
     assert_eq!(bar.top_diff, 500.0);
+    assert_eq!(bar.total_work, 500.0);
 }
 
 #[tokio::test]

@@ -257,7 +257,7 @@ impl Server {
             );
         }
 
-        match Database::new(config.database_url()).await {
+        let database = match Database::new(config.database_url()).await {
             Ok(database) => {
                 if config.migrate_accounts() {
                     let pool = database.pool.clone();
@@ -281,22 +281,35 @@ impl Server {
                     });
                 }
 
+                // Populate total_work for any historical rounds that predate the
+                // column (or were never snapshotted). Runs off the request path so
+                // wide rounds don't stall /rounds/{h}; self-limits once backfilled.
+                let backfill_db = database.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = backfill_db.backfill_round_participation().await {
+                        warn!("Round participation backfill failed: {e}");
+                    }
+                });
+
                 router = router
                     .merge(account_router(database.clone()))
                     .merge(share_difficulty_router(database.clone()))
                     .merge(payouts_router(config.clone(), database.clone()))
                     .merge(rounds_router(database.clone()))
-                    .merge(sync_router(config.clone(), database));
+                    .merge(sync_router(config.clone(), database.clone()));
+
+                Some(database)
             }
             Err(err) => {
                 warn!("Failed to connect to PostgreSQL: {err}",);
+                None
             }
-        }
+        };
 
         router = router.layer(Extension(config.clone()));
 
         if !config.nodes().is_empty() {
-            let aggregator = Aggregator::init(config.clone())?;
+            let aggregator = Aggregator::init(config.clone(), database)?;
             router = router.merge(aggregator);
         } else {
             warn!("No aggregator nodes configured: skipping aggregator routes.");

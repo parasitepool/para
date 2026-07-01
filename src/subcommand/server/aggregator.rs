@@ -3,7 +3,10 @@ use super::*;
 pub(crate) struct Aggregator;
 
 impl Aggregator {
-    pub(crate) fn init(config: Arc<ServerConfig>) -> Result<axum::Router> {
+    pub(crate) fn init(
+        config: Arc<ServerConfig>,
+        database: Option<Database>,
+    ) -> Result<axum::Router> {
         let mut headers = header::HeaderMap::new();
         if let Some(token) = config.api_token() {
             headers.insert(
@@ -22,7 +25,7 @@ impl Aggregator {
             .pool_max_idle_per_host(3)
             .build()?;
 
-        let cache = Arc::new(Cache::new(client.clone(), config.clone()));
+        let cache = Arc::new(Cache::new(client.clone(), config.clone(), database));
 
         let router = axum::Router::new()
             .route("/aggregator/blockheight", get(blockheight))

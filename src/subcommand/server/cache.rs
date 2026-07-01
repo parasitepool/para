@@ -110,16 +110,22 @@ impl<T: Clone> Cached<T> {
 pub(super) struct Cache {
     client: Client,
     config: Arc<ServerConfig>,
+    database: Option<Database>,
     pool_status: Mutex<Cached<ckpool::Status>>,
     user_statuses: DashMap<String, Arc<Mutex<Cached<ckpool::User>>>>,
     users: Mutex<Cached<Vec<String>>>,
 }
 
 impl Cache {
-    pub(super) fn new(client: Client, config: Arc<ServerConfig>) -> Self {
+    pub(super) fn new(
+        client: Client,
+        config: Arc<ServerConfig>,
+        database: Option<Database>,
+    ) -> Self {
         Self {
             client,
             config: config.clone(),
+            database,
             pool_status: Mutex::new(Cached::init(config.ttl())),
             user_statuses: DashMap::new(),
             users: Mutex::new(Cached::init(config.ttl())),
@@ -146,7 +152,7 @@ impl Cache {
             })
             .collect();
 
-        let aggregated = fetches
+        let mut aggregated = fetches
             .fold(None, |acc, (base, res)| async move {
                 match res {
                     Ok(status) => Some(match acc {
@@ -164,6 +170,15 @@ impl Cache {
 
         if aggregated.is_none() {
             error!("Failed to aggregate pool statistics");
+        }
+
+        // workaround for stale data in ckpool instances
+        if let (Some(status), Some(database)) = (aggregated.as_mut(), self.database.as_ref()) {
+            match database.get_current_round_bestshare().await {
+                Ok(Some(best)) => status.shares.bestshare = best as u64,
+                Ok(None) => status.shares.bestshare = 0,
+                Err(err) => warn!("Failed to load round bestshare from database: {err}"),
+            }
         }
 
         *cached = Cached::new(aggregated);
@@ -202,7 +217,7 @@ impl Cache {
             .expect("system clock before unix epoch")
             .as_secs();
 
-        let aggregated = fetches
+        let mut aggregated = fetches
             .fold(None, |acc, (_, res)| async move {
                 match res {
                     Ok(status) => {
@@ -219,6 +234,16 @@ impl Cache {
 
         if aggregated.is_none() {
             error!("Failed to find user {address} on any node");
+        }
+
+        // workaround for stale ckpool stats
+        if let (Some(user), Some(database)) = (aggregated.as_mut(), self.database.as_ref()) {
+            match database.get_current_round_bestshare_by_user(&address).await {
+                Ok(best) => user.bestshare = best.unwrap_or(0.0),
+                Err(err) => {
+                    warn!("Failed to load round bestshare for {address} from database: {err}")
+                }
+            }
         }
 
         *cached = Cached::new(aggregated.clone());

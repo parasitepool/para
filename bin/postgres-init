@@ -113,12 +113,21 @@ PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
       idx_remote_shares_blockheight ON
       remote_shares (blockheight);
   "
-# Covering index for round participation queries (index-only scans)
+# Covering index for round participation queries (index-only scans).
+# INCLUDE both sdiff (top_diff = MAX(sdiff)) and diff (total_work = SUM(diff))
+# so the round_participation_current refresh doesn't need heap fetches.
+HAS_DIFF_INCLUDE=$(PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -tAc \
+  "SELECT 1 FROM pg_indexes WHERE indexname='idx_remote_shares_round_participation' AND indexdef LIKE '%sdiff, diff%'")
+if [ "$HAS_DIFF_INCLUDE" != "1" ]; then
+  PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
+    DROP INDEX CONCURRENTLY IF EXISTS idx_remote_shares_round_participation;
+    "
+fi
 PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
   CREATE INDEX CONCURRENTLY IF NOT EXISTS
       idx_remote_shares_round_participation ON
       remote_shares (blockheight, username)
-      INCLUDE (sdiff)
+      INCLUDE (sdiff, diff)
       WHERE reject_reason IS NULL;
   "
 
@@ -275,18 +284,36 @@ PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
       username TEXT NOT NULL,
       blocks_participated BIGINT NOT NULL,
       top_diff DOUBLE PRECISION NOT NULL,
+      total_work DOUBLE PRECISION NOT NULL DEFAULT 0,
       PRIMARY KEY (blockheight, username)
   )
   "
+# Add total_work to pre-existing history tables (populated by the startup backfill).
+PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
+  ALTER TABLE round_participation_history
+      ADD COLUMN IF NOT EXISTS total_work DOUBLE PRECISION NOT NULL DEFAULT 0;
+  "
 
-# Materialized view for current (in-progress) round participation
-if ! PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -tAc "SELECT 1 FROM pg_matviews WHERE matviewname='round_participation_current'" | grep -q 1; then
+# Materialized view for current (in-progress) round participation.
+# If an older matview exists without the total_work column, drop it so it is
+# rebuilt below with the new definition (rebuildable derived state, no data loss).
+MATVIEW_EXISTS=$(PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -tAc "SELECT 1 FROM pg_matviews WHERE matviewname='round_participation_current'")
+if [ "$MATVIEW_EXISTS" = "1" ]; then
+  HAS_TOTAL_WORK=$(PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -tAc \
+    "SELECT 1 FROM pg_attribute WHERE attrelid='round_participation_current'::regclass AND attname='total_work' AND NOT attisdropped")
+  if [ "$HAS_TOTAL_WORK" != "1" ]; then
+    PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "DROP MATERIALIZED VIEW round_participation_current;"
+    MATVIEW_EXISTS=""
+  fi
+fi
+if [ "$MATVIEW_EXISTS" != "1" ]; then
   PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
     CREATE MATERIALIZED VIEW round_participation_current AS
     SELECT
         COALESCE(rs.username, '') AS username,
         COUNT(DISTINCT rs.blockheight)::BIGINT AS blocks_participated,
-        COALESCE(MAX(rs.sdiff), 0) AS top_diff
+        COALESCE(MAX(rs.sdiff), 0) AS top_diff,
+        COALESCE(SUM(rs.diff), 0) AS total_work
     FROM remote_shares rs
     WHERE rs.blockheight > (SELECT COALESCE(MAX(blockheight), 0) FROM blocks)
         AND rs.reject_reason IS NULL

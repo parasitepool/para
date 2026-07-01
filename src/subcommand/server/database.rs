@@ -74,8 +74,12 @@ pub struct Database {
 impl Database {
     pub async fn new(database_url: String) -> Result<Self> {
         Ok(Self {
+            // The pool is shared across every DB-backed route (sync ingestion,
+            // rounds, payouts, account migration) plus the aggregator bestshare
+            // overlays, so 5 connections starves under concurrent load. Postgres
+            // defaults to max_connections = 100, leaving ample headroom here.
             pool: PgPoolOptions::new()
-                .max_connections(5)
+                .max_connections(20)
                 .acquire_timeout(Duration::from_secs(5))
                 .connect(&database_url)
                 .await
@@ -517,6 +521,34 @@ impl Database {
         .map_err(|err| anyhow!(err))
     }
 
+    /// Highest difficulty share submitted since the last found block, across all
+    /// nodes. Read from the `round_participation_current` materialized view
+    /// (`top_diff` = `MAX(sdiff)` per user for the current round), so it is immune
+    /// to individual ckpool instances failing to reset their `pool.status`
+    /// `bestshare` on a block. Freshness tracks the matview refresh cadence.
+    pub async fn get_current_round_bestshare(&self) -> Result<Option<f64>> {
+        sqlx::query_scalar::<_, Option<f64>>(
+            "SELECT MAX(top_diff) FROM round_participation_current",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))
+    }
+
+    /// Highest difficulty share submitted by a single user since the last found
+    /// block. Round-scoped counterpart to the per-user `bestshare` reported in
+    /// the ckpool user flatfile. Indexed lookup on the
+    /// `round_participation_current` materialized view.
+    pub async fn get_current_round_bestshare_by_user(&self, username: &str) -> Result<Option<f64>> {
+        sqlx::query_scalar::<_, f64>(
+            "SELECT top_diff FROM round_participation_current WHERE username = $1",
+        )
+        .bind(username)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))
+    }
+
     pub async fn get_tera_shares(
         &self,
         min_blockheight: Option<i32>,
@@ -811,7 +843,7 @@ impl Database {
                 // 'current' round comes from matview
                 match sqlx::query_as::<_, RoundParticipant>(
                     "
-                    SELECT username, blocks_participated, top_diff
+                    SELECT username, blocks_participated, top_diff, total_work
                     FROM round_participation_current
                     ORDER BY top_diff DESC
                     ",
@@ -827,7 +859,11 @@ impl Database {
                 }
             }
             Some(h) => {
-                // historical round ending on blockheight 'h' comes from history table
+                // Historical round ending on blockheight 'h' comes from the history
+                // table, which persists total_work (populated at snapshot time and
+                // by the startup backfill). This is a cheap indexed read — the
+                // expensive per-round aggregation happens once, out of band, not on
+                // every request. On a miss we snapshot once, then read.
                 match self.get_round_participation_history(h).await {
                     Ok(result) if !result.is_empty() => Ok(result),
                     Ok(_) => {
@@ -838,6 +874,7 @@ impl Database {
                             .await
                             .map_err(|err| anyhow!(err))
                     }
+                    // Dynamic fallback already computes total_work inline.
                     Err(_) => self.query_round_participation(Some(h)).await,
                 }
             }
@@ -850,7 +887,7 @@ impl Database {
     ) -> Result<Vec<RoundParticipant>, sqlx::Error> {
         sqlx::query_as::<_, RoundParticipant>(
             "
-            SELECT username, blocks_participated, top_diff
+            SELECT username, blocks_participated, top_diff, total_work
             FROM round_participation_history
             WHERE blockheight = $1
             ORDER BY top_diff DESC
@@ -859,6 +896,46 @@ impl Database {
         .bind(blockheight)
         .fetch_all(&self.pool)
         .await
+    }
+
+    /// Snapshot every completed round that hasn't had its `total_work` populated
+    /// yet (missing history rows, or rows left at 0 by an older schema). Run once
+    /// out of band on startup: it does the heavy per-round aggregation off the
+    /// request path, then self-limits on subsequent runs since backfilled rounds
+    /// no longer match. Rounds are processed oldest-first, one at a time.
+    pub(crate) async fn backfill_round_participation(&self) -> Result<()> {
+        let rounds: Vec<i32> = sqlx::query_scalar::<_, i32>(
+            "
+            SELECT b.blockheight
+            FROM blocks b
+            WHERE b.blockheight > 0
+              AND NOT EXISTS (
+                  SELECT 1 FROM round_participation_history h
+                  WHERE h.blockheight = b.blockheight AND h.total_work > 0
+              )
+            ORDER BY b.blockheight
+            ",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))?;
+
+        if rounds.is_empty() {
+            return Ok(());
+        }
+
+        info!(
+            "Backfilling round total_work for {} round(s)...",
+            rounds.len()
+        );
+        for h in &rounds {
+            if let Err(e) = self.snapshot_round_participation(*h).await {
+                warn!("Backfill snapshot failed for round {h}: {e}");
+            }
+        }
+        info!("Round total_work backfill complete");
+
+        Ok(())
     }
 
     async fn query_round_participation(
@@ -875,7 +952,8 @@ impl Database {
             SELECT
                 COALESCE(rs.username, '') AS username,
                 COUNT(DISTINCT rs.blockheight) AS blocks_participated,
-                COALESCE(MAX(rs.sdiff), 0) AS top_diff
+                COALESCE(MAX(rs.sdiff), 0) AS top_diff,
+                COALESCE(SUM(rs.diff), 0) AS total_work
             FROM remote_shares rs, previous_block pb
             WHERE rs.blockheight > pb.prev_height
                 AND ($1::INTEGER IS NULL OR rs.blockheight <= $1)
@@ -893,7 +971,7 @@ impl Database {
     pub(crate) async fn snapshot_round_participation(&self, blockheight: i32) -> Result<()> {
         sqlx::query(
             "
-            INSERT INTO round_participation_history (blockheight, username, blocks_participated, top_diff)
+            INSERT INTO round_participation_history (blockheight, username, blocks_participated, top_diff, total_work)
             WITH previous_block AS (
                 SELECT COALESCE(MAX(b.blockheight), 0) AS prev_height
                 FROM blocks b
@@ -903,13 +981,17 @@ impl Database {
                 $1,
                 COALESCE(rs.username, ''),
                 COUNT(DISTINCT rs.blockheight),
-                COALESCE(MAX(rs.sdiff), 0)
+                COALESCE(MAX(rs.sdiff), 0),
+                COALESCE(SUM(rs.diff), 0)
             FROM remote_shares rs, previous_block pb
             WHERE rs.blockheight > pb.prev_height
                 AND rs.blockheight <= $1
                 AND rs.reject_reason IS NULL
             GROUP BY rs.username
-            ON CONFLICT (blockheight, username) DO NOTHING
+            ON CONFLICT (blockheight, username) DO UPDATE SET
+                blocks_participated = EXCLUDED.blocks_participated,
+                top_diff = EXCLUDED.top_diff,
+                total_work = EXCLUDED.total_work
             ",
         )
         .bind(blockheight)
