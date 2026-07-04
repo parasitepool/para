@@ -1,6 +1,17 @@
 Changelog
 =========
 
+[Unreleased]
+------------
+
+### Added
+- Add `display_name` to account metadata: accounts can set an optional,
+  non-unique cosmetic name via the existing signed `/account/metadata`
+  endpoint (validated: trimmed, max 24 chars, no control characters). Names are
+  surfaced on the `Account` response and through a new bulk `/names` endpoint
+  (address -> name) for front-ends to consume. Accounts marked `is_private` are
+  excluded from `/names`.
+
 [0.5.4](https://github.com/parasitepool/para/releases/tag/0.5.4) - 2026-06-25
 -----------------------------------------------------------------------------
 

@@ -126,6 +126,7 @@ impl Modify for SecurityAddon {
         account::account_lookup,
         account::account_update,
         account::account_metadata_update,
+        account::names_lookup,
         // Share difficulty endpoints
         sharediff::highestdiff,
         sharediff::highestdiff_by_user,
