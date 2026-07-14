@@ -65,6 +65,12 @@ impl FromStr for HashDays {
     }
 }
 
+impl Sum for HashDays {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        Self::from_raw(saturating_finite(iter.map(|days| days.0).sum()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

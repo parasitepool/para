@@ -91,7 +91,7 @@ maxconnections=256
 maxmempool=2048
 minrelaytxfee=0.00001
 ",
-                &bitcoind_data_dir.display(),
+                bitcoind_data_dir.display(),
             ),
         )?;
 
@@ -205,7 +205,7 @@ maxconnections=256
 maxmempool=2048
 minrelaytxfee=0.00001
 ",
-                &bitcoind_data_dir.display(),
+                bitcoind_data_dir.display(),
             ),
         )?;
 

@@ -157,7 +157,7 @@ async fn users(
         }
     }
 
-    users.sort_by(|a, b| b.hashrate.total_cmp(&a.hashrate));
+    users.sort_by_key(|user| Reverse(user.hashrate));
     users.truncate(query.limit.unwrap_or(usize::MAX));
 
     Ok(Json(users).into_response())

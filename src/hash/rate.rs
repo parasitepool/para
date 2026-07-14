@@ -1,8 +1,22 @@
 use super::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 #[serde(try_from = "f64", into = "f64")]
 pub struct HashRate(f64);
+
+impl Eq for HashRate {}
+
+impl Ord for HashRate {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.partial_cmp(&other.0).unwrap()
+    }
+}
+
+impl PartialOrd for HashRate {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
 
 impl HashRate {
     pub const ZERO: Self = Self(0.0);
@@ -39,10 +53,6 @@ impl HashRate {
         }
 
         Self::from_hps(total_difficulty * HASHES_PER_DIFF_1 as f64 / window.as_secs_f64())
-    }
-
-    pub fn total_cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0.total_cmp(&other.0)
     }
 }
 
@@ -115,6 +125,12 @@ impl Div<f64> for HashRate {
         } else {
             Self::from_hps(self.0 / rhs)
         }
+    }
+}
+
+impl Sum for HashRate {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(Self::ZERO, Add::add)
     }
 }
 

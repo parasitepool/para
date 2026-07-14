@@ -618,7 +618,7 @@ impl Database {
         }
 
         let mut result: Vec<PendingPayout> = grouped.into_values().collect();
-        result.sort_by_key(|b| std::cmp::Reverse(b.amount_sats));
+        result.sort_by_key(|b| Reverse(b.amount_sats));
 
         Ok(result)
     }
@@ -666,7 +666,7 @@ impl Database {
             });
         }
 
-        result.sort_by_key(|b| std::cmp::Reverse(b.amount_sats));
+        result.sort_by_key(|b| Reverse(b.amount_sats));
 
         Ok(result)
     }
@@ -781,7 +781,7 @@ impl Database {
         }
 
         let mut result: Vec<PendingPayout> = grouped.into_values().collect();
-        result.sort_by_key(|b| std::cmp::Reverse(b.amount_sats));
+        result.sort_by_key(|b| Reverse(b.amount_sats));
 
         Ok(result)
     }

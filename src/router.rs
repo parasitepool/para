@@ -7,13 +7,113 @@ use {
     },
     bdk_wallet::ChangeSet,
     error::{RouterError, RouterResult},
-    order::{Bucket, Order, OrderStatus, PAYMENT_TIMEOUT, Payment},
+    order::{Bucket, Order, OrderStatus, Payment},
     orders::Orders,
 };
 
 pub mod error;
 pub mod order;
-pub(crate) mod orders;
+mod orders;
+
+const RAMP_UP_SHARES: u64 = 3;
+const MAX_RAMPING_CONNECTIONS: usize = 2;
+const PAYMENT_TIMEOUT: u32 = 6;
+const HYSTERESIS_LOW: f64 = 0.95;
+const HYSTERESIS_HIGH: f64 = 1.3;
+
+/// Routing preference, compared lexicographically: earlier fields are more
+/// significant, so field order encodes the priority ladder.
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+struct Priority {
+    bucket: bool,
+    unserved: bool,
+    ramping: Reverse<usize>,
+    boost_starving: bool,
+    remaining_fraction: f64,
+    hashrate: Reverse<HashRate>,
+    id: Reverse<u32>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct Trim {
+    hashrate: HashRate,
+    sessions: usize,
+}
+
+impl AddAssign for Trim {
+    fn add_assign(&mut self, rhs: Self) {
+        self.hashrate += rhs.hashrate;
+        self.sessions += rhs.sessions;
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Demand {
+    has_unfulfilled_bucket: bool,
+    deficit: HashRate,
+    ramp_slots: Option<usize>,
+}
+
+impl Demand {
+    fn snapshot(orders: &[Arc<Order>], now: Instant, boost: bool) -> Self {
+        let mut has_unfulfilled_bucket = false;
+        let mut deficit = HashRate::ZERO;
+        let mut ramp_slots = 0usize;
+
+        for order in orders.iter().filter(|order| !order.is_sink()) {
+            has_unfulfilled_bucket |= order.has_connected_upstream() && !order.is_fulfilled();
+
+            let order_deficit = order.hashrate_deficit(now);
+
+            if order_deficit == HashRate::ZERO {
+                continue;
+            }
+
+            if boost {
+                deficit += order_deficit;
+                continue;
+            }
+
+            let available = order.available_ramp_slots();
+
+            if available > 0 {
+                deficit += order_deficit;
+                ramp_slots = ramp_slots.saturating_add(available);
+            }
+        }
+
+        Self {
+            has_unfulfilled_bucket,
+            deficit,
+            ramp_slots: if boost { None } else { Some(ramp_slots) },
+        }
+    }
+
+    fn exhausted(self) -> bool {
+        self.deficit == HashRate::ZERO || self.ramp_slots == Some(0)
+    }
+
+    fn consume(&mut self, trimmed: Trim) {
+        self.deficit -= trimmed.hashrate;
+        self.ramp_slots = self
+            .ramp_slots
+            .map(|slots| slots.saturating_sub(trimmed.sessions));
+    }
+}
+
+fn log_rebalance(demand: Demand, overflow_trimmed: Trim, sink_trimmed: Trim, budget: Demand) {
+    debug!(
+        "Rebalance decision: deficit={} ramp_slots={:?} overflow_sessions={} overflow_hashrate={} sink_sessions={} sink_hashrate={} remaining_deficit={} remaining_ramp_slots={:?}",
+        demand.deficit,
+        demand.ramp_slots,
+        overflow_trimmed.sessions,
+        overflow_trimmed.hashrate,
+        sink_trimmed.sessions,
+        sink_trimmed.hashrate,
+        budget.deficit,
+        budget.ramp_slots,
+    );
+}
 
 pub(crate) struct Router {
     settings: Arc<Settings>,
@@ -130,35 +230,39 @@ impl Router {
     pub(crate) fn next_order(&self) -> Option<Arc<Order>> {
         let now = Instant::now();
         let boost = self.boost();
-        let routable = self.orders.read().routable(now, boost);
+        let candidates = self.orders.read().routable();
 
-        let mut best: Option<&Arc<Order>> = None;
+        let key = |order: &Arc<Order>| {
+            let hashrate = order.hashrate_1m(now);
+            let ramping = order.ramping_connections();
 
-        for order in &routable {
-            let Some(current) = best else {
-                best = Some(order);
-                continue;
-            };
-
-            let prefer_order = if order.is_ramping_up() != current.is_ramping_up() {
-                !order.is_ramping_up()
-            } else if order.is_sink() && current.is_sink() {
-                order.hashrate_1m(now) < current.hashrate_1m(now)
-            } else if boost && order.is_starving(now) != current.is_starving(now) {
-                order.is_starving(now)
-            } else {
-                order.remaining_work() > current.remaining_work()
-            };
-
-            if prefer_order {
-                best = Some(order);
+            if !order.is_sink()
+                && !boost
+                && (!order.is_starving(hashrate) || ramping >= MAX_RAMPING_CONNECTIONS)
+            {
+                return None;
             }
-        }
 
-        let order = best?;
+            Some(Priority {
+                bucket: !order.is_sink(),
+                unserved: order.is_unserved(hashrate),
+                ramping: Reverse(ramping),
+                boost_starving: boost && order.is_starving(hashrate),
+                remaining_fraction: order.remaining_fraction(),
+                hashrate: Reverse(hashrate),
+                id: Reverse(order.id),
+            })
+        };
+
+        let order = candidates
+            .into_iter()
+            .filter_map(|order| key(&order).map(|k| (k, order)))
+            .max_by(|(a, _), (b, _)| a.partial_cmp(b).unwrap())?
+            .1;
+
         order.assign();
 
-        Some(order.clone())
+        Some(order)
     }
 
     pub(crate) fn add_sink_order(self: &Arc<Self>, upstream_target: UpstreamTarget) -> Arc<Order> {
@@ -380,16 +484,8 @@ impl Router {
                 }
                 _ = async {
                     let mut ticker = ticker(check_interval);
-                    loop {
+                    while !order.is_fulfilled() {
                         ticker.tick().await;
-
-                        if order.is_fulfilled() {
-                            break;
-                        }
-
-                        if !self.boost() {
-                            order.trim();
-                        }
                     }
                 } => {
                     info!("Order {} fulfilled", order.id);
@@ -545,36 +641,82 @@ impl Router {
         let now = Instant::now();
         let boost = self.boost();
         let orders = self.orders.read().active();
+        let demand = Demand::snapshot(&orders, now, boost);
 
-        if !boost && !orders.iter().any(|order| order.is_starving(now)) {
+        if !demand.has_unfulfilled_bucket {
             return;
         }
 
-        let has_unfulfilled_bucket = orders
-            .iter()
-            .any(|order| !order.is_sink() && !order.is_fulfilled());
-
-        if !has_unfulfilled_bucket {
+        if !boost && demand.deficit == HashRate::ZERO {
             return;
         }
 
-        if boost {
-            if let Some((order, id)) =
-                fattest_session(orders.iter().filter(|order| order.is_sink()), now)
-            {
-                order.trim_session(id, now);
+        let mut budget = demand;
+        let mut overflow_trimmed = Trim::default();
+        let mut sink_trimmed = Trim::default();
+
+        if !boost {
+            for order in orders.iter().filter(|order| order.is_overflowing(now)) {
+                if budget.exhausted() {
+                    break;
+                }
+
+                let trimmed = order.trim(budget.ramp_slots);
+                budget.consume(trimmed);
+                overflow_trimmed += trimmed;
+            }
+        }
+
+        let mut candidates = Vec::new();
+
+        for order in orders.iter().filter(|order| order.is_sink()) {
+            for (id, hashrate) in order.session_hashrates(now) {
+                candidates.push((order, id, hashrate));
+            }
+        }
+
+        candidates.sort_by_key(|(_, _, hashrate)| Reverse(*hashrate));
+
+        if boost && demand.deficit == HashRate::ZERO {
+            if let Some((order, id, hashrate)) = candidates.first() {
+                order.trim_session(*id, now);
+                sink_trimmed += Trim {
+                    hashrate: *hashrate,
+                    sessions: 1,
+                };
             }
 
+            log_rebalance(demand, overflow_trimmed, sink_trimmed, budget);
+
             return;
         }
 
-        let Some((order, id)) = fattest_session(orders.iter().filter(|order| order.is_sink()), now)
-        else {
-            warn!("Rebalance needed but no sink session available");
-            return;
-        };
+        if budget.exhausted() {
+            log_rebalance(demand, overflow_trimmed, sink_trimmed, budget);
 
-        order.trim_session(id, now);
+            return;
+        }
+
+        for (order, id, hashrate) in &candidates {
+            if budget.exhausted() || (sink_trimmed.sessions > 0 && *hashrate == HashRate::ZERO) {
+                break;
+            }
+
+            order.trim_session(*id, now);
+
+            let trimmed = Trim {
+                hashrate: *hashrate,
+                sessions: 1,
+            };
+            budget.consume(trimmed);
+            sink_trimmed += trimmed;
+        }
+
+        if sink_trimmed.sessions == 0 && !boost {
+            warn!("Rebalance needed but no sink session available");
+        }
+
+        log_rebalance(demand, overflow_trimmed, sink_trimmed, budget);
     }
 
     pub(crate) fn status(&self) -> RouterStatus {
@@ -605,7 +747,7 @@ impl Router {
                         sink_order_count += 1;
                     } else {
                         bucket_order_count += 1;
-                        if order.is_starving(now) {
+                        if order.is_starving(order.hashrate_1m(now)) {
                             starving_order_count += 1;
                         }
                     }
@@ -767,32 +909,6 @@ impl Router {
             });
         }
     }
-}
-
-fn fattest_session<'a>(
-    orders: impl Iterator<Item = &'a Arc<Order>>,
-    now: Instant,
-) -> Option<(&'a Arc<Order>, SessionId)> {
-    let mut best = None;
-
-    for order in orders {
-        let sessions = order.sessions.lock();
-
-        for (session, _) in sessions.values() {
-            let hash_rate = session.hashrate_1m(now);
-
-            let replace = match best {
-                None => true,
-                Some((_, _, best_hashrate)) => hash_rate > best_hashrate,
-            };
-
-            if replace {
-                best = Some((order, session.id(), hash_rate));
-            }
-        }
-    }
-
-    best.map(|(order, id, _)| (order, id))
 }
 
 impl StatusLine for Router {
@@ -1153,29 +1269,199 @@ mod tests {
         }
     }
 
+    fn register_session(
+        metatron: &Metatron,
+        order: &Order,
+        enonce1: &str,
+        worker: &str,
+        difficulty: f64,
+    ) -> CancellationToken {
+        let session = metatron.new_session(test_authorization(enonce1, worker), order.id);
+
+        if difficulty > 0.0 {
+            session.record_accepted(Difficulty::from(difficulty), Difficulty::from(difficulty));
+        }
+
+        let cancel = CancellationToken::new();
+        order.add_session(session, cancel.clone());
+        cancel
+    }
+
     fn ids(orders: Vec<Arc<Order>>) -> Vec<u32> {
         orders.into_iter().map(|order| order.id).collect()
     }
 
     #[test]
-    fn is_fulfilled() {
+    fn priority_orders_fields_by_significance() {
+        let worst = Priority {
+            bucket: false,
+            unserved: false,
+            ramping: Reverse(9),
+            boost_starving: false,
+            remaining_fraction: 0.0,
+            hashrate: Reverse(HashRate::from_hps(9.0)),
+            id: Reverse(9),
+        };
+
+        let best = Priority {
+            bucket: true,
+            unserved: true,
+            ramping: Reverse(0),
+            boost_starving: true,
+            remaining_fraction: 1.0,
+            hashrate: Reverse(HashRate::ZERO),
+            id: Reverse(0),
+        };
+
         #[track_caller]
-        fn case(target: Option<HashDays>, delivered: Option<f64>, expected: bool) {
-            let (metatron, _dir) = Metatron::test();
-            let metatron = Arc::new(metatron);
-            let order = test_order(0, target, OrderStatus::Active, &metatron);
-
-            if let Some(delivered) = delivered {
-                set_delivered_work(&metatron, order.as_ref(), delivered);
-            }
-
-            assert_eq!(order.is_fulfilled(), expected);
+        fn case(better: Priority, worse: Priority) {
+            assert!(better > worse);
         }
 
-        case(None, None, false);
-        case(Some(hash_days(1e15)), None, false);
-        case(Some(hash_days(1e12)), Some(1e12), true);
-        case(Some(hash_days(1e12)), Some(2e12), true);
+        case(
+            Priority {
+                bucket: true,
+                ..worst
+            },
+            Priority {
+                bucket: false,
+                ..best
+            },
+        );
+        case(
+            Priority {
+                unserved: true,
+                ..worst
+            },
+            Priority {
+                bucket: false,
+                unserved: false,
+                ..best
+            },
+        );
+        case(
+            Priority {
+                ramping: Reverse(0),
+                ..worst
+            },
+            Priority {
+                bucket: false,
+                unserved: false,
+                ramping: Reverse(9),
+                ..best
+            },
+        );
+        case(
+            Priority {
+                boost_starving: true,
+                ..worst
+            },
+            Priority {
+                bucket: false,
+                unserved: false,
+                ramping: Reverse(9),
+                boost_starving: false,
+                ..best
+            },
+        );
+        case(
+            Priority {
+                remaining_fraction: 1.0,
+                ..worst
+            },
+            Priority {
+                bucket: false,
+                unserved: false,
+                ramping: Reverse(9),
+                boost_starving: false,
+                remaining_fraction: 0.0,
+                ..best
+            },
+        );
+        case(
+            Priority {
+                hashrate: Reverse(HashRate::ZERO),
+                ..worst
+            },
+            Priority {
+                bucket: false,
+                unserved: false,
+                ramping: Reverse(9),
+                boost_starving: false,
+                remaining_fraction: 0.0,
+                hashrate: Reverse(HashRate::from_hps(9.0)),
+                ..best
+            },
+        );
+        case(
+            Priority {
+                id: Reverse(0),
+                ..worst
+            },
+            worst,
+        );
+    }
+
+    #[test]
+    fn rebalance_demand_applies_ramp_policy_once() {
+        let router = test_router();
+        let open = test_order(
+            0,
+            Some(hash_days(100.0)),
+            OrderStatus::Active,
+            &router.metatron,
+        );
+        let capped = test_order(
+            1,
+            Some(hash_days(200.0)),
+            OrderStatus::Active,
+            &router.metatron,
+        );
+        capped.assign();
+        capped.assign();
+        let orders = [open, capped];
+        let now = Instant::now();
+
+        let normal = Demand::snapshot(&orders, now, false);
+        assert!(normal.has_unfulfilled_bucket);
+        assert_eq!(normal.deficit, HashRate::from_hps(100.0));
+        assert_eq!(normal.ramp_slots, Some(2));
+
+        let boost = Demand::snapshot(&orders, now, true);
+        assert!(boost.has_unfulfilled_bucket);
+        assert_eq!(boost.deficit, HashRate::from_hps(300.0));
+        assert_eq!(boost.ramp_slots, None);
+    }
+
+    #[test]
+    fn rebalance_demand_keeps_unfulfilled_bucket_without_deficit() {
+        let router = test_router();
+        let fed = test_order(
+            0,
+            Some(hash_days(1.0)),
+            OrderStatus::Active,
+            &router.metatron,
+        );
+        register_session(&router.metatron, &fed, "deadbeef", "foo", 1000.0);
+
+        let disconnected = test_order(
+            1,
+            Some(hash_days(100.0)),
+            OrderStatus::Active,
+            &router.metatron,
+        );
+        disconnected.upstream().unwrap().set_connected(false);
+        let orders = [fed, disconnected];
+
+        let normal = Demand::snapshot(&orders, Instant::now(), false);
+        assert!(normal.has_unfulfilled_bucket);
+        assert_eq!(normal.deficit, HashRate::ZERO);
+        assert_eq!(normal.ramp_slots, Some(0));
+
+        let boost = Demand::snapshot(&orders, Instant::now(), true);
+        assert!(boost.has_unfulfilled_bucket);
+        assert_eq!(boost.deficit, HashRate::ZERO);
+        assert_eq!(boost.ramp_slots, None);
     }
 
     #[test]
@@ -1588,7 +1874,7 @@ mod tests {
         orders.add(pending);
         orders.add(in_mempool);
 
-        assert_eq!(ids(orders.routable(Instant::now(), false)), vec![0]);
+        assert_eq!(ids(orders.routable()), vec![0]);
     }
 
     #[test]
@@ -1838,7 +2124,53 @@ mod tests {
     }
 
     #[test]
-    fn next_order_prefers_bucket_over_sink() {
+    fn next_order_prefers_higher_remaining_fraction() {
+        let router = test_router();
+        let half_filled_large = test_order(
+            0,
+            Some(hash_days(1e20)),
+            OrderStatus::Active,
+            &router.metatron,
+        );
+        set_delivered_work(&router.metatron, &half_filled_large, 5e19);
+        let mostly_empty_small = test_order(
+            1,
+            Some(hash_days(1e18)),
+            OrderStatus::Active,
+            &router.metatron,
+        );
+        set_delivered_work(&router.metatron, &mostly_empty_small, 1e17);
+
+        add_orders(router.as_ref(), [half_filled_large, mostly_empty_small]);
+
+        assert_eq!(router.next_order().unwrap().id, 1);
+    }
+
+    #[test]
+    fn next_order_prioritizes_unserved_bucket() {
+        let router = test_router();
+        let served = test_order(
+            0,
+            Some(hash_days(1e20)),
+            OrderStatus::Active,
+            &router.metatron,
+        );
+        register_session(&router.metatron, &served, "deadbeef", "foo", 1.0);
+
+        let unserved = test_order(
+            1,
+            Some(hash_days(1e20)),
+            OrderStatus::Active,
+            &router.metatron,
+        );
+
+        add_orders(router.as_ref(), [served, unserved]);
+
+        assert_eq!(router.next_order().unwrap().id, 1);
+    }
+
+    #[test]
+    fn next_order_allows_two_ramping_bucket_connections_before_sink() {
         let router = test_router();
         let bucket = test_order(
             0,
@@ -1848,53 +2180,33 @@ mod tests {
         );
         let sink = test_order(1, None, OrderStatus::Active, &router.metatron);
 
-        add_orders(router.as_ref(), [sink, bucket]);
-
-        assert_eq!(router.next_order().unwrap().id, 0);
-    }
-
-    #[test]
-    fn next_order_prefers_least_filled_bucket() {
-        let router = test_router();
-        let mostly_empty = test_order(
-            0,
-            Some(hash_days(1e20)),
-            OrderStatus::Active,
-            &router.metatron,
-        );
-        let partly_filled = test_order(
-            1,
-            Some(hash_days(1e20)),
-            OrderStatus::Active,
-            &router.metatron,
-        );
-        router
-            .metatron
-            .set_order_delivered_work(1, hash_days(1e10).to_hash_work());
-
-        add_orders(router.as_ref(), [partly_filled, mostly_empty]);
-
-        assert_eq!(router.next_order().unwrap().id, 0);
-    }
-
-    #[test]
-    fn next_order_second_call_sees_first_as_ramping_up() {
-        let router = test_router();
-        let active = test_order(
-            0,
-            Some(hash_days(100.0)),
-            OrderStatus::Active,
-            &router.metatron,
-        );
-        let sink = test_order(1, None, OrderStatus::Active, &router.metatron);
-
-        add_orders(router.as_ref(), [active, sink]);
+        add_orders(router.as_ref(), [bucket, sink]);
 
         let first = router.next_order().unwrap();
         assert_eq!(first.id, 0);
 
         let second = router.next_order().unwrap();
-        assert_eq!(second.id, 1);
+        assert_eq!(second.id, 0);
+
+        let third = router.next_order().unwrap();
+        assert_eq!(third.id, 1);
+    }
+
+    #[test]
+    fn next_order_returns_none_when_buckets_capped_without_sink() {
+        let router = test_router();
+        let bucket = test_order(
+            0,
+            Some(hash_days(100.0)),
+            OrderStatus::Active,
+            &router.metatron,
+        );
+
+        add_orders(router.as_ref(), [bucket]);
+
+        assert_eq!(router.next_order().unwrap().id, 0);
+        assert_eq!(router.next_order().unwrap().id, 0);
+        assert!(router.next_order().is_none());
     }
 
     #[test]
@@ -1947,6 +2259,14 @@ mod tests {
         let third = router.next_order().unwrap();
 
         let mut picked = [first.id, second.id, third.id];
+        picked.sort();
+        assert_eq!(picked, [0, 1, 2]);
+
+        let fourth = router.next_order().unwrap();
+        let fifth = router.next_order().unwrap();
+        let sixth = router.next_order().unwrap();
+
+        let mut picked = [fourth.id, fifth.id, sixth.id];
         picked.sort();
         assert_eq!(picked, [0, 1, 2]);
     }
@@ -2040,33 +2360,26 @@ mod tests {
     }
 
     #[test]
-    fn rebalance_noop_when_no_starving_bucket() {
+    fn rebalance_noop_without_starving_demand() {
         let router = test_router();
-        let active = test_order(
-            0,
-            Some(hash_days(100.0)),
+        let over = overflowing_order(&router, 0);
+        let satisfied = test_order(
+            1,
+            Some(hash_days(1.0)),
             OrderStatus::Active,
             &router.metatron,
         );
-        let active_session = router
-            .metatron
-            .new_session(test_authorization("feedface", "baz"), 0);
-        active_session.record_accepted(Difficulty::from(1000.0), Difficulty::from(1000.0));
-        active.add_session(active_session, CancellationToken::new());
+        register_session(&router.metatron, &satisfied, "feedface", "qux", 1000.0);
 
-        let sink = test_order(1, None, OrderStatus::Active, &router.metatron);
+        let sink = test_order(2, None, OrderStatus::Active, &router.metatron);
+        let sink_cancel = register_session(&router.metatron, &sink, "deadbeef", "foo", 100.0);
 
-        let cancel = CancellationToken::new();
-        let session = router
-            .metatron
-            .new_session(test_authorization("deadbeef", "foo"), 1);
-        sink.add_session(session, cancel.clone());
-
-        add_orders(router.as_ref(), [active, sink]);
+        add_orders(router.as_ref(), [over.order.clone(), satisfied, sink]);
 
         router.rebalance();
 
-        assert!(!cancel.is_cancelled());
+        assert!(!over.cancel_mid.is_cancelled());
+        assert!(!sink_cancel.is_cancelled());
     }
 
     #[test]
@@ -2460,7 +2773,7 @@ mod tests {
     }
 
     #[test]
-    fn routable_with_boost_includes_non_starving_bucket() {
+    fn routable_includes_unfulfilled_bucket() {
         let (metatron, _dir) = Metatron::test();
         let metatron = Arc::new(metatron);
         let mut orders = Orders::new();
@@ -2472,25 +2785,20 @@ mod tests {
 
         orders.add(bucket);
 
-        assert!(orders.routable(Instant::now(), false).is_empty());
-        assert_eq!(ids(orders.routable(Instant::now(), true)), vec![0]);
+        assert_eq!(ids(orders.routable()), vec![0]);
     }
 
     #[test]
-    fn routable_with_boost_excludes_fulfilled_bucket() {
+    fn routable_excludes_fulfilled_bucket() {
         let (metatron, _dir) = Metatron::test();
         let metatron = Arc::new(metatron);
         let mut orders = Orders::new();
         let bucket = test_order(0, Some(hash_days(100.0)), OrderStatus::Active, &metatron);
         set_delivered_work(&metatron, &bucket, 100.0);
 
-        let session = metatron.new_session(test_authorization("deadbeef", "foo"), 0);
-        session.record_accepted(Difficulty::from(1000.0), Difficulty::from(1000.0));
-        bucket.add_session(session, CancellationToken::new());
-
         orders.add(bucket);
 
-        assert!(orders.routable(Instant::now(), true).is_empty());
+        assert!(orders.routable().is_empty());
     }
 
     #[test]
@@ -2523,7 +2831,7 @@ mod tests {
     }
 
     #[test]
-    fn rebalance_boost_trims_fattest_sink_session() {
+    fn next_order_boost_bypasses_bucket_ramp_limit() {
         let router = test_router();
         router.set_boost(true);
 
@@ -2534,54 +2842,299 @@ mod tests {
             &router.metatron,
         );
         let sink = test_order(1, None, OrderStatus::Active, &router.metatron);
-
-        let cancel_a = CancellationToken::new();
-        let cancel_b = CancellationToken::new();
-        let session_a = router
-            .metatron
-            .new_session(test_authorization("deadbeef", "foo"), 1);
-        let session_b = router
-            .metatron
-            .new_session(test_authorization("cafebabe", "bar"), 1);
-        sink.add_session(session_a.clone(), cancel_a.clone());
-        sink.add_session(session_b.clone(), cancel_b.clone());
-        session_a.record_accepted(Difficulty::from(200.0), Difficulty::from(200.0));
-        session_b.record_accepted(Difficulty::from(100.0), Difficulty::from(100.0));
-
         add_orders(router.as_ref(), [bucket, sink]);
 
-        router.rebalance();
-
-        assert!(cancel_a.is_cancelled());
-        assert!(!cancel_b.is_cancelled());
+        assert_eq!(router.next_order().unwrap().id, 0);
+        assert_eq!(router.next_order().unwrap().id, 0);
+        assert_eq!(router.next_order().unwrap().id, 0);
     }
 
     #[test]
-    fn rebalance_boost_does_not_trim_bucket_sessions() {
+    fn rebalance_boost_trims_fattest_sink_session() {
+        #[track_caller]
+        fn case(deficit: bool) {
+            let router = test_router();
+            router.set_boost(true);
+
+            let bucket = test_order(
+                0,
+                Some(hash_days(100.0)),
+                OrderStatus::Active,
+                &router.metatron,
+            );
+
+            if !deficit {
+                register_session(&router.metatron, &bucket, "feedface", "baz", 1000.0);
+            }
+
+            let sink = test_order(1, None, OrderStatus::Active, &router.metatron);
+            let cancel_a = register_session(&router.metatron, &sink, "deadbeef", "foo", 200.0);
+            let cancel_b = register_session(&router.metatron, &sink, "cafebabe", "bar", 100.0);
+
+            add_orders(router.as_ref(), [bucket, sink]);
+
+            router.rebalance();
+
+            assert!(cancel_a.is_cancelled());
+            assert!(!cancel_b.is_cancelled());
+        }
+
+        case(false);
+        case(true);
+    }
+
+    #[test]
+    fn rebalance_limits_sink_shedding_to_available_ramp_slots() {
+        #[track_caller]
+        fn case(assigned: usize, expected_cancelled: usize) {
+            let router = test_router();
+            let bucket = test_order(
+                0,
+                Some(hash_days(1e20)),
+                OrderStatus::Active,
+                &router.metatron,
+            );
+
+            for _ in 0..assigned {
+                bucket.assign();
+            }
+
+            let sink = test_order(1, None, OrderStatus::Active, &router.metatron);
+            let cancel_fat = register_session(&router.metatron, &sink, "deadbeef", "foo", 200.0);
+            let cancel_small = register_session(&router.metatron, &sink, "cafebabe", "bar", 100.0);
+
+            add_orders(router.as_ref(), [bucket, sink]);
+            router.rebalance();
+
+            assert_eq!(
+                [cancel_fat.is_cancelled(), cancel_small.is_cancelled()]
+                    .into_iter()
+                    .filter(|cancelled| *cancelled)
+                    .count(),
+                expected_cancelled,
+            );
+            assert_eq!(cancel_fat.is_cancelled(), expected_cancelled >= 1);
+            assert_eq!(cancel_small.is_cancelled(), expected_cancelled == 2);
+        }
+
+        case(0, 2);
+        case(1, 1);
+        case(2, 0);
+    }
+
+    #[test]
+    fn rebalance_overflow_release_consumes_ramp_slot_before_sink_shedding() {
         let router = test_router();
-        router.set_boost(true);
+        let over = overflowing_order(&router, 0);
+        let starving = test_order(
+            1,
+            Some(hash_days(1e20)),
+            OrderStatus::Active,
+            &router.metatron,
+        );
+        starving.assign();
+
+        let sink = test_order(2, None, OrderStatus::Active, &router.metatron);
+        let sink_cancel = register_session(&router.metatron, &sink, "dddd", "qux", 100.0);
+        add_orders(router.as_ref(), [over.order.clone(), starving, sink]);
+
+        router.rebalance();
+
+        assert!(over.cancel_mid.is_cancelled());
+        assert!(!sink_cancel.is_cancelled());
+    }
+
+    #[test]
+    fn rebalance_zero_rate_overflow_does_not_consume_ramp_slot() {
+        let router = test_router();
+        let over = test_order(
+            0,
+            Some(hash_days(1e9)),
+            OrderStatus::Active,
+            &router.metatron,
+        );
+        let cancel_a = register_session(&router.metatron, &over, "aaaa", "foo", 12.0);
+        let cancel_b = register_session(&router.metatron, &over, "bbbb", "bar", 12.0);
+        let cancel_zero = register_session(&router.metatron, &over, "cccc", "baz", 0.0);
 
         let starving = test_order(
+            1,
+            Some(hash_days(1e20)),
+            OrderStatus::Active,
+            &router.metatron,
+        );
+        starving.assign();
+
+        let sink = test_order(2, None, OrderStatus::Active, &router.metatron);
+        let sink_cancel = register_session(&router.metatron, &sink, "dddd", "qux", 100.0);
+
+        add_orders(router.as_ref(), [over, starving, sink]);
+        router.rebalance();
+
+        assert!(!cancel_a.is_cancelled());
+        assert!(!cancel_b.is_cancelled());
+        assert!(!cancel_zero.is_cancelled());
+        assert!(sink_cancel.is_cancelled());
+    }
+
+    #[test]
+    fn rebalance_trims_for_starving_order_after_ramp_up() {
+        let router = test_router();
+        let bucket = test_order(
+            0,
+            Some(hash_days(1e20)),
+            OrderStatus::Active,
+            &router.metatron,
+        );
+
+        bucket.assign();
+
+        let session = router
+            .metatron
+            .new_session(test_authorization("feedface", "baz"), 0);
+
+        bucket.add_session(session.clone(), CancellationToken::new());
+
+        for _ in 0..RAMP_UP_SHARES {
+            session.record_accepted(Difficulty::from(1.0), Difficulty::from(1.0));
+        }
+
+        let sink = test_order(1, None, OrderStatus::Active, &router.metatron);
+        let cancel = register_session(&router.metatron, &sink, "deadbeef", "foo", 100.0);
+
+        add_orders(router.as_ref(), [bucket, sink]);
+
+        router.rebalance();
+
+        assert!(cancel.is_cancelled());
+    }
+
+    #[test]
+    fn rebalance_falls_back_to_zero_rate_sink_session() {
+        let router = test_router();
+        let bucket = test_order(
             0,
             Some(hash_days(100.0)),
             OrderStatus::Active,
             &router.metatron,
         );
 
-        let fed = test_order(
+        let sink = test_order(1, None, OrderStatus::Active, &router.metatron);
+        let cancel = register_session(&router.metatron, &sink, "deadbeef", "foo", 0.0);
+
+        add_orders(router.as_ref(), [bucket, sink]);
+
+        router.rebalance();
+
+        assert!(cancel.is_cancelled());
+    }
+
+    struct OverflowingOrder {
+        order: Arc<Order>,
+        cancel_fat: CancellationToken,
+        cancel_mid: CancellationToken,
+        cancel_small: CancellationToken,
+    }
+
+    fn overflowing_order(router: &Router, id: u32) -> OverflowingOrder {
+        let order = test_order(
+            id,
+            Some(hash_days(1e9)),
+            OrderStatus::Active,
+            &router.metatron,
+        );
+
+        let cancel_fat = register_session(&router.metatron, &order, "aaaa", "foo", 13.0);
+        let cancel_mid = register_session(&router.metatron, &order, "bbbb", "bar", 7.0);
+        let cancel_small = register_session(&router.metatron, &order, "cccc", "baz", 4.0);
+
+        OverflowingOrder {
+            order,
+            cancel_fat,
+            cancel_mid,
+            cancel_small,
+        }
+    }
+
+    #[test]
+    fn rebalance_sheds_overflow_when_another_order_starving() {
+        let router = test_router();
+        let over = overflowing_order(&router, 0);
+        let starving = test_order(
             1,
+            Some(hash_days(1e20)),
+            OrderStatus::Active,
+            &router.metatron,
+        );
+
+        add_orders(router.as_ref(), [over.order.clone(), starving]);
+
+        router.rebalance();
+
+        assert!(!over.cancel_fat.is_cancelled());
+        assert!(over.cancel_mid.is_cancelled());
+        assert!(!over.cancel_small.is_cancelled());
+    }
+
+    #[test]
+    fn rebalance_does_not_shed_sink_after_overflow_covers_deficit() {
+        let router = test_router();
+        let over = overflowing_order(&router, 0);
+        let starving = test_order(
+            1,
+            Some(hash_days(1.0)),
+            OrderStatus::Active,
+            &router.metatron,
+        );
+        let sink = test_order(2, None, OrderStatus::Active, &router.metatron);
+        let sink_cancel = register_session(&router.metatron, &sink, "dddd", "qux", 100.0);
+
+        add_orders(router.as_ref(), [over.order.clone(), starving, sink]);
+
+        router.rebalance();
+
+        assert!(over.cancel_mid.is_cancelled());
+        assert!(!sink_cancel.is_cancelled());
+    }
+
+    #[test]
+    fn rebalance_stops_trimming_overflow_after_deficit_is_covered() {
+        let router = test_router();
+        let first = overflowing_order(&router, 0);
+        let second = overflowing_order(&router, 1);
+        let starving = test_order(
+            2,
+            Some(hash_days(1.0)),
+            OrderStatus::Active,
+            &router.metatron,
+        );
+
+        add_orders(
+            router.as_ref(),
+            [first.order.clone(), second.order.clone(), starving],
+        );
+
+        router.rebalance();
+
+        assert!(first.cancel_mid.is_cancelled());
+        assert!(!second.cancel_mid.is_cancelled());
+    }
+
+    #[test]
+    fn rebalance_skips_starving_order_with_disconnected_upstream() {
+        let router = test_router();
+        let zombie = test_order(
+            0,
             Some(hash_days(100.0)),
             OrderStatus::Active,
             &router.metatron,
         );
-        let cancel = CancellationToken::new();
-        let session = router
-            .metatron
-            .new_session(test_authorization("deadbeef", "foo"), 1);
-        fed.add_session(session.clone(), cancel.clone());
-        session.record_accepted(Difficulty::from(1000.0), Difficulty::from(1000.0));
+        zombie.upstream().unwrap().set_connected(false);
 
-        add_orders(router.as_ref(), [starving, fed]);
+        let sink = test_order(1, None, OrderStatus::Active, &router.metatron);
+        let cancel = register_session(&router.metatron, &sink, "deadbeef", "foo", 100.0);
+
+        add_orders(router.as_ref(), [zombie, sink]);
 
         router.rebalance();
 
@@ -2589,30 +3142,58 @@ mod tests {
     }
 
     #[test]
-    fn rebalance_boost_noop_when_all_buckets_fulfilled() {
+    fn rebalance_boost_does_not_shed_overflow() {
         let router = test_router();
         router.set_boost(true);
 
-        let bucket = test_order(
-            0,
-            Some(hash_days(100.0)),
+        let over = overflowing_order(&router, 0);
+        let starving = test_order(
+            1,
+            Some(hash_days(1e20)),
             OrderStatus::Active,
             &router.metatron,
         );
-        set_delivered_work(&router.metatron, &bucket, 100.0);
 
-        let sink = test_order(1, None, OrderStatus::Active, &router.metatron);
-        let cancel = CancellationToken::new();
-        let session = router
-            .metatron
-            .new_session(test_authorization("deadbeef", "foo"), 1);
-        sink.add_session(session, cancel.clone());
-
-        add_orders(router.as_ref(), [bucket, sink]);
+        add_orders(router.as_ref(), [over.order.clone(), starving]);
 
         router.rebalance();
 
-        assert!(!cancel.is_cancelled());
+        assert!(!over.cancel_mid.is_cancelled());
+    }
+
+    #[test]
+    fn rebalance_boost_noop_without_connected_unfulfilled_bucket() {
+        #[track_caller]
+        fn case(fulfilled: bool, connected: bool) {
+            let router = test_router();
+            router.set_boost(true);
+
+            let bucket = test_order(
+                0,
+                Some(hash_days(100.0)),
+                OrderStatus::Active,
+                &router.metatron,
+            );
+
+            if fulfilled {
+                set_delivered_work(&router.metatron, &bucket, 100.0);
+            }
+
+            if !connected {
+                bucket.upstream().unwrap().set_connected(false);
+            }
+
+            let sink = test_order(1, None, OrderStatus::Active, &router.metatron);
+            let cancel = register_session(&router.metatron, &sink, "deadbeef", "foo", 100.0);
+
+            add_orders(router.as_ref(), [bucket, sink]);
+            router.rebalance();
+
+            assert!(!cancel.is_cancelled());
+        }
+
+        case(true, true);
+        case(false, false);
     }
 
     #[test]

@@ -81,11 +81,13 @@ use {
     snafu::Snafu,
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
     std::{
+        cmp::Reverse,
         collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
         env,
         fmt::{self, Display, Formatter},
         fs,
         io::{self, Write},
+        iter::Sum,
         net::{SocketAddr, ToSocketAddrs},
         num::NonZeroUsize,
         ops::{Add, AddAssign, Div, Mul, Sub, SubAssign},
@@ -99,7 +101,7 @@ use {
         thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     },
-    store::Store,
+    store::{Store, entry},
     stratifier::Stratifier,
     stratum::{
         Authorize, Configure, Difficulty, Extranonce, Id, JobId, MAX_MESSAGE_SIZE, MerkleNode,
