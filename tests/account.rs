@@ -569,4 +569,75 @@ async fn metadata_update_allowlist() {
     assert_eq!(metadata["is_private"], false);
     assert!(metadata.get("block_count").is_none());
     assert!(metadata.get("highest_blockheight").is_none());
+
+    // ---- display names ----
+
+    // Set a display name; it is trimmed and surfaced on the typed field.
+    let account = case(
+        &server,
+        &test_account,
+        &btc_address,
+        serde_json::json!({"display_name": "  Satoshi  "}),
+        StatusCode::OK,
+    )
+    .await
+    .unwrap();
+    assert_eq!(account.display_name.as_deref(), Some("Satoshi"));
+    assert_eq!(account.metadata.unwrap()["display_name"], "Satoshi");
+
+    // Overlong names are rejected.
+    case(
+        &server,
+        &test_account,
+        &btc_address,
+        serde_json::json!({"display_name": "x".repeat(64)}),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+
+    // The bulk /names map exposes address -> name for labeling leaderboards.
+    let names = server
+        .get_json_async::<std::collections::HashMap<String, String>>("/names")
+        .await;
+    assert_eq!(names.get(&btc_address).map(String::as_str), Some("Satoshi"));
+
+    // A private account's name must not be published via /names.
+    case(
+        &server,
+        &test_account,
+        &btc_address,
+        serde_json::json!({"is_private": true}),
+        StatusCode::OK,
+    )
+    .await;
+    let names = server
+        .get_json_async::<std::collections::HashMap<String, String>>("/names")
+        .await;
+    assert!(names.get(&btc_address).is_none());
+
+    // Making it public again re-publishes the name.
+    case(
+        &server,
+        &test_account,
+        &btc_address,
+        serde_json::json!({"is_private": false}),
+        StatusCode::OK,
+    )
+    .await;
+    let names = server
+        .get_json_async::<std::collections::HashMap<String, String>>("/names")
+        .await;
+    assert_eq!(names.get(&btc_address).map(String::as_str), Some("Satoshi"));
+
+    // Clearing with an empty string unsets the name.
+    let account = case(
+        &server,
+        &test_account,
+        &btc_address,
+        serde_json::json!({"display_name": ""}),
+        StatusCode::OK,
+    )
+    .await
+    .unwrap();
+    assert_eq!(account.display_name, None);
 }

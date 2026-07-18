@@ -345,14 +345,52 @@ impl Database {
             return Ok(None);
         };
 
+        let display_name = raw
+            .metadata
+            .as_ref()
+            .and_then(|m| m.get("display_name"))
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+
         Ok(Some(Account {
             btc_address: raw.username,
+            display_name,
             ln_address: raw.lnurl,
             past_ln_addresses: raw.past_lnurls.0,
             total_diff: raw.total_diff,
             last_updated: raw.last_updated,
             metadata: raw.metadata,
         }))
+    }
+
+    /// Return a map of BTC address -> display name for all accounts that have a
+    /// non-empty `display_name` in their metadata. Used to label leaderboards.
+    pub async fn display_names(&self) -> Result<std::collections::HashMap<String, String>> {
+        #[derive(sqlx::FromRow)]
+        struct NameRow {
+            username: String,
+            display_name: String,
+        }
+
+        let rows = sqlx::query_as::<_, NameRow>(
+            "
+            SELECT a.username, TRIM(m.data->>'display_name') AS display_name
+            FROM accounts a
+            JOIN account_metadata m ON a.id = m.account_id
+            WHERE NULLIF(TRIM(m.data->>'display_name'), '') IS NOT NULL
+              AND (m.data->>'is_private') IS DISTINCT FROM 'true'
+            ",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| (row.username, row.display_name))
+            .collect())
     }
 
     pub async fn update_account_lnurl(
