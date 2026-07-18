@@ -44,6 +44,18 @@ coverage:
   # cargo llvm-cov -- --include-ignored
   cargo llvm-cov --html --open
 
+fuzz:
+  #!/usr/bin/env bash
+  set -euxo pipefail
+  cd fuzz
+  while true; do
+    cargo +nightly fuzz run message -- -dict=stratum.dict -max_len=32768 -max_total_time=60
+    cargo +nightly fuzz run method-from-parts -- -dict=stratum.dict -max_len=32768 -max_total_time=60
+    cargo +nightly fuzz run primitives -- -dict=stratum.dict -max_total_time=60
+    cargo +nightly fuzz run merkle-root -- -max_total_time=60
+    cargo +nightly fuzz run difficulty -- -max_total_time=60
+  done
+
 test-without-ckpool:
   cargo test --all -- --skip ckpool
 

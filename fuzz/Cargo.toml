@@ -1,0 +1,51 @@
+[package]
+name = "fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[workspace]
+members = ["."]
+
+[package.metadata]
+cargo-fuzz = true
+
+[profile.release]
+debug = 1
+
+[dependencies]
+arbitrary = { version = "1", features = ["derive"] }
+hex = "0.4.3"
+libfuzzer-sys = "0.4"
+serde_json = "1"
+stratum = { path = "../crates/stratum" }
+
+[[bin]]
+name = "message"
+path = "fuzz_targets/message.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "method-from-parts"
+path = "fuzz_targets/method_from_parts.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "primitives"
+path = "fuzz_targets/primitives.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "merkle-root"
+path = "fuzz_targets/merkle_root.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "difficulty"
+path = "fuzz_targets/difficulty.rs"
+test = false
+doc = false

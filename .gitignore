@@ -5,6 +5,9 @@ copr/tmp
 copr/para
 docs/build
 docs/tmp
+/fuzz/artifacts
+/fuzz/corpus
+/fuzz/coverage
 logs
 target
 .idea
