@@ -277,12 +277,15 @@
 
 <div class="grid grid-stack">
   <div class="stats stats-3 column-full">
-    <div class=stat><div class=stat-label>Starving</div><div class=stat-value id=starving_order_count></div></div>
     <div class=stat><div class=stat-label>Active Orders</div><div class=stat-value id=bucket_order_count></div></div>
+    <div class=stat><div class=stat-label>Starving</div><div class=stat-value id=starving_order_count></div></div>
     <div class=stat><div class=stat-label>Uptime</div><div class=stat-value id=uptime_secs></div></div>
     <div class=stat><div class=stat-label>Available</div><div class=stat-value id=available_work></div></div>
     <div class=stat><div class=stat-label>Used</div><div class=stat-value id=used_work></div></div>
     <div class=stat><div class=stat-label>Hash Price</div><div class=stat-value id=hash_price></div></div>
+    <div class=stat><div class=stat-label>Intents Created</div><div class=stat-value id=intents_created_total></div></div>
+    <div class=stat><div class=stat-label>Intent Hits</div><div class=stat-value id=intent_hits_total></div></div>
+    <div class=stat><div class=stat-label>Intents Expired</div><div class=stat-value id=intents_expired_total></div></div>
   </div>
 
   <div class=action-bar>
@@ -612,6 +615,9 @@ async function refresh(signal) {
 
   set('bucket_order_count', routerData.bucket_order_count);
   set('starving_order_count', routerData.starving_order_count);
+  set('intent_hits_total', routerData.intent_hits_total);
+  set('intents_created_total', routerData.intents_created_total);
+  set('intents_expired_total', routerData.intents_expired_total);
   set('used_work', routerData.used_capacity_hash_days, formatHashDays);
   set('hash_price', routerData.hash_price, v => v + ' sats/PHd');
   const available = routerData.total_capacity_hash_days != null && routerData.used_capacity_hash_days != null

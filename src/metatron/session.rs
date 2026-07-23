@@ -91,10 +91,6 @@ impl Session {
         self.stats.lock().clone()
     }
 
-    pub(crate) fn accepted_shares(&self) -> u64 {
-        self.stats.lock().accepted_shares
-    }
-
     pub(crate) fn record_accepted(&self, pool_diff: Difficulty, share_diff: Difficulty) {
         let now = Instant::now();
         self.stats

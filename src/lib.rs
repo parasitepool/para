@@ -88,7 +88,7 @@ use {
         fs,
         io::{self, Write},
         iter::Sum,
-        net::{SocketAddr, ToSocketAddrs},
+        net::{IpAddr, SocketAddr, ToSocketAddrs},
         num::NonZeroUsize,
         ops::{Add, AddAssign, Div, Mul, Sub, SubAssign},
         path::{Path, PathBuf},
@@ -96,7 +96,7 @@ use {
         str::FromStr,
         sync::{
             Arc, LazyLock, OnceLock,
-            atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering},
+            atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
         },
         thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -114,7 +114,7 @@ use {
     throbber::{StatusLine, spawn_throbber},
     tokio::{
         net::{
-            TcpListener, TcpStream,
+            TcpListener,
             tcp::{OwnedReadHalf, OwnedWriteHalf},
         },
         runtime::Runtime,

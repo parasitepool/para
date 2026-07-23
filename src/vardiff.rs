@@ -20,10 +20,12 @@ pub(crate) struct Vardiff {
     min_shares_for_adjustment: u32,
     min_time_for_adjustment: Duration,
     dsps: DecayingAverage,
+    start_diff: Difficulty,
     current_diff: Difficulty,
     old_diff: Difficulty,
     first_share: Option<Instant>,
     last_diff_change: Instant,
+    last_suggest: Option<Instant>,
     shares_since_change: u32,
     min_diff: Option<Difficulty>,
     max_diff: Option<Difficulty>,
@@ -47,10 +49,12 @@ impl Vardiff {
             min_shares_for_adjustment: (expected_shares_per_window * MIN_WINDOW_RATIO) as u32,
             min_time_for_adjustment: Duration::from_secs_f64(window_secs * MIN_WINDOW_RATIO),
             dsps: DecayingAverage::new(window),
+            start_diff,
             current_diff: start_diff,
             old_diff: start_diff,
             first_share: None,
             last_diff_change: Instant::now(),
+            last_suggest: None,
             shares_since_change: 0,
             min_diff,
             max_diff,
@@ -97,6 +101,37 @@ impl Vardiff {
         } else {
             self.current_diff
         }
+    }
+
+    pub(crate) fn suggest(&mut self, diff: Difficulty) -> bool {
+        let now = Instant::now();
+
+        if self
+            .last_suggest
+            .is_some_and(|last| now.duration_since(last) < self.period)
+        {
+            return false;
+        }
+
+        let floored = if self.min_diff.is_none() {
+            diff.max(self.start_diff)
+        } else {
+            diff
+        };
+
+        let clamped = self.clamp_difficulty(floored, None);
+
+        if clamped == self.current_diff {
+            return false;
+        }
+
+        self.old_diff = self.current_diff;
+        self.current_diff = clamped;
+        self.shares_since_change = 0;
+        self.last_diff_change = now;
+        self.last_suggest = Some(now);
+
+        true
     }
 
     pub(crate) fn clamp_to_upstream(&mut self, upstream_diff: Difficulty) -> Option<Difficulty> {
@@ -432,6 +467,84 @@ mod tests {
         );
         assert_eq!(result.unwrap(), upstream_diff);
         assert_eq!(vardiff.current_diff(), upstream_diff);
+    }
+
+    #[test]
+    fn suggest() {
+        #[track_caller]
+        fn case(suggested: u64, expected_change: bool) {
+            let mut vardiff = Vardiff::new(Difficulty::from(10), secs(5), secs(300), None, None);
+
+            vardiff.shares_since_change = 42;
+
+            assert_eq!(
+                vardiff.suggest(Difficulty::from(suggested)),
+                expected_change
+            );
+            assert_eq!(vardiff.current_diff(), Difficulty::from(suggested));
+            assert_eq!(
+                vardiff.shares_since_change(),
+                if expected_change { 0 } else { 42 }
+            );
+        }
+
+        case(1000, true);
+        case(10, false);
+    }
+
+    #[test]
+    fn suggest_floors_at_start_diff_without_min_diff() {
+        let mut vardiff = Vardiff::new(Difficulty::from(10), secs(5), secs(300), None, None);
+
+        assert!(!vardiff.suggest(Difficulty::from(1)));
+        assert_eq!(vardiff.current_diff(), Difficulty::from(10));
+
+        let mut vardiff = Vardiff::new(
+            Difficulty::from(10),
+            secs(5),
+            secs(300),
+            Some(Difficulty::from(1)),
+            None,
+        );
+
+        assert!(vardiff.suggest(Difficulty::from(1)));
+        assert_eq!(vardiff.current_diff(), Difficulty::from(1));
+    }
+
+    #[test]
+    fn suggest_ignores_repeats_within_period() {
+        let mut vardiff = Vardiff::new(Difficulty::from(10), secs(5), secs(300), None, None);
+
+        assert!(vardiff.suggest(Difficulty::from(1000)));
+        assert!(!vardiff.suggest(Difficulty::from(500)));
+        assert_eq!(vardiff.current_diff(), Difficulty::from(1000));
+
+        vardiff.last_suggest = Some(Instant::now() - secs(10));
+
+        assert!(vardiff.suggest(Difficulty::from(500)));
+        assert_eq!(vardiff.current_diff(), Difficulty::from(500));
+    }
+
+    #[test]
+    fn suggest_clamps_to_min_and_max() {
+        #[track_caller]
+        fn case(min: Option<u64>, max: Option<u64>, suggested: u64, expected: u64) {
+            let mut vardiff = Vardiff::new(
+                Difficulty::from(100),
+                secs(5),
+                secs(300),
+                min.map(Difficulty::from),
+                max.map(Difficulty::from),
+            );
+
+            vardiff.suggest(Difficulty::from(suggested));
+
+            assert_eq!(vardiff.current_diff(), Difficulty::from(expected));
+        }
+
+        case(Some(50), None, 1, 50);
+        case(None, Some(500), 1000, 500);
+        case(Some(50), Some(500), 100, 100);
     }
 
     #[test]

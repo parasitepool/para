@@ -282,6 +282,23 @@ impl Client {
         }
     }
 
+    pub async fn suggest_difficulty(&self, difficulty: Difficulty) -> Result<(Duration, usize)> {
+        let suggest = Method::SuggestDifficulty(SuggestDifficulty::from(difficulty));
+
+        let (rx, instant) = self.send_request(suggest).await?;
+
+        let (message, bytes_read, duration) = self.await_response(rx, instant).await?;
+        let result = self.handle_response(message, "mining.suggest_difficulty")?;
+
+        if serde_json::from_value(result).context(error::SerializationSnafu)? {
+            Ok((duration, bytes_read))
+        } else {
+            Err(ClientError::Stratum {
+                response: StratumError::MethodNotAllowed.into_response(None),
+            })
+        }
+    }
+
     pub async fn submit(
         &self,
         job_id: JobId,

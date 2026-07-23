@@ -152,13 +152,19 @@ impl Pool {
             let event_tx = event_tx.clone();
 
             tasks.spawn(async move {
+                let _ = stream.set_nodelay(true);
+
+                let (read_half, write_half) = stream.into_split();
+
                 let mut stratifier: Stratifier<BlockTemplate> = Stratifier::new(
                     addr,
                     settings.clone(),
                     allocator,
                     metatron,
                     None,
-                    stream,
+                    FramedRead::new(read_half, LinesCodec::new_with_max_length(MAX_MESSAGE_SIZE)),
+                    FramedWrite::new(write_half, LinesCodec::new()),
+                    VecDeque::new(),
                     workbase_rx,
                     disconnect_token,
                     event_tx,

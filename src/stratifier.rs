@@ -24,6 +24,7 @@ pub(crate) struct Stratifier<W: Workbase> {
     upstream: Option<Arc<Upstream>>,
     reader: FramedRead<OwnedReadHalf, LinesCodec>,
     writer: FramedWrite<OwnedWriteHalf, LinesCodec>,
+    inbox: VecDeque<Message>,
     workbase_rx: watch::Receiver<Arc<W>>,
     cancel: CancellationToken,
     jobs: Jobs<W>,
@@ -41,17 +42,15 @@ impl<W: Workbase> Stratifier<W> {
         allocator: Arc<EnonceAllocator>,
         metatron: Arc<Metatron>,
         upstream: Option<Arc<Upstream>>,
-        tcp_stream: TcpStream,
+        reader: FramedRead<OwnedReadHalf, LinesCodec>,
+        writer: FramedWrite<OwnedWriteHalf, LinesCodec>,
+        inbox: VecDeque<Message>,
         workbase_rx: watch::Receiver<Arc<W>>,
         cancel: CancellationToken,
         event_tx: Option<mpsc::Sender<Event>>,
         start_diff: Difficulty,
         order: Option<Arc<Order>>,
     ) -> Self {
-        let _ = tcp_stream.set_nodelay(true);
-
-        let (reader, writer) = tcp_stream.into_split();
-
         let vardiff = Vardiff::new(
             start_diff,
             settings.vardiff_period(),
@@ -69,8 +68,9 @@ impl<W: Workbase> Stratifier<W> {
             allocator,
             metatron,
             upstream,
-            reader: FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_MESSAGE_SIZE)),
-            writer: FramedWrite::new(writer, LinesCodec::new()),
+            reader,
+            writer,
+            inbox,
             workbase_rx,
             cancel,
             jobs: Jobs::new(),
@@ -112,6 +112,16 @@ impl<W: Workbase> Stratifier<W> {
                 message = self.read_message() => {
                     let Some(message) = message? else {
                         break;
+                    };
+
+                    let message = match message {
+                        Message::Notification {
+                            method: Method::SuggestDifficulty(suggest),
+                        } => {
+                            self.suggest_difficulty(None, suggest.difficulty()).await?;
+                            continue;
+                        }
+                        message => message,
                     };
 
                     let Message::Request { id, method } = message else {
@@ -167,7 +177,11 @@ impl<W: Workbase> Stratifier<W> {
                                     );
 
                                     if let Some(order) = &self.order {
-                                        order.add_session(session.clone(), self.cancel.clone());
+                                        order.add_session(
+                                            session.clone(),
+                                            self.cancel.clone(),
+                                            self.socket_addr,
+                                        );
                                     }
 
                                     self.state = State::Working(session.clone());
@@ -199,6 +213,9 @@ impl<W: Workbase> Stratifier<W> {
                             if self.handle_submit_consequence(consequence, session.address(), session.enonce1()).await {
                                 break;
                             }
+                        }
+                        Method::SuggestDifficulty(suggest) => {
+                            self.suggest_difficulty(Some(id), suggest.difficulty()).await?
                         }
                         method => {
                             warn!("Unexpected method {} from {}", method.method_name(), self.socket_addr);
@@ -682,6 +699,34 @@ impl<W: Workbase> Stratifier<W> {
         Ok(Consequence::None)
     }
 
+    async fn suggest_difficulty(&mut self, id: Option<Id>, diff: Difficulty) -> Result {
+        debug!("Suggested difficulty {diff} from {}", self.socket_addr);
+
+        let changed = self.vardiff.suggest(diff);
+
+        if let Some(id) = id {
+            self.send(Message::Response {
+                id,
+                result: Some(json!(true)),
+                error: None,
+                reject_reason: None,
+            })
+            .await?;
+        }
+
+        if !changed || self.state.identity().is_none() {
+            return Ok(());
+        }
+
+        self.vardiff
+            .record_diff_change_job_id(self.jobs.peek_next_id());
+
+        self.send(Message::Notification {
+            method: Method::SetDifficulty(SetDifficulty(self.vardiff.current_diff())),
+        })
+        .await
+    }
+
     async fn submit(
         &mut self,
         id: Id,
@@ -1107,6 +1152,10 @@ impl<W: Workbase> Stratifier<W> {
     }
 
     async fn read_message(&mut self) -> Result<Option<Message>> {
+        if let Some(message) = self.inbox.pop_front() {
+            return Ok(Some(message));
+        }
+
         match self.reader.next().await {
             Some(Ok(line)) => {
                 let message = serde_json::from_str::<Message>(&line).map_err(|e| {
@@ -1165,7 +1214,7 @@ impl<W: Workbase> Stratifier<W> {
 impl<W: Workbase> Drop for Stratifier<W> {
     fn drop(&mut self) {
         if let Some(order) = &self.order {
-            order.unassign();
+            order.release_placement(&self.socket_addr);
         }
 
         if let Some(session) = self.state.working() {

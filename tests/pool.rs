@@ -502,6 +502,155 @@ async fn concurrently_listening_workers_receive_new_templates_on_new_block() {
 
 #[tokio::test]
 #[timeout(120000)]
+async fn suggest_difficulty_request_gets_response_and_sets_difficulty() {
+    let bitcoind = bitcoind();
+    let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001");
+
+    let client = pool.stratum_client().await;
+    let mut events = client.connect().await.unwrap();
+
+    client.subscribe().await.unwrap();
+    client.authorize().await.unwrap();
+    client
+        .suggest_difficulty(Difficulty::from(1000))
+        .await
+        .unwrap();
+
+    timeout(Duration::from_secs(10), async {
+        loop {
+            match events.recv().await.unwrap() {
+                stratum::client::Event::SetDifficulty(diff) if diff == Difficulty::from(1000) => {
+                    break;
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("Timeout waiting for suggested set_difficulty");
+}
+
+#[tokio::test]
+#[timeout(120000)]
+async fn suggest_difficulty_repeat_within_period_is_ignored() {
+    let bitcoind = bitcoind();
+    let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001 --vardiff-period 60");
+
+    let client = pool.stratum_client().await;
+    let mut events = client.connect().await.unwrap();
+
+    client.subscribe().await.unwrap();
+    client.authorize().await.unwrap();
+    client
+        .suggest_difficulty(Difficulty::from(1000))
+        .await
+        .unwrap();
+    client
+        .suggest_difficulty(Difficulty::from(500))
+        .await
+        .unwrap();
+
+    timeout(Duration::from_secs(10), async {
+        loop {
+            match events.recv().await.unwrap() {
+                stratum::client::Event::SetDifficulty(diff) if diff == Difficulty::from(1000) => {
+                    break;
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("Timeout waiting for first suggested set_difficulty");
+
+    let repeat_applied = timeout(Duration::from_secs(2), async {
+        loop {
+            match events.recv().await.unwrap() {
+                stratum::client::Event::SetDifficulty(diff) if diff == Difficulty::from(500) => {
+                    break;
+                }
+                _ => {}
+            }
+        }
+    })
+    .await;
+
+    assert!(
+        repeat_applied.is_err(),
+        "repeat suggest within vardiff period was applied"
+    );
+}
+
+#[tokio::test]
+#[timeout(120000)]
+async fn suggest_difficulty_before_authorize_sets_initial_difficulty() {
+    let bitcoind = bitcoind();
+    let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001");
+
+    let client = pool.stratum_client().await;
+    let mut events = client.connect().await.unwrap();
+
+    client.subscribe().await.unwrap();
+    client
+        .suggest_difficulty(Difficulty::from(1000))
+        .await
+        .unwrap();
+    client.authorize().await.unwrap();
+
+    timeout(Duration::from_secs(10), async {
+        loop {
+            if let stratum::client::Event::SetDifficulty(diff) = events.recv().await.unwrap() {
+                assert_eq!(diff, Difficulty::from(1000));
+                break;
+            }
+        }
+    })
+    .await
+    .expect("Timeout waiting for initial set_difficulty");
+}
+
+#[tokio::test]
+#[timeout(120000)]
+async fn notification_form_suggest_difficulty_is_applied() {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    let bitcoind = bitcoind();
+    let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001");
+
+    let stream = tokio::net::TcpStream::connect(pool.stratum_endpoint())
+        .await
+        .unwrap();
+    let (read_half, mut write_half) = stream.into_split();
+    let mut reader = BufReader::new(read_half);
+
+    let prelude = format!(
+        "{{\"id\":1,\"method\":\"mining.subscribe\",\"params\":[\"foo\"]}}\n\
+         {{\"id\":2,\"method\":\"mining.authorize\",\"params\":[\"{}\",\"bar\"]}}\n\
+         {{\"id\":null,\"method\":\"mining.suggest_difficulty\",\"params\":[1000]}}\n",
+        signet_username()
+    );
+
+    write_half.write_all(prelude.as_bytes()).await.unwrap();
+
+    timeout(Duration::from_secs(10), async {
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).await.unwrap();
+            let message: serde_json::Value = serde_json::from_str(&line).unwrap();
+
+            if message["method"] == "mining.set_difficulty"
+                && message["params"][0].as_f64() == Some(1000.0)
+            {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("Timeout waiting for set_difficulty from notification-form suggest");
+}
+
+#[tokio::test]
+#[timeout(120000)]
 async fn vardiff_adjusts_difficulty() {
     let bitcoind = bitcoind();
     let pool = TestPool::spawn_with_args(

@@ -281,6 +281,9 @@ pub struct RouterStatus {
     pub wallet_synced: bool,
     pub halt: bool,
     pub boost: bool,
+    pub intents_created_total: u64,
+    pub intent_hits_total: u64,
+    pub intents_expired_total: u64,
     pub upstream: UpstreamSummary,
     pub downstream: DownstreamInfo,
 }
