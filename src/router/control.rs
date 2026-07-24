@@ -1,13 +1,131 @@
 use {
     super::*,
     greeter::Prelude,
-    intents::Intents,
+    intents::{IntentClaim, Intents},
     order::{Order, Trim},
     rand::{Rng, SeedableRng, rngs::StdRng},
 };
 
 pub(crate) const TRIM_COOLDOWN: Duration = Duration::from_secs(600);
 const MAX_TRIMS_PER_TICK: usize = 1;
+const ROLLING_COUNTER_WINDOW: Duration = Duration::from_secs(60 * 60);
+
+#[derive(Default)]
+struct RollingCounter {
+    entries: VecDeque<(Instant, usize)>,
+}
+
+impl RollingCounter {
+    fn record(&mut self, count: usize, now: Instant) {
+        if count == 0 {
+            return;
+        }
+
+        self.prune(now);
+        self.entries.push_back((now, count));
+    }
+
+    fn count(&mut self, now: Instant) -> usize {
+        self.prune(now);
+        self.entries
+            .iter()
+            .fold(0usize, |total, (_, count)| total.saturating_add(*count))
+    }
+
+    fn prune(&mut self, now: Instant) {
+        while self.entries.front().is_some_and(|(created, _)| {
+            now.saturating_duration_since(*created) >= ROLLING_COUNTER_WINDOW
+        }) {
+            self.entries.pop_front();
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct ControlMetricsSnapshot {
+    pub(crate) sessions_trimmed_1h: usize,
+    pub(crate) intents_created_1h: usize,
+    pub(crate) intents_expired_1h: usize,
+    pub(crate) intent_claims_1h: IntentClaimCounts,
+    pub(crate) placements_1h: PlacementCounts,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Placement {
+    Intent,
+    Resumed,
+    Redirected,
+    Estimated,
+    Blind,
+}
+
+#[derive(Default)]
+struct ControlMetrics {
+    sessions_trimmed_1h: RollingCounter,
+    intents_created_1h: RollingCounter,
+    intents_expired_1h: RollingCounter,
+    intent_claims_enonce1_1h: RollingCounter,
+    intent_claims_ip_1h: RollingCounter,
+    placements_intent_1h: RollingCounter,
+    placements_resumed_1h: RollingCounter,
+    placements_redirected_1h: RollingCounter,
+    placements_estimated_1h: RollingCounter,
+    placements_blind_1h: RollingCounter,
+}
+
+impl ControlMetrics {
+    fn record_sessions_trimmed(&mut self, count: usize, now: Instant) {
+        self.sessions_trimmed_1h.record(count, now);
+    }
+
+    fn record_intents_created(&mut self, count: usize, now: Instant) {
+        self.intents_created_1h.record(count, now);
+    }
+
+    fn record_intents_expired(&mut self, count: usize, now: Instant) {
+        self.intents_expired_1h.record(count, now);
+    }
+
+    fn record_intent_claim(&mut self, claim: IntentClaim, now: Instant) {
+        let counter = match claim {
+            IntentClaim::Enonce1 => &mut self.intent_claims_enonce1_1h,
+            IntentClaim::Ip => &mut self.intent_claims_ip_1h,
+        };
+
+        counter.record(1, now);
+    }
+
+    fn record_placement(&mut self, placement: Placement, now: Instant) {
+        let counter = match placement {
+            Placement::Intent => &mut self.placements_intent_1h,
+            Placement::Resumed => &mut self.placements_resumed_1h,
+            Placement::Redirected => &mut self.placements_redirected_1h,
+            Placement::Estimated => &mut self.placements_estimated_1h,
+            Placement::Blind => &mut self.placements_blind_1h,
+        };
+
+        counter.record(1, now);
+    }
+
+    fn snapshot(&mut self, now: Instant) -> ControlMetricsSnapshot {
+        ControlMetricsSnapshot {
+            sessions_trimmed_1h: self.sessions_trimmed_1h.count(now),
+            intents_created_1h: self.intents_created_1h.count(now),
+            intents_expired_1h: self.intents_expired_1h.count(now),
+            intent_claims_1h: IntentClaimCounts {
+                enonce1: self.intent_claims_enonce1_1h.count(now),
+                ip: self.intent_claims_ip_1h.count(now),
+            },
+            placements_1h: PlacementCounts {
+                intent: self.placements_intent_1h.count(now),
+                resumed: self.placements_resumed_1h.count(now),
+                redirected: self.placements_redirected_1h.count(now),
+                estimated: self.placements_estimated_1h.count(now),
+                blind: self.placements_blind_1h.count(now),
+            },
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 struct Demand {
@@ -94,9 +212,7 @@ pub(crate) struct Control {
     intents: Mutex<Intents>,
     cooldowns: Mutex<HashMap<Extranonce, Instant>>,
     rng: Mutex<StdRng>,
-    intent_hits: AtomicU64,
-    intents_created: AtomicU64,
-    intents_expired: AtomicU64,
+    metrics: Mutex<ControlMetrics>,
 }
 
 impl Control {
@@ -107,9 +223,7 @@ impl Control {
             intents: Mutex::new(Intents::default()),
             cooldowns: Mutex::new(HashMap::new()),
             rng: Mutex::new(StdRng::from_rng(&mut rand::rng())),
-            intent_hits: AtomicU64::new(0),
-            intents_created: AtomicU64::new(0),
-            intents_expired: AtomicU64::new(0),
+            metrics: Mutex::new(ControlMetrics::default()),
         }
     }
 
@@ -118,16 +232,8 @@ impl Control {
         *self.rng.lock() = StdRng::seed_from_u64(seed);
     }
 
-    pub(crate) fn intent_hits(&self) -> u64 {
-        self.intent_hits.load(Ordering::Relaxed)
-    }
-
-    pub(crate) fn intents_created(&self) -> u64 {
-        self.intents_created.load(Ordering::Relaxed)
-    }
-
-    pub(crate) fn intents_expired(&self) -> u64 {
-        self.intents_expired.load(Ordering::Relaxed)
+    pub(crate) fn metrics(&self, now: Instant) -> ControlMetricsSnapshot {
+        self.metrics.lock().snapshot(now)
     }
 
     fn estimated_hashrate(&self, difficulty: Difficulty) -> HashRate {
@@ -147,10 +253,15 @@ impl Control {
             .lock()
             .claim(prelude.resume_enonce1.as_ref(), addr.ip(), now);
 
-        if let Some(intent) = intent {
+        if let Some((intent, claim)) = intent {
             if let Some(order) = candidates.iter().find(|order| order.id == intent.order_id) {
-                self.intent_hits.fetch_add(1, Ordering::Relaxed);
                 order.place(addr, intent.expected);
+
+                {
+                    let mut metrics = self.metrics.lock();
+                    metrics.record_placement(Placement::Intent, now);
+                    metrics.record_intent_claim(claim, now);
+                }
 
                 debug!(
                     "Routing {addr} to order {} via intent ({})",
@@ -168,14 +279,15 @@ impl Control {
             .as_ref()
             .and_then(|enonce1| self.metatron.disconnected_info(enonce1, now));
 
-        let known = parked
+        let parked_rate = parked
             .map(|(_, rate)| rate)
-            .filter(|rate| *rate > HashRate::ZERO)
-            .or_else(|| {
-                prelude
-                    .suggested_difficulty
-                    .map(|difficulty| self.estimated_hashrate(difficulty))
-            });
+            .filter(|rate| *rate > HashRate::ZERO);
+
+        let known = parked_rate.or_else(|| {
+            prelude
+                .suggested_difficulty
+                .map(|difficulty| self.estimated_hashrate(difficulty))
+        });
 
         let buckets = candidates
             .iter()
@@ -187,6 +299,9 @@ impl Control {
             && (!order.is_sink() || buckets.is_empty())
         {
             order.place(addr, known.unwrap_or(HashRate::ZERO));
+            self.metrics
+                .lock()
+                .record_placement(Placement::Resumed, now);
             return Some(order.clone());
         }
 
@@ -201,6 +316,16 @@ impl Control {
         }?;
 
         order.place(addr, known.unwrap_or(HashRate::ZERO));
+
+        let placement = if parked_rate.is_some() {
+            Placement::Redirected
+        } else if known.is_some() {
+            Placement::Estimated
+        } else {
+            Placement::Blind
+        };
+
+        self.metrics.lock().record_placement(placement, now);
 
         Some(order)
     }
@@ -269,8 +394,7 @@ impl Control {
 
         let expired = self.intents.lock().expire(now);
 
-        self.intents_expired
-            .fetch_add(expired as u64, Ordering::Relaxed);
+        self.metrics.lock().record_intents_expired(expired, now);
 
         self.cooldowns
             .lock()
@@ -332,7 +456,9 @@ impl Control {
                 break;
             }
 
-            order.trim_session(detail.id, now);
+            if !order.trim_session(detail.id, now) {
+                continue;
+            }
 
             let trimmed = Trim {
                 hashrate: detail.hashrate,
@@ -343,6 +469,8 @@ impl Control {
             budget.consume(&trimmed);
             sink_trimmed += trimmed;
         }
+
+        let mut intents_created = 0;
 
         {
             let mut cooldowns = self.cooldowns.lock();
@@ -372,9 +500,20 @@ impl Control {
                         detail.hashrate,
                         now,
                     );
-                    self.intents_created.fetch_add(1, Ordering::Relaxed);
+                    intents_created += 1;
                 }
             }
+        }
+
+        let sessions_trimmed = overflow_trimmed
+            .sessions
+            .len()
+            .saturating_add(sink_trimmed.sessions.len());
+
+        {
+            let mut metrics = self.metrics.lock();
+            metrics.record_intents_created(intents_created, now);
+            metrics.record_sessions_trimmed(sessions_trimmed, now);
         }
 
         log_rebalance(
@@ -417,6 +556,66 @@ mod tests {
             metatron,
             _dir: dir,
         }
+    }
+
+    #[test]
+    fn rolling_counter_counts_only_the_trailing_hour_and_ignores_zero() {
+        let mut counter = RollingCounter::default();
+        let start = Instant::now();
+
+        counter.record(0, start);
+        assert!(counter.entries.is_empty());
+
+        counter.record(2, start);
+        counter.record(3, start + Duration::from_secs(30 * 60));
+
+        assert_eq!(
+            counter.count(start + ROLLING_COUNTER_WINDOW - Duration::from_secs(1)),
+            5
+        );
+        assert_eq!(counter.count(start + ROLLING_COUNTER_WINDOW), 3);
+        assert_eq!(
+            counter.count(start + ROLLING_COUNTER_WINDOW + Duration::from_secs(30 * 60)),
+            0
+        );
+    }
+
+    #[test]
+    fn control_metrics_rolls_every_counter_at_the_one_hour_boundary() {
+        let mut metrics = ControlMetrics::default();
+        let start = Instant::now();
+
+        metrics.record_sessions_trimmed(1, start);
+        metrics.record_intents_created(2, start);
+        metrics.record_intents_expired(4, start);
+        metrics.record_intent_claim(IntentClaim::Enonce1, start);
+        metrics.record_intent_claim(IntentClaim::Ip, start);
+        metrics.record_placement(Placement::Intent, start);
+        metrics.record_placement(Placement::Resumed, start);
+        metrics.record_placement(Placement::Redirected, start);
+        metrics.record_placement(Placement::Estimated, start);
+        metrics.record_placement(Placement::Blind, start);
+
+        assert_eq!(
+            metrics.snapshot(start + ROLLING_COUNTER_WINDOW - Duration::from_nanos(1)),
+            ControlMetricsSnapshot {
+                sessions_trimmed_1h: 1,
+                intents_created_1h: 2,
+                intents_expired_1h: 4,
+                intent_claims_1h: IntentClaimCounts { enonce1: 1, ip: 1 },
+                placements_1h: PlacementCounts {
+                    intent: 1,
+                    resumed: 1,
+                    redirected: 1,
+                    estimated: 1,
+                    blind: 1,
+                },
+            }
+        );
+        assert_eq!(
+            metrics.snapshot(start + ROLLING_COUNTER_WINDOW),
+            ControlMetricsSnapshot::default()
+        );
     }
 
     fn test_address() -> Address {
@@ -683,7 +882,17 @@ mod tests {
             1
         );
         assert_eq!(sink.expected_incoming(), HashRate::from_hps(100.0));
-        assert_eq!(control.intent_hits(), 1);
+        assert_eq!(
+            control.metrics(Instant::now()),
+            ControlMetricsSnapshot {
+                intent_claims_1h: IntentClaimCounts { enonce1: 1, ip: 0 },
+                placements_1h: PlacementCounts {
+                    intent: 1,
+                    ..PlacementCounts::default()
+                },
+                ..ControlMetricsSnapshot::default()
+            }
+        );
         assert_eq!(control.intents.lock().len(), 0);
     }
 
@@ -711,6 +920,17 @@ mod tests {
         assert_eq!(
             control.next_order(&orders, addr(1), &blank()).unwrap().id,
             1
+        );
+        assert_eq!(
+            control.metrics(Instant::now()),
+            ControlMetricsSnapshot {
+                intent_claims_1h: IntentClaimCounts { enonce1: 0, ip: 1 },
+                placements_1h: PlacementCounts {
+                    intent: 1,
+                    ..PlacementCounts::default()
+                },
+                ..ControlMetricsSnapshot::default()
+            }
         );
     }
 
@@ -743,7 +963,16 @@ mod tests {
             control.next_order(&orders, addr(1), &prelude).unwrap().id,
             0
         );
-        assert_eq!(control.intent_hits(), 0);
+        assert_eq!(
+            control.metrics(Instant::now()),
+            ControlMetricsSnapshot {
+                placements_1h: PlacementCounts {
+                    blind: 1,
+                    ..PlacementCounts::default()
+                },
+                ..ControlMetricsSnapshot::default()
+            }
+        );
     }
 
     #[test]
@@ -780,6 +1009,134 @@ mod tests {
         assert_eq!(
             control.next_order(&orders, addr(1), &prelude).unwrap().id,
             0
+        );
+    }
+
+    #[test]
+    fn next_order_records_placement_source() {
+        #[track_caller]
+        fn case(
+            parked_difficulty: Option<f64>,
+            suggested: Option<f64>,
+            exclude_home: bool,
+            expected: PlacementCounts,
+        ) {
+            let control = test_control();
+            let home = test_order(
+                0,
+                Some(hash_days(100.0)),
+                OrderStatus::Active,
+                &control.metatron,
+            );
+            let other = test_order(
+                1,
+                Some(hash_days(100.0)),
+                OrderStatus::Active,
+                &control.metatron,
+            );
+
+            if let Some(difficulty) = parked_difficulty {
+                let session = control
+                    .metatron
+                    .new_session(test_authorization("deadbeef", "foo"), 0);
+
+                if difficulty > 0.0 {
+                    session.record_accepted(
+                        Difficulty::from(difficulty),
+                        Difficulty::from(difficulty),
+                    );
+                }
+
+                control
+                    .metatron
+                    .retire_session(session, home.allocator().unwrap().clone());
+            }
+
+            let prelude = Prelude {
+                resume_enonce1: parked_difficulty.map(|_| "deadbeef".parse().unwrap()),
+                suggested_difficulty: suggested.map(Difficulty::from),
+                ..blank()
+            };
+
+            let orders = if exclude_home {
+                vec![other]
+            } else {
+                vec![home, other]
+            };
+
+            control.next_order(&orders, addr(1), &prelude).unwrap();
+
+            assert_eq!(
+                control.metrics(Instant::now()),
+                ControlMetricsSnapshot {
+                    placements_1h: expected,
+                    ..ControlMetricsSnapshot::default()
+                }
+            );
+        }
+
+        case(
+            None,
+            None,
+            false,
+            PlacementCounts {
+                blind: 1,
+                ..PlacementCounts::default()
+            },
+        );
+        case(
+            None,
+            Some(1000.0),
+            false,
+            PlacementCounts {
+                estimated: 1,
+                ..PlacementCounts::default()
+            },
+        );
+        case(
+            Some(100.0),
+            None,
+            false,
+            PlacementCounts {
+                resumed: 1,
+                ..PlacementCounts::default()
+            },
+        );
+        case(
+            Some(0.0),
+            None,
+            false,
+            PlacementCounts {
+                resumed: 1,
+                ..PlacementCounts::default()
+            },
+        );
+        case(
+            Some(100.0),
+            None,
+            true,
+            PlacementCounts {
+                redirected: 1,
+                ..PlacementCounts::default()
+            },
+        );
+        case(
+            Some(100.0),
+            Some(1000.0),
+            true,
+            PlacementCounts {
+                redirected: 1,
+                ..PlacementCounts::default()
+            },
+        );
+        case(
+            Some(0.0),
+            None,
+            true,
+            PlacementCounts {
+                blind: 1,
+                ..PlacementCounts::default()
+            },
         );
     }
 
@@ -922,6 +1279,16 @@ mod tests {
                 control.next_order(&orders, addr(3), &blank()).unwrap().id,
                 expected
             );
+            assert_eq!(
+                control.metrics(Instant::now()),
+                ControlMetricsSnapshot {
+                    placements_1h: PlacementCounts {
+                        blind: 1,
+                        ..PlacementCounts::default()
+                    },
+                    ..ControlMetricsSnapshot::default()
+                }
+            );
         }
 
         case(100.0, 0.0, 1);
@@ -960,7 +1327,14 @@ mod tests {
                     .count(),
                 expected_trimmed,
             );
-            assert_eq!(control.intents_created(), expected_trimmed as u64);
+            assert_eq!(
+                control.metrics(Instant::now()),
+                ControlMetricsSnapshot {
+                    sessions_trimmed_1h: expected_trimmed,
+                    intents_created_1h: expected_trimmed,
+                    ..ControlMetricsSnapshot::default()
+                }
+            );
         }
 
         case(false, 1);
@@ -995,7 +1369,7 @@ mod tests {
             Instant::now(),
         );
 
-        assert_eq!(intent.map(|intent| intent.order_id), Some(1));
+        assert_eq!(intent.map(|(intent, _)| intent.order_id), Some(1));
     }
 
     #[test]
@@ -1063,7 +1437,7 @@ mod tests {
             Instant::now(),
         );
 
-        assert_eq!(intent.map(|intent| intent.order_id), Some(0));
+        assert_eq!(intent.map(|(intent, _)| intent.order_id), Some(0));
     }
 
     #[test]
@@ -1090,6 +1464,31 @@ mod tests {
     }
 
     #[test]
+    fn rebalance_records_only_intents_removed_by_the_expiry_sweep() {
+        let control = test_control();
+        let now = Instant::now();
+
+        control.intents.lock().create(
+            "deadbeef".parse().unwrap(),
+            addr(1).ip(),
+            7,
+            HashRate::from_hps(100.0),
+            now - intents::INTENT_TTL,
+        );
+
+        control.rebalance(&[], false);
+
+        assert_eq!(control.intents.lock().len(), 0);
+        assert_eq!(
+            control.metrics(Instant::now()),
+            ControlMetricsSnapshot {
+                intents_expired_1h: 1,
+                ..ControlMetricsSnapshot::default()
+            }
+        );
+    }
+
+    #[test]
     fn rebalance_falls_back_to_zero_rate_sink_session() {
         let control = test_control();
         let bucket = test_order(
@@ -1107,8 +1506,73 @@ mod tests {
         control.rebalance(&orders, false);
 
         assert!(cancel.is_cancelled());
-        assert_eq!(control.intents_created(), 0);
         assert_eq!(control.intents.lock().len(), 0);
+        assert_eq!(
+            control.metrics(Instant::now()),
+            ControlMetricsSnapshot {
+                sessions_trimmed_1h: 1,
+                ..ControlMetricsSnapshot::default()
+            }
+        );
+    }
+
+    #[test]
+    fn rebalance_does_not_count_an_already_cancelled_session() {
+        let control = test_control();
+        let bucket = test_order(
+            0,
+            Some(hash_days(100.0)),
+            OrderStatus::Active,
+            &control.metatron,
+        );
+
+        let sink = test_order(1, None, OrderStatus::Active, &control.metatron);
+        let already_cancelled =
+            register_session(&control.metatron, &sink, "deadbeef", "foo", 200.0);
+        let live = register_session(&control.metatron, &sink, "cafebabe", "bar", 100.0);
+        already_cancelled.cancel();
+
+        control.rebalance(&[bucket, sink], false);
+
+        assert!(
+            live.is_cancelled(),
+            "cancelled session consumed trim budget"
+        );
+        let cooldowns = control.cooldowns.lock();
+        assert!(!cooldowns.contains_key(&"deadbeef".parse().unwrap()));
+        assert!(cooldowns.contains_key(&"cafebabe".parse().unwrap()));
+        drop(cooldowns);
+
+        let mut intents = control.intents.lock();
+        assert!(
+            intents
+                .claim(
+                    Some(&"deadbeef".parse().unwrap()),
+                    IpAddr::from([127, 0, 0, 2]),
+                    Instant::now(),
+                )
+                .is_none()
+        );
+        assert_eq!(
+            intents
+                .claim(
+                    Some(&"cafebabe".parse().unwrap()),
+                    addr(4444).ip(),
+                    Instant::now(),
+                )
+                .map(|(intent, _)| intent.order_id),
+            Some(0)
+        );
+        drop(intents);
+
+        assert_eq!(
+            control.metrics(Instant::now()),
+            ControlMetricsSnapshot {
+                sessions_trimmed_1h: 1,
+                intents_created_1h: 1,
+                ..ControlMetricsSnapshot::default()
+            }
+        );
     }
 
     struct OverflowingOrder {

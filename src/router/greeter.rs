@@ -200,6 +200,27 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn greet_drops_disconnect() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let client = tokio::spawn(async move {
+            drop(TcpStream::connect(addr).await.unwrap());
+        });
+
+        let (stream, peer) = listener.accept().await.unwrap();
+
+        assert!(greet(framed(stream), peer).await.is_none());
+
+        client.await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn greet_drops_oversized_line() {
+        assert!(greeted(&"a".repeat(MAX_MESSAGE_SIZE + 1)).await.is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn greet_caps_buffered_messages() {
         let lines = vec![
             "{\"id\":1,\"method\":\"mining.subscribe\",\"params\":[\"foo\"]}\n";

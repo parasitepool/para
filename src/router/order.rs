@@ -360,6 +360,20 @@ impl Order {
             .hashrate_1m(now)
     }
 
+    pub(crate) fn hashrate_shortfall(&self, supplied: HashRate) -> HashRate {
+        let Some(bucket) = &self.bucket else {
+            return HashRate::ZERO;
+        };
+
+        let target = bucket.target.target_hashrate();
+
+        if supplied >= target {
+            HashRate::ZERO
+        } else {
+            target - supplied
+        }
+    }
+
     pub(crate) fn stats(&self) -> Stats {
         self.metatron.order_stats(self.id)
     }
@@ -381,9 +395,9 @@ impl Order {
     }
 
     pub(crate) fn hashrate_deficit(&self, now: Instant, intents_expected: HashRate) -> HashRate {
-        let Some(bucket) = &self.bucket else {
+        if self.bucket.is_none() {
             return HashRate::ZERO;
-        };
+        }
 
         if !self.has_connected_upstream() || self.is_fulfilled() {
             return HashRate::ZERO;
@@ -392,29 +406,23 @@ impl Order {
         let supplied = self.supplied(now, intents_expected);
 
         if self.is_starving(supplied) {
-            bucket.target.target_hashrate() - supplied
+            self.hashrate_shortfall(supplied)
         } else {
             HashRate::ZERO
         }
     }
 
     pub(crate) fn residual_deficit(&self, now: Instant, intents_expected: HashRate) -> HashRate {
-        let Some(bucket) = &self.bucket else {
+        if self.bucket.is_none() {
             return HashRate::ZERO;
-        };
+        }
 
         if !self.has_connected_upstream() || self.is_fulfilled() {
             return HashRate::ZERO;
         }
 
         let supplied = self.supplied(now, intents_expected);
-        let target = bucket.target.target_hashrate();
-
-        if supplied >= target {
-            HashRate::ZERO
-        } else {
-            target - supplied
-        }
+        self.hashrate_shortfall(supplied)
     }
 
     pub(crate) fn is_severely_starving(&self, now: Instant, intents_expected: HashRate) -> bool {
@@ -492,7 +500,10 @@ impl Order {
                 continue;
             }
 
-            self.trim_session(detail.id, now);
+            if !self.trim_session(detail.id, now) {
+                continue;
+            }
+
             min_trim -= detail.hashrate;
             max_trim -= detail.hashrate;
             trimmed.hashrate += detail.hashrate;
@@ -502,12 +513,16 @@ impl Order {
         trimmed
     }
 
-    pub(crate) fn trim_session(&self, id: SessionId, now: Instant) {
+    pub(crate) fn trim_session(&self, id: SessionId, now: Instant) -> bool {
         let sessions = self.sessions.lock();
 
         let Some((session, cancel, _)) = sessions.get(&id) else {
-            return;
+            return false;
         };
+
+        if cancel.is_cancelled() {
+            return false;
+        }
 
         info!(
             "Trimming session {id} ({}) from order {} at {}",
@@ -517,6 +532,7 @@ impl Order {
         );
 
         cancel.cancel();
+        true
     }
 
     pub(crate) async fn connect(
@@ -864,6 +880,30 @@ mod tests {
     }
 
     #[test]
+    fn hashrate_shortfall_sums_without_netting_surplus() {
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
+        let order_a = test_order(&metatron, Some(HashDays::new(1e15).unwrap()));
+        let order_b = test_order(&metatron, Some(HashDays::new(3e15).unwrap()));
+
+        let deficit = order_a.hashrate_shortfall(HashRate::from_hps(1.5e15))
+            + order_b.hashrate_shortfall(HashRate::from_hps(2e15));
+
+        assert_eq!(deficit, HashRate::from_hps(1e15));
+    }
+
+    #[test]
+    fn hashrate_shortfall_does_not_apply_starvation_hysteresis() {
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
+        let order = test_order(&metatron, Some(HashDays::new(100.0).unwrap()));
+        let measured = HashRate::from_hps(97.0);
+
+        assert!(!order.is_starving(measured));
+        assert_eq!(order.hashrate_shortfall(measured), HashRate::from_hps(3.0));
+    }
+
+    #[test]
     fn hashrate_deficit() {
         #[track_caller]
         fn case(
@@ -945,6 +985,15 @@ mod tests {
     fn residual_deficit() {
         let (metatron, _dir) = Metatron::test();
         let metatron = Arc::new(metatron);
+        let sink = test_order(&metatron, None);
+        connect_upstream(&sink, &metatron);
+        assert_eq!(
+            sink.residual_deficit(Instant::now(), HashRate::ZERO),
+            HashRate::ZERO
+        );
+
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
         let order = test_order(&metatron, Some(HashDays::new(100.0).unwrap()));
         connect_upstream(&order, &metatron);
 
@@ -971,6 +1020,17 @@ mod tests {
         order.upstream().unwrap().set_connected(false);
         assert_eq!(
             order.residual_deficit(Instant::now(), HashRate::ZERO),
+            HashRate::ZERO
+        );
+
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
+        let fulfilled = test_order(&metatron, Some(HashDays::new(100.0).unwrap()));
+        connect_upstream(&fulfilled, &metatron);
+        metatron
+            .set_order_delivered_work(fulfilled.id, HashDays::new(100.0).unwrap().to_hash_work());
+        assert_eq!(
+            fulfilled.residual_deficit(Instant::now(), HashRate::ZERO),
             HashRate::ZERO
         );
     }

@@ -16,6 +16,12 @@ impl Intent {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum IntentClaim {
+    Enonce1,
+    Ip,
+}
+
 #[derive(Default)]
 pub(crate) struct Intents {
     by_enonce1: HashMap<Extranonce, Intent>,
@@ -47,7 +53,7 @@ impl Intents {
         enonce1: Option<&Extranonce>,
         ip: IpAddr,
         now: Instant,
-    ) -> Option<Intent> {
+    ) -> Option<(Intent, IntentClaim)> {
         if let Some(enonce1) = enonce1
             && let Some(intent) = self.by_enonce1.get(enonce1).copied()
         {
@@ -58,7 +64,7 @@ impl Intents {
             }
 
             if intent.fresh(now) {
-                return Some(intent);
+                return Some((intent, IntentClaim::Enonce1));
             }
         }
 
@@ -69,7 +75,7 @@ impl Intents {
                 self.by_enonce1.remove(&key);
 
                 if intent.fresh(now) {
-                    return Some(intent);
+                    return Some((intent, IntentClaim::Ip));
                 }
             }
         }
@@ -120,9 +126,10 @@ mod tests {
 
         intents.create(enonce1(1), ip(1), 7, HashRate::from_hps(100.0), now);
 
-        let intent = intents.claim(Some(&enonce1(1)), ip(1), now).unwrap();
+        let (intent, claim) = intents.claim(Some(&enonce1(1)), ip(1), now).unwrap();
         assert_eq!(intent.order_id, 7);
         assert_eq!(intent.expected, HashRate::from_hps(100.0));
+        assert_eq!(claim, IntentClaim::Enonce1);
 
         assert!(intents.claim(Some(&enonce1(1)), ip(1), now).is_none());
     }
@@ -134,9 +141,10 @@ mod tests {
 
         intents.create(enonce1(1), ip(1), 7, HashRate::from_hps(100.0), now);
 
-        let intent = intents.claim(None, ip(1), now).unwrap();
+        let (intent, claim) = intents.claim(None, ip(1), now).unwrap();
         assert_eq!(intent.order_id, 7);
         assert_eq!(intent.expected, HashRate::from_hps(100.0));
+        assert_eq!(claim, IntentClaim::Ip);
 
         assert!(intents.claim(None, ip(1), now).is_none());
         assert!(intents.claim(Some(&enonce1(1)), ip(1), now).is_none());
@@ -162,11 +170,12 @@ mod tests {
         intents.create(enonce1(1), ip(1), 7, HashRate::from_hps(100.0), now);
         intents.create(enonce1(2), ip(1), 8, HashRate::from_hps(50.0), now);
 
-        assert_eq!(intents.claim(None, ip(1), now).unwrap().order_id, 8);
+        assert_eq!(intents.claim(None, ip(1), now).unwrap().0.order_id, 8);
         assert_eq!(
             intents
                 .claim(Some(&enonce1(1)), ip(2), now)
                 .unwrap()
+                .0
                 .order_id,
             7
         );

@@ -283,9 +283,6 @@
     <div class=stat><div class=stat-label>Available</div><div class=stat-value id=available_work></div></div>
     <div class=stat><div class=stat-label>Used</div><div class=stat-value id=used_work></div></div>
     <div class=stat><div class=stat-label>Hash Price</div><div class=stat-value id=hash_price></div></div>
-    <div class=stat><div class=stat-label>Intents Created</div><div class=stat-value id=intents_created_total></div></div>
-    <div class=stat><div class=stat-label>Intent Hits</div><div class=stat-value id=intent_hits_total></div></div>
-    <div class=stat><div class=stat-label>Intents Expired</div><div class=stat-value id=intents_expired_total></div></div>
   </div>
 
   <div class=action-bar>
@@ -293,6 +290,26 @@
     <button id=boost-btn class=hidden>Boost: OFF</button>
     <button id=halt-btn class=hidden>Halt: OFF</button>
     <button id=add-order-btn>Add Order</button>
+  </div>
+
+  <div class="column column-full">
+    <h2>Routing</h2>
+    <table class="compact-table routing-table">
+      <tbody>
+        <tr><td>Deficit</td><td id=deficit_hashrate></td></tr>
+        <tr><td>Trims (1h)</td><td id=sessions_trimmed_1h></td></tr>
+        <tr><td>Intents (1h)</td><td id=intents_created_1h></td></tr>
+        <tr><td class=sub>Hit via enonce1</td><td id=intent_claims_enonce1_1h></td></tr>
+        <tr><td class=sub>Hit via IP</td><td id=intent_claims_ip_1h></td></tr>
+        <tr><td class=sub>Expired</td><td id=intents_expired_1h></td></tr>
+        <tr><td>Placements (1h)</td><td id=placements_total_1h></td></tr>
+        <tr><td class=sub>Intent</td><td id=placement_intent></td></tr>
+        <tr><td class=sub>Resumed</td><td id=placement_resumed></td></tr>
+        <tr><td class=sub>Redirected</td><td id=placement_redirected></td></tr>
+        <tr><td class=sub>Estimated</td><td id=placement_estimated></td></tr>
+        <tr><td class=sub>Blind</td><td id=placement_blind></td></tr>
+      </tbody>
+    </table>
   </div>
 
   <div class="column column-full">
@@ -615,9 +632,20 @@ async function refresh(signal) {
 
   set('bucket_order_count', routerData.bucket_order_count);
   set('starving_order_count', routerData.starving_order_count);
-  set('intent_hits_total', routerData.intent_hits_total);
-  set('intents_created_total', routerData.intents_created_total);
-  set('intents_expired_total', routerData.intents_expired_total);
+  set('deficit_hashrate', routerData.deficit_hashrate, formatHashrate);
+  set('sessions_trimmed_1h', routerData.sessions_trimmed_1h);
+  const claims = routerData.intent_claims_1h;
+  set('intents_created_1h', routerData.intents_created_1h);
+  set('intent_claims_enonce1_1h', claims, c => c.enonce1);
+  set('intent_claims_ip_1h', claims, c => c.ip);
+  set('intents_expired_1h', routerData.intents_expired_1h);
+  const placements = routerData.placements_1h;
+  set('placements_total_1h', placements, p => p.intent + p.resumed + p.redirected + p.estimated + p.blind);
+  set('placement_intent', placements, p => p.intent);
+  set('placement_resumed', placements, p => p.resumed);
+  set('placement_redirected', placements, p => p.redirected);
+  set('placement_estimated', placements, p => p.estimated);
+  set('placement_blind', placements, p => p.blind);
   set('used_work', routerData.used_capacity_hash_days, formatHashDays);
   set('hash_price', routerData.hash_price, v => v + ' sats/PHd');
   const available = routerData.total_capacity_hash_days != null && routerData.used_capacity_hash_days != null

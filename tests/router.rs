@@ -1352,9 +1352,9 @@ async fn router_trim_reconnects_to_intended_order() {
 
     let status = router.get_status().await.unwrap();
     assert!(
-        status.intent_hits_total >= 1,
-        "expected at least one intent hit, got {}",
-        status.intent_hits_total
+        status.placements_1h.intent >= 1,
+        "expected at least one intent placement, got {}",
+        status.placements_1h.intent
     );
 
     for mut miner in miners {

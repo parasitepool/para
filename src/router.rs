@@ -1,7 +1,10 @@
 use {
     super::*,
     crate::{
-        api::{DownstreamInfo, MiningStats, RouterStatus, UpstreamSummary},
+        api::{
+            DownstreamInfo, IntentClaimCounts, MiningStats, PlacementCounts, RouterStatus,
+            UpstreamSummary,
+        },
         event_sink::Event,
         generator::get_block_template,
     },
@@ -533,6 +536,7 @@ impl Router {
         let mut bucket_order_count = 0;
         let mut sink_order_count = 0;
         let mut starving_order_count = 0;
+        let mut deficit_hashrate = HashRate::ZERO;
 
         let mut upstream_addresses: HashSet<&Address<NetworkUnchecked>> = HashSet::new();
         let mut upstream_workers: HashSet<&str> = HashSet::new();
@@ -548,8 +552,13 @@ impl Router {
                         sink_order_count += 1;
                     } else {
                         bucket_order_count += 1;
-                        if order.is_starving(order.hashrate_1m(now)) {
-                            starving_order_count += 1;
+                        let measured = order.hashrate_1m(now);
+
+                        if !order.is_fulfilled() {
+                            if order.is_starving(measured) {
+                                starving_order_count += 1;
+                            }
+                            deficit_hashrate += order.hashrate_shortfall(measured);
                         }
                     }
                 }
@@ -569,6 +578,7 @@ impl Router {
 
         let used_capacity_hash_days =
             HashDays::from_raw(committed.as_f64().min(total_capacity_hash_days.as_f64()));
+        let control_metrics = self.control.metrics(now);
 
         RouterStatus {
             uptime_secs: metatron.uptime().as_secs(),
@@ -580,15 +590,18 @@ impl Router {
             bucket_order_count,
             sink_order_count,
             starving_order_count,
+            deficit_hashrate,
             wallet_synced: self
                 .wallet
                 .as_ref()
                 .is_some_and(|wallet| wallet.is_synced()),
             halt: self.halt(),
             boost: self.boost(),
-            intent_hits_total: self.control.intent_hits(),
-            intents_created_total: self.control.intents_created(),
-            intents_expired_total: self.control.intents_expired(),
+            sessions_trimmed_1h: control_metrics.sessions_trimmed_1h,
+            intents_created_1h: control_metrics.intents_created_1h,
+            intents_expired_1h: control_metrics.intents_expired_1h,
+            intent_claims_1h: control_metrics.intent_claims_1h,
+            placements_1h: control_metrics.placements_1h,
             upstream: UpstreamSummary {
                 user_count: upstream_addresses.len(),
                 worker_count: upstream_workers.len(),
@@ -1936,7 +1949,8 @@ mod tests {
         order.add_session(kept.clone(), cancel_kept.clone(), addr(1));
         order.add_session(trimmed.clone(), cancel_trimmed.clone(), addr(2));
 
-        order.trim_session(trimmed.id(), Instant::now());
+        assert!(order.trim_session(trimmed.id(), Instant::now()));
+        assert!(!order.trim_session(trimmed.id(), Instant::now()));
 
         assert!(cancel_trimmed.is_cancelled());
         assert!(!cancel_kept.is_cancelled());
@@ -2285,5 +2299,44 @@ mod tests {
         assert_eq!(status.total_capacity_hash_days.as_f64(), 500.0);
         assert_eq!(status.used_capacity_hash_days.as_f64(), 300.0);
         assert_eq!(status.bucket_order_count, 1);
+    }
+
+    #[test]
+    fn status_deficit_and_starving_include_only_active_unfulfilled_buckets() {
+        let router = test_router();
+        let metatron = &router.metatron;
+
+        let active = test_order(0, Some(hash_days(100.0)), OrderStatus::Active, metatron);
+        let pending = test_order(1, Some(hash_days(200.0)), OrderStatus::Pending, metatron);
+        let fulfilled = test_order(2, Some(hash_days(300.0)), OrderStatus::Active, metatron);
+        set_delivered_work(metatron, &fulfilled, 300.0);
+        let cancelled = test_order(3, Some(hash_days(400.0)), OrderStatus::Cancelled, metatron);
+        let sink = test_order(4, None, OrderStatus::Active, metatron);
+
+        add_orders(
+            router.as_ref(),
+            [active, pending, fulfilled, cancelled, sink],
+        );
+
+        let status = router.status();
+        assert_eq!(status.deficit_hashrate, HashRate::from_hps(100.0));
+        assert_eq!(status.starving_order_count, 1);
+    }
+
+    #[test]
+    fn status_reports_placements() {
+        let router = test_router();
+        let sink = test_order(0, None, OrderStatus::Active, &router.metatron);
+        add_orders(router.as_ref(), [sink]);
+
+        router.next_order(addr(1), &blank()).unwrap();
+
+        assert_eq!(
+            router.status().placements_1h,
+            PlacementCounts {
+                blind: 1,
+                ..PlacementCounts::default()
+            }
+        );
     }
 }

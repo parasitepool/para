@@ -267,6 +267,21 @@ impl UpstreamInfo {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PlacementCounts {
+    pub intent: usize,
+    pub resumed: usize,
+    pub redirected: usize,
+    pub estimated: usize,
+    pub blind: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct IntentClaimCounts {
+    pub enonce1: usize,
+    pub ip: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RouterStatus {
     pub uptime_secs: u64,
@@ -278,12 +293,15 @@ pub struct RouterStatus {
     pub bucket_order_count: usize,
     pub sink_order_count: usize,
     pub starving_order_count: usize,
+    pub deficit_hashrate: HashRate,
     pub wallet_synced: bool,
     pub halt: bool,
     pub boost: bool,
-    pub intents_created_total: u64,
-    pub intent_hits_total: u64,
-    pub intents_expired_total: u64,
+    pub sessions_trimmed_1h: usize,
+    pub intents_created_1h: usize,
+    pub intents_expired_1h: usize,
+    pub intent_claims_1h: IntentClaimCounts,
+    pub placements_1h: PlacementCounts,
     pub upstream: UpstreamSummary,
     pub downstream: DownstreamInfo,
 }
