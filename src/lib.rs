@@ -20,6 +20,7 @@ use {
         Sequence, Target, Transaction, TxIn, TxOut, Txid, VarInt, Witness,
         address::NetworkUnchecked,
         block::{self, Header},
+        blockdata::constants::{DIFFCHANGE_INTERVAL, TARGET_BLOCK_SPACING},
         consensus::{self, Decodable, encode},
         hashes::Hash,
         locktime::absolute::LockTime,

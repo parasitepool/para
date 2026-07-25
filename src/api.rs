@@ -288,6 +288,7 @@ pub struct RouterStatus {
     pub block_count: u64,
     pub recent_blocks: Vec<BlockHash>,
     pub hash_price: HashPrice,
+    pub premium_percent: f64,
     pub total_capacity_hash_days: HashDays,
     pub used_capacity_hash_days: HashDays,
     pub bucket_order_count: usize,

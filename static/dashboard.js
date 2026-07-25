@@ -40,7 +40,7 @@ async function initAuthProbe() {
     return true;
   }
 
-  for (const id of ['halt-btn', 'boost-btn', 'capacity-btn']) {
+  for (const id of ['halt-btn', 'boost-btn', 'capacity-btn', 'premium-btn']) {
     document.getElementById(id)?.classList.remove('hidden');
   }
 

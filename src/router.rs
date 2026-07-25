@@ -7,6 +7,7 @@ use {
         },
         event_sink::Event,
         generator::get_block_template,
+        hash::price::difficulty_multiplier,
     },
     bdk_wallet::ChangeSet,
     control::Control,
@@ -35,6 +36,8 @@ pub(crate) struct Router {
     halt: AtomicBool,
     boost: AtomicBool,
     capacity_work: AtomicU64,
+    premium_percent: AtomicU64,
+    difficulty_multiplier: AtomicU64,
     control: Control,
     tasks: TaskTracker,
     cancel: CancellationToken,
@@ -52,6 +55,7 @@ impl Router {
         let halt = settings.halt();
         let boost = settings.boost();
         let capacity_work = settings.capacity_work();
+        let premium_percent = settings.premium_percent();
 
         let control = Control::new(settings.clone(), metatron.clone());
 
@@ -65,6 +69,8 @@ impl Router {
             halt: AtomicBool::new(halt),
             boost: AtomicBool::new(boost),
             capacity_work: AtomicU64::new(capacity_work.as_f64().to_bits()),
+            premium_percent: AtomicU64::new(premium_percent.to_bits()),
+            difficulty_multiplier: AtomicU64::new(1.0f64.to_bits()),
             control,
             tasks,
             cancel,
@@ -76,7 +82,11 @@ impl Router {
     }
 
     pub(crate) fn hash_price(&self) -> HashPrice {
-        HashPrice::from_hash_value(self.hash_value())
+        HashPrice::from_hash_value(
+            self.hash_value(),
+            self.premium_percent(),
+            f64::from_bits(self.difficulty_multiplier.load(Ordering::Relaxed)),
+        )
     }
 
     pub(crate) fn halt(&self) -> bool {
@@ -102,6 +112,20 @@ impl Router {
     pub(crate) fn set_capacity_work(&self, capacity: HashDays) {
         self.capacity_work
             .store(capacity.as_f64().to_bits(), Ordering::Relaxed);
+    }
+
+    pub(crate) fn premium_percent(&self) -> f64 {
+        f64::from_bits(self.premium_percent.load(Ordering::Relaxed))
+    }
+
+    pub(crate) fn set_premium_percent(&self, premium_percent: f64) {
+        self.premium_percent
+            .store(premium_percent.to_bits(), Ordering::Relaxed);
+    }
+
+    pub(crate) fn set_difficulty_multiplier(&self, multiplier: f64) {
+        self.difficulty_multiplier
+            .store(multiplier.to_bits(), Ordering::Relaxed);
     }
 
     pub(crate) fn set_hash_value(&self, hash_value: HashValue) {
@@ -585,6 +609,7 @@ impl Router {
             block_count: metatron.block_count() as u64,
             recent_blocks: metatron.recent_blocks(10),
             hash_price: self.hash_price(),
+            premium_percent: self.premium_percent(),
             total_capacity_hash_days,
             used_capacity_hash_days,
             bucket_order_count,
@@ -633,10 +658,17 @@ impl Router {
 
                         if let Some(bitcoin_client) = &bitcoin_client {
                             match get_block_template(bitcoin_client, &router.settings).await {
-                                Ok(template) => router.set_hash_value(HashValue::compute(
-                                    template.coinbase_value,
-                                    template.bits,
-                                )),
+                                Ok(template) => {
+                                    router.set_hash_value(HashValue::compute(
+                                        template.coinbase_value,
+                                        template.bits,
+                                    ));
+
+                                    let multiplier =
+                                        difficulty_multiplier(bitcoin_client, template.height)
+                                            .await;
+                                    router.set_difficulty_multiplier(multiplier);
+                                }
                                 Err(err) => warn!("Failed to update hash value: {err}"),
                             }
                         }
@@ -932,6 +964,7 @@ mod tests {
                 halt: false,
                 boost: false,
                 capacity_work: 1e18,
+                premium_percent: 5.0,
             })
             .unwrap(),
         )
@@ -2005,6 +2038,32 @@ mod tests {
         router.set_hash_value(HashValue::from_sats(100));
 
         assert_eq!(router.status().hash_price, HashPrice::from_sats(105));
+    }
+
+    #[test]
+    fn set_premium_percent_updates_hash_price() {
+        let router = test_router();
+        router.set_hash_value(HashValue::from_sats(100));
+
+        router.set_premium_percent(10.0);
+        assert_eq!(router.premium_percent(), 10.0);
+        assert_eq!(router.hash_price(), HashPrice::from_sats(110));
+
+        router.set_premium_percent(1.0);
+        assert_eq!(router.hash_price(), HashPrice::from_sats(101));
+
+        router.set_premium_percent(0.0);
+        assert_eq!(router.hash_price(), HashPrice::from_sats(100));
+    }
+
+    #[test]
+    fn difficulty_multiplier_raises_hash_price() {
+        let router = test_router();
+        router.set_hash_value(HashValue::from_sats(100));
+        router.set_premium_percent(0.0);
+
+        router.set_difficulty_multiplier(2.0);
+        assert_eq!(router.hash_price(), HashPrice::from_sats(200));
     }
 
     #[tokio::test(flavor = "multi_thread")]

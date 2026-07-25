@@ -49,4 +49,11 @@ pub(crate) struct RouterOptions {
         help = "Total <CAPACITY_WORK> in hash days."
     )]
     pub(crate) capacity_work: f64,
+
+    #[arg(
+        long,
+        default_value_t = 5.0,
+        help = "<PREMIUM_PERCENT> markup over hash value."
+    )]
+    pub(crate) premium_percent: f64,
 }

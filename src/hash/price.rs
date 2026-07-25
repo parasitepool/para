@@ -1,5 +1,7 @@
 use super::*;
 
+const DELIVERY_WINDOW_BLOCKS: u32 = 144;
+
 #[derive(
     Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
 )]
@@ -7,8 +9,9 @@ use super::*;
 pub struct HashPrice(Amount);
 
 impl HashPrice {
-    pub fn from_hash_value(hash_value: HashValue) -> Self {
-        let sats = (hash_value.to_sats() as f64 * 1.05).ceil();
+    pub fn from_hash_value(hash_value: HashValue, premium_percent: f64, multiplier: f64) -> Self {
+        let sats =
+            (hash_value.to_sats() as f64 * (100.0 + premium_percent) / 100.0 * multiplier).ceil();
 
         if sats >= u64::MAX as f64 {
             return Self::from_sats(u64::MAX);
@@ -58,9 +61,103 @@ impl FromStr for HashPrice {
     }
 }
 
+fn multiplier(height: u64, start_time: u32, now: u64) -> f64 {
+    let tip = height.saturating_sub(1);
+    let blocks_into_epoch = tip % u64::from(DIFFCHANGE_INTERVAL);
+    let blocks_until_adjustment = DIFFCHANGE_INTERVAL - blocks_into_epoch as u32;
+
+    if blocks_until_adjustment > DELIVERY_WINDOW_BLOCKS {
+        return 1.0;
+    }
+
+    let elapsed = now.saturating_sub(u64::from(start_time));
+
+    if elapsed == 0 {
+        return 1.0;
+    }
+
+    let change = (f64::from(TARGET_BLOCK_SPACING) * (blocks_into_epoch + 1) as f64
+        / elapsed as f64)
+        .clamp(0.25, 4.0);
+
+    if change >= 1.0 {
+        return 1.0;
+    }
+
+    let before = f64::from(blocks_until_adjustment - 1) / f64::from(DELIVERY_WINDOW_BLOCKS);
+
+    before + (1.0 - before) / change
+}
+
+pub(crate) async fn difficulty_multiplier(client: &BitcoindClient, height: u64) -> f64 {
+    let tip = height.saturating_sub(1);
+    let blocks_into_epoch = tip % u64::from(DIFFCHANGE_INTERVAL);
+
+    if DIFFCHANGE_INTERVAL - blocks_into_epoch as u32 > DELIVERY_WINDOW_BLOCKS {
+        return 1.0;
+    }
+
+    let start_time = match client.get_block_header_at(tip - blocks_into_epoch).await {
+        Ok(header) => header.time,
+        Err(err) => {
+            warn!("Failed to fetch epoch start header: {err}");
+            return 1.0;
+        }
+    };
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    multiplier(height, start_time, now)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn multiplier() {
+        #[track_caller]
+        fn case(height: u64, start_time: u32, now: u64, expected: f64) {
+            let multiplier = super::multiplier(height, start_time, now);
+            assert!(
+                (multiplier - expected).abs() < 1e-9,
+                "expected multiplier {expected}, got {multiplier}",
+            );
+        }
+
+        case(102, 0, 1_000_000, 1.0);
+        case(1872, 0, 1_000_000, 1.0);
+        case(1873, 0, 2_247_600, 143.0 / 144.0 + 1.0 / 144.0 / 0.5);
+        case(1947, 0, 2_336_400, 69.0 / 144.0 + 75.0 / 144.0 / 0.5);
+        case(2016, 0, 2_419_200, 2.0);
+        case(1947, 0, 584_100, 1.0);
+        case(1947, 0, 11_682_000, 69.0 / 144.0 + 75.0 / 144.0 / 0.25);
+        case(1947, 0, 100, 1.0);
+        case(2016, 100, 0, 1.0);
+    }
+
+    #[test]
+    fn from_hash_value() {
+        #[track_caller]
+        fn case(hash_value: u64, premium_percent: f64, multiplier: f64, expected: u64) {
+            assert_eq!(
+                HashPrice::from_hash_value(
+                    HashValue::from_sats(hash_value),
+                    premium_percent,
+                    multiplier,
+                ),
+                HashPrice::from_sats(expected),
+            );
+        }
+
+        case(100, 5.0, 1.0, 105);
+        case(100, 0.0, 1.0, 100);
+        case(100, 10.0, 1.0, 110);
+        case(100, 5.0, 2.0, 210);
+    }
 
     #[test]
     fn total() {

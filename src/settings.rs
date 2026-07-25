@@ -52,6 +52,7 @@ pub(crate) struct Settings {
     halt: bool,
     boost: bool,
     capacity_work: HashDays,
+    premium_percent: f64,
     store_path: Option<PathBuf>,
     http_api_token: Option<String>,
     http_admin_token: Option<String>,
@@ -99,6 +100,7 @@ impl Default for Settings {
             halt: false,
             boost: false,
             capacity_work: HashDays::from_raw(1e18),
+            premium_percent: 5.0,
             store_path: None,
             http_api_token: None,
             http_admin_token: None,
@@ -270,6 +272,7 @@ impl Settings {
             halt,
             boost,
             capacity_work,
+            premium_percent,
         } = options;
 
         let settings = Self {
@@ -283,6 +286,7 @@ impl Settings {
             halt,
             boost,
             capacity_work: HashDays::new(capacity_work)?,
+            premium_percent,
             ..Self::from_common_options(common)?
         };
 
@@ -443,6 +447,10 @@ impl Settings {
         ensure!(
             !self.tick_interval.is_zero(),
             "tick_interval must be greater than 0"
+        );
+        ensure!(
+            self.premium_percent.is_finite() && self.premium_percent > -100.0,
+            "premium_percent must be finite and greater than -100"
         );
         ensure!(
             self.http_api_token.is_none() || self.http_admin_token.is_some(),
@@ -692,6 +700,10 @@ impl Settings {
 
     pub(crate) fn capacity_work(&self) -> HashDays {
         self.capacity_work
+    }
+
+    pub(crate) fn premium_percent(&self) -> f64 {
+        self.premium_percent
     }
 
     pub(crate) fn sink_orders(&self) -> &[UpstreamTarget] {
@@ -1115,6 +1127,20 @@ mod tests {
             router_settings_error("--tick-interval 0"),
             "tick_interval must be greater than 0",
         );
+    }
+
+    #[test]
+    fn premium_percent_validation() {
+        #[track_caller]
+        fn case(args: &str) {
+            assert_error_contains(
+                router_settings_error(args),
+                "premium_percent must be finite and greater than -100",
+            );
+        }
+
+        case("--premium-percent=-100");
+        case("--premium-percent NaN");
     }
 
     #[test]

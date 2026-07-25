@@ -3,7 +3,7 @@
 
   .action-bar {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     gap: 8px;
     width: 1048px;
   }
@@ -198,7 +198,7 @@
     min-height: 1.4em;
   }
 
-  #capacity-overlay {
+  #capacity-overlay, #premium-overlay {
     position: fixed;
     inset: 0;
     background: rgba(0,0,0,0.7);
@@ -208,9 +208,9 @@
     z-index: 2000;
   }
 
-  #capacity-overlay.hidden { display: none; }
+  #capacity-overlay.hidden, #premium-overlay.hidden { display: none; }
 
-  #capacity-modal {
+  #capacity-modal, #premium-modal {
     background: #1a1a1a;
     border: 1px solid #444;
     padding: 30px;
@@ -218,21 +218,21 @@
     max-width: 90vw;
   }
 
-  #capacity-modal h2 {
+  #capacity-modal h2, #premium-modal h2 {
     margin: 0 0 20px;
     font-size: 1.22em;
     text-align: center;
     color: #888;
   }
 
-  #capacity-modal label {
+  #capacity-modal label, #premium-modal label {
     display: block;
     margin-bottom: 4px;
     color: #888;
     font-size: 0.9em;
   }
 
-  #capacity-modal input {
+  #capacity-modal input, #premium-modal input {
     width: 100%;
     background: #111;
     border: 1px solid #444;
@@ -243,15 +243,15 @@
     margin-bottom: 14px;
   }
 
-  #capacity-modal input::placeholder { color: #555; }
+  #capacity-modal input::placeholder, #premium-modal input::placeholder { color: #555; }
 
-  #capacity-modal .modal-buttons {
+  #capacity-modal .modal-buttons, #premium-modal .modal-buttons {
     display: flex;
     gap: 10px;
     margin-top: 6px;
   }
 
-  #capacity-modal .modal-buttons button {
+  #capacity-modal .modal-buttons button, #premium-modal .modal-buttons button {
     flex: 1;
     background: #333;
     border: 1px solid #444;
@@ -261,9 +261,9 @@
     font: inherit;
   }
 
-  #capacity-modal .modal-buttons button:hover { background: #444; }
+  #capacity-modal .modal-buttons button:hover, #premium-modal .modal-buttons button:hover { background: #444; }
 
-  #capacity-error {
+  #capacity-error, #premium-error {
     color: #f55;
     font-size: 0.85em;
     margin-bottom: 10px;
@@ -271,7 +271,7 @@
   }
 
   @media (max-width: 1140px) {
-    .action-bar { width: 100%; max-width: 500px; grid-template-columns: repeat(2, 1fr); }
+    .action-bar { width: 100%; grid-template-columns: repeat(5, 1fr); }
   }
 </style>
 
@@ -287,6 +287,7 @@
 
   <div class=action-bar>
     <button id=capacity-btn class=hidden>Capacity</button>
+    <button id=premium-btn class=hidden>Premium</button>
     <button id=boost-btn class=hidden>Boost: OFF</button>
     <button id=halt-btn class=hidden>Halt: OFF</button>
     <button id=add-order-btn>Add Order</button>
@@ -460,6 +461,19 @@
     </div>
   </div>
 
+  <div id=premium-overlay class=hidden>
+    <div id=premium-modal>
+      <h2>Set Premium</h2>
+      <label for=premium-input>Premium (%)</label>
+      <input id=premium-input placeholder="e.g. 1, 5, 10" inputmode="decimal">
+      <div id=premium-error></div>
+      <div class=modal-buttons>
+        <button id=premium-cancel>Cancel</button>
+        <button id=premium-confirm>Set</button>
+      </div>
+    </div>
+  </div>
+
   <div class=column>
     <h2>Bitcoin</h2>
     <div class=row><span>Block Height</span><a id=btc_height_link target=_blank rel=noopener><span id=btc_height></span></a></div>
@@ -499,6 +513,7 @@
 <script>
 let currentHashPrice = null;
 let currentCapacity = null;
+let currentPremium = null;
 const ORDER_STATUS_PRIORITY = Object.fromEntries(
   ['active', 'in_mempool', 'pending', 'expired', 'disconnected', 'fulfilled', 'cancelled']
     .map((status, i) => [status, i])
@@ -624,6 +639,12 @@ async function refresh(signal) {
   const capacityBtn = document.getElementById('capacity-btn');
   if (capacityBtn) {
     capacityBtn.textContent = 'Capacity: ' + currentCapacity;
+  }
+  currentPremium = routerData.premium_percent;
+
+  const premiumBtn = document.getElementById('premium-btn');
+  if (premiumBtn && currentPremium != null) {
+    premiumBtn.textContent = 'Premium: ' + formatTruncated(currentPremium) + '%';
   }
   if (addOrderBtn) {
     addOrderBtn.disabled = routerData.halt;
@@ -876,6 +897,52 @@ initConfirmModal('boost', '/api/router/boost',
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ capacity_hash_days: parsed }),
+      }));
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        error.textContent = text || `Error: ${res.status}`;
+        return;
+      }
+      overlay.classList.add('hidden');
+      location.reload();
+    } catch (e) {
+      error.textContent = e.message;
+    }
+  });
+}
+
+{
+  const overlay = document.getElementById('premium-overlay');
+  const input = document.getElementById('premium-input');
+  const error = document.getElementById('premium-error');
+
+  document.getElementById('premium-btn').addEventListener('click', () => {
+    input.value = currentPremium != null ? currentPremium : '';
+    error.textContent = '';
+    overlay.classList.remove('hidden');
+    input.focus();
+  });
+
+  document.getElementById('premium-cancel').addEventListener('click', () => {
+    overlay.classList.add('hidden');
+  });
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) overlay.classList.add('hidden');
+  });
+
+  document.getElementById('premium-confirm').addEventListener('click', async () => {
+    error.textContent = '';
+    const parsed = parseFloat(input.value);
+    if (!isFinite(parsed) || parsed <= -100) {
+      error.textContent = 'Premium must be a number greater than -100 (e.g. 1, 5, 10)';
+      return;
+    }
+    try {
+      const res = await fetch('/api/router/premium', withAuthOptions({
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ premium_percent: parsed }),
       }));
       if (!res.ok) {
         const text = await res.text().catch(() => '');

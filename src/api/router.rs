@@ -30,6 +30,7 @@ pub(crate) fn router(
         .route("/api/router/halt", put(set_halt))
         .route("/api/router/boost", put(set_boost))
         .route("/api/router/capacity", put(set_capacity))
+        .route("/api/router/premium", put(set_premium))
         .with_state(state)
         .merge(users::routes(users::Service::Router, metatron))
         .merge(common_routes())
@@ -317,6 +318,34 @@ async fn set_capacity(
     router.set_capacity_work(request.capacity_hash_days);
     Ok(Json(CapacityResponse {
         capacity_hash_days: router.capacity_work(),
+    })
+    .into_response())
+}
+
+#[derive(Deserialize)]
+struct PremiumRequest {
+    premium_percent: f64,
+}
+
+#[derive(Serialize)]
+struct PremiumResponse {
+    premium_percent: f64,
+}
+
+async fn set_premium(
+    _: AdminAuth,
+    State(router): State<Arc<Router>>,
+    Json(request): Json<PremiumRequest>,
+) -> ServerResult<Response> {
+    if !request.premium_percent.is_finite() || request.premium_percent <= -100.0 {
+        return Err(ServerError::BadRequest(
+            "premium_percent must be finite and greater than -100".into(),
+        ));
+    }
+
+    router.set_premium_percent(request.premium_percent);
+    Ok(Json(PremiumResponse {
+        premium_percent: router.premium_percent(),
     })
     .into_response())
 }
