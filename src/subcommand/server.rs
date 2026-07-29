@@ -9,8 +9,12 @@ use {
         },
         subcommand::{
             server::{
-                account::account_router, payouts::payouts_router, rounds::rounds_router,
-                sharediff::share_difficulty_router, sync_routes::sync_router,
+                account::account_router,
+                badges::{ExternalBadgeSources, badges_router},
+                payouts::payouts_router,
+                rounds::rounds_router,
+                sharediff::share_difficulty_router,
+                sync_routes::sync_router,
             },
             sync::{ShareBatch, SyncResponse},
         },
@@ -36,6 +40,7 @@ use {
 
 pub mod account;
 mod aggregator;
+mod badges;
 mod cache;
 pub mod database;
 mod node_status;
@@ -146,6 +151,9 @@ impl Modify for SecurityAddon {
         rounds::round_current,
         rounds::round,
         rounds::participants,
+        // Badge endpoints
+        badges::badge_catalog,
+        badges::badges_for_account,
         // Sync endpoints
         sync_routes::sync_batch,
         // Status endpoints
@@ -173,6 +181,12 @@ impl Modify for SecurityAddon {
         // Round schemas
         rounds::Round,
         rounds::RoundParticipant,
+        // Badge schemas
+        badges::BadgeInstance,
+        badges::BadgeBucket,
+        badges::BadgeType,
+        badges::BadgesPayload,
+        badges::BadgeDefinition,
         // Server schemas
         Payment,
         SatSplit,
@@ -190,6 +204,7 @@ impl Modify for SecurityAddon {
         (name = "sharediff", description = "Share difficulty endpoints"),
         (name = "payouts", description = "Payout and split endpoints"),
         (name = "rounds", description = "Round and participant endpoints"),
+        (name = "badges", description = "Account badge endpoints"),
         (name = "sync", description = "Share synchronization endpoints"),
         (name = "status", description = "Server status endpoints"),
         (name = "aggregator", description = "Multi-node aggregation endpoints"),
@@ -291,8 +306,17 @@ impl Server {
                     }
                 });
 
+                // Attach external badge sources (Refinery / dispenser)
+                let database = database.with_external(ExternalBadgeSources::new(
+                    config.router_url(),
+                    config.router_token(),
+                    config.guac_url(),
+                    config.guac_token(),
+                ));
+
                 router = router
                     .merge(account_router(database.clone()))
+                    .merge(badges_router(database.clone()))
                     .merge(share_difficulty_router(database.clone()))
                     .merge(payouts_router(config.clone(), database.clone()))
                     .merge(rounds_router(database.clone()))

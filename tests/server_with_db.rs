@@ -1272,3 +1272,318 @@ async fn auth_tiers_with_db() {
     case(&server, "/payouts", "foo", StatusCode::UNAUTHORIZED).await;
     case(&server, "/payouts", "bar", StatusCode::OK).await;
 }
+
+#[derive(Deserialize, Debug)]
+struct BadgeInstance {
+    blockheight: i32,
+}
+
+#[derive(Deserialize, Debug)]
+struct BadgeBucket {
+    count: i64,
+}
+
+#[derive(Deserialize, Debug)]
+struct BadgeType {
+    #[allow(dead_code)]
+    kind: String,
+    unique: Vec<BadgeInstance>,
+    bucket: BadgeBucket,
+    total: i64,
+}
+
+#[derive(Deserialize, Debug)]
+struct BadgesPayload {
+    version: u32,
+    types: std::collections::HashMap<String, BadgeType>,
+}
+
+#[derive(Deserialize, Debug)]
+struct BadgeDefinition {
+    id: String,
+    unique_cap: Option<i64>,
+}
+
+/// Record a found block at each height and have `foo` submit one accepted share
+/// AT that exact height, so `foo` earns a "mined on block" badge for each.
+async fn seed_block_participation(server: &TestServer, heights: &[i64]) {
+    let db_url = server.database_url().unwrap();
+
+    for (i, h) in heights.iter().enumerate() {
+        insert_test_block(db_url.clone(), *h).await.unwrap();
+        insert_test_shares_for_round(
+            db_url.clone(),
+            vec![("foo", 1000.0)],
+            *h,
+            1000 + (i as i64) * 100,
+        )
+        .await
+        .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn test_badges_three_unique_no_bucket() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+    insert_test_account_with_diff(db_url.clone(), "foo", None, 0)
+        .await
+        .unwrap();
+
+    seed_block_participation(&server, &[10, 20, 30]).await;
+
+    let payload: BadgesPayload = server.get_json_async("/badges/foo").await;
+    assert_eq!(payload.version, 1);
+
+    let block = payload.types.get("block").unwrap();
+    assert_eq!(block.total, 3);
+    assert_eq!(block.bucket.count, 0);
+
+    let heights: Vec<i32> = block.unique.iter().map(|u| u.blockheight).collect();
+    assert_eq!(heights, vec![10, 20, 30]);
+}
+
+#[tokio::test]
+async fn test_badges_stacked_bucket() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+    insert_test_account_with_diff(db_url.clone(), "foo", None, 0)
+        .await
+        .unwrap();
+
+    seed_block_participation(&server, &[10, 20, 30, 40, 50]).await;
+
+    let payload: BadgesPayload = server.get_json_async("/badges/foo").await;
+    let block = payload.types.get("block").unwrap();
+
+    // 5 blocks => earliest 3 unique medals + a "+2" stacking bucket.
+    assert_eq!(block.total, 5);
+    assert_eq!(block.unique.len(), 3);
+    assert_eq!(block.bucket.count, 2);
+
+    let heights: Vec<i32> = block.unique.iter().map(|u| u.blockheight).collect();
+    assert_eq!(heights, vec![10, 20, 30]);
+}
+
+#[tokio::test]
+async fn test_badges_account_without_blocks_is_empty() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+    insert_test_account_with_diff(db_url.clone(), "foo", None, 0)
+        .await
+        .unwrap();
+
+    let payload: BadgesPayload = server.get_json_async("/badges/foo").await;
+    let block = payload.types.get("block").unwrap();
+    assert_eq!(block.total, 0);
+    assert!(block.unique.is_empty());
+    assert_eq!(block.bucket.count, 0);
+}
+
+#[tokio::test]
+async fn test_badges_unknown_account_is_404() {
+    let server = TestServer::spawn_with_db().await;
+    setup_test_schema(server.database_url().unwrap())
+        .await
+        .unwrap();
+
+    let response = server.get_json_async_raw("/badges/nobody").await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_badges_catalog() {
+    let server = TestServer::spawn_with_db().await;
+    setup_test_schema(server.database_url().unwrap())
+        .await
+        .unwrap();
+
+    let catalog: Vec<BadgeDefinition> = server.get_json_async("/badges").await;
+    let block = catalog.iter().find(|d| d.id == "block").unwrap();
+    assert_eq!(block.unique_cap, Some(3));
+}
+
+/// Set `account_metadata.data.block_count` for a user (loyalty badge source).
+async fn set_block_count(database_url: String, username: &str, block_count: i64) {
+    let pool = sqlx::PgPool::connect(&database_url).await.unwrap();
+    sqlx::query(
+        "
+        INSERT INTO account_metadata (account_id, data, created_at, updated_at)
+        SELECT id, jsonb_build_object('block_count', $2::bigint), NOW(), NOW()
+        FROM accounts WHERE username = $1
+        ON CONFLICT (account_id) DO UPDATE
+        SET data = account_metadata.data || jsonb_build_object('block_count', $2::bigint)
+        ",
+    )
+    .bind(username)
+    .bind(block_count)
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn test_badges_block_winner() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+    // insert_test_block records "test_user" as the winning username.
+    insert_test_account_with_diff(db_url.clone(), "test_user", None, 0)
+        .await
+        .unwrap();
+    insert_test_block(db_url.clone(), 10).await.unwrap();
+    insert_test_block(db_url.clone(), 20).await.unwrap();
+
+    let payload: BadgesPayload = server.get_json_async("/badges/test_user").await;
+    let winner = payload.types.get("block_winner").unwrap();
+
+    assert_eq!(winner.total, 2);
+    assert_eq!(winner.bucket.count, 0);
+    let heights: Vec<i32> = winner.unique.iter().map(|u| u.blockheight).collect();
+    assert_eq!(heights, vec![10, 20]);
+}
+
+#[tokio::test]
+async fn test_badges_loyalty() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+    insert_test_account_with_diff(db_url.clone(), "foo", None, 0)
+        .await
+        .unwrap();
+    // 25_000 blocks => floor(25000 / 10000) = 2 loyalty instances.
+    set_block_count(db_url.clone(), "foo", 25_000).await;
+
+    let payload: BadgesPayload = server.get_json_async("/badges/foo").await;
+    let loyalty = payload.types.get("loyalty").unwrap();
+
+    assert_eq!(loyalty.total, 2);
+    assert_eq!(loyalty.bucket.count, 2);
+    assert!(loyalty.unique.is_empty());
+}
+
+#[tokio::test]
+async fn test_badges_block_requires_exact_height() {
+    // Block found at height 20. `foo` submits a share at 15 (in the round but
+    // not on the block); `bar` submits at exactly 20. Only `bar` earns a badge.
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+    insert_test_account_with_diff(db_url.clone(), "foo", None, 0)
+        .await
+        .unwrap();
+    insert_test_account_with_diff(db_url.clone(), "bar", None, 0)
+        .await
+        .unwrap();
+    insert_test_block(db_url.clone(), 20).await.unwrap();
+    insert_test_shares_for_round(db_url.clone(), vec![("foo", 1000.0)], 15, 3000)
+        .await
+        .unwrap();
+    insert_test_shares_for_round(db_url.clone(), vec![("bar", 1000.0)], 20, 3100)
+        .await
+        .unwrap();
+
+    let foo: BadgesPayload = server.get_json_async("/badges/foo").await;
+    assert_eq!(foo.types.get("block").unwrap().total, 0);
+
+    let bar: BadgesPayload = server.get_json_async("/badges/bar").await;
+    let block = bar.types.get("block").unwrap();
+    assert_eq!(block.total, 1);
+    let heights: Vec<i32> = block.unique.iter().map(|u| u.blockheight).collect();
+    assert_eq!(heights, vec![20]);
+}
+
+#[tokio::test]
+async fn test_badges_cache_invalidates_on_new_block() {
+    // First read caches the payload with the current found-block tip. When a new
+    // block is found (tip advances) and foo mined it, the next read recomputes
+    // rather than serving stale cache.
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+    insert_test_account_with_diff(db_url.clone(), "foo", None, 0)
+        .await
+        .unwrap();
+
+    insert_test_block(db_url.clone(), 10).await.unwrap();
+    insert_test_shares_for_round(db_url.clone(), vec![("foo", 1000.0)], 10, 1000)
+        .await
+        .unwrap();
+
+    let first: BadgesPayload = server.get_json_async("/badges/foo").await;
+    assert_eq!(first.types.get("block").unwrap().total, 1);
+
+    // A new found block foo also mined.
+    insert_test_block(db_url.clone(), 20).await.unwrap();
+    insert_test_shares_for_round(db_url.clone(), vec![("foo", 1000.0)], 20, 2000)
+        .await
+        .unwrap();
+
+    let second: BadgesPayload = server.get_json_async("/badges/foo").await;
+    assert_eq!(second.types.get("block").unwrap().total, 2);
+}
+
+/// Write a badges payload directly into `account_metadata.data.badges`.
+async fn seed_cached_badges(database_url: String, username: &str, badges: serde_json::Value) {
+    let pool = sqlx::PgPool::connect(&database_url).await.unwrap();
+    sqlx::query(
+        "
+        INSERT INTO account_metadata (account_id, data, created_at, updated_at)
+        SELECT id, jsonb_build_object('badges', $2::jsonb), NOW(), NOW()
+        FROM accounts WHERE username = $1
+        ON CONFLICT (account_id) DO UPDATE
+        SET data = account_metadata.data || jsonb_build_object('badges', $2::jsonb)
+        ",
+    )
+    .bind(username)
+    .bind(badges)
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn test_badges_external_outage_keeps_cached_value() {
+    // Router configured but unreachable. A recompute must preserve the
+    // previously cached refinery badge rather than dropping it.
+    let server = TestServer::spawn_with_db_args("--router-url http://127.0.0.1:1").await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+    insert_test_account_with_diff(db_url.clone(), "foo", None, 0)
+        .await
+        .unwrap();
+
+    // Stale cache (source_tip/source_blocks won't match) that holds a refinery badge.
+    seed_cached_badges(
+        db_url.clone(),
+        "foo",
+        serde_json::json!({
+            "version": 1,
+            "computed_at": "2020-01-01T00:00:00Z",
+            "source_tip": -1,
+            "source_blocks": -1,
+            "types": {
+                "refinery": {
+                    "kind": "bucket",
+                    "unique": [],
+                    "bucket": { "count": 7 },
+                    "total": 7
+                }
+            }
+        }),
+    )
+    .await;
+
+    let payload: BadgesPayload = server.get_json_async("/badges/foo").await;
+
+    let refinery = payload
+        .types
+        .get("refinery")
+        .expect("refinery badge should be carried forward through an outage");
+    assert_eq!(refinery.total, 7);
+}

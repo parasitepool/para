@@ -33,6 +33,17 @@ pub(crate) struct ServerConfig {
     ttl: u64,
     #[arg(long, help = "Run account migration before processing sync batches.")]
     migrate_accounts: bool,
+    #[arg(long, help = "Base URL of the Router service for refinery badges.")]
+    router_url: Option<String>,
+    #[arg(long, help = "Bearer token for the Router service.")]
+    router_token: Option<String>,
+    #[arg(
+        long,
+        help = "Base URL of the guac dispenser service for dispenser badges."
+    )]
+    guac_url: Option<String>,
+    #[arg(long, help = "Bearer token for the guac dispenser service.")]
+    guac_token: Option<String>,
 }
 
 impl ServerConfig {
@@ -118,5 +129,21 @@ impl ServerConfig {
 
     pub(crate) fn migrate_accounts(&self) -> bool {
         self.migrate_accounts
+    }
+
+    pub(crate) fn router_url(&self) -> Option<String> {
+        self.router_url.clone()
+    }
+
+    pub(crate) fn router_token(&self) -> Option<String> {
+        self.router_token.clone()
+    }
+
+    pub(crate) fn guac_url(&self) -> Option<String> {
+        self.guac_url.clone()
+    }
+
+    pub(crate) fn guac_token(&self) -> Option<String> {
+        self.guac_token.clone()
     }
 }

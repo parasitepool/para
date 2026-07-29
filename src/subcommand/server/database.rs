@@ -1,5 +1,11 @@
 use {
     super::*,
+    badges::{
+        BADGES_VERSION, BLOCK_BADGE_ID, BLOCK_WINNER_BADGE_ID, BadgeLookup, BadgesPayload,
+        DISPENSER_BADGE_ID, ExternalBadgeSources, LOYALTY_BADGE_ID, LOYALTY_BLOCKS_PER_INSTANCE,
+        REFINERY_BADGE_ID, build_block_badge_type, build_bucket_badge, build_unique_badge,
+        payload_is_fresh, payload_within_max_age,
+    },
     rounds::{Round, RoundParticipant},
 };
 
@@ -69,6 +75,9 @@ pub struct HistoricalPayout {
 #[derive(Debug, Clone)]
 pub struct Database {
     pub(crate) pool: Pool<Postgres>,
+    /// External HTTP badge sources (Refinery / dispenser). Empty by default;
+    /// populated for the badge-serving server via [`Database::with_external`].
+    pub(crate) external: ExternalBadgeSources,
 }
 
 impl Database {
@@ -84,7 +93,14 @@ impl Database {
                 .connect(&database_url)
                 .await
                 .with_context(|| format!("failed to connect to database at `{database_url}`"))?,
+            external: ExternalBadgeSources::default(),
         })
+    }
+
+    /// Attach external badge sources (Refinery / dispenser HTTP endpoints).
+    pub(crate) fn with_external(mut self, external: ExternalBadgeSources) -> Self {
+        self.external = external;
+        self
     }
 
     pub(crate) async fn get_split(&self) -> Result<Vec<Split>> {
@@ -1000,6 +1016,239 @@ impl Database {
         .map_err(|err| anyhow!(err))?;
 
         Ok(())
+    }
+
+    /// Compute the `block` badge state for a user: one badge per pool-found
+    /// block where they submitted an accepted share at that exact height. The
+    /// earliest `BLOCK_UNIQUE_CAP` become individual medals and the rest stack.
+    pub(crate) async fn compute_block_badges(&self, username: &str) -> Result<badges::BadgeType> {
+        // "Mined on block X" means a share was submitted at the exact height the
+        // block was found
+        let heights: Vec<i32> = sqlx::query_scalar(
+            "
+            SELECT b.blockheight
+            FROM blocks b
+            WHERE b.blockheight > 0
+              AND EXISTS (
+                  SELECT 1 FROM remote_shares rs
+                  WHERE rs.blockheight = b.blockheight
+                    AND rs.username = $1
+                    AND rs.reject_reason IS NULL
+              )
+            ORDER BY b.blockheight ASC
+            ",
+        )
+        .bind(username)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))?;
+
+        let total = heights.len() as i64;
+        Ok(build_block_badge_type(total, heights))
+    }
+
+    /// Block heights this user won (their share solved the block). Sourced from
+    /// the `blocks` table where `username` is the winning address.
+    pub(crate) async fn compute_block_winner_heights(&self, username: &str) -> Result<Vec<i32>> {
+        sqlx::query_scalar::<_, i32>(
+            "
+            SELECT blockheight
+            FROM blocks
+            WHERE username = $1 AND blockheight > 0
+            ORDER BY blockheight ASC
+            ",
+        )
+        .bind(username)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))
+    }
+
+    /// Number of loyalty instances: one per `LOYALTY_BLOCKS_PER_INSTANCE` blocks
+    /// the user has submitted a share in (`account_metadata.data.block_count`).
+    pub(crate) async fn compute_loyalty_count(&self, username: &str) -> Result<i64> {
+        let block_count: Option<i64> = sqlx::query_scalar(
+            "
+            SELECT (m.data->>'block_count')::bigint
+            FROM accounts a
+            LEFT JOIN account_metadata m ON a.id = m.account_id
+            WHERE a.username = $1
+            ",
+        )
+        .bind(username)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))?
+        .flatten();
+
+        Ok(block_count.unwrap_or(0) / LOYALTY_BLOCKS_PER_INSTANCE)
+    }
+
+    /// Compute the full badge payload for a user and cache it into
+    /// `account_metadata.data.badges`. Returns `None` when the account does not
+    /// exist. The shallow JSONB `||` merge preserves sibling keys such as
+    /// `block_count`/`highest_blockheight`. Externally-sourced badges (refinery,
+    /// dispenser) are best-effort: on a fetch failure the previously cached
+    /// value for that badge is carried forward, so a transient outage of the
+    /// Router/guac never makes an earned badge disappear from a profile.
+    pub(crate) async fn compute_and_store_badges(
+        &self,
+        username: &str,
+    ) -> Result<Option<BadgesPayload>> {
+        let row: Option<(i64, Option<serde_json::Value>)> = sqlx::query_as(
+            "
+            SELECT a.id, m.data->'badges' AS badges
+            FROM accounts a
+            LEFT JOIN account_metadata m ON a.id = m.account_id
+            WHERE a.username = $1
+            ",
+        )
+        .bind(username)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))?;
+
+        let Some((account_id, previous_raw)) = row else {
+            return Ok(None);
+        };
+
+        // Best-effort: an unparseable or absent previous payload just means
+        // there is nothing to carry forward.
+        let previous: Option<BadgesPayload> =
+            previous_raw.and_then(|raw| serde_json::from_value(raw).ok());
+
+        let mut types = std::collections::HashMap::new();
+
+        types.insert(
+            BLOCK_BADGE_ID.to_string(),
+            self.compute_block_badges(username).await?,
+        );
+        types.insert(
+            BLOCK_WINNER_BADGE_ID.to_string(),
+            build_unique_badge(self.compute_block_winner_heights(username).await?),
+        );
+        types.insert(
+            LOYALTY_BADGE_ID.to_string(),
+            build_bucket_badge(self.compute_loyalty_count(username).await?),
+        );
+
+        // Carry the last known value forward when an external source is
+        // unreachable, so an outage degrades to "stale" rather than "missing".
+        let carry_forward = |id: &str, types: &mut std::collections::HashMap<String, _>| {
+            if let Some(prev) = previous.as_ref().and_then(|p| p.types.get(id)) {
+                types.insert(id.to_string(), prev.clone());
+            }
+        };
+
+        match self.external.refinery_count(username).await {
+            Ok(Some(count)) => {
+                types.insert(REFINERY_BADGE_ID.to_string(), build_bucket_badge(count));
+            }
+            Ok(None) => {}
+            Err(e) => {
+                warn!("Refinery badge fetch failed for {username}, keeping cached value: {e}");
+                carry_forward(REFINERY_BADGE_ID, &mut types);
+            }
+        }
+
+        match self.external.dispenser_count(username).await {
+            Ok(Some(count)) => {
+                types.insert(DISPENSER_BADGE_ID.to_string(), build_bucket_badge(count));
+            }
+            Ok(None) => {}
+            Err(e) => {
+                warn!("Dispenser badge fetch failed for {username}, keeping cached value: {e}");
+                carry_forward(DISPENSER_BADGE_ID, &mut types);
+            }
+        }
+
+        let (source_tip, source_blocks): (i64, i64) = sqlx::query_as(
+            "SELECT COALESCE(MAX(blockheight), 0)::bigint, COUNT(*)::bigint FROM blocks",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))?;
+
+        let payload = BadgesPayload {
+            version: BADGES_VERSION,
+            computed_at: chrono::Utc::now().to_rfc3339(),
+            source_tip,
+            source_blocks,
+            types,
+        };
+
+        let data = serde_json::json!({ "badges": serde_json::to_value(&payload)? });
+
+        sqlx::query(
+            "
+            INSERT INTO account_metadata (account_id, data, created_at, updated_at)
+            VALUES ($1, $2, NOW(), NOW())
+            ON CONFLICT (account_id) DO UPDATE
+            SET data = account_metadata.data || $2, updated_at = NOW()
+            ",
+        )
+        .bind(account_id)
+        .bind(&data)
+        .execute(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))?;
+
+        Ok(Some(payload))
+    }
+
+    /// Read the cached badge payload for an account, distinguishing a missing
+    /// account (404) from a missing/stale cache (recompute on demand).
+    ///
+    /// The cache is considered fresh only when nothing that feeds it has
+    /// changed: same schema version, same found-block fingerprint (tip + row
+    /// count, so block/winner can't have changed), same loyalty count, within
+    /// the backstop max age, and — only if external sources are configured —
+    /// within the external re-poll TTL. This avoids re-checking unchanged data
+    /// on a short timer while still bounding staleness.
+    pub(crate) async fn get_account_badges(&self, username: &str) -> Result<BadgeLookup> {
+        let row: Option<(i64, Option<serde_json::Value>, i64, i64, i64)> = sqlx::query_as(
+            "
+            SELECT
+                a.id,
+                m.data->'badges' AS badges,
+                COALESCE((m.data->>'block_count')::bigint, 0) AS block_count,
+                (SELECT COALESCE(MAX(blockheight), 0)::bigint FROM blocks) AS tip,
+                (SELECT COUNT(*)::bigint FROM blocks) AS blocks
+            FROM accounts a
+            LEFT JOIN account_metadata m ON a.id = m.account_id
+            WHERE a.username = $1
+            ",
+        )
+        .bind(username)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))?;
+
+        let Some((_id, badges, block_count, tip, blocks)) = row else {
+            return Ok(BadgeLookup::NoAccount);
+        };
+
+        let Some(badges) = badges else {
+            return Ok(BadgeLookup::Stale);
+        };
+
+        let external_configured = self.external.is_configured();
+        let current_loyalty = block_count / LOYALTY_BLOCKS_PER_INSTANCE;
+
+        match serde_json::from_value::<BadgesPayload>(badges) {
+            Ok(payload)
+                if payload.version == BADGES_VERSION
+                    && payload.source_tip == tip
+                    && payload.source_blocks == blocks
+                    && payload.types.get(LOYALTY_BADGE_ID).map(|t| t.total)
+                        == Some(current_loyalty)
+                    && payload_within_max_age(&payload.computed_at)
+                    && (!external_configured || payload_is_fresh(&payload.computed_at)) =>
+            {
+                Ok(BadgeLookup::Cached(payload))
+            }
+            _ => Ok(BadgeLookup::Stale),
+        }
     }
 
     pub(crate) async fn refresh_current_round_participation(&self) -> Result<()> {
