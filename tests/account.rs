@@ -33,12 +33,12 @@ impl TestAccount {
     }
 
     pub fn sign_update(&self, address: String, ln_address: &str) -> String {
-        sign_simple_encoded(&address, ln_address, self.private_key.to_wif().as_str()).unwrap()
+        sign_simple_encoded(&address, ln_address, &[self.private_key.to_wif()], None).unwrap()
     }
 
     pub fn sign_metadata(&self, address: &str, metadata: &serde_json::Value) -> String {
         let message = serde_json::to_string(metadata).unwrap();
-        sign_simple_encoded(address, &message, self.private_key.to_wif().as_str()).unwrap()
+        sign_simple_encoded(address, &message, &[self.private_key.to_wif()], None).unwrap()
     }
 
     pub fn sign_update_legacy(&self, ln_address: &str) -> Result<String, Error> {
@@ -456,19 +456,79 @@ async fn account_signature_invalid() {
     setup_test_schema(db_url.clone()).await.unwrap();
 
     let test_account = TestAccount::new();
+    let other_account = TestAccount::new();
     let ln_address = "newuser@getalby.com";
-    let signature = "invalid signature".to_string();
 
-    let update_request = AccountUpdate {
-        btc_address: test_account.native_segwit_address.clone(),
-        ln_address: ln_address.to_string(),
-        signature,
-    };
+    async fn case(server: &TestServer, btc_address: &str, signature: String) {
+        let response: Response = server
+            .post_json_raw(
+                "/account/update",
+                &AccountUpdate {
+                    btc_address: btc_address.to_string(),
+                    ln_address: "newuser@getalby.com".to_string(),
+                    signature,
+                },
+            )
+            .await;
 
-    let response: Response = server
-        .post_json_raw("/account/update", &update_request)
-        .await;
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    case(
+        &server,
+        &test_account.native_segwit_address,
+        "invalid signature".to_string(),
+    )
+    .await;
+
+    case(
+        &server,
+        &test_account.native_segwit_address,
+        sign_simple_encoded(
+            &test_account.native_segwit_address,
+            ln_address,
+            &[other_account.private_key.to_wif()],
+            None,
+        )
+        .unwrap(),
+    )
+    .await;
+
+    let address = Address::from_str(&test_account.wrapped_segwit_address)
+        .unwrap()
+        .assume_checked();
+    let to_spend = bip322::create_to_spend(&address, ln_address).unwrap();
+    let to_sign = bip322::create_to_sign(&to_spend, None).unwrap();
+    let witness = bip322::create_message_signature_p2wpkh(
+        &to_sign,
+        &other_account.private_key,
+        &to_spend.output[0],
+        0,
+        true,
+    )
+    .unwrap();
+    let mut buffer = Vec::new();
+    witness.consensus_encode(&mut buffer).unwrap();
+
+    case(
+        &server,
+        &test_account.wrapped_segwit_address,
+        general_purpose::STANDARD.encode(buffer),
+    )
+    .await;
+
+    case(
+        &server,
+        &test_account.taproot_address,
+        sign_simple_encoded(
+            &test_account.taproot_address,
+            ln_address,
+            &[other_account.private_key.to_wif()],
+            None,
+        )
+        .unwrap(),
+    )
+    .await;
 }
 
 #[tokio::test]
