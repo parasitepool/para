@@ -1,10 +1,11 @@
 use {
     super::*,
     badges::{
-        BADGES_VERSION, BLOCK_BADGE_ID, BLOCK_WINNER_BADGE_ID, BadgeLookup, BadgesPayload,
-        DISPENSER_BADGE_ID, ExternalBadgeSources, LOYALTY_BADGE_ID, LOYALTY_BLOCKS_PER_INSTANCE,
-        REFINERY_BADGE_ID, build_block_badge_type, build_bucket_badge, build_unique_badge,
-        payload_is_fresh, payload_within_max_age,
+        AUCTION_WINNER_BADGE_ID, BADGES_VERSION, BLOCK_BADGE_ID, BLOCK_WINNER_BADGE_ID,
+        BRAVOCADO_ASSET, BRAVOCADO_BADGE_ID, BadgeLookup, BadgesPayload, DISPENSER_BADGE_ID,
+        ExternalBadgeSources, LOYALTY_BADGE_ID, LOYALTY_BLOCKS_PER_INSTANCE, MINER_ASSET,
+        MINER_BADGE_ID, REFINERY_BADGE_ID, build_block_badge_type, build_bucket_badge,
+        build_unique_badge, payload_is_fresh, payload_within_max_age,
     },
     rounds::{Round, RoundParticipant},
 };
@@ -1151,14 +1152,43 @@ impl Database {
             }
         }
 
-        match self.external.dispenser_count(username).await {
-            Ok(Some(count)) => {
-                types.insert(DISPENSER_BADGE_ID.to_string(), build_bucket_badge(count));
+        match self.external.dispenser_assets(username).await {
+            Ok(Some(assets)) => {
+                types.insert(
+                    DISPENSER_BADGE_ID.to_string(),
+                    build_bucket_badge(assets.len() as i64),
+                );
+                // Per-asset badges for the collections that have one of their
+                // own. These are earned-or-not: collecting a second Bravocado
+                // does not stack a second medal, so the count is capped at one.
+                for (badge_id, asset) in [
+                    (BRAVOCADO_BADGE_ID, BRAVOCADO_ASSET),
+                    (MINER_BADGE_ID, MINER_ASSET),
+                ] {
+                    let earned = i64::from(assets.contains_key(asset));
+                    types.insert(badge_id.to_string(), build_bucket_badge(earned));
+                }
             }
             Ok(None) => {}
             Err(e) => {
                 warn!("Dispenser badge fetch failed for {username}, keeping cached value: {e}");
-                carry_forward(DISPENSER_BADGE_ID, &mut types);
+                for id in [DISPENSER_BADGE_ID, BRAVOCADO_BADGE_ID, MINER_BADGE_ID] {
+                    carry_forward(id, &mut types);
+                }
+            }
+        }
+
+        match self.external.auction_wins(username).await {
+            Ok(Some(count)) => {
+                types.insert(
+                    AUCTION_WINNER_BADGE_ID.to_string(),
+                    build_bucket_badge(count),
+                );
+            }
+            Ok(None) => {}
+            Err(e) => {
+                warn!("Auction badge fetch failed for {username}, keeping cached value: {e}");
+                carry_forward(AUCTION_WINNER_BADGE_ID, &mut types);
             }
         }
 

@@ -1301,6 +1301,7 @@ struct BadgesPayload {
 #[derive(Deserialize, Debug)]
 struct BadgeDefinition {
     id: String,
+    stacking: String,
     unique_cap: Option<i64>,
 }
 
@@ -1334,7 +1335,7 @@ async fn test_badges_three_unique_no_bucket() {
     seed_block_participation(&server, &[10, 20, 30]).await;
 
     let payload: BadgesPayload = server.get_json_async("/badges/foo").await;
-    assert_eq!(payload.version, 1);
+    assert_eq!(payload.version, 2);
 
     let block = payload.types.get("block").unwrap();
     assert_eq!(block.total, 3);
@@ -1404,6 +1405,15 @@ async fn test_badges_catalog() {
     let catalog: Vec<BadgeDefinition> = server.get_json_async("/badges").await;
     let block = catalog.iter().find(|d| d.id == "block").unwrap();
     assert_eq!(block.unique_cap, Some(3));
+
+    for id in ["bravocado", "miner", "auction_winner"] {
+        let badge = catalog
+            .iter()
+            .find(|d| d.id == id)
+            .unwrap_or_else(|| panic!("{id} badge missing from the catalog"));
+        assert_eq!(badge.stacking, "bucket");
+        assert_eq!(badge.unique_cap, None);
+    }
 }
 
 /// Set `account_metadata.data.block_count` for a user (loyalty badge source).
@@ -1455,8 +1465,8 @@ async fn test_badges_loyalty() {
     insert_test_account_with_diff(db_url.clone(), "foo", None, 0)
         .await
         .unwrap();
-    // 25_000 blocks => floor(25000 / 10000) = 2 loyalty instances.
-    set_block_count(db_url.clone(), "foo", 25_000).await;
+    // 45_000 blocks => floor(45000 / 21000) = 2 loyalty instances.
+    set_block_count(db_url.clone(), "foo", 45_000).await;
 
     let payload: BadgesPayload = server.get_json_async("/badges/foo").await;
     let loyalty = payload.types.get("loyalty").unwrap();
@@ -1545,6 +1555,111 @@ async fn seed_cached_badges(database_url: String, username: &str, badges: serde_
     .await
     .unwrap();
     pool.close().await;
+}
+
+/// Minimal stand-in for the guac dispenser, serving the three endpoints the
+/// badge fetcher reads. Returns the base URL to pass as `--guac-url`.
+async fn spawn_mock_guac(
+    assigned_utxos: serde_json::Value,
+    tiers: serde_json::Value,
+    auctions_won: serde_json::Value,
+) -> String {
+    use axum::{Json, Router, extract::Path as AxumPath, routing::get};
+
+    let eligibility = serde_json::json!({ "assigned_utxos": assigned_utxos });
+
+    let app = Router::new()
+        .route(
+            "/eligibility/{username}",
+            get(move |AxumPath(_): AxumPath<String>| {
+                let body = eligibility.clone();
+                async move { Json(body) }
+            }),
+        )
+        .route(
+            "/tiers",
+            get(move || {
+                let body = tiers.clone();
+                async move { Json(body) }
+            }),
+        )
+        .route(
+            "/auctions/won/{address}",
+            get(move |AxumPath(_): AxumPath<String>| {
+                let body = auctions_won.clone();
+                async move { Json(body) }
+            }),
+        );
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    format!("http://{addr}")
+}
+
+/// The dispenser-sourced badges: distinct asset types (`dispenser`), the
+/// per-asset `bravocado`/`miner` badges, and auctions won.
+#[tokio::test]
+async fn test_badges_dispenser_assets_and_auction_wins() {
+    let guac = spawn_mock_guac(
+        // Two bravocados (across two tiers of the same asset) and one miner.
+        serde_json::json!({
+            "1T": ["aa:0"],
+            "10T": ["bb:0"],
+            "100T": ["cc:0"],
+        }),
+        serde_json::json!([
+            { "name": "1T", "threshold": 1, "asset": "bravocado" },
+            { "name": "10T", "threshold": 10, "asset": "bravocado" },
+            { "name": "100T", "threshold": 100, "asset": "miner" },
+        ]),
+        serde_json::json!([{ "id": "auction-0" }]),
+    )
+    .await;
+
+    let server = TestServer::spawn_with_db_args(format!("--guac-url {guac}")).await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+    insert_test_account_with_diff(db_url.clone(), "foo", None, 0)
+        .await
+        .unwrap();
+
+    let payload: BadgesPayload = server.get_json_async("/badges/foo").await;
+
+    // Two distinct asset types collected.
+    assert_eq!(payload.types.get("dispenser").unwrap().total, 2);
+    // Two bravocados, but the badge is earned-or-not: a single medal.
+    assert_eq!(payload.types.get("bravocado").unwrap().total, 1);
+    assert_eq!(payload.types.get("miner").unwrap().total, 1);
+    assert_eq!(payload.types.get("auction_winner").unwrap().total, 1);
+}
+
+/// An account that has collected nothing from the dispenser and won no auction
+/// still gets the badge entries, at zero, so the client renders nothing.
+#[tokio::test]
+async fn test_badges_dispenser_assets_absent_are_zero() {
+    let guac = spawn_mock_guac(
+        serde_json::json!({}),
+        serde_json::json!([{ "name": "1T", "threshold": 1, "asset": "bravocado" }]),
+        serde_json::json!([]),
+    )
+    .await;
+
+    let server = TestServer::spawn_with_db_args(format!("--guac-url {guac}")).await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+    insert_test_account_with_diff(db_url.clone(), "foo", None, 0)
+        .await
+        .unwrap();
+
+    let payload: BadgesPayload = server.get_json_async("/badges/foo").await;
+
+    assert_eq!(payload.types.get("bravocado").unwrap().total, 0);
+    assert_eq!(payload.types.get("miner").unwrap().total, 0);
+    assert_eq!(payload.types.get("auction_winner").unwrap().total, 0);
 }
 
 #[tokio::test]

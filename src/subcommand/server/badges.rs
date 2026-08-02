@@ -7,17 +7,25 @@ pub(crate) const BLOCK_UNIQUE_CAP: i64 = 3;
 /// Version of the cached badge payload written into `account_metadata.data`.
 /// Bump this when the payload shape or computation changes so stale caches are
 /// recomputed on the next read.
-pub(crate) const BADGES_VERSION: u32 = 1;
+pub(crate) const BADGES_VERSION: u32 = 2;
 
 /// A loyalty badge instance is earned per this many blocks the user has
 /// submitted a share in (`account_metadata.data.block_count`).
-pub(crate) const LOYALTY_BLOCKS_PER_INSTANCE: i64 = 10_000;
+pub(crate) const LOYALTY_BLOCKS_PER_INSTANCE: i64 = 21_000;
 
 pub(crate) const BLOCK_BADGE_ID: &str = "block";
 pub(crate) const BLOCK_WINNER_BADGE_ID: &str = "block_winner";
 pub(crate) const LOYALTY_BADGE_ID: &str = "loyalty";
 pub(crate) const REFINERY_BADGE_ID: &str = "refinery";
 pub(crate) const DISPENSER_BADGE_ID: &str = "dispenser";
+pub(crate) const BRAVOCADO_BADGE_ID: &str = "bravocado";
+pub(crate) const MINER_BADGE_ID: &str = "miner";
+pub(crate) const AUCTION_WINNER_BADGE_ID: &str = "auction_winner";
+
+/// Dispenser asset registry names that have a badge of their own. Matched
+/// case-insensitively against the asset a claimed slot was drawn from.
+pub(crate) const BRAVOCADO_ASSET: &str = "bravocado";
+pub(crate) const MINER_ASSET: &str = "miner";
 
 /// Stacking policies (the `kind` field on `BadgeType`).
 pub(crate) const KIND_UNIQUE_THEN_BUCKET: &str = "unique_then_bucket";
@@ -206,6 +214,36 @@ pub(crate) fn badge_catalog_definitions() -> Vec<BadgeDefinition> {
             stacking: KIND_BUCKET.to_string(),
             unique_cap: None,
         },
+        BadgeDefinition {
+            id: BRAVOCADO_BADGE_ID.to_string(),
+            name: "Bravocado".to_string(),
+            description: "Awarded for collecting at least one Bravocado from the dispenser. A \
+                          single medal — further Bravocados do not stack."
+                .to_string(),
+            icon: "mushroom".to_string(),
+            stacking: KIND_BUCKET.to_string(),
+            unique_cap: None,
+        },
+        BadgeDefinition {
+            id: MINER_BADGE_ID.to_string(),
+            name: "Miner".to_string(),
+            description: "Awarded for collecting at least one Miner from the dispenser. A single \
+                          medal — further Miners do not stack."
+                .to_string(),
+            icon: "rig".to_string(),
+            stacking: KIND_BUCKET.to_string(),
+            unique_cap: None,
+        },
+        BadgeDefinition {
+            id: AUCTION_WINNER_BADGE_ID.to_string(),
+            name: "Auction Winner".to_string(),
+            description: "Awarded for winning an auction in the dispenser's auction house. Stacks \
+                          once per auction won."
+                .to_string(),
+            icon: "gavel".to_string(),
+            stacking: KIND_BUCKET.to_string(),
+            unique_cap: None,
+        },
     ]
 }
 
@@ -365,9 +403,15 @@ impl ExternalBadgeSources {
         Ok(Some(count))
     }
 
-    /// Number of DISTINCT dispenser asset types this address has been assigned.
+    /// Dispenser assets this address has been assigned, keyed by lower-cased
+    /// asset name with the number of units earned of each. The map's length is
+    /// the number of distinct asset types (the `dispenser` badge); individual
+    /// entries back the per-asset badges (`bravocado`, `miner`).
     /// `Ok(None)` when the guac source is not configured.
-    pub(crate) async fn dispenser_count(&self, address: &str) -> Result<Option<i64>> {
+    pub(crate) async fn dispenser_assets(
+        &self,
+        address: &str,
+    ) -> Result<Option<std::collections::HashMap<String, i64>>> {
         let Some(guac) = &self.guac else {
             return Ok(None);
         };
@@ -388,43 +432,77 @@ impl ExternalBadgeSources {
             .get_json(format!("{}/tiers", guac.base()), guac)
             .await?;
 
-        // Map tier name -> asset name so multiple tiers drawing from the same
-        // asset only count once.
-        let mut tier_to_asset: std::collections::HashMap<String, String> =
-            std::collections::HashMap::new();
-        if let Some(tiers) = tiers.as_array() {
-            for tier in tiers {
-                if let (Some(name), Some(asset)) = (
-                    tier.get("name").and_then(|v| v.as_str()),
-                    tier.get("asset").and_then(|v| v.as_str()),
-                ) {
-                    tier_to_asset.insert(name.to_string(), asset.to_string());
-                }
-            }
-        }
-
-        let mut assets: std::collections::HashSet<String> = std::collections::HashSet::new();
-        if let Some(assigned) = eligibility
-            .get("assigned_utxos")
-            .and_then(|v| v.as_object())
-        {
-            for (tier, outpoints) in assigned {
-                let has_any = outpoints.as_array().is_some_and(|list| !list.is_empty());
-                if !has_any {
-                    continue;
-                }
-                // Overrides and any tier without an asset mapping count under
-                // their own key.
-                let asset = tier_to_asset
-                    .get(tier)
-                    .cloned()
-                    .unwrap_or_else(|| tier.clone());
-                assets.insert(asset);
-            }
-        }
-
-        Ok(Some(assets.len() as i64))
+        Ok(Some(assigned_asset_counts(&eligibility, &tiers)))
     }
+
+    /// Number of auctions this address has WON (settled auctions whose winning
+    /// bid it placed). `Ok(None)` when the guac source is not configured.
+    pub(crate) async fn auction_wins(&self, address: &str) -> Result<Option<i64>> {
+        let Some(guac) = &self.guac else {
+            return Ok(None);
+        };
+
+        // Percent-encode: `address` is caller-supplied and must not be able to
+        // escape this path segment (e.g. `..%2F`) into other guac endpoints.
+        let won = self
+            .get_json(
+                format!(
+                    "{}/auctions/won/{}",
+                    guac.base(),
+                    urlencoding::encode(address)
+                ),
+                guac,
+            )
+            .await?;
+
+        Ok(Some(won.as_array().map(|a| a.len() as i64).unwrap_or(0)))
+    }
+}
+
+/// Fold guac's `/eligibility/{address}` and `/tiers` responses into a map of
+/// lower-cased asset name -> units assigned to that account. Tiers drawing from
+/// the same asset are merged, so a user holding two tiers of one asset has one
+/// entry with both units. Pure so it can be unit-tested without guac running.
+pub(crate) fn assigned_asset_counts(
+    eligibility: &serde_json::Value,
+    tiers: &serde_json::Value,
+) -> std::collections::HashMap<String, i64> {
+    // Map tier name -> asset name so multiple tiers drawing from the same
+    // asset only count once.
+    let mut tier_to_asset: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    if let Some(tiers) = tiers.as_array() {
+        for tier in tiers {
+            if let (Some(name), Some(asset)) = (
+                tier.get("name").and_then(|v| v.as_str()),
+                tier.get("asset").and_then(|v| v.as_str()),
+            ) {
+                tier_to_asset.insert(name.to_string(), asset.to_lowercase());
+            }
+        }
+    }
+
+    let mut assets: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    if let Some(assigned) = eligibility
+        .get("assigned_utxos")
+        .and_then(|v| v.as_object())
+    {
+        for (tier, outpoints) in assigned {
+            let units = outpoints.as_array().map(|list| list.len()).unwrap_or(0) as i64;
+            if units == 0 {
+                continue;
+            }
+            // Overrides and any tier without an asset mapping count under
+            // their own key.
+            let asset = tier_to_asset
+                .get(tier)
+                .cloned()
+                .unwrap_or_else(|| tier.to_lowercase());
+            *assets.entry(asset).or_insert(0) += units;
+        }
+    }
+
+    assets
 }
 
 /// Age in seconds of a cached payload, or `None` if the timestamp is unparseable.
@@ -483,6 +561,46 @@ mod tests {
         assert_eq!(badge.total, 4);
         assert_eq!(badge.unique.len(), 3);
         assert_eq!(badge.bucket.count, 1);
+    }
+
+    /// Tiers drawing from the same asset merge, empty tiers are ignored, and a
+    /// tier with no asset mapping (e.g. an override) counts under its own name.
+    #[test]
+    fn asset_counts_merge_tiers_and_skip_empty() {
+        let tiers = serde_json::json!([
+            { "name": "1T", "asset": "Bravocado" },
+            { "name": "10T", "asset": "bravocado" },
+            { "name": "100T", "asset": "miner" },
+            { "name": "1000T", "asset": "default" },
+        ]);
+        let eligibility = serde_json::json!({
+            "assigned_utxos": {
+                "1T": ["a:0", "b:1"],
+                "10T": ["c:0"],
+                "100T": ["d:0"],
+                "1000T": [],
+                "override": ["e:0"],
+            }
+        });
+
+        let assets = assigned_asset_counts(&eligibility, &tiers);
+
+        assert_eq!(assets.get(BRAVOCADO_ASSET), Some(&3));
+        assert_eq!(assets.get(MINER_ASSET), Some(&1));
+        assert_eq!(assets.get("override"), Some(&1));
+        assert_eq!(assets.get("default"), None);
+        // Distinct types (the `dispenser` badge count): bravocado, miner, override.
+        assert_eq!(assets.len(), 3);
+    }
+
+    #[test]
+    fn asset_counts_are_empty_without_assignments() {
+        let assets = assigned_asset_counts(
+            &serde_json::json!({ "assigned_utxos": {} }),
+            &serde_json::json!([]),
+        );
+        assert!(assets.is_empty());
+        assert_eq!(assets.get(BRAVOCADO_ASSET), None);
     }
 
     #[test]
