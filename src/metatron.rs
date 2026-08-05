@@ -293,6 +293,10 @@ impl Metatron {
         self.orders.insert(order_id, OrderSlot::with_stats(stats));
     }
 
+    pub(crate) fn remove_order(&self, order_id: u32) {
+        self.orders.remove(&order_id);
+    }
+
     pub(crate) fn persist(
         &self,
         orders: &[(u32, store::entry::OrderEntry)],
@@ -302,7 +306,10 @@ impl Metatron {
 
         let txn = self.store.begin()?;
 
-        txn.write_orders(orders)?;
+        for (id, order) in orders {
+            txn.insert_order(*id, order)?;
+        }
+
         txn.merge_wallet(wallet_delta)?;
         txn.write_users(&self.snapshot_users())?;
         txn.write_blocks(&self.blocks.read())?;

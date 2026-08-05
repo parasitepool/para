@@ -267,28 +267,33 @@ impl Wallet {
         self.inner.lock().latest_checkpoint().height()
     }
 
+    pub(crate) fn received(&self, derivation_index: u32) -> Amount {
+        let inner = self.inner.lock();
+
+        external_txouts(&inner, derivation_index)
+            .map(|txout| txout.txout.value)
+            .sum()
+    }
+
     pub(crate) fn received_by_deadline(
         &self,
         derivation_index: u32,
         deadline_height: u32,
-    ) -> (Amount, Amount) {
+    ) -> Amount {
         let inner = self.inner.lock();
-        let mut total = Amount::ZERO;
-        let mut confirmed_by_deadline = Amount::ZERO;
+        let mut confirmed = Amount::ZERO;
 
         for txout in external_txouts(&inner, derivation_index) {
-            total += txout.txout.value;
-
             if txout
                 .chain_position
                 .confirmation_height_upper_bound()
                 .is_some_and(|height| height <= deadline_height)
             {
-                confirmed_by_deadline += txout.txout.value;
+                confirmed += txout.txout.value;
             }
         }
 
-        (total, confirmed_by_deadline)
+        confirmed
     }
 
     pub(crate) fn txids_by_derivation_index(&self, derivation_index: u32) -> Vec<Txid> {
@@ -429,6 +434,12 @@ impl Wallet {
         inner
             .apply_block_connected_to(&block, previous.height + 1, previous)
             .unwrap();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_evict_tx(&self, tx: &Transaction) {
+        let mut inner = self.inner.lock();
+        inner.apply_evicted_txs([(tx.compute_txid(), 2)]);
     }
 
     #[cfg(test)]

@@ -361,6 +361,21 @@ impl OrderSummary {
             best_share: stats.best_share,
         }
     }
+
+    pub(crate) fn from_entry(id: u32, entry: &entry::OrderEntry, now: Instant) -> Result<Self> {
+        let stats = Stats::from_entry(entry.stats.clone())?;
+        Ok(Self {
+            id,
+            status: entry.status,
+            review: entry.review,
+            endpoint: entry.upstream_target.endpoint().to_string(),
+            username: entry.upstream_target.username().to_string(),
+            requested_hash_days: entry.bucket.as_ref().map(|bucket| bucket.target),
+            hashrate: stats.hashrate_1m(now),
+            delivered_hash_days: (stats.accepted_work + stats.rejected_work).to_hash_days(),
+            best_share: stats.best_share,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -416,5 +431,30 @@ impl OrderDetail {
                 .map(|session| SessionDetail::from_session(session.as_ref(), now))
                 .collect(),
         }
+    }
+
+    pub(crate) fn from_entry(id: u32, entry: &entry::OrderEntry, txids: Vec<Txid>) -> Result<Self> {
+        let now = Instant::now();
+        let bucket = entry.bucket.as_ref();
+        let stats = Stats::from_entry(entry.stats.clone())?;
+
+        Ok(Self {
+            id,
+            status: entry.status,
+            review: entry.review,
+            upstream_target: entry.upstream_target.clone(),
+            requested_hash_days: bucket.map(|bucket| bucket.target),
+            hash_price: bucket.map(|bucket| {
+                HashPrice::from_total(Amount::from_sat(bucket.amount_sat), bucket.target)
+            }),
+            payment_address: bucket.map(|bucket| bucket.address.clone()),
+            payment_amount: bucket.map(|bucket| Amount::from_sat(bucket.amount_sat)),
+            txids,
+            created_at: entry.created_at_secs as u64,
+            created_at_height: bucket.map(|bucket| bucket.created_at_height),
+            upstream: MiningStats::from_snapshot(&stats, now),
+            downstream: MiningStats::from_snapshot(&Stats::new(), now),
+            sessions: Vec::new(),
+        })
     }
 }

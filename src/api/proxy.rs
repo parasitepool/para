@@ -35,7 +35,7 @@ async fn home(Extension(chain): Extension<Chain>, auth: NavbarAuth) -> Response 
 async fn status(State(router): State<Arc<Router>>) -> ServerResult<Response> {
     let now = Instant::now();
     let metatron = router.metatron();
-    let orders = router.orders();
+    let orders = router.live_orders();
 
     let order = orders
         .first()

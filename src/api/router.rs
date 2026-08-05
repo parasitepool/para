@@ -60,29 +60,42 @@ async fn order_detail(
     State(router): State<Arc<Router>>,
     Path(id): Path<u32>,
 ) -> ServerResult<Response> {
-    let order = router
-        .get_order(id)
-        .ok_or_not_found(|| format!("Order {id}"))?;
-
     let metatron = router.metatron();
 
-    let txids = order
+    let txids_for = |derivation_index: u32| {
+        router
+            .wallet()
+            .map(|wallet| wallet.txids_by_derivation_index(derivation_index))
+            .unwrap_or_default()
+    };
+
+    if let Some(order) = router.get_order(id) {
+        let txids = order
+            .bucket
+            .as_ref()
+            .map(|bucket| txids_for(bucket.payment.derivation_index))
+            .unwrap_or_default();
+
+        return Ok(Json(OrderDetail::from_order(
+            &order,
+            &metatron,
+            Instant::now(),
+            txids,
+        ))
+        .into_response());
+    }
+
+    let entry = router
+        .cold_order(id)
+        .ok_or_not_found(|| format!("Order {id}"))?;
+
+    let txids = entry
         .bucket
         .as_ref()
-        .and_then(|bucket| {
-            router
-                .wallet()
-                .map(|wallet| wallet.txids_by_derivation_index(bucket.payment.derivation_index))
-        })
+        .map(|bucket| txids_for(bucket.derivation_index))
         .unwrap_or_default();
 
-    Ok(Json(OrderDetail::from_order(
-        &order,
-        &metatron,
-        Instant::now(),
-        txids,
-    ))
-    .into_response())
+    Ok(Json(OrderDetail::from_entry(id, &entry, txids)?).into_response())
 }
 
 async fn add_order(
@@ -165,8 +178,13 @@ impl OrdersQuery {
     }
 
     fn matches(&self, order: &Order) -> bool {
+        let payment_address = order
+            .bucket
+            .as_ref()
+            .map(|bucket| bucket.payment.address.as_unchecked());
+
         if let Some(address) = &self.address
-            && !order_matches_address(order, address)
+            && !matches_address(&order.upstream_target, payment_address, address)
         {
             return false;
         }
@@ -182,7 +200,35 @@ impl OrdersQuery {
         }
 
         if let Some(search) = &self.search
-            && !order_matches_search(order, search)
+            && !matches_search(order.id, &order.upstream_target, payment_address, search)
+        {
+            return false;
+        }
+
+        true
+    }
+
+    fn matches_entry(&self, id: u32, entry: &entry::OrderEntry) -> bool {
+        let payment_address = entry.bucket.as_ref().map(|bucket| &bucket.address);
+
+        if let Some(address) = &self.address
+            && !matches_address(&entry.upstream_target, payment_address, address)
+        {
+            return false;
+        }
+
+        if !self.statuses.is_empty() && !self.statuses.contains(&entry.status) {
+            return false;
+        }
+
+        if let Some(review) = self.review
+            && entry.review != review
+        {
+            return false;
+        }
+
+        if let Some(search) = &self.search
+            && !matches_search(id, &entry.upstream_target, payment_address, search)
         {
             return false;
         }
@@ -217,25 +263,26 @@ fn parse_review(value: &str) -> ServerResult<Review> {
     }
 }
 
-fn order_matches_address(order: &Order, address: &Address<NetworkUnchecked>) -> bool {
-    order.upstream_target.username().address() == address
-        || order
-            .bucket
-            .as_ref()
-            .is_some_and(|bucket| bucket.payment.address.as_unchecked() == address)
+fn matches_address(
+    upstream_target: &UpstreamTarget,
+    payment_address: Option<&Address<NetworkUnchecked>>,
+    address: &Address<NetworkUnchecked>,
+) -> bool {
+    upstream_target.username().address() == address || payment_address == Some(address)
 }
 
-fn order_matches_search(order: &Order, search: &str) -> bool {
-    order.id.to_string().contains(search)
-        || order
-            .upstream_target
-            .to_string()
-            .to_lowercase()
-            .contains(search)
-        || order.bucket.as_ref().is_some_and(|bucket| {
-            bucket
-                .payment
-                .address
+fn matches_search(
+    id: u32,
+    upstream_target: &UpstreamTarget,
+    payment_address: Option<&Address<NetworkUnchecked>>,
+    search: &str,
+) -> bool {
+    id.to_string().contains(search)
+        || upstream_target.to_string().to_lowercase().contains(search)
+        || payment_address.is_some_and(|address| {
+            address
+                .clone()
+                .assume_checked()
                 .to_string()
                 .to_lowercase()
                 .contains(search)
@@ -249,16 +296,35 @@ async fn list_orders(
 ) -> ServerResult<Response> {
     let now = Instant::now();
     let query = OrdersQuery::parse(raw_query.as_deref())?;
-    let orders = router
-        .orders()
-        .iter()
-        .rev()
-        .filter(|order| query.matches(order))
-        .take(query.limit.unwrap_or(usize::MAX))
-        .map(|order| OrderSummary::from_order(order, now))
-        .collect::<Vec<OrderSummary>>();
 
-    Ok(Json(orders).into_response())
+    let (live, cold) = router.order_snapshots(|id, entry| query.matches_entry(id, entry));
+
+    Ok(Json(merge_summaries(&live, cold, &query, now)).into_response())
+}
+
+fn merge_summaries(
+    live: &[Arc<Order>],
+    cold: Vec<(u32, entry::OrderEntry)>,
+    query: &OrdersQuery,
+    now: Instant,
+) -> Vec<OrderSummary> {
+    let mut orders = live
+        .iter()
+        .filter(|order| query.matches(order))
+        .map(|order| OrderSummary::from_order(order, now))
+        .collect::<Vec<_>>();
+
+    for (id, entry) in cold {
+        match OrderSummary::from_entry(id, &entry, now) {
+            Ok(summary) => orders.push(summary),
+            Err(err) => warn!("Skipping cold order {id} with invalid entry: {err:#}"),
+        }
+    }
+
+    orders.sort_by_key(|order| Reverse(order.id));
+    orders.truncate(query.limit.unwrap_or(usize::MAX));
+
+    orders
 }
 
 #[derive(Deserialize)]
@@ -372,4 +438,140 @@ async fn clear_order(
         .ok_or_not_found(|| format!("Order {id}"))?;
 
     Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_entry(status: OrderStatus) -> entry::OrderEntry {
+        entry::OrderEntry {
+            status,
+            review: Review::Clean,
+            upstream_target: "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333"
+                .parse()
+                .unwrap(),
+            bucket: Some(entry::BucketEntry {
+                target: HashDays::new(100.0).unwrap(),
+                address: "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc"
+                    .parse()
+                    .unwrap(),
+                derivation_index: 3,
+                amount_sat: 1_000,
+                created_at_height: 42,
+            }),
+            created_at_secs: 1_700_000_000.0,
+            stats: Stats::new().to_entry(Instant::now()),
+        }
+    }
+
+    #[test]
+    fn matches_entry_filters() {
+        #[track_caller]
+        fn case(raw: Option<&str>, expected: bool) {
+            let query = OrdersQuery::parse(raw).ok().unwrap();
+            assert_eq!(
+                query.matches_entry(7, &test_entry(OrderStatus::Expired)),
+                expected,
+                "query: {raw:?}",
+            );
+        }
+
+        case(None, true);
+        case(Some("status=expired"), true);
+        case(Some("status=active"), false);
+        case(Some("status=active,expired"), true);
+        case(Some("review=clean"), true);
+        case(Some("review=flagged"), false);
+        case(Some("search=bar"), true);
+        case(Some("search=baz"), false);
+        case(Some("search=7"), true);
+        case(Some("search=krrl"), true);
+        case(
+            Some("address=tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc"),
+            true,
+        );
+        case(
+            Some("address=tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx"),
+            false,
+        );
+    }
+
+    #[test]
+    fn order_detail_from_entry_maps_fields() {
+        let entry = test_entry(OrderStatus::Expired);
+        let detail = OrderDetail::from_entry(7, &entry, Vec::new()).unwrap();
+
+        assert_eq!(detail.id, 7);
+        assert_eq!(detail.status, OrderStatus::Expired);
+        assert_eq!(detail.created_at, 1_700_000_000);
+        assert_eq!(detail.created_at_height, Some(42));
+        assert_eq!(detail.payment_amount, Some(Amount::from_sat(1_000)));
+        assert_eq!(
+            detail.payment_address.unwrap().assume_checked().to_string(),
+            "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc"
+        );
+        assert_eq!(detail.upstream.accepted_shares, 0);
+        assert!(detail.sessions.is_empty());
+        assert_eq!(detail.downstream.accepted_shares, 0);
+    }
+
+    #[test]
+    fn order_summary_from_entry_maps_fields() {
+        let entry = test_entry(OrderStatus::Fulfilled);
+        let summary = OrderSummary::from_entry(7, &entry, Instant::now()).unwrap();
+
+        assert_eq!(summary.id, 7);
+        assert_eq!(summary.status, OrderStatus::Fulfilled);
+        assert_eq!(summary.endpoint, "bar:3333");
+        assert_eq!(summary.requested_hash_days.unwrap().as_f64(), 100.0);
+    }
+
+    #[test]
+    fn merge_summaries_sorts_descending_and_truncates_across_tiers() {
+        let (metatron, _directory) = Metatron::test();
+        let metatron = Arc::new(metatron);
+
+        fn live_order(id: u32, metatron: &Arc<Metatron>) -> Arc<Order> {
+            let order = Order::new(
+                id,
+                "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333"
+                    .parse()
+                    .unwrap(),
+                None,
+                CancellationToken::new(),
+                metatron.clone(),
+            );
+            order.force_status(OrderStatus::Active);
+            order
+        }
+
+        let live = vec![live_order(5, &metatron), live_order(3, &metatron)];
+        let cold = vec![
+            (4, test_entry(OrderStatus::Expired)),
+            (2, test_entry(OrderStatus::Fulfilled)),
+        ];
+
+        let now = Instant::now();
+
+        let merged = merge_summaries(&live, cold.clone(), &OrdersQuery::default(), now);
+        assert_eq!(
+            merged.iter().map(|summary| summary.id).collect::<Vec<_>>(),
+            [5, 4, 3, 2],
+        );
+
+        let query = OrdersQuery {
+            limit: Some(3),
+            ..OrdersQuery::default()
+        };
+
+        let truncated = merge_summaries(&live, cold, &query, now);
+        assert_eq!(
+            truncated
+                .iter()
+                .map(|summary| summary.id)
+                .collect::<Vec<_>>(),
+            [5, 4, 3],
+        );
+    }
 }

@@ -645,7 +645,7 @@ mod tests {
             metatron.clone(),
         );
 
-        *order.status.lock() = status;
+        order.force_status(status);
 
         if status == OrderStatus::Active {
             *order.upstream.lock() = Some(Upstream::test(id, metatron.clone()));

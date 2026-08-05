@@ -157,6 +157,19 @@ impl Store {
         Ok(orders)
     }
 
+    #[cfg(test)]
+    pub(crate) fn read_order(&self, id: u32) -> Result<Option<entry::OrderEntry>> {
+        let transaction = self.db.begin_read()?;
+        let table = transaction.open_table(ORDERS)?;
+
+        table
+            .get(id)?
+            .map(|value| {
+                ciborium::from_reader(value.value()).with_context(|| format!("decode order {id}"))
+            })
+            .transpose()
+    }
+
     pub(crate) fn read_users(&self) -> Result<Vec<(Address, entry::UserEntry)>> {
         let transaction = self.db.begin_read()?;
         let table = transaction.open_table(USERS)?;
@@ -195,20 +208,6 @@ pub(crate) struct WriteTxn {
 }
 
 impl WriteTxn {
-    pub(crate) fn write_orders(&self, orders: &[(u32, entry::OrderEntry)]) -> Result {
-        let mut table = self.inner.open_table(ORDERS)?;
-        table.retain(|_, _| false)?;
-
-        for (id, order) in orders {
-            let mut bytes = Vec::with_capacity(2048);
-            ciborium::into_writer(order, &mut bytes)
-                .with_context(|| format!("encode order {id}"))?;
-            table.insert(id, bytes.as_slice())?;
-        }
-
-        Ok(())
-    }
-
     pub(crate) fn insert_order(&self, id: u32, order: &entry::OrderEntry) -> Result {
         let mut table = self.inner.open_table(ORDERS)?;
         let mut bytes = Vec::with_capacity(2048);
@@ -371,12 +370,12 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_persists_wallet_and_replaces_orders() {
+    fn snapshot_persists_wallet_and_upserts_orders() {
         let (_directory, store) = temporary_store(Chain::Regtest);
         let changeset = network_changeset(Network::Regtest);
 
         let txn = store.begin().unwrap();
-        txn.write_orders(&[(7, test_order_entry(OrderStatus::Active))])
+        txn.insert_order(7, &test_order_entry(OrderStatus::Active))
             .unwrap();
         txn.merge_wallet(&changeset).unwrap();
         txn.commit().unwrap();
@@ -388,15 +387,22 @@ mod tests {
         assert_eq!(orders[0].1.status, OrderStatus::Active);
 
         let txn = store.begin().unwrap();
-        txn.write_orders(&[(8, test_order_entry(OrderStatus::Fulfilled))])
+        txn.insert_order(7, &test_order_entry(OrderStatus::Fulfilled))
+            .unwrap();
+        txn.insert_order(8, &test_order_entry(OrderStatus::Pending))
             .unwrap();
         txn.commit().unwrap();
 
         let orders = store.read_orders().unwrap();
-        assert_eq!(orders.len(), 1);
-        assert_eq!(orders[0].0, 8);
+        assert_eq!(orders.len(), 2);
         assert_eq!(orders[0].1.status, OrderStatus::Fulfilled);
-        assert_eq!(order_entry_count(&store), 1);
+        assert_eq!(orders[1].0, 8);
+
+        assert_eq!(
+            store.read_order(7).unwrap().unwrap().status,
+            OrderStatus::Fulfilled
+        );
+        assert!(store.read_order(9).unwrap().is_none());
     }
 
     #[test]
@@ -404,7 +410,7 @@ mod tests {
         let (_directory, store) = temporary_store(Chain::Regtest);
 
         let txn = store.begin().unwrap();
-        txn.write_orders(&[(7, test_order_entry(OrderStatus::Active))])
+        txn.insert_order(7, &test_order_entry(OrderStatus::Active))
             .unwrap();
         txn.commit().unwrap();
 
@@ -423,7 +429,7 @@ mod tests {
         let (_directory, store) = temporary_store(Chain::Regtest);
 
         let txn = store.begin().unwrap();
-        txn.write_orders(&[(7, test_order_entry(OrderStatus::Active))])
+        txn.insert_order(7, &test_order_entry(OrderStatus::Active))
             .unwrap();
         txn.commit().unwrap();
 
@@ -450,7 +456,6 @@ mod tests {
         let (_directory, store) = temporary_store(Chain::Regtest);
 
         let txn = store.begin().unwrap();
-        txn.write_orders(&[]).unwrap();
         txn.merge_wallet(&ChangeSet::default()).unwrap();
         txn.commit().unwrap();
 

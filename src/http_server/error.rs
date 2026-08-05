@@ -6,6 +6,7 @@ pub(crate) enum ServerError {
     BadRequest(String),
     UnprocessableEntity(String),
     ServiceUnavailable(String),
+    TooManyRequests(String),
 }
 
 pub(crate) type ServerResult<T> = Result<T, ServerError>;
@@ -30,6 +31,9 @@ impl IntoResponse for ServerError {
             }
             Self::ServiceUnavailable(message) => {
                 (StatusCode::SERVICE_UNAVAILABLE, message).into_response()
+            }
+            Self::TooManyRequests(message) => {
+                (StatusCode::TOO_MANY_REQUESTS, message).into_response()
             }
         }
     }
@@ -59,6 +63,8 @@ impl From<RouterError> for ServerError {
             | RouterError::MissingActiveAllocator { .. } => {
                 Self::ServiceUnavailable(error.to_string())
             }
+            RouterError::OrderRateLimited { .. } => Self::TooManyRequests(error.to_string()),
+            RouterError::OrderIdExhausted => Self::Internal(error.into()),
         }
     }
 }

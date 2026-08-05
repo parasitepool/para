@@ -26,6 +26,10 @@ impl OrderStatus {
                 | OrderStatus::Expired
         )
     }
+
+    pub(crate) fn awaiting_payment(self) -> bool {
+        matches!(self, OrderStatus::Pending | OrderStatus::InMempool)
+    }
 }
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
@@ -35,6 +39,13 @@ pub enum Review {
     Clean,
     Flagged,
     Cleared,
+}
+
+#[derive(Copy, Clone)]
+pub(crate) struct Lifecycle {
+    pub(crate) status: OrderStatus,
+    pub(crate) review: Review,
+    pub(crate) dirty: bool,
 }
 
 pub struct Payment {
@@ -96,8 +107,7 @@ pub struct Order {
     pub(crate) bucket: Option<Bucket>,
     pub(crate) upstream: Mutex<Option<Arc<Upstream>>>,
     pub(crate) allocator: OnceLock<Arc<EnonceAllocator>>,
-    pub(crate) status: Mutex<OrderStatus>,
-    pub(crate) review: Mutex<Review>,
+    pub(crate) lifecycle: Mutex<Lifecycle>,
     pub(crate) created_at: Instant,
     pub(crate) cancel: CancellationToken,
     pub(crate) metatron: Arc<Metatron>,
@@ -122,8 +132,11 @@ impl Order {
             bucket,
             upstream: Mutex::new(None),
             allocator: OnceLock::new(),
-            status: Mutex::new(OrderStatus::Pending),
-            review: Mutex::new(Review::Clean),
+            lifecycle: Mutex::new(Lifecycle {
+                status: OrderStatus::Pending,
+                review: Review::Clean,
+                dirty: true,
+            }),
             created_at: now,
             cancel,
             metatron,
@@ -135,10 +148,11 @@ impl Order {
 
     pub(crate) fn to_entry(&self) -> entry::OrderEntry {
         let now = Instant::now();
+        let lifecycle = self.lifecycle();
 
         entry::OrderEntry {
-            status: self.status(),
-            review: self.review(),
+            status: lifecycle.status,
+            review: lifecycle.review,
             upstream_target: self.upstream_target.clone(),
             bucket: self.bucket.as_ref().map(|bucket| entry::BucketEntry {
                 target: bucket.target,
@@ -160,7 +174,6 @@ impl Order {
         metatron: Arc<Metatron>,
     ) -> Result<Arc<Self>> {
         let stats = Stats::from_entry(order_entry.stats)?;
-        metatron.restore_order_stats(id, stats);
 
         let bucket = order_entry
             .bucket
@@ -182,14 +195,19 @@ impl Order {
             })
             .transpose()?;
 
+        metatron.restore_order_stats(id, stats);
+
         Ok(Arc::new(Self {
             id,
             upstream_target: order_entry.upstream_target,
             bucket,
             upstream: Mutex::new(None),
             allocator: OnceLock::new(),
-            status: Mutex::new(order_entry.status),
-            review: Mutex::new(order_entry.review),
+            lifecycle: Mutex::new(Lifecycle {
+                status: order_entry.status,
+                review: order_entry.review,
+                dirty: false,
+            }),
             created_at: epoch::epoch_secs_to_instant(order_entry.created_at_secs),
             cancel,
             metatron,
@@ -258,20 +276,60 @@ impl Order {
             .for_each(|(_, cancel, _)| cancel.cancel());
     }
 
+    pub(crate) fn lifecycle(&self) -> Lifecycle {
+        *self.lifecycle.lock()
+    }
+
+    pub(crate) fn clear_dirty(&self) {
+        self.lifecycle.lock().dirty = false;
+    }
+
+    pub(crate) fn mark_dirty(&self) {
+        self.lifecycle.lock().dirty = true;
+    }
+
+    pub(crate) fn note_payment_seen(&self, seen: bool) {
+        let mut lifecycle = self.lifecycle.lock();
+
+        match (lifecycle.status, seen) {
+            (OrderStatus::Pending, true) => lifecycle.status = OrderStatus::InMempool,
+            (OrderStatus::InMempool, false) => lifecycle.status = OrderStatus::Pending,
+            _ => {}
+        }
+    }
+
+    pub(crate) fn activate(&self) -> Result {
+        let mut lifecycle = self.lifecycle.lock();
+
+        if lifecycle.status.is_terminal() {
+            bail!(
+                "order in unexpected status {:?} during activation",
+                lifecycle.status
+            );
+        }
+
+        lifecycle.status = OrderStatus::Active;
+
+        info!("Order {} activated", self.id);
+
+        Ok(())
+    }
+
     pub(crate) fn terminate(&self, status: OrderStatus) {
         if !status.is_terminal() {
             return;
         }
 
         let previous = {
-            let mut current = self.status.lock();
+            let mut lifecycle = self.lifecycle.lock();
 
-            if current.is_terminal() {
+            if lifecycle.status.is_terminal() {
                 return;
             }
 
-            let previous = *current;
-            *current = status;
+            let previous = lifecycle.status;
+            lifecycle.status = status;
+            lifecycle.dirty = true;
             previous
         };
 
@@ -284,45 +342,61 @@ impl Order {
     }
 
     #[cfg(test)]
+    pub(crate) fn force_status(&self, status: OrderStatus) {
+        self.lifecycle.lock().status = status;
+    }
+
+    #[cfg(test)]
     pub(crate) fn is_flagged(&self) -> bool {
-        *self.review.lock() == Review::Flagged
+        self.lifecycle.lock().review == Review::Flagged
     }
 
     #[cfg(test)]
     pub(crate) fn is_cleared(&self) -> bool {
-        *self.review.lock() == Review::Cleared
+        self.lifecycle.lock().review == Review::Cleared
     }
 
     pub(crate) fn review(&self) -> Review {
-        *self.review.lock()
+        self.lifecycle.lock().review
     }
 
-    pub(crate) fn set_flagged(&self) {
-        let mut review = self.review.lock();
+    pub(crate) fn set_flagged(&self) -> bool {
+        {
+            let mut lifecycle = self.lifecycle.lock();
 
-        if *review != Review::Clean {
-            return;
+            if lifecycle.review != Review::Clean {
+                return false;
+            }
+
+            lifecycle.review = Review::Flagged;
+            lifecycle.dirty = true;
         }
 
-        *review = Review::Flagged;
         warn!(
             "Order {} at {} flagged for review",
             self.id, self.upstream_target,
         );
+
+        true
     }
 
     pub(crate) fn set_cleared(&self) -> bool {
-        let mut review = self.review.lock();
+        let cleared = {
+            let mut lifecycle = self.lifecycle.lock();
 
-        if *review != Review::Flagged {
-            return false;
-        }
+            if lifecycle.review != Review::Flagged {
+                return false;
+            }
 
-        *review = Review::Cleared;
+            lifecycle.review = Review::Cleared;
+            lifecycle.dirty = true;
+
+            true
+        };
 
         info!("Order {} at {} cleared", self.id, self.upstream_target);
 
-        true
+        cleared
     }
 
     pub(crate) fn is_sink(&self) -> bool {
@@ -351,7 +425,7 @@ impl Order {
     }
 
     pub(crate) fn status(&self) -> OrderStatus {
-        *self.status.lock()
+        self.lifecycle.lock().status
     }
 
     pub(crate) fn hashrate_1m(&self, now: Instant) -> HashRate {
@@ -566,18 +640,7 @@ impl Order {
                 .set(allocator)
                 .map_err(|_| anyhow!("allocator already initialized"))?;
 
-            let mut status = self.status.lock();
-
-            if !matches!(
-                *status,
-                OrderStatus::Pending | OrderStatus::InMempool | OrderStatus::Active
-            ) {
-                bail!("order in unexpected status {:?} during activation", *status);
-            }
-
-            *status = OrderStatus::Active;
-
-            info!("Order {} activated", self.id);
+            self.activate()?;
         }
 
         *self.upstream.lock() = Some(upstream);
