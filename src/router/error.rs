@@ -34,4 +34,14 @@ pub(crate) enum RouterError {
     MissingActiveUpstream { id: u32 },
     #[snafu(display("active order {id} is missing extranonce allocator"))]
     MissingActiveAllocator { id: u32 },
+    #[snafu(display("order {id} not found"))]
+    OrderNotFound { id: u32 },
+    #[snafu(display("order {id} is not a bucket order"))]
+    NotABucketOrder { id: u32 },
+    #[snafu(display("order {id} has no confirmed unspent funds"))]
+    NoUnspentFunds { id: u32 },
+    #[snafu(display("order {id} default refund destination has the wrong network"))]
+    InvalidRefundDestination { id: u32 },
+    #[snafu(display("refund construction failed: {error:#}"))]
+    RefundConstruction { error: anyhow::Error },
 }

@@ -21,12 +21,14 @@ pub(crate) fn router(
     axum::Router::new()
         .route("/", get(home))
         .route("/order/{id}", get(order_page))
+        .route("/review", get(review_page))
         .route("/api/router/status", get(status))
         .route("/api/router/order", post(add_order))
         .route("/api/router/order/{id}", get(order_detail))
         .route("/api/router/orders", get(list_orders))
         .route("/api/router/order/{id}/cancel", post(cancel_order))
         .route("/api/router/order/{id}/clear", post(clear_order))
+        .route("/api/router/order/{id}/refund", post(refund_order))
         .route("/api/router/halt", put(set_halt))
         .route("/api/router/boost", put(set_boost))
         .route("/api/router/capacity", put(set_capacity))
@@ -49,6 +51,13 @@ async fn order_page(
     auth: NavbarAuth,
 ) -> ServerResult<Response> {
     Ok(render_page(OrderHtml, chain, auth))
+}
+
+async fn review_page(
+    Extension(chain): Extension<Chain>,
+    auth: NavbarAuth,
+) -> ServerResult<Response> {
+    Ok(render_page(ReviewHtml, chain, auth))
 }
 
 async fn status(_: ApiAuth, State(router): State<Arc<Router>>) -> ServerResult<Response> {
@@ -438,6 +447,57 @@ async fn clear_order(
         .ok_or_not_found(|| format!("Order {id}"))?;
 
     Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+#[derive(Deserialize)]
+struct RefundRequest {
+    fee_rate: Option<u64>,
+    destination: Option<Address<NetworkUnchecked>>,
+}
+
+#[derive(Serialize)]
+struct RefundResponse {
+    psbt: String,
+    destination: Address,
+    amount: Amount,
+    outpoints: Vec<OutPoint>,
+    fee_rate: u64,
+}
+
+async fn refund_order(
+    _: AdminAuth,
+    State(router): State<Arc<Router>>,
+    Extension(chain): Extension<Chain>,
+    Path(id): Path<u32>,
+    Json(request): Json<RefundRequest>,
+) -> ServerResult<Response> {
+    let destination = request
+        .destination
+        .map(|address| {
+            address
+                .require_network(chain.network())
+                .map_err(|err| ServerError::BadRequest(format!("invalid destination: {err}")))
+        })
+        .transpose()?;
+
+    let fee_rate = request
+        .fee_rate
+        .map(|rate| {
+            FeeRate::from_sat_per_vb(rate)
+                .ok_or_else(|| ServerError::BadRequest("invalid fee rate".into()))
+        })
+        .transpose()?;
+
+    let refund = router.build_refund(id, fee_rate, destination)?;
+
+    Ok(Json(RefundResponse {
+        psbt: refund.psbt.to_string(),
+        destination: refund.destination,
+        amount: refund.amount,
+        outpoints: refund.outpoints,
+        fee_rate: refund.fee_rate.to_sat_per_vb_ceil(),
+    })
+    .into_response())
 }
 
 #[cfg(test)]

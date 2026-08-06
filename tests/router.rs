@@ -1024,6 +1024,91 @@ async fn late_payment_flag_is_cleared_and_survives_restart() {
     assert_eq!(order.review, Review::Cleared);
 }
 
+#[derive(Deserialize)]
+struct RefundResponse {
+    psbt: String,
+    destination: String,
+    amount: u64,
+    outpoints: Vec<bitcoin::OutPoint>,
+    fee_rate: u64,
+}
+
+#[tokio::test]
+#[timeout(120000)]
+async fn refund_order_builds_unsigned_psbt() {
+    let bitcoind = spawn_regtest();
+    let descriptor = generate_descriptor();
+    let funding_descriptor = generate_descriptor();
+    fund_wallet(&bitcoind, &funding_descriptor).await;
+
+    let router = TestRouter::spawn(&descriptor, &bitcoind, "--tick-interval 1");
+
+    let buyer_address = fund_wallet(&bitcoind, &generate_descriptor()).await;
+
+    let (id, address, amount) = add_order(
+        &router,
+        &format!("{buyer_address}.buyer@127.0.0.1:1"),
+        HashDays::new(1e5).unwrap(),
+        current_hash_price(&router).await,
+    )
+    .await;
+
+    pay_address(&bitcoind, &funding_descriptor, &address, amount).await;
+
+    let response = timeout(Duration::from_secs(30), async {
+        loop {
+            let response = router
+                .refund_order(id, &serde_json::json!({}))
+                .await
+                .unwrap();
+
+            if response.status() == StatusCode::OK {
+                break response;
+            }
+
+            sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("refund did not become available");
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let refund: RefundResponse = response.json().await.unwrap();
+
+    assert_eq!(refund.destination, buyer_address);
+    assert!(refund.amount < amount);
+    assert_eq!(refund.outpoints.len(), 1);
+    assert_eq!(refund.fee_rate, 1);
+
+    let psbt: bitcoin::Psbt = refund.psbt.parse().unwrap();
+
+    assert_eq!(refund.amount, psbt.unsigned_tx.output[0].value.to_sat());
+
+    assert_eq!(psbt.unsigned_tx.input.len(), 1);
+    assert_eq!(
+        psbt.unsigned_tx.input[0].previous_output,
+        refund.outpoints[0],
+    );
+    assert_eq!(psbt.unsigned_tx.output.len(), 1);
+    assert_eq!(
+        psbt.unsigned_tx.output[0].script_pubkey,
+        buyer_address
+            .parse::<Address<NetworkUnchecked>>()
+            .unwrap()
+            .assume_checked()
+            .script_pubkey(),
+    );
+    assert!(psbt.inputs[0].final_script_witness.is_none());
+
+    let response = router
+        .refund_order(id + 1, &serde_json::json!({ "fee_rate": 1 }))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
 #[tokio::test]
 #[timeout(120000)]
 async fn order_survives_upstream_bounce_and_drops_sessions() {

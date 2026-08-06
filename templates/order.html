@@ -1,5 +1,5 @@
 <style>
-  #cancel-order, #clear-order {
+  #cancel-order, #refund-order, #clear-order {
     margin: 8px 0;
     width: 100%;
     background: #333;
@@ -10,7 +10,27 @@
     font: inherit;
   }
 
-  #cancel-order:hover, #clear-order:hover { background: #444; }
+  #cancel-order:hover, #refund-order:hover, #clear-order:hover { background: #444; }
+
+  #clear-order { margin-bottom: 0; }
+  #refund-order { margin-top: 0; }
+
+  #refund-result h2 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  #refund-close {
+    background: none;
+    border: none;
+    color: #888;
+    cursor: pointer;
+    font: inherit;
+    padding: 0 4px;
+  }
+
+  #refund-close:hover { color: #eee; }
 
   .confirm-overlay {
     position: fixed;
@@ -61,6 +81,36 @@
   }
 
   .confirm-modal .modal-buttons button:hover { background: #444; }
+
+  #refund-overlay .confirm-modal { text-align: left; }
+
+  #refund-overlay h2 { text-align: center; }
+
+  #refund-overlay label {
+    display: block;
+    margin-bottom: 4px;
+    color: #888;
+    font-size: 0.9em;
+  }
+
+  #refund-overlay input {
+    width: 100%;
+    background: #111;
+    border: 1px solid #444;
+    color: #eee;
+    padding: 8px 12px;
+    font: inherit;
+    box-sizing: border-box;
+    margin-bottom: 14px;
+  }
+
+  #refund-overlay input::placeholder { color: #555; }
+
+  #refund-error {
+    color: #f55;
+    font-size: 0.85em;
+    margin-bottom: 10px;
+  }
 </style>
 
 <div class="grid grid-stack">
@@ -82,6 +132,15 @@
   </div>
   <button id=cancel-order class=hidden>Cancel Order</button>
   <button id=clear-order class=hidden>Mark Cleared</button>
+  <button id=refund-order class=hidden>Build Refund PSBT</button>
+
+  <div id=refund-result class="column column-full hidden">
+    <h2>Refund PSBT<button id=refund-close title=Collapse>×</button></h2>
+    <div class=row><span>Destination</span><span id=refund-destination class=copyable></span></div>
+    <div class=row><span>Amount</span><span id=refund-amount></span></div>
+    <div class=row><span>Fee Rate</span><span id=refund-fee-rate></span></div>
+    <div class=row><span>PSBT</span><span id=refund-psbt class=copyable></span></div>
+  </div>
 
   <div class="column column-full">
     <h2>Traffic</h2>
@@ -147,6 +206,19 @@
     <div class=modal-buttons>
       <button id=clear-dismiss>Cancel</button>
       <button id=clear-confirm>Confirm</button>
+    </div>
+  </div>
+</div>
+
+<div id=refund-overlay class="confirm-overlay hidden">
+  <div class=confirm-modal>
+    <h2>Build Refund PSBT</h2>
+    <label for=refund-fee-input>Fee Rate (sat/vB)</label>
+    <input id=refund-fee-input placeholder="optional, default 1" inputmode="numeric">
+    <div id=refund-error></div>
+    <div class=modal-buttons>
+      <button id=refund-dismiss>Cancel</button>
+      <button id=refund-confirm>Confirm</button>
     </div>
   </div>
 </div>
@@ -222,7 +294,9 @@ async function refresh(signal) {
   }
 
   const terminal = TERMINAL.includes(data.status);
+  const refundOpen = !document.getElementById('refund-result').classList.contains('hidden');
   document.getElementById('cancel-order').classList.toggle('hidden', terminal);
+  document.getElementById('refund-order').classList.toggle('hidden', data.review !== 'flagged' || refundOpen);
   document.getElementById('clear-order').classList.toggle('hidden', data.review !== 'flagged');
 
   populateOrder(data);
@@ -273,6 +347,75 @@ function setupOverlay(triggerId, overlayId, dismissId, confirmId, endpoint) {
 
 setupOverlay('cancel-order', 'cancel-overlay', 'cancel-dismiss', 'cancel-confirm', 'cancel');
 setupOverlay('clear-order', 'clear-overlay', 'clear-dismiss', 'clear-confirm', 'clear');
+
+{
+  const overlay = document.getElementById('refund-overlay');
+  const input = document.getElementById('refund-fee-input');
+  const error = document.getElementById('refund-error');
+
+  document.getElementById('refund-order').addEventListener('click', () => {
+    input.value = '';
+    error.textContent = '';
+    overlay.classList.remove('hidden');
+    input.focus();
+  });
+
+  document.getElementById('refund-dismiss').addEventListener('click', () => {
+    overlay.classList.add('hidden');
+  });
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) overlay.classList.add('hidden');
+  });
+
+  document.getElementById('refund-confirm').addEventListener('click', async () => {
+    error.textContent = '';
+
+    const value = input.value.trim();
+    const body = {};
+
+    if (value !== '') {
+      const feeRate = Number(value);
+      if (!Number.isInteger(feeRate) || feeRate < 1) {
+        error.textContent = 'Fee rate must be a positive integer (sat/vB)';
+        return;
+      }
+      body.fee_rate = feeRate;
+    }
+
+    try {
+      const res = await fetch(`/api/router/order/${orderId}/refund`, withAuthOptions({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }));
+
+      if (!res.ok) {
+        const message = await res.text().catch(() => '');
+        error.textContent = message || `Error: ${res.status}`;
+        return;
+      }
+
+      const refund = await res.json();
+
+      copyable('refund-destination', truncateMiddle(refund.destination, 20, 8), refund.destination);
+      set('refund-amount', refund.amount, formatAmount);
+      set('refund-fee-rate', refund.fee_rate, v => v + ' sat/vB');
+      copyable('refund-psbt', truncateMiddle(refund.psbt, 40, 16), refund.psbt);
+
+      overlay.classList.add('hidden');
+      document.getElementById('refund-order').classList.add('hidden');
+      document.getElementById('refund-result').classList.remove('hidden');
+    } catch (e) {
+      error.textContent = e.message;
+    }
+  });
+}
+
+document.getElementById('refund-close').addEventListener('click', () => {
+  document.getElementById('refund-result').classList.add('hidden');
+  document.getElementById('refund-order').classList.remove('hidden');
+});
 
 initCopyables();
 initDelegatedCopyables('sessions-list');

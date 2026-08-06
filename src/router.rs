@@ -2,8 +2,8 @@ use {
     super::*,
     crate::{
         api::{
-            DownstreamInfo, IntentClaimCounts, MiningStats, PlacementCounts, RouterStatus,
-            UpstreamSummary,
+            DownstreamInfo, IntentClaimCounts, MiningStats, OrphanReceipt, PlacementCounts,
+            RouterStatus, UpstreamSummary,
         },
         event_sink::Event,
         generator::get_block_template,
@@ -28,10 +28,19 @@ const PAYMENT_TIMEOUT: u32 = 6;
 const EXTENDED_PAYMENT_TIMEOUT: u32 = 144;
 const MAX_ORDER_CREATIONS_PER_MINUTE: usize = 100;
 const SWEEP_INTERVAL: Duration = Duration::from_hours(1);
+const DEFAULT_REFUND_FEE_RATE: FeeRate = FeeRate::from_sat_per_kwu(250);
 
 struct RateWindow {
     start: Instant,
     count: usize,
+}
+
+pub(crate) struct Refund {
+    pub(crate) psbt: Psbt,
+    pub(crate) destination: Address,
+    pub(crate) amount: Amount,
+    pub(crate) outpoints: Vec<OutPoint>,
+    pub(crate) fee_rate: FeeRate,
 }
 
 pub(crate) struct Router {
@@ -41,6 +50,7 @@ pub(crate) struct Router {
     orders: RwLock<Orders>,
     next_id: AtomicU32,
     creation_window: Mutex<RateWindow>,
+    orphan_receipts: Mutex<BTreeMap<u32, OrphanReceipt>>,
     hash_value: AtomicU64,
     halt: AtomicBool,
     boost: AtomicBool,
@@ -78,6 +88,7 @@ impl Router {
                 start: Instant::now(),
                 count: 0,
             }),
+            orphan_receipts: Mutex::new(BTreeMap::new()),
             hash_value: AtomicU64::new(initial_hash_value.to_sats()),
             halt: AtomicBool::new(halt),
             boost: AtomicBool::new(boost),
@@ -168,6 +179,75 @@ impl Router {
 
     pub(crate) fn cold_order(&self, id: u32) -> Option<entry::OrderEntry> {
         self.orders.read().cold_entry(id).cloned()
+    }
+
+    fn refund_target(&self, id: u32) -> RouterResult<(u32, Address<NetworkUnchecked>)> {
+        if let Some(order) = self.get_order(id) {
+            let bucket = order
+                .bucket
+                .as_ref()
+                .ok_or(RouterError::NotABucketOrder { id })?;
+
+            return Ok((
+                bucket.payment.derivation_index,
+                order.upstream_target.username().address().clone(),
+            ));
+        }
+
+        let entry = self
+            .cold_order(id)
+            .ok_or(RouterError::OrderNotFound { id })?;
+
+        let bucket = entry.bucket.ok_or(RouterError::NotABucketOrder { id })?;
+
+        Ok((
+            bucket.derivation_index,
+            entry.upstream_target.username().address().clone(),
+        ))
+    }
+
+    pub(crate) fn build_refund(
+        &self,
+        id: u32,
+        fee_rate: Option<FeeRate>,
+        destination: Option<Address>,
+    ) -> RouterResult<Refund> {
+        let (derivation_index, default_destination) = self.refund_target(id)?;
+
+        let wallet = self.wallet.as_ref().ok_or(RouterError::WalletRequired)?;
+
+        if !wallet.is_synced() {
+            return Err(RouterError::WalletSyncing);
+        }
+
+        let outpoints = wallet.unspent_by_derivation_index(derivation_index);
+
+        if outpoints.is_empty() {
+            return Err(RouterError::NoUnspentFunds { id });
+        }
+
+        let destination = match destination {
+            Some(destination) => destination,
+            None => default_destination
+                .require_network(self.settings.chain().network())
+                .map_err(|_| RouterError::InvalidRefundDestination { id })?,
+        };
+
+        let fee_rate = fee_rate.unwrap_or(DEFAULT_REFUND_FEE_RATE);
+
+        let psbt = wallet
+            .build_refund_psbt(&outpoints, destination.clone(), fee_rate)
+            .map_err(|error| RouterError::RefundConstruction { error })?;
+
+        let amount = psbt.unsigned_tx.output[0].value;
+
+        Ok(Refund {
+            psbt,
+            destination,
+            amount,
+            outpoints,
+            fee_rate,
+        })
     }
 
     pub(crate) fn order_snapshots(
@@ -684,6 +764,42 @@ impl Router {
         orphans
     }
 
+    pub(crate) fn sweep_orphan_receipts(&self) {
+        let Some(wallet) = &self.wallet else {
+            return;
+        };
+
+        if !wallet.is_synced() {
+            return;
+        }
+
+        let findings = self.audit_receipts();
+
+        let height = wallet.tip();
+
+        let mut stored = self.orphan_receipts.lock();
+
+        stored.retain(|index, _| findings.iter().any(|(orphan, _)| orphan == index));
+
+        for (index, amount) in findings {
+            if let Some(receipt) = stored.get_mut(&index) {
+                receipt.amount = amount;
+            } else {
+                warn!("Received {amount} at derivation index {index} with no matching order");
+
+                stored.insert(
+                    index,
+                    OrphanReceipt {
+                        derivation_index: index,
+                        address: wallet.peek_address(index).as_unchecked().clone(),
+                        amount,
+                        first_seen_height: height,
+                    },
+                );
+            }
+        }
+    }
+
     pub(crate) fn persist(&self) -> Result {
         let mut entries = Vec::new();
         let mut candidates = Vec::new();
@@ -825,6 +941,7 @@ impl Router {
                 .is_some_and(|wallet| wallet.is_synced()),
             halt: self.halt(),
             boost: self.boost(),
+            orphan_receipts: self.orphan_receipts.lock().values().cloned().collect(),
             sessions_trimmed_1h: control_metrics.sessions_trimmed_1h,
             intents_created_1h: control_metrics.intents_created_1h,
             intents_expired_1h: control_metrics.intents_expired_1h,
@@ -894,9 +1011,7 @@ impl Router {
                     biased;
                     _ = router.cancel.cancelled() => break,
                     _ = ticker.tick() => {
-                        for (index, amount) in router.audit_receipts() {
-                            warn!("Received {amount} at derivation index {index} with no matching order");
-                        }
+                        router.sweep_orphan_receipts();
                     }
                 }
             }
@@ -1837,6 +1952,255 @@ mod tests {
             router.audit_receipts(),
             vec![(orphan.index, Amount::from_sat(1000))],
         );
+    }
+
+    #[test]
+    fn sweep_orphan_receipts_stores_first_seen_and_resolves() {
+        let router = test_router();
+        let wallet = router.wallet.clone().unwrap();
+
+        router.sweep_orphan_receipts();
+        assert!(
+            router.orphan_receipts.lock().is_empty(),
+            "wallet not synced"
+        );
+
+        wallet.mark_synced();
+
+        let orphan = wallet.test_reveal_address();
+        let tx = wallet.test_receive_unconfirmed(&orphan.address, Amount::from_sat(1000));
+        wallet.test_confirm_tx(tx);
+
+        router.sweep_orphan_receipts();
+
+        let expected = OrphanReceipt {
+            derivation_index: orphan.index,
+            address: orphan.address.as_unchecked().clone(),
+            amount: Amount::from_sat(1000),
+            first_seen_height: wallet.tip(),
+        };
+
+        assert_eq!(
+            router
+                .orphan_receipts
+                .lock()
+                .values()
+                .cloned()
+                .collect::<Vec<_>>(),
+            vec![expected.clone()],
+        );
+
+        router.sweep_orphan_receipts();
+
+        assert_eq!(
+            router.status().orphan_receipts,
+            vec![expected],
+            "first-seen height is stable across sweeps",
+        );
+
+        add_orders(
+            router.as_ref(),
+            [test_order_with_payment(
+                0,
+                Payment::new(
+                    orphan.address.clone(),
+                    orphan.index,
+                    Amount::from_sat(1000),
+                    0,
+                ),
+                OrderStatus::Active,
+                &router.metatron,
+            )],
+        );
+
+        router.sweep_orphan_receipts();
+
+        assert!(router.orphan_receipts.lock().is_empty());
+    }
+
+    fn funded_bucket_order(
+        id: u32,
+        funded: &bdk_wallet::AddressInfo,
+        amount: u64,
+        metatron: &Arc<Metatron>,
+    ) -> Arc<Order> {
+        let order = Order::new(
+            id,
+            "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.foo@bar:3333"
+                .parse()
+                .unwrap(),
+            Some(Bucket {
+                target: hash_days(100.0),
+                payment: Payment::new(
+                    funded.address.clone(),
+                    funded.index,
+                    Amount::from_sat(amount),
+                    0,
+                ),
+            }),
+            CancellationToken::new(),
+            metatron.clone(),
+        );
+
+        order.force_status(OrderStatus::Expired);
+        order
+    }
+
+    #[test]
+    fn build_refund_constructs_unsigned_psbt() {
+        let router = test_router();
+        let wallet = router.wallet.clone().unwrap();
+        wallet.mark_synced();
+
+        let funded = wallet.test_reveal_address();
+        let tx = wallet.test_receive_unconfirmed(&funded.address, Amount::from_sat(10_000));
+        wallet.test_confirm_tx(tx);
+
+        add_orders(
+            router.as_ref(),
+            [funded_bucket_order(0, &funded, 10_000, &router.metatron)],
+        );
+
+        let refund = router
+            .build_refund(0, Some(FeeRate::from_sat_per_vb(1).unwrap()), None)
+            .unwrap();
+
+        assert_eq!(refund.amount, refund.psbt.unsigned_tx.output[0].value);
+        assert!(refund.amount < Amount::from_sat(10_000));
+        assert_eq!(refund.outpoints.len(), 1);
+        assert_eq!(
+            refund.destination.to_string(),
+            "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",
+        );
+        assert_eq!(refund.psbt.unsigned_tx.input.len(), 1);
+        assert_eq!(
+            refund.psbt.unsigned_tx.input[0].previous_output,
+            refund.outpoints[0],
+        );
+        assert!(refund.psbt.inputs[0].final_script_witness.is_none());
+
+        let cold = wallet.test_reveal_address();
+        let tx = wallet.test_receive_unconfirmed(&cold.address, Amount::from_sat(2000));
+        wallet.test_confirm_tx(tx);
+
+        let order = funded_bucket_order(1, &cold, 2000, &router.metatron);
+        router.orders.write().add_cold(1, order.to_entry());
+
+        let override_destination = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
+            .parse::<Address<NetworkUnchecked>>()
+            .unwrap()
+            .require_network(Network::Bitcoin)
+            .unwrap();
+
+        let refund = router
+            .build_refund(
+                1,
+                Some(FeeRate::from_sat_per_vb(1).unwrap()),
+                Some(override_destination.clone()),
+            )
+            .unwrap();
+
+        assert_eq!(refund.amount, refund.psbt.unsigned_tx.output[0].value);
+        assert!(refund.amount < Amount::from_sat(2000));
+        assert_eq!(refund.destination, override_destination);
+    }
+
+    #[test]
+    fn build_refund_errors() {
+        let fee_rate = FeeRate::from_sat_per_vb(1).unwrap();
+
+        let router = test_router();
+        let wallet = router.wallet.clone().unwrap();
+
+        assert!(matches!(
+            router.build_refund(99, Some(fee_rate), None),
+            Err(RouterError::OrderNotFound { id: 99 })
+        ));
+
+        add_orders(
+            router.as_ref(),
+            [test_order(
+                0,
+                None,
+                OrderStatus::Cancelled,
+                &router.metatron,
+            )],
+        );
+
+        assert!(matches!(
+            router.build_refund(0, Some(fee_rate), None),
+            Err(RouterError::NotABucketOrder { id: 0 })
+        ));
+
+        let unfunded = wallet.test_reveal_address();
+
+        add_orders(
+            router.as_ref(),
+            [test_order_with_payment(
+                1,
+                Payment::new(
+                    unfunded.address.clone(),
+                    unfunded.index,
+                    Amount::from_sat(1000),
+                    0,
+                ),
+                OrderStatus::Expired,
+                &router.metatron,
+            )],
+        );
+
+        assert!(matches!(
+            router.build_refund(1, Some(fee_rate), None),
+            Err(RouterError::WalletSyncing)
+        ));
+
+        wallet.mark_synced();
+
+        assert!(matches!(
+            router.build_refund(1, Some(fee_rate), None),
+            Err(RouterError::NoUnspentFunds { id: 1 })
+        ));
+
+        let funded = wallet.test_reveal_address();
+        let tx = wallet.test_receive_unconfirmed(&funded.address, Amount::from_sat(1000));
+        wallet.test_confirm_tx(tx);
+
+        add_orders(
+            router.as_ref(),
+            [test_order_with_payment(
+                2,
+                Payment::new(
+                    funded.address.clone(),
+                    funded.index,
+                    Amount::from_sat(1000),
+                    0,
+                ),
+                OrderStatus::Expired,
+                &router.metatron,
+            )],
+        );
+
+        assert!(matches!(
+            router.build_refund(2, Some(fee_rate), None),
+            Err(RouterError::InvalidRefundDestination { id: 2 })
+        ));
+
+        let router = test_router_with_wallet(None);
+
+        add_orders(
+            router.as_ref(),
+            [test_order_with_payment(
+                0,
+                Payment::new(test_address(), 0, Amount::from_sat(1000), 0),
+                OrderStatus::Expired,
+                &router.metatron,
+            )],
+        );
+
+        assert!(matches!(
+            router.build_refund(0, Some(fee_rate), None),
+            Err(RouterError::WalletRequired)
+        ));
     }
 
     fn regtest_wallet_router(directory: &tempfile::TempDir) -> (Arc<Router>, Arc<Wallet>) {

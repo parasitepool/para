@@ -50,11 +50,16 @@ impl From<RouterError> for ServerError {
         match &error {
             RouterError::InvalidHashdays
             | RouterError::HashPriceOverflow
-            | RouterError::BelowDustLimit { .. } => Self::BadRequest(error.to_string()),
+            | RouterError::BelowDustLimit { .. }
+            | RouterError::NotABucketOrder { .. }
+            | RouterError::InvalidRefundDestination { .. } => Self::BadRequest(error.to_string()),
             RouterError::HashPriceBelowMinimum { .. }
-            | RouterError::InsufficientCapacity { .. } => {
+            | RouterError::InsufficientCapacity { .. }
+            | RouterError::NoUnspentFunds { .. }
+            | RouterError::RefundConstruction { .. } => {
                 Self::UnprocessableEntity(error.to_string())
             }
+            RouterError::OrderNotFound { .. } => Self::NotFound(error.to_string()),
             RouterError::Halted
             | RouterError::WalletSyncing
             | RouterError::WalletRequired

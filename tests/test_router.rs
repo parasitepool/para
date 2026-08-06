@@ -240,6 +240,21 @@ impl TestRouter {
             .await
     }
 
+    pub(crate) async fn refund_order(
+        &self,
+        id: u32,
+        request: &serde_json::Value,
+    ) -> reqwest::Result<reqwest::Response> {
+        reqwest::Client::new()
+            .post(format!(
+                "{}/api/router/order/{id}/refund",
+                self.api_endpoint()
+            ))
+            .json(request)
+            .send()
+            .await
+    }
+
     fn terminate(&mut self) {
         let Some(mut child) = self.router_handle.take() else {
             return;

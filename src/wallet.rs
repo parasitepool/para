@@ -203,6 +203,13 @@ impl Wallet {
         })
     }
 
+    pub(crate) fn peek_address(&self, derivation_index: u32) -> Address {
+        self.inner
+            .lock()
+            .peek_address(KeychainKind::External, derivation_index)
+            .address
+    }
+
     pub(crate) fn reveal_address_with<T>(
         &self,
         persist: impl FnOnce(bdk_wallet::AddressInfo, u32, &ChangeSet) -> Result<T>,
@@ -323,6 +330,52 @@ impl Wallet {
         }
 
         confirmed
+    }
+
+    pub(crate) fn unspent_by_derivation_index(&self, derivation_index: u32) -> Vec<OutPoint> {
+        let inner = self.inner.lock();
+        let tip = inner.latest_checkpoint().height();
+
+        let spendable = |txout: &FullTxOut<ConfirmationBlockTime>| {
+            if txout.spent_by.is_some() || !txout.chain_position.is_confirmed() {
+                return false;
+            }
+
+            let coinbase = inner
+                .tx_graph()
+                .get_tx(txout.outpoint.txid)
+                .is_some_and(|tx| tx.is_coinbase());
+
+            !coinbase
+                || txout
+                    .chain_position
+                    .confirmation_height_upper_bound()
+                    .is_some_and(|confirmed| tip + 1 >= confirmed + COINBASE_MATURITY)
+        };
+
+        external_txouts(&inner, derivation_index)
+            .filter(|txout| spendable(txout))
+            .map(|txout| txout.outpoint)
+            .collect()
+    }
+
+    pub(crate) fn build_refund_psbt(
+        &self,
+        outpoints: &[OutPoint],
+        destination: Address,
+        fee_rate: FeeRate,
+    ) -> Result<Psbt> {
+        let mut inner = self.inner.lock();
+        let mut builder = inner.build_tx();
+
+        builder
+            .add_utxos(outpoints)
+            .context("failed to add refund inputs")?;
+        builder.manually_selected_only();
+        builder.drain_to(destination.script_pubkey());
+        builder.fee_rate(fee_rate);
+
+        Ok(builder.finish()?)
     }
 
     pub fn send(&self, to: Address, amount: Amount, fee_rate: FeeRate) -> Result<Txid> {
@@ -736,5 +789,43 @@ mod tests {
 
         case(false);
         case(true);
+    }
+
+    #[test]
+    fn build_refund_psbt_spends_only_selected_outpoints() {
+        let wallet = test_wallet();
+
+        let included = wallet.test_reveal_address();
+        let excluded = wallet.test_reveal_address();
+
+        let tx = wallet.test_receive_unconfirmed(&included.address, Amount::from_sat(10_000));
+        wallet.test_confirm_tx(tx);
+
+        let tx = wallet.test_receive_unconfirmed(&excluded.address, Amount::from_sat(20_000));
+        wallet.test_confirm_tx(tx);
+
+        let unspent = wallet.unspent_by_derivation_index(included.index);
+
+        assert_eq!(unspent.len(), 1);
+
+        let destination = wallet.test_reveal_address().address;
+
+        let psbt = wallet
+            .build_refund_psbt(
+                &[unspent[0]],
+                destination.clone(),
+                FeeRate::from_sat_per_vb(1).unwrap(),
+            )
+            .unwrap();
+
+        assert_eq!(psbt.unsigned_tx.input.len(), 1);
+        assert_eq!(psbt.unsigned_tx.input[0].previous_output, unspent[0]);
+        assert_eq!(psbt.unsigned_tx.output.len(), 1);
+        assert_eq!(
+            psbt.unsigned_tx.output[0].script_pubkey,
+            destination.script_pubkey(),
+        );
+        assert!(psbt.unsigned_tx.output[0].value < Amount::from_sat(10_000));
+        assert!(psbt.inputs[0].final_script_witness.is_none());
     }
 }

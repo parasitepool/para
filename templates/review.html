@@ -1,0 +1,106 @@
+<div class="grid grid-stack">
+  <div class="column column-full">
+    <h2>Flagged Orders</h2>
+    <table class=compact-table id=flagged-table>
+      <thead>
+        <tr><th>ID</th><th>Status</th><th>Endpoint</th><th>Username</th><th>Requested</th><th>Progress</th></tr>
+      </thead>
+      <tbody id=flagged-body></tbody>
+    </table>
+  </div>
+
+  <div class="column column-full">
+    <h2>Orphan Receipts</h2>
+    <table class=compact-table id=orphan-receipts-table>
+      <thead>
+        <tr><th>Address</th><th>Amount</th><th>First Seen</th></tr>
+      </thead>
+      <tbody id=orphan-receipts-body></tbody>
+    </table>
+  </div>
+
+  <div class="column column-full">
+    <h2>Cleared Orders</h2>
+    <table class=compact-table id=cleared-table>
+      <thead>
+        <tr><th>ID</th><th>Status</th><th>Endpoint</th><th>Username</th><th>Requested</th><th>Progress</th></tr>
+      </thead>
+      <tbody id=cleared-body></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+function orderRow(order) {
+  const safeId = escapeHtml(order.id);
+  const shortUsername = truncateMiddle(order.username);
+  const target = order.requested_hash_days == null ? 'Unlimited' : formatHashDays(order.requested_hash_days);
+  const href = `/order/${safeId}`;
+  const a = (content) => `<a class=order-link href="${href}">${content}</a>`;
+  return `<tr>
+    <td>${a(safeId)}</td>
+    <td class="${escapeHtml(statusClass(order.status))}">${a(escapeHtml(formatStatus(order.status)))}</td>
+    <td>${a(escapeHtml(order.endpoint))}</td>
+    <td>${a(escapeHtml(shortUsername))}</td>
+    <td>${a(escapeHtml(target))}</td>
+    <td>${a(formatOrderProgress(order))}</td>
+  </tr>`;
+}
+
+function renderOrders(bodyId, orders) {
+  const body = document.getElementById(bodyId);
+
+  if (!orders || orders.length === 0) {
+    body.innerHTML = '<tr><td colspan=6>None</td></tr>';
+    return;
+  }
+
+  body.innerHTML = orders.map(orderRow).join('');
+}
+
+function renderOrphanReceipts(orphans) {
+  const body = document.getElementById('orphan-receipts-body');
+
+  if (!orphans || orphans.length === 0) {
+    body.innerHTML = '<tr><td colspan=3>None</td></tr>';
+    return;
+  }
+
+  body.innerHTML = orphans.map(orphan => {
+    const short = truncateMiddle(orphan.address, 20, 8);
+    return `<tr>
+    <td><span class=copyable data-full="${escapeHtml(orphan.address)}" data-formatted="${escapeHtml(short)}">${escapeHtml(short)}</span></td>
+    <td>${escapeHtml(Number(orphan.amount).toLocaleString() + ' sats')}</td>
+    <td>${escapeHtml('block ' + orphan.first_seen_height)}</td>
+  </tr>`;
+  }).join('');
+}
+
+async function fetchOrders(review, signal) {
+  const r = await fetch(`/api/router/orders?review=${review}`, withAuthOptions({ signal }));
+  if (r.status === 401) {
+    redirectToLogin();
+    throw new Error(`/api/router/orders: ${r.status}`);
+  }
+  if (!r.ok) throw new Error(`/api/router/orders: ${r.status}`);
+  return r.json();
+}
+
+async function refresh(signal) {
+  const [statusData, flagged, cleared] = await Promise.all([
+    fetchJson('/api/router/status', { signal }),
+    fetchOrders('flagged', signal),
+    fetchOrders('cleared', signal),
+  ]);
+
+  renderOrders('flagged-body', flagged);
+  renderOrphanReceipts(statusData.orphan_receipts);
+  renderOrders('cleared-body', cleared);
+}
+
+initDelegatedCopyables('orphan-receipts-body');
+initAuthProbe().then(ok => {
+  if (!ok) return;
+  startPolling(refresh);
+});
+</script>

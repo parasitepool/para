@@ -29,6 +29,10 @@ impl<T: DashboardContent> DashboardHtml<T> {
 
 pub(crate) trait DashboardContent: fmt::Display + 'static {
     fn title(&self) -> &'static str;
+
+    fn show_review(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Boilerplate)]
@@ -56,6 +60,23 @@ impl DashboardContent for RouterHtml {
     fn title(&self) -> &'static str {
         "Router"
     }
+
+    fn show_review(&self) -> bool {
+        true
+    }
+}
+
+#[derive(Boilerplate)]
+pub(crate) struct ReviewHtml;
+
+impl DashboardContent for ReviewHtml {
+    fn title(&self) -> &'static str {
+        "Router | Review"
+    }
+
+    fn show_review(&self) -> bool {
+        true
+    }
 }
 
 #[derive(Boilerplate)]
@@ -67,6 +88,10 @@ pub(crate) struct OrderHtml;
 impl DashboardContent for OrderHtml {
     fn title(&self) -> &'static str {
         "Router | Order"
+    }
+
+    fn show_review(&self) -> bool {
+        true
     }
 }
 
@@ -80,6 +105,10 @@ impl DashboardContent for UsersHtml {
     fn title(&self) -> &'static str {
         self.title
     }
+
+    fn show_review(&self) -> bool {
+        self.api_base == "/api/router"
+    }
 }
 
 #[derive(Boilerplate)]
@@ -92,12 +121,17 @@ impl DashboardContent for UserHtml {
     fn title(&self) -> &'static str {
         self.title
     }
+
+    fn show_review(&self) -> bool {
+        self.api_base == "/api/router"
+    }
 }
 
 #[cfg(feature = "reload")]
 pub(crate) struct ReloadedContent {
     pub(crate) html: String,
     pub(crate) title: &'static str,
+    pub(crate) show_review: bool,
 }
 
 #[cfg(feature = "reload")]
@@ -112,6 +146,10 @@ impl DashboardContent for ReloadedContent {
     fn title(&self) -> &'static str {
         self.title
     }
+
+    fn show_review(&self) -> bool {
+        self.show_review
+    }
 }
 
 pub(crate) fn render_page(
@@ -122,12 +160,21 @@ pub(crate) fn render_page(
     #[cfg(feature = "reload")]
     let body = {
         let title = content.title();
+        let show_review = content.show_review();
         let html = content
             .reload_from_path()
             .map(|r| r.to_string())
             .unwrap_or_else(|_| content.to_string());
 
-        let dashboard = DashboardHtml::new(ReloadedContent { html, title }, chain, auth);
+        let dashboard = DashboardHtml::new(
+            ReloadedContent {
+                html,
+                title,
+                show_review,
+            },
+            chain,
+            auth,
+        );
 
         dashboard
             .reload_from_path()

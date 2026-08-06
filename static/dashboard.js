@@ -319,6 +319,23 @@ function statusClass(status) {
   return status === 'active' ? 'connected' : status;
 }
 
+function orderProgressValue(order) {
+  const requested = Number(order.requested_hash_days);
+  const delivered = Number(order.delivered_hash_days);
+  if (!Number.isFinite(requested) || requested <= 0 || !Number.isFinite(delivered)) return null;
+  return Math.min(100, Math.max(0, (delivered / requested) * 100));
+}
+
+function formatOrderProgress(order) {
+  const progress = orderProgressValue(order);
+  if (progress === null) return '-';
+  const label = formatTruncated(progress) + '%';
+  return `<div class=order-progress title="${escapeHtml(label)}">
+    <span class=order-progress-fill style="width:${progress}%"></span>
+    <span class=order-progress-label>${escapeHtml(label)}</span>
+  </div>`;
+}
+
 function set(id, value, formatter = v => v) {
   const el = document.getElementById(id);
   if (el && !el.matches(':hover')) {

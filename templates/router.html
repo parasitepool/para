@@ -1,6 +1,4 @@
 <style>
-  .order-link { color: inherit; text-decoration: none; display: block; margin: -12px -16px; padding: 12px 16px; }
-
   .action-bar {
     display: grid;
     grid-template-columns: repeat(5, 1fr);
@@ -75,28 +73,6 @@
 
   #orders-table tbody tr.unlimited-order {
     background: #181818;
-  }
-  .order-progress {
-    position: relative;
-    width: 120px;
-    height: 18px;
-    overflow: hidden;
-    background: #111;
-    border: 1px solid #444;
-  }
-  .order-progress-fill {
-    position: absolute;
-    inset: 0 auto 0 0;
-    background: #2d7a2d;
-  }
-  .order-progress-label {
-    position: relative;
-    z-index: 1;
-    display: block;
-    line-height: 18px;
-    text-align: center;
-    color: #eee;
-    font-size: 0.9em;
   }
   #order-overlay {
     position: fixed;
@@ -518,23 +494,6 @@ const ORDER_STATUS_PRIORITY = Object.fromEntries(
   ['active', 'in_mempool', 'pending', 'expired', 'disconnected', 'fulfilled', 'cancelled']
     .map((status, i) => [status, i])
 );
-
-function formatOrderProgress(order) {
-  const progress = orderProgressValue(order);
-  if (progress === null) return '-';
-  const label = formatTruncated(progress) + '%';
-  return `<div class=order-progress title="${escapeHtml(label)}">
-    <span class=order-progress-fill style="width:${progress}%"></span>
-    <span class=order-progress-label>${escapeHtml(label)}</span>
-  </div>`;
-}
-
-function orderProgressValue(order) {
-  const requested = Number(order.requested_hash_days);
-  const delivered = Number(order.delivered_hash_days);
-  if (!Number.isFinite(requested) || requested <= 0 || !Number.isFinite(delivered)) return null;
-  return Math.min(100, Math.max(0, (delivered / requested) * 100));
-}
 
 function compareProgress(a, b) {
   const aProgress = orderProgressValue(a);

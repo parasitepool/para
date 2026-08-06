@@ -4,7 +4,10 @@ use {
     http_server::{
         self, common_routes,
         error::{OptionExt, ServerError, ServerResult},
-        templates::{OrderHtml, PoolHtml, ProxyHtml, RouterHtml, UserHtml, UsersHtml, render_page},
+        templates::{
+            OrderHtml, PoolHtml, ProxyHtml, ReviewHtml, RouterHtml, UserHtml, UsersHtml,
+            render_page,
+        },
     },
 };
 
@@ -282,6 +285,14 @@ pub struct IntentClaimCounts {
     pub ip: usize,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct OrphanReceipt {
+    pub derivation_index: u32,
+    pub address: Address<NetworkUnchecked>,
+    pub amount: Amount,
+    pub first_seen_height: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RouterStatus {
     pub uptime_secs: u64,
@@ -298,6 +309,7 @@ pub struct RouterStatus {
     pub wallet_synced: bool,
     pub halt: bool,
     pub boost: bool,
+    pub orphan_receipts: Vec<OrphanReceipt>,
     pub sessions_trimmed_1h: usize,
     pub intents_created_1h: usize,
     pub intents_expired_1h: usize,
