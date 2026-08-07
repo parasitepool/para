@@ -28,6 +28,7 @@ pub(crate) struct Session {
     username: Username,
     version_mask: Option<Version>,
     stats: Mutex<Stats>,
+    dirty: Arc<AtomicBool>,
 }
 
 impl Session {
@@ -38,6 +39,7 @@ impl Session {
         workername: String,
         username: Username,
         version_mask: Option<Version>,
+        dirty: Arc<AtomicBool>,
     ) -> Self {
         Self {
             id,
@@ -47,6 +49,7 @@ impl Session {
             username,
             version_mask,
             stats: Mutex::new(Stats::new()),
+            dirty,
         }
     }
 
@@ -91,15 +94,21 @@ impl Session {
         self.stats.lock().clone()
     }
 
+    pub(crate) fn has_accepted(&self) -> bool {
+        self.stats.lock().accepted_shares > 0
+    }
+
     pub(crate) fn record_accepted(&self, pool_diff: Difficulty, share_diff: Difficulty) {
         let now = Instant::now();
         self.stats
             .lock()
             .record_accepted(pool_diff, share_diff, now);
+        self.dirty.store(true, Ordering::Release);
     }
 
     pub(crate) fn record_rejected(&self, pool_diff: Difficulty) {
         self.stats.lock().record_rejected(pool_diff);
+        self.dirty.store(true, Ordering::Release);
     }
 }
 

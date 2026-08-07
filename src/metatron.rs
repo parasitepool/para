@@ -42,6 +42,7 @@ pub(crate) struct Metatron {
     started: Instant,
     orders: DashMap<u32, OrderSlot>,
     users: DashMap<Address, Arc<User>>,
+    persist_lock: Mutex<()>,
 }
 
 impl Metatron {
@@ -65,6 +66,7 @@ impl Metatron {
             started: Instant::now(),
             orders: DashMap::new(),
             users,
+            persist_lock: Mutex::new(()),
         })
     }
 
@@ -107,24 +109,34 @@ impl Metatron {
                 }
                 keep
             });
+
+        self.users
+            .retain(|_, user| user.session_count() > 0 || user.has_accepted());
     }
 
     pub(crate) fn new_session(&self, auth: Arc<Authorization>, order_id: u32) -> Arc<Session> {
         let id = SessionId::new(order_id, self.counter.fetch_add(1, Ordering::Relaxed));
 
-        let session = Arc::new(Session::new(
-            id,
-            auth.enonce1.clone(),
-            auth.address.clone(),
-            auth.workername.clone(),
-            auth.username.clone(),
-            auth.version_mask,
-        ));
+        let session = {
+            let user = self
+                .users
+                .entry(auth.address.clone())
+                .or_insert_with(|| Arc::new(User::new(auth.address.clone())));
 
-        self.users
-            .entry(auth.address.clone())
-            .or_insert_with(|| Arc::new(User::new(auth.address.clone())))
-            .new_session(&auth.workername, session.clone());
+            let session = Arc::new(Session::new(
+                id,
+                auth.enonce1.clone(),
+                auth.address.clone(),
+                auth.workername.clone(),
+                auth.username.clone(),
+                auth.version_mask,
+                user.dirty.clone(),
+            ));
+
+            user.new_session(&auth.workername, session.clone());
+
+            session
+        };
 
         self.orders
             .entry(order_id)
@@ -138,8 +150,9 @@ impl Metatron {
     pub(crate) fn retire_session(&self, session: Arc<Session>, allocator: Arc<EnonceAllocator>) {
         if let Some(user) = self.users.get(session.address())
             && let Some(worker) = user.workers.get(session.workername())
+            && worker.retire_session(session.id())
         {
-            worker.retire_session(session.id());
+            user.mark_dirty();
         }
 
         if let Some(slot) = self.orders.get(&session.id().order_id()) {
@@ -302,18 +315,54 @@ impl Metatron {
         orders: &[(u32, store::entry::OrderEntry)],
         wallet_delta: &ChangeSet,
     ) -> Result {
+        let _guard = self.persist_lock.lock();
+
         let start = Instant::now();
 
-        let txn = self.store.begin()?;
+        let mut users = Vec::new();
 
-        for (id, order) in orders {
-            txn.insert_order(*id, order)?;
+        for user in self.users.iter() {
+            let user = user.value();
+
+            if !user.take_dirty() {
+                continue;
+            }
+
+            let entry = user.to_entry(start);
+
+            if entry
+                .workers
+                .iter()
+                .any(|worker| worker.stats.accepted_shares > 0)
+            {
+                users.push((user.clone(), entry));
+            }
         }
 
-        txn.merge_wallet(wallet_delta)?;
-        txn.write_users(&self.snapshot_users())?;
-        txn.write_blocks(&self.blocks.read())?;
-        txn.commit()?;
+        let result = (|| {
+            let txn = self.store.begin()?;
+
+            for (id, order) in orders {
+                txn.insert_order(*id, order)?;
+            }
+
+            txn.merge_wallet(wallet_delta)?;
+
+            for (user, entry) in &users {
+                txn.upsert_user(&user.address, entry)?;
+            }
+
+            txn.write_blocks(&self.blocks.read())?;
+            txn.commit()
+        })();
+
+        if let Err(err) = result {
+            for (user, _) in &users {
+                user.mark_dirty();
+            }
+
+            return Err(err);
+        }
 
         debug!("persist took {:?}", start.elapsed());
 
@@ -332,15 +381,6 @@ impl Metatron {
         txn.merge_wallet(wallet_delta)?;
 
         txn.commit()
-    }
-
-    fn snapshot_users(&self) -> Vec<(Address, store::entry::UserEntry)> {
-        let now = Instant::now();
-
-        self.users
-            .iter()
-            .map(|user| (user.address.clone(), user.to_entry(now)))
-            .collect()
     }
 
     pub(crate) fn order_delivered_work(&self, order_id: u32) -> HashWork {
@@ -439,6 +479,13 @@ mod tests {
             .assume_checked()
     }
 
+    fn test_address_2() -> Address {
+        "tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx"
+            .parse::<Address<bitcoin::address::NetworkUnchecked>>()
+            .unwrap()
+            .assume_checked()
+    }
+
     fn test_allocator() -> Arc<EnonceAllocator> {
         Arc::new(EnonceAllocator::new(
             Extranonces::Pool(PoolExtranonces::new(4, 8).unwrap()),
@@ -446,16 +493,22 @@ mod tests {
         ))
     }
 
-    fn test_auth(enonce1: &str, workername: &str) -> Arc<Authorization> {
+    fn auth(address: Address, enonce1: &str, workername: &str) -> Arc<Authorization> {
         Arc::new(Authorization {
             enonce1: enonce1.parse().unwrap(),
-            address: test_address(),
+            username: format!("{address}.{workername}").parse().unwrap(),
+            address,
             workername: workername.into(),
-            username: format!("tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.{workername}")
-                .parse()
-                .unwrap(),
             version_mask: None,
         })
+    }
+
+    fn test_auth(enonce1: &str, workername: &str) -> Arc<Authorization> {
+        auth(test_address(), enonce1, workername)
+    }
+
+    fn test_auth_2(enonce1: &str, workername: &str) -> Arc<Authorization> {
+        auth(test_address_2(), enonce1, workername)
     }
 
     #[test]
@@ -878,5 +931,138 @@ mod tests {
             metatron.order_stats(0).best_share,
             Some(Difficulty::from(800.0))
         );
+    }
+
+    #[test]
+    fn record_marks_user_dirty() {
+        let (metatron, _dir) = Metatron::test();
+        let session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+
+        let user = metatron.users().get(&test_address()).unwrap().clone();
+        assert!(user.is_dirty());
+        assert!(!user.has_accepted());
+
+        assert!(user.take_dirty());
+        session.record_rejected(Difficulty::from(100.0));
+        assert!(user.is_dirty());
+        assert!(!user.has_accepted());
+
+        assert!(user.take_dirty());
+        session.record_accepted(Difficulty::from(100.0), Difficulty::from(150.0));
+        assert!(user.is_dirty());
+        assert!(user.has_accepted());
+    }
+
+    #[test]
+    fn persist_skips_users_without_accepted_work() {
+        let (metatron, _dir) = Metatron::test();
+        let session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+
+        metatron.persist(&[], &ChangeSet::default()).unwrap();
+        assert!(metatron.store().read_users().unwrap().is_empty());
+
+        session.record_rejected(Difficulty::from(100.0));
+        metatron.persist(&[], &ChangeSet::default()).unwrap();
+        assert!(metatron.store().read_users().unwrap().is_empty());
+
+        session.record_accepted(Difficulty::from(100.0), Difficulty::from(150.0));
+        metatron.persist(&[], &ChangeSet::default()).unwrap();
+
+        let users = metatron.store().read_users().unwrap();
+        assert_eq!(users.len(), 1);
+        assert_eq!(users[0].1.workers.len(), 1);
+        assert_eq!(users[0].1.workers[0].stats.accepted_shares, 1);
+        assert!(!metatron.users().get(&test_address()).unwrap().is_dirty());
+    }
+
+    #[test]
+    fn persist_upserts_only_dirty_users() {
+        let (metatron, _dir) = Metatron::test();
+        let foo = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+        metatron.new_session(test_auth_2("cafebabe", "bar"), 0);
+
+        foo.record_accepted(Difficulty::from(100.0), Difficulty::from(200.0));
+        metatron.persist(&[], &ChangeSet::default()).unwrap();
+
+        let users = metatron.store().read_users().unwrap();
+        assert_eq!(users.len(), 1);
+        assert_eq!(users[0].0, test_address());
+
+        for user in metatron.users().iter() {
+            assert!(!user.is_dirty());
+        }
+
+        foo.record_accepted(Difficulty::from(100.0), Difficulty::from(300.0));
+        metatron.persist(&[], &ChangeSet::default()).unwrap();
+
+        let users = metatron.store().read_users().unwrap();
+        assert_eq!(users.len(), 1);
+        assert_eq!(users[0].1.workers[0].stats.accepted_shares, 2);
+        assert_eq!(
+            users[0].1.workers[0].stats.best_share,
+            Some(Difficulty::from(300.0))
+        );
+    }
+
+    #[test]
+    fn zero_work_user_pruned_after_sessions_end() {
+        let (metatron, _dir) = Metatron::test();
+        let session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+
+        metatron.cleanup_expired(Instant::now());
+        assert_eq!(metatron.total_users(), 1);
+
+        metatron.retire_session(session, test_allocator());
+        metatron.cleanup_expired(Instant::now());
+        assert_eq!(metatron.total_users(), 0);
+
+        metatron.persist(&[], &ChangeSet::default()).unwrap();
+        assert!(metatron.store().read_users().unwrap().is_empty());
+    }
+
+    #[test]
+    fn pruned_then_resurrected_user_keeps_stats() {
+        let (metatron, _dir) = Metatron::test();
+        let session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+        metatron.retire_session(session, test_allocator());
+        metatron.cleanup_expired(Instant::now());
+        assert_eq!(metatron.total_users(), 0);
+
+        let session = metatron.new_session(test_auth("cafebabe", "foo"), 0);
+        session.record_accepted(Difficulty::from(100.0), Difficulty::from(200.0));
+        metatron.persist(&[], &ChangeSet::default()).unwrap();
+
+        let users = metatron.store().read_users().unwrap();
+        assert_eq!(users.len(), 1);
+        assert_eq!(users[0].1.workers[0].stats.accepted_shares, 1);
+        assert_eq!(
+            users[0].1.workers[0].stats.best_share,
+            Some(Difficulty::from(200.0))
+        );
+    }
+
+    #[test]
+    fn worked_user_survives_reopen() {
+        let directory = tempfile::tempdir().unwrap();
+        let store =
+            Arc::new(Store::open(&directory.path().join("test.redb"), Chain::Regtest).unwrap());
+
+        {
+            let metatron = Metatron::test_with_store(store.clone());
+            let session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+            session.record_accepted(Difficulty::from(100.0), Difficulty::from(200.0));
+            metatron.retire_session(session, test_allocator());
+            metatron.persist(&[], &ChangeSet::default()).unwrap();
+        }
+
+        let metatron = Metatron::test_with_store(store);
+
+        let stats = metatron.snapshot();
+        assert_eq!(stats.accepted_shares, 1);
+        assert_eq!(stats.best_share, Some(Difficulty::from(200.0)));
+
+        let user = metatron.users().get(&test_address()).unwrap();
+        assert!(user.has_accepted());
+        assert!(!user.is_dirty());
     }
 }

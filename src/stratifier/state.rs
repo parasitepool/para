@@ -288,6 +288,7 @@ mod tests {
                 .parse()
                 .unwrap(),
             None,
+            Arc::new(AtomicBool::new(false)),
         ));
         state = State::Working(session);
 
@@ -339,6 +340,7 @@ mod tests {
                 .parse()
                 .unwrap(),
             None,
+            Arc::new(AtomicBool::new(false)),
         ));
         let state = State::Working(session);
         assert_eq!(state.enonce1(), Some(&test_enonce1()));

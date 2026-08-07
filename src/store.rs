@@ -240,16 +240,13 @@ impl WriteTxn {
         Ok(())
     }
 
-    pub(crate) fn write_users(&self, users: &[(Address, entry::UserEntry)]) -> Result {
+    pub(crate) fn upsert_user(&self, address: &Address, entry: &entry::UserEntry) -> Result {
         let mut table = self.inner.open_table(USERS)?;
-        table.retain(|_, _| false)?;
+        let mut bytes = Vec::with_capacity(2048);
 
-        for (address, entry) in users {
-            let mut bytes = Vec::with_capacity(2048);
-            ciborium::into_writer(entry, &mut bytes)
-                .with_context(|| format!("encode user {address}"))?;
-            table.insert(address.to_string().as_str(), bytes.as_slice())?;
-        }
+        ciborium::into_writer(entry, &mut bytes)
+            .with_context(|| format!("encode user {address}"))?;
+        table.insert(address.to_string().as_str(), bytes.as_slice())?;
 
         Ok(())
     }
@@ -529,6 +526,44 @@ mod tests {
         let merged = store.read_wallet_changeset().unwrap();
         assert_eq!(merged.tx_graph.first_seen.get(&txid), Some(&900));
         assert_eq!(merged.tx_graph.last_seen.get(&txid), Some(&2_100));
+    }
+
+    #[test]
+    fn upsert_user_overwrites() {
+        let (_directory, store) = temporary_store(Chain::Regtest);
+
+        let address = "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc"
+            .parse::<Address<NetworkUnchecked>>()
+            .unwrap()
+            .assume_checked();
+
+        let txn = store.begin().unwrap();
+        txn.upsert_user(
+            &address,
+            &entry::UserEntry {
+                authorized_secs: 7,
+                workers: Vec::new(),
+            },
+        )
+        .unwrap();
+        txn.commit().unwrap();
+
+        assert_eq!(store.read_users().unwrap().len(), 1);
+
+        let txn = store.begin().unwrap();
+        txn.upsert_user(
+            &address,
+            &entry::UserEntry {
+                authorized_secs: 8,
+                workers: Vec::new(),
+            },
+        )
+        .unwrap();
+        txn.commit().unwrap();
+
+        let users = store.read_users().unwrap();
+        assert_eq!(users.len(), 1);
+        assert_eq!(users[0].1.authorized_secs, 8);
     }
 
     #[test]

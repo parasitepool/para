@@ -4,6 +4,7 @@ pub(crate) struct User {
     pub(crate) address: Address,
     pub(crate) workers: DashMap<String, Arc<Worker>>,
     pub(crate) authorized: u64,
+    pub(crate) dirty: Arc<AtomicBool>,
 }
 
 impl User {
@@ -15,7 +16,25 @@ impl User {
                 .duration_since(UNIX_EPOCH)
                 .expect("time went backwards")
                 .as_secs(),
+            dirty: Arc::new(AtomicBool::new(true)),
         }
+    }
+
+    pub(crate) fn mark_dirty(&self) {
+        self.dirty.store(true, Ordering::Release);
+    }
+
+    pub(crate) fn take_dirty(&self) -> bool {
+        self.dirty.swap(false, Ordering::AcqRel)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_dirty(&self) -> bool {
+        self.dirty.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn has_accepted(&self) -> bool {
+        self.workers.iter().any(|worker| worker.has_accepted())
     }
 
     pub(super) fn new_session(&self, workername: &str, session: Arc<Session>) {
@@ -72,6 +91,7 @@ impl User {
             address,
             workers,
             authorized: entry.authorized_secs,
+            dirty: Arc::new(AtomicBool::new(false)),
         })
     }
 

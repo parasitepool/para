@@ -27,11 +27,17 @@ impl Worker {
         self.sessions.insert(session.id(), session);
     }
 
-    pub(super) fn retire_session(&self, id: SessionId) {
-        if let Some((_, session)) = self.sessions.remove(&id) {
-            let snapshot = session.snapshot();
-            self.lifetime.lock().absorb(snapshot, Instant::now());
-        }
+    pub(super) fn retire_session(&self, id: SessionId) -> bool {
+        let Some(session) = self.sessions.get(&id).map(|entry| entry.value().clone()) else {
+            return false;
+        };
+
+        let snapshot = session.snapshot();
+        let mut lifetime = self.lifetime.lock();
+        lifetime.absorb(snapshot, Instant::now());
+        self.sessions.remove(&id);
+
+        true
     }
 
     pub(crate) fn workername(&self) -> &str {
@@ -42,16 +48,22 @@ impl Worker {
         self.sessions.len()
     }
 
+    pub(crate) fn has_accepted(&self) -> bool {
+        self.lifetime.lock().accepted_shares > 0
+            || self.sessions.iter().any(|session| session.has_accepted())
+    }
+
     pub(crate) fn sessions(&self) -> impl Iterator<Item = Arc<Session>> {
         self.sessions.iter().map(|entry| entry.value().clone())
     }
 
     pub(crate) fn snapshot(&self) -> Stats {
         let now = Instant::now();
+        let lifetime = self.lifetime.lock();
 
         self.sessions
             .iter()
-            .fold(self.lifetime.lock().clone(), |mut combined, session| {
+            .fold(lifetime.clone(), |mut combined, session| {
                 combined.absorb(session.snapshot(), now);
                 combined
             })
