@@ -824,14 +824,14 @@ async fn share_validation() {
     );
 
     let status = pool.get_status().await.unwrap();
-    assert_eq!(status.downstream.user_count, 0);
-    assert_eq!(status.downstream.worker_count, 0);
-    assert_eq!(status.downstream.session_count, 0);
+    assert_eq!(status.downstream.users, 0);
+    assert_eq!(status.downstream.workers, 0);
+    assert_eq!(status.downstream.sessions, 0);
     assert_eq!(status.block_count, 0);
-    assert_eq!(status.downstream.stats.accepted_shares, 0);
-    assert_eq!(status.downstream.stats.rejected_shares, 0);
-    assert!(status.downstream.stats.best_share.is_none());
-    assert!(status.downstream.stats.last_share.is_none());
+    assert_eq!(status.downstream.total.stats.accepted_shares, 0);
+    assert_eq!(status.downstream.total.stats.rejected_shares, 0);
+    assert!(status.downstream.total.stats.best_share.is_none());
+    assert!(status.downstream.total.stats.last_share.is_none());
 
     let system_status = pool.get_system_status().await.unwrap();
     assert!(system_status.cpu_usage_percent >= 0.0 && system_status.cpu_usage_percent <= 100.0);
@@ -866,13 +866,13 @@ async fn share_validation() {
         .unwrap();
 
     let status = pool.get_status().await.unwrap();
-    assert_eq!(status.downstream.user_count, 1);
-    assert_eq!(status.downstream.worker_count, 1);
-    assert_eq!(status.downstream.session_count, 1);
-    assert_eq!(status.downstream.stats.accepted_shares, 1);
-    assert_eq!(status.downstream.stats.rejected_shares, 0);
-    assert!(status.downstream.stats.best_share.is_some());
-    assert!(status.downstream.stats.last_share.is_some());
+    assert_eq!(status.downstream.users, 1);
+    assert_eq!(status.downstream.workers, 1);
+    assert_eq!(status.downstream.sessions, 1);
+    assert_eq!(status.downstream.total.stats.accepted_shares, 1);
+    assert_eq!(status.downstream.total.stats.rejected_shares, 0);
+    assert!(status.downstream.total.stats.best_share.is_some());
+    assert!(status.downstream.total.stats.last_share.is_some());
 
     let user = pool.get_user(&user_address).await.unwrap();
     assert_eq!(
@@ -898,8 +898,8 @@ async fn share_validation() {
     );
 
     let status = pool.get_status().await.unwrap();
-    assert_eq!(status.downstream.stats.accepted_shares, 1);
-    assert_eq!(status.downstream.stats.rejected_shares, 1);
+    assert_eq!(status.downstream.total.stats.accepted_shares, 1);
+    assert_eq!(status.downstream.total.stats.rejected_shares, 1);
 
     let user = pool.get_user(&user_address).await.unwrap();
     assert_eq!(user.stats.accepted_shares, 1);
@@ -922,8 +922,8 @@ async fn share_validation() {
     );
 
     let status = pool.get_status().await.unwrap();
-    assert_eq!(status.downstream.stats.accepted_shares, 1);
-    assert_eq!(status.downstream.stats.rejected_shares, 2);
+    assert_eq!(status.downstream.total.stats.accepted_shares, 1);
+    assert_eq!(status.downstream.total.stats.rejected_shares, 2);
 
     // Invalid enonce2 length (too long)
     assert_stratum_error(
@@ -940,8 +940,8 @@ async fn share_validation() {
     );
 
     let status = pool.get_status().await.unwrap();
-    assert_eq!(status.downstream.stats.accepted_shares, 1);
-    assert_eq!(status.downstream.stats.rejected_shares, 3);
+    assert_eq!(status.downstream.total.stats.accepted_shares, 1);
+    assert_eq!(status.downstream.total.stats.rejected_shares, 3);
 
     // Invalid job id (stale)
     assert_stratum_error(
@@ -958,8 +958,8 @@ async fn share_validation() {
     );
 
     let status = pool.get_status().await.unwrap();
-    assert_eq!(status.downstream.stats.accepted_shares, 1);
-    assert_eq!(status.downstream.stats.rejected_shares, 4);
+    assert_eq!(status.downstream.total.stats.accepted_shares, 1);
+    assert_eq!(status.downstream.total.stats.rejected_shares, 4);
 
     // Share above target
     assert_stratum_error(
@@ -976,8 +976,8 @@ async fn share_validation() {
     );
 
     let status = pool.get_status().await.unwrap();
-    assert_eq!(status.downstream.stats.accepted_shares, 1);
-    assert_eq!(status.downstream.stats.rejected_shares, 5);
+    assert_eq!(status.downstream.total.stats.accepted_shares, 1);
+    assert_eq!(status.downstream.total.stats.rejected_shares, 5);
 
     // Worker mismatch rejected
     assert_stratum_error(
@@ -997,8 +997,8 @@ async fn share_validation() {
     );
 
     let status = pool.get_status().await.unwrap();
-    assert_eq!(status.downstream.stats.accepted_shares, 1);
-    assert_eq!(status.downstream.stats.rejected_shares, 6);
+    assert_eq!(status.downstream.total.stats.accepted_shares, 1);
+    assert_eq!(status.downstream.total.stats.rejected_shares, 6);
 
     let user = pool.get_user(&user_address).await.unwrap();
     assert_eq!(user.stats.accepted_shares, 1);
@@ -1020,8 +1020,8 @@ async fn share_validation() {
     );
 
     let status = pool.get_status().await.unwrap();
-    assert_eq!(status.downstream.stats.accepted_shares, 1);
-    assert_eq!(status.downstream.stats.rejected_shares, 7);
+    assert_eq!(status.downstream.total.stats.accepted_shares, 1);
+    assert_eq!(status.downstream.total.stats.rejected_shares, 7);
 
     // Ntime too far in future rejected (> 7000 seconds)
     assert_stratum_error(
@@ -1038,8 +1038,8 @@ async fn share_validation() {
     );
 
     let status = pool.get_status().await.unwrap();
-    assert_eq!(status.downstream.stats.accepted_shares, 1);
-    assert_eq!(status.downstream.stats.rejected_shares, 8);
+    assert_eq!(status.downstream.total.stats.accepted_shares, 1);
+    assert_eq!(status.downstream.total.stats.rejected_shares, 8);
 
     let user = pool.get_user(&user_address).await.unwrap();
     assert_eq!(user.stats.accepted_shares, 1);
@@ -1062,8 +1062,8 @@ async fn share_validation() {
     );
 
     let status = pool.get_status().await.unwrap();
-    assert_eq!(status.downstream.stats.accepted_shares, 1);
-    assert_eq!(status.downstream.stats.rejected_shares, 9);
+    assert_eq!(status.downstream.total.stats.accepted_shares, 1);
+    assert_eq!(status.downstream.total.stats.rejected_shares, 9);
 
     // Stale after new block (submitted via pre-mined block to bitcoind)
     let old_job_id = notify.job_id;
@@ -1098,8 +1098,8 @@ async fn share_validation() {
 
     let status = pool.get_status().await.unwrap();
     assert_eq!(
-        status.downstream.stats.rejected_shares,
-        baseline.downstream.stats.rejected_shares + 1
+        status.downstream.total.stats.rejected_shares,
+        baseline.downstream.total.stats.rejected_shares + 1
     );
 
     let user = pool.get_user(&user_address).await.unwrap();
@@ -1569,12 +1569,12 @@ async fn idle_drop_retires_session() {
         .unwrap();
 
     let status = pool.get_status().await.unwrap();
-    assert_eq!(status.downstream.session_count, 1);
+    assert_eq!(status.downstream.sessions, 1);
 
     tokio::time::sleep(Duration::from_secs(8)).await;
 
     let status = pool.get_status().await.unwrap();
-    assert_eq!(status.downstream.session_count, 0);
+    assert_eq!(status.downstream.sessions, 0);
 }
 
 #[tokio::test]
@@ -1608,9 +1608,9 @@ async fn pool_persists_stats_across_restart() {
         .unwrap();
 
     let status = pool.get_status().await.unwrap();
-    assert_eq!(status.downstream.stats.accepted_shares, 1);
-    assert_eq!(status.downstream.user_count, 1);
-    assert_eq!(status.downstream.worker_count, 1);
+    assert_eq!(status.downstream.total.stats.accepted_shares, 1);
+    assert_eq!(status.downstream.users, 1);
+    assert_eq!(status.downstream.workers, 1);
 
     let user = pool.get_user(&user_address).await.unwrap();
     assert_eq!(user.stats.accepted_shares, 1);
@@ -1628,19 +1628,19 @@ async fn pool_persists_stats_across_restart() {
 
     let status = pool.get_status().await.unwrap();
     assert_eq!(
-        status.downstream.stats.accepted_shares, 1,
+        status.downstream.total.stats.accepted_shares, 1,
         "accepted shares should survive restart"
     );
     assert_eq!(
-        status.downstream.user_count, 1,
+        status.downstream.total.users, 1,
         "user should survive restart"
     );
     assert_eq!(
-        status.downstream.worker_count, 1,
+        status.downstream.total.workers, 1,
         "worker should survive restart"
     );
     assert_eq!(
-        status.downstream.session_count, 0,
+        status.downstream.sessions, 0,
         "sessions should not survive restart"
     );
 

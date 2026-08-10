@@ -453,7 +453,7 @@ async fn router() {
         loop {
             if let Ok(status) = router.get_status().await
                 && status.bucket_order_count == 2
-                && status.downstream.session_count >= 3
+                && status.downstream.sessions >= 3
             {
                 break;
             }
@@ -465,9 +465,9 @@ async fn router() {
 
     let status = router.get_status().await.unwrap();
     assert_eq!(status.bucket_order_count, 2);
-    assert_eq!(status.downstream.session_count, 3);
-    assert_eq!(status.downstream.user_count, 1);
-    assert_eq!(status.downstream.worker_count, 1);
+    assert_eq!(status.downstream.sessions, 3);
+    assert_eq!(status.downstream.users, 1);
+    assert_eq!(status.downstream.workers, 1);
 
     let users = router.get_users().await.unwrap();
     assert_eq!(users.len(), 1);
@@ -516,7 +516,7 @@ async fn router() {
     timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(status) = router.get_status().await
-                && status.downstream.session_count >= 3
+                && status.downstream.sessions >= 3
             {
                 break;
             }
@@ -527,14 +527,14 @@ async fn router() {
     .expect("Timeout waiting for miners to reconnect to remaining upstream");
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.downstream.session_count, 3);
+    assert_eq!(status.downstream.sessions, 3);
 
     drop(pool_b);
 
     timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(status) = router.get_status().await
-                && status.downstream.session_count == 0
+                && status.downstream.sessions == 0
             {
                 break;
             }
@@ -1151,7 +1151,7 @@ async fn order_survives_upstream_bounce_and_drops_sessions() {
     timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(status) = router.get_status().await
-                && status.downstream.session_count >= 1
+                && status.downstream.sessions >= 1
             {
                 break;
             }
@@ -1170,7 +1170,7 @@ async fn order_survives_upstream_bounce_and_drops_sessions() {
             if let (Ok(status), Ok(detail)) = (status, detail)
                 && detail.status == OrderStatus::Active
                 && detail.sessions.is_empty()
-                && status.downstream.session_count == 0
+                && status.downstream.sessions == 0
             {
                 break;
             }
@@ -1486,8 +1486,8 @@ async fn greet_drops_concurrent_probes_independently() {
     );
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.downstream.user_count, 0);
-    assert_eq!(status.downstream.session_count, 0);
+    assert_eq!(status.downstream.users, 0);
+    assert_eq!(status.downstream.sessions, 0);
 }
 
 #[tokio::test]
@@ -1800,11 +1800,11 @@ async fn router_persists_order_stats_across_restart() {
 
     let status = router.get_status().await.unwrap();
     assert_eq!(
-        status.downstream.user_count, 1,
+        status.downstream.total.users, 1,
         "downstream user should survive restart"
     );
     assert_eq!(
-        status.downstream.worker_count, 1,
+        status.downstream.total.workers, 1,
         "downstream worker should survive restart"
     );
 }

@@ -57,6 +57,10 @@ impl Worker {
         self.sessions.iter().map(|entry| entry.value().clone())
     }
 
+    pub(crate) fn lifetime(&self) -> Stats {
+        self.lifetime.lock().clone()
+    }
+
     pub(crate) fn snapshot(&self) -> Stats {
         let now = Instant::now();
         let lifetime = self.lifetime.lock();

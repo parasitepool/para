@@ -2,8 +2,8 @@ use {
     super::*,
     crate::{
         api::{
-            DownstreamInfo, IntentClaimCounts, MiningStats, OrphanReceipt, PlacementCounts,
-            RouterStatus, UpstreamSummary,
+            DownstreamStatus, IntentClaimCounts, OrphanReceipt, PlacementCounts, RouterStatus,
+            TotalStats, UpstreamStatus, UpstreamTotals,
         },
         event_sink::Event,
         generator::get_block_template,
@@ -875,21 +875,25 @@ impl Router {
 
         drop(guard);
 
-        let mut accepted = Stats::new();
         let mut bucket_order_count = 0;
         let mut sink_order_count = 0;
         let mut starving_order_count = 0;
         let mut deficit_hashrate = HashRate::ZERO;
+        let mut pending = 0;
+        let mut disconnected = 0;
 
-        let mut upstream_addresses: HashSet<&Address<NetworkUnchecked>> = HashSet::new();
-        let mut upstream_workers: HashSet<&str> = HashSet::new();
-        let mut upstream_idle_count = 0;
-        let mut upstream_disconnected_count = 0;
+        let mut active_addresses: HashSet<&Address<NetworkUnchecked>> = HashSet::new();
+        let mut active_workers: HashSet<&str> = HashSet::new();
+        let mut live_addresses: HashSet<&Address<NetworkUnchecked>> = HashSet::new();
+
+        let mut active = Stats::new();
+        let mut live = Stats::new();
 
         for order in &orders {
-            let status = order.status();
+            let username = order.upstream_target.username();
+            let stats = order.stats();
 
-            match status {
+            match order.status() {
                 OrderStatus::Active => {
                     if order.is_sink() {
                         sink_order_count += 1;
@@ -903,19 +907,66 @@ impl Router {
                             }
                             deficit_hashrate += order.hashrate_shortfall(measured);
                         }
+
+                        active_addresses.insert(username.address());
+                        active_workers.insert(username.as_str());
+                        active.absorb(stats.clone(), now);
                     }
                 }
-                OrderStatus::Pending | OrderStatus::InMempool => upstream_idle_count += 1,
-                OrderStatus::Disconnected => upstream_disconnected_count += 1,
+                OrderStatus::Pending | OrderStatus::InMempool => pending += 1,
+                OrderStatus::Disconnected => disconnected += 1,
                 _ => {}
             }
 
-            let username = order.upstream_target.username();
-            upstream_addresses.insert(username.address());
-            upstream_workers.insert(username.as_str());
-
-            accepted.absorb(order.stats(), now);
+            live_addresses.insert(username.address());
+            live.absorb(stats, now);
         }
+
+        let guard = self.orders.read();
+        let cold = guard.cold_totals();
+
+        live_addresses.extend(cold.addresses.iter());
+        let total_users = live_addresses.len();
+        let total_orders = guard.cold_count() + orders.len();
+
+        let total_best_share = if cold
+            .best_share
+            .is_some_and(|best| live.best_share.is_none_or(|current| best > current))
+        {
+            cold.best_share
+        } else {
+            live.best_share
+        };
+
+        let live_last_share_secs = live
+            .last_share
+            .map(|time| epoch::instant_to_epoch_secs(time, now));
+
+        let total_last_share_secs = if cold
+            .last_share_secs
+            .is_some_and(|last| live_last_share_secs.is_none_or(|current| last > current))
+        {
+            cold.last_share_secs
+        } else {
+            live_last_share_secs
+        };
+
+        let accepted_work = cold.accepted_work + live.accepted_work;
+        let rejected_work = cold.rejected_work + live.rejected_work;
+        let delivered_work = accepted_work + rejected_work;
+
+        let total = TotalStats {
+            accepted_shares: cold.accepted_shares + live.accepted_shares,
+            rejected_shares: cold.rejected_shares + live.rejected_shares,
+            accepted_work,
+            rejected_work,
+            delivered_work,
+            delivered_hash_days: delivered_work.to_hash_days(),
+            best_share: total_best_share,
+            last_share: total_last_share_secs.map(|secs| secs as u64),
+        };
+
+        drop(guard);
 
         let total_capacity_hash_days = self.capacity_work();
 
@@ -947,14 +998,25 @@ impl Router {
             intents_expired_1h: control_metrics.intents_expired_1h,
             intent_claims_1h: control_metrics.intent_claims_1h,
             placements_1h: control_metrics.placements_1h,
-            upstream: UpstreamSummary {
-                user_count: upstream_addresses.len(),
-                worker_count: upstream_workers.len(),
-                idle_count: upstream_idle_count,
-                disconnected_count: upstream_disconnected_count,
-                stats: MiningStats::from_snapshot(&accepted, now),
+            upstream: UpstreamStatus {
+                users: active_addresses.len(),
+                workers: active_workers.len(),
+                orders: bucket_order_count,
+                pending,
+                disconnected,
+                hashrate_1m: active.hashrate_1m(now),
+                sps_1m: active.sps_1m(now),
+                accepted_shares: active.accepted_shares,
+                rejected_shares: active.rejected_shares,
+                accepted_work: active.accepted_work,
+                rejected_work: active.rejected_work,
+                total: UpstreamTotals {
+                    users: total_users,
+                    orders: total_orders,
+                    stats: total,
+                },
             },
-            downstream: DownstreamInfo::from_metatron(metatron, now),
+            downstream: DownstreamStatus::from_metatron(metatron, now),
         }
     }
 
@@ -1500,6 +1562,171 @@ mod tests {
         case(OrderStatus::Cancelled, "\"cancelled\"");
         case(OrderStatus::Disconnected, "\"disconnected\"");
         case(OrderStatus::Expired, "\"expired\"");
+    }
+
+    #[test]
+    fn status_separates_now_and_totals() {
+        let router = test_router();
+        let order = test_order(
+            0,
+            Some(hash_days(100.0)),
+            OrderStatus::Active,
+            &router.metatron,
+        );
+        add_orders(router.as_ref(), [order.clone()]);
+
+        router.metatron.record_order_accepted(
+            order.id,
+            Difficulty::from(1.0),
+            Difficulty::from(1.0),
+        );
+
+        let session = router
+            .metatron
+            .new_session(test_authorization("deadbeef", "foo"), order.id);
+        session.record_accepted(Difficulty::from(1.0), Difficulty::from(1.0));
+
+        let status = router.status();
+        assert_eq!(status.upstream.accepted_shares, 1);
+        assert_eq!(status.upstream.total.stats.accepted_shares, 1);
+        assert_eq!(status.upstream.total.users, 1);
+        assert_eq!(status.upstream.total.orders, 1);
+        assert_eq!(status.downstream.accepted_shares, 1);
+        assert_eq!(status.downstream.total.stats.accepted_shares, 1);
+
+        order.terminate(OrderStatus::Fulfilled);
+        order.clear_dirty();
+
+        let status = router.status();
+        assert_eq!(status.upstream.accepted_shares, 0);
+        assert_eq!(status.upstream.users, 0);
+        assert_eq!(status.upstream.total.stats.accepted_shares, 1);
+        assert_eq!(status.upstream.total.users, 1);
+
+        router.retire_orders();
+
+        let status = router.status();
+        assert_eq!(status.upstream.accepted_shares, 0);
+        assert_eq!(status.upstream.total.stats.accepted_shares, 1);
+        assert_eq!(status.upstream.total.users, 1);
+        assert_eq!(status.upstream.total.orders, 1);
+        assert_eq!(status.downstream.accepted_shares, 1);
+        assert_eq!(status.downstream.total.stats.accepted_shares, 1);
+
+        let json = serde_json::to_value(router.status()).unwrap();
+        assert!(json["upstream"]["hashrate_1m"].is_number());
+        assert!(json["upstream"]["total"]["orders"].is_number());
+        assert!(json["downstream"]["sessions"].is_number());
+        assert!(json["downstream"]["total"]["users"].is_number());
+        assert!(json.get("traffic").is_none());
+        assert!(json.get("history").is_none());
+    }
+
+    #[test]
+    fn status_excludes_sinks_from_traffic_plane() {
+        let router = test_router();
+        let sink = test_order(0, None, OrderStatus::Active, &router.metatron);
+        add_orders(router.as_ref(), [sink.clone()]);
+
+        router.metatron.record_order_accepted(
+            sink.id,
+            Difficulty::from(1.0),
+            Difficulty::from(1.0),
+        );
+
+        let status = router.status();
+        assert_eq!(status.sink_order_count, 1);
+        assert_eq!(status.upstream.orders, 0);
+        assert_eq!(status.upstream.users, 0);
+        assert_eq!(status.upstream.workers, 0);
+        assert_eq!(status.upstream.accepted_shares, 0);
+        assert_eq!(status.upstream.hashrate_1m, HashRate::ZERO);
+        assert_eq!(status.upstream.total.stats.accepted_shares, 1);
+        assert_eq!(status.upstream.total.orders, 1);
+        assert_eq!(status.upstream.total.users, 1);
+    }
+
+    #[test]
+    fn cold_totals_track_cold_entries() {
+        let router = test_router();
+
+        router
+            .metatron
+            .record_order_accepted(0, Difficulty::from(1.0), Difficulty::from(1.0));
+        router
+            .metatron
+            .record_order_accepted(1, Difficulty::from(1.0), Difficulty::from(1.0));
+        router
+            .metatron
+            .record_order_accepted(1, Difficulty::from(1.0), Difficulty::from(1.0));
+
+        let first = test_order(0, None, OrderStatus::Expired, &router.metatron).to_entry();
+        let second = test_order(1, None, OrderStatus::Expired, &router.metatron).to_entry();
+
+        let mut orders = router.orders.write();
+
+        orders.add_cold(0, first);
+        orders.add_cold(1, second);
+
+        let totals = orders.cold_totals();
+        assert_eq!(totals.accepted_shares, 3);
+        assert!(totals.best_share.is_some());
+        assert!(totals.last_share_secs.is_some());
+        assert_eq!(totals.addresses.len(), 1);
+        assert_eq!(orders.cold_count(), 2);
+
+        orders.remove_cold(0);
+
+        let totals = orders.cold_totals();
+        assert_eq!(totals.accepted_shares, 2);
+        assert_eq!(totals.addresses.len(), 1);
+        assert_eq!(orders.cold_count(), 1);
+
+        orders.remove_cold(0);
+
+        assert_eq!(orders.cold_totals().accepted_shares, 2);
+    }
+
+    #[test]
+    fn flag_orders_resurrection_conserves_upstream_totals() {
+        let directory = tempfile::tempdir().unwrap();
+        let (router, wallet) = regtest_wallet_router(&directory);
+        wallet.mark_synced();
+
+        let cold = wallet.test_reveal_address();
+
+        router
+            .metatron
+            .record_order_accepted(1, Difficulty::from(1.0), Difficulty::from(1.0));
+
+        let cold_entry = test_order_with_payment(
+            1,
+            Payment::new(cold.address.clone(), cold.index, Amount::from_sat(1000), 0),
+            OrderStatus::Expired,
+            &router.metatron,
+        )
+        .to_entry();
+
+        router.orders.write().add_cold(1, cold_entry);
+
+        let tx = wallet.test_receive_unconfirmed(&cold.address, Amount::from_sat(1000));
+        wallet.test_confirm_tx(tx);
+
+        let before = router.status();
+        assert_eq!(before.upstream.accepted_shares, 0);
+        assert_eq!(before.upstream.total.stats.accepted_shares, 1);
+        assert_eq!(before.upstream.total.orders, 1);
+        assert_eq!(before.upstream.total.users, 1);
+
+        router.flag_orders();
+
+        let after = router.status();
+        assert_eq!(after.upstream.accepted_shares, 0);
+        assert_eq!(after.upstream.total.stats.accepted_shares, 1);
+        assert_eq!(after.upstream.total.orders, 1);
+        assert_eq!(after.upstream.total.users, 1);
+        assert_eq!(router.orders.read().cold_count(), 0);
+        assert!(router.orders.read().get(1).is_some());
     }
 
     #[test]

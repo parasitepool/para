@@ -32,6 +32,6 @@ async fn status(State(metatron): State<Arc<Metatron>>) -> Json<PoolStatus> {
         block_count: metatron.block_count() as u64,
         recent_blocks: metatron.recent_blocks(10),
         uptime_secs: metatron.uptime().as_secs(),
-        downstream: DownstreamInfo::from_metatron(&metatron, Instant::now()),
+        downstream: DownstreamStatus::from_metatron(&metatron, Instant::now()),
     })
 }

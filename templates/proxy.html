@@ -1,38 +1,64 @@
 <div class=grid>
-  <div class="stats stats-3 column-full">
-    <div class=stat><div class=stat-label>Status</div><div class=stat-value><span id=upstream_status></span></div></div>
-    <div class=stat><div class=stat-label>Ping</div><div class=stat-value><span id=upstream_ping></span>ms</div></div>
-    <div class=stat><div class=stat-label>Uptime</div><div class=stat-value id=uptime_secs></div></div>
-    <div class=stat><div class=stat-label>Endpoint</div><div class=stat-value id=upstream_endpoint></div></div>
-    <div class=stat><div class=stat-label>Username</div><div class=stat-value id=upstream_username class=copyable></div></div>
-    <div class=stat><div class=stat-label>Difficulty</div><div class=stat-value id=upstream_difficulty class=copyable></div></div>
-    <div class=stat><div class=stat-label>Extranonce1</div><div class=stat-value id=upstream_enonce1></div></div>
-    <div class=stat><div class=stat-label>Extranonce2 Size</div><div class=stat-value id=upstream_enonce2_size></div></div>
-    <div class=stat><div class=stat-label>Version Mask</div><div class=stat-value id=upstream_version_mask></div></div>
-  </div>
+  <div class="column column-full" data-tabs>
+    <div class=tab-bar>
+      <button type=button data-tab=info>Info</button>
+      <button type=button data-tab=traffic>Traffic</button>
+      <button type=button data-tab=total>Total</button>
+    </div>
 
-  <div class="column column-full">
-    <h2>Traffic</h2>
-    <table class=compact-table>
-      <thead>
-        <tr><th></th><th>Upstream</th><th>Downstream</th></tr>
-      </thead>
-      <tbody>
-        <tr><td>Hashrate</td><td id=upstream_hashrate_1m></td><td id=downstream_hashrate_1m></td></tr>
-        <tr><td>SPS</td><td id=upstream_sps_1m></td><td id=downstream_sps_1m></td></tr>
-        <tr><td>Best Share</td><td id=upstream_best_share class=copyable></td><td id=downstream_best_share class=copyable></td></tr>
-        <tr><td>Last Share</td><td id=upstream_last_share></td><td id=downstream_last_share></td></tr>
-        <tr><td>Rejected Shares</td><td id=upstream_rejected_shares class=copyable></td><td id=downstream_rejected_shares class=copyable></td></tr>
-        <tr><td>Rejected Work</td><td id=upstream_rejected_work class=copyable></td><td id=downstream_rejected_work class=copyable></td></tr>
-        <tr><td>Delivered Work</td><td id=upstream_delivered_work></td><td id=downstream_delivered_work></td></tr>
-        <tr><td>Delivered Hashdays</td><td id=upstream_delivered_hash_days class=copyable></td><td id=downstream_delivered_hash_days class=copyable></td></tr>
-        <tr><td>Users</td><td id=upstream_users></td><td id=users></td></tr>
-        <tr><td>Workers</td><td id=upstream_workers></td><td id=workers></td></tr>
-        <tr><td>Orders / Sessions</td><td id=upstream_sessions></td><td id=sessions></td></tr>
-        <tr><td>Pending / Idle</td><td id=upstream_idle></td><td id=idle></td></tr>
-        <tr><td>Disconnected</td><td id=upstream_disconnected></td><td id=disconnected></td></tr>
-      </tbody>
-    </table>
+    <div data-tab-panel=traffic class=hidden>
+      <table class=compact-table>
+        <thead>
+          <tr><th></th><th>Upstream</th><th>Downstream</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Hashrate</td><td data-value=upstream.hashrate_1m data-format=hashrate></td><td data-value=downstream.hashrate_1m data-format=hashrate></td></tr>
+          <tr><td>SPS</td><td data-value=upstream.sps_1m data-format=sps></td><td data-value=downstream.sps_1m data-format=sps></td></tr>
+          <tr><td>Best Share</td><td data-value=upstream.total.best_share data-format=difficulty class=copyable></td><td data-value=downstream.total.best_share data-format=difficulty class=copyable></td></tr>
+          <tr><td>Last Share</td><td data-value=upstream.total.last_share data-format=timestamp_ago></td><td data-value=downstream.total.last_share data-format=timestamp_ago></td></tr>
+          <tr><td>Rejected Shares</td><td data-value=upstream data-format=rejection_shares class=copyable></td><td data-value=downstream data-format=rejection_shares class=copyable></td></tr>
+          <tr><td>Rejected Work</td><td data-value=upstream data-format=rejection_work class=copyable></td><td data-value=downstream data-format=rejection_work class=copyable></td></tr>
+          <tr><td>Users</td><td data-value=upstream.users></td><td data-value=downstream.users></td></tr>
+          <tr><td>Workers</td><td data-value=upstream.workers></td><td data-value=downstream.workers></td></tr>
+          <tr><td>Orders / Sessions</td><td data-value=upstream.orders></td><td data-value=downstream.sessions></td></tr>
+          <tr><td>Pending / Idle</td><td data-value=upstream.pending></td><td data-value=downstream.idle></td></tr>
+          <tr><td>Disconnected</td><td data-value=upstream.disconnected></td><td data-value=downstream.disconnected></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div data-tab-panel=info>
+      <table class=compact-table>
+        <tbody>
+          <tr><td>Status</td><td><span id=upstream_status></span></td></tr>
+          <tr><td>Ping</td><td><span data-value=upstream_info.ping_ms data-format=ping></span>ms</td></tr>
+          <tr><td>Uptime</td><td data-value=uptime_secs data-format=duration></td></tr>
+          <tr><td>Endpoint</td><td data-value=upstream_info.endpoint></td></tr>
+          <tr><td>Username</td><td data-value=upstream_info.username data-format=username class=copyable></td></tr>
+          <tr><td>Difficulty</td><td data-value=upstream_info.difficulty data-format=difficulty class=copyable></td></tr>
+          <tr><td>Extranonce1</td><td data-value=upstream_info.enonce1></td></tr>
+          <tr><td>Extranonce2 Size</td><td data-value=upstream_info.enonce2_size></td></tr>
+          <tr><td>Version Mask</td><td data-value=upstream_info.version_mask></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div data-tab-panel=total class=hidden>
+      <table class=compact-table>
+        <thead>
+          <tr><th></th><th>Upstream</th><th>Downstream</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Users</td><td data-value=upstream.total.users></td><td data-value=downstream.total.users></td></tr>
+          <tr><td>Orders / Workers</td><td data-value=upstream.total.orders></td><td data-value=downstream.total.workers></td></tr>
+          <tr><td>Best Share</td><td data-value=upstream.total.best_share data-format=difficulty class=copyable></td><td data-value=downstream.total.best_share data-format=difficulty class=copyable></td></tr>
+          <tr><td>Rejected Shares</td><td data-value=upstream.total data-format=rejection_shares class=copyable></td><td data-value=downstream.total data-format=rejection_shares class=copyable></td></tr>
+          <tr><td>Rejected Work</td><td data-value=upstream.total data-format=rejection_work class=copyable></td><td data-value=downstream.total data-format=rejection_work class=copyable></td></tr>
+          <tr><td>Delivered Work</td><td data-value=upstream.total.delivered_work data-format=difficulty></td><td data-value=downstream.total.delivered_work data-format=difficulty></td></tr>
+          <tr><td>Delivered Hashdays</td><td data-value=upstream.total.delivered_hash_days data-format=hash_days class=copyable></td><td data-value=downstream.total.delivered_hash_days data-format=hash_days class=copyable></td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 
   <div class=column>
@@ -79,26 +105,11 @@ async function refresh(signal) {
     fetchJson('/api/bitcoin/status', { signal }),
   ]);
 
-  const u = proxyData.upstream || {};
+  applyData(proxyData);
 
-  set('upstream_endpoint', u.endpoint);
-  set('upstream_status', u.connected ? 'Connected' : 'Disconnected');
-  setClass('upstream_status', u.connected ? 'connected' : 'disconnected');
-  copyable('upstream_username', truncateMiddle(u.username), u.username);
-  copyable('upstream_difficulty', formatDifficulty(u.difficulty), u.difficulty);
-  set('upstream_enonce1', u.enonce1);
-  set('upstream_enonce2_size', u.enonce2_size);
-  set('upstream_version_mask', u.version_mask);
-  set('upstream_ping', u.ping_ms, formatPing);
-  set('uptime_secs', proxyData.uptime_secs, formatDuration);
-  populateStats('upstream', u.stats);
-  const connected = u.connected ? 1 : 0;
-  set('upstream_users', 1);
-  set('upstream_workers', 1);
-  set('upstream_sessions', connected);
-  set('upstream_idle', 0);
-  set('upstream_disconnected', 1 - connected);
-  populateDownstream(proxyData.downstream || {});
+  const connected = proxyData.upstream_info?.connected;
+  set('upstream_status', connected ? 'Connected' : 'Disconnected');
+  setClass('upstream_status', connected ? 'connected' : 'disconnected');
 
   renderBitcoinData(bitcoinData);
   renderSystemData(systemData);

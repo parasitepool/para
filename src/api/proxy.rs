@@ -45,12 +45,33 @@ async fn status(State(router): State<Arc<Router>>) -> ServerResult<Response> {
         .upstream()
         .ok_or_not_found(|| "Proxy upstream".to_string())?;
 
+    let stats = order.stats();
+    let connected = usize::from(upstream.is_connected());
+
     Ok(Json(ProxyStatus {
         uptime_secs: metatron.uptime().as_secs(),
         block_count: metatron.block_count() as u64,
         recent_blocks: metatron.recent_blocks(10),
-        upstream: UpstreamInfo::from_upstream(&upstream, &metatron, now),
-        downstream: DownstreamInfo::from_metatron(&metatron, now),
+        upstream_info: UpstreamInfo::from_upstream(&upstream),
+        upstream: UpstreamStatus {
+            users: 1,
+            workers: 1,
+            orders: connected,
+            pending: 0,
+            disconnected: 1 - connected,
+            hashrate_1m: stats.hashrate_1m(now),
+            sps_1m: stats.sps_1m(now),
+            accepted_shares: stats.accepted_shares,
+            rejected_shares: stats.rejected_shares,
+            accepted_work: stats.accepted_work,
+            rejected_work: stats.rejected_work,
+            total: UpstreamTotals {
+                users: 1,
+                orders: 1,
+                stats: TotalStats::from_stats(&stats, now),
+            },
+        },
+        downstream: DownstreamStatus::from_metatron(&metatron, now),
     })
     .into_response())
 }

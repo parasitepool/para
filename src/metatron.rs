@@ -45,6 +45,16 @@ pub(crate) struct Metatron {
     persist_lock: Mutex<()>,
 }
 
+pub(crate) struct DownstreamSnapshot {
+    pub(crate) traffic: Stats,
+    pub(crate) total: Stats,
+    pub(crate) users: usize,
+    pub(crate) workers: usize,
+    pub(crate) sessions: usize,
+    pub(crate) idle: usize,
+    pub(crate) total_workers: usize,
+}
+
 impl Metatron {
     pub(crate) fn open(store: Arc<Store>) -> Result<Self> {
         let users = store
@@ -217,6 +227,65 @@ impl Metatron {
         })
     }
 
+    pub(crate) fn downstream(&self, now: Instant) -> DownstreamSnapshot {
+        let mut traffic = Stats::new();
+        let mut total = Stats::new();
+        let mut addresses = HashSet::new();
+        let mut workers = HashSet::new();
+        let mut sessions = 0;
+        let mut idle = 0;
+        let mut total_workers = 0;
+
+        for user in self.users.iter() {
+            let live_workers = workers.len();
+
+            for worker in user.workers() {
+                total_workers += 1;
+                total.absorb(worker.lifetime(), now);
+
+                if worker.session_count() == 0 {
+                    continue;
+                }
+
+                workers.insert((user.address.clone(), worker.workername().to_string()));
+
+                for session in worker.sessions() {
+                    let snapshot = session.snapshot();
+
+                    sessions += 1;
+
+                    if session.is_idle(now) {
+                        idle += 1;
+                    }
+
+                    traffic.absorb(snapshot.clone(), now);
+                    total.absorb(snapshot, now);
+                }
+            }
+
+            if workers.len() > live_workers {
+                addresses.insert(user.address.clone());
+            }
+        }
+
+        for entry in self.disconnected.iter() {
+            let session = &entry.value().0;
+            traffic.absorb(session.snapshot(), now);
+            addresses.insert(session.address().clone());
+            workers.insert((session.address().clone(), session.workername().to_string()));
+        }
+
+        DownstreamSnapshot {
+            traffic,
+            total,
+            users: addresses.len(),
+            workers: workers.len(),
+            sessions,
+            idle,
+            total_workers,
+        }
+    }
+
     pub(crate) fn block_count(&self) -> usize {
         self.blocks.read().len()
     }
@@ -231,16 +300,6 @@ impl Metatron {
 
     pub(crate) fn total_disconnected(&self) -> usize {
         self.disconnected.len()
-    }
-
-    pub(crate) fn total_idle(&self) -> usize {
-        let now = Instant::now();
-
-        self.users
-            .iter()
-            .flat_map(|user| user.sessions())
-            .filter(|session| session.is_idle(now))
-            .count()
     }
 
     pub(crate) fn users(&self) -> &DashMap<Address, Arc<User>> {
@@ -386,10 +445,7 @@ impl Metatron {
     pub(crate) fn order_delivered_work(&self, order_id: u32) -> HashWork {
         self.orders
             .get(&order_id)
-            .map(|slot| {
-                let stats = slot.stats.lock();
-                stats.accepted_work + stats.rejected_work
-            })
+            .map(|slot| slot.stats.lock().delivered_work())
             .unwrap_or(HashWork::ZERO)
     }
 
@@ -640,6 +696,60 @@ mod tests {
         let expected = HashWork::from_difficulty(pool_diff);
         assert_eq!(stats.accepted_work, expected + expected);
         assert_eq!(stats.rejected_work, expected);
+    }
+
+    #[test]
+    fn downstream_excludes_retired_lifetime() {
+        let (metatron, _dir) = Metatron::test();
+        let now = Instant::now();
+
+        let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+        let s2 = metatron.new_session(test_auth("cafebabe", "bar"), 0);
+
+        let pool_diff = Difficulty::from(100.0);
+        s1.record_accepted(pool_diff, Difficulty::from(200.0));
+        s2.record_accepted(pool_diff, Difficulty::from(300.0));
+
+        assert_eq!(metatron.downstream(now).traffic.accepted_shares, 2);
+
+        metatron.retire_session(s1, test_allocator());
+        metatron.retire_session(s2, test_allocator());
+
+        assert_eq!(metatron.downstream(now).traffic.accepted_shares, 2);
+        assert_eq!(metatron.downstream(now).total.accepted_shares, 2);
+
+        metatron.cleanup_expired(Instant::now() + SESSION_TTL + Duration::from_secs(1));
+
+        assert_eq!(metatron.downstream(now).traffic.accepted_shares, 0);
+        assert_eq!(metatron.downstream(now).total.accepted_shares, 2);
+    }
+
+    #[test]
+    fn downstream_counts_track_live_and_disconnected() {
+        let (metatron, _dir) = Metatron::test();
+        let now = Instant::now();
+
+        metatron.new_session(test_auth("deadbeef", "foo"), 0);
+        let s2 = metatron.new_session(test_auth_2("cafebabe", "bar"), 0);
+
+        let downstream = metatron.downstream(now);
+        assert_eq!(downstream.users, 2);
+        assert_eq!(downstream.workers, 2);
+
+        s2.record_accepted(Difficulty::from(100.0), Difficulty::from(200.0));
+        metatron.retire_session(s2, test_allocator());
+
+        let downstream = metatron.downstream(now);
+        assert_eq!(downstream.users, 2);
+        assert_eq!(downstream.workers, 2);
+
+        metatron.cleanup_expired(Instant::now() + SESSION_TTL + Duration::from_secs(1));
+
+        let downstream = metatron.downstream(now);
+        assert_eq!(downstream.users, 1);
+        assert_eq!(downstream.workers, 1);
+        assert_eq!(metatron.total_users(), 2);
+        assert_eq!(metatron.total_workers(), 2);
     }
 
     #[test]

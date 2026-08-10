@@ -55,14 +55,12 @@ impl MiningStats {
             sps_15m: stats.sps_15m(now),
             sps_1hr: stats.sps_1hr(now),
             best_share: stats.best_share,
-            last_share: stats
-                .last_share
-                .map(|time| epoch::instant_to_epoch_secs(time, now) as u64),
+            last_share: stats.last_share_epoch_secs(now),
             accepted_shares: stats.accepted_shares,
             rejected_shares: stats.rejected_shares,
             accepted_work: stats.accepted_work,
             rejected_work: stats.rejected_work,
-            delivered_hash_days: (stats.accepted_work + stats.rejected_work).to_hash_days(),
+            delivered_hash_days: stats.delivered_work().to_hash_days(),
         }
     }
 }
@@ -72,39 +70,107 @@ pub struct PoolStatus {
     pub block_count: u64,
     pub recent_blocks: Vec<BlockHash>,
     pub uptime_secs: u64,
-    pub downstream: DownstreamInfo,
+    pub downstream: DownstreamStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DownstreamInfo {
-    pub user_count: usize,
-    pub worker_count: usize,
-    pub session_count: usize,
-    pub disconnected_count: usize,
-    pub idle_count: usize,
-    pub stats: MiningStats,
+pub struct TotalStats {
+    pub accepted_shares: u64,
+    pub rejected_shares: u64,
+    pub accepted_work: HashWork,
+    pub rejected_work: HashWork,
+    pub delivered_work: HashWork,
+    pub delivered_hash_days: HashDays,
+    pub best_share: Option<Difficulty>,
+    pub last_share: Option<u64>,
 }
 
-impl DownstreamInfo {
-    pub(crate) fn from_metatron(metatron: &Metatron, now: Instant) -> Self {
+impl TotalStats {
+    pub(crate) fn from_stats(stats: &Stats, now: Instant) -> Self {
         Self {
-            user_count: metatron.total_users(),
-            worker_count: metatron.total_workers(),
-            session_count: metatron.total_sessions(),
-            disconnected_count: metatron.total_disconnected(),
-            idle_count: metatron.total_idle(),
-            stats: MiningStats::from_snapshot(&metatron.snapshot(), now),
+            accepted_shares: stats.accepted_shares,
+            rejected_shares: stats.rejected_shares,
+            accepted_work: stats.accepted_work,
+            rejected_work: stats.rejected_work,
+            delivered_work: stats.delivered_work(),
+            delivered_hash_days: stats.delivered_work().to_hash_days(),
+            best_share: stats.best_share,
+            last_share: stats.last_share_epoch_secs(now),
         }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UpstreamSummary {
-    pub user_count: usize,
-    pub worker_count: usize,
-    pub idle_count: usize,
-    pub disconnected_count: usize,
-    pub stats: MiningStats,
+pub struct Totals {
+    pub users: usize,
+    pub workers: usize,
+    #[serde(flatten)]
+    pub stats: TotalStats,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpstreamTotals {
+    pub users: usize,
+    pub orders: usize,
+    #[serde(flatten)]
+    pub stats: TotalStats,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DownstreamStatus {
+    pub users: usize,
+    pub workers: usize,
+    pub sessions: usize,
+    pub idle: usize,
+    pub disconnected: usize,
+    pub hashrate_1m: HashRate,
+    pub sps_1m: f64,
+    pub accepted_shares: u64,
+    pub rejected_shares: u64,
+    pub accepted_work: HashWork,
+    pub rejected_work: HashWork,
+    pub total: Totals,
+}
+
+impl DownstreamStatus {
+    pub(crate) fn from_metatron(metatron: &Metatron, now: Instant) -> Self {
+        let downstream = metatron.downstream(now);
+
+        Self {
+            users: downstream.users,
+            workers: downstream.workers,
+            sessions: downstream.sessions,
+            idle: downstream.idle,
+            disconnected: metatron.total_disconnected(),
+            hashrate_1m: downstream.traffic.hashrate_1m(now),
+            sps_1m: downstream.traffic.sps_1m(now),
+            accepted_shares: downstream.traffic.accepted_shares,
+            rejected_shares: downstream.traffic.rejected_shares,
+            accepted_work: downstream.traffic.accepted_work,
+            rejected_work: downstream.traffic.rejected_work,
+            total: Totals {
+                users: metatron.total_users(),
+                workers: downstream.total_workers,
+                stats: TotalStats::from_stats(&downstream.total, now),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpstreamStatus {
+    pub users: usize,
+    pub workers: usize,
+    pub orders: usize,
+    pub pending: usize,
+    pub disconnected: usize,
+    pub hashrate_1m: HashRate,
+    pub sps_1m: f64,
+    pub accepted_shares: u64,
+    pub rejected_shares: u64,
+    pub accepted_work: HashWork,
+    pub rejected_work: HashWork,
+    pub total: UpstreamTotals,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -126,11 +192,9 @@ impl UserSummary {
             worker_count: user.worker_count(),
             session_count: user.session_count(),
             hashrate: stats.hashrate_1m(now),
-            delivered_hash_days: (stats.accepted_work + stats.rejected_work).to_hash_days(),
+            delivered_hash_days: stats.delivered_work().to_hash_days(),
             best_share: stats.best_share,
-            last_share: stats
-                .last_share
-                .map(|time| epoch::instant_to_epoch_secs(time, now) as u64),
+            last_share: stats.last_share_epoch_secs(now),
         }
     }
 }
@@ -236,8 +300,9 @@ pub struct ProxyStatus {
     pub uptime_secs: u64,
     pub block_count: u64,
     pub recent_blocks: Vec<BlockHash>,
-    pub upstream: UpstreamInfo,
-    pub downstream: DownstreamInfo,
+    pub upstream_info: UpstreamInfo,
+    pub upstream: UpstreamStatus,
+    pub downstream: DownstreamStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -250,12 +315,10 @@ pub struct UpstreamInfo {
     pub enonce1: Extranonce,
     pub enonce2_size: usize,
     pub version_mask: Option<Version>,
-    pub stats: MiningStats,
 }
 
 impl UpstreamInfo {
-    pub(crate) fn from_upstream(upstream: &Upstream, metatron: &Metatron, now: Instant) -> Self {
-        let stats = metatron.order_stats(upstream.id());
+    pub(crate) fn from_upstream(upstream: &Upstream) -> Self {
         Self {
             endpoint: upstream.endpoint().to_string(),
             connected: upstream.is_connected(),
@@ -265,7 +328,6 @@ impl UpstreamInfo {
             enonce1: upstream.enonce1().clone(),
             enonce2_size: upstream.enonce2_size(),
             version_mask: upstream.version_mask(),
-            stats: MiningStats::from_snapshot(&stats, now),
         }
     }
 }
@@ -315,8 +377,8 @@ pub struct RouterStatus {
     pub intents_expired_1h: usize,
     pub intent_claims_1h: IntentClaimCounts,
     pub placements_1h: PlacementCounts,
-    pub upstream: UpstreamSummary,
-    pub downstream: DownstreamInfo,
+    pub upstream: UpstreamStatus,
+    pub downstream: DownstreamStatus,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -369,7 +431,7 @@ impl OrderSummary {
             username: order.upstream_target.username().to_string(),
             requested_hash_days: order.bucket.as_ref().map(|bucket| bucket.target),
             hashrate: stats.hashrate_1m(now),
-            delivered_hash_days: (stats.accepted_work + stats.rejected_work).to_hash_days(),
+            delivered_hash_days: stats.delivered_work().to_hash_days(),
             best_share: stats.best_share,
         }
     }
@@ -384,7 +446,7 @@ impl OrderSummary {
             username: entry.upstream_target.username().to_string(),
             requested_hash_days: entry.bucket.as_ref().map(|bucket| bucket.target),
             hashrate: stats.hashrate_1m(now),
-            delivered_hash_days: (stats.accepted_work + stats.rejected_work).to_hash_days(),
+            delivered_hash_days: stats.delivered_work().to_hash_days(),
             best_share: stats.best_share,
         })
     }
@@ -468,5 +530,79 @@ impl OrderDetail {
             downstream: MiningStats::from_snapshot(&Stats::new(), now),
             sessions: Vec::new(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pool_status_json_has_downstream_planes() {
+        let (metatron, _directory) = Metatron::test();
+        let now = Instant::now();
+
+        let json = serde_json::to_value(PoolStatus {
+            block_count: 0,
+            recent_blocks: Vec::new(),
+            uptime_secs: 0,
+            downstream: DownstreamStatus::from_metatron(&metatron, now),
+        })
+        .unwrap();
+
+        assert!(json["downstream"]["sessions"].is_number());
+        assert!(json["downstream"]["hashrate_1m"].is_number());
+        assert!(json["downstream"]["accepted_shares"].is_number());
+        assert!(json["downstream"]["total"]["users"].is_number());
+        assert!(json["downstream"]["total"]["accepted_shares"].is_number());
+        assert!(json["downstream"]["total"]["rejected_shares"].is_number());
+        assert!(json["downstream"]["total"]["rejected_work"].is_number());
+        assert!(json.get("traffic").is_none());
+        assert!(json.get("history").is_none());
+    }
+
+    #[test]
+    fn proxy_status_json_has_upstream_and_downstream_planes() {
+        let (metatron, _directory) = Metatron::test();
+        let metatron = Arc::new(metatron);
+        let now = Instant::now();
+        let upstream = Upstream::test(0, metatron.clone());
+        let stats = metatron.order_stats(0);
+
+        let json = serde_json::to_value(ProxyStatus {
+            uptime_secs: 0,
+            block_count: 0,
+            recent_blocks: Vec::new(),
+            upstream_info: UpstreamInfo::from_upstream(&upstream),
+            upstream: UpstreamStatus {
+                users: 1,
+                workers: 1,
+                orders: 1,
+                pending: 0,
+                disconnected: 0,
+                hashrate_1m: stats.hashrate_1m(now),
+                sps_1m: stats.sps_1m(now),
+                accepted_shares: stats.accepted_shares,
+                rejected_shares: stats.rejected_shares,
+                accepted_work: stats.accepted_work,
+                rejected_work: stats.rejected_work,
+                total: UpstreamTotals {
+                    users: 1,
+                    orders: 1,
+                    stats: TotalStats::from_stats(&stats, now),
+                },
+            },
+            downstream: DownstreamStatus::from_metatron(&metatron, now),
+        })
+        .unwrap();
+
+        assert!(json["upstream_info"]["endpoint"].is_string());
+        assert!(json["upstream"]["orders"].is_number());
+        assert!(json["upstream"]["total"]["orders"].is_number());
+        assert!(json["upstream"]["total"]["rejected_shares"].is_number());
+        assert!(json["upstream"]["total"]["rejected_work"].is_number());
+        assert!(json["downstream"]["total"]["users"].is_number());
+        assert!(json.get("traffic").is_none());
+        assert!(json.get("history").is_none());
     }
 }

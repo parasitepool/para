@@ -116,19 +116,19 @@
 <div class="grid grid-stack">
   <div class="column column-full">
     <h2>Order</h2>
-    <div class=row><span>ID</span><span id=id></span></div>
+    <div class=row><span>ID</span><span data-value=id></span></div>
     <div class=row><span>Status</span><span id=status></span></div>
     <div class=row><span>Review</span><span id=review></span></div>
-    <div class=row><span>Endpoint</span><span id=endpoint></span></div>
-    <div class=row><span>Username</span><span id=username class=copyable></span></div>
+    <div class=row><span>Endpoint</span><span data-value=upstream_target.endpoint></span></div>
+    <div class=row><span>Username</span><span data-value=upstream_target.username data-format=username class=copyable></span></div>
     <div class=row><span>Requested Hashdays</span><span id=requested_hash_days></span></div>
-    <div class=row><span>Delivered Hashdays</span><span id=delivered_hash_days class=copyable></span></div>
-    <div class=row><span>Hash Price</span><span id=hash_price></span></div>
-    <div class=row><span>Payment Amount</span><span id=payment_amount></span></div>
-    <div class=row><span>Payment Address</span><span id=payment_address class=copyable></span></div>
+    <div class=row><span>Delivered Hashdays</span><span data-value=upstream.delivered_hash_days data-format=hash_days class=copyable></span></div>
+    <div class=row><span>Hash Price</span><span data-value=hash_price data-format=sats_phd></span></div>
+    <div class=row><span>Payment Amount</span><span data-value=payment_amount data-format=amount></span></div>
+    <div class=row><span>Payment Address</span><span data-value=payment_address data-format=address class=copyable></span></div>
     <div class=row><span>Transactions</span><span id=txids></span></div>
-    <div class=row><span>Created At</span><span id=created_at></span></div>
-    <div class=row><span>Created At Height</span><span id=created_at_height></span></div>
+    <div class=row><span>Created At</span><span data-value=created_at data-format=timestamp></span></div>
+    <div class=row><span>Created At Height</span><span data-value=created_at_height></span></div>
   </div>
   <button id=cancel-order class=hidden>Cancel Order</button>
   <button id=clear-order class=hidden>Mark Cleared</button>
@@ -149,14 +149,12 @@
         <tr><th></th><th>Upstream</th><th>Downstream</th></tr>
       </thead>
       <tbody>
-        <tr><td>Hashrate</td><td id=upstream_hashrate_1m></td><td id=downstream_hashrate_1m></td></tr>
-        <tr><td>SPS</td><td id=upstream_sps_1m></td><td id=downstream_sps_1m></td></tr>
-        <tr><td>Best Share</td><td id=upstream_best_share class=copyable></td><td id=downstream_best_share class=copyable></td></tr>
-        <tr><td>Last Share</td><td id=upstream_last_share></td><td id=downstream_last_share></td></tr>
-        <tr><td>Rejected Shares</td><td id=upstream_rejected_shares class=copyable></td><td id=downstream_rejected_shares class=copyable></td></tr>
-        <tr><td>Rejected Work</td><td id=upstream_rejected_work class=copyable></td><td id=downstream_rejected_work class=copyable></td></tr>
-        <tr><td>Delivered Work</td><td id=upstream_delivered_work></td><td id=downstream_delivered_work></td></tr>
-        <tr><td>Delivered Hashdays</td><td id=upstream_delivered_hash_days class=copyable></td><td id=downstream_delivered_hash_days class=copyable></td></tr>
+        <tr><td>Hashrate</td><td data-value=upstream.hashrate_1m data-format=hashrate></td><td data-value=downstream.hashrate_1m data-format=hashrate></td></tr>
+        <tr><td>SPS</td><td data-value=upstream.sps_1m data-format=sps></td><td data-value=downstream.sps_1m data-format=sps></td></tr>
+        <tr><td>Best Share</td><td data-value=upstream.best_share data-format=difficulty class=copyable></td><td data-value=downstream.best_share data-format=difficulty class=copyable></td></tr>
+        <tr><td>Last Share</td><td data-value=upstream.last_share data-format=timestamp_ago></td><td data-value=downstream.last_share data-format=timestamp_ago></td></tr>
+        <tr><td>Rejected Shares</td><td data-value=upstream data-format=rejection_shares class=copyable></td><td data-value=downstream data-format=rejection_shares class=copyable></td></tr>
+        <tr><td>Rejected Work</td><td data-value=upstream data-format=rejection_work class=copyable></td><td data-value=downstream data-format=rejection_work class=copyable></td></tr>
       </tbody>
     </table>
   </div>
@@ -235,22 +233,11 @@ h1.childNodes[0].textContent = `Router | Order ${orderId}`;
 const TERMINAL = ['fulfilled', 'cancelled', 'disconnected', 'expired'];
 
 function populateOrder(data) {
-  const endpoint = data.upstream_target.endpoint;
-  const username = data.upstream_target.username || '';
-  const deliveredHashdays = data.upstream.delivered_hash_days;
-
-  set('id', data.id);
   set('status', formatStatus(data.status));
   setClass('status', statusClass(data.status));
   set('review', data.review, formatStatus);
   setClass('review', data.review || '');
-  set('endpoint', endpoint);
-  copyable('username', truncateMiddle(username), username);
   set('requested_hash_days', data.requested_hash_days == null ? 'Unlimited' : formatHashDays(data.requested_hash_days));
-  set('hash_price', data.hash_price, v => v + ' sats/PHd');
-  copyable('delivered_hash_days', formatHashDays(deliveredHashdays), deliveredHashdays);
-  set('payment_amount', data.payment_amount, formatAmount);
-  copyable('payment_address', truncateMiddle(data.payment_address, 20, 8), data.payment_address);
   const txidsEl = document.getElementById('txids');
   if (txidsEl) {
     if (data.txids && data.txids.length > 0) {
@@ -280,8 +267,6 @@ function populateOrder(data) {
       txidsEl.textContent = '-';
     }
   }
-  set('created_at', data.created_at, formatTimestamp);
-  set('created_at_height', data.created_at_height);
 }
 
 async function refresh(signal) {
@@ -301,14 +286,12 @@ async function refresh(signal) {
 
   populateOrder(data);
 
-  populateStats('upstream', data.upstream);
+  applyData(terminal ? { ...data, downstream: null } : data);
 
   if (terminal) {
-    populateStats('downstream', null);
     set('session_count', 0);
     sessionsTable.setRows([]);
   } else {
-    populateStats('downstream', data.downstream);
     set('session_count', (data.sessions || []).length);
     sessionsTable.setRows(data.sessions || []);
   }

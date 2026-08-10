@@ -252,15 +252,6 @@
 </style>
 
 <div class="grid grid-stack">
-  <div class="stats stats-3 column-full">
-    <div class=stat><div class=stat-label>Active Orders</div><div class=stat-value id=bucket_order_count></div></div>
-    <div class=stat><div class=stat-label>Starving</div><div class=stat-value id=starving_order_count></div></div>
-    <div class=stat><div class=stat-label>Uptime</div><div class=stat-value id=uptime_secs></div></div>
-    <div class=stat><div class=stat-label>Available</div><div class=stat-value id=available_work></div></div>
-    <div class=stat><div class=stat-label>Used</div><div class=stat-value id=used_work></div></div>
-    <div class=stat><div class=stat-label>Hash Price</div><div class=stat-value id=hash_price></div></div>
-  </div>
-
   <div class=action-bar>
     <button id=capacity-btn class=hidden>Capacity</button>
     <button id=premium-btn class=hidden>Premium</button>
@@ -269,48 +260,83 @@
     <button id=add-order-btn>Add Order</button>
   </div>
 
-  <div class="column column-full">
-    <h2>Routing</h2>
-    <table class="compact-table routing-table">
-      <tbody>
-        <tr><td>Deficit</td><td id=deficit_hashrate></td></tr>
-        <tr><td>Trims (1h)</td><td id=sessions_trimmed_1h></td></tr>
-        <tr><td>Intents (1h)</td><td id=intents_created_1h></td></tr>
-        <tr><td class=sub>Hit via enonce1</td><td id=intent_claims_enonce1_1h></td></tr>
-        <tr><td class=sub>Hit via IP</td><td id=intent_claims_ip_1h></td></tr>
-        <tr><td class=sub>Expired</td><td id=intents_expired_1h></td></tr>
-        <tr><td>Placements (1h)</td><td id=placements_total_1h></td></tr>
-        <tr><td class=sub>Intent</td><td id=placement_intent></td></tr>
-        <tr><td class=sub>Resumed</td><td id=placement_resumed></td></tr>
-        <tr><td class=sub>Redirected</td><td id=placement_redirected></td></tr>
-        <tr><td class=sub>Estimated</td><td id=placement_estimated></td></tr>
-        <tr><td class=sub>Blind</td><td id=placement_blind></td></tr>
-      </tbody>
-    </table>
-  </div>
+  <div class="column column-full" data-tabs>
+    <div class=tab-bar>
+      <button type=button data-tab=info>Info</button>
+      <button type=button data-tab=traffic>Traffic</button>
+      <button type=button data-tab=total>Total</button>
+      <button type=button data-tab=routing>Routing</button>
+    </div>
 
-  <div class="column column-full">
-    <h2>Traffic</h2>
-    <table class=compact-table>
-      <thead>
-        <tr><th></th><th>Upstream</th><th>Downstream</th></tr>
-      </thead>
-      <tbody>
-        <tr><td>Hashrate</td><td id=upstream_hashrate_1m></td><td id=downstream_hashrate_1m></td></tr>
-        <tr><td>SPS</td><td id=upstream_sps_1m></td><td id=downstream_sps_1m></td></tr>
-        <tr><td>Best Share</td><td id=upstream_best_share class=copyable></td><td id=downstream_best_share class=copyable></td></tr>
-        <tr><td>Last Share</td><td id=upstream_last_share></td><td id=downstream_last_share></td></tr>
-        <tr><td>Rejected Shares</td><td id=upstream_rejected_shares class=copyable></td><td id=downstream_rejected_shares class=copyable></td></tr>
-        <tr><td>Rejected Work</td><td id=upstream_rejected_work class=copyable></td><td id=downstream_rejected_work class=copyable></td></tr>
-        <tr><td>Delivered Work</td><td id=upstream_delivered_work></td><td id=downstream_delivered_work></td></tr>
-        <tr><td>Delivered Hashdays</td><td id=upstream_delivered_hash_days class=copyable></td><td id=downstream_delivered_hash_days class=copyable></td></tr>
-        <tr><td>Users</td><td id=upstream_users></td><td id=users></td></tr>
-        <tr><td>Workers</td><td id=upstream_workers></td><td id=workers></td></tr>
-        <tr><td>Orders / Sessions</td><td id=upstream_sessions></td><td id=sessions></td></tr>
-        <tr><td>Pending / Idle</td><td id=upstream_idle></td><td id=idle></td></tr>
-        <tr><td>Disconnected</td><td id=upstream_disconnected></td><td id=disconnected></td></tr>
-      </tbody>
-    </table>
+    <div data-tab-panel=info>
+      <table class=compact-table>
+        <tbody>
+          <tr><td>Active Orders</td><td data-value=bucket_order_count></td></tr>
+          <tr><td>Starving</td><td data-value=starving_order_count></td></tr>
+          <tr><td>Uptime</td><td data-value=uptime_secs data-format=duration></td></tr>
+          <tr><td>Available</td><td id=available_work></td></tr>
+          <tr><td>Used</td><td data-value=used_capacity_hash_days data-format=hash_days></td></tr>
+          <tr><td>Hash Price</td><td data-value=hash_price data-format=sats_phd></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div data-tab-panel=traffic class=hidden>
+      <table class=compact-table>
+        <thead>
+          <tr><th></th><th>Upstream</th><th>Downstream</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Hashrate</td><td data-value=upstream.hashrate_1m data-format=hashrate></td><td data-value=downstream.hashrate_1m data-format=hashrate></td></tr>
+          <tr><td>SPS</td><td data-value=upstream.sps_1m data-format=sps></td><td data-value=downstream.sps_1m data-format=sps></td></tr>
+          <tr><td>Best Share</td><td data-value=upstream.total.best_share data-format=difficulty class=copyable></td><td data-value=downstream.total.best_share data-format=difficulty class=copyable></td></tr>
+          <tr><td>Last Share</td><td data-value=upstream.total.last_share data-format=timestamp_ago></td><td data-value=downstream.total.last_share data-format=timestamp_ago></td></tr>
+          <tr><td>Rejected Shares</td><td data-value=upstream data-format=rejection_shares class=copyable></td><td data-value=downstream data-format=rejection_shares class=copyable></td></tr>
+          <tr><td>Rejected Work</td><td data-value=upstream data-format=rejection_work class=copyable></td><td data-value=downstream data-format=rejection_work class=copyable></td></tr>
+          <tr><td>Users</td><td data-value=upstream.users></td><td data-value=downstream.users></td></tr>
+          <tr><td>Workers</td><td data-value=upstream.workers></td><td data-value=downstream.workers></td></tr>
+          <tr><td>Orders / Sessions</td><td data-value=upstream.orders></td><td data-value=downstream.sessions></td></tr>
+          <tr><td>Pending / Idle</td><td data-value=upstream.pending></td><td data-value=downstream.idle></td></tr>
+          <tr><td>Disconnected</td><td data-value=upstream.disconnected></td><td data-value=downstream.disconnected></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div data-tab-panel=total class=hidden>
+      <table class=compact-table>
+        <thead>
+          <tr><th></th><th>Upstream</th><th>Downstream</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Users</td><td data-value=upstream.total.users></td><td data-value=downstream.total.users></td></tr>
+          <tr><td>Orders / Workers</td><td data-value=upstream.total.orders></td><td data-value=downstream.total.workers></td></tr>
+          <tr><td>Best Share</td><td data-value=upstream.total.best_share data-format=difficulty class=copyable></td><td data-value=downstream.total.best_share data-format=difficulty class=copyable></td></tr>
+          <tr><td>Rejected Shares</td><td data-value=upstream.total data-format=rejection_shares class=copyable></td><td data-value=downstream.total data-format=rejection_shares class=copyable></td></tr>
+          <tr><td>Rejected Work</td><td data-value=upstream.total data-format=rejection_work class=copyable></td><td data-value=downstream.total data-format=rejection_work class=copyable></td></tr>
+          <tr><td>Delivered Work</td><td data-value=upstream.total.delivered_work data-format=difficulty></td><td data-value=downstream.total.delivered_work data-format=difficulty></td></tr>
+          <tr><td>Delivered Hashdays</td><td data-value=upstream.total.delivered_hash_days data-format=hash_days class=copyable></td><td data-value=downstream.total.delivered_hash_days data-format=hash_days class=copyable></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div data-tab-panel=routing class=hidden>
+      <table class="compact-table routing-table">
+        <tbody>
+          <tr><td>Deficit</td><td data-value=deficit_hashrate data-format=hashrate></td></tr>
+          <tr><td>Trims (1h)</td><td data-value=sessions_trimmed_1h></td></tr>
+          <tr><td>Intents (1h)</td><td data-value=intents_created_1h></td></tr>
+          <tr><td class=sub>Hit via enonce1</td><td data-value=intent_claims_1h.enonce1></td></tr>
+          <tr><td class=sub>Hit via IP</td><td data-value=intent_claims_1h.ip></td></tr>
+          <tr><td class=sub>Expired</td><td data-value=intents_expired_1h></td></tr>
+          <tr><td>Placements (1h)</td><td data-value=placements_1h data-format=placement_total></td></tr>
+          <tr><td class=sub>Intent</td><td data-value=placements_1h.intent></td></tr>
+          <tr><td class=sub>Resumed</td><td data-value=placements_1h.resumed></td></tr>
+          <tr><td class=sub>Redirected</td><td data-value=placements_1h.redirected></td></tr>
+          <tr><td class=sub>Estimated</td><td data-value=placements_1h.estimated></td></tr>
+          <tr><td class=sub>Blind</td><td data-value=placements_1h.blind></td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 
   <div class="column column-full">
@@ -610,32 +636,11 @@ async function refresh(signal) {
     addOrderBtn.title = routerData.halt ? 'Router is halted' : '';
   }
 
-  set('bucket_order_count', routerData.bucket_order_count);
-  set('starving_order_count', routerData.starving_order_count);
-  set('deficit_hashrate', routerData.deficit_hashrate, formatHashrate);
-  set('sessions_trimmed_1h', routerData.sessions_trimmed_1h);
-  const claims = routerData.intent_claims_1h;
-  set('intents_created_1h', routerData.intents_created_1h);
-  set('intent_claims_enonce1_1h', claims, c => c.enonce1);
-  set('intent_claims_ip_1h', claims, c => c.ip);
-  set('intents_expired_1h', routerData.intents_expired_1h);
-  const placements = routerData.placements_1h;
-  set('placements_total_1h', placements, p => p.intent + p.resumed + p.redirected + p.estimated + p.blind);
-  set('placement_intent', placements, p => p.intent);
-  set('placement_resumed', placements, p => p.resumed);
-  set('placement_redirected', placements, p => p.redirected);
-  set('placement_estimated', placements, p => p.estimated);
-  set('placement_blind', placements, p => p.blind);
-  set('used_work', routerData.used_capacity_hash_days, formatHashDays);
-  set('hash_price', routerData.hash_price, v => v + ' sats/PHd');
+  applyData(routerData);
   const available = routerData.total_capacity_hash_days != null && routerData.used_capacity_hash_days != null
     ? routerData.total_capacity_hash_days - routerData.used_capacity_hash_days
     : null;
   set('available_work', available, formatHashDays);
-  set('uptime_secs', routerData.uptime_secs, formatDuration);
-  populateUpstream(routerData.upstream);
-  set('upstream_sessions', (routerData.bucket_order_count || 0) + (routerData.sink_order_count || 0));
-  populateDownstream(routerData.downstream || {});
 
   renderBitcoinData(bitcoinData);
   renderSystemData(systemData);

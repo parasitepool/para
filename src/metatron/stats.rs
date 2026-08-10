@@ -172,6 +172,15 @@ impl Stats {
         }
     }
 
+    pub(crate) fn delivered_work(&self) -> HashWork {
+        self.accepted_work + self.rejected_work
+    }
+
+    pub(crate) fn last_share_epoch_secs(&self, now: Instant) -> Option<u64> {
+        self.last_share
+            .map(|time| instant_to_epoch_secs(time, now) as u64)
+    }
+
     pub(crate) fn hashrate_1m(&self, now: Instant) -> HashRate {
         HashRate::from_dsps(self.dsps_1m.value_at(now))
     }

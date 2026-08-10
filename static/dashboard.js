@@ -66,6 +66,32 @@ function initNavbar() {
 
 document.addEventListener('DOMContentLoaded', initNavbar);
 
+function initTabs(root) {
+  const key = `tab:${location.pathname}`;
+  const buttons = [...root.querySelectorAll('[data-tab]')];
+  const panels = [...root.querySelectorAll('[data-tab-panel]')];
+
+  function select(name) {
+    for (const button of buttons) button.classList.toggle('active', button.dataset.tab === name);
+    for (const panel of panels) panel.classList.toggle('hidden', panel.dataset.tabPanel !== name);
+    localStorage.setItem(key, name);
+  }
+
+  for (const button of buttons) {
+    button.addEventListener('click', () => select(button.dataset.tab));
+  }
+
+  const saved = localStorage.getItem(key);
+  const initial = buttons.some(button => button.dataset.tab === saved)
+    ? saved
+    : buttons[0]?.dataset.tab;
+  if (initial) select(initial);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('[data-tabs]').forEach(initTabs);
+});
+
 const logState = {
   paused: false,
   allLogs: [],
@@ -349,26 +375,24 @@ function setClass(id, className) {
   if (el) el.className = className;
 }
 
+function write(el, text, full) {
+  if (full === null || full === undefined) {
+    delete el.dataset.full;
+  } else {
+    el.dataset.full = String(full);
+  }
+  el.dataset.formatted = text;
+  if (!el.matches(':hover')) {
+    el.textContent = text;
+  }
+}
+
 function copyable(id, formatted, raw) {
-  const el = set(id, formatted);
+  const el = document.getElementById(id);
   if (el) {
-    if (raw === null || raw === undefined) {
-      delete el.dataset.full;
-    } else {
-      el.dataset.full = String(raw);
-    }
-    el.dataset.formatted =
-      (formatted !== null && formatted !== undefined) ? String(formatted) : '-';
+    write(el, (formatted !== null && formatted !== undefined) ? String(formatted) : '-', raw);
   }
   return el;
-}
-
-function rejectionCopyable(id, accepted, rejected) {
-  copyable(id, rejectionPct(accepted, rejected), rejectionDetail(accepted, rejected));
-}
-
-function rejectionWorkCopyable(id, accepted, rejected) {
-  copyable(id, rejectionPct(accepted, rejected), rejectionWorkDetail(accepted, rejected));
 }
 
 function initCopyables() {
@@ -465,46 +489,48 @@ function renderSystemData(data) {
   set('uptime', data.uptime, formatDuration);
 }
 
-function populateStats(prefix, stats) {
-  if (!stats) {
-    for (const id of ['hashrate_1m', 'sps_1m', 'best_share', 'last_share',
-                      'rejected_shares', 'rejected_work', 'delivered_work', 'delivered_hash_days']) {
-      set(`${prefix}_${id}`, null);
-    }
-    return;
-  }
-  set(`${prefix}_hashrate_1m`, stats.hashrate_1m, formatHashrate);
-  set(`${prefix}_sps_1m`, stats.sps_1m, formatTruncated);
-  copyable(`${prefix}_best_share`, formatDifficulty(stats.best_share), stats.best_share);
-  set(`${prefix}_last_share`, stats.last_share, formatTimestampAgo);
-  rejectionCopyable(`${prefix}_rejected_shares`, stats.accepted_shares, stats.rejected_shares);
-  rejectionWorkCopyable(`${prefix}_rejected_work`, stats.accepted_work, stats.rejected_work);
-  set(`${prefix}_delivered_work`, (stats.accepted_work || 0) + (stats.rejected_work || 0), formatDifficulty);
-  copyable(`${prefix}_delivered_hash_days`, formatHashDays(stats.delivered_hash_days), stats.delivered_hash_days);
+function resolvePath(obj, path) {
+  return path.split('.').reduce((value, key) => value == null ? undefined : value[key], obj);
 }
 
-function populateDownstream(downstream) {
-  set('users', downstream.user_count);
-  set('workers', downstream.worker_count);
-  set('sessions', downstream.session_count);
-  set('idle', downstream.idle_count);
-  set('disconnected', downstream.disconnected_count);
-  populateStats('downstream', downstream.stats);
-}
+const FORMATTERS = {
+  hashrate: formatHashrate,
+  sps: formatTruncated,
+  difficulty: formatDifficulty,
+  hash_days: formatHashDays,
+  duration: formatDuration,
+  timestamp: formatTimestamp,
+  timestamp_ago: formatTimestampAgo,
+  ping: formatPing,
+  amount: formatAmount,
+  sats_phd: price => price + ' sats/PHd',
+  address: address => ({ text: truncateMiddle(address, 20, 8), full: address }),
+  placement_total: p => p.intent + p.resumed + p.redirected + p.estimated + p.blind,
+  username: username => ({ text: truncateMiddle(username), full: username }),
+  rejection_shares: side => ({
+    text: rejectionPct(side.accepted_shares, side.rejected_shares),
+    full: rejectionDetail(side.accepted_shares, side.rejected_shares),
+  }),
+  rejection_work: side => ({
+    text: rejectionPct(side.accepted_work, side.rejected_work),
+    full: rejectionWorkDetail(side.accepted_work, side.rejected_work),
+  }),
+};
 
-function populateUpstream(upstream) {
-  if (!upstream) {
-    for (const id of ['users', 'workers', 'idle', 'disconnected']) {
-      set(`upstream_${id}`, null);
-    }
-    populateStats('upstream', null);
-    return;
+let dataBindings;
+
+function applyData(data) {
+  dataBindings ??= [...document.querySelectorAll('[data-value]')];
+
+  for (const el of dataBindings) {
+    const raw = resolvePath(data, el.dataset.value);
+    const formatter = FORMATTERS[el.dataset.format] ?? (value => value);
+    const result = raw === null || raw === undefined ? null : formatter(raw);
+    const { text, full } = result === null || result === undefined
+      ? { text: '-', full: null }
+      : typeof result === 'object' ? result : { text: String(result), full: raw };
+    write(el, text, typeof full === 'object' ? null : full);
   }
-  set('upstream_users', upstream.user_count);
-  set('upstream_workers', upstream.worker_count);
-  set('upstream_idle', upstream.idle_count);
-  set('upstream_disconnected', upstream.disconnected_count);
-  populateStats('upstream', upstream.stats);
 }
 
 function renderSessionRow(session) {

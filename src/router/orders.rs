@@ -1,9 +1,48 @@
 use super::*;
 
+#[derive(Default)]
+pub(crate) struct ColdTotals {
+    pub(crate) accepted_shares: u64,
+    pub(crate) rejected_shares: u64,
+    pub(crate) accepted_work: HashWork,
+    pub(crate) rejected_work: HashWork,
+    pub(crate) best_share: Option<Difficulty>,
+    pub(crate) last_share_secs: Option<f64>,
+    pub(crate) addresses: HashSet<Address<NetworkUnchecked>>,
+}
+
+impl ColdTotals {
+    fn absorb(&mut self, entry: &entry::OrderEntry) {
+        let stats = &entry.stats;
+
+        self.accepted_shares += stats.accepted_shares;
+        self.rejected_shares += stats.rejected_shares;
+        self.accepted_work += stats.accepted_work;
+        self.rejected_work += stats.rejected_work;
+
+        if stats
+            .best_share
+            .is_some_and(|best| self.best_share.is_none_or(|current| best > current))
+        {
+            self.best_share = stats.best_share;
+        }
+
+        if let Some(last) = stats.last_share_secs.filter(|secs| secs.is_finite())
+            && self.last_share_secs.is_none_or(|current| last > current)
+        {
+            self.last_share_secs = Some(last);
+        }
+
+        self.addresses
+            .insert(entry.upstream_target.username().address().clone());
+    }
+}
+
 pub(crate) struct Orders {
     live: BTreeMap<u32, Arc<Order>>,
     cold: BTreeMap<u32, entry::OrderEntry>,
     cold_by_index: HashMap<u32, u32>,
+    cold_totals: ColdTotals,
 }
 
 impl Orders {
@@ -12,6 +51,7 @@ impl Orders {
             live: BTreeMap::new(),
             cold: BTreeMap::new(),
             cold_by_index: HashMap::new(),
+            cold_totals: ColdTotals::default(),
         }
     }
 
@@ -20,19 +60,41 @@ impl Orders {
     }
 
     pub(crate) fn add_cold(&mut self, id: u32, entry: entry::OrderEntry) {
+        debug_assert!(!self.cold.contains_key(&id));
+
         if let Some(bucket) = &entry.bucket {
             self.cold_by_index.insert(bucket.derivation_index, id);
         }
+
+        self.cold_totals.absorb(&entry);
 
         self.cold.insert(id, entry);
     }
 
     pub(crate) fn remove_cold(&mut self, id: u32) {
-        if let Some(entry) = self.cold.remove(&id)
-            && let Some(bucket) = &entry.bucket
-        {
+        let Some(entry) = self.cold.remove(&id) else {
+            return;
+        };
+
+        if let Some(bucket) = &entry.bucket {
             self.cold_by_index.remove(&bucket.derivation_index);
         }
+
+        let mut totals = ColdTotals::default();
+
+        for entry in self.cold.values() {
+            totals.absorb(entry);
+        }
+
+        self.cold_totals = totals;
+    }
+
+    pub(crate) fn cold_totals(&self) -> &ColdTotals {
+        &self.cold_totals
+    }
+
+    pub(crate) fn cold_count(&self) -> usize {
+        self.cold.len()
     }
 
     pub(crate) fn retire(&mut self, order: &Order) {
