@@ -1193,6 +1193,70 @@ async fn share_validation() {
 }
 
 #[tokio::test]
+#[timeout(120000)]
+async fn rejected_shares_do_not_poison_duplicate_cache() {
+    let bitcoind = bitcoind();
+    let pool = TestPool::spawn_with_args(
+        &bitcoind,
+        "--start-diff 0.000001 --min-diff 0.000001 --max-diff 0.000001 --disable-bouncer",
+    );
+
+    let client = pool.stratum_client().await;
+    let mut events = client.connect().await.unwrap();
+
+    let (subscribe, _, _) = client.subscribe().await.unwrap();
+    let enonce1 = subscribe.enonce1;
+    let enonce2_size = subscribe.enonce2_size;
+
+    client.authorize().await.unwrap();
+
+    let (notify, difficulty) = wait_for_notify(&mut events).await;
+
+    // Valid share accepted
+    let enonce2 = Extranonce::random(enonce2_size);
+    let (ntime, nonce) = solve_share(&notify, &enonce1, &enonce2, difficulty);
+    client
+        .submit(notify.job_id, enonce2.clone(), ntime, nonce, None)
+        .await
+        .unwrap();
+
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(status.downstream.total.stats.accepted_shares, 1);
+
+    // Flood with garbage shares, each rejected AboveTarget
+    for _ in 0..1000 {
+        let garbage_enonce2 = Extranonce::random(enonce2_size);
+        let (garbage_ntime, garbage_nonce) =
+            above_target_share(&notify, &enonce1, &garbage_enonce2, difficulty);
+
+        assert_stratum_error(
+            client
+                .submit(
+                    notify.job_id,
+                    garbage_enonce2,
+                    garbage_ntime,
+                    garbage_nonce,
+                    None,
+                )
+                .await,
+            StratumError::AboveTarget,
+        );
+    }
+
+    // Rejected shares must not evict accepted shares from the duplicate
+    // cache, so resubmitting the original share is still a duplicate
+    assert_stratum_error(
+        client
+            .submit(notify.job_id, enonce2, ntime, nonce, None)
+            .await,
+        StratumError::Duplicate,
+    );
+
+    let status = pool.get_status().await.unwrap();
+    assert_eq!(status.downstream.total.stats.accepted_shares, 1);
+}
+
+#[tokio::test]
 #[timeout(90000)]
 async fn bouncer() {
     let bitcoind = bitcoind();

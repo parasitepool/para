@@ -949,7 +949,7 @@ impl<W: Workbase> Stratifier<W> {
 
         let hash = header.block_hash();
 
-        if self.jobs.is_duplicate(hash) {
+        if self.jobs.is_duplicate(&hash) {
             debug!(
                 "Rejected duplicate share from {}: hash={}",
                 session.username(),
@@ -1054,6 +1054,8 @@ impl<W: Workbase> Stratifier<W> {
         }
 
         let share_diff = Difficulty::from(hash);
+
+        self.jobs.record_accepted(hash);
 
         session.record_accepted(pool_diff, share_diff);
 

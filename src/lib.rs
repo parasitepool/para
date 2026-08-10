@@ -50,7 +50,6 @@ use {
     job::Job,
     jobs::Jobs,
     logs::logs_enabled,
-    lru::LruCache,
     metatron::{
         Metatron,
         session::{Session, SessionId},
@@ -90,7 +89,6 @@ use {
         io::{self, Write},
         iter::Sum,
         net::{IpAddr, SocketAddr, ToSocketAddrs},
-        num::NonZeroUsize,
         ops::{Add, AddAssign, Div, Mul, Sub, SubAssign},
         path::{Path, PathBuf},
         process,
@@ -182,7 +180,6 @@ pub const ENONCE1_SIZE: usize = 4;
 pub const ENONCE1_EXTENSION_SIZE: usize = 2;
 pub const SHARE_CHANNEL_CAPACITY: usize = 100_000;
 pub const SUBSCRIPTION_ID: &str = "deadbeef";
-pub const LRU_CACHE_SIZE: usize = 256;
 pub const SESSION_TTL: Duration = Duration::from_secs(600);
 /// Max ntime forward roll in seconds. Conservative margin under Bitcoin's 2-hour limit.
 pub const MAX_NTIME_OFFSET: u32 = 7000;

@@ -4,7 +4,7 @@ use super::*;
 pub(crate) struct Jobs<W: Workbase> {
     latest: Option<Arc<Job<W>>>,
     next_id: JobId,
-    seen: LruCache<BlockHash, ()>,
+    seen: HashSet<BlockHash>,
     valid: HashMap<JobId, Arc<Job<W>>>,
 }
 
@@ -14,7 +14,7 @@ impl<W: Workbase> Jobs<W> {
             next_id: JobId::new(0),
             valid: HashMap::new(),
             latest: None,
-            seen: LruCache::new(NonZeroUsize::new(LRU_CACHE_SIZE).expect("should be non-zero")),
+            seen: HashSet::new(),
         }
     }
 
@@ -47,8 +47,12 @@ impl<W: Workbase> Jobs<W> {
         clean
     }
 
-    pub(crate) fn is_duplicate(&mut self, block_hash: BlockHash) -> bool {
-        self.seen.put(block_hash, ()).is_some()
+    pub(crate) fn is_duplicate(&self, block_hash: &BlockHash) -> bool {
+        self.seen.contains(block_hash)
+    }
+
+    pub(crate) fn record_accepted(&mut self, block_hash: BlockHash) {
+        self.seen.insert(block_hash);
     }
 }
 
@@ -197,8 +201,9 @@ mod tests {
         assert!(clean_jobs);
 
         let blockhash = BlockHash::from_byte_array([7u8; 32]);
-        assert!(!jobs.is_duplicate(blockhash));
-        assert!(jobs.is_duplicate(blockhash));
+        assert!(!jobs.is_duplicate(&blockhash));
+        jobs.record_accepted(blockhash);
+        assert!(jobs.is_duplicate(&blockhash));
 
         let id_2 = jobs.next_id();
         let workbase_2 = W::workbase_that_cleans(101, id_2);
@@ -214,22 +219,25 @@ mod tests {
         assert_eq!(jobs.valid.len(), 1);
 
         assert!(
-            !jobs.is_duplicate(blockhash),
+            !jobs.is_duplicate(&blockhash),
             "seen should be cleared on clean"
         );
-        assert!(jobs.is_duplicate(blockhash));
+        jobs.record_accepted(blockhash);
+        assert!(jobs.is_duplicate(&blockhash));
     }
 
-    fn check_duplicate_lru<W: TestWorkbaseFactory>() {
+    fn check_duplicate_detection<W: TestWorkbaseFactory>() {
         let mut jobs: Jobs<W> = Jobs::new();
         let h1 = BlockHash::from_byte_array([1u8; 32]);
         let h2 = BlockHash::from_byte_array([2u8; 32]);
 
-        assert!(!jobs.is_duplicate(h1));
-        assert!(jobs.is_duplicate(h1));
+        assert!(!jobs.is_duplicate(&h1));
+        jobs.record_accepted(h1);
+        assert!(jobs.is_duplicate(&h1));
 
-        assert!(!jobs.is_duplicate(h2));
-        assert!(jobs.is_duplicate(h2));
+        assert!(!jobs.is_duplicate(&h2));
+        jobs.record_accepted(h2);
+        assert!(jobs.is_duplicate(&h2));
     }
 
     fn check_get_returns_valid_job<W: TestWorkbaseFactory>() {
@@ -365,30 +373,44 @@ mod tests {
         assert!(!Arc::ptr_eq(&retrieved, &job1));
     }
 
-    fn check_lru_eviction<W: TestWorkbaseFactory>() {
+    fn check_seen_never_evicts_within_job_group<W: TestWorkbaseFactory>() {
         let mut jobs: Jobs<W> = Jobs::new();
 
-        for i in 0..LRU_CACHE_SIZE {
+        let mut hashes = Vec::new();
+        for i in 0..1000u32 {
             let mut bytes = [0u8; 32];
-            bytes[0] = (i & 0xff) as u8;
-            bytes[1] = ((i >> 8) & 0xff) as u8;
+            bytes[..4].copy_from_slice(&i.to_le_bytes());
             let hash = BlockHash::from_byte_array(bytes);
-            assert!(
-                !jobs.is_duplicate(hash),
-                "hash {i} should not be duplicate on first insert"
-            );
+            jobs.record_accepted(hash);
+            hashes.push(hash);
         }
 
-        let new_hash = BlockHash::from_byte_array([255u8; 32]);
-        assert!(
-            !jobs.is_duplicate(new_hash),
-            "new hash should not be duplicate"
-        );
+        for hash in hashes {
+            assert!(
+                jobs.is_duplicate(&hash),
+                "accepted share should never be evicted within a job group"
+            );
+        }
+    }
 
-        let oldest_hash = BlockHash::from_byte_array([0u8; 32]);
+    fn check_duplicate_lookup_does_not_insert<W: TestWorkbaseFactory>() {
+        let mut jobs: Jobs<W> = Jobs::new();
+
+        let accepted = BlockHash::from_byte_array([1u8; 32]);
+        jobs.record_accepted(accepted);
+        assert!(jobs.is_duplicate(&accepted));
+
+        for i in 0..1000u32 {
+            let mut bytes = [0u8; 32];
+            bytes[..4].copy_from_slice(&i.to_le_bytes());
+            bytes[4] = 1;
+            let hash = BlockHash::from_byte_array(bytes);
+            assert!(!jobs.is_duplicate(&hash));
+        }
+
         assert!(
-            !jobs.is_duplicate(oldest_hash),
-            "oldest hash should have been evicted and not be duplicate"
+            jobs.is_duplicate(&accepted),
+            "duplicate lookups must not insert"
         );
     }
 
@@ -458,9 +480,9 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_lru() {
-        check_duplicate_lru::<BlockTemplate>();
-        check_duplicate_lru::<Notify>();
+    fn duplicate_detection() {
+        check_duplicate_detection::<BlockTemplate>();
+        check_duplicate_detection::<Notify>();
     }
 
     #[test]
@@ -512,9 +534,15 @@ mod tests {
     }
 
     #[test]
-    fn lru_eviction() {
-        check_lru_eviction::<BlockTemplate>();
-        check_lru_eviction::<Notify>();
+    fn seen_never_evicts_within_job_group() {
+        check_seen_never_evicts_within_job_group::<BlockTemplate>();
+        check_seen_never_evicts_within_job_group::<Notify>();
+    }
+
+    #[test]
+    fn duplicate_lookup_does_not_insert() {
+        check_duplicate_lookup_does_not_insert::<BlockTemplate>();
+        check_duplicate_lookup_does_not_insert::<Notify>();
     }
 
     #[test]

@@ -250,6 +250,41 @@ fn solve_share_with_version_bits(
 }
 
 #[cfg(target_os = "linux")]
+fn above_target_share(
+    notify: &stratum::Notify,
+    enonce1: &Extranonce,
+    enonce2: &Extranonce,
+    difficulty: stratum::Difficulty,
+) -> (Ntime, Nonce) {
+    let merkle_root = stratum::merkle_root(
+        &notify.coinb1,
+        &notify.coinb2,
+        enonce1,
+        enonce2,
+        &notify.merkle_branches,
+    )
+    .unwrap();
+
+    let mut header = Header {
+        version: notify.version.into(),
+        prev_blockhash: notify.prevhash.clone().into(),
+        merkle_root: merkle_root.into(),
+        time: notify.ntime.into(),
+        bits: notify.nbits.into(),
+        nonce: 0,
+    };
+
+    let target = difficulty.to_target();
+
+    while target.is_met_by(header.block_hash()) {
+        header.nonce += 1;
+        assert!(header.nonce != 0, "every nonce meets diff {difficulty}");
+    }
+
+    (Ntime::from(header.time), Nonce::from(header.nonce))
+}
+
+#[cfg(target_os = "linux")]
 async fn wait_for_notify(
     events: &mut stratum::client::EventReceiver,
 ) -> (stratum::Notify, Difficulty) {
