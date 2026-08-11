@@ -931,17 +931,41 @@ impl<W: Workbase> Stratifier<W> {
 
         let bits = job.nbits().to_compact();
 
+        let merkle_root = match stratum::merkle_root(
+            &job.coinb1,
+            &job.coinb2,
+            &job.enonce1,
+            &submit.enonce2,
+            job.merkle_branches(),
+        ) {
+            Ok(merkle_root) => merkle_root,
+            Err(err) => {
+                warn!(
+                    "Rejected share from {}: unbuildable coinbase for job {}: {err}",
+                    session.username(),
+                    submit.job_id,
+                );
+
+                self.send_error(id, StratumError::InvalidCoinbase, None)
+                    .await?;
+
+                self.send_event(rejection_event!(
+                    session.address().to_string(),
+                    session.workername().to_string(),
+                    job.workbase.height(),
+                    StratumError::InvalidCoinbase
+                ));
+
+                session.record_rejected(pool_diff);
+
+                return Ok(self.bouncer.reject());
+            }
+        };
+
         let header = Header {
             version: version.into(),
             prev_blockhash: job.prevhash().into(),
-            merkle_root: stratum::merkle_root(
-                &job.coinb1,
-                &job.coinb2,
-                &job.enonce1,
-                &submit.enonce2,
-                job.merkle_branches(),
-            )?
-            .into(),
+            merkle_root: merkle_root.into(),
             time: submit.ntime.into(),
             bits,
             nonce: submit.nonce.into(),

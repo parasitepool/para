@@ -49,6 +49,9 @@ pub use {
 
 pub const MAX_MESSAGE_SIZE: usize = 32 * 1024;
 
+pub const MIN_ENONCE_SIZE: usize = 2;
+pub const MAX_ENONCE_SIZE: usize = 8;
+
 pub mod error;
 pub mod message;
 pub mod method;

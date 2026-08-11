@@ -23,6 +23,7 @@ pub enum StratumError {
     Duplicate = 4,
     AboveTarget = 5,
     InvalidVersionMask = 6,
+    InvalidCoinbase = 7,
 }
 
 impl fmt::Display for StratumError {
@@ -46,6 +47,7 @@ impl fmt::Display for StratumError {
             Self::Duplicate => "Duplicate",
             Self::AboveTarget => "Above target",
             Self::InvalidVersionMask => "Invalid version mask",
+            Self::InvalidCoinbase => "Invalid coinbase",
         };
         write!(f, "{}", message)
     }
@@ -225,6 +227,10 @@ mod tests {
             StratumError::InvalidVersionMask.to_string(),
             "Invalid version mask"
         );
+        assert_eq!(
+            StratumError::InvalidCoinbase.to_string(),
+            "Invalid coinbase"
+        );
     }
 
     #[test]
@@ -281,6 +287,7 @@ mod tests {
         assert_eq!(StratumError::Duplicate as i32, 4);
         assert_eq!(StratumError::AboveTarget as i32, 5);
         assert_eq!(StratumError::InvalidVersionMask as i32, 6);
+        assert_eq!(StratumError::InvalidCoinbase as i32, 7);
     }
 
     #[test]

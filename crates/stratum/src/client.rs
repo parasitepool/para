@@ -259,6 +259,12 @@ impl Client {
         let subscribe_response: SubscribeResponse =
             serde_json::from_value(result).context(error::SerializationSnafu)?;
 
+        if !(MIN_ENONCE_SIZE..=MAX_ENONCE_SIZE).contains(&subscribe_response.enonce2_size) {
+            return Err(ClientError::InvalidEnonce2Size {
+                size: subscribe_response.enonce2_size,
+            });
+        }
+
         Ok((subscribe_response, duration, bytes_read))
     }
 
@@ -355,7 +361,7 @@ mod tests {
         super::*,
         std::net::SocketAddr,
         tokio::{
-            io::{AsyncReadExt, BufReader},
+            io::{AsyncBufReadExt, AsyncReadExt, BufReader},
             net::TcpListener,
         },
     };
@@ -468,5 +474,76 @@ mod tests {
             "Expected NotConnected, got: {:?}",
             err
         );
+    }
+
+    async fn mock_subscribe_server(enonce2_size: usize) -> SocketAddr {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let (read_half, mut write_half) = socket.into_split();
+            let mut reader = BufReader::new(read_half);
+
+            let mut line = String::new();
+            reader.read_line(&mut line).await.unwrap();
+
+            let request: Value = serde_json::from_str(&line).unwrap();
+
+            let response = serde_json::json!({
+                "id": request["id"],
+                "result": [[["mining.notify", "tag"]], "08000002", enonce2_size],
+                "error": null,
+            });
+
+            write_half
+                .write_all(format!("{response}\n").as_bytes())
+                .await
+                .unwrap();
+        });
+
+        addr
+    }
+
+    #[tokio::test]
+    async fn subscribe_validates_enonce2_size() {
+        async fn case(enonce2_size: usize, valid: bool) {
+            let addr = mock_subscribe_server(enonce2_size).await;
+
+            let client = Client::new(
+                addr.to_string(),
+                "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.test"
+                    .parse()
+                    .unwrap(),
+                None,
+                "test".into(),
+                Duration::from_secs(1),
+            );
+            client.connect().await.unwrap();
+
+            let result = client.subscribe().await;
+
+            if valid {
+                assert_eq!(
+                    result.unwrap().0.enonce2_size,
+                    enonce2_size,
+                    "enonce2_size {enonce2_size} should be accepted"
+                );
+            } else {
+                assert!(
+                    matches!(
+                        result,
+                        Err(ClientError::InvalidEnonce2Size { size }) if size == enonce2_size
+                    ),
+                    "enonce2_size {enonce2_size} should be rejected, got: {result:?}"
+                );
+            }
+        }
+
+        case(2, true).await;
+        case(8, true).await;
+        case(1, false).await;
+        case(9, false).await;
+        case(1 << 40, false).await;
     }
 }

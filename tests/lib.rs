@@ -53,7 +53,7 @@ use {
     harness::bitcoind::Bitcoind,
     ntest::timeout,
     para::{
-        ENONCE1_EXTENSION_SIZE, ENONCE1_SIZE, MAX_ENONCE_SIZE, USER_AGENT, api,
+        ENONCE1_EXTENSION_SIZE, ENONCE1_SIZE, USER_AGENT, api,
         hash::{HashDays, HashPrice},
         router::order::{OrderStatus, Review},
         subcommand::{
@@ -76,8 +76,8 @@ use {
         time::Instant,
     },
     stratum::{
-        self, Difficulty, Extranonce, JobId, Nonce, Notify, Ntime, StratumError, Username, Version,
-        client::ClientError,
+        self, Difficulty, Extranonce, JobId, MAX_ENONCE_SIZE, Nonce, Notify, Ntime, StratumError,
+        Username, Version, client::ClientError,
     },
     tempfile::tempdir,
     test_ckpool::TestCkpool,

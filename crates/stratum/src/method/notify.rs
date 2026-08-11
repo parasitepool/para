@@ -51,6 +51,11 @@ impl<'de> Deserialize<'de> for Notify {
                 bool,
             )>::deserialize(deserializer)?;
 
+        for (field, coinb) in [("coinb1", &coinb1), ("coinb2", &coinb2)] {
+            hex::decode(coinb)
+                .map_err(|err| de::Error::custom(format!("invalid {field}: {err}")))?;
+        }
+
         Ok(Notify {
             job_id,
             prevhash,
@@ -151,5 +156,34 @@ mod tests {
         ]"#;
 
         case(json, sample_notify(true));
+    }
+
+    #[test]
+    fn notify_rejects_invalid_coinb_hex() {
+        #[track_caller]
+        fn case(coinb1: &str, coinb2: &str, field: &str) {
+            let json = serde_json::json!([
+                "bf",
+                "4d16b6f85af6e2198f44ae2a6de67f78487ae5611b77c6c0440b921e00000000",
+                coinb1,
+                coinb2,
+                [],
+                "00000002",
+                "1c2ac4af",
+                "504e86b9",
+                true
+            ]);
+
+            let err = serde_json::from_value::<Notify>(json).unwrap_err();
+            assert!(
+                err.to_string().contains(&format!("invalid {field}")),
+                "expected invalid {field} error, got: {err}"
+            );
+        }
+
+        case("zz", "aa", "coinb1");
+        case("aa", "zz", "coinb2");
+        case("abc", "aa", "coinb1");
+        case("aa", "abc", "coinb2");
     }
 }

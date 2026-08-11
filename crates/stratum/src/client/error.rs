@@ -17,6 +17,11 @@ pub enum ClientError {
     #[snafu(display("Serialization error: {source}"))]
     Serialization { source: serde_json::Error },
 
+    #[snafu(display(
+        "Invalid enonce2_size {size}: outside allowed range {MIN_ENONCE_SIZE}..={MAX_ENONCE_SIZE}"
+    ))]
+    InvalidEnonce2Size { size: usize },
+
     #[snafu(display("{response}"))]
     Stratum { response: StratumErrorResponse },
 

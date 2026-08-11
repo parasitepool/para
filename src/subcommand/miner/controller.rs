@@ -309,14 +309,19 @@ impl Controller {
                             enonce2
                         };
 
-                        let merkle_root = stratum::merkle_root(
+                        let merkle_root = match stratum::merkle_root(
                             &notify.coinb1,
                             &notify.coinb2,
                             &enonce1,
                             &enonce2,
                             &notify.merkle_branches,
-                        )
-                        .expect("merkle root should calculate");
+                        ) {
+                            Ok(merkle_root) => merkle_root,
+                            Err(err) => {
+                                warn!("Skipping job {}: {err}", notify.job_id);
+                                break;
+                            }
+                        };
 
                         let header = Header {
                             version: notify.version.into(),

@@ -103,10 +103,10 @@ use {
     store::{Store, entry},
     stratifier::Stratifier,
     stratum::{
-        Authorize, Configure, Difficulty, Extranonce, Id, JobId, MAX_MESSAGE_SIZE, MerkleNode,
-        Message, Method, Nbits, Nonce, Notify, Ntime, PETA, PrevHash, Reconnect, SetDifficulty,
-        StratumError, Submit, Subscribe, SubscribeResponse, Username, Version, format_si,
-        merkle_root, parse_si,
+        Authorize, Configure, Difficulty, Extranonce, Id, JobId, MAX_ENONCE_SIZE, MAX_MESSAGE_SIZE,
+        MIN_ENONCE_SIZE, MerkleNode, Message, Method, Nbits, Nonce, Notify, Ntime, PETA, PrevHash,
+        Reconnect, SetDifficulty, StratumError, Submit, Subscribe, SubscribeResponse, Username,
+        Version, format_si, merkle_root, parse_si,
     },
     subcommand::server::account::Account,
     sysinfo::{Disks, System},
@@ -174,8 +174,6 @@ mod zmq;
 
 pub const COIN_VALUE: u64 = 100_000_000;
 pub const USER_AGENT: &str = concat!("para/", env!("CARGO_PKG_VERSION"));
-pub const MIN_ENONCE_SIZE: usize = 2;
-pub const MAX_ENONCE_SIZE: usize = 8;
 pub const ENONCE1_SIZE: usize = 4;
 pub const ENONCE1_EXTENSION_SIZE: usize = 2;
 pub const SHARE_CHANNEL_CAPACITY: usize = 100_000;
