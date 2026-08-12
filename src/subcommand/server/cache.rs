@@ -114,6 +114,8 @@ pub(super) struct Cache {
     pool_status: Mutex<Cached<ckpool::Status>>,
     user_statuses: DashMap<String, Arc<Mutex<Cached<ckpool::User>>>>,
     users: Mutex<Cached<Vec<String>>>,
+    /// Per-address running max of `top_diff` over completed rounds
+    bestevers: DashMap<String, (i32, f64)>,
 }
 
 impl Cache {
@@ -129,6 +131,7 @@ impl Cache {
             pool_status: Mutex::new(Cached::init(config.ttl())),
             user_statuses: DashMap::new(),
             users: Mutex::new(Cached::init(config.ttl())),
+            bestevers: DashMap::new(),
         }
     }
 
@@ -242,6 +245,29 @@ impl Cache {
                 Ok(best) => user.bestshare = best.unwrap_or(0.0),
                 Err(err) => {
                     warn!("Failed to load round bestshare for {address} from database: {err}")
+                }
+            }
+
+            // ckpool flatfiles lose bestever on hard restarts
+            // Use persisted and backedup data from db
+            let (after, history_best) = self
+                .bestevers
+                .get(&address)
+                .map(|entry| *entry)
+                .unwrap_or((0, 0.0));
+
+            match database.get_bestever_delta_by_user(&address, after).await {
+                Ok(delta) => {
+                    let history_best = history_best.max(delta.history_best.unwrap_or(0.0));
+                    if let Some(latest_round) = delta.latest_round {
+                        self.bestevers
+                            .insert(address.clone(), (after.max(latest_round), history_best));
+                    }
+                    let best = history_best.max(delta.current_best.unwrap_or(0.0));
+                    user.bestever = user.bestever.max(best as u64);
+                }
+                Err(err) => {
+                    warn!("Failed to load bestever for {address} from database: {err}")
                 }
             }
         }

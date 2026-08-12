@@ -1170,6 +1170,128 @@ async fn test_current_round_no_blocks_found() {
 }
 
 #[tokio::test]
+async fn test_aggregator_bestever_from_rounds_data() {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let addr = address(0).to_string();
+
+    // Node whose flatfile bestever was wiped by a hard ckpool restart.
+    let node = TestServer::spawn();
+    let flatfile_user = User {
+        hashrate1m: HashRate(5e15),
+        hashrate5m: HashRate(5e15),
+        hashrate1hr: HashRate(5e15),
+        hashrate1d: HashRate(5e15),
+        hashrate7d: HashRate(5e15),
+        lastshare: now - 30,
+        workers: 1,
+        shares: 500,
+        bestshare: 1e9,
+        bestever: 200,
+        authorised: 1,
+        worker: vec![Worker {
+            workername: format!("{addr}.foo"),
+            hashrate1m: HashRate(5e15),
+            hashrate5m: HashRate(5e15),
+            hashrate1hr: HashRate(5e15),
+            hashrate1d: HashRate(5e15),
+            hashrate7d: HashRate(5e15),
+            lastshare: now - 30,
+            shares: 500,
+            bestshare: 1e9,
+            bestever: 200,
+        }],
+    };
+    fs::write(
+        node.log_dir().join(format!("users/{addr}")),
+        serde_json::to_string(&flatfile_user).unwrap(),
+    )
+    .unwrap();
+
+    let aggregator = TestServer::spawn_with_db_args(format!("--nodes {}", node.url())).await;
+    let db_url = aggregator.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    // The all-time best share landed in a completed round...
+    insert_test_shares_for_round(db_url.clone(), vec![(addr.as_str(), 5e12)], 5, 100)
+        .await
+        .unwrap();
+    insert_test_block(db_url.clone(), 5).await.unwrap();
+    // ...while the current round only has a lower one.
+    insert_test_shares_for_round(db_url.clone(), vec![(addr.as_str(), 1e9)], 7, 200)
+        .await
+        .unwrap();
+    refresh_round_participation_view(db_url.clone())
+        .await
+        .unwrap();
+
+    // Snapshot round 5 into round_participation_history.
+    let _: Vec<RoundParticipant> = aggregator.get_json_async("/rounds/5").await;
+
+    let response: User = aggregator
+        .get_json_async(format!("/aggregator/users/{addr}"))
+        .await;
+
+    // The completed-round top_diff beats both the current round and the
+    // post-restart flatfile value.
+    assert_eq!(response.bestever, 5_000_000_000_000);
+    // bestshare still reflects only the current round.
+    assert_eq!(response.bestshare, 1e9);
+}
+
+#[tokio::test]
+async fn test_bestever_delta_scans_only_new_rounds() {
+    let server = TestServer::spawn_with_db().await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    // Two completed rounds (ending at blocks 5 and 9) and a current round.
+    insert_test_shares_for_round(db_url.clone(), vec![("foo", 5e12)], 5, 100)
+        .await
+        .unwrap();
+    insert_test_block(db_url.clone(), 5).await.unwrap();
+    insert_test_shares_for_round(db_url.clone(), vec![("foo", 3e12)], 9, 200)
+        .await
+        .unwrap();
+    insert_test_block(db_url.clone(), 9).await.unwrap();
+    insert_test_shares_for_round(db_url.clone(), vec![("foo", 1e9)], 11, 300)
+        .await
+        .unwrap();
+    refresh_round_participation_view(db_url.clone())
+        .await
+        .unwrap();
+
+    // Snapshot both completed rounds into round_participation_history.
+    let _: Vec<RoundParticipant> = server.get_json_async("/rounds/5").await;
+    let _: Vec<RoundParticipant> = server.get_json_async("/rounds/9").await;
+
+    let database = Database::new(db_url.clone()).await.unwrap();
+
+    // Initial full read sees all history plus the current round.
+    let delta = database.get_bestever_delta_by_user("foo", 0).await.unwrap();
+    assert_eq!(delta.latest_round, Some(9));
+    assert_eq!(delta.history_best, Some(5e12));
+    assert_eq!(delta.current_best, Some(1e9));
+
+    // From the watermark onward, no history rows are re-read; only the
+    // current round comes back.
+    let delta = database.get_bestever_delta_by_user("foo", 9).await.unwrap();
+    assert_eq!(delta.latest_round, None);
+    assert_eq!(delta.history_best, None);
+    assert_eq!(delta.current_best, Some(1e9));
+
+    // A round newer than the watermark is picked up incrementally.
+    let delta = database.get_bestever_delta_by_user("foo", 5).await.unwrap();
+    assert_eq!(delta.latest_round, Some(9));
+    assert_eq!(delta.history_best, Some(3e12));
+    assert_eq!(delta.current_best, Some(1e9));
+}
+
+#[tokio::test]
 async fn test_participants_for_blockheight() {
     let server = TestServer::spawn_with_db().await;
     let db_url = server.database_url().unwrap();

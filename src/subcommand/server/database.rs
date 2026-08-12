@@ -10,6 +10,14 @@ use {
     rounds::{Round, RoundParticipant},
 };
 
+#[derive(sqlx::FromRow, Debug, Clone, PartialEq)]
+pub struct BestEverDelta {
+    /// Highest snapshotted round seen in this read
+    pub latest_round: Option<i32>,
+    pub history_best: Option<f64>,
+    pub current_best: Option<f64>,
+}
+
 #[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone, PartialEq, ToSchema)]
 pub struct HighestDiff {
     pub blockheight: i32,
@@ -562,6 +570,34 @@ impl Database {
         )
         .bind(username)
         .fetch_optional(&self.pool)
+        .await
+        .map_err(|err| anyhow!(err))
+    }
+
+    /// Read of a user's best-ever share difficulty
+    pub async fn get_bestever_delta_by_user(
+        &self,
+        username: &str,
+        after: i32,
+    ) -> Result<BestEverDelta> {
+        sqlx::query_as::<_, BestEverDelta>(
+            "
+            WITH new_rounds AS (
+                SELECT MAX(blockheight) AS latest_round, MAX(top_diff) AS history_best
+                FROM round_participation_history
+                WHERE username = $1 AND blockheight > $2
+            )
+            SELECT
+                nr.latest_round,
+                nr.history_best,
+                (SELECT top_diff FROM round_participation_current WHERE username = $1)
+                    AS current_best
+            FROM new_rounds nr
+            ",
+        )
+        .bind(username)
+        .bind(after)
+        .fetch_one(&self.pool)
         .await
         .map_err(|err| anyhow!(err))
     }

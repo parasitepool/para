@@ -28,7 +28,7 @@ impl TestServer {
         fs::create_dir(logdir.join("users")).unwrap();
 
         let child = CommandBuilder::new(format!(
-            "server --address 127.0.0.1 --port 0 --data-dir {} --log-dir {} {}",
+            "server --address 127.0.0.1 --port 0 --data-dir {} --log-dir {} --database-url postgres://para:para@127.0.0.1:1/unreachable {}",
             tempdir.path().display(),
             logdir.display(),
             args.to_args().join(" ")
