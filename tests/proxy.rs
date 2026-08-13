@@ -47,13 +47,13 @@ async fn proxy() {
     assert_eq!(status.downstream.users, 0);
     assert_eq!(status.downstream.workers, 0);
     assert_eq!(status.downstream.sessions, 0);
-    assert_eq!(status.downstream.total.stats.accepted_shares, 0);
-    assert_eq!(status.downstream.total.stats.rejected_shares, 0);
-    assert_eq!(status.upstream.total.stats.accepted_shares, 0);
-    assert_eq!(status.upstream.total.stats.rejected_shares, 0);
+    assert_eq!(status.downstream.totals.accepted_shares, 0);
+    assert_eq!(status.downstream.totals.rejected_shares, 0);
+    assert_eq!(status.upstream.totals.accepted_shares, 0);
+    assert_eq!(status.upstream.totals.rejected_shares, 0);
     assert_eq!(status.upstream_info.difficulty, Difficulty::from(0.00001));
-    assert!(status.downstream.total.stats.best_share.is_none());
-    assert!(status.downstream.total.stats.last_share.is_none());
+    assert!(status.downstream.totals.best_share.is_none());
+    assert!(status.downstream.totals.last_share.is_none());
 
     let client = proxy.stratum_client();
     let mut events = client.connect().await.unwrap();
@@ -104,12 +104,12 @@ async fn proxy() {
     assert_eq!(status.downstream.users, 1);
     assert_eq!(status.downstream.workers, 1);
     assert_eq!(status.downstream.sessions, 1);
-    assert_eq!(status.downstream.total.stats.accepted_shares, 1);
-    assert_eq!(status.downstream.total.stats.rejected_shares, 0);
-    assert_eq!(status.upstream.total.stats.accepted_shares, 1);
-    assert_eq!(status.upstream.total.stats.rejected_shares, 0);
-    assert!(status.downstream.total.stats.best_share.is_some());
-    assert!(status.downstream.total.stats.last_share.is_some());
+    assert_eq!(status.downstream.totals.accepted_shares, 1);
+    assert_eq!(status.downstream.totals.rejected_shares, 0);
+    assert_eq!(status.upstream.totals.accepted_shares, 1);
+    assert_eq!(status.upstream.totals.rejected_shares, 0);
+    assert!(status.downstream.totals.best_share.is_some());
+    assert!(status.downstream.totals.last_share.is_some());
 
     let user = proxy.get_user(&user_address).await.unwrap();
     assert_eq!(
@@ -140,10 +140,10 @@ async fn proxy() {
     assert_stratum_error(result, StratumError::AboveTarget);
 
     let status = proxy.get_status().await.unwrap();
-    assert_eq!(status.downstream.total.stats.accepted_shares, 1);
-    assert_eq!(status.downstream.total.stats.rejected_shares, 1);
-    assert_eq!(status.upstream.total.stats.accepted_shares, 1);
-    assert_eq!(status.upstream.total.stats.rejected_shares, 0);
+    assert_eq!(status.downstream.totals.accepted_shares, 1);
+    assert_eq!(status.downstream.totals.rejected_shares, 1);
+    assert_eq!(status.upstream.totals.accepted_shares, 1);
+    assert_eq!(status.upstream.totals.rejected_shares, 0);
 
     assert_stratum_error(
         client
@@ -159,8 +159,8 @@ async fn proxy() {
     );
 
     let status = proxy.get_status().await.unwrap();
-    assert_eq!(status.downstream.total.stats.accepted_shares, 1);
-    assert_eq!(status.downstream.total.stats.rejected_shares, 2);
+    assert_eq!(status.downstream.totals.accepted_shares, 1);
+    assert_eq!(status.downstream.totals.rejected_shares, 2);
 
     assert_stratum_error(
         client
@@ -176,8 +176,8 @@ async fn proxy() {
     );
 
     let status = proxy.get_status().await.unwrap();
-    assert_eq!(status.downstream.total.stats.accepted_shares, 1);
-    assert_eq!(status.downstream.total.stats.rejected_shares, 3);
+    assert_eq!(status.downstream.totals.accepted_shares, 1);
+    assert_eq!(status.downstream.totals.rejected_shares, 3);
 
     let user = proxy.get_user(&user_address).await.unwrap();
     assert_eq!(user.stats.accepted_shares, 1);
@@ -221,10 +221,10 @@ async fn proxy() {
     let status = proxy.get_status().await.unwrap();
     assert_eq!(status.downstream.accepted_shares, 1);
     assert_eq!(status.downstream.rejected_shares, 0);
-    assert_eq!(status.downstream.total.stats.accepted_shares, 2);
-    assert_eq!(status.downstream.total.stats.rejected_shares, 3);
-    assert_eq!(status.upstream.total.stats.accepted_shares, 2);
-    assert_eq!(status.upstream.total.stats.rejected_shares, 0);
+    assert_eq!(status.downstream.totals.accepted_shares, 2);
+    assert_eq!(status.downstream.totals.rejected_shares, 3);
+    assert_eq!(status.upstream.totals.accepted_shares, 2);
+    assert_eq!(status.upstream.totals.rejected_shares, 0);
 
     let user = proxy.get_user(&user_address).await.unwrap();
     assert_eq!(user.stats.accepted_shares, 2);
@@ -678,7 +678,7 @@ async fn stale_extended_enonce1_is_rejected_after_upstream_reconnect() {
         .unwrap();
 
     let status = proxy.get_status().await.unwrap();
-    assert!(status.upstream.total.stats.accepted_shares >= 1);
+    assert!(status.upstream.totals.accepted_shares >= 1);
 
     drop(pool2);
 }
@@ -716,13 +716,13 @@ async fn proxy_persists_stats_across_restart() {
         .unwrap();
 
     let status = proxy.get_status().await.unwrap();
-    assert_eq!(status.downstream.total.stats.accepted_shares, 1);
+    assert_eq!(status.downstream.totals.accepted_shares, 1);
     assert_eq!(status.downstream.users, 1);
 
     timeout(Duration::from_secs(10), async {
         loop {
             let status = proxy.get_status().await.unwrap();
-            if status.upstream.total.stats.accepted_shares >= 1 {
+            if status.upstream.totals.accepted_shares >= 1 {
                 break;
             }
             sleep(Duration::from_millis(200)).await;
@@ -747,15 +747,15 @@ async fn proxy_persists_stats_across_restart() {
 
     let status = proxy.get_status().await.unwrap();
     assert_eq!(
-        status.upstream.total.stats.accepted_shares, 1,
+        status.upstream.totals.accepted_shares, 1,
         "upstream order stats should survive restart"
     );
     assert_eq!(
-        status.downstream.total.stats.accepted_shares, 1,
+        status.downstream.totals.accepted_shares, 1,
         "downstream stats should survive restart"
     );
     assert_eq!(
-        status.downstream.total.users, 1,
+        status.downstream.totals.users, 1,
         "user should survive restart"
     );
     assert_eq!(

@@ -2,8 +2,8 @@ use {
     super::*,
     crate::{
         api::{
-            DownstreamStatus, IntentClaimCounts, OrphanReceipt, PlacementCounts, RouterStatus,
-            TotalStats, UpstreamStatus, UpstreamTotals,
+            DownstreamStats, IntentClaimCounts, OrphanReceipt, PlacementCounts, RouterStatus,
+            RoutingInfo, UpstreamStats, UpstreamTotals, WalletInfo,
         },
         event_sink::Event,
         generator::get_block_template,
@@ -955,12 +955,13 @@ impl Router {
         let rejected_work = cold.rejected_work + live.rejected_work;
         let delivered_work = accepted_work + rejected_work;
 
-        let total = TotalStats {
+        let totals = UpstreamTotals {
+            users: total_users,
+            orders: total_orders,
             accepted_shares: cold.accepted_shares + live.accepted_shares,
             rejected_shares: cold.rejected_shares + live.rejected_shares,
             accepted_work,
             rejected_work,
-            delivered_work,
             delivered_hash_days: delivered_work.to_hash_days(),
             best_share: total_best_share,
             last_share: total_last_share_secs.map(|secs| secs as u64),
@@ -972,6 +973,7 @@ impl Router {
 
         let used_capacity_hash_days =
             HashDays::from_raw(used.as_f64().min(total_capacity_hash_days.as_f64()));
+
         let control_metrics = self.control.metrics(now);
 
         RouterStatus {
@@ -982,41 +984,51 @@ impl Router {
             premium_percent: self.premium_percent(),
             total_capacity_hash_days,
             used_capacity_hash_days,
-            bucket_order_count,
-            sink_order_count,
-            starving_order_count,
-            deficit_hashrate,
-            wallet_synced: self
-                .wallet
-                .as_ref()
-                .is_some_and(|wallet| wallet.is_synced()),
             halt: self.halt(),
             boost: self.boost(),
-            orphan_receipts: self.orphan_receipts.lock().values().cloned().collect(),
-            sessions_trimmed_1h: control_metrics.sessions_trimmed_1h,
-            intents_created_1h: control_metrics.intents_created_1h,
-            intents_expired_1h: control_metrics.intents_expired_1h,
-            intent_claims_1h: control_metrics.intent_claims_1h,
-            placements_1h: control_metrics.placements_1h,
-            upstream: UpstreamStatus {
+            wallet: WalletInfo {
+                synced: self
+                    .wallet
+                    .as_ref()
+                    .is_some_and(|wallet| wallet.is_synced()),
+                orphan_receipts: self.orphan_receipts.lock().values().cloned().collect(),
+            },
+            routing: RoutingInfo {
+                sessions_trimmed_1h: control_metrics.sessions_trimmed_1h,
+                intents_created_1h: control_metrics.intents_created_1h,
+                intents_expired_1h: control_metrics.intents_expired_1h,
+                intent_claims_1h: control_metrics.intent_claims_1h,
+                placements_1h: control_metrics.placements_1h,
+                deficit_hashrate,
+                bucket_order_count,
+                sink_order_count,
+                starving_order_count,
+            },
+            upstream: UpstreamStats {
                 users: active_addresses.len(),
                 workers: active_workers.len(),
                 orders: bucket_order_count,
                 pending,
                 disconnected,
                 hashrate_1m: active.hashrate_1m(now),
+                hashrate_5m: active.hashrate_5m(now),
+                hashrate_15m: active.hashrate_15m(now),
+                hashrate_1hr: active.hashrate_1hr(now),
+                hashrate_6hr: active.hashrate_6hr(now),
+                hashrate_1d: active.hashrate_1d(now),
+                hashrate_7d: active.hashrate_7d(now),
                 sps_1m: active.sps_1m(now),
+                sps_5m: active.sps_5m(now),
+                sps_15m: active.sps_15m(now),
+                sps_1hr: active.sps_1hr(now),
                 accepted_shares: active.accepted_shares,
                 rejected_shares: active.rejected_shares,
                 accepted_work: active.accepted_work,
                 rejected_work: active.rejected_work,
-                total: UpstreamTotals {
-                    users: total_users,
-                    orders: total_orders,
-                    stats: total,
-                },
+                totals,
             },
-            downstream: DownstreamStatus::from_metatron(metatron, now),
+            downstream: DownstreamStats::from_metatron(metatron, now),
+            git_commit: env!("GIT_COMMIT").into(),
         }
     }
 
@@ -1588,11 +1600,11 @@ mod tests {
 
         let status = router.status();
         assert_eq!(status.upstream.accepted_shares, 1);
-        assert_eq!(status.upstream.total.stats.accepted_shares, 1);
-        assert_eq!(status.upstream.total.users, 1);
-        assert_eq!(status.upstream.total.orders, 1);
+        assert_eq!(status.upstream.totals.accepted_shares, 1);
+        assert_eq!(status.upstream.totals.users, 1);
+        assert_eq!(status.upstream.totals.orders, 1);
         assert_eq!(status.downstream.accepted_shares, 1);
-        assert_eq!(status.downstream.total.stats.accepted_shares, 1);
+        assert_eq!(status.downstream.totals.accepted_shares, 1);
 
         order.terminate(OrderStatus::Fulfilled);
         order.clear_dirty();
@@ -1600,24 +1612,24 @@ mod tests {
         let status = router.status();
         assert_eq!(status.upstream.accepted_shares, 0);
         assert_eq!(status.upstream.users, 0);
-        assert_eq!(status.upstream.total.stats.accepted_shares, 1);
-        assert_eq!(status.upstream.total.users, 1);
+        assert_eq!(status.upstream.totals.accepted_shares, 1);
+        assert_eq!(status.upstream.totals.users, 1);
 
         router.retire_orders();
 
         let status = router.status();
         assert_eq!(status.upstream.accepted_shares, 0);
-        assert_eq!(status.upstream.total.stats.accepted_shares, 1);
-        assert_eq!(status.upstream.total.users, 1);
-        assert_eq!(status.upstream.total.orders, 1);
+        assert_eq!(status.upstream.totals.accepted_shares, 1);
+        assert_eq!(status.upstream.totals.users, 1);
+        assert_eq!(status.upstream.totals.orders, 1);
         assert_eq!(status.downstream.accepted_shares, 1);
-        assert_eq!(status.downstream.total.stats.accepted_shares, 1);
+        assert_eq!(status.downstream.totals.accepted_shares, 1);
 
         let json = serde_json::to_value(router.status()).unwrap();
         assert!(json["upstream"]["hashrate_1m"].is_number());
-        assert!(json["upstream"]["total"]["orders"].is_number());
+        assert!(json["upstream"]["totals"]["orders"].is_number());
         assert!(json["downstream"]["sessions"].is_number());
-        assert!(json["downstream"]["total"]["users"].is_number());
+        assert!(json["downstream"]["totals"]["users"].is_number());
         assert!(json.get("traffic").is_none());
         assert!(json.get("history").is_none());
     }
@@ -1635,15 +1647,15 @@ mod tests {
         );
 
         let status = router.status();
-        assert_eq!(status.sink_order_count, 1);
+        assert_eq!(status.routing.sink_order_count, 1);
         assert_eq!(status.upstream.orders, 0);
         assert_eq!(status.upstream.users, 0);
         assert_eq!(status.upstream.workers, 0);
         assert_eq!(status.upstream.accepted_shares, 0);
         assert_eq!(status.upstream.hashrate_1m, HashRate::ZERO);
-        assert_eq!(status.upstream.total.stats.accepted_shares, 1);
-        assert_eq!(status.upstream.total.orders, 1);
-        assert_eq!(status.upstream.total.users, 1);
+        assert_eq!(status.upstream.totals.accepted_shares, 1);
+        assert_eq!(status.upstream.totals.orders, 1);
+        assert_eq!(status.upstream.totals.users, 1);
     }
 
     #[test]
@@ -1714,17 +1726,17 @@ mod tests {
 
         let before = router.status();
         assert_eq!(before.upstream.accepted_shares, 0);
-        assert_eq!(before.upstream.total.stats.accepted_shares, 1);
-        assert_eq!(before.upstream.total.orders, 1);
-        assert_eq!(before.upstream.total.users, 1);
+        assert_eq!(before.upstream.totals.accepted_shares, 1);
+        assert_eq!(before.upstream.totals.orders, 1);
+        assert_eq!(before.upstream.totals.users, 1);
 
         router.flag_orders();
 
         let after = router.status();
         assert_eq!(after.upstream.accepted_shares, 0);
-        assert_eq!(after.upstream.total.stats.accepted_shares, 1);
-        assert_eq!(after.upstream.total.orders, 1);
-        assert_eq!(after.upstream.total.users, 1);
+        assert_eq!(after.upstream.totals.accepted_shares, 1);
+        assert_eq!(after.upstream.totals.orders, 1);
+        assert_eq!(after.upstream.totals.users, 1);
         assert_eq!(router.orders.read().cold_count(), 0);
         assert!(router.orders.read().get(1).is_some());
     }
@@ -2220,7 +2232,7 @@ mod tests {
         router.sweep_orphan_receipts();
 
         assert_eq!(
-            router.status().orphan_receipts,
+            router.status().wallet.orphan_receipts,
             vec![expected],
             "first-seen height is stable across sweeps",
         );
@@ -3712,7 +3724,7 @@ mod tests {
         let status = router.status();
         assert_eq!(status.total_capacity_hash_days.as_f64(), 500.0);
         assert_eq!(status.used_capacity_hash_days.as_f64(), 300.0);
-        assert_eq!(status.bucket_order_count, 1);
+        assert_eq!(status.routing.bucket_order_count, 1);
     }
 
     #[test]
@@ -3733,8 +3745,8 @@ mod tests {
         );
 
         let status = router.status();
-        assert_eq!(status.deficit_hashrate, HashRate::from_hps(100.0));
-        assert_eq!(status.starving_order_count, 1);
+        assert_eq!(status.routing.deficit_hashrate, HashRate::from_hps(100.0));
+        assert_eq!(status.routing.starving_order_count, 1);
     }
 
     #[test]
@@ -3746,7 +3758,7 @@ mod tests {
         router.next_order(addr(1), &blank()).unwrap();
 
         assert_eq!(
-            router.status().placements_1h,
+            router.status().routing.placements_1h,
             PlacementCounts {
                 blind: 1,
                 ..PlacementCounts::default()

@@ -109,7 +109,7 @@ impl TestRouter {
                 request
                     .send()
                     .and_then(|response| response.json::<RouterStatus>())
-                    .map(|status| status.wallet_synced)
+                    .map(|status| status.wallet.synced)
                     .unwrap_or(false)
             })
             .join()

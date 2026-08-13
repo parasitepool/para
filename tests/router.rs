@@ -410,7 +410,7 @@ async fn router() {
     );
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.bucket_order_count, 0);
+    assert_eq!(status.routing.bucket_order_count, 0);
     let hash_price = status.hash_price;
 
     add_and_activate_order(
@@ -434,7 +434,7 @@ async fn router() {
     .await;
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.bucket_order_count, 2);
+    assert_eq!(status.routing.bucket_order_count, 2);
 
     let mut miners = Vec::new();
 
@@ -452,7 +452,7 @@ async fn router() {
     timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(status) = router.get_status().await
-                && status.bucket_order_count == 2
+                && status.routing.bucket_order_count == 2
                 && status.downstream.sessions >= 3
             {
                 break;
@@ -464,7 +464,7 @@ async fn router() {
     .expect("Timeout waiting for 2 slots and 3 sessions");
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.bucket_order_count, 2);
+    assert_eq!(status.routing.bucket_order_count, 2);
     assert_eq!(status.downstream.sessions, 3);
     assert_eq!(status.downstream.users, 1);
     assert_eq!(status.downstream.workers, 1);
@@ -752,7 +752,7 @@ async fn order_activates_after_payment_output_is_spent_before_confirmation() {
             let status = router.get_status().await;
             if let (Ok(detail), Ok(status)) = (detail, status)
                 && detail.status == OrderStatus::InMempool
-                && status.bucket_order_count == 0
+                && status.routing.bucket_order_count == 0
             {
                 break;
             }
@@ -843,7 +843,7 @@ async fn orders() {
     );
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.bucket_order_count, 0);
+    assert_eq!(status.routing.bucket_order_count, 0);
     let hash_price = status.hash_price;
 
     let response = router
@@ -878,7 +878,7 @@ async fn orders() {
     .await;
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.bucket_order_count, 2);
+    assert_eq!(status.routing.bucket_order_count, 2);
 
     let response = router.cancel_order(9999).await.unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
@@ -895,7 +895,7 @@ async fn orders() {
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.bucket_order_count, 1);
+    assert_eq!(status.routing.bucket_order_count, 1);
 }
 
 #[tokio::test]
@@ -949,7 +949,7 @@ async fn cancelled_order_stays_cancelled_during_activation() {
 
     assert_eq!(order.status, OrderStatus::Cancelled);
     assert_eq!(order.review, Review::Flagged);
-    assert_eq!(status.bucket_order_count, 0);
+    assert_eq!(status.routing.bucket_order_count, 0);
 
     stalled_server.abort();
 }
@@ -1230,7 +1230,7 @@ async fn order_fulfilled_on_hashdays_reached() {
     .await;
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.bucket_order_count, 1);
+    assert_eq!(status.routing.bucket_order_count, 1);
 
     let mut miner = CommandBuilder::new(format!(
         "miner {} --mode continuous --username {} --cpu-cores 1",
@@ -1253,7 +1253,7 @@ async fn order_fulfilled_on_hashdays_reached() {
     .expect("Timeout waiting for order to be fulfilled");
 
     let status = router.get_status().await.unwrap();
-    assert_eq!(status.bucket_order_count, 0);
+    assert_eq!(status.routing.bucket_order_count, 0);
 
     let orders = router.list_orders(None).await.unwrap();
     let fulfilled = orders
@@ -1437,9 +1437,9 @@ async fn router_trim_reconnects_to_intended_order() {
 
     let status = router.get_status().await.unwrap();
     assert!(
-        status.placements_1h.intent >= 1,
+        status.routing.placements_1h.intent >= 1,
         "expected at least one intent placement, got {}",
-        status.placements_1h.intent
+        status.routing.placements_1h.intent
     );
 
     for mut miner in miners {
@@ -1800,11 +1800,11 @@ async fn router_persists_order_stats_across_restart() {
 
     let status = router.get_status().await.unwrap();
     assert_eq!(
-        status.downstream.total.users, 1,
+        status.downstream.totals.users, 1,
         "downstream user should survive restart"
     );
     assert_eq!(
-        status.downstream.total.workers, 1,
+        status.downstream.totals.workers, 1,
         "downstream worker should survive restart"
     );
 }

@@ -7,6 +7,218 @@ use {
     axum::extract::RawQuery,
 };
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PlacementCounts {
+    pub intent: usize,
+    pub resumed: usize,
+    pub redirected: usize,
+    pub estimated: usize,
+    pub blind: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct IntentClaimCounts {
+    pub enonce1: usize,
+    pub ip: usize,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct OrphanReceipt {
+    pub derivation_index: u32,
+    pub address: Address<NetworkUnchecked>,
+    pub amount: Amount,
+    pub first_seen_height: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoutingInfo {
+    pub sessions_trimmed_1h: usize,
+    pub intents_created_1h: usize,
+    pub intents_expired_1h: usize,
+    pub intent_claims_1h: IntentClaimCounts,
+    pub placements_1h: PlacementCounts,
+    pub deficit_hashrate: HashRate,
+    pub bucket_order_count: usize,
+    pub sink_order_count: usize,
+    pub starving_order_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WalletInfo {
+    pub synced: bool,
+    pub orphan_receipts: Vec<OrphanReceipt>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RouterStatus {
+    pub uptime_secs: u64,
+    pub block_count: u64,
+    pub recent_blocks: Vec<BlockHash>,
+    pub hash_price: HashPrice,
+    pub premium_percent: f64,
+    pub total_capacity_hash_days: HashDays,
+    pub used_capacity_hash_days: HashDays,
+    pub halt: bool,
+    pub boost: bool,
+    pub wallet: WalletInfo,
+    pub routing: RoutingInfo,
+    pub upstream: UpstreamStats,
+    pub downstream: DownstreamStats,
+    pub git_commit: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct OrderRequest {
+    pub upstream_target: UpstreamTarget,
+    pub hash_days: HashDays,
+    pub hash_price: HashPrice,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OrderResponse {
+    pub order_id: u32,
+    pub payment_address: Address<NetworkUnchecked>,
+    pub payment_amount: Amount,
+    pub hash_price: HashPrice,
+}
+
+impl OrderResponse {
+    pub(crate) fn from_order(order: &Order, bucket: &Bucket) -> Self {
+        Self {
+            order_id: order.id,
+            payment_address: bucket.payment.address.as_unchecked().clone(),
+            payment_amount: bucket.payment.amount,
+            hash_price: HashPrice::from_total(bucket.payment.amount, bucket.target),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrderSummary {
+    pub id: u32,
+    pub status: OrderStatus,
+    pub review: Review,
+    pub endpoint: String,
+    pub username: String,
+    pub requested_hash_days: Option<HashDays>,
+    pub hashrate: HashRate,
+    pub delivered_hash_days: HashDays,
+    pub best_share: Option<Difficulty>,
+}
+
+impl OrderSummary {
+    pub(crate) fn from_order(order: &Order, now: Instant) -> Self {
+        let stats = order.stats();
+        Self {
+            id: order.id,
+            status: order.status(),
+            review: order.review(),
+            endpoint: order.upstream_target.endpoint().to_string(),
+            username: order.upstream_target.username().to_string(),
+            requested_hash_days: order.bucket.as_ref().map(|bucket| bucket.target),
+            hashrate: stats.hashrate_1m(now),
+            delivered_hash_days: stats.delivered_work().to_hash_days(),
+            best_share: stats.best_share,
+        }
+    }
+
+    pub(crate) fn from_entry(id: u32, entry: &entry::OrderEntry, now: Instant) -> Result<Self> {
+        let stats = Stats::from_entry(entry.stats.clone())?;
+        Ok(Self {
+            id,
+            status: entry.status,
+            review: entry.review,
+            endpoint: entry.upstream_target.endpoint().to_string(),
+            username: entry.upstream_target.username().to_string(),
+            requested_hash_days: entry.bucket.as_ref().map(|bucket| bucket.target),
+            hashrate: stats.hashrate_1m(now),
+            delivered_hash_days: stats.delivered_work().to_hash_days(),
+            best_share: stats.best_share,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrderDetail {
+    pub id: u32,
+    pub status: OrderStatus,
+    pub review: Review,
+    pub upstream_target: UpstreamTarget,
+    pub requested_hash_days: Option<HashDays>,
+    pub hash_price: Option<HashPrice>,
+    pub payment_address: Option<Address<NetworkUnchecked>>,
+    pub payment_amount: Option<Amount>,
+    pub txids: Vec<Txid>,
+    pub created_at: u64,
+    pub created_at_height: Option<u32>,
+    pub upstream: MiningStats,
+    pub downstream: MiningStats,
+    pub sessions: Vec<SessionDetail>,
+}
+
+impl OrderDetail {
+    pub(crate) fn from_order(
+        order: &Order,
+        metatron: &Metatron,
+        now: Instant,
+        txids: Vec<Txid>,
+    ) -> Self {
+        let upstream_conn = order.upstream();
+        let bucket = order.bucket.as_ref();
+
+        let (sessions, downstream) = match &upstream_conn {
+            Some(upstream) => metatron.downstream_snapshot(upstream.id(), now),
+            None => (Vec::new(), Stats::new()),
+        };
+
+        Self {
+            id: order.id,
+            status: order.status(),
+            review: order.review(),
+            upstream_target: order.upstream_target.clone(),
+            requested_hash_days: bucket.map(|bucket| bucket.target),
+            hash_price: bucket
+                .map(|bucket| HashPrice::from_total(bucket.payment.amount, bucket.target)),
+            payment_address: bucket.map(|bucket| bucket.payment.address.as_unchecked().clone()),
+            payment_amount: bucket.map(|bucket| bucket.payment.amount),
+            txids,
+            created_at: epoch::instant_to_epoch_secs(order.created_at, now) as u64,
+            created_at_height: bucket.map(|bucket| bucket.payment.created_at_height),
+            upstream: MiningStats::from_stats(&order.stats(), now),
+            downstream: MiningStats::from_stats(&downstream, now),
+            sessions: sessions
+                .into_iter()
+                .map(|session| SessionDetail::from_session(session.as_ref(), now))
+                .collect(),
+        }
+    }
+
+    pub(crate) fn from_entry(id: u32, entry: &entry::OrderEntry, txids: Vec<Txid>) -> Result<Self> {
+        let now = Instant::now();
+        let bucket = entry.bucket.as_ref();
+        let stats = Stats::from_entry(entry.stats.clone())?;
+
+        Ok(Self {
+            id,
+            status: entry.status,
+            review: entry.review,
+            upstream_target: entry.upstream_target.clone(),
+            requested_hash_days: bucket.map(|bucket| bucket.target),
+            hash_price: bucket.map(|bucket| {
+                HashPrice::from_total(Amount::from_sat(bucket.amount_sat), bucket.target)
+            }),
+            payment_address: bucket.map(|bucket| bucket.address.clone()),
+            payment_amount: bucket.map(|bucket| Amount::from_sat(bucket.amount_sat)),
+            txids,
+            created_at: entry.created_at_secs as u64,
+            created_at_height: bucket.map(|bucket| bucket.created_at_height),
+            upstream: MiningStats::from_stats(&stats, now),
+            downstream: MiningStats::from_stats(&Stats::new(), now),
+            sessions: Vec::new(),
+        })
+    }
+}
+
 pub(crate) fn router(
     state: Arc<Router>,
     bitcoin_client: Arc<BitcoindClient>,

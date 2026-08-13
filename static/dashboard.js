@@ -506,6 +506,7 @@ const FORMATTERS = {
   sats_phd: price => price + ' sats/PHd',
   address: address => ({ text: truncateMiddle(address, 20, 8), full: address }),
   placement_total: p => p.intent + p.resumed + p.redirected + p.estimated + p.blind,
+  delivered_work: total => formatDifficulty(total.accepted_work + total.rejected_work),
   username: username => ({ text: truncateMiddle(username), full: username }),
   rejection_shares: side => ({
     text: rejectionPct(side.accepted_shares, side.rejected_shares),

@@ -3,6 +3,15 @@ use {
     crate::http_server::auth::{BearerAuth, NavbarAuth},
 };
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PoolStatus {
+    pub block_count: u64,
+    pub recent_blocks: Vec<BlockHash>,
+    pub uptime_secs: u64,
+    pub downstream: DownstreamStats,
+    pub git_commit: String,
+}
+
 pub(crate) fn router(
     metatron: Arc<Metatron>,
     bitcoin_client: Arc<BitcoindClient>,
@@ -32,6 +41,7 @@ async fn status(State(metatron): State<Arc<Metatron>>) -> Json<PoolStatus> {
         block_count: metatron.block_count() as u64,
         recent_blocks: metatron.recent_blocks(10),
         uptime_secs: metatron.uptime().as_secs(),
-        downstream: DownstreamStatus::from_metatron(&metatron, Instant::now()),
+        downstream: DownstreamStats::from_metatron(&metatron, Instant::now()),
+        git_commit: env!("GIT_COMMIT").into(),
     })
 }

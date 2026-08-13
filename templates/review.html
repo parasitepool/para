@@ -94,7 +94,7 @@ async function refresh(signal) {
   ]);
 
   renderOrders('flagged-body', flagged);
-  renderOrphanReceipts(statusData.orphan_receipts);
+  renderOrphanReceipts(statusData.wallet.orphan_receipts);
   renderOrders('cleared-body', cleared);
 }
 
