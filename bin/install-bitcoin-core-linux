@@ -2,17 +2,27 @@
 
 set -euxo pipefail
 
+# Pin by hash, updates should update both fields
 version=31.1
-if ! bitcoind --version | grep $version; then
+sha256=b80d9c3e04da78fb6f0569685673418cf686fadba9042d926d13fb87ff503f9e
+
+# bitcoin-node is the multiprocess daemon that serves the mining IPC socket
+if ! bitcoind --version | grep $version || [[ ! -x /usr/local/libexec/bitcoin-node ]]; then
+  tmp=$(mktemp -d)
+  trap 'rm -rf "$tmp"' EXIT
+
   wget \
-    -O bitcoin.tar.gz \
+    -O "$tmp/bitcoin.tar.gz" \
     https://bitcoincore.org/bin/bitcoin-core-$version/bitcoin-$version-x86_64-linux-gnu.tar.gz
-  
+
+  echo "$sha256  $tmp/bitcoin.tar.gz" | sha256sum --check --strict -
+
   tar \
-    -xzvf bitcoin.tar.gz \
-    -C /usr/local/bin \
-    --strip-components 2 \
-    bitcoin-$version/bin/{bitcoin-cli,bitcoind}
-  
-  bitcoind --version 
+    -xzvf "$tmp/bitcoin.tar.gz" \
+    -C /usr/local \
+    --strip-components 1 \
+    bitcoin-$version/bin/{bitcoin,bitcoin-cli,bitcoind} \
+    bitcoin-$version/libexec/bitcoin-node
+
+  bitcoind --version
 fi

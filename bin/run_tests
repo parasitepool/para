@@ -1,11 +1,38 @@
 #!/usr/bin/env bash
 
-set -euxo pipefail
+set -euo pipefail
+
+# ckpool/test holds two kinds of test. Upstream's are wired into automake and
+# need the src headers and libckpool.a, so they are built and run by "make
+# check". Ours are standalone single file programs compiled straight with gcc.
+# Tell them apart by whether they include any local header.
+failed=0
 
 for file in ./ckpool/test/*.c; do
+    if grep -q '#include "' "$file"; then
+        continue
+    fi
     base="${file%.c}"
     echo "Testing $file"
-    gcc "$file" -o "$base" && ./"$base"
-    [ $? -ne 0 ] && echo "ERROR: $file exited with code $?" || echo "OK"
+    if gcc -Wall -o "$base" "$file" && "$base"; then
+        echo "OK"
+    else
+        echo "ERROR: $file failed"
+        failed=1
+    fi
     rm -f "$base"
 done
+
+# Upstream's suite. Only run it if the tree has been configured, so that a
+# bare "just test" does not fail purely for lack of a build.
+if [ -f ./ckpool/Makefile ]; then
+    echo "Running ckpool make check"
+    if ! make -C ckpool check; then
+        echo "ERROR: ckpool make check failed"
+        failed=1
+    fi
+else
+    echo "ckpool not configured, skipping make check (run 'just build-ckpool' first)"
+fi
+
+exit "$failed"

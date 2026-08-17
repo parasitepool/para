@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2018,2023 Con Kolivas
+ * Copyright 2014-2018,2023,2026 Con Kolivas
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the Free
@@ -14,8 +14,9 @@
 
 #include <errno.h>
 #include <inttypes.h>
-#include <jansson.h>
 #include <netdb.h>
+#include <stdarg.h>
+#include "yyjson.h"
 #include <pthread.h>
 #include <signal.h>
 #include <stdbool.h>
@@ -81,6 +82,21 @@
 #define __maybe_unused __attribute__((unused))
 #define uninitialised_var(x) x = x
 
+/* Portable case fallthrough marker: C23 [[fallthrough]] where available,
+ * GCC/Clang attribute on older compilers, and a no-op on anything else. */
+#if defined(__has_c_attribute)
+#if __has_c_attribute(fallthrough)
+#define fallthrough [[fallthrough]]
+#endif
+#endif
+#ifndef fallthrough
+#if defined(__GNUC__) && __GNUC__ >= 7
+#define fallthrough __attribute__((fallthrough))
+#else
+#define fallthrough ((void)0)
+#endif
+#endif
+
 #ifndef MAX
 #define MAX(a, b)               \
     ({                          \
@@ -103,50 +119,63 @@ typedef unsigned char uchar;
 typedef struct timeval  tv_t;
 typedef struct timespec ts_t;
 
-static inline void swap_256(void* dest_p, const void* src_p) {
-    uint32_t*       dest = dest_p;
-    const uint32_t* src = src_p;
+/* memcpy-based so buffers need not be naturally aligned (SV2 frames, etc.) */
+static inline uint32_t read_u32(const void* p) {
+    uint32_t v;
 
-    dest[0] = src[7];
-    dest[1] = src[6];
-    dest[2] = src[5];
-    dest[3] = src[4];
-    dest[4] = src[3];
-    dest[5] = src[2];
-    dest[6] = src[1];
-    dest[7] = src[0];
+    memcpy(&v, p, sizeof(v));
+    return v;
+}
+
+static inline void write_u32(void* p, uint32_t v) {
+    memcpy(p, &v, sizeof(v));
+}
+
+static inline uint64_t read_u64(const void* p) {
+    uint64_t v;
+
+    memcpy(&v, p, sizeof(v));
+    return v;
+}
+
+static inline void write_u64(void* p, uint64_t v) {
+    memcpy(p, &v, sizeof(v));
+}
+
+static inline void swap_256(void* dest_p, const void* src_p) {
+    const uchar* src = src_p;
+    uchar*       dest = dest_p;
+    int          i;
+
+    for (i = 0; i < 8; i++)
+        write_u32(dest + i * 4, read_u32(src + (7 - i) * 4));
 }
 
 static inline void bswap_256(void* dest_p, const void* src_p) {
-    uint32_t*       dest = dest_p;
-    const uint32_t* src = src_p;
+    const uchar* src = src_p;
+    uchar*       dest = dest_p;
+    int          i;
 
-    dest[0] = bswap_32(src[7]);
-    dest[1] = bswap_32(src[6]);
-    dest[2] = bswap_32(src[5]);
-    dest[3] = bswap_32(src[4]);
-    dest[4] = bswap_32(src[3]);
-    dest[5] = bswap_32(src[2]);
-    dest[6] = bswap_32(src[1]);
-    dest[7] = bswap_32(src[0]);
+    for (i = 0; i < 8; i++)
+        write_u32(dest + i * 4, bswap_32(read_u32(src + (7 - i) * 4)));
 }
 
 static inline void flip_32(void* dest_p, const void* src_p) {
-    uint32_t*       dest = dest_p;
-    const uint32_t* src = src_p;
-    int             i;
+    const uchar* src = src_p;
+    uchar*       dest = dest_p;
+    int          i;
 
     for (i = 0; i < 8; i++)
-        dest[i] = bswap_32(src[i]);
+        write_u32(dest + i * 4, bswap_32(read_u32(src + i * 4)));
 }
 
 static inline void flip_80(void* dest_p, const void* src_p) {
-    uint32_t*       dest = dest_p;
-    const uint32_t* src = src_p;
-    int             i;
+    const uchar* src = src_p;
+    uchar*       dest = dest_p;
+    int          i;
 
     for (i = 0; i < 20; i++)
-        dest[i] = bswap_32(src[i]);
+        write_u32(dest + i * 4, bswap_32(read_u32(src + i * 4)));
 }
 
 #define cond_wait(_cond, _lock) _cond_wait(_cond, _lock, __FILE__, __func__, __LINE__)
@@ -178,6 +207,7 @@ static inline void flip_80(void* dest_p, const void* src_p) {
 
 #define ckalloc(len) _ckalloc(len, __FILE__, __func__, __LINE__)
 #define ckzalloc(len) _ckzalloc(len, __FILE__, __func__, __LINE__)
+#define ckrealloc(ptr, size) _ckrealloc(ptr, size, __FILE__, __func__, __LINE__);
 
 #define dealloc(ptr) \
     do {             \
@@ -199,6 +229,7 @@ static inline void flip_80(void* dest_p, const void* src_p) {
 
 void logmsg(int loglevel, const char* fmt, ...);
 
+/* Truncates messages greater than DEFLOGBUFSIZ */
 #define DEFLOGBUFSIZ 512
 
 #define LOGMSGSIZ(__siz, __lvl, __fmt, ...)        \
@@ -213,7 +244,7 @@ void logmsg(int loglevel, const char* fmt, ...);
             memcpy(tmp42, BUF + OFFSET, CPY);      \
             logmsg(__lvl, "%s", tmp42);            \
             OFFSET += CPY;                         \
-            LEN -= OFFSET;                         \
+            LEN -= CPY;                            \
         }                                          \
         free(BUF);                                 \
     } while (0)
@@ -240,14 +271,19 @@ void logmsg(int loglevel, const char* fmt, ...);
         exit(status);                                                            \
     } while (0)
 
-#define quit(status, fmt, ...)                   \
-    do {                                         \
-        if (fmt) {                               \
-            fprintf(stderr, fmt, ##__VA_ARGS__); \
-            fprintf(stderr, "\n");               \
-            fflush(stderr);                      \
-        }                                        \
-        exit(status);                            \
+/* Many configuration aborts pass status 0. Set this for a config test run so
+ * they exit non zero instead and the check can be used from a script. It is
+ * false everywhere else, leaving every existing exit status untouched. */
+extern bool quit_zero_is_failure;
+
+#define quit(status, fmt, ...)                                      \
+    do {                                                            \
+        if (fmt) {                                                  \
+            fprintf(stderr, fmt, ##__VA_ARGS__);                    \
+            fprintf(stderr, "\n");                                  \
+            fflush(stderr);                                         \
+        }                                                           \
+        exit((status) ? (status) : (quit_zero_is_failure ? 1 : 0)); \
     } while (0)
 
 #define PAGESIZE (4096)
@@ -284,7 +320,8 @@ enum share_err {
     SE_NTIME_INVALID,
     SE_DUPE,
     SE_HIGH_DIFF,
-    SE_INVALID_VERSION_MASK
+    SE_INVALID_VERSION_MASK,
+    SE_NO_WORKBASE
 };
 
 static const char __maybe_unused* share_errs[] = {
@@ -303,9 +340,43 @@ static const char __maybe_unused* share_errs[] = {
     "Ntime out of range",
     "Duplicate",
     "Above target",
-    "Invalid version mask"};
+    "Invalid version mask",
+    "No workbase"};
 
 #define SHARE_ERR(x) share_errs[((x) + 9)]
+
+/* Stratum V1 error codes for mining.submit responses.
+ * Origin: slush pool Stratum mining protocol specification
+ * (https://web.archive.org/web/20150307191254/http://mining.bitcoin.cz/stratum-mining)
+ *
+ *   20 - Other/Unknown
+ *   21 - Job not found (=stale)
+ *   22 - Duplicate share
+ *   23 - Low difficulty share
+ *   24 - Unauthorized worker
+ *   25 - Not subscribed
+ */
+static const int __maybe_unused share_err_codes[] = {
+    20,  // SE_INVALID_NONCE2       - Other/Unknown
+    24,  // SE_WORKER_MISMATCH      - Unauthorized worker
+    20,  // SE_NO_NONCE             - Other/Unknown
+    20,  // SE_NO_NTIME             - Other/Unknown
+    20,  // SE_NO_NONCE2            - Other/Unknown
+    20,  // SE_NO_JOBID             - Other/Unknown
+    20,  // SE_NO_USERNAME          - Other/Unknown
+    20,  // SE_INVALID_SIZE         - Other/Unknown
+    20,  // SE_NOT_ARRAY            - Other/Unknown
+    0,   // SE_NONE
+    21,  // SE_INVALID_JOBID        - Job not found
+    21,  // SE_STALE                - Job not found (stale)
+    20,  // SE_NTIME_INVALID        - Other/Unknown
+    22,  // SE_DUPE                 - Duplicate share
+    23,  // SE_HIGH_DIFF            - Low difficulty share
+    20,  // SE_INVALID_VERSION_MASK - Other/Unknown
+    20,  // SE_NO_WORKBASE          - Other/Unknown
+};
+
+#define SHARE_ERR_CODE(x) share_err_codes[((x) + 9)]
 
 typedef struct ckmutex mutex_t;
 
@@ -343,85 +414,67 @@ struct unixsock {
 
 typedef struct unixsock unixsock_t;
 
-void _json_check(json_t* val, json_error_t* err, const char* file, const char* func, const int line);
-#define json_check(VAL, ERR) _json_check(VAL, ERR, __FILE__, __func__, __LINE__)
+/* As the json_*cpy helpers above but for mutable yyjson objects, bounded to
+ * size bytes including the null terminator for copying into fixed sized
+ * buffers. */
+static inline void yyjson_mut_obj_strncpy(char* buf, yyjson_mut_val* val, const char* key, const size_t size) {
+    const char* str = yyjson_mut_get_str(yyjson_mut_obj_get(val, key)) ?: "";
 
-/* Check and pack json */
-#define JSON_CPACK(VAL, ...)                        \
-    do {                                            \
-        json_error_t ERR;                           \
-        VAL = json_pack_ex(&ERR, 0, ##__VA_ARGS__); \
-        json_check(VAL, &ERR);                      \
-    } while (0)
-
-/* No error checking with these, make sure we know they're valid already! */
-static inline void json_strcpy(char* buf, json_t* val, const char* key) {
-    strcpy(buf, json_string_value(json_object_get(val, key)) ?: "");
+    if (likely(size)) {
+        strncpy(buf, str, size - 1);
+        buf[size - 1] = '\0';
+    }
 }
 
-static inline void json_dblcpy(double* dbl, json_t* val, const char* key) {
-    *dbl = json_real_value(json_object_get(val, key));
+static inline void yyjson_mut_obj_dblcpy(double* dbl, yyjson_mut_val* val, const char* key) {
+    *dbl = yyjson_mut_get_num(yyjson_mut_obj_get(val, key));
 }
 
-static inline void json_uintcpy(uint32_t* u32, json_t* val, const char* key) {
-    *u32 = (uint32_t)json_integer_value(json_object_get(val, key));
+static inline void yyjson_mut_obj_uintcpy(uint32_t* u32, yyjson_mut_val* val, const char* key) {
+    *u32 = (uint32_t)yyjson_mut_get_uint(yyjson_mut_obj_get(val, key));
 }
 
-static inline void json_uint64cpy(uint64_t* u64, json_t* val, const char* key) {
-    *u64 = (uint64_t)json_integer_value(json_object_get(val, key));
+static inline void yyjson_mut_obj_uint64cpy(uint64_t* u64, yyjson_mut_val* val, const char* key) {
+    *u64 = yyjson_mut_get_uint(yyjson_mut_obj_get(val, key));
 }
 
-static inline void json_int64cpy(int64_t* i64, json_t* val, const char* key) {
-    *i64 = (int64_t)json_integer_value(json_object_get(val, key));
+static inline void yyjson_mut_obj_int64cpy(int64_t* i64, yyjson_mut_val* val, const char* key) {
+    *i64 = yyjson_mut_get_sint(yyjson_mut_obj_get(val, key));
 }
 
-static inline void json_intcpy(int* i, json_t* val, const char* key) {
-    *i = json_integer_value(json_object_get(val, key));
+static inline void yyjson_mut_obj_intcpy(int* i, yyjson_mut_val* val, const char* key) {
+    *i = yyjson_mut_get_sint(yyjson_mut_obj_get(val, key));
 }
 
-static inline void json_strdup(char** buf, json_t* val, const char* key) {
-    *buf = strdup(json_string_value(json_object_get(val, key)) ?: "");
+static inline void yyjson_mut_obj_strdup(char** buf, yyjson_mut_val* val, const char* key) {
+    *buf = strdup(yyjson_mut_get_str(yyjson_mut_obj_get(val, key)) ?: "");
 }
 
-/* Helpers for setting a field will check for valid entry and print an error
- * if it is unsuccessfully set. */
-static inline void
-_json_set_string(json_t* val, const char* key, const char* str, const char* file, const char* func, const int line) {
-    if (unlikely(json_object_set_new(val, key, json_string(str))))
-        LOGERR("Failed to set json string from %s %s:%d", file, func, line);
-}
-#define json_set_string(val, key, str) _json_set_string(val, key, str, __FILE__, __func__, __LINE__)
+/* As above but for immutable yyjson objects */
+static inline void yyjson_obj_strncpy(char* buf, yyjson_val* val, const char* key, const size_t size) {
+    const char* str = yyjson_get_str(yyjson_obj_get(val, key)) ?: "";
 
-/* Int is long long so will work for u32 and int64 */
-static inline void
-_json_set_int(json_t* val, const char* key, int64_t integer, const char* file, const char* func, const int line) {
-    if (unlikely(json_object_set_new_nocheck(val, key, json_integer(integer))))
-        LOGERR("Failed to set json int from %s %s:%d", file, func, line);
+    if (likely(size)) {
+        strncpy(buf, str, size - 1);
+        buf[size - 1] = '\0';
+    }
 }
-#define json_set_int(val, key, integer) _json_set_int(val, key, integer, __FILE__, __func__, __LINE__)
-#define json_set_uint32(val, key, u32) _json_set_int(val, key, u32, __FILE__, __func__, __LINE__)
-#define json_set_int64(val, key, i64) _json_set_int(val, key, i64, __FILE__, __func__, __LINE__)
 
-static inline void
-_json_set_double(json_t* val, const char* key, double real, const char* file, const char* func, const int line) {
-    if (unlikely(json_object_set_new_nocheck(val, key, json_real(real))))
-        LOGERR("Failed to set json double from %s %s:%d", file, func, line);
+static inline void yyjson_obj_dblcpy(double* dbl, yyjson_val* val, const char* key) {
+    *dbl = yyjson_get_num(yyjson_obj_get(val, key));
 }
-#define json_set_double(val, key, real) _json_set_double(val, key, real, __FILE__, __func__, __LINE__)
 
-static inline void
-_json_set_bool(json_t* val, const char* key, bool boolean, const char* file, const char* func, const int line) {
-    if (unlikely(json_object_set_new_nocheck(val, key, json_boolean(boolean))))
-        LOGERR("Failed to set json bool from %s %s:%d", file, func, line);
+static inline void yyjson_obj_int64cpy(int64_t* i64, yyjson_val* val, const char* key) {
+    *i64 = yyjson_get_sint(yyjson_obj_get(val, key));
 }
-#define json_set_bool(val, key, boolean) _json_set_bool(val, key, boolean, __FILE__, __func__, __LINE__)
 
-static inline void
-_json_set_object(json_t* val, const char* key, json_t* object, const char* file, const char* func, const int line) {
-    if (unlikely(json_object_set_new_nocheck(val, key, object)))
-        LOGERR("Failed to set json object from %s %s:%d", file, func, line);
+static inline void yyjson_obj_intcpy(int* i, yyjson_val* val, const char* key) {
+    *i = yyjson_get_sint(yyjson_obj_get(val, key));
 }
-#define json_set_object(val, key, object) _json_set_object(val, key, object, __FILE__, __func__, __LINE__)
+
+static inline void yyjson_obj_strdup(char** buf, yyjson_val* val, const char* key) {
+    *buf = strdup(yyjson_get_str(yyjson_obj_get(val, key)) ?: "");
+}
 
 void rename_proc(const char* name);
 void create_pthread(pthread_t* thread, void* (*start_routine)(void*), void* arg);
@@ -526,9 +579,13 @@ int _open_unix_server(const char* server_path, const char* file, const char* fun
 #define open_unix_server(server_path) _open_unix_server(server_path, __FILE__, __func__, __LINE__)
 int _open_unix_client(const char* server_path, const char* file, const char* func, const int line);
 #define open_unix_client(server_path) _open_unix_client(server_path, __FILE__, __func__, __LINE__)
-int   wait_close(int sockd, int timeout);
-int   wait_read_select(int sockd, float timeout);
-int   read_length(int sockd, void* buf, int len);
+int wait_close(int sockd, int timeout);
+int wait_read_select(int sockd, float timeout);
+int read_length(int sockd, void* buf, int len);
+/* Largest message accepted over the unix socket IPC. Control plane messages
+ * are tiny; a block submission carries the full block as hex and is the
+ * largest, at roughly 8MB for a full mainnet block, so leave ample headroom. */
+#define MAX_UNIX_MSGSIZE (64 * 1024 * 1024)
 char* _recv_unix_msg(int sockd, int timeout1, int timeout2, const char* file, const char* func, const int line);
 #define RECV_UNIX_TIMEOUT1 30
 #define RECV_UNIX_TIMEOUT2 5
@@ -549,18 +606,14 @@ bool _send_fd(int fd, int sockd, const char* file, const char* func, const int l
 int _get_fd(int sockd, const char* file, const char* func, const int line);
 #define get_fd(sockd) _get_fd(sockd, __FILE__, __func__, __LINE__)
 
-const char* __json_array_string(json_t* val, unsigned int entry);
-char*       json_array_string(json_t* val, unsigned int entry);
-json_t*     json_object_dup(json_t* val, const char* entry);
-
 char* rotating_filename(const char* path, time_t when);
 bool  rotating_log(const char* path, const char* msg);
 
 void   align_len(size_t* len);
 void   realloc_strcat(char** ptr, const char* s);
 void   trail_slash(char** buf);
+void*  _ckrealloc(void* ptr, size_t size, const char* file, const char* func, const int line);
 void*  _ckalloc(size_t len, const char* file, const char* func, const int line);
-void*  json_ckalloc(size_t size);
 void*  _ckzalloc(size_t len, const char* file, const char* func, const int line);
 size_t round_up_page(size_t len);
 
@@ -577,6 +630,16 @@ int   safecmp(const char* a, const char* b);
 bool  cmdmatch(const char* buf, const char* cmd);
 
 int  address_to_txn(char* p2h, const char* addr, const bool script, const bool segwit);
+bool txn_to_address(char* addr, const size_t alen, const uchar* script, const int slen, const char* ref);
+int  coinbase_payout_script(
+     uchar*       script,
+     int*         slen,
+     int64_t*     value,
+     const uchar* cb1,
+     const int    cb1len,
+     const int    holelen,
+     const uchar* cb2,
+     const int    cb2len);
 int  ser_number(uchar* s, int32_t val);
 int  get_sernumber(uchar* s);
 bool fulltest(const uchar* hash, const uchar* target);

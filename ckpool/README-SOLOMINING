@@ -2,42 +2,74 @@ Local solo mining.
 
 ---
 
-QUICK START INSTRUCTIONS (build instructions not included.)
+ALL-IN-ONE SOLO MINING QUICKSTART:
 
-Edit bitcoin.conf, enabling RPC (remote procedure calls) with a username and
-password. The following would allow ckpool to talk to a bitcoin daemon running
+wget https://api.bitbucket.org/2.0/repositories/ckolivas/ckpool/src/master/scripts/install-ckpool-solo.sh
+sudo scripts/install-ckpool-solo.sh
+
+This will download ckpool source code, v29.0 bitcoin daemon binary, check its
+validity, install the daemon, build ckpool, and install it, configured for
+solo mining. Follow the prompts or simply press enter for the default settings.
+
+Should work on any .deb or .rpm based linux distribution (ubuntu, debian,
+fedora, centos, rhel) to download required packages. Installs both as systemd
+services as the current user but can configure a new ckpool user for both. It
+will allow you to choose to run a pruned bitcoin blockchain to minimise hard
+drive storage, but it is recommended to use a full blockchain and have enough
+storage space to spare. The current blockchain is almost 700GB, so ideally you
+should at least have double this space on the drive. You will be given the
+option to use a checkpoint hash to speed up the initial blockchain download, or
+disable it for maximum paranoia. It will use any existing blockchain data in
+~/.bitcoin if it exists for the chosen user.
+
+Bitcoind will be preconfigured with suitable mining defaults, and ckpool will
+be configured to start in solo mining mode on port 3333 on the current machine.
+You will be unable to mine to it until the bitcoin daemon has synced up the
+full blockchain.
+
+You will be given the option to enable donation to the ckpool author, and a
+custom signature to be added to any solved blocks.
+
+---
+
+SELF INSTALL INSTRUCTIONS (build instructions not included.)
+
+Get a password from bitcoin core for the RPC (remote procedure calls) to allow
+the pool to talk to it. You will need bitcoin core source code.
+
+Within the bitcoin source code directory type the following command:
+share/rpcauth/rpcauth.py ckpool
+
+This will give you a message such as:
+
+String to be appended to bitcoin.conf:
+rpcauth=ckpool:c6f55b4a74b8fcbca4e8b2be22d7d53b$e2ca5e642d7ef4f43ab2524964dc6b3625ccfde09a97866c5b97c40622192149
+Your password:
+sI7jIjC61U9ZYTT29GnBpm0Rg1qQV9w_TXOfBF1vOM8
+
+
+Edit bitcoin.conf, enabling RPC (remote procedure calls) and add the rpcauth
+line above. The following would allow ckpool to talk to a bitcoin daemon running
 on the same hardware:
 
 server=1
-rpcuser=username
-rpcpassword=password
+rpcauth=ckpool:c6f55b4a74b8fcbca4e8b2be22d7d53b$e2ca5e642d7ef4f43ab2524964dc6b3625ccfde09a97866c5b97c40622192149
 rpcallowip=127.0.0.1
 rpcbind=127.0.0.1
+zmqpubhashblock=tcp://127.0.0.1:28332
 
-
-Restart the bitcoin daemon with zmq messaging enabled by adding the following
-to the startup command:
-
--zmqpubhashblock=tcp://127.0.0.1:28332
-
-
-If your bitcoin daemon was built without zmq support, you can use the ckpool
-notifier included by adding the following command
-
--blocknotify=$CKPOOLSOURCE/src/notifier
-
-(Replace $CKPOOLSOURCE with the path to where you have the ckpool source code)
+Make sure to use the rpcauth line you got when running the rpcauth command.
 
 
 Create or modify a ckpool configuration file (such as ckpool.conf), including
-the minimum necessary entries.
+the minimum necessary entries. Make sure to use the password you got in step 1.
 
 {
 "btcd" :  [
         {
         "url" : "127.0.0.1:8332",
-        "auth" : "username",
-        "pass" : "password",
+        "auth" : "ckpool",
+        "pass" : "sI7jIjC61U9ZYTT29GnBpm0Rg1qQV9w_TXOfBF1vOM8",
         "notify" : true
         }
 ]
@@ -116,6 +148,8 @@ follows:
 	"192.168.1.100:3334"
 ],
 
+In addition, if you specify a port above 4000, it will become a "high diff"
+port that sets the minimum difficulty to 1 million.
 
 You can specify a different configuration file as follows:
 

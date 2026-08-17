@@ -482,9 +482,22 @@ PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
   \$\$ LANGUAGE plpgsql;
   "
 
+# Drop cluster superuser now that every object above exists.
+# This must stay last
+sudo -u postgres psql -d ckpool -v ON_ERROR_STOP=1 -c "
+  ALTER ROLE satoshi WITH NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+  ALTER ROLE satoshi SET search_path = public;
+  "
+
+# Fail loudly rather than silently leaving a superuser in place.
+if [ "$(sudo -u postgres psql -tAc "SELECT rolsuper FROM pg_roles WHERE rolname='satoshi'")" != "f" ]; then
+  echo "ERROR: satoshi is still a superuser" >&2
+  exit 1
+fi
+
 echo "PostgreSQL is running"
 echo "Database: ckpool"
-echo "User: satoshi"
+echo "User: satoshi (NOSUPERUSER; owns the ckpool schema)"
 echo "Password: nakamoto"
 echo "Table: shares with columns (id, data, created_at)"
 echo "Connection string: dbname=ckpool user=satoshi password=nakamoto host=localhost"

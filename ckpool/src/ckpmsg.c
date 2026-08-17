@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2018,2023 Con Kolivas
+ * Copyright 2014-2018,2023,2026 Con Kolivas
  * Copyright 2014-2016 Andrew Smith
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -89,9 +89,17 @@ static void sighandler(const int sig) {
     }
 }
 
+static void redraw_line(char* buf, int pos) {
+    printf("\r\033[K");
+    if (buf && *buf)
+        printf("%s", buf);
+    printf("\r\033[%dC", pos);
+    fflush(stdout);
+}
+
 int get_line(char** buf) {
     struct input_log* entry = NULL;
-    int               c, len = 0, ctl1, ctl2;
+    int               c, len = 0, cursor = 0;
     struct termios    ctrl;
     *buf = NULL;
 
@@ -116,41 +124,135 @@ int get_line(char** buf) {
     ctrl.c_lflag &= ~(ICANON | ECHO);  // turn off canonical mode and echo
     tcsetattr(STDIN_FILENO, TCSANOW, &ctrl);
 
+    *buf = ckalloc(1);
+    (*buf)[0] = '\0';
+
     do {
         c = getchar();
-        if (c == EOF || c == '\n')
+        if (c == EOF || c == '\n' || c == '\r')
             break;
-        if (c == 27) {
-            ctl1 = getchar();
-            ctl2 = getchar();
+
+        if (c == 27) { /* ESC sequence */
+            int ctl1 = getchar();
+            if (ctl1 == EOF)
+                break;
             if (ctl1 != '[')
                 continue;
-            if (ctl2 < 'A' || ctl2 > 'B')
+
+            int ctl2 = getchar();
+            if (ctl2 == EOF)
+                break;
+
+            if (ctl2 == 'A' || ctl2 == 'B') { /* History: Up/Down */
+                if (!input_log)
+                    continue;
+                printf("\33[2K\r");
+                dealloc(*buf);
+                if (ctl2 == 'B')
+                    entry = entry ? entry->prev : input_log->prev;
+                else
+                    entry = entry ? entry->next : input_log;
+                if (entry && entry->buf) {
+                    *buf = strdup(entry->buf);
+                    len = strlen(*buf);
+                    cursor = len;
+                } else {
+                    *buf = ckalloc(1);
+                    (*buf)[0] = '\0';
+                    len = 0;
+                    cursor = 0;
+                }
+                printf("%s", *buf);
+                fflush(stdout);
                 continue;
-            if (!input_log)
-                continue;
-            printf("\33[2K\r");
-            free(*buf);
-            if (ctl2 == 'B')
-                entry = entry ? entry->prev : input_log->prev;
-            else
-                entry = entry ? entry->next : input_log;
-            *buf = strdup(entry->buf);
-            len = strlen(*buf);
-            printf("%s", *buf);
-        }
-        if (c == 127) {
-            if (!len)
-                continue;
-            printf("\b \b");
-            (*buf)[--len] = '\0';
+            }
+
+            /* Handle other escape sequences */
+            switch (ctl2) {
+                case 'C': /* Right arrow */
+                    if (cursor < len) {
+                        cursor++;
+                        printf("\033[C");
+                        fflush(stdout);
+                    }
+                    continue;
+                case 'D': /* Left arrow */
+                    if (cursor > 0) {
+                        cursor--;
+                        printf("\033[D");
+                        fflush(stdout);
+                    }
+                    continue;
+                case 'H': /* Home */
+                    cursor = 0;
+                    printf("\r");
+                    fflush(stdout);
+                    continue;
+                case 'F': /* End */
+                    cursor = len;
+                    printf("\r\033[%dC", len);
+                    fflush(stdout);
+                    continue;
+                case '3': /* Delete key: ESC[3~ */
+                {
+                    int ctl3 = getchar();
+                    if (ctl3 == '~' && cursor < len) {
+                        memmove(*buf + cursor, *buf + cursor + 1, len - cursor);
+                        len--;
+                        (*buf)[len] = '\0';
+                        redraw_line(*buf, cursor);
+                    }
+                }
+                    continue;
+                default:
+                    /* Handle [1~, [4~, [7~, [8~ etc. for Home/End/Delete on some terminals */
+                    if (isdigit(ctl2)) {
+                        int ctl3 = getchar();
+                        if (ctl3 == '~') {
+                            if (ctl2 == '1' || ctl2 == '7') { /* Home */
+                                cursor = 0;
+                                printf("\r");
+                                fflush(stdout);
+                            } else if (ctl2 == '4' || ctl2 == '8') { /* End */
+                                cursor = len;
+                                printf("\r\033[%dC", len);
+                                fflush(stdout);
+                            } else if (ctl2 == '3') { /* Delete */
+                                if (cursor < len) {
+                                    memmove(*buf + cursor, *buf + cursor + 1, len - cursor);
+                                    len--;
+                                    (*buf)[len] = '\0';
+                                    redraw_line(*buf, cursor);
+                                }
+                            }
+                        }
+                    }
+                    continue;
+            }
             continue;
         }
+
+        if (c == 127 || c == '\b') { /* Backspace */
+            if (cursor > 0) {
+                memmove(*buf + cursor - 1, *buf + cursor, len - cursor + 1);
+                len--;
+                cursor--;
+                redraw_line(*buf, cursor);
+            }
+            continue;
+        }
+
+        /* Normal printable ASCII character - insert at cursor */
         if (c < 32 || c > 126)
             continue;
+
+        *buf = realloc(*buf, len + 2);
+        memmove(*buf + cursor + 1, *buf + cursor, len - cursor + 1);
+        (*buf)[cursor] = c;
         len++;
-        realloc_strcat(buf, (char*)&c);
-        putchar(c);
+        cursor++;
+        redraw_line(*buf, cursor);
+
     } while (42);
 
     if (*buf)

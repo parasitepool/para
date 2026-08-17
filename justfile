@@ -252,8 +252,15 @@ ckpool:
     --signet \
     --log-txns
 
+build-ckpool-nodb: install
+  #!/usr/bin/env bash
+  cd ckpool
+  ./autogen.sh
+  ./configure --without-libpq
+  make
+
 lint:
-  find ./ckpool/src -type f \( -name "*.c" -o -name "*.h" \) -not -path "**/jansson-2.14/*" -exec clang-format -i {} \;
+  find ./ckpool/src -type f \( -name "*.c" -o -name "*.h" \) -not -name "sha2.c" -not -name "sha2.h" -not -name "uthash.h" -not -name "utlist.h" -not -name "yyjson.c" -not -name "yyjson.h" -exec clang-format -i {} \;
 
 test: lint
   ./bin/run_tests

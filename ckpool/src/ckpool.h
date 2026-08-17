@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2018,2023 Con Kolivas
+ * Copyright 2014-2018,2023,2025-2026 Con Kolivas
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the Free
@@ -18,11 +18,15 @@
 
 #include "libckpool.h"
 #include "uthash.h"
+#include "yyjson.h"
+#include "yyjson_util.h"
 
 #define RPC_TIMEOUT 60
 
 struct ckpool_instance;
 typedef struct ckpool_instance ckpool_t;
+
+extern ckpool_t ckpool;
 
 struct ckmsg {
     struct ckmsg* next;
@@ -41,24 +45,23 @@ struct unix_msg {
     char*       buf;
 };
 
+typedef struct ckmsgq ckmsgq_t;
+
 struct ckmsgq {
-    ckpool_t*       ckp;
     char            name[16];
     pthread_t       pth;
     mutex_t*        lock;
     pthread_cond_t* cond;
     ckmsg_t*        msgs;
-    void (*func)(ckpool_t*, void*);
-    int64_t messages;
-    bool    active;
+    void (*func)(void*);
+    int64_t   messages;
+    bool      active;
+    ckmsgq_t* primary;
 };
-
-typedef struct ckmsgq ckmsgq_t;
 
 typedef struct proc_instance proc_instance_t;
 
 struct proc_instance {
-    ckpool_t*  ckp;
     unixsock_t us;
     char*      processname;
     char*      sockname;
@@ -85,7 +88,6 @@ struct connsock {
     int   rcvbufsiz;
     int   sendbufsiz;
 
-    ckpool_t* ckp;
     /* Semaphore used to serialise request/responses */
     sem_t sem;
 
@@ -139,13 +141,13 @@ struct ckpool_instance {
     char* config;
     /* Kill old instance with same name */
     bool killold;
-    /* Should we log shares */
+    /* Whether to log shares at all; true if either sink below is set */
     bool logshares;
-    /* Whether to log shares to db */
+    /* Whether to log shares to the postgres database */
     bool logshares_db;
-    /* Whether to log shares to file */
+    /* Whether to log shares to per-workbase files */
     bool logshares_file;
-    /* Whether to log txns or not */
+    /* Whether to dump each workbase's txids to logdir/pool/pool.txns */
     bool logtxns;
     /* Logging level */
     int loglevel;
@@ -167,8 +169,21 @@ struct ckpool_instance {
     int* oldconnfd;
     /* Should we inherit a running instance's socket and shut it down */
     bool handover;
+
+    /* Parse and validate the configuration, report it, and exit */
+    bool testconfig;
     /* How many clients maximum to accept before rejecting further */
     int maxclients;
+    /* Drop clients that have been idle for this many seconds, 0 to disable */
+    int dropidle;
+    /* Maximum bytes queued but unsent to one client before dropping it, 0
+     * to use the per client derived default */
+    int64_t maxsendqueue;
+    /* Maximum distinct users to create from authorisations, 0 to disable */
+    int maxusers;
+    /* Honour client.reconnect requests from the upstream pool (proxy mode).
+     * Defaults to true; set false to refuse all upstream redirects. */
+    bool reconnect;
 
     /* API message queue */
     ckmsgq_t* ckpapi;
@@ -188,8 +203,17 @@ struct ckpool_instance {
     bool stratifier_ready;
     bool connector_ready;
 
+    /* Set true once a shutdown has been initiated so long-running threads
+     * (notably the mining IPC notifier) can stop and disconnect cleanly. */
+    bool shutdown;
+
     /* Name of protocol used for ZMQ block notifications */
     char* zmqblock;
+
+    /* Filesystem path to the bitcoind mining IPC unix socket. When set and
+     * present, block notifications and template generation are driven from
+     * the IPC interface in preference to ZMQ / getblocktemplate. */
+    char* ipcmining;
 
     /* Threads of main process */
     pthread_t pth_listener;
@@ -235,11 +259,11 @@ struct ckpool_instance {
     int    blockpoll;     // How frequently in ms to poll bitcoind for block updates
     int    nonce1length;  // Extranonce1 length
     int    nonce2length;  // Extranonce2 length
-    bool   signet;        // Signet
+    bool   signet;        // Request the signet rule in getblocktemplate
 
     /* Difficulty settings */
     int64_t mindiff;    // Default 1
-    int64_t startdiff;  // Default 42
+    int64_t startdiff;  // Default 10000
     int64_t highdiff;   // Default 1000000
     int64_t maxdiff;    // No default
 
@@ -250,7 +274,10 @@ struct ckpool_instance {
     char* btcsig;          // Optional signature to add to coinbase
     bool  coinbase_valid;  // Coinbase transaction confirmed valid
 
-    /* Database data */
+    bool regtest;
+
+    /* PostgreSQL logging. db_conn_str is NULL unless all four parts were
+     * configured; logshares_db is refused without it. */
     char* database_host;
     char* database_name;
     char* database_user;
@@ -285,6 +312,10 @@ struct ckpool_instance {
     char** proxyurl;
     char** proxyauth;
     char** proxypass;
+    /* Per-entry SV2 Job Declaration server URL, NULL when the entry does no
+     * job declaration. Presence enables the JD client for that upstream and
+     * requires an SV2 proxyurl plus a mining IPC socket. */
+    char** proxyjds;
 
     /* Passthrough redirect options */
     int    redirecturls;
@@ -295,6 +326,35 @@ struct ckpool_instance {
     void* gdata;
     void* sdata;
     void* cdata;
+
+    /* Opaque mining_ipc_ctx* for the bitcoind mining IPC connection, owned
+     * by the ipcnotify thread. NULL when IPC is unavailable or unused. */
+    void* btc_mining_ctx;
+
+    /* Opaque mining_ipc_service* for IPC block template generation. NULL
+     * when ipcmining is unset or the interface is unavailable. */
+    void* btc_template_svc;
+
+    /* Opaque mining_ipc_service* dedicated to Mining.checkBlock (SV2 JD
+     * Phase 2). Separate EzRpcClient/service thread from btc_template_svc
+     * so validation cannot HOL-block workgen/submit marshalling. */
+    void* btc_validation_svc;
+
+#ifdef HAVE_SV2
+    /* Stratum V2 mining listen URLs (like serverurl). sv2urls==0 = disabled. */
+    char** sv2url;
+    int    sv2urls;
+    /* Stratum V2 Job Declaration listen URLs. sv2jdurls==0 = off. */
+    char** sv2jdurl;
+    int    sv2jdurls;
+    /* Optional paths to Noise authority / server static key material. */
+    char* sv2_authority_key;
+    char* sv2_static_key;
+    /* Per-serverurl: true if this bind is SV2 (binary), not SV1 JSON. */
+    bool* server_sv2;
+    /* Per-serverurl: true if SV2 bind is Job Declaration (not Mining). */
+    bool* server_sv2_jd;
+#endif
 };
 
 enum stratum_msgtype {
@@ -333,17 +393,18 @@ static const char __maybe_unused* stratum_msgs[] = {
 
 void get_timestamp(char* stamp);
 
-ckmsgq_t* create_ckmsgq(ckpool_t* ckp, const char* name, const void* func);
-ckmsgq_t* create_ckmsgqs(ckpool_t* ckp, const char* name, const void* func, const int count);
-bool      _ckmsgq_add(ckmsgq_t* ckmsgq, void* data, const char* file, const char* func, const int line);
-#define ckmsgq_add(ckmsgq, data) _ckmsgq_add(ckmsgq, data, __FILE__, __func__, __LINE__)
+ckmsgq_t* create_ckmsgq(const char* name, const void* func);
+ckmsgq_t* create_ckmsgqs(const char* name, const void* func, const int count);
+bool      _ckmsgq_add(ckmsgq_t* ckmsgq, void* data, bool head, const char* file, const char* func, const int line);
+#define ckmsgq_add(ckmsgq, data) _ckmsgq_add(ckmsgq, data, false, __FILE__, __func__, __LINE__)
+#define ckmsgq_add_head(ckmsgq, data) _ckmsgq_add(ckmsgq, data, true, __FILE__, __func__, __LINE__)
 bool        ckmsgq_empty(ckmsgq_t* ckmsgq);
 unix_msg_t* get_unix_msg(proc_instance_t* pi);
 
-bool ping_main(ckpool_t* ckp);
+bool ping_main(void);
 void empty_buffer(connsock_t* cs);
-int  set_sendbufsize(ckpool_t* ckp, const int fd, const int len);
-int  set_recvbufsize(ckpool_t* ckp, const int fd, const int len);
+int  set_sendbufsize(const int fd, const int len);
+int  set_recvbufsize(const int fd, const int len);
 int  read_socket_line(connsock_t* cs, float* timeout);
 void _queue_proc(proc_instance_t* pi, const char* msg, const char* file, const char* func, const int line);
 #define send_proc(pi, msg) _queue_proc(&(pi), msg, __FILE__, __func__, __LINE__)
@@ -357,26 +418,29 @@ char* _send_recv_proc(
     const int              line);
 #define send_recv_proc(pi, msg) \
     _send_recv_proc(&(pi), msg, UNIX_WRITE_TIMEOUT, UNIX_READ_TIMEOUT, __FILE__, __func__, __LINE__)
-char* _send_recv_ckdb(const ckpool_t* ckp, const char* msg, const char* file, const char* func, const int line);
-#define send_recv_ckdb(ckp, msg) _send_recv_ckdb(ckp, msg, __FILE__, __func__, __LINE__)
-char* _ckdb_msg_call(const ckpool_t* ckp, const char* msg, const char* file, const char* func, const int line);
-#define ckdb_msg_call(ckp, msg) _ckdb_msg_call(ckp, msg, __FILE__, __func__, __LINE__)
 
-json_t* json_rpc_call(connsock_t* cs, const char* rpc_req);
-json_t* json_rpc_response(connsock_t* cs, const char* rpc_req);
-void    json_rpc_msg(connsock_t* cs, const char* rpc_req);
-bool    _send_json_msg(connsock_t* cs, const json_t* json_msg, const char* file, const char* func, const int line);
-#define send_json_msg(CS, JSON_MSG) _send_json_msg(CS, JSON_MSG, __FILE__, __func__, __LINE__)
-json_t* json_msg_result(const char* msg, json_t** res_val, json_t** err_val);
+yyjson_doc* yyjson_rpc_call(connsock_t* cs, const char* rpc_req);
+yyjson_doc* yyjson_rpc_response(connsock_t* cs, const char* rpc_req);
+void        yyjson_rpc_msg(connsock_t* cs, const char* rpc_req);
 
-bool json_get_string(char** store, const json_t* val, const char* res);
-bool json_get_int64(int64_t* store, const json_t* val, const char* res);
-bool json_get_int(int* store, const json_t* val, const char* res);
-bool json_get_double(double* store, const json_t* val, const char* res);
-bool json_get_uint32(uint32_t* store, const json_t* val, const char* res);
-bool json_get_bool(bool* store, const json_t* val, const char* res);
-bool json_getdel_int(int* store, json_t* val, const char* res);
-bool json_getdel_int64(int64_t* store, json_t* val, const char* res);
+bool _send_yyjson_msg(connsock_t* cs, yyjson_mut_doc* doc, const char* file, const char* func, const int line);
+#define send_yyjson_msg(CS, DOC) _send_yyjson_msg(CS, DOC, __FILE__, __func__, __LINE__)
+yyjson_doc* yyjson_msg_result(const char* msg, yyjson_val** res_val, yyjson_val** err_val);
+
+bool yyjson_obj_get_string(char** store, yyjson_val* val, const char* res);
+bool yyjson_obj_get_int64(int64_t* store, yyjson_val* val, const char* res);
+bool yyjson_obj_get_int(int* store, yyjson_val* val, const char* res);
+bool yyjson_obj_get_double(double* store, yyjson_val* val, const char* res);
+bool yyjson_obj_get_uint32(uint32_t* store, yyjson_val* val, const char* res);
+bool yyjson_obj_get_bool(bool* store, yyjson_val* val, const char* res);
+bool yyjson_mut_obj_get_string(char** store, yyjson_mut_val* val, const char* res);
+bool yyjson_mut_obj_get_int64(int64_t* store, yyjson_mut_val* val, const char* res);
+bool yyjson_mut_obj_get_int(int* store, yyjson_mut_val* val, const char* res);
+bool yyjson_mut_obj_get_double(double* store, yyjson_mut_val* val, const char* res);
+bool yyjson_mut_obj_get_uint32(uint32_t* store, yyjson_mut_val* val, const char* res);
+bool yyjson_mut_obj_get_bool(bool* store, yyjson_mut_val* val, const char* res);
+bool yyjson_mut_obj_getdel_int(int* store, yyjson_mut_val* val, const char* res);
+bool yyjson_mut_obj_getdel_int64(int64_t* store, yyjson_mut_val* val, const char* res);
 
 /* API Placeholders for future API implementation */
 typedef struct apimsg apimsg_t;
@@ -386,14 +450,17 @@ struct apimsg {
     int   sockd;
 };
 
-static inline void    ckpool_api(ckpool_t __maybe_unused* ckp, apimsg_t __maybe_unused* apimsg) {}
-static inline json_t* json_encode_errormsg(json_error_t __maybe_unused* err_val) {
+// static inline void ckpool_api(apimsg_t __maybe_unused *apimsg) {};
+static inline yyjson_mut_doc* yyjson_encode_errormsg(yyjson_read_err __maybe_unused* err_val) {
     return NULL;
-}
-static inline json_t* json_errormsg(const char __maybe_unused* fmt, ...) {
+};
+static inline yyjson_mut_doc* yyjson_errormsg(const char __maybe_unused* fmt, ...) {
     return NULL;
-}
-static inline void send_api_response(json_t __maybe_unused* val, const int __maybe_unused sockd) {}
+};
+static inline void send_api_yyresponse(yyjson_mut_doc* doc, const int __maybe_unused sockd) {
+    if (doc)
+        yyjson_mut_doc_free(doc);
+};
 
 /* Subclients have client_ids in the high bits. Returns the value of the parent
  * client if one exists. */
