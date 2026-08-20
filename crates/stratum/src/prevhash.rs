@@ -14,7 +14,7 @@ impl FromStr for PrevHash {
         let bytes = <[u8; 32]>::from_hex(s).context(error::HexParseSnafu)?;
 
         let mut reordered = [0u8; 32];
-        for (src, dst) in bytes.chunks_exact(4).zip(reordered.chunks_mut(4)) {
+        for (src, dst) in bytes.as_chunks::<4>().0.iter().zip(reordered.chunks_mut(4)) {
             let word = BigEndian::read_u32(src);
             LittleEndian::write_u32(dst, word);
         }
@@ -30,7 +30,9 @@ impl fmt::Display for PrevHash {
         for (src, dst) in self
             .0
             .as_byte_array()
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .zip(swapped.chunks_mut(4))
         {
             let word = LittleEndian::read_u32(src);
