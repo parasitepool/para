@@ -9,17 +9,9 @@ use {
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct PlacementCounts {
-    pub intent: usize,
-    pub resumed: usize,
-    pub redirected: usize,
+    pub targeted: usize,
     pub estimated: usize,
     pub blind: usize,
-}
-
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub struct IntentClaimCounts {
-    pub enonce1: usize,
-    pub ip: usize,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -35,7 +27,7 @@ pub struct RoutingInfo {
     pub sessions_trimmed_1h: usize,
     pub intents_created_1h: usize,
     pub intents_expired_1h: usize,
-    pub intent_claims_1h: IntentClaimCounts,
+    pub intent_claimed_1h: usize,
     pub placements_1h: PlacementCounts,
     pub deficit_hashrate: HashRate,
     pub bucket_order_count: usize,

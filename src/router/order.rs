@@ -95,7 +95,6 @@ impl AddAssign for Trim {
 pub(crate) struct SessionDetail {
     pub(crate) id: SessionId,
     pub(crate) enonce1: Extranonce,
-    pub(crate) ip: IpAddr,
     pub(crate) hashrate: HashRate,
 }
 
@@ -520,10 +519,9 @@ impl Order {
         self.sessions
             .lock()
             .values()
-            .map(|(session, _, addr)| SessionDetail {
+            .map(|(session, _, _)| SessionDetail {
                 id: session.id(),
                 enonce1: session.enonce1().clone(),
-                ip: addr.ip(),
                 hashrate: session.hashrate_1m(now),
             })
             .collect()

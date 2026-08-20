@@ -183,15 +183,10 @@ impl Metatron {
             .is_some()
     }
 
-    pub(crate) fn disconnected_info(
-        &self,
-        enonce1: &Extranonce,
-        now: Instant,
-    ) -> Option<(u32, HashRate)> {
-        self.disconnected.get(enonce1).map(|entry| {
-            let (session, _, _) = entry.value();
-            (session.id().order_id(), session.hashrate_1m(now))
-        })
+    pub(crate) fn disconnected_info(&self, enonce1: &Extranonce, now: Instant) -> Option<HashRate> {
+        self.disconnected
+            .get(enonce1)
+            .map(|entry| entry.value().0.hashrate_1m(now))
     }
 
     pub(crate) fn evict_oldest_disconnected(&self, order_id: u32) -> bool {
@@ -266,13 +261,6 @@ impl Metatron {
             if workers.len() > live_workers {
                 addresses.insert(user.address.clone());
             }
-        }
-
-        for entry in self.disconnected.iter() {
-            let session = &entry.value().0;
-            traffic.absorb(session.snapshot(), now);
-            addresses.insert(session.address().clone());
-            workers.insert((session.address().clone(), session.workername().to_string()));
         }
 
         DownstreamSnapshot {
@@ -715,13 +703,30 @@ mod tests {
         metatron.retire_session(s1, test_allocator());
         metatron.retire_session(s2, test_allocator());
 
-        assert_eq!(metatron.downstream(now).traffic.accepted_shares, 2);
+        assert_eq!(metatron.downstream(now).traffic.accepted_shares, 0);
         assert_eq!(metatron.downstream(now).total.accepted_shares, 2);
 
         metatron.cleanup_expired(Instant::now() + SESSION_TTL + Duration::from_secs(1));
 
         assert_eq!(metatron.downstream(now).traffic.accepted_shares, 0);
         assert_eq!(metatron.downstream(now).total.accepted_shares, 2);
+    }
+
+    #[test]
+    fn downstream_traffic_excludes_disconnected_sessions() {
+        let (metatron, _dir) = Metatron::test();
+        let now = Instant::now();
+
+        let session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+        session.record_accepted(Difficulty::from(100.0), Difficulty::from(200.0));
+
+        metatron.retire_session(session, test_allocator());
+
+        let downstream = metatron.downstream(now);
+        assert_eq!(downstream.traffic.accepted_shares, 0);
+        assert_eq!(downstream.users, 0);
+        assert_eq!(downstream.workers, 0);
+        assert_eq!(downstream.total.accepted_shares, 1);
     }
 
     #[test]
@@ -740,8 +745,8 @@ mod tests {
         metatron.retire_session(s2, test_allocator());
 
         let downstream = metatron.downstream(now);
-        assert_eq!(downstream.users, 2);
-        assert_eq!(downstream.workers, 2);
+        assert_eq!(downstream.users, 1);
+        assert_eq!(downstream.workers, 1);
 
         metatron.cleanup_expired(Instant::now() + SESSION_TTL + Duration::from_secs(1));
 

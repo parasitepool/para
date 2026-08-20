@@ -2,8 +2,8 @@ use {
     super::*,
     crate::{
         api::{
-            DownstreamStats, IntentClaimCounts, OrphanReceipt, PlacementCounts, RouterStatus,
-            RoutingInfo, UpstreamStats, UpstreamTotals, WalletInfo,
+            DownstreamStats, OrphanReceipt, PlacementCounts, RouterStatus, RoutingInfo,
+            UpstreamStats, UpstreamTotals, WalletInfo,
         },
         event_sink::Event,
         generator::get_block_template,
@@ -997,7 +997,7 @@ impl Router {
                 sessions_trimmed_1h: control_metrics.sessions_trimmed_1h,
                 intents_created_1h: control_metrics.intents_created_1h,
                 intents_expired_1h: control_metrics.intents_expired_1h,
-                intent_claims_1h: control_metrics.intent_claims_1h,
+                intent_claimed_1h: control_metrics.intent_claimed_1h,
                 placements_1h: control_metrics.placements_1h,
                 deficit_hashrate,
                 bucket_order_count,

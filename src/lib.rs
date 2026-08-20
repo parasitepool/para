@@ -88,7 +88,7 @@ use {
         fs,
         io::{self, Write},
         iter::Sum,
-        net::{IpAddr, SocketAddr, ToSocketAddrs},
+        net::{SocketAddr, ToSocketAddrs},
         ops::{Add, AddAssign, Div, Mul, Sub, SubAssign},
         path::{Path, PathBuf},
         process,
