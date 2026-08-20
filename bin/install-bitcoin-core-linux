@@ -7,7 +7,7 @@ version=31.1
 sha256=b80d9c3e04da78fb6f0569685673418cf686fadba9042d926d13fb87ff503f9e
 
 # bitcoin-node is the multiprocess daemon that serves the mining IPC socket
-if ! bitcoind --version | grep $version || [[ ! -x /usr/local/libexec/bitcoin-node ]]; then
+if ! bitcoind --version | grep -qF "v$version" || ! bitcoin-node --version | grep -qF "v$version"; then
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
 
@@ -19,10 +19,21 @@ if ! bitcoind --version | grep $version || [[ ! -x /usr/local/libexec/bitcoin-no
 
   tar \
     -xzvf "$tmp/bitcoin.tar.gz" \
-    -C /usr/local \
-    --strip-components 1 \
+    -C "$tmp" \
     bitcoin-$version/bin/{bitcoin,bitcoin-cli,bitcoind} \
     bitcoin-$version/libexec/bitcoin-node
 
+  # /usr/local/libexec is root-owned on GitHub Actions runners, so expose
+  # bitcoin-node on PATH like bitcoind instead of installing into libexec.
+  # Remove any stale copy from both locations: the node prioritizes libexec,
+  # which would leave an outdated binary on future version bumps.
+  rm -f /usr/local/bin/bitcoin-node /usr/local/libexec/bitcoin-node
+
+  cp \
+    "$tmp"/bitcoin-$version/bin/{bitcoin,bitcoin-cli,bitcoind} \
+    "$tmp"/bitcoin-$version/libexec/bitcoin-node \
+    /usr/local/bin
+
   bitcoind --version
+  bitcoin-node --version
 fi

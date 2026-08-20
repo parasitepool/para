@@ -20,7 +20,7 @@ use {
     std::{
         fs,
         net::TcpListener,
-        path::PathBuf,
+        path::{Path, PathBuf},
         process::{self, Child, Command, Stdio},
         sync::{
             Arc,

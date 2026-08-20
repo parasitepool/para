@@ -221,7 +221,11 @@ public:
 			auto req = mining_.waitTipChangedRequest();
 			fill_context(req.initContext());
 			req.setCurrentTip(kj::arrayPtr(reinterpret_cast<const capnp::byte *>(tip), 32));
-			req.setTimeout(timeout_seconds > 0 ? timeout_seconds : 1e9);
+			/* The interface takes MillisecondsDouble, which libmultiprocess
+			 * encodes on the wire as a raw count, so the caller's seconds
+			 * must be converted: sending 5.0 unconverted would have the
+			 * node time out after 5 milliseconds and spin the caller. */
+			req.setTimeout(timeout_seconds > 0 ? timeout_seconds * 1000 : 1e9);
 
 			auto resp = req.send().wait(ws);
 			return fill_tip(resp.getResult(), out);
@@ -378,7 +382,20 @@ public:
 		return true;
 	}
 
-	bool ready() const { return have_mining_.load(); }
+	/* Offer template generation only when it yields usable work. During
+	 * IBD (and the header catch-up that also counts as IBD) the node would
+	 * return a template on a stale tip — serving it wastes miner hash — so
+	 * report not ready: block_update falls back to getblocktemplate, which
+	 * errors during IBD and the pool serves nothing, its long-standing
+	 * behaviour for a syncing node. Test chains are exempt: a regtest or
+	 * single miner signet can sit in IBD forever by design and producing
+	 * templates there is the whole point. Mirrors the getblocktemplate
+	 * RPC, which rejects in IBD only when !isTestChain. */
+	bool ready() const { return have_mining_.load() && (!ibd_.load() || is_test_chain_); }
+
+	/* Like ready() but without the IBD gate: enough for checkBlock, whose
+	 * validity does not depend on chain sync. */
+	bool connected() const { return have_mining_.load(); }
 
 	/* Marshal a promise-returning functor onto the service thread and block
 	 * for its result. Must only be called once started_ is set. */
@@ -477,10 +494,9 @@ private:
 					}
 					/* A live round-trip: returns on success (even during
 					 * IBD), throws if the connection has dropped, which
-					 * unwinds to the reconnect path below. */
-					auto probe = mining_.isInitialBlockDownloadRequest();
-					fill_context(probe.initContext());
-					probe.send().wait(ws);
+					 * unwinds to the reconnect path below. The result is
+					 * the IBD state ready() gates on. */
+					refresh_ibd(ws);
 				}
 			} catch (...) {
 				connected_.store(false);
@@ -539,9 +555,16 @@ private:
 			fill_context(req.initContext());
 			mining_ = req.send().wait(ws).getResult();
 
-			auto probe = mining_.isInitialBlockDownloadRequest();
-			fill_context(probe.initContext());
-			probe.send().wait(ws);
+			/* The probe doubles as state tracking: IBD is what ready()
+			 * gates template generation on, so keep the result rather than
+			 * discarding it. The keepalive loop refreshes it. */
+			refresh_ibd(ws);
+
+			{
+				auto tc = mining_.isTestChainRequest();
+				fill_context(tc.initContext());
+				is_test_chain_.store(tc.send().wait(ws).getResult());
+			}
 
 			have_mining_.store(true);
 		} catch (const kj::Exception &e) {
@@ -553,6 +576,15 @@ private:
 			if (e.getType() == kj::Exception::Type::DISCONNECTED)
 				throw;
 		}
+	}
+
+	/* Probe isInitialBlockDownload and record the result. Runs on the service
+	 * thread; throws on transport failure. */
+	void refresh_ibd(kj::WaitScope &ws)
+	{
+		auto probe = mining_.isInitialBlockDownloadRequest();
+		fill_context(probe.initContext());
+		ibd_.store(probe.send().wait(ws).getResult());
 	}
 
 	/* Drop every capnp cap derived from the current client. Must run on the
@@ -595,6 +627,11 @@ private:
 	std::atomic<bool> stop_{false};
 	std::atomic<bool> connected_{false};
 	std::atomic<bool> have_mining_{false};
+	std::atomic<bool> ibd_{false};
+	/* Rewritten by every obtain_mining() on reconnect, not only at initial
+	 * publication, while ready() reads it cross-thread, so atomic like the
+	 * flags above. */
+	std::atomic<bool> is_test_chain_{false};
 
 	bool started_ = false;
 	std::mutex mutex_;
@@ -620,6 +657,13 @@ int MiningService::create_new_block(BlockTemplateHolder **out)
 	auto *holder = run([this]() -> kj::Promise<BlockTemplateHolder *> {
 		auto req = mining_.createNewBlockRequest();
 		fill_context(req.initContext());
+		/* cooldown defaults to true on the wire, which makes the node wait
+		 * out IBD and header catch-up before returning a template, and
+		 * doubles as a reorg protection worth keeping on mainnet. On regtest
+		 * and single miner signets that wait never ends (upstream says as
+		 * much), and ckpool wants a template regardless, so opt out there
+		 * only. */
+		req.setCooldown(!is_test_chain_.load());
 		return req.send().then([this](auto resp) {
 			return new BlockTemplateHolder{ this, resp.getResult() };
 		});
@@ -713,6 +757,13 @@ int mining_ipc_service_ready(mining_ipc_service *svc)
 	if (!svc)
 		return 0;
 	return reinterpret_cast<MiningService *>(svc)->ready() ? 1 : 0;
+}
+
+int mining_ipc_service_connected(mining_ipc_service *svc)
+{
+	if (!svc)
+		return 0;
+	return reinterpret_cast<MiningService *>(svc)->connected() ? 1 : 0;
 }
 
 int mining_ipc_create_new_block(mining_ipc_service *svc, mining_block_template **out)
@@ -930,7 +981,7 @@ int mining_ipc_check_block(mining_ipc_service *svc,
 		return -1;
 
 	auto *service = reinterpret_cast<MiningService *>(svc);
-	if (!service->ready())
+	if (!service->connected())
 		return -1;
 
 	/* Snapshot options for the marshalled lambda (caller may free after return). */

@@ -55,7 +55,11 @@ jobs:
     - name: Install bitcoind
       run: |
         ./bin/install-bitcoin-core-linux
-    
+
+    - name: Install capnproto
+      run: |
+        ./bin/install-capnproto-linux
+
     - name: Test
       run: cargo test --all
 

@@ -113,9 +113,16 @@ mining_ipc_service *mining_ipc_service_connect(const char *socket_path);
 /* Tear down the service connection. Safe with NULL. */
 void mining_ipc_service_disconnect(mining_ipc_service *svc);
 
-/* Non-zero if the connection is up and a usable Mining capability is held
- * (i.e. mining_ipc_create_new_block() can be expected to work). */
+/* Non-zero if a usable Mining capability is held. Also reports not ready
+ * while the node is in initial block download on a non-test chain, so
+ * "ready" means mining_ipc_create_new_block() yields a template worth
+ * mining. */
 int mining_ipc_service_ready(mining_ipc_service *svc);
+
+/* Non-zero if a usable Mining capability is held, regardless of IBD state:
+ * enough for calls whose validity does not depend on chain sync (checkBlock),
+ * unlike mining_ipc_service_ready() which also gates templates on IBD. */
+int mining_ipc_service_connected(mining_ipc_service *svc);
 
 /* Create a fresh block template. On success returns 0 and stores a handle in
  * *out that must be released with mining_block_template_destroy(). */

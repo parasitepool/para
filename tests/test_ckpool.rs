@@ -39,7 +39,11 @@ impl TestCkpool {
         let ckpool_port = allocate_port();
         let zmq_port = bitcoind.zmq_port;
 
+        let logdir = tempdir.path().join("logs");
+
         let ckpool_conf = tempdir.path().join("ckpool.conf");
+
+        let ipc_socket = bitcoind.node_socket_path();
 
         fs::write(
             &ckpool_conf,
@@ -47,7 +51,7 @@ impl TestCkpool {
                 r#"{{
     "btcd" : [
         {{
-            "url" : "127.0.0.1:{}",
+            "url" : "127.0.0.1:{rpc_port}",
             "auth" : "satoshi",
             "pass" : "nakamoto",
             "notify" : true
@@ -68,9 +72,12 @@ impl TestCkpool {
     "startdiff" : 1,
     "maxdiff" : 0,
     "zmqblock" : "tcp://127.0.0.1:{zmq_port}",
-    "logdir" : "logs"
+    "ipcmining" : "{ipc_socket}",
+    "logdir" : "{logdir}"
 }}"#,
-                bitcoind.rpc_port,
+                rpc_port = bitcoind.rpc_port,
+                ipc_socket = ipc_socket.display(),
+                logdir = logdir.display(),
             ),
         )
         .unwrap();
@@ -102,6 +109,28 @@ impl TestCkpool {
                 ),
             }
         }
+
+        let log_path = logdir.join("ckpool.log");
+
+        let ipc_logged = (0..100).any(|_| {
+            let logged = fs::read_to_string(&log_path)
+                .map(|log| log.contains("Connected to bitcoind mining IPC"))
+                .unwrap_or(false);
+
+            if !logged {
+                thread::sleep(Duration::from_millis(50));
+            }
+
+            logged
+        });
+
+        let log = fs::read_to_string(&log_path).unwrap_or_else(|e| e.to_string());
+        let tail = log.get(log.len().saturating_sub(4000)..).unwrap_or(&log);
+
+        assert!(
+            ipc_logged,
+            "ckpool never logged the mining IPC path, fell back to getblocktemplate; log tail:\n{tail}"
+        );
 
         Self {
             ckpool_handle,

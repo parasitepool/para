@@ -2052,8 +2052,14 @@ static void block_update(int* prio) {
 
 #ifdef HAVE_CAPNP
     /* Prefer the mining IPC interface for block templates when enabled and
-     * ready, falling back to getblocktemplate below on any failure. */
-    if (ckpool.btc_template_svc && mining_ipc_service_ready(ckpool.btc_template_svc)) {
+     * ready, falling back to getblocktemplate below on any failure. Not
+     * ready means the node is syncing or still starting: getblocktemplate
+     * errors there too, so skip the update entirely — the pool serves
+     * nothing, its long-standing behaviour for a syncing node — rather
+     * than spin the priority retry loop below on a guaranteed-failing RPC. */
+    if (ckpool.btc_template_svc) {
+        if (!mining_ipc_service_ready(ckpool.btc_template_svc))
+            goto out;
         wb = build_ipc_workbase();
         if (unlikely(!wb))
             LOGWARNING("IPC template generation failed, falling back to getblocktemplate");

@@ -1154,7 +1154,7 @@ static uint8_t* finalize_declare_check(struct sv2_jd_pending* pend, size_t* repl
             continue;
         enonce_used = enonce_try[ti];
 #ifdef HAVE_CAPNP
-        if (ckpool.btc_validation_svc && mining_ipc_service_ready(ckpool.btc_validation_svc)) {
+        if (ckpool.btc_validation_svc && mining_ipc_service_connected(ckpool.btc_validation_svc)) {
             mining_block_check_options opts = mining_check_opts_template();
 
             if (mining_ipc_check_block(

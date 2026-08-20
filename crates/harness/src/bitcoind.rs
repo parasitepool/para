@@ -2,6 +2,7 @@ use super::*;
 
 pub struct Bitcoind {
     pub datadir: Option<PathBuf>,
+    pub node_socket: Option<PathBuf>,
     pub handle: Option<Child>,
     pub network: Network,
     pub rpc_port: u16,
@@ -23,6 +24,7 @@ impl Bitcoind {
     ) -> Result<Self> {
         let bitcoind = Self {
             datadir: None,
+            node_socket: None,
             handle: None,
             network,
             rpc_port,
@@ -60,11 +62,13 @@ impl Bitcoind {
         let rpc_password = "nakamoto".to_string();
         let rpcauth = Self::generate_rpcauth(rpc_user.as_str(), rpc_password.as_str(), None);
 
-        let (network_flag, section, extra) = match network {
-            Network::Signet => ("signet=1", "[signet]", "signetchallenge=51\n\n"),
-            Network::Regtest => ("regtest=1", "[regtest]", ""),
+        let (network_flag, section, extra, subdir) = match network {
+            Network::Signet => ("signet=1", "[signet]", "signetchallenge=51\n\n", "signet"),
+            Network::Regtest => ("regtest=1", "[regtest]", "", "regtest"),
             _ => bail!("unsupported network: {network}"),
         };
+
+        let node_socket_path = bitcoind_data_dir.join(subdir).join("node.sock");
 
         fs::write(
             &bitcoind_conf,
@@ -78,6 +82,7 @@ datadir={}
 server=1
 txindex=1
 zmqpubhashblock=tcp://127.0.0.1:{zmq_port}
+ipcbind=unix:{node_socket}
 
 port={bitcoind_port}
 
@@ -92,13 +97,14 @@ maxmempool=2048
 minrelaytxfee=0.00001
 ",
                 bitcoind_data_dir.display(),
+                node_socket = node_socket_path.display(),
             ),
         )?;
 
         let compiled_bitcoind = format!("{}/bitcoin/build/bin", workspace_root());
         let expanded_path = format!("{compiled_bitcoind}:{}", std::env::var("PATH")?);
 
-        let mut handle = Command::new("bitcoind")
+        let mut handle = Command::new("bitcoin-node")
             .env("PATH", &expanded_path)
             .arg(format!("-conf={}", bitcoind_conf.display()))
             .stdout(if with_output {
@@ -147,6 +153,7 @@ minrelaytxfee=0.00001
 
         Ok(Self {
             datadir: Some(bitcoind_data_dir),
+            node_socket: Some(node_socket_path),
             handle: Some(handle),
             network,
             rpc_port,
@@ -174,11 +181,13 @@ minrelaytxfee=0.00001
         let rpc_password = "nakamoto".to_string();
         let rpcauth = Self::generate_rpcauth(rpc_user.as_str(), rpc_password.as_str(), None);
 
-        let (network_flag, section, extra) = match network {
-            Network::Signet => ("signet=1", "[signet]", "signetchallenge=51\n\n"),
-            Network::Regtest => ("regtest=1", "[regtest]", ""),
+        let (network_flag, section, extra, subdir) = match network {
+            Network::Signet => ("signet=1", "[signet]", "signetchallenge=51\n\n", "signet"),
+            Network::Regtest => ("regtest=1", "[regtest]", "", "regtest"),
             _ => bail!("unsupported network: {network}"),
         };
+
+        let node_socket_path = bitcoind_data_dir.join(subdir).join("node.sock");
 
         fs::write(
             &bitcoind_conf,
@@ -192,6 +201,7 @@ datadir={}
 server=1
 txindex=1
 zmqpubhashblock=tcp://127.0.0.1:{zmq_port}
+ipcbind=unix:{node_socket}
 
 listen=0
 
@@ -206,13 +216,14 @@ maxmempool=2048
 minrelaytxfee=0.00001
 ",
                 bitcoind_data_dir.display(),
+                node_socket = node_socket_path.display(),
             ),
         )?;
 
         let compiled_bitcoind = format!("{}/bitcoin/build/bin", workspace_root());
         let expanded_path = format!("{compiled_bitcoind}:{}", std::env::var("PATH")?);
 
-        let mut handle = Command::new("bitcoind")
+        let mut handle = Command::new("bitcoin-node")
             .env("PATH", &expanded_path)
             .arg(format!("-conf={}", bitcoind_conf.display()))
             .stdout(if with_output {
@@ -261,6 +272,7 @@ minrelaytxfee=0.00001
 
         Ok(Self {
             datadir: Some(bitcoind_data_dir),
+            node_socket: Some(node_socket_path),
             handle: Some(handle),
             network,
             rpc_port,
@@ -299,6 +311,15 @@ minrelaytxfee=0.00001
             None,
             None,
         )?)
+    }
+
+    /* The absolute socket path the spawned node was configured with via
+     * ipcbind, stored at spawn time. Panics for connect()-ed (external)
+     * nodes, which have no socket of ours. */
+    pub fn node_socket_path(&self) -> &Path {
+        self.node_socket
+            .as_deref()
+            .expect("bitcoind connected without a spawned datadir")
     }
 
     pub async fn create_or_load_wallet(&self) -> Result {

@@ -61,7 +61,7 @@ test-without-ckpool:
 
 bitcoind:
   #!/usr/bin/env bash
-  ./bitcoin/build/bin/bitcoind \
+  ./bitcoin/build/bin/bitcoin-node \
     -datadir=copr \
     -signet
 
@@ -208,11 +208,9 @@ install:
     autoconf \
     automake \
     build-essential \
-    capnproto \
     clang-format \
     cmake \
     libboost-dev \
-    libcapnp-dev \
     libevent-dev \
     libpq-dev \
     libsqlite3-dev \
@@ -220,7 +218,9 @@ install:
     libzmq3-dev \
     pkgconf \
     python3 \
-    yasm \
+    wget \
+    yasm
+  sudo ./bin/install-capnproto-linux
 
 build-bitcoind: install
   #!/usr/bin/env bash
