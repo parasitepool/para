@@ -1,5 +1,7 @@
 use super::*;
 
+const MAX_WORKERNAME_LENGTH: usize = 127;
+
 /// Worker identity with Bitcoin address parsing
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
@@ -75,6 +77,18 @@ impl FromStr for Username {
         if workername.is_empty() {
             return Err(InternalError::Parse {
                 message: "username must include workername".into(),
+            });
+        }
+
+        if workername.chars().count() > MAX_WORKERNAME_LENGTH {
+            return Err(InternalError::Parse {
+                message: "workername too long".into(),
+            });
+        }
+
+        if workername.chars().any(char::is_control) {
+            return Err(InternalError::Parse {
+                message: "workername contains invalid characters".into(),
             });
         }
 
@@ -244,6 +258,40 @@ mod tests {
                 .parse::<Username>()
                 .is_err()
         );
+    }
+
+    #[test]
+    fn workername_length_limit() {
+        let workername = "a".repeat(MAX_WORKERNAME_LENGTH);
+        format!("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.{workername}")
+            .parse::<Username>()
+            .unwrap();
+
+        let workername = "a".repeat(MAX_WORKERNAME_LENGTH + 1);
+        assert!(
+            format!("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.{workername}")
+                .parse::<Username>()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn workername_rejects_control_characters() {
+        #[track_caller]
+        fn case(workername: &str) {
+            assert!(
+                format!("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.{workername}")
+                    .parse::<Username>()
+                    .is_err(),
+                "workername {workername:?} must be rejected"
+            );
+        }
+
+        case("foo\x1b[2J");
+        case("foo\nbar");
+        case("foo\rbar");
+        case("foo\0bar");
+        case("foo\x7fbar");
     }
 
     #[test]
