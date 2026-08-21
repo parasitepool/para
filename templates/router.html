@@ -277,6 +277,8 @@
           <tr><td>Available</td><td id=available_work></td></tr>
           <tr><td>Used</td><td data-value=used_capacity_hash_days data-format=hash_days></td></tr>
           <tr><td>Hash Price</td><td data-value=hash_price data-format=sats_phd></td></tr>
+          <tr><td>Hash Value</td><td data-value=hash_value data-format=sats_phd></td></tr>
+          <tr><td>Difficulty Multiplier</td><td data-value=difficulty_multiplier data-format=multiplier></td></tr>
         </tbody>
       </table>
     </div>
@@ -622,7 +624,13 @@ async function refresh(signal) {
   if (capacityBtn) {
     capacityBtn.textContent = 'Capacity: ' + currentCapacity;
   }
-  currentPremium = routerData.premium_percent;
+  const hashValue = Number(routerData.hash_value);
+  const difficultyMultiplier = Number(routerData.difficulty_multiplier);
+  currentPremium =
+    Number.isFinite(hashValue) && hashValue > 0 &&
+    Number.isFinite(difficultyMultiplier) && difficultyMultiplier > 0
+      ? (routerData.hash_price / hashValue / difficultyMultiplier - 1) * 100
+      : null;
 
   const premiumBtn = document.getElementById('premium-btn');
   if (premiumBtn && currentPremium != null) {

@@ -152,6 +152,10 @@ impl Router {
             .store(multiplier.to_bits(), Ordering::Relaxed);
     }
 
+    pub(crate) fn difficulty_multiplier(&self) -> f64 {
+        f64::from_bits(self.difficulty_multiplier.load(Ordering::Relaxed))
+    }
+
     pub(crate) fn set_hash_value(&self, hash_value: HashValue) {
         self.hash_value
             .store(hash_value.to_sats(), Ordering::Relaxed);
@@ -362,9 +366,9 @@ impl Router {
             return Err(RouterError::InvalidHashdays);
         }
 
-        let minimum = self.hash_value();
+        let minimum = self.hash_price().tolerance();
 
-        if price.to_sats() < minimum.to_sats() {
+        if price < minimum {
             return Err(RouterError::HashPriceBelowMinimum {
                 bid: price,
                 minimum,
@@ -981,7 +985,8 @@ impl Router {
             block_count: metatron.block_count() as u64,
             recent_blocks: metatron.recent_blocks(10),
             hash_price: self.hash_price(),
-            premium_percent: self.premium_percent(),
+            hash_value: self.hash_value(),
+            difficulty_multiplier: self.difficulty_multiplier(),
             total_capacity_hash_days,
             used_capacity_hash_days,
             halt: self.halt(),
@@ -1462,11 +1467,7 @@ mod tests {
         wallet.mark_synced();
 
         router
-            .add_bucket_order(
-                test_upstream_target(),
-                hash_days(1e18),
-                HashPrice::from_sats(router.hash_value().to_sats()),
-            )
+            .add_bucket_order(test_upstream_target(), hash_days(1e18), router.hash_price())
             .unwrap()
     }
 
@@ -3288,7 +3289,7 @@ mod tests {
         let target: UpstreamTarget = "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.foo@bar:3333"
             .parse()
             .unwrap();
-        let price = HashPrice::from_sats(router.hash_value().to_sats());
+        let price = router.hash_price();
 
         let wallet = router.wallet.as_ref().unwrap();
         assert!(!wallet.is_synced());
@@ -3306,7 +3307,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn add_order_rejects_price_below_hash_value() {
+    async fn add_order_rejects_price_below_minimum() {
         let router = test_router();
         router.set_hash_value(HashValue::from_sats(100));
         router.wallet.as_ref().unwrap().mark_synced();
@@ -3316,13 +3317,52 @@ mod tests {
             .unwrap();
 
         assert!(matches!(
-            router.add_bucket_order(target.clone(), hash_days(1e18), HashPrice::from_sats(99)),
+            router.add_bucket_order(target.clone(), hash_days(1e18), HashPrice::from_sats(102)),
             Err(RouterError::HashPriceBelowMinimum { .. }),
         ));
 
-        router
-            .add_bucket_order(target, hash_days(1e18), HashPrice::from_sats(100))
+        let order = router
+            .add_bucket_order(target.clone(), hash_days(1e18), HashPrice::from_sats(103))
             .unwrap();
+
+        assert_eq!(
+            order.bucket.as_ref().unwrap().payment.amount,
+            HashPrice::from_sats(103).total(hash_days(1e18)).unwrap(),
+        );
+
+        router
+            .add_bucket_order(target, hash_days(1e18), HashPrice::from_sats(105))
+            .unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn add_bucket_order_charges_bid_price() {
+        let router = test_router();
+        router.set_hash_value(HashValue::from_sats(100));
+        router.set_difficulty_multiplier(2.0);
+        router.wallet.as_ref().unwrap().mark_synced();
+
+        assert!(matches!(
+            router.add_bucket_order(
+                test_upstream_target(),
+                hash_days(1e18),
+                HashPrice::from_sats(206),
+            ),
+            Err(RouterError::HashPriceBelowMinimum { .. }),
+        ));
+
+        let order = router
+            .add_bucket_order(
+                test_upstream_target(),
+                hash_days(1e18),
+                HashPrice::from_sats(250),
+            )
+            .unwrap();
+
+        assert_eq!(
+            order.bucket.as_ref().unwrap().payment.amount,
+            HashPrice::from_sats(250).total(hash_days(1e18)).unwrap(),
+        );
     }
 
     #[test]
@@ -3331,6 +3371,8 @@ mod tests {
         router.set_hash_value(HashValue::from_sats(100));
 
         assert_eq!(router.status().hash_price, HashPrice::from_sats(105));
+        assert_eq!(router.status().hash_value, HashValue::from_sats(100));
+        assert_eq!(router.status().difficulty_multiplier, 1.0);
     }
 
     #[test]
@@ -3477,11 +3519,7 @@ mod tests {
             .unwrap();
 
         assert!(matches!(
-            router.add_bucket_order(
-                target,
-                hash_days(1.0),
-                HashPrice::from_sats(router.hash_value().to_sats()),
-            ),
+            router.add_bucket_order(target, hash_days(1.0), router.hash_price(),),
             Err(RouterError::WalletRequired),
         ));
     }
@@ -3498,7 +3536,7 @@ mod tests {
         assert!(router.status().halt);
 
         let target = test_upstream_target();
-        let price = HashPrice::from_sats(router.hash_value().to_sats());
+        let price = router.hash_price();
 
         assert!(matches!(
             router.add_bucket_order(target.clone(), hash_days(1e18), price),
@@ -3600,7 +3638,7 @@ mod tests {
         let router = test_router();
         let wallet = router.wallet.as_ref().unwrap();
         wallet.mark_synced();
-        let price = HashPrice::from_sats(router.hash_value().to_sats());
+        let price = router.hash_price();
         router.set_capacity_work(hash_days(1e18));
 
         let order = router
@@ -3619,7 +3657,7 @@ mod tests {
         let router = test_router();
         let wallet = router.wallet.as_ref().unwrap();
         wallet.mark_synced();
-        let price = HashPrice::from_sats(router.hash_value().to_sats());
+        let price = router.hash_price();
         router.set_capacity_work(hash_days(1e18));
 
         let order = router
@@ -3637,7 +3675,7 @@ mod tests {
         let router = test_router();
         let wallet = router.wallet.as_ref().unwrap();
         wallet.mark_synced();
-        let price = HashPrice::from_sats(router.hash_value().to_sats());
+        let price = router.hash_price();
         router.set_capacity_work(hash_days(1e18));
 
         router
@@ -3654,7 +3692,7 @@ mod tests {
         let router = test_router();
         let wallet = router.wallet.as_ref().unwrap();
         wallet.mark_synced();
-        let price = HashPrice::from_sats(router.hash_value().to_sats());
+        let price = router.hash_price();
         router.set_capacity_work(hash_days(1e18));
 
         let order = router

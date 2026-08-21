@@ -24,6 +24,13 @@ impl HashPrice {
         Self(Amount::from_sat(sats))
     }
 
+    pub fn tolerance(self) -> Self {
+        const TOLERANCE_PERCENT: u64 = 1;
+        Self::from_sats(
+            (self.to_sats() as f64 * (100.0 - TOLERANCE_PERCENT as f64) / 100.0).floor() as u64,
+        )
+    }
+
     pub fn to_sats(self) -> u64 {
         self.0.to_sat()
     }
@@ -157,6 +164,21 @@ mod tests {
         case(100, 0.0, 1.0, 100);
         case(100, 10.0, 1.0, 110);
         case(100, 5.0, 2.0, 210);
+    }
+
+    #[test]
+    fn tolerance() {
+        #[track_caller]
+        fn case(price: u64, expected: u64) {
+            assert_eq!(
+                HashPrice::from_sats(price).tolerance(),
+                HashPrice::from_sats(expected),
+            );
+        }
+
+        case(105, 103);
+        case(100, 99);
+        case(0, 0);
     }
 
     #[test]

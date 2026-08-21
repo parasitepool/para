@@ -11,8 +11,8 @@ pub(crate) enum RouterError {
     InvalidHashdays,
     #[snafu(display("price calculation overflow"))]
     HashPriceOverflow,
-    #[snafu(display("bid price {bid} is below minimum hash value {minimum}"))]
-    HashPriceBelowMinimum { bid: HashPrice, minimum: HashValue },
+    #[snafu(display("hash price bid {bid} is below minimum {minimum}"))]
+    HashPriceBelowMinimum { bid: HashPrice, minimum: HashPrice },
     #[snafu(display("order total {amount} is below dust limit {dust_limit}"))]
     BelowDustLimit { amount: Amount, dust_limit: Amount },
     #[snafu(display("wallet is still syncing, try again shortly"))]
