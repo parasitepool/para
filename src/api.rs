@@ -151,6 +151,8 @@ pub struct DownstreamStats {
     pub rejected_shares: u64,
     pub accepted_work: HashWork,
     pub rejected_work: HashWork,
+    pub best_share: Option<Difficulty>,
+    pub last_share: Option<u64>,
     pub totals: DownstreamTotals,
 }
 
@@ -180,6 +182,8 @@ impl DownstreamStats {
             rejected_shares: traffic.rejected_shares,
             accepted_work: traffic.accepted_work,
             rejected_work: traffic.rejected_work,
+            best_share: traffic.best_share,
+            last_share: traffic.last_share_epoch_secs(now),
             totals: DownstreamTotals::from_stats(
                 metatron.total_users(),
                 downstream.total_workers,
@@ -212,6 +216,8 @@ pub struct UpstreamStats {
     pub rejected_shares: u64,
     pub accepted_work: HashWork,
     pub rejected_work: HashWork,
+    pub best_share: Option<Difficulty>,
+    pub last_share: Option<u64>,
     pub totals: UpstreamTotals,
 }
 

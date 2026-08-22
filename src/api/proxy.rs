@@ -85,6 +85,8 @@ async fn status(State(router): State<Arc<Router>>) -> ServerResult<Response> {
             rejected_shares: stats.rejected_shares,
             accepted_work: stats.accepted_work,
             rejected_work: stats.rejected_work,
+            best_share: stats.best_share,
+            last_share: stats.last_share_epoch_secs(now),
             totals: UpstreamTotals {
                 users: 1,
                 orders: 1,

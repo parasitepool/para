@@ -1030,6 +1030,8 @@ impl Router {
                 rejected_shares: active.rejected_shares,
                 accepted_work: active.accepted_work,
                 rejected_work: active.rejected_work,
+                best_share: active.best_share,
+                last_share: active.last_share_epoch_secs(now),
                 totals,
             },
             downstream: DownstreamStats::from_metatron(metatron, now),
@@ -1657,6 +1659,43 @@ mod tests {
         assert_eq!(status.upstream.totals.accepted_shares, 1);
         assert_eq!(status.upstream.totals.orders, 1);
         assert_eq!(status.upstream.totals.users, 1);
+    }
+
+    #[test]
+    fn status_traffic_best_share_excludes_inactive_orders() {
+        let router = test_router();
+        let inactive = test_order(
+            0,
+            Some(hash_days(100.0)),
+            OrderStatus::Fulfilled,
+            &router.metatron,
+        );
+        let active = test_order(
+            1,
+            Some(hash_days(100.0)),
+            OrderStatus::Active,
+            &router.metatron,
+        );
+        add_orders(router.as_ref(), [inactive.clone(), active.clone()]);
+
+        router.metatron.record_order_accepted(
+            inactive.id,
+            Difficulty::from(1.0),
+            Difficulty::from(400.97e12),
+        );
+        router.metatron.record_order_accepted(
+            active.id,
+            Difficulty::from(1.0),
+            Difficulty::from(100.0e12),
+        );
+
+        let status = router.status();
+
+        assert_eq!(status.upstream.best_share, Some(Difficulty::from(100.0e12)));
+        assert_eq!(
+            status.upstream.totals.best_share,
+            Some(Difficulty::from(400.97e12)),
+        );
     }
 
     #[test]
