@@ -3,6 +3,8 @@ use {
     stratum::client::{Client, ClientError, Event},
 };
 
+pub(crate) const NOTIFY_TIMEOUT: Duration = Duration::from_secs(600);
+
 pub(crate) struct UpstreamSubmit {
     pub(crate) job_id: JobId,
     pub(crate) enonce2: Extranonce,
@@ -46,6 +48,7 @@ impl Upstream {
         id: u32,
         target: &UpstreamTarget,
         timeout: Duration,
+        notify_timeout: Duration,
         cancel: CancellationToken,
         tasks: &TaskTracker,
         metatron: Arc<Metatron>,
@@ -115,36 +118,40 @@ impl Upstream {
             client.username()
         );
 
-        let mut initial_difficulty: Option<Difficulty> = None;
-        let mut first_notify: Option<Notify> = None;
+        let (initial_difficulty, first_notify) = tokio::time::timeout(timeout, async {
+            let mut initial_difficulty: Option<Difficulty> = None;
+            let mut first_notify: Option<Notify> = None;
 
-        let (initial_difficulty, first_notify) = loop {
-            match events.recv().await {
-                Ok(Event::SetDifficulty(diff)) => {
-                    info!("Received initial difficulty: {}", diff);
-                    initial_difficulty = Some(diff);
+            Ok(loop {
+                match events.recv().await {
+                    Ok(Event::SetDifficulty(diff)) => {
+                        info!("Received initial difficulty: {}", diff);
+                        initial_difficulty = Some(diff);
+                    }
+                    Ok(Event::Notify(notify)) => {
+                        info!(
+                            "Received job: job_id={}, clean_jobs={}",
+                            notify.job_id, notify.clean_jobs
+                        );
+                        first_notify = Some(notify);
+                    }
+                    Ok(Event::Reconnect(_)) | Ok(Event::Disconnected) => {
+                        bail!("Disconnected from upstream before initialization complete");
+                    }
+                    Err(e) => {
+                        bail!("Upstream error during initialization: {e}");
+                    }
                 }
-                Ok(Event::Notify(notify)) => {
-                    info!(
-                        "Received job: job_id={}, clean_jobs={}",
-                        notify.job_id, notify.clean_jobs
-                    );
-                    first_notify = Some(notify);
-                }
-                Ok(Event::Reconnect(_)) | Ok(Event::Disconnected) => {
-                    bail!("Disconnected from upstream before initialization complete");
-                }
-                Err(e) => {
-                    bail!("Upstream error during initialization: {e}");
-                }
-            }
 
-            if let Some(diff) = initial_difficulty
-                && let Some(notify) = first_notify.take()
-            {
-                break (diff, notify);
-            }
-        };
+                if let Some(diff) = initial_difficulty
+                    && let Some(notify) = first_notify.take()
+                {
+                    break (diff, notify);
+                }
+            })
+        })
+        .await
+        .context("timed out waiting for initial difficulty and job from upstream")??;
 
         let difficulty = Arc::new(RwLock::new(initial_difficulty));
         let (connected, _) = watch::channel(true);
@@ -152,6 +159,7 @@ impl Upstream {
 
         let difficulty_clone = difficulty.clone();
         let disconnect = Disconnect(connected.clone());
+        let mut notify_deadline = tokio::time::Instant::now() + notify_timeout;
 
         tasks.spawn(async move {
             let _disconnect = disconnect;
@@ -164,6 +172,14 @@ impl Upstream {
                         break;
                     }
 
+                    _ = tokio::time::sleep_until(notify_deadline) => {
+                        warn!(
+                            "No work received from upstream for {}s, disconnecting",
+                            notify_timeout.as_secs()
+                        );
+                        break;
+                    }
+
                     event = events.recv() => {
                         match event {
                             Ok(Event::Notify(notify)) => {
@@ -171,6 +187,7 @@ impl Upstream {
                                     "Received notify: job_id={}, clean_jobs={}",
                                     notify.job_id, notify.clean_jobs
                                 );
+                                notify_deadline = tokio::time::Instant::now() + notify_timeout;
                                 workbase_tx.send_replace(Arc::new(notify));
                             }
                             Ok(Event::SetDifficulty(diff)) => {
@@ -365,7 +382,139 @@ impl Upstream {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use {
+        super::*,
+        std::net::SocketAddr,
+        tokio::{
+            io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+            net::TcpListener,
+        },
+    };
+
+    async fn mock_upstream(with_work: bool) -> SocketAddr {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let (read_half, mut write_half) = socket.into_split();
+            let mut reader = BufReader::new(read_half);
+            let mut line = String::new();
+
+            loop {
+                line.clear();
+                if reader.read_line(&mut line).await.unwrap_or(0) == 0 {
+                    break;
+                }
+
+                let Ok(request) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
+                    continue;
+                };
+                let id = request["id"].clone();
+
+                let response = match request["method"].as_str() {
+                    Some("mining.configure") => {
+                        serde_json::json!({"id": id, "result": {}, "error": null})
+                    }
+                    Some("mining.subscribe") => serde_json::json!({
+                        "id": id,
+                        "result": [[["mining.notify", "ae6812eb4cd7735a302a8a9dd95cf71f"]], "08000002", 4],
+                        "error": null,
+                    }),
+                    Some("mining.authorize") => {
+                        write_half
+                            .write_all(
+                                format!(
+                                    "{}\n",
+                                    serde_json::json!({"id": id, "result": true, "error": null})
+                                )
+                                .as_bytes(),
+                            )
+                            .await
+                            .unwrap();
+
+                        if with_work {
+                            write_half
+                                .write_all(b"{\"id\":null,\"method\":\"mining.set_difficulty\",\"params\":[2]}\n")
+                                .await
+                                .unwrap();
+                            write_half
+                                .write_all(
+                                    b"{\"id\":null,\"method\":\"mining.notify\",\"params\":[\"bf\",\"4d16b6f85af6e2198f44ae2a6de67f78487ae5611b77c6c0440b921e00000000\",\"01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff20020862062f503253482f04b8864e5008\",\"072f736c7573682f000000000100f2052a010000001976a914d23fcdf86f7e756a64a7a9688ef9903327048ed988ac00000000\",[],\"00000002\",\"1c2ac4af\",\"504e86b9\",false]}\n",
+                                )
+                                .await
+                                .unwrap();
+                        }
+
+                        break;
+                    }
+                    _ => continue,
+                };
+
+                write_half
+                    .write_all(format!("{response}\n").as_bytes())
+                    .await
+                    .unwrap();
+            }
+
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        });
+
+        addr
+    }
+
+    fn test_target(addr: SocketAddr) -> UpstreamTarget {
+        format!("tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@{addr}")
+            .parse()
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn connect_times_out_without_initial_job() {
+        let (metatron, _dir) = Metatron::test();
+        let addr = mock_upstream(false).await;
+        let tasks = TaskTracker::new();
+
+        let err = match Upstream::connect(
+            0,
+            &test_target(addr),
+            Duration::from_millis(300),
+            Duration::from_millis(300),
+            CancellationToken::new(),
+            &tasks,
+            Arc::new(metatron),
+        )
+        .await
+        {
+            Ok(_) => panic!("connect must time out without an initial job"),
+            Err(err) => err,
+        };
+
+        assert!(err.to_string().contains("timed out"), "{err:#}");
+    }
+
+    #[tokio::test]
+    async fn upstream_disconnects_when_notifies_stall() {
+        let (metatron, _dir) = Metatron::test();
+        let addr = mock_upstream(true).await;
+        let tasks = TaskTracker::new();
+
+        let upstream = Upstream::connect(
+            0,
+            &test_target(addr),
+            Duration::from_secs(5),
+            Duration::from_millis(200),
+            CancellationToken::new(),
+            &tasks,
+            Arc::new(metatron),
+        )
+        .await
+        .unwrap();
+
+        timeout(Duration::from_secs(2), upstream.disconnected())
+            .await
+            .expect("upstream must disconnect when notifies stall");
+    }
 
     #[tokio::test]
     async fn disconnected_returns_immediately_when_already_disconnected() {

@@ -129,7 +129,7 @@ use {
     tracing::{Subscriber, debug, error, info, warn},
     tracing_appender::non_blocking,
     tracing_subscriber::{EnvFilter, Layer, layer::SubscriberExt, util::SubscriberInitExt},
-    upstream::Upstream,
+    upstream::{NOTIFY_TIMEOUT, Upstream},
     upstream_target::UpstreamTarget,
     utoipa::{OpenApi, ToSchema},
     vardiff::Vardiff,
