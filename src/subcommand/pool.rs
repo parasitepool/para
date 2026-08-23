@@ -156,7 +156,7 @@ impl Pool {
 
                 let (read_half, write_half) = stream.into_split();
 
-                let mut stratifier: Stratifier<BlockTemplate> = Stratifier::new(
+                let stratifier: Stratifier<BlockTemplate> = Stratifier::new(
                     addr,
                     settings.clone(),
                     allocator,

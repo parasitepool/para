@@ -9,6 +9,9 @@ use {
 mod bouncer;
 pub(crate) mod state;
 
+const WRITER_QUEUE_CAPACITY: usize = 64;
+const WRITE_STALL_TIMEOUT: Duration = Duration::from_secs(60);
+
 enum Acquisition {
     Acquired(Extranonce),
     Reroute,
@@ -23,7 +26,8 @@ pub(crate) struct Stratifier<W: Workbase> {
     metatron: Arc<Metatron>,
     upstream: Option<Arc<Upstream>>,
     reader: FramedRead<OwnedReadHalf, LinesCodec>,
-    writer: FramedWrite<OwnedWriteHalf, LinesCodec>,
+    writer_tx: mpsc::Sender<String>,
+    writer_handle: Option<JoinHandle<()>>,
     inbox: VecDeque<Message>,
     workbase_rx: watch::Receiver<Arc<W>>,
     cancel: CancellationToken,
@@ -61,6 +65,10 @@ impl<W: Workbase> Stratifier<W> {
 
         let bouncer = Bouncer::new(settings.disable_bouncer());
 
+        let (writer_tx, writer_rx) = mpsc::channel(WRITER_QUEUE_CAPACITY);
+
+        let writer_handle = task::spawn(writer_task(writer, writer_rx));
+
         Self {
             state: State::new(),
             socket_addr,
@@ -69,7 +77,8 @@ impl<W: Workbase> Stratifier<W> {
             metatron,
             upstream,
             reader,
-            writer,
+            writer_tx,
+            writer_handle: Some(writer_handle),
             inbox,
             workbase_rx,
             cancel,
@@ -81,9 +90,29 @@ impl<W: Workbase> Stratifier<W> {
         }
     }
 
-    pub(crate) async fn serve(&mut self) -> Result {
+    pub(crate) async fn serve(mut self) -> Result {
+        let result = self.run().await;
+
+        let writer_handle = self.writer_handle.take();
+
+        drop(self);
+
+        if let Some(mut writer_handle) = writer_handle
+            && timeout(Duration::from_millis(500), &mut writer_handle)
+                .await
+                .is_err()
+        {
+            writer_handle.abort();
+            let _ = writer_handle.await;
+        }
+
+        result
+    }
+
+    async fn run(&mut self) -> Result {
         let mut workbase_rx = self.workbase_rx.clone();
         let cancel = self.cancel.clone();
+        let writer_tx = self.writer_tx.clone();
         let mut idle_check = ticker(self.bouncer.check_interval());
 
         loop {
@@ -91,10 +120,8 @@ impl<W: Workbase> Stratifier<W> {
                 _ = cancel.cancelled() => {
                     info!("Session cancelled, sending client.reconnect to {}", self.socket_addr);
 
-                    match timeout(Duration::from_millis(500), self.send_reconnect()).await {
-                        Ok(Ok(())) => {}
-                        Ok(Err(err)) => warn!("Failed to send client.reconnect to {}: {err}", self.socket_addr),
-                        Err(_) => warn!("Timed out sending client.reconnect to {}", self.socket_addr),
+                    if let Err(err) = self.send_reconnect() {
+                        warn!("Failed to send client.reconnect to {}: {err}", self.socket_addr);
                     }
 
                     break;
@@ -108,6 +135,10 @@ impl<W: Workbase> Stratifier<W> {
                         );
                         break
                     }
+                }
+                _ = writer_tx.closed() => {
+                    warn!("Writer task exited for {}, closing connection", self.socket_addr);
+                    break;
                 }
                 message = self.read_message() => {
                     let Some(message) = message? else {
@@ -138,7 +169,7 @@ impl<W: Workbase> Stratifier<W> {
                         Method::Subscribe(subscribe) => {
                             let consequence = self.subscribe(id, subscribe).await?;
 
-                            if self.handle_protocol_consequence(consequence).await {
+                            if self.handle_protocol_consequence(consequence) {
                                 break;
                             }
                         }
@@ -151,11 +182,10 @@ impl<W: Workbase> Stratifier<W> {
                                         "method": "mining.authorize",
                                         "current_state": self.state.to_string()
                                     })),
-                                )
-                                .await?;
+                                )?;
 
                                 let consequence = self.bouncer.reject();
-                                if self.handle_protocol_consequence(consequence).await {
+                                if self.handle_protocol_consequence(consequence) {
                                     break;
                                 }
 
@@ -164,7 +194,7 @@ impl<W: Workbase> Stratifier<W> {
 
                             let consequence = self.authorize(id, authorize, subscription).await?;
 
-                            if self.handle_protocol_consequence(consequence).await {
+                            if self.handle_protocol_consequence(consequence) {
                                 break;
                             }
                         }
@@ -190,15 +220,10 @@ impl<W: Workbase> Stratifier<W> {
                                 },
                                 State::Working(session) => session.clone(),
                                 _ => {
-                                    self.send_error(
-                                        id.clone(),
-                                        StratumError::Unauthorized,
-                                        None,
-                                    )
-                                    .await?;
+                                    self.send_error(id.clone(), StratumError::Unauthorized, None)?;
 
                                     let consequence = self.bouncer.reject();
-                                    if self.handle_protocol_consequence(consequence).await {
+                                    if self.handle_protocol_consequence(consequence) {
                                         break;
                                     }
 
@@ -210,7 +235,7 @@ impl<W: Workbase> Stratifier<W> {
                                 .submit(id, submit, session.clone())
                                 .await?;
 
-                            if self.handle_submit_consequence(consequence, session.address(), session.enonce1()).await {
+                            if self.handle_submit_consequence(consequence, session.address(), session.enonce1()) {
                                 break;
                             }
                         }
@@ -227,7 +252,7 @@ impl<W: Workbase> Stratifier<W> {
                     if changed.is_err() {
                         warn!("Upstream disconnected, sending client.reconnect to {}", self.socket_addr);
 
-                        if let Err(err) = self.send_reconnect().await {
+                        if let Err(err) = self.send_reconnect() {
                             warn!("Failed to send client.reconnect to {}: {err}", self.socket_addr);
                         }
 
@@ -241,15 +266,15 @@ impl<W: Workbase> Stratifier<W> {
                         let _ = workbase_rx.borrow_and_update();
                         continue;
                     };
-
                 }
+
             }
         }
 
         Ok(())
     }
 
-    async fn handle_submit_consequence(
+    fn handle_submit_consequence(
         &mut self,
         consequence: Consequence,
         address: &Address,
@@ -282,11 +307,9 @@ impl<W: Workbase> Stratifier<W> {
                         let clean_jobs = self.jobs.insert(new_job.clone());
 
                         if let Ok(notify) = new_job.notify(clean_jobs) {
-                            let _ = self
-                                .send(Message::Notification {
-                                    method: Method::Notify(notify),
-                                })
-                                .await;
+                            let _ = self.send(Message::Notification {
+                                method: Method::Notify(notify),
+                            });
                         }
                     }
                     Err(err) => {
@@ -307,12 +330,12 @@ impl<W: Workbase> Stratifier<W> {
                         .unwrap_or(0)
                 );
 
-                let _ = self.send_reconnect().await.inspect_err(|err| {
+                if let Err(err) = self.send_reconnect() {
                     warn!(
                         "Failed to send client.reconnect to {}: {err}",
                         self.socket_addr
                     );
-                });
+                }
 
                 false
             }
@@ -331,7 +354,7 @@ impl<W: Workbase> Stratifier<W> {
         }
     }
 
-    async fn handle_protocol_consequence(&mut self, consequence: Consequence) -> bool {
+    fn handle_protocol_consequence(&mut self, consequence: Consequence) -> bool {
         match consequence {
             Consequence::None => false,
             Consequence::Warn => {
@@ -356,12 +379,12 @@ impl<W: Workbase> Stratifier<W> {
                         .map(|d| d.as_secs())
                         .unwrap_or(0)
                 );
-                let _ = self.send_reconnect().await.inspect_err(|err| {
+                if let Err(err) = self.send_reconnect() {
                     warn!(
                         "Failed to send client.reconnect to {}: {err}",
                         self.socket_addr
                     );
-                });
+                }
                 false
             }
             Consequence::Drop => {
@@ -396,8 +419,7 @@ impl<W: Workbase> Stratifier<W> {
 
                 self.send(Message::Notification {
                     method: Method::SetDifficulty(SetDifficulty(new_diff)),
-                })
-                .await?;
+                })?;
             }
         }
 
@@ -422,8 +444,7 @@ impl<W: Workbase> Stratifier<W> {
 
         self.send(Message::Notification {
             method: Method::Notify(new_job.notify(clean_jobs)?),
-        })
-        .await?;
+        })?;
 
         Ok(())
     }
@@ -444,7 +465,7 @@ impl<W: Workbase> Stratifier<W> {
                 reject_reason: None,
             };
 
-            self.send(message).await?;
+            self.send(message)?;
             return Ok(());
         }
 
@@ -470,7 +491,7 @@ impl<W: Workbase> Stratifier<W> {
                         reject_reason: None,
                     };
 
-                    self.send(message).await?;
+                    self.send(message)?;
                     return Ok(());
                 }
             }
@@ -486,8 +507,7 @@ impl<W: Workbase> Stratifier<W> {
                     "method": "mining.configure",
                     "current_state": self.state.to_string()
                 })),
-            )
-            .await?;
+            )?;
 
             return Ok(());
         }
@@ -504,7 +524,7 @@ impl<W: Workbase> Stratifier<W> {
             reject_reason: None,
         };
 
-        self.send(message).await?;
+        self.send(message)?;
 
         Ok(())
     }
@@ -549,8 +569,7 @@ impl<W: Workbase> Stratifier<W> {
                     "method": "mining.subscribe",
                     "current_state": self.state.to_string()
                 })),
-            )
-            .await?;
+            )?;
 
             return Ok(self.bouncer.reject());
         }
@@ -559,12 +578,12 @@ impl<W: Workbase> Stratifier<W> {
             Acquisition::Acquired(enonce1) => enonce1,
             Acquisition::Reroute => {
                 warn!("Upstream saturated, reconnecting {}", self.socket_addr);
-                self.send_reconnect().await?;
+                self.send_reconnect()?;
                 return Ok(Consequence::Drop);
             }
             Acquisition::Exhausted => {
                 warn!("Pool full, rejecting {}", self.socket_addr);
-                self.send_error(id, StratumError::PoolFull, None).await?;
+                self.send_error(id, StratumError::PoolFull, None)?;
                 return Ok(Consequence::Drop);
             }
         };
@@ -594,8 +613,7 @@ impl<W: Workbase> Stratifier<W> {
             result: Some(json!(result)),
             error: None,
             reject_reason: None,
-        })
-        .await?;
+        })?;
 
         Ok(Consequence::None)
     }
@@ -619,8 +637,7 @@ impl<W: Workbase> Stratifier<W> {
                         "message": e.to_string(),
                         "username": authorize.username.as_str(),
                     })),
-                )
-                .await?;
+                )?;
 
                 return Ok(self.bouncer.reject());
             }
@@ -644,8 +661,7 @@ impl<W: Workbase> Stratifier<W> {
                     "method": "mining.authorize",
                     "current_state": self.state.to_string()
                 })),
-            )
-            .await?;
+            )?;
 
             return Ok(self.bouncer.reject());
         }
@@ -669,8 +685,7 @@ impl<W: Workbase> Stratifier<W> {
             result: Some(json!(true)),
             error: None,
             reject_reason: None,
-        })
-        .await?;
+        })?;
 
         self.bouncer.authorize();
         self.bouncer.accept();
@@ -684,8 +699,7 @@ impl<W: Workbase> Stratifier<W> {
 
         self.send(Message::Notification {
             method: Method::SetDifficulty(SetDifficulty(current_diff)),
-        })
-        .await?;
+        })?;
 
         debug!("Sending mining.notify to {}", self.socket_addr);
 
@@ -693,8 +707,7 @@ impl<W: Workbase> Stratifier<W> {
 
         self.send(Message::Notification {
             method: Method::Notify(job.notify(clean_jobs)?),
-        })
-        .await?;
+        })?;
 
         Ok(Consequence::None)
     }
@@ -710,8 +723,7 @@ impl<W: Workbase> Stratifier<W> {
                 result: Some(json!(true)),
                 error: None,
                 reject_reason: None,
-            })
-            .await?;
+            })?;
         }
 
         if !changed || self.state.identity().is_none() {
@@ -724,7 +736,6 @@ impl<W: Workbase> Stratifier<W> {
         self.send(Message::Notification {
             method: Method::SetDifficulty(SetDifficulty(self.vardiff.current_diff())),
         })
-        .await
     }
 
     async fn submit(
@@ -748,8 +759,7 @@ impl<W: Workbase> Stratifier<W> {
                     "authorized": session.username().as_str(),
                     "submitted": submit.username.as_str(),
                 })),
-            )
-            .await?;
+            )?;
 
             self.send_event(rejection_event!(
                 session.address().to_string(),
@@ -770,7 +780,7 @@ impl<W: Workbase> Stratifier<W> {
                 submit.job_id,
             );
 
-            self.send_error(id, StratumError::Stale, None).await?;
+            self.send_error(id, StratumError::Stale, None)?;
 
             self.send_event(rejection_event!(
                 session.address().to_string(),
@@ -804,8 +814,7 @@ impl<W: Workbase> Stratifier<W> {
                     "expected": expected_extranonce2_size,
                     "received": submit.enonce2.len()
                 })),
-            )
-            .await?;
+            )?;
 
             self.send_event(rejection_event!(
                 session.address().to_string(),
@@ -838,8 +847,7 @@ impl<W: Workbase> Stratifier<W> {
                     "submit_ntime": submit_ntime,
                     "max_ntime": job_ntime + MAX_NTIME_OFFSET,
                 })),
-            )
-            .await?;
+            )?;
 
             self.send_event(rejection_event!(
                 session.address().to_string(),
@@ -865,8 +873,7 @@ impl<W: Workbase> Stratifier<W> {
                         id,
                         StratumError::InvalidVersionMask,
                         Some(serde_json::json!({"reason": "Version rolling not negotiated"})),
-                    )
-                    .await?;
+                    )?;
 
                     self.send_event(rejection_event!(
                         session.address().to_string(),
@@ -898,8 +905,7 @@ impl<W: Workbase> Stratifier<W> {
                             "disallowed": disallowed.to_string(),
                             "mask": version_mask.to_string()
                         })),
-                    )
-                    .await?;
+                    )?;
 
                     self.send_event(rejection_event!(
                         session.address().to_string(),
@@ -946,8 +952,7 @@ impl<W: Workbase> Stratifier<W> {
                     submit.job_id,
                 );
 
-                self.send_error(id, StratumError::InvalidCoinbase, None)
-                    .await?;
+                self.send_error(id, StratumError::InvalidCoinbase, None)?;
 
                 self.send_event(rejection_event!(
                     session.address().to_string(),
@@ -980,7 +985,7 @@ impl<W: Workbase> Stratifier<W> {
                 hash,
             );
 
-            self.send_error(id, StratumError::Duplicate, None).await?;
+            self.send_error(id, StratumError::Duplicate, None)?;
 
             self.send_event(rejection_event!(
                 session.address().to_string(),
@@ -1061,7 +1066,7 @@ impl<W: Workbase> Stratifier<W> {
                 pool_diff,
             );
 
-            self.send_error(id, StratumError::AboveTarget, None).await?;
+            self.send_error(id, StratumError::AboveTarget, None)?;
 
             self.send_event(rejection_event!(
                 session.address().to_string(),
@@ -1091,8 +1096,7 @@ impl<W: Workbase> Stratifier<W> {
             result: Some(json!(true)),
             error: None,
             reject_reason: None,
-        })
-        .await?;
+        })?;
 
         self.send_event(Event::Share(ShareEvent {
             timestamp: None,
@@ -1137,8 +1141,7 @@ impl<W: Workbase> Stratifier<W> {
 
             self.send(Message::Notification {
                 method: Method::SetDifficulty(SetDifficulty(new_diff)),
-            })
-            .await?;
+            })?;
         }
 
         Ok(Consequence::None)
@@ -1200,21 +1203,22 @@ impl<W: Workbase> Stratifier<W> {
         }
     }
 
-    async fn send(&mut self, message: Message) -> Result<()> {
+    fn send(&self, message: Message) -> Result<()> {
         let frame = serde_json::to_string(&message)?;
-        self.writer.send(frame).await?;
+        self.writer_tx
+            .try_send(frame)
+            .context("writer queue full, dropping slow client")?;
         Ok(())
     }
 
-    async fn send_reconnect(&mut self) -> Result<()> {
+    fn send_reconnect(&self) -> Result<()> {
         self.send(Message::Notification {
             method: Method::Reconnect(Reconnect::default()),
         })
-        .await
     }
 
-    async fn send_error(
-        &mut self,
+    fn send_error(
+        &self,
         id: Id,
         error: StratumError,
         traceback: Option<serde_json::Value>,
@@ -1225,7 +1229,6 @@ impl<W: Workbase> Stratifier<W> {
             error: Some(error.into_response(traceback)),
             reject_reason: None,
         })
-        .await
     }
 
     fn send_event(&self, event: Event) {
@@ -1233,6 +1236,28 @@ impl<W: Workbase> Stratifier<W> {
             && let Err(e) = tx.try_send(event)
         {
             warn!("Failed to send event: {e}");
+        }
+    }
+}
+
+async fn writer_task(
+    mut writer: FramedWrite<OwnedWriteHalf, LinesCodec>,
+    mut rx: mpsc::Receiver<String>,
+) {
+    while let Some(frame) = rx.recv().await {
+        match timeout(WRITE_STALL_TIMEOUT, writer.send(frame)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => {
+                warn!("Write failed, closing connection: {err}");
+                return;
+            }
+            Err(_) => {
+                warn!(
+                    "Write stalled for {}s, closing connection",
+                    WRITE_STALL_TIMEOUT.as_secs()
+                );
+                return;
+            }
         }
     }
 }

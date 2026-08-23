@@ -1141,7 +1141,7 @@ impl Router {
                     }
                 };
 
-                let mut stratifier: Stratifier<Notify> = Stratifier::new(
+                let stratifier: Stratifier<Notify> = Stratifier::new(
                     addr,
                     settings,
                     allocator,
