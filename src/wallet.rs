@@ -203,13 +203,6 @@ impl Wallet {
         })
     }
 
-    pub(crate) fn peek_address(&self, derivation_index: u32) -> Address {
-        self.inner
-            .lock()
-            .peek_address(KeychainKind::External, derivation_index)
-            .address
-    }
-
     pub(crate) fn reveal_address_with<T>(
         &self,
         persist: impl FnOnce(bdk_wallet::AddressInfo, u32, &ChangeSet) -> Result<T>,

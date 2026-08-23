@@ -2,8 +2,8 @@ use {
     super::*,
     crate::{
         api::{
-            DownstreamStats, OrphanReceipt, PlacementCounts, RouterStatus, RoutingInfo,
-            UpstreamStats, UpstreamTotals, WalletInfo,
+            DownstreamStats, PlacementCounts, RouterStatus, RoutingInfo, UpstreamStats,
+            UpstreamTotals, WalletInfo,
         },
         event_sink::Event,
         generator::get_block_template,
@@ -50,7 +50,7 @@ pub(crate) struct Router {
     orders: RwLock<Orders>,
     next_id: AtomicU32,
     creation_window: Mutex<RateWindow>,
-    orphan_receipts: Mutex<BTreeMap<u32, OrphanReceipt>>,
+    logged_orphan_receipts: Mutex<HashSet<u32>>,
     hash_value: AtomicU64,
     halt: AtomicBool,
     boost: AtomicBool,
@@ -88,7 +88,7 @@ impl Router {
                 start: Instant::now(),
                 count: 0,
             }),
-            orphan_receipts: Mutex::new(BTreeMap::new()),
+            logged_orphan_receipts: Mutex::new(HashSet::new()),
             hash_value: AtomicU64::new(initial_hash_value.to_sats()),
             halt: AtomicBool::new(halt),
             boost: AtomicBool::new(boost),
@@ -769,37 +769,11 @@ impl Router {
     }
 
     pub(crate) fn sweep_orphan_receipts(&self) {
-        let Some(wallet) = &self.wallet else {
-            return;
-        };
+        let mut logged = self.logged_orphan_receipts.lock();
 
-        if !wallet.is_synced() {
-            return;
-        }
-
-        let findings = self.audit_receipts();
-
-        let height = wallet.tip();
-
-        let mut stored = self.orphan_receipts.lock();
-
-        stored.retain(|index, _| findings.iter().any(|(orphan, _)| orphan == index));
-
-        for (index, amount) in findings {
-            if let Some(receipt) = stored.get_mut(&index) {
-                receipt.amount = amount;
-            } else {
+        for (index, amount) in self.audit_receipts() {
+            if logged.insert(index) {
                 warn!("Received {amount} at derivation index {index} with no matching order");
-
-                stored.insert(
-                    index,
-                    OrphanReceipt {
-                        derivation_index: index,
-                        address: wallet.peek_address(index).as_unchecked().clone(),
-                        amount,
-                        first_seen_height: height,
-                    },
-                );
             }
         }
     }
@@ -996,7 +970,6 @@ impl Router {
                     .wallet
                     .as_ref()
                     .is_some_and(|wallet| wallet.is_synced()),
-                orphan_receipts: self.orphan_receipts.lock().values().cloned().collect(),
             },
             routing: RoutingInfo {
                 sessions_trimmed_1h: control_metrics.sessions_trimmed_1h,
@@ -2231,70 +2204,6 @@ mod tests {
             router.audit_receipts(),
             vec![(orphan.index, Amount::from_sat(1000))],
         );
-    }
-
-    #[test]
-    fn sweep_orphan_receipts_stores_first_seen_and_resolves() {
-        let router = test_router();
-        let wallet = router.wallet.clone().unwrap();
-
-        router.sweep_orphan_receipts();
-        assert!(
-            router.orphan_receipts.lock().is_empty(),
-            "wallet not synced"
-        );
-
-        wallet.mark_synced();
-
-        let orphan = wallet.test_reveal_address();
-        let tx = wallet.test_receive_unconfirmed(&orphan.address, Amount::from_sat(1000));
-        wallet.test_confirm_tx(tx);
-
-        router.sweep_orphan_receipts();
-
-        let expected = OrphanReceipt {
-            derivation_index: orphan.index,
-            address: orphan.address.as_unchecked().clone(),
-            amount: Amount::from_sat(1000),
-            first_seen_height: wallet.tip(),
-        };
-
-        assert_eq!(
-            router
-                .orphan_receipts
-                .lock()
-                .values()
-                .cloned()
-                .collect::<Vec<_>>(),
-            vec![expected.clone()],
-        );
-
-        router.sweep_orphan_receipts();
-
-        assert_eq!(
-            router.status().wallet.orphan_receipts,
-            vec![expected],
-            "first-seen height is stable across sweeps",
-        );
-
-        add_orders(
-            router.as_ref(),
-            [test_order_with_payment(
-                0,
-                Payment::new(
-                    orphan.address.clone(),
-                    orphan.index,
-                    Amount::from_sat(1000),
-                    0,
-                ),
-                OrderStatus::Active,
-                &router.metatron,
-            )],
-        );
-
-        router.sweep_orphan_receipts();
-
-        assert!(router.orphan_receipts.lock().is_empty());
     }
 
     fn funded_bucket_order(

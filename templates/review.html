@@ -10,16 +10,6 @@
   </div>
 
   <div class="column column-full">
-    <h2>Orphan Receipts</h2>
-    <table class=compact-table id=orphan-receipts-table>
-      <thead>
-        <tr><th>Address</th><th>Amount</th><th>First Seen</th></tr>
-      </thead>
-      <tbody id=orphan-receipts-body></tbody>
-    </table>
-  </div>
-
-  <div class="column column-full">
     <h2>Cleared Orders</h2>
     <table class=compact-table id=cleared-table>
       <thead>
@@ -27,6 +17,11 @@
       </thead>
       <tbody id=cleared-body></tbody>
     </table>
+    <div class=table-pagination>
+      <button class=page-prev type=button>&lsaquo; Prev</button>
+      <span class=page-status>1/1</span>
+      <button class=page-next type=button>Next &rsaquo;</button>
+    </div>
   </div>
 </div>
 
@@ -58,22 +53,41 @@ function renderOrders(bodyId, orders) {
   body.innerHTML = orders.map(orderRow).join('');
 }
 
-function renderOrphanReceipts(orphans) {
-  const body = document.getElementById('orphan-receipts-body');
+const CLEARED_PAGE_SIZE = 10;
+let clearedPage = 0;
+let clearedOrders = [];
 
-  if (!orphans || orphans.length === 0) {
-    body.innerHTML = '<tr><td colspan=3>None</td></tr>';
-    return;
+const prevButton = document.querySelector('#cleared-table + .table-pagination .page-prev');
+const nextButton = document.querySelector('#cleared-table + .table-pagination .page-next');
+const pageStatus = document.querySelector('#cleared-table + .table-pagination .page-status');
+
+prevButton.addEventListener('click', () => {
+  clearedPage--;
+  renderClearedPage();
+});
+
+nextButton.addEventListener('click', () => {
+  clearedPage++;
+  renderClearedPage();
+});
+
+function renderClearedPage() {
+  const body = document.getElementById('cleared-body');
+  const pageCount = Math.max(1, Math.ceil(clearedOrders.length / CLEARED_PAGE_SIZE));
+  clearedPage = Math.max(0, Math.min(clearedPage, pageCount - 1));
+
+  const pageStart = clearedPage * CLEARED_PAGE_SIZE;
+  const rows = clearedOrders.slice(pageStart, pageStart + CLEARED_PAGE_SIZE);
+
+  if (rows.length === 0) {
+    body.innerHTML = '<tr><td colspan=6>None</td></tr>';
+  } else {
+    body.innerHTML = rows.map(orderRow).join('');
   }
 
-  body.innerHTML = orphans.map(orphan => {
-    const short = truncateMiddle(orphan.address, 20, 8);
-    return `<tr>
-    <td><span class=copyable data-full="${escapeHtml(orphan.address)}" data-formatted="${escapeHtml(short)}">${escapeHtml(short)}</span></td>
-    <td>${escapeHtml(Number(orphan.amount).toLocaleString() + ' sats')}</td>
-    <td>${escapeHtml('block ' + orphan.first_seen_height)}</td>
-  </tr>`;
-  }).join('');
+  pageStatus.textContent = clearedOrders.length === 0 ? '0/0' : `${clearedPage + 1}/${pageCount} (${clearedOrders.length})`;
+  prevButton.disabled = clearedPage === 0;
+  nextButton.disabled = clearedPage >= pageCount - 1;
 }
 
 async function fetchOrders(review, signal) {
@@ -87,18 +101,16 @@ async function fetchOrders(review, signal) {
 }
 
 async function refresh(signal) {
-  const [statusData, flagged, cleared] = await Promise.all([
-    fetchJson('/api/router/status', { signal }),
+  const [flagged, cleared] = await Promise.all([
     fetchOrders('flagged', signal),
     fetchOrders('cleared', signal),
   ]);
 
   renderOrders('flagged-body', flagged);
-  renderOrphanReceipts(statusData.wallet.orphan_receipts);
-  renderOrders('cleared-body', cleared);
+  clearedOrders = cleared;
+  renderClearedPage();
 }
 
-initDelegatedCopyables('orphan-receipts-body');
 initAuthProbe().then(ok => {
   if (!ok) return;
   startPolling(refresh);

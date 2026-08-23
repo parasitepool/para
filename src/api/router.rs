@@ -14,14 +14,6 @@ pub struct PlacementCounts {
     pub blind: usize,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct OrphanReceipt {
-    pub derivation_index: u32,
-    pub address: Address<NetworkUnchecked>,
-    pub amount: Amount,
-    pub first_seen_height: u32,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoutingInfo {
     pub sessions_trimmed_1h: usize,
@@ -38,7 +30,6 @@ pub struct RoutingInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WalletInfo {
     pub synced: bool,
-    pub orphan_receipts: Vec<OrphanReceipt>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

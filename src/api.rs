@@ -16,8 +16,8 @@ pub use {
     pool::PoolStatus,
     proxy::ProxyStatus,
     router::{
-        OrderDetail, OrderRequest, OrderResponse, OrderSummary, OrphanReceipt, PlacementCounts,
-        RouterStatus, RoutingInfo, WalletInfo,
+        OrderDetail, OrderRequest, OrderResponse, OrderSummary, PlacementCounts, RouterStatus,
+        RoutingInfo, WalletInfo,
     },
     users::{SessionDetail, UserDetail, UserSummary, WorkerDetail},
 };
