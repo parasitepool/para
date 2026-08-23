@@ -1,18 +1,20 @@
 use super::*;
 
+const MAX_JOBS: usize = 64;
+
 #[derive(Debug)]
 pub(crate) struct Jobs<W: Workbase> {
     latest: Option<Arc<Job<W>>>,
     next_id: JobId,
     seen: HashSet<BlockHash>,
-    valid: HashMap<JobId, Arc<Job<W>>>,
+    valid: BTreeMap<JobId, Arc<Job<W>>>,
 }
 
 impl<W: Workbase> Jobs<W> {
     pub(crate) fn new() -> Self {
         Self {
             next_id: JobId::new(0),
-            valid: HashMap::new(),
+            valid: BTreeMap::new(),
             latest: None,
             seen: HashSet::new(),
         }
@@ -44,6 +46,11 @@ impl<W: Workbase> Jobs<W> {
         }
 
         self.valid.insert(job.job_id, job);
+
+        while self.valid.len() > MAX_JOBS {
+            self.valid.pop_first();
+        }
+
         clean
     }
 
@@ -453,6 +460,34 @@ mod tests {
             assert!(jobs.get(id).is_none(), "old job {id:?} should be cleaned");
         }
         assert!(jobs.get(&new_id).is_some());
+    }
+
+    fn check_evicts_oldest_beyond_cap<W: TestWorkbaseFactory>() {
+        let mut jobs: Jobs<W> = Jobs::new();
+
+        for _ in 0..MAX_JOBS + 10 {
+            let id = jobs.next_id();
+            let workbase = W::workbase_same_group(100, id);
+            let job = W::create_test_job(&workbase, id);
+            jobs.insert(job);
+        }
+
+        assert_eq!(jobs.valid.len(), MAX_JOBS);
+
+        for i in 0..10 {
+            assert!(
+                jobs.get(&JobId::new(i as u64)).is_none(),
+                "job {i} should be evicted"
+            );
+        }
+
+        assert_invariants(&jobs);
+    }
+
+    #[test]
+    fn evicts_oldest_beyond_cap() {
+        check_evicts_oldest_beyond_cap::<BlockTemplate>();
+        check_evicts_oldest_beyond_cap::<Notify>();
     }
 
     #[test]
