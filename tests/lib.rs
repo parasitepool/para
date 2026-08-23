@@ -115,6 +115,8 @@ mod ping;
 #[cfg(target_os = "linux")]
 mod pool;
 #[cfg(target_os = "linux")]
+mod probe;
+#[cfg(target_os = "linux")]
 mod proxy;
 #[cfg(target_os = "linux")]
 mod router;
@@ -123,8 +125,6 @@ mod server;
 mod server_with_db;
 #[cfg(target_os = "linux")]
 mod sync;
-#[cfg(target_os = "linux")]
-mod template;
 #[cfg(target_os = "linux")]
 mod wallet;
 

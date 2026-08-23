@@ -17,7 +17,7 @@
 software with no warranty. See [LICENSE](LICENSE) for more details.
 
 It implements a Rust library for the Stratum protocol and includes helpful
-command-line tools that measure ping, inspect block templates, mimic mining
+command-line tools that measure ping, probe stratum servers, mimic mining
 machines and run pool logic. To see a full list of available commands just
 follow the instructions below and do `para help`.
 

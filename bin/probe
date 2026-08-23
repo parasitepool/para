@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+
+set -euxo pipefail
+
+USERNAME=bc1p4r54k6ju6h92x8rvucsumg06nhl4fmnr9ecg6dzw5nk24r45dzasde25r3.probe
+
+cargo run -- probe parasite.wtf:42069 --username $USERNAME
+cargo run -- probe mine.ocean.xyz:3334 --username $USERNAME
+cargo run -- probe stratum.antpool.com:3333 --username $USERNAME
+# cargo run -- probe stratum.braiins.com:3333 --username $USERNAME
+cargo run -- probe solo.atlaspool.io:3333 --username $USERNAME
+cargo run -- probe public-pool.io:3333 --username $USERNAME
+cargo run -- probe pool.256foundation.org:3333 --username $USERNAME

@@ -1,8 +1,14 @@
-use {super::*, crate::MAX_MESSAGE_SIZE, std::time::Instant, tokio_util::sync::CancellationToken};
+use {
+    super::*,
+    crate::MAX_MESSAGE_SIZE,
+    std::{net::SocketAddr, time::Instant},
+    tokio_util::sync::CancellationToken,
+};
 
 struct ConnectionState {
     writer: BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     reader_handle: tokio::task::JoinHandle<()>,
+    peer_address: SocketAddr,
 }
 
 enum IncomingMessage {
@@ -29,6 +35,9 @@ pub(super) enum ClientMessage {
     Request {
         method: Method,
         respond_to: oneshot::Sender<Result<(Message, usize)>>,
+    },
+    PeerAddress {
+        respond_to: oneshot::Sender<Result<SocketAddr>>,
     },
     Disconnect {
         respond_to: oneshot::Sender<()>,
@@ -111,6 +120,16 @@ impl ClientActor {
                                 }
                             }
                         }
+                        ClientMessage::PeerAddress { respond_to } => {
+                            let result = self
+                                .connection
+                                .as_ref()
+                                .map(|connection| connection.peer_address)
+                                .ok_or(ClientError::NotConnected);
+                            if respond_to.send(result).is_err() {
+                                debug!("PeerAddress response dropped: caller gave up");
+                            }
+                        }
                         ClientMessage::Disconnect { respond_to } => {
                             self.handle_disconnect().await;
                             if respond_to.send(()).is_err() {
@@ -168,10 +187,11 @@ impl ClientActor {
             .set_nodelay(true)
             .map_err(|source| ClientError::Io { source })?;
 
-        match stream.peer_addr() {
-            Ok(peer) => debug!("Connected to {} -> {peer}", self.inner.address),
-            Err(_) => debug!("Connected to {}", self.inner.address),
-        }
+        let peer_address = stream
+            .peer_addr()
+            .map_err(|source| ClientError::Io { source })?;
+
+        debug!("Connected to {} -> {peer_address}", self.inner.address);
 
         let (reader, writer) = stream.into_split();
         let writer = BufWriter::new(writer);
@@ -185,6 +205,7 @@ impl ClientActor {
         self.connection = Some(ConnectionState {
             writer,
             reader_handle,
+            peer_address,
         });
 
         Ok(())

@@ -145,6 +145,17 @@ impl Client {
         })
     }
 
+    pub async fn peer_address(&self) -> Result<std::net::SocketAddr> {
+        let (respond_to, rx) = oneshot::channel();
+
+        self.tx
+            .send(ClientMessage::PeerAddress { respond_to })
+            .await
+            .map_err(|_| ClientError::NotConnected)?;
+
+        rx.await.map_err(|_| ClientError::NotConnected)?
+    }
+
     pub async fn disconnect(&self) {
         let (respond_to, rx) = oneshot::channel();
 
@@ -474,6 +485,30 @@ mod tests {
             "Expected NotConnected, got: {:?}",
             err
         );
+    }
+
+    #[tokio::test]
+    async fn peer_address() {
+        let addr = mock_server(false).await;
+
+        let client = Client::new(
+            addr.to_string(),
+            "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.test"
+                .parse()
+                .unwrap(),
+            None,
+            "test".into(),
+            Duration::from_secs(5),
+        );
+
+        assert!(matches!(
+            client.peer_address().await,
+            Err(ClientError::NotConnected)
+        ));
+
+        client.connect().await.unwrap();
+
+        assert_eq!(client.peer_address().await.unwrap(), addr);
     }
 
     async fn mock_subscribe_server(enonce2_size: usize) -> SocketAddr {

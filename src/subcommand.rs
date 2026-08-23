@@ -3,11 +3,11 @@ use super::*;
 pub mod miner;
 pub mod ping;
 pub mod pool;
+pub mod probe;
 pub mod proxy;
 pub mod router;
 pub mod server;
 pub mod sync;
-pub mod template;
 pub mod wallet;
 
 #[derive(Debug, Parser)]
@@ -18,6 +18,8 @@ pub(crate) enum Subcommand {
     Ping(ping::Ping),
     #[command(about = "Run a toy solo pool")]
     Pool(pool::Pool),
+    #[command(about = "Probe a stratum server")]
+    Probe(probe::Probe),
     #[command(about = "Run a toy stratum proxy")]
     Proxy(proxy::Proxy),
     #[command(about = "Run a toy hashrate router")]
@@ -26,8 +28,6 @@ pub(crate) enum Subcommand {
     Server(server::Server),
     #[command(about = "Sync shares via HTTP")]
     Sync(sync::Sync),
-    #[command(about = "Monitor block templates")]
-    Template(template::Template),
     #[command(about = "Toy wallet for testing")]
     Wallet(wallet::WalletCommand),
 }
@@ -42,6 +42,7 @@ impl Subcommand {
             Self::Miner(miner) => miner.run(cancel_token).await,
             Self::Ping(ping) => ping.run(cancel_token).await,
             Self::Pool(pool) => pool.run(cancel_token, logs).await,
+            Self::Probe(probe) => probe.run(cancel_token).await,
             Self::Proxy(proxy) => proxy.run(cancel_token, logs).await,
             Self::Router(router) => router.run(cancel_token, logs).await,
             Self::Server(server) => {
@@ -81,7 +82,6 @@ impl Subcommand {
                 server_result
             }
             Self::Sync(sync) => sync.run(cancel_token).await,
-            Self::Template(template) => template.run(cancel_token).await,
             Self::Wallet(wallet) => wallet.run().await,
         }
     }

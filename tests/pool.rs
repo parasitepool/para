@@ -391,7 +391,7 @@ fn configure_template_update_interval() {
     let stratum_endpoint = pool.stratum_endpoint();
 
     let output = CommandBuilder::new(format!(
-        "template {stratum_endpoint} --username {} --raw",
+        "probe {stratum_endpoint} --username {} --raw",
         signet_username()
     ))
     .spawn()
@@ -404,7 +404,7 @@ fn configure_template_update_interval() {
     std::thread::sleep(Duration::from_secs(1));
 
     let output = CommandBuilder::new(format!(
-        "template {stratum_endpoint} --username {} --raw",
+        "probe {stratum_endpoint} --username {} --raw",
         signet_username()
     ))
     .spawn()
@@ -440,23 +440,22 @@ async fn concurrently_listening_workers_receive_new_templates_on_new_block() {
         let user = user.clone();
 
         tokio::task::spawn_blocking(move || {
-            let mut template_watcher = CommandBuilder::new(format!(
-                "template {endpoint} --username {user} --watch --raw"
-            ))
-            .spawn();
+            let mut probe_watcher =
+                CommandBuilder::new(format!("probe {endpoint} --username {user} --watch --raw"))
+                    .spawn();
 
-            let mut reader = BufReader::new(template_watcher.stdout.take().unwrap());
+            let mut reader = BufReader::new(probe_watcher.stdout.take().unwrap());
 
-            let initial_template = next_json::<stratum::Notify>(&mut reader);
+            let initial_notify = next_json::<stratum::Notify>(&mut reader);
 
             gate.wait();
 
-            let new_template = next_json::<stratum::Notify>(&mut reader);
+            let new_notify = next_json::<stratum::Notify>(&mut reader);
 
-            out.blocking_send((initial_template, new_template)).ok();
+            out.blocking_send((initial_notify, new_notify)).ok();
 
-            template_watcher.kill().unwrap();
-            template_watcher.wait().unwrap();
+            probe_watcher.kill().unwrap();
+            probe_watcher.wait().unwrap();
         });
     }
 
@@ -464,40 +463,37 @@ async fn concurrently_listening_workers_receive_new_templates_on_new_block() {
 
     pool.mine_block().await;
 
-    let (initial_template_worker_a, new_template_worker_a) =
+    let (initial_notify_worker_a, new_notify_worker_a) =
         tokio::time::timeout(Duration::from_secs(10), in_1.recv())
             .await
             .unwrap()
             .unwrap();
 
-    let (initial_template_worker_b, new_template_worker_b) =
+    let (initial_notify_worker_b, new_notify_worker_b) =
         tokio::time::timeout(Duration::from_secs(10), in_2.recv())
             .await
             .unwrap()
             .unwrap();
 
     assert_eq!(
-        initial_template_worker_a.prevhash,
-        initial_template_worker_b.prevhash
+        initial_notify_worker_a.prevhash,
+        initial_notify_worker_b.prevhash
     );
 
     assert_ne!(
-        initial_template_worker_a.prevhash,
-        new_template_worker_a.prevhash
+        initial_notify_worker_a.prevhash,
+        new_notify_worker_a.prevhash
     );
 
     assert_ne!(
-        initial_template_worker_b.prevhash,
-        new_template_worker_b.prevhash,
+        initial_notify_worker_b.prevhash,
+        new_notify_worker_b.prevhash,
     );
 
-    assert_eq!(
-        new_template_worker_a.prevhash,
-        new_template_worker_b.prevhash
-    );
+    assert_eq!(new_notify_worker_a.prevhash, new_notify_worker_b.prevhash);
 
-    assert!(new_template_worker_a.ntime >= initial_template_worker_a.ntime);
-    assert!(new_template_worker_b.ntime >= initial_template_worker_b.ntime);
+    assert!(new_notify_worker_a.ntime >= initial_notify_worker_a.ntime);
+    assert!(new_notify_worker_b.ntime >= initial_notify_worker_b.ntime);
 }
 
 #[tokio::test]
