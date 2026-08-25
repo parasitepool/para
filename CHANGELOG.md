@@ -1,6 +1,56 @@
 Changelog
 =========
 
+[0.6.0](https://github.com/parasitepool/para/releases/tag/0.6.0) - 2026-08-25
+-----------------------------------------------------------------------------
+
+### Added
+- Add para probe command (#612)
+- Add bitcoin node + IPC to test harness (#602)
+- Add dirty flag to USERS table (#595)
+- Automate refund PSBT construction and track orphan receipts (#594)
+- Add new badges (#589)
+- Badge Reform (#588)
+- Dynamic Hashprice (#587)
+- Add routing insights to API (#586)
+- Add greeter and intents to routing algorithm (#585)
+- Add basic fuzzing for stratum crate (#584)
+- Show txids for payments (#580)
+- Store metatron in redb (#574)
+- Add version to stratum dependency (#576)
+
+### Changed
+- Refactor router into runner, dispatcher, cashier, and order_book modules (#617)
+- Remove orphan receipts from API (#614)
+- Validate workername length and characters (#606)
+- Tighten HashPrice enforcement (#605)
+- Merge ckpool upstream changes (#593)
+- Split up realtime stats and total stats (#596)
+- Consolidate order lifecycle logic (#592)
+- Routing algo tweaks (#583)
+- Improve stat tracking (#582)
+- Change schema for blocks and update persistence flow (#579)
+- API tweaks (#578)
+
+### Fixed
+- Fix potential statifier wedging (#610)
+- Fix notify flood memory growth (#611)
+- Fix init stall (#608)
+- Fix displayed best share in router (#607)
+- Removed unused routing intents, fix double counting hashrate (#603)
+- Fix API fields (#600)
+- Correct User Best Difficulty to use persisted DB values (#599)
+- Fix stratum crash paths (#598)
+- Fix duplicate share cache poisoning (#597)
+
+### Misc
+- Update dependencies (#616)
+- Placate clippy (#604)
+- Update Bitcoin Core to v31.1 (#591)
+- Update dependencies (#590)
+- Update dependencies (#581)
+- Exlude vendored repos bitcoind and ckpool (#577)
+
 [0.5.4](https://github.com/parasitepool/para/releases/tag/0.5.4) - 2026-06-25
 -----------------------------------------------------------------------------
 
