@@ -26,6 +26,7 @@ impl HashPrice {
 
     pub fn tolerance(self) -> Self {
         const TOLERANCE_PERCENT: u64 = 1;
+
         Self::from_sats(
             (self.to_sats() as f64 * (100.0 - TOLERANCE_PERCENT as f64) / 100.0).floor() as u64,
         )

@@ -2,7 +2,7 @@ use {
     super::*,
     crate::{
         http_server::auth::{BearerAuth, NavbarAuth},
-        router::Router,
+        proxy::Proxy,
     },
 };
 
@@ -18,7 +18,7 @@ pub struct ProxyStatus {
 }
 
 pub(crate) fn router(
-    router: Arc<Router>,
+    router: Arc<Proxy>,
     bitcoin_client: Arc<BitcoindClient>,
     chain: Chain,
     logs: Arc<logs::Logs>,
@@ -43,7 +43,7 @@ async fn home(Extension(chain): Extension<Chain>, auth: NavbarAuth) -> Response 
     render_page(ProxyHtml, chain, auth)
 }
 
-async fn status(State(router): State<Arc<Router>>) -> ServerResult<Response> {
+async fn status(State(router): State<Arc<Proxy>>) -> ServerResult<Response> {
     let now = Instant::now();
     let metatron = router.metatron();
     let orders = router.live_orders();

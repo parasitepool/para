@@ -64,8 +64,7 @@ impl From<RouterError> for ServerError {
             | RouterError::WalletSyncing
             | RouterError::WalletRequired
             | RouterError::WalletPersistence { .. }
-            | RouterError::MissingActiveUpstream { .. }
-            | RouterError::MissingActiveAllocator { .. } => {
+            | RouterError::MissingActiveUpstream { .. } => {
                 Self::ServiceUnavailable(error.to_string())
             }
             RouterError::OrderRateLimited { .. } => Self::TooManyRequests(error.to_string()),

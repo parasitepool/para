@@ -685,6 +685,58 @@ async fn stale_extended_enonce1_is_rejected_after_upstream_reconnect() {
 
 #[tokio::test]
 #[timeout(120000)]
+async fn restart_with_changed_upstream_reports_status() {
+    let bitcoind = bitcoind();
+    let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001");
+    let upstream = pool.stratum_endpoint();
+    let username = signet_username().to_string();
+    let replacement = username.replace(".tick.", ".foo.");
+
+    let proxy = TestProxy::spawn_with_args(
+        &upstream,
+        &username,
+        pool.bitcoind_rpc_port(),
+        "--start-diff 0.00001",
+    );
+
+    timeout(Duration::from_secs(30), async {
+        loop {
+            if let Ok(status) = proxy.get_status().await
+                && status.upstream_info.connected
+            {
+                break;
+            }
+
+            sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("proxy should connect before restart");
+
+    let proxy = proxy.restart(
+        &upstream,
+        &replacement,
+        pool.bitcoind_rpc_port(),
+        "--start-diff 0.00001",
+    );
+
+    timeout(Duration::from_secs(30), async {
+        loop {
+            if let Ok(status) = proxy.get_status().await
+                && status.upstream_info.connected
+            {
+                break;
+            }
+
+            sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("proxy should report the replacement upstream");
+}
+
+#[tokio::test]
+#[timeout(120000)]
 async fn proxy_persists_stats_across_restart() {
     let bitcoind = bitcoind();
     let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001");

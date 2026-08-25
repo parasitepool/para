@@ -157,6 +157,7 @@ mod job;
 mod jobs;
 mod logs;
 mod metatron;
+mod proxy;
 mod retry;
 pub mod router;
 pub mod settings;

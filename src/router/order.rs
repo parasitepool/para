@@ -3,6 +3,7 @@ use {super::*, control::TRIM_COOLDOWN, epoch};
 pub(crate) const HYSTERESIS_LOW: f64 = 0.95;
 pub(crate) const HYSTERESIS_HIGH: f64 = 1.3;
 pub(crate) const SEVERE_STARVATION: f64 = 0.5;
+pub(crate) const PLACEMENT_TTL: Duration = Duration::from_secs(90);
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -75,8 +76,6 @@ pub struct Bucket {
     pub(crate) target: HashDays,
     pub(crate) payment: Payment,
 }
-
-pub(crate) const PLACEMENT_TTL: Duration = Duration::from_secs(90);
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Trim {
@@ -412,6 +411,13 @@ impl Order {
         self.upstream.lock().clone()
     }
 
+    pub(crate) fn upstream_route(&self) -> Option<(Arc<Upstream>, Arc<EnonceAllocator>)> {
+        let upstream = self.upstream.lock().clone()?;
+        let allocator = self.allocator.get()?.clone();
+
+        Some((upstream, allocator))
+    }
+
     pub(crate) fn has_connected_upstream(&self) -> bool {
         self.upstream
             .lock()
@@ -419,6 +425,7 @@ impl Order {
             .is_some_and(|upstream| upstream.is_connected())
     }
 
+    #[cfg(test)]
     pub(crate) fn allocator(&self) -> Option<&Arc<EnonceAllocator>> {
         self.allocator.get()
     }

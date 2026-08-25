@@ -1,6 +1,6 @@
 use {
     super::*,
-    crate::{api, event_sink::build_event_sink, http_server, router::Router},
+    crate::{api, event_sink::build_event_sink, http_server},
 };
 
 #[derive(Parser, Debug)]
@@ -46,13 +46,11 @@ impl Proxy {
         let metatron = Arc::new(Metatron::open(store)?);
         metatron.spawn(cancel_token.clone(), &tasks);
 
-        let router = Arc::new(Router::new(
+        let router = Arc::new(crate::proxy::Proxy::new(
             settings.clone(),
             metatron.clone(),
-            None,
             tasks.clone(),
             cancel_token.clone(),
-            HashValue::from_sats(1),
         ));
 
         let event_tx = build_event_sink(&settings, cancel_token.clone(), &tasks)
@@ -79,6 +77,6 @@ impl Proxy {
             spawn_throbber(router.clone(), cancel_token.clone(), &tasks);
         }
 
-        router.serve(listener, event_tx, None, cancel_token).await
+        router.serve(listener, event_tx, cancel_token).await
     }
 }

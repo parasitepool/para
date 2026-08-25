@@ -32,8 +32,6 @@ pub(crate) enum RouterError {
     WalletPersistence { error: anyhow::Error },
     #[snafu(display("active order {id} is missing upstream"))]
     MissingActiveUpstream { id: u32 },
-    #[snafu(display("active order {id} is missing extranonce allocator"))]
-    MissingActiveAllocator { id: u32 },
     #[snafu(display("order {id} not found"))]
     OrderNotFound { id: u32 },
     #[snafu(display("order {id} is not a bucket order"))]
