@@ -246,12 +246,14 @@ impl Settings {
             upstream,
             timeout,
             enonce1_extension_size,
+            disable_bouncer,
         } = options;
 
         let settings = Self {
             upstream_targets: vec![upstream],
             timeout: Duration::from_secs(timeout),
             enonce1_extension_size,
+            disable_bouncer,
             ..Self::from_common_options(common)?
         };
 

@@ -21,4 +21,7 @@ pub(crate) struct ProxyOptions {
         help = "Extend upstream enonce1 by <ENONCE1_EXTENSION_SIZE> bytes."
     )]
     pub(crate) enonce1_extension_size: usize,
+
+    #[arg(long, help = "Disable bouncer.")]
+    pub(crate) disable_bouncer: bool,
 }

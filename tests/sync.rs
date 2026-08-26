@@ -378,7 +378,7 @@ async fn test_sync_batch_with_block_only() {
 }
 
 #[tokio::test]
-#[timeout(90000)]
+#[timeout(300000)]
 #[ignore]
 async fn test_sync_large_batch() {
     let record_count_in_large_batch = 40000;
@@ -690,7 +690,7 @@ async fn test_sync_endpoint_to_endpoint() {
         .with_terminate_when_complete(true)
         .with_temp_file();
 
-    let client = reqwest::Client::new();
+    let client = http_client();
 
     let health_check = client
         .get(target_server.url().join("/sync/batch").unwrap())

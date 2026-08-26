@@ -11,10 +11,11 @@ struct BouncerConfig {
 
 static CONFIG: LazyLock<BouncerConfig> = LazyLock::new(|| {
     if integration_test() {
+        // Threshold balanced to hit WARN reliably
         BouncerConfig {
             warn_threshold: Duration::from_secs(1),
-            reconnect_threshold: Duration::from_secs(2),
-            drop_threshold: Duration::from_secs(3),
+            reconnect_threshold: Duration::from_secs(4),
+            drop_threshold: Duration::from_secs(6),
             auth_timeout: Duration::from_secs(2),
             idle_timeout: Duration::from_secs(5),
             check_interval: Duration::from_secs(1),

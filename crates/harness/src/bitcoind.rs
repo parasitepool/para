@@ -115,41 +115,7 @@ minrelaytxfee=0.00001
             .stderr(Stdio::piped())
             .spawn()?;
 
-        let rpc_status = Command::new("bitcoin-cli")
-            .env("PATH", &expanded_path)
-            .args([
-                &format!("-conf={}", bitcoind_conf.display()),
-                "-rpcwait",
-                "-rpcwaittimeout=30",
-                "getblockchaininfo",
-            ])
-            .stderr(Stdio::null())
-            .stdout(Stdio::null())
-            .status()?;
-
-        if !rpc_status.success() {
-            let exited = handle.try_wait()?;
-            let stderr = handle
-                .stderr
-                .take()
-                .map(|mut s| {
-                    let mut buf = String::new();
-                    std::io::Read::read_to_string(&mut s, &mut buf).ok();
-                    buf
-                })
-                .unwrap_or_default();
-
-            let _ = handle.kill();
-            let _ = handle.wait();
-
-            if let Some(exit_status) = exited {
-                bail!("bitcoind exited early with {exit_status}.\nstderr:\n{stderr}");
-            } else {
-                bail!(
-                    "Failed to connect bitcoind RPC after 30 seconds (process still running).\nstderr:\n{stderr}"
-                );
-            }
-        }
+        Self::await_ready(&mut handle, &expanded_path, &bitcoind_conf, zmq_port)?;
 
         Ok(Self {
             datadir: Some(bitcoind_data_dir),
@@ -234,14 +200,34 @@ minrelaytxfee=0.00001
             .stderr(Stdio::piped())
             .spawn()?;
 
+        Self::await_ready(&mut handle, &expanded_path, &bitcoind_conf, zmq_port)?;
+
+        Ok(Self {
+            datadir: Some(bitcoind_data_dir),
+            node_socket: Some(node_socket_path),
+            handle: Some(handle),
+            network,
+            rpc_port,
+            zmq_port,
+            rpc_user,
+            rpc_password,
+            with_output,
+            _tempdir: Some(tempdir),
+        })
+    }
+
+    /// Wait for RPC to come up, then confirm the ZMQ publisher bound
+    fn await_ready(
+        handle: &mut Child,
+        expanded_path: &str,
+        bitcoind_conf: &Path,
+        zmq_port: u16,
+    ) -> Result {
+        let conf = format!("-conf={}", bitcoind_conf.display());
+
         let rpc_status = Command::new("bitcoin-cli")
-            .env("PATH", &expanded_path)
-            .args([
-                &format!("-conf={}", bitcoind_conf.display()),
-                "-rpcwait",
-                "-rpcwaittimeout=30",
-                "getblockchaininfo",
-            ])
+            .env("PATH", expanded_path)
+            .args([&conf, "-rpcwait", "-rpcwaittimeout=30", "getblockchaininfo"])
             .stderr(Stdio::null())
             .stdout(Stdio::null())
             .status()?;
@@ -270,18 +256,32 @@ minrelaytxfee=0.00001
             }
         }
 
-        Ok(Self {
-            datadir: Some(bitcoind_data_dir),
-            node_socket: Some(node_socket_path),
-            handle: Some(handle),
-            network,
-            rpc_port,
-            zmq_port,
-            rpc_user,
-            rpc_password,
-            with_output,
-            _tempdir: Some(tempdir),
-        })
+        let zmq = Command::new("bitcoin-cli")
+            .env("PATH", expanded_path)
+            .args([&conf, "getzmqnotifications"])
+            .stderr(Stdio::null())
+            .output()?;
+
+        let expected = format!("tcp://127.0.0.1:{zmq_port}");
+
+        let publishing = zmq.status.success()
+            && serde_json::from_slice::<Vec<serde_json::Value>>(&zmq.stdout)
+                .map(|notifications| {
+                    notifications
+                        .iter()
+                        .any(|n| n["type"] == "pubhashblock" && n["address"] == expected)
+                })
+                .unwrap_or(false);
+
+        if !publishing {
+            let _ = handle.kill();
+            let _ = handle.wait();
+            bail!(
+                "bitcoind is not publishing hashblock on {expected} (ZMQ bind failed, port collision?)"
+            );
+        }
+
+        Ok(())
     }
 
     pub fn generate_rpcauth(username: &str, password: &str, salt_overide: Option<&str>) -> String {
@@ -335,10 +335,9 @@ minrelaytxfee=0.00001
         Ok(())
     }
 
-    /// Submit a pre-mined block to advance the chain by one block.
-    /// This block was mined against the custom signet genesis (signetchallenge=51)
-    /// and is valid for any fresh instance of that chain.
-    pub async fn submit_premined_block(&self) -> Result<()> {
+    /// Submit a pre-mined block to advance the chain by one block
+    /// Returns `false` if the chain had already been advanced by a real block.
+    pub async fn submit_premined_block(&self) -> Result<bool> {
         const SIGNET_BLOCK_1: &str = "0020872af61eee3b63a380a477a063af32b2bbc97c9ff9f01f2c4225e973988108000000e809b8decabf0a7ea3347543028303e07e6a2cb3e48b8c92731674fc24259f2742b1cd69ae77031e7e0d030001020000000001010000000000000000000000000000000000000000000000000000000000000000ffffffff265100b0207a4b00000000000000577c70617261736974657c45b1cd69000000007c706172617cffffffff0200f2052a010000002200204ae81572f06e1b88fd5ced7a1a000945432e83e1551e6f721ee9c00b8cc332600000000000000000266a24aa21a9ede2f61c3f71d1defd3fa999dfa36953755c690689799962b48bebd836974e8cf90120000000000000000000000000000000000000000000000000000000000000000000000000";
 
         match self
@@ -346,15 +345,25 @@ minrelaytxfee=0.00001
             .call_raw::<serde_json::Value>("submitblock", &[json!(SIGNET_BLOCK_1)])
             .await
         {
-            Ok(result) => assert!(result.is_null(), "submitblock rejected: {result}"),
+            Ok(result) => {
+                if result.is_null() {
+                    return Ok(true);
+                }
+
+                // A real block may already exist at this height
+                let count = self.client()?.get_block_count().await?;
+                assert!(count > 0, "submitblock rejected: {result}");
+
+                Ok(false)
+            }
             Err(e) => {
                 // Check if the block was actually accepted despite the parse error
                 let count = self.client()?.get_block_count().await?;
                 assert!(count > 0, "submitblock failed and block not accepted: {e}");
+
+                Ok(true)
             }
         }
-
-        Ok(())
     }
 
     pub fn op_true_address(&self) -> Address {

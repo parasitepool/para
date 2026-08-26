@@ -79,26 +79,27 @@ async fn fetch(client: &Client, url: Url) -> Result<String> {
 #[derive(Debug)]
 struct Cached<T> {
     value: Option<T>,
-    last_updated: Instant,
+    last_updated: Option<Instant>,
 }
 
 impl<T: Clone> Cached<T> {
-    fn init(ttl: Duration) -> Self {
+    fn init() -> Self {
         Self {
             value: None,
-            last_updated: Instant::now() - ttl,
+            last_updated: None,
         }
     }
 
     fn new(value: Option<T>) -> Self {
         Self {
             value,
-            last_updated: Instant::now(),
+            last_updated: Some(Instant::now()),
         }
     }
 
     fn is_fresh(&self, ttl: Duration) -> bool {
-        self.last_updated.elapsed() < ttl
+        self.last_updated
+            .is_some_and(|last_updated| last_updated.elapsed() < ttl)
     }
 
     fn value(&self) -> Option<T> {
@@ -128,9 +129,9 @@ impl Cache {
             client,
             config: config.clone(),
             database,
-            pool_status: Mutex::new(Cached::init(config.ttl())),
+            pool_status: Mutex::new(Cached::init()),
             user_statuses: DashMap::new(),
-            users: Mutex::new(Cached::init(config.ttl())),
+            users: Mutex::new(Cached::init()),
             bestevers: DashMap::new(),
         }
     }
@@ -193,7 +194,7 @@ impl Cache {
         let cell = self
             .user_statuses
             .entry(address.clone())
-            .or_insert_with(|| Arc::new(Mutex::new(Cached::init(self.config.ttl()))))
+            .or_insert_with(|| Arc::new(Mutex::new(Cached::init())))
             .clone();
 
         let mut cached = cell.lock().await;

@@ -27,7 +27,7 @@ use {
     tempfile::TempDir,
     test_server::TestServer,
     to_args::ToArgs,
-    tokio::time::timeout,
+    tokio::time::timeout as async_timeout,
 };
 
 #[cfg(target_os = "linux")]
@@ -137,13 +137,102 @@ fn allocate_port() -> u16 {
         .port()
 }
 
+/// HTTP client for talking to spawned services
+#[allow(unused)]
+fn http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .unwrap()
+}
+
+#[allow(unused)]
+fn blocking_http_client() -> reqwest::blocking::Client {
+    reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .unwrap()
+}
+
+/// Continuously drain a child process pipe on a background thread
+#[allow(unused)]
+fn drain_pipe(pipe: Option<impl std::io::Read + Send + 'static>) -> Arc<std::sync::Mutex<Vec<u8>>> {
+    let buffer = Arc::new(std::sync::Mutex::new(Vec::new()));
+
+    if let Some(mut pipe) = pipe {
+        let buffer = buffer.clone();
+        thread::spawn(move || {
+            let mut chunk = [0u8; 8192];
+            loop {
+                match std::io::Read::read(&mut pipe, &mut chunk) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => buffer.lock().unwrap().extend_from_slice(&chunk[..n]),
+                }
+            }
+        });
+    }
+
+    buffer
+}
+
+#[allow(unused)]
+fn drained_output(buffer: &Arc<std::sync::Mutex<Vec<u8>>>) -> String {
+    // Let the drain thread catch up with the child's final output.
+    thread::sleep(Duration::from_millis(100));
+    String::from_utf8_lossy(&buffer.lock().unwrap()).into_owned()
+}
+
+/// Drain a spawned child's pipes
+#[cfg(target_os = "linux")]
+fn await_listener(child: &mut Child, port: u16, name: &str) {
+    const CONNECT_DEADLINE: Duration = Duration::from_secs(30);
+
+    drain_pipe(child.stdout.take());
+    let stderr = drain_pipe(child.stderr.take());
+
+    let started = Instant::now();
+    loop {
+        if let Ok(Some(status)) = child.try_wait() {
+            panic!(
+                "{name} exited during startup with {status}.\nstderr:\n{}",
+                drained_output(&stderr)
+            );
+        }
+
+        if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            return;
+        }
+
+        if started.elapsed() > CONNECT_DEADLINE {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!(
+                "{name} not reachable on port {port} within {CONNECT_DEADLINE:?}.\nstderr:\n{}",
+                drained_output(&stderr)
+            );
+        }
+
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
 #[cfg(target_os = "linux")]
 fn spawn_regtest() -> Bitcoind {
-    let tempdir = Arc::new(TempDir::new().unwrap());
-    let rpc_port = allocate_port();
-    let zmq_port = allocate_port();
+    for attempt in 0..3 {
+        let tempdir = Arc::new(TempDir::new().unwrap());
+        let rpc_port = allocate_port();
+        let zmq_port = allocate_port();
 
-    Bitcoind::spawn_no_listen(tempdir, rpc_port, zmq_port, false, Network::Regtest).unwrap()
+        match Bitcoind::spawn_no_listen(tempdir, rpc_port, zmq_port, false, Network::Regtest) {
+            Ok(bitcoind) => return bitcoind,
+            Err(e) if attempt < 2 => {
+                eprintln!("bitcoind spawn attempt {attempt} failed: {e}, retrying with new ports");
+                continue;
+            }
+            Err(e) => panic!("bitcoind failed to spawn after 3 attempts: {e}"),
+        }
+    }
+    unreachable!()
 }
 
 #[cfg(target_os = "linux")]
@@ -289,7 +378,7 @@ async fn wait_for_notify(
     events: &mut stratum::client::EventReceiver,
 ) -> (stratum::Notify, Difficulty) {
     let mut difficulty = Difficulty::from(1);
-    timeout(Duration::from_secs(30), async {
+    async_timeout(Duration::from_secs(30), async {
         loop {
             match events.recv().await.unwrap() {
                 stratum::client::Event::SetDifficulty(diff) => difficulty = diff,
@@ -318,6 +407,9 @@ async fn submit_share(
 }
 
 #[cfg(target_os = "linux")]
+const SHARES_IN_FLIGHT: usize = 8;
+
+#[cfg(target_os = "linux")]
 async fn mine_until_difficulty_increases(
     client: &stratum::client::Client,
     events: &mut stratum::client::EventReceiver,
@@ -343,13 +435,52 @@ async fn mine_until_difficulty_increases(
             initial_difficulty
         );
 
-        if submit_share(client, notify, enonce1, enonce2_size, initial_difficulty)
+        // Keep several shares in flight so round-trip latency doesn't bound the share rate
+        let submits = (0..SHARES_IN_FLIGHT)
+            .map(|_| submit_share(client, notify, enonce1, enonce2_size, initial_difficulty));
+
+        if futures::future::join_all(submits)
             .await
-            .is_ok()
+            .iter()
+            .any(|result| result.is_ok())
         {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
     }
+}
+
+/// Submit a share for the latest job, retry on stale
+#[cfg(target_os = "linux")]
+async fn submit_share_fresh(
+    client: &stratum::client::Client,
+    events: &mut stratum::client::EventReceiver,
+    mut notify: stratum::Notify,
+    enonce1: &Extranonce,
+    enonce2_size: usize,
+    mut difficulty: Difficulty,
+) -> Result<Duration, ClientError> {
+    for _ in 0..5 {
+        while let Some(Ok(event)) = events.try_recv() {
+            match event {
+                stratum::client::Event::Notify(n) => notify = n,
+                stratum::client::Event::SetDifficulty(d) => difficulty = d,
+                _ => {}
+            }
+        }
+
+        match submit_share(client, &notify, enonce1, enonce2_size, difficulty).await {
+            Err(ClientError::Stratum { response })
+                if response.error_code == StratumError::Stale as i32 =>
+            {
+                let (n, d) = wait_for_notify(events).await;
+                notify = n;
+                difficulty = d;
+            }
+            result => return result,
+        }
+    }
+
+    panic!("share still stale after retrying with fresh jobs");
 }
 
 #[cfg(target_os = "linux")]
@@ -357,7 +488,7 @@ async fn wait_for_job_update(
     events: &mut stratum::client::EventReceiver,
     old_job_id: JobId,
 ) -> stratum::Notify {
-    timeout(Duration::from_secs(30), async {
+    async_timeout(Duration::from_secs(30), async {
         loop {
             match events.recv().await.unwrap() {
                 stratum::client::Event::Notify(n) if n.job_id != old_job_id && !n.clean_jobs => {
@@ -376,7 +507,7 @@ async fn wait_for_new_block(
     events: &mut stratum::client::EventReceiver,
     old_job_id: JobId,
 ) -> stratum::Notify {
-    timeout(Duration::from_secs(90), async {
+    async_timeout(Duration::from_secs(90), async {
         loop {
             match events.recv().await.unwrap() {
                 stratum::client::Event::Notify(n) if n.job_id != old_job_id && n.clean_jobs => {

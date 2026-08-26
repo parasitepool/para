@@ -9,20 +9,35 @@ struct IsolatedBitcoind {
 
 impl IsolatedBitcoind {
     fn spawn() -> Self {
-        let tempdir = Arc::new(TempDir::new().unwrap());
-        let rpc_port = allocate_port();
-        let zmq_port = allocate_port();
+        for attempt in 0..3 {
+            let tempdir = Arc::new(TempDir::new().unwrap());
+            let rpc_port = allocate_port();
+            let zmq_port = allocate_port();
 
-        let bitcoind =
-            Bitcoind::spawn_no_listen(tempdir.clone(), rpc_port, zmq_port, false, Network::Signet)
-                .unwrap();
-
-        Self {
-            bitcoind,
-            tempdir,
-            rpc_port,
-            zmq_port,
+            match Bitcoind::spawn_no_listen(
+                tempdir.clone(),
+                rpc_port,
+                zmq_port,
+                false,
+                Network::Signet,
+            ) {
+                Ok(bitcoind) => {
+                    return Self {
+                        bitcoind,
+                        tempdir,
+                        rpc_port,
+                        zmq_port,
+                    };
+                }
+                Err(e) if attempt < 2 => {
+                    eprintln!(
+                        "bitcoind spawn attempt {attempt} failed: {e}, retrying with new ports"
+                    );
+                }
+                Err(e) => panic!("bitcoind failed to spawn after 3 attempts: {e}"),
+            }
         }
+        unreachable!()
     }
 
     fn shutdown(&mut self) {
@@ -42,7 +57,7 @@ impl IsolatedBitcoind {
 }
 
 async fn wait_for_exit(pool: &mut TestPool) {
-    timeout(Duration::from_secs(20), async {
+    async_timeout(Duration::from_secs(20), async {
         loop {
             match pool.try_wait() {
                 Ok(Some(_)) => break,

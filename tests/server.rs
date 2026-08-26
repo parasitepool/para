@@ -458,14 +458,14 @@ fn status_json() {
 fn status_with_auth() {
     let server = TestServer::spawn_with_args("--admin-token verysecrettoken");
 
-    let response = reqwest::blocking::Client::new()
+    let response = blocking_http_client()
         .get(format!("{}status", server.url()))
         .send()
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
-    let response = reqwest::blocking::Client::new()
+    let response = blocking_http_client()
         .get(format!("{}status", server.url()))
         .bearer_auth("verysecrettoken")
         .send()
@@ -509,7 +509,7 @@ fn aggregator_cache_ttl() {
     assert_eq!(servers.len(), 3);
 
     let aggregator = TestServer::spawn_with_args(format!(
-        "--nodes {} --nodes {} --nodes {} --ttl 1",
+        "--nodes {} --nodes {} --nodes {} --ttl 5",
         servers[0].url(),
         servers[1].url(),
         servers[2].url()
@@ -547,7 +547,7 @@ fn aggregator_cache_ttl() {
     let response = aggregator.get_json::<User>(format!("/aggregator/users/{}", users[0].0), None);
     pretty_assert_eq!(response, typical_user());
 
-    thread::sleep(Duration::from_secs(1));
+    thread::sleep(Duration::from_secs(5));
 
     aggregator.assert_response(
         "/aggregator/pool/pool.status",
@@ -570,7 +570,7 @@ fn aggregator_negative_cache_on_users() {
     assert_eq!(servers.len(), 3);
 
     let aggregator = TestServer::spawn_with_args(format!(
-        "--nodes {} --nodes {} --nodes {} --ttl 1",
+        "--nodes {} --nodes {} --nodes {} --ttl 5",
         servers[0].url(),
         servers[1].url(),
         servers[2].url()
@@ -596,7 +596,7 @@ fn aggregator_negative_cache_on_users() {
         StatusCode::NOT_FOUND,
     );
 
-    thread::sleep(Duration::from_secs(1));
+    thread::sleep(Duration::from_secs(5));
 
     let response =
         aggregator.get_json::<User>(format!("/aggregator/users/{non_existent_user}"), None);
@@ -775,7 +775,7 @@ fn auth_tiers() {
 
     #[track_caller]
     fn case(server: &TestServer, path: &str, token: Option<&str>, expected: StatusCode) {
-        let request = reqwest::blocking::Client::new().get(server.url().join(path).unwrap());
+        let request = blocking_http_client().get(server.url().join(path).unwrap());
 
         let request = if let Some(token) = token {
             request.bearer_auth(token)

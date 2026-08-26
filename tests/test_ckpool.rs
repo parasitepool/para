@@ -97,18 +97,8 @@ impl TestCkpool {
             .spawn()
             .unwrap();
 
-        for attempt in 0.. {
-            match TcpStream::connect(format!("127.0.0.1:{ckpool_port}")) {
-                Ok(_) => break,
-                Err(_) if attempt < 100 => {
-                    thread::sleep(Duration::from_millis(50));
-                }
-                Err(e) => panic!(
-                    "Failed to connect to ckpool after {} attempts: {}",
-                    attempt, e
-                ),
-            }
-        }
+        let mut ckpool_handle = ckpool_handle;
+        await_listener(&mut ckpool_handle, ckpool_port, "ckpool");
 
         let log_path = logdir.join("ckpool.log");
 

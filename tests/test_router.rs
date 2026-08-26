@@ -48,10 +48,32 @@ impl TestRouter {
         tempdir: Arc<TempDir>,
         probe_token: Option<&str>,
     ) -> Self {
+        let args = args.to_args();
+        for attempt in 0..3 {
+            match Self::try_launch(descriptor, bitcoind, &args, tempdir.clone(), probe_token) {
+                Ok(router) => return router,
+                Err(e) if attempt < 2 => {
+                    eprintln!(
+                        "router launch attempt {attempt} failed: {e}, retrying with new ports"
+                    );
+                }
+                Err(e) => panic!("router failed to launch after 3 attempts: {e}"),
+            }
+        }
+        unreachable!()
+    }
+
+    fn try_launch(
+        descriptor: &str,
+        bitcoind: &Bitcoind,
+        args: &[String],
+        tempdir: Arc<TempDir>,
+        probe_token: Option<&str>,
+    ) -> Result<Self, String> {
         let router_port = allocate_port();
         let http_port = allocate_port();
 
-        let router_handle = CommandBuilder::new(format!(
+        let mut router_handle = CommandBuilder::new(format!(
             "router \
                 --chain regtest \
                 --address 127.0.0.1 \
@@ -67,7 +89,7 @@ impl TestRouter {
             bitcoind.rpc_password,
             bitcoind.rpc_port,
             tempdir.path().to_str().unwrap(),
-            args.to_args().join(" ")
+            args.join(" ")
         ))
         .capture_stderr(true)
         .capture_stdout(true)
@@ -75,33 +97,56 @@ impl TestRouter {
         .integration_test(true)
         .spawn();
 
-        for attempt in 0.. {
-            match TcpStream::connect(format!("127.0.0.1:{http_port}")) {
-                Ok(_) => break,
-                Err(_) if attempt < 100 => {
-                    thread::sleep(Duration::from_millis(50));
-                }
-                Err(e) => panic!(
-                    "Failed to connect to router API after {} attempts: {}",
-                    attempt, e
-                ),
+        // Drain pipes so the router can't wedge on a full buffer
+        drain_pipe(router_handle.stdout.take());
+        let stderr = drain_pipe(router_handle.stderr.take());
+
+        const CONNECT_DEADLINE: Duration = Duration::from_secs(30);
+        const SYNC_DEADLINE: Duration = Duration::from_secs(120);
+
+        let started = Instant::now();
+        loop {
+            if let Ok(Some(status)) = router_handle.try_wait() {
+                return Err(format!(
+                    "router exited during startup with {status}.\nstderr:\n{}",
+                    drained_output(&stderr)
+                ));
             }
+
+            if TcpStream::connect(format!("127.0.0.1:{http_port}")).is_ok() {
+                break;
+            }
+
+            if started.elapsed() > CONNECT_DEADLINE {
+                let _ = router_handle.kill();
+                let _ = router_handle.wait();
+                return Err(format!(
+                    "router API not reachable within {CONNECT_DEADLINE:?}.\nstderr:\n{}",
+                    drained_output(&stderr)
+                ));
+            }
+
+            thread::sleep(Duration::from_millis(50));
         }
 
-        let router = Self {
-            router_handle: Some(router_handle),
-            router_port,
-            http_port,
-            tempdir,
-        };
+        let url = format!("http://127.0.0.1:{http_port}/api/router/status");
 
-        let url = format!("{}/api/router/status", router.api_endpoint());
+        let started = Instant::now();
+        loop {
+            if let Ok(Some(status)) = router_handle.try_wait() {
+                return Err(format!(
+                    "router exited while syncing wallet with {status}.\nstderr:\n{}",
+                    drained_output(&stderr)
+                ));
+            }
 
-        for attempt in 0.. {
             let url = url.clone();
             let probe_token = probe_token.map(str::to_string);
             let synced = thread::spawn(move || {
-                let client = reqwest::blocking::Client::new();
+                let client = reqwest::blocking::Client::builder()
+                    .timeout(Duration::from_secs(5))
+                    .build()
+                    .unwrap();
                 let mut request = client.get(url);
                 if let Some(token) = probe_token {
                     request = request.bearer_auth(token);
@@ -119,14 +164,24 @@ impl TestRouter {
                 break;
             }
 
-            if attempt >= 600 {
-                panic!("Router wallet did not sync within 60s");
+            if started.elapsed() > SYNC_DEADLINE {
+                let _ = router_handle.kill();
+                let _ = router_handle.wait();
+                panic!(
+                    "Router wallet did not sync within {SYNC_DEADLINE:?}.\nstderr:\n{}",
+                    drained_output(&stderr)
+                );
             }
 
             thread::sleep(Duration::from_millis(100));
         }
 
-        router
+        Ok(Self {
+            router_handle: Some(router_handle),
+            router_port,
+            http_port,
+            tempdir,
+        })
     }
 
     pub(crate) fn stratum_endpoint(&self) -> String {
@@ -138,7 +193,7 @@ impl TestRouter {
     }
 
     pub(crate) async fn get_status(&self) -> reqwest::Result<RouterStatus> {
-        reqwest::Client::new()
+        http_client()
             .get(format!("{}/api/router/status", self.api_endpoint()))
             .send()
             .await?
@@ -150,7 +205,7 @@ impl TestRouter {
         &self,
         order: &api::OrderRequest,
     ) -> reqwest::Result<reqwest::Response> {
-        reqwest::Client::new()
+        http_client()
             .post(format!("{}/api/router/order", self.api_endpoint()))
             .json(order)
             .send()
@@ -158,7 +213,7 @@ impl TestRouter {
     }
 
     pub(crate) async fn get_order(&self, id: u32) -> reqwest::Result<OrderDetail> {
-        reqwest::Client::new()
+        http_client()
             .get(format!("{}/api/router/order/{id}", self.api_endpoint()))
             .send()
             .await?
@@ -167,7 +222,7 @@ impl TestRouter {
     }
 
     pub(crate) async fn get_users(&self) -> reqwest::Result<Vec<UserSummary>> {
-        reqwest::Client::new()
+        http_client()
             .get(format!("{}/api/router/users", self.api_endpoint()))
             .send()
             .await?
@@ -177,7 +232,7 @@ impl TestRouter {
 
     pub(crate) async fn users_query(&self, query: &str) -> reqwest::Result<reqwest::Response> {
         let separator = if query.is_empty() { "" } else { "?" };
-        reqwest::Client::new()
+        http_client()
             .get(format!(
                 "{}/api/router/users{separator}{query}",
                 self.api_endpoint()
@@ -187,7 +242,7 @@ impl TestRouter {
     }
 
     pub(crate) async fn get_user(&self, address: &str) -> reqwest::Result<UserDetail> {
-        reqwest::Client::new()
+        http_client()
             .get(format!("{}/api/router/user/{address}", self.api_endpoint()))
             .send()
             .await?
@@ -203,7 +258,7 @@ impl TestRouter {
         if let Some(addr) = address {
             url.push_str(&format!("?address={addr}"));
         }
-        reqwest::Client::new().get(url).send().await?.json().await
+        http_client().get(url).send().await?.json().await
     }
 
     pub(crate) async fn list_orders_query(
@@ -211,7 +266,7 @@ impl TestRouter {
         query: &str,
     ) -> reqwest::Result<reqwest::Response> {
         let separator = if query.is_empty() { "" } else { "?" };
-        reqwest::Client::new()
+        http_client()
             .get(format!(
                 "{}/api/router/orders{separator}{query}",
                 self.api_endpoint()
@@ -221,7 +276,7 @@ impl TestRouter {
     }
 
     pub(crate) async fn cancel_order(&self, id: u32) -> reqwest::Result<reqwest::Response> {
-        reqwest::Client::new()
+        http_client()
             .post(format!(
                 "{}/api/router/order/{id}/cancel",
                 self.api_endpoint()
@@ -231,7 +286,7 @@ impl TestRouter {
     }
 
     pub(crate) async fn clear_order(&self, id: u32) -> reqwest::Result<reqwest::Response> {
-        reqwest::Client::new()
+        http_client()
             .post(format!(
                 "{}/api/router/order/{id}/clear",
                 self.api_endpoint()
@@ -245,7 +300,7 @@ impl TestRouter {
         id: u32,
         request: &serde_json::Value,
     ) -> reqwest::Result<reqwest::Response> {
-        reqwest::Client::new()
+        http_client()
             .post(format!(
                 "{}/api/router/order/{id}/refund",
                 self.api_endpoint()

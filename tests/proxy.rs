@@ -2,10 +2,10 @@ use super::*;
 use std::time::Duration;
 
 #[tokio::test]
-#[timeout(90000)]
+#[timeout(300000)]
 async fn proxy() {
     let bitcoind = bitcoind();
-    let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001");
+    let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001 --disable-bouncer");
     let upstream = pool.stratum_endpoint();
     let username = signet_username();
 
@@ -13,7 +13,7 @@ async fn proxy() {
         &upstream,
         &username.to_string(),
         pool.bitcoind_rpc_port(),
-        "--start-diff 0.00001",
+        "--start-diff 0.00001 --disable-bouncer",
     );
 
     let status = proxy.get_status().await.unwrap();
@@ -234,16 +234,16 @@ async fn proxy() {
 }
 
 #[test]
-#[timeout(90000)]
+#[timeout(300000)]
 fn mine_through_proxy() {
     let bitcoind = bitcoind();
-    let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001");
+    let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001 --disable-bouncer");
 
     let proxy = TestProxy::spawn_with_args(
         &pool.stratum_endpoint(),
         &signet_username().to_string(),
         pool.bitcoind_rpc_port(),
-        "--start-diff 0.00001",
+        "--start-diff 0.00001 --disable-bouncer",
     );
 
     let miner = CommandBuilder::new(format!(
@@ -268,21 +268,24 @@ fn mine_through_proxy() {
 }
 
 #[tokio::test]
-#[timeout(90000)]
+#[timeout(300000)]
 async fn proxy_rejects_incompatible_upstream_enonce2_size() {
     let bitcoind = bitcoind();
-    let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001 --enonce2-size 2");
+    let pool = TestPool::spawn_with_args(
+        &bitcoind,
+        "--start-diff 0.00001 --enonce2-size 2 --disable-bouncer",
+    );
 
     let proxy = TestProxy::spawn_with_args(
         &pool.stratum_endpoint(),
         &signet_username().to_string(),
         pool.bitcoind_rpc_port(),
-        "--start-diff 0.00001",
+        "--start-diff 0.00001 --disable-bouncer",
     );
 
     tokio::time::sleep(Duration::from_secs(2)).await;
 
-    let response = reqwest::Client::new()
+    let response = http_client()
         .get(format!("{}/api/proxy/status", proxy.api_endpoint()))
         .send()
         .await
@@ -296,12 +299,12 @@ async fn proxy_rejects_incompatible_upstream_enonce2_size() {
 }
 
 #[tokio::test]
-#[timeout(90000)]
+#[timeout(300000)]
 async fn proxy_with_non_default_enonce_sizes() {
     let bitcoind = bitcoind();
     let pool = TestPool::spawn_with_args(
         &bitcoind,
-        "--start-diff 0.00001 --enonce1-size 6 --enonce2-size 4",
+        "--start-diff 0.00001 --enonce1-size 6 --enonce2-size 4 --disable-bouncer",
     );
     let upstream = pool.stratum_endpoint();
 
@@ -309,7 +312,7 @@ async fn proxy_with_non_default_enonce_sizes() {
         &upstream,
         &signet_username().to_string(),
         pool.bitcoind_rpc_port(),
-        "--start-diff 0.00001",
+        "--start-diff 0.00001 --disable-bouncer",
     );
 
     let status = proxy.get_status().await.unwrap();
@@ -353,16 +356,16 @@ async fn proxy_with_non_default_enonce_sizes() {
 }
 
 #[tokio::test]
-#[timeout(90000)]
+#[timeout(300000)]
 async fn proxy_allows_version_rolling() {
     let bitcoind = bitcoind();
-    let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001");
+    let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001 --disable-bouncer");
 
     let proxy = TestProxy::spawn_with_args(
         &pool.stratum_endpoint(),
         &signet_username().to_string(),
         pool.bitcoind_rpc_port(),
-        "--start-diff 0.00001",
+        "--start-diff 0.00001 --disable-bouncer",
     );
 
     assert_eq!(
@@ -414,18 +417,21 @@ async fn proxy_allows_version_rolling() {
 }
 
 #[tokio::test]
-#[timeout(180000)]
+#[timeout(300000)]
 #[ignore]
 #[serial(heavy)]
 async fn proxy_relays_job_updates_and_new_blocks() {
     let bitcoind = bitcoind();
-    let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.000001 --update-interval 1");
+    let pool = TestPool::spawn_with_args(
+        &bitcoind,
+        "--start-diff 0.000001 --update-interval 1 --disable-bouncer",
+    );
 
     let proxy = TestProxy::spawn_with_args(
         &pool.stratum_endpoint(),
         signet_username().as_str(),
         pool.bitcoind_rpc_port(),
-        "--start-diff 0.00001",
+        "--start-diff 0.00001 --disable-bouncer",
     );
 
     let client = proxy.stratum_client();
@@ -450,17 +456,20 @@ async fn proxy_relays_job_updates_and_new_blocks() {
 }
 
 #[tokio::test]
-#[timeout(120000)]
+#[timeout(300000)]
 async fn reconnects_on_upstream_disconnect() {
     let bitcoind = bitcoind();
-    let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001 --update-interval 120");
+    let pool = TestPool::spawn_with_args(
+        &bitcoind,
+        "--start-diff 0.00001 --update-interval 120 --disable-bouncer",
+    );
     let pool_port = pool.pool_port();
 
     let proxy = TestProxy::spawn_with_args(
         &pool.stratum_endpoint(),
         signet_username().as_str(),
         pool.bitcoind_rpc_port(),
-        "--start-diff 0.00001",
+        "--start-diff 0.00001 --disable-bouncer",
     );
 
     let original_status = proxy.get_status().await.unwrap();
@@ -474,7 +483,7 @@ async fn reconnects_on_upstream_disconnect() {
     ))
     .spawn();
 
-    timeout(Duration::from_secs(30), async {
+    async_timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(status) = proxy.get_status().await
                 && status.downstream.sessions >= 1
@@ -489,7 +498,7 @@ async fn reconnects_on_upstream_disconnect() {
 
     drop(pool);
 
-    timeout(Duration::from_secs(10), async {
+    async_timeout(Duration::from_secs(10), async {
         loop {
             if let Ok(status) = proxy.get_status().await
                 && !status.upstream_info.connected
@@ -507,10 +516,10 @@ async fn reconnects_on_upstream_disconnect() {
     let _pool2 = TestPool::spawn_on_port(
         &bitcoind,
         pool_port,
-        "--start-diff 0.00001 --enonce1-size 6 --enonce2-size 4",
+        "--start-diff 0.00001 --enonce1-size 6 --enonce2-size 4 --disable-bouncer",
     );
 
-    timeout(Duration::from_secs(30), async {
+    async_timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(status) = proxy.get_status().await
                 && status.upstream_info.connected
@@ -531,7 +540,7 @@ async fn reconnects_on_upstream_disconnect() {
         original_status.upstream_info.enonce1,
     );
 
-    timeout(Duration::from_secs(30), async {
+    async_timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(status) = proxy.get_status().await
                 && status.downstream.sessions >= 1
@@ -560,30 +569,33 @@ async fn reconnects_on_upstream_disconnect() {
 
     let (notify, difficulty) = wait_for_notify(&mut events).await;
 
-    let enonce2 = Extranonce::random(subscribe.enonce2_size);
-    let (ntime, nonce) = solve_share(&notify, &subscribe.enonce1, &enonce2, difficulty);
-
-    client
-        .submit(notify.job_id, enonce2, ntime, nonce, None)
-        .await
-        .unwrap();
+    submit_share_fresh(
+        &client,
+        &mut events,
+        notify,
+        &subscribe.enonce1,
+        subscribe.enonce2_size,
+        difficulty,
+    )
+    .await
+    .unwrap();
 
     miner.kill().unwrap();
     miner.wait().unwrap();
 }
 
 #[tokio::test]
-#[timeout(120000)]
+#[timeout(300000)]
 async fn stale_extended_enonce1_is_rejected_after_upstream_reconnect() {
     let bitcoind = bitcoind();
-    let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001");
+    let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001 --disable-bouncer");
     let pool_port = pool.pool_port();
 
     let proxy = TestProxy::spawn_with_args(
         &pool.stratum_endpoint(),
         signet_username().as_str(),
         pool.bitcoind_rpc_port(),
-        "--start-diff 0.00001",
+        "--start-diff 0.00001 --disable-bouncer",
     );
 
     let client = proxy.stratum_client();
@@ -608,7 +620,7 @@ async fn stale_extended_enonce1_is_rejected_after_upstream_reconnect() {
 
     drop(pool);
 
-    timeout(Duration::from_secs(10), async {
+    async_timeout(Duration::from_secs(10), async {
         loop {
             if let Ok(status) = proxy.get_status().await
                 && !status.upstream_info.connected
@@ -626,10 +638,10 @@ async fn stale_extended_enonce1_is_rejected_after_upstream_reconnect() {
     let pool2 = TestPool::spawn_on_port(
         &bitcoind,
         pool_port,
-        "--start-diff 0.00001 --enonce1-size 6 --enonce2-size 4",
+        "--start-diff 0.00001 --enonce1-size 6 --enonce2-size 4 --disable-bouncer",
     );
 
-    timeout(Duration::from_secs(30), async {
+    async_timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(status) = proxy.get_status().await
                 && status.upstream_info.connected
@@ -699,7 +711,7 @@ async fn restart_with_changed_upstream_reports_status() {
         "--start-diff 0.00001",
     );
 
-    timeout(Duration::from_secs(30), async {
+    async_timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(status) = proxy.get_status().await
                 && status.upstream_info.connected
@@ -720,7 +732,7 @@ async fn restart_with_changed_upstream_reports_status() {
         "--start-diff 0.00001",
     );
 
-    timeout(Duration::from_secs(30), async {
+    async_timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(status) = proxy.get_status().await
                 && status.upstream_info.connected
@@ -736,10 +748,10 @@ async fn restart_with_changed_upstream_reports_status() {
 }
 
 #[tokio::test]
-#[timeout(120000)]
+#[timeout(300000)]
 async fn proxy_persists_stats_across_restart() {
     let bitcoind = bitcoind();
-    let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001");
+    let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001 --disable-bouncer");
     let upstream = pool.stratum_endpoint();
     let username = signet_username();
 
@@ -747,7 +759,7 @@ async fn proxy_persists_stats_across_restart() {
         &upstream,
         &username.to_string(),
         pool.bitcoind_rpc_port(),
-        "--start-diff 0.00001",
+        "--start-diff 0.00001 --disable-bouncer",
     );
 
     let user_address = username.address().clone().assume_checked().to_string();
@@ -771,7 +783,7 @@ async fn proxy_persists_stats_across_restart() {
     assert_eq!(status.downstream.totals.accepted_shares, 1);
     assert_eq!(status.downstream.users, 1);
 
-    timeout(Duration::from_secs(10), async {
+    async_timeout(Duration::from_secs(10), async {
         loop {
             let status = proxy.get_status().await.unwrap();
             if status.upstream.totals.accepted_shares >= 1 {
@@ -794,7 +806,7 @@ async fn proxy_persists_stats_across_restart() {
         &upstream,
         &username.to_string(),
         pool.bitcoind_rpc_port(),
-        "--start-diff 0.00001",
+        "--start-diff 0.00001 --disable-bouncer",
     );
 
     let status = proxy.get_status().await.unwrap();

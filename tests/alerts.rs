@@ -24,10 +24,10 @@ pub(crate) async fn listen_for_ntfy_messages(
     channel: &str,
     timeout_duration: Duration,
 ) -> Vec<NtfyMessage> {
-    let client = reqwest::Client::new();
+    let client = http_client();
     let url = format!("https://ntfy.sh/{}/json?poll=1&since=30s", channel);
 
-    let response = timeout(timeout_duration, client.get(&url).send())
+    let response = async_timeout(timeout_duration, client.get(&url).send())
         .await
         .unwrap()
         .unwrap();

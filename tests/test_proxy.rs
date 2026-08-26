@@ -59,18 +59,8 @@ impl TestProxy {
         .with_data_dir()
         .spawn_persistent();
 
-        for attempt in 0.. {
-            match TcpStream::connect(format!("127.0.0.1:{http_port}")) {
-                Ok(_) => break,
-                Err(_) if attempt < 100 => {
-                    thread::sleep(Duration::from_millis(50));
-                }
-                Err(e) => panic!(
-                    "Failed to connect to proxy API after {} attempts: {}",
-                    attempt, e
-                ),
-            }
-        }
+        let mut proxy_handle = proxy_handle;
+        await_listener(&mut proxy_handle, http_port, "proxy");
 
         Self {
             proxy_handle,
@@ -104,18 +94,8 @@ impl TestProxy {
         .with_data_dir()
         .spawn_persistent();
 
-        for attempt in 0.. {
-            match TcpStream::connect(format!("127.0.0.1:{http_port}")) {
-                Ok(_) => break,
-                Err(_) if attempt < 100 => {
-                    thread::sleep(Duration::from_millis(50));
-                }
-                Err(e) => panic!(
-                    "Failed to connect to proxy API after {} attempts: {}",
-                    attempt, e
-                ),
-            }
-        }
+        let mut proxy_handle = proxy_handle;
+        await_listener(&mut proxy_handle, http_port, "proxy");
 
         Self {
             proxy_handle,
@@ -148,7 +128,7 @@ impl TestProxy {
     }
 
     pub(crate) async fn get_status(&self) -> reqwest::Result<ProxyStatus> {
-        reqwest::Client::new()
+        http_client()
             .get(format!("{}/api/proxy/status", self.api_endpoint()))
             .send()
             .await?
@@ -157,7 +137,7 @@ impl TestProxy {
     }
 
     pub(crate) async fn get_system_status(&self) -> reqwest::Result<SystemStatus> {
-        reqwest::Client::new()
+        http_client()
             .get(format!("{}/api/system/status", self.api_endpoint()))
             .send()
             .await?
@@ -166,7 +146,7 @@ impl TestProxy {
     }
 
     pub(crate) async fn get_user(&self, address: &str) -> reqwest::Result<UserDetail> {
-        reqwest::Client::new()
+        http_client()
             .get(format!(
                 "{}/api/proxy/user/{}",
                 self.api_endpoint(),
@@ -179,7 +159,7 @@ impl TestProxy {
     }
 
     pub(crate) async fn get_bitcoin_status(&self) -> reqwest::Result<BitcoinStatus> {
-        reqwest::Client::new()
+        http_client()
             .get(format!("{}/api/bitcoin/status", self.api_endpoint()))
             .send()
             .await?

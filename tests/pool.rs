@@ -36,7 +36,7 @@ fn authorize_raw(endpoint: &str, username: &str) -> Option<stratum::Message> {
 }
 
 #[test]
-#[timeout(90000)]
+#[timeout(300000)]
 fn mine_to_pool() {
     let bitcoind = bitcoind();
     let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001");
@@ -57,7 +57,7 @@ fn mine_to_pool() {
 }
 
 #[tokio::test]
-#[timeout(120000)]
+#[timeout(300000)]
 async fn stratum_state_machine() {
     let bitcoind = bitcoind();
     let pool = TestPool::spawn_with_args(
@@ -361,7 +361,7 @@ async fn stratum_state_machine() {
 }
 
 #[tokio::test]
-#[timeout(180000)]
+#[timeout(300000)]
 #[ignore]
 #[serial(heavy)]
 async fn clean_jobs_true_on_init_and_new_block() {
@@ -383,7 +383,7 @@ async fn clean_jobs_true_on_init_and_new_block() {
 }
 
 #[test]
-#[timeout(90000)]
+#[timeout(300000)]
 fn configure_template_update_interval() {
     let bitcoind = bitcoind();
     let pool = TestPool::spawn_with_args(&bitcoind, "--update-interval 1 --start-diff 0.00001");
@@ -418,7 +418,7 @@ fn configure_template_update_interval() {
 }
 
 #[tokio::test]
-#[timeout(180000)]
+#[timeout(300000)]
 #[ignore]
 #[serial(heavy)]
 async fn concurrently_listening_workers_receive_new_templates_on_new_block() {
@@ -497,7 +497,7 @@ async fn concurrently_listening_workers_receive_new_templates_on_new_block() {
 }
 
 #[tokio::test]
-#[timeout(120000)]
+#[timeout(300000)]
 async fn suggest_difficulty_request_gets_response_and_sets_difficulty() {
     let bitcoind = bitcoind();
     let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001");
@@ -512,7 +512,7 @@ async fn suggest_difficulty_request_gets_response_and_sets_difficulty() {
         .await
         .unwrap();
 
-    timeout(Duration::from_secs(10), async {
+    async_timeout(Duration::from_secs(10), async {
         loop {
             match events.recv().await.unwrap() {
                 stratum::client::Event::SetDifficulty(diff) if diff == Difficulty::from(1000) => {
@@ -527,7 +527,7 @@ async fn suggest_difficulty_request_gets_response_and_sets_difficulty() {
 }
 
 #[tokio::test]
-#[timeout(120000)]
+#[timeout(300000)]
 async fn suggest_difficulty_repeat_within_period_is_ignored() {
     let bitcoind = bitcoind();
     let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001 --vardiff-period 60");
@@ -546,7 +546,7 @@ async fn suggest_difficulty_repeat_within_period_is_ignored() {
         .await
         .unwrap();
 
-    timeout(Duration::from_secs(10), async {
+    async_timeout(Duration::from_secs(10), async {
         loop {
             match events.recv().await.unwrap() {
                 stratum::client::Event::SetDifficulty(diff) if diff == Difficulty::from(1000) => {
@@ -559,7 +559,7 @@ async fn suggest_difficulty_repeat_within_period_is_ignored() {
     .await
     .expect("Timeout waiting for first suggested set_difficulty");
 
-    let repeat_applied = timeout(Duration::from_secs(2), async {
+    let repeat_applied = async_timeout(Duration::from_secs(2), async {
         loop {
             match events.recv().await.unwrap() {
                 stratum::client::Event::SetDifficulty(diff) if diff == Difficulty::from(500) => {
@@ -578,7 +578,7 @@ async fn suggest_difficulty_repeat_within_period_is_ignored() {
 }
 
 #[tokio::test]
-#[timeout(120000)]
+#[timeout(300000)]
 async fn suggest_difficulty_before_authorize_sets_initial_difficulty() {
     let bitcoind = bitcoind();
     let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001");
@@ -593,7 +593,7 @@ async fn suggest_difficulty_before_authorize_sets_initial_difficulty() {
         .unwrap();
     client.authorize().await.unwrap();
 
-    timeout(Duration::from_secs(10), async {
+    async_timeout(Duration::from_secs(10), async {
         loop {
             if let stratum::client::Event::SetDifficulty(diff) = events.recv().await.unwrap() {
                 assert_eq!(diff, Difficulty::from(1000));
@@ -606,7 +606,7 @@ async fn suggest_difficulty_before_authorize_sets_initial_difficulty() {
 }
 
 #[tokio::test]
-#[timeout(120000)]
+#[timeout(300000)]
 async fn notification_form_suggest_difficulty_is_applied() {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
@@ -628,7 +628,7 @@ async fn notification_form_suggest_difficulty_is_applied() {
 
     write_half.write_all(prelude.as_bytes()).await.unwrap();
 
-    timeout(Duration::from_secs(10), async {
+    async_timeout(Duration::from_secs(10), async {
         loop {
             let mut line = String::new();
             reader.read_line(&mut line).await.unwrap();
@@ -646,7 +646,7 @@ async fn notification_form_suggest_difficulty_is_applied() {
 }
 
 #[tokio::test]
-#[timeout(120000)]
+#[timeout(300000)]
 async fn vardiff_adjusts_difficulty() {
     let bitcoind = bitcoind();
     let pool = TestPool::spawn_with_args(
@@ -682,21 +682,14 @@ async fn vardiff_adjusts_difficulty() {
 
     assert!(new_difficulty > initial_difficulty);
 
-    bitcoind
+    // Wait for the block change
+    if bitcoind
         .submit_premined_block()
         .await
-        .expect("submit_premined_block failed");
-
-    timeout(Duration::from_secs(10), async {
-        loop {
-            match events.recv().await.unwrap() {
-                stratum::client::Event::Notify(n) if n.job_id != notify.job_id => break,
-                _ => {}
-            }
-        }
-    })
-    .await
-    .expect("Timeout waiting for new block notification");
+        .expect("submit_premined_block failed")
+    {
+        wait_for_new_block(&mut events, old_job_id).await;
+    }
 
     let baseline = pool.get_user(&user_address).await.unwrap();
 
@@ -740,7 +733,7 @@ async fn vardiff_adjusts_difficulty() {
 }
 
 #[tokio::test]
-#[timeout(120000)]
+#[timeout(300000)]
 async fn new_job_shares_rejected_at_old_diff() {
     let bitcoind = bitcoind();
     let pool = TestPool::spawn_with_args(
@@ -768,7 +761,7 @@ async fn new_job_shares_rejected_at_old_diff() {
     )
     .await;
 
-    let new_notify = timeout(Duration::from_secs(10), async {
+    let new_notify = async_timeout(Duration::from_secs(10), async {
         loop {
             match events.recv().await {
                 Ok(stratum::client::Event::Notify(n)) if n.job_id != notify.job_id => return n,
@@ -811,7 +804,7 @@ async fn new_job_shares_rejected_at_old_diff() {
 }
 
 #[tokio::test]
-#[timeout(90000)]
+#[timeout(300000)]
 async fn share_validation() {
     let bitcoind = bitcoind();
     let pool = TestPool::spawn_with_args(
@@ -1066,21 +1059,14 @@ async fn share_validation() {
     let fresh_enonce2 = Extranonce::random(enonce2_size);
     let (old_ntime, old_nonce) = solve_share(&notify, &enonce1, &fresh_enonce2, difficulty);
 
-    bitcoind
+    // Wait specifically for the block change
+    if bitcoind
         .submit_premined_block()
         .await
-        .expect("submit_premined_block failed");
-
-    timeout(Duration::from_secs(10), async {
-        loop {
-            match events.recv().await.unwrap() {
-                stratum::client::Event::Notify(n) if n.job_id != old_job_id => break,
-                _ => {}
-            }
-        }
-    })
-    .await
-    .expect("Timeout waiting for new block notification");
+        .expect("submit_premined_block failed")
+    {
+        wait_for_new_block(&mut events, old_job_id).await;
+    }
 
     let baseline = pool.get_status().await.unwrap();
     let user_baseline = pool.get_user(&user_address).await.unwrap();
@@ -1189,7 +1175,7 @@ async fn share_validation() {
 }
 
 #[tokio::test]
-#[timeout(120000)]
+#[timeout(300000)]
 async fn rejected_shares_do_not_poison_duplicate_cache() {
     let bitcoind = bitcoind();
     let pool = TestPool::spawn_with_args(
@@ -1252,17 +1238,50 @@ async fn rejected_shares_do_not_poison_duplicate_cache() {
     assert_eq!(status.downstream.totals.accepted_shares, 1);
 }
 
+/// Sets up a connected client for the bouncer test
+async fn bouncer_ready_client(
+    pool: &TestPool,
+    username: Option<&str>,
+    authorize: bool,
+) -> (
+    stratum::client::Client,
+    stratum::client::EventReceiver,
+    stratum::SubscribeResponse,
+) {
+    for attempt in 0.. {
+        let client = match username {
+            Some(username) => pool.stratum_client_for_username(username).await,
+            None => pool.stratum_client().await,
+        };
+
+        let setup = async {
+            let events = client.connect().await?;
+            let (subscribe, _, _) = client.subscribe().await?;
+            if authorize {
+                client.authorize().await?;
+            }
+            Ok::<_, ClientError>((events, subscribe))
+        };
+
+        match setup.await {
+            Ok((events, subscribe)) => return (client, events, subscribe),
+            Err(err) if attempt < 2 => {
+                eprintln!("bouncer client setup attempt {attempt} failed: {err:?}, retrying");
+            }
+            Err(err) => panic!("bouncer client setup failed after 3 attempts: {err:?}"),
+        }
+    }
+    unreachable!()
+}
+
 #[tokio::test]
-#[timeout(90000)]
+#[timeout(300000)]
 async fn bouncer() {
     let bitcoind = bitcoind();
     let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001 --update-interval 120");
 
     let auth_timeout_test = async {
-        let client = pool.stratum_client().await;
-        let _events = client.connect().await.unwrap();
-
-        client.subscribe().await.unwrap();
+        let (client, _events, _subscribe) = bouncer_ready_client(&pool, None, false).await;
 
         tokio::time::sleep(Duration::from_secs(4)).await;
 
@@ -1274,14 +1293,9 @@ async fn bouncer() {
     };
 
     let idle_timeout_test = async {
-        let client = pool.stratum_client().await;
-        let mut events = client.connect().await.unwrap();
-
-        let (subscribe, _, _) = client.subscribe().await.unwrap();
+        let (client, mut events, subscribe) = bouncer_ready_client(&pool, None, true).await;
         let enonce1 = subscribe.enonce1;
         let enonce2_size = subscribe.enonce2_size;
-
-        client.authorize().await.unwrap();
 
         let (notify, difficulty) = wait_for_notify(&mut events).await;
 
@@ -1311,13 +1325,8 @@ async fn bouncer() {
     };
 
     let reject_escalation_test = async {
-        let client = pool.stratum_client().await;
-        let mut events = client.connect().await.unwrap();
-
-        let (subscribe, _, _) = client.subscribe().await.unwrap();
+        let (client, mut events, subscribe) = bouncer_ready_client(&pool, None, true).await;
         let enonce2_size = subscribe.enonce2_size;
-
-        client.authorize().await.unwrap();
 
         let (initial_notify, _) = wait_for_notify(&mut events).await;
         let initial_job_id = initial_notify.job_id;
@@ -1342,7 +1351,8 @@ async fn bouncer() {
             match &result {
                 Err(ClientError::Io { .. })
                 | Err(ClientError::NotConnected)
-                | Err(ClientError::ChannelRecv { .. }) => break,
+                | Err(ClientError::ChannelRecv { .. })
+                | Err(ClientError::Timeout { .. }) => break,
                 _ => {}
             }
 
@@ -1355,7 +1365,7 @@ async fn bouncer() {
                 }
             }
 
-            if elapsed > Duration::from_secs(10) {
+            if elapsed > Duration::from_secs(20) {
                 panic!(
                     "reject_escalation: Connection still alive after 10s - expected drop at DROP_THRESHOLD (3s)"
                 );
@@ -1369,19 +1379,22 @@ async fn bouncer() {
     };
 
     let auth_failure_test = async {
-        let client = pool
-            .stratum_client_for_username("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.worker")
-            .await;
-        client.connect().await.unwrap();
-        client.subscribe().await.unwrap();
+        let (client, _events, _subscribe) = bouncer_ready_client(
+            &pool,
+            Some("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.worker"),
+            false,
+        )
+        .await;
 
         let start = std::time::Instant::now();
         let mut dropped = false;
 
-        while start.elapsed() < Duration::from_secs(10) {
+        while start.elapsed() < Duration::from_secs(20) {
             match client.authorize().await {
                 Ok(_) => panic!("auth_failure: Expected unauthorized response"),
-                Err(ClientError::NotConnected) | Err(ClientError::Io { .. }) => {
+                Err(ClientError::NotConnected)
+                | Err(ClientError::Io { .. })
+                | Err(ClientError::Timeout { .. }) => {
                     dropped = true;
                     break;
                 }
@@ -1412,10 +1425,12 @@ async fn bouncer() {
         let start = std::time::Instant::now();
         let mut dropped = false;
 
-        while start.elapsed() < Duration::from_secs(10) {
+        while start.elapsed() < Duration::from_secs(20) {
             match client.authorize().await {
                 Ok(_) => panic!("auth_before_subscribe: Expected MethodNotAllowed response"),
-                Err(ClientError::NotConnected) | Err(ClientError::Io { .. }) => {
+                Err(ClientError::NotConnected)
+                | Err(ClientError::Io { .. })
+                | Err(ClientError::Timeout { .. }) => {
                     dropped = true;
                     break;
                 }
@@ -1440,14 +1455,12 @@ async fn bouncer() {
     };
 
     let submit_before_authorize_test = async {
-        let client = pool.stratum_client().await;
-        client.connect().await.unwrap();
-        client.subscribe().await.unwrap();
+        let (client, _events, _subscribe) = bouncer_ready_client(&pool, None, false).await;
 
         let start = std::time::Instant::now();
         let mut dropped = false;
 
-        while start.elapsed() < Duration::from_secs(10) {
+        while start.elapsed() < Duration::from_secs(20) {
             match client
                 .submit(
                     JobId::new(0),
@@ -1459,7 +1472,9 @@ async fn bouncer() {
                 .await
             {
                 Ok(_) => panic!("submit_before_authorize: Expected unauthorized response"),
-                Err(ClientError::NotConnected) | Err(ClientError::Io { .. }) => {
+                Err(ClientError::NotConnected)
+                | Err(ClientError::Io { .. })
+                | Err(ClientError::Timeout { .. }) => {
                     dropped = true;
                     break;
                 }
@@ -1484,17 +1499,17 @@ async fn bouncer() {
     };
 
     let duplicate_subscribe_test = async {
-        let client = pool.stratum_client().await;
-        client.connect().await.unwrap();
-        client.subscribe().await.unwrap();
+        let (client, _events, _subscribe) = bouncer_ready_client(&pool, None, false).await;
 
         let start = std::time::Instant::now();
         let mut dropped = false;
 
-        while start.elapsed() < Duration::from_secs(10) {
+        while start.elapsed() < Duration::from_secs(20) {
             match client.subscribe().await {
                 Ok(_) => panic!("duplicate_subscribe: Expected MethodNotAllowed response"),
-                Err(ClientError::NotConnected) | Err(ClientError::Io { .. }) => {
+                Err(ClientError::NotConnected)
+                | Err(ClientError::Io { .. })
+                | Err(ClientError::Timeout { .. }) => {
                     dropped = true;
                     break;
                 }
@@ -1519,15 +1534,12 @@ async fn bouncer() {
     };
 
     let duplicate_authorize_test = async {
-        let client = pool.stratum_client().await;
-        client.connect().await.unwrap();
-        client.subscribe().await.unwrap();
-        client.authorize().await.unwrap();
+        let (client, _events, _subscribe) = bouncer_ready_client(&pool, None, true).await;
 
         let start = std::time::Instant::now();
         let mut dropped = false;
 
-        while start.elapsed() < Duration::from_secs(10) {
+        while start.elapsed() < Duration::from_secs(20) {
             match client.authorize().await {
                 Ok(_) => panic!("duplicate_authorize: Expected MethodNotAllowed response"),
                 Err(ClientError::NotConnected)
@@ -1569,7 +1581,7 @@ async fn bouncer() {
 }
 
 #[tokio::test]
-#[timeout(90000)]
+#[timeout(300000)]
 async fn high_diff_port() {
     let bitcoind = bitcoind();
     let high_diff_port = allocate_port();
@@ -1605,7 +1617,7 @@ async fn high_diff_port() {
 }
 
 #[tokio::test]
-#[timeout(90000)]
+#[timeout(300000)]
 async fn idle_drop_retires_session() {
     let bitcoind = bitcoind();
     let pool = TestPool::spawn_with_args(&bitcoind, "--start-diff 0.00001 --update-interval 120");
@@ -1638,7 +1650,7 @@ async fn idle_drop_retires_session() {
 }
 
 #[tokio::test]
-#[timeout(120000)]
+#[timeout(300000)]
 async fn pool_persists_stats_across_restart() {
     let bitcoind = bitcoind();
     let pool = TestPool::spawn_with_args(

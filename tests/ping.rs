@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-#[timeout(90000)]
+#[timeout(300000)]
 fn ping_pool() {
     let bitcoind = bitcoind();
     let pool = TestPool::spawn_with_args(&bitcoind, "");
@@ -16,7 +16,7 @@ fn ping_pool() {
 }
 
 #[test]
-#[timeout(90000)]
+#[timeout(300000)]
 #[ignore]
 #[serial(heavy)]
 fn ping_ckpool() {

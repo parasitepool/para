@@ -1,7 +1,7 @@
 use {super::*, para::subcommand::probe::Output};
 
 #[test]
-#[timeout(90000)]
+#[timeout(300000)]
 #[ignore]
 #[serial(heavy)]
 fn probe_with_ckpool() {
@@ -104,7 +104,7 @@ async fn partial_report_on_stalled_server() {
 }
 
 #[tokio::test]
-#[timeout(90000)]
+#[timeout(300000)]
 #[ignore]
 #[serial(heavy)]
 async fn probe_watch_with_pool() {

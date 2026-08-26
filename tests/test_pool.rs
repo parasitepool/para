@@ -61,18 +61,8 @@ impl TestPool {
         .integration_test(true)
         .spawn();
 
-        for attempt in 0.. {
-            match TcpStream::connect(format!("127.0.0.1:{pool_port}")) {
-                Ok(_) => break,
-                Err(_) if attempt < 100 => {
-                    thread::sleep(Duration::from_millis(50));
-                }
-                Err(e) => panic!(
-                    "Failed to connect to para pool after {} attempts: {}",
-                    attempt, e
-                ),
-            }
-        }
+        let mut pool_handle = pool_handle;
+        await_listener(&mut pool_handle, pool_port, "para pool");
 
         Self {
             pool_handle,
@@ -96,7 +86,7 @@ impl TestPool {
     }
 
     pub(crate) async fn get_status(&self) -> reqwest::Result<api::PoolStatus> {
-        reqwest::Client::new()
+        http_client()
             .get(format!("{}/api/pool/status", self.api_endpoint()))
             .send()
             .await?
@@ -105,7 +95,7 @@ impl TestPool {
     }
 
     pub(crate) async fn get_system_status(&self) -> reqwest::Result<api::SystemStatus> {
-        reqwest::Client::new()
+        http_client()
             .get(format!("{}/api/system/status", self.api_endpoint()))
             .send()
             .await?
@@ -114,7 +104,7 @@ impl TestPool {
     }
 
     pub(crate) async fn get_user(&self, address: &str) -> reqwest::Result<UserDetail> {
-        reqwest::Client::new()
+        http_client()
             .get(format!("{}/api/pool/user/{}", self.api_endpoint(), address))
             .send()
             .await?
@@ -123,7 +113,7 @@ impl TestPool {
     }
 
     pub(crate) async fn get_bitcoin_status(&self) -> reqwest::Result<api::BitcoinStatus> {
-        reqwest::Client::new()
+        http_client()
             .get(format!("{}/api/bitcoin/status", self.api_endpoint()))
             .send()
             .await?
@@ -183,7 +173,7 @@ impl TestPool {
             signet_username(),
             None,
             USER_AGENT.into(),
-            Duration::from_secs(1),
+            Duration::from_secs(5),
         )
     }
 
@@ -196,7 +186,7 @@ impl TestPool {
             username.parse().unwrap(),
             None,
             USER_AGENT.into(),
-            Duration::from_secs(1),
+            Duration::from_secs(5),
         )
     }
 

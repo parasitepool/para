@@ -741,7 +741,7 @@ async fn aggregator_blockheight_returns_minimum() {
     let aggregator_db_url = aggregator.database_url().unwrap();
     setup_test_schema(aggregator_db_url.clone()).await.unwrap();
 
-    let client = reqwest::Client::new();
+    let client = http_client();
     let response = client
         .get(
             aggregator
@@ -1379,7 +1379,7 @@ async fn auth_tiers_with_db() {
         .unwrap();
 
     async fn case(server: &TestServer, path: &str, token: &str, expected: StatusCode) {
-        let response = reqwest::Client::new()
+        let response = http_client()
             .get(server.url().join(path).unwrap())
             .bearer_auth(token)
             .send()

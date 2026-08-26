@@ -12,3 +12,11 @@ logs
 target
 .idea
 .hermit
+
+# Runtime state and secrets
+acme-cache
+*.redb
+current_id.txt
+
+# Installer download artifact
+bitcoin.tar.gz

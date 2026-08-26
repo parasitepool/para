@@ -141,7 +141,7 @@ async fn current_hash_price(router: &TestRouter) -> HashPrice {
 }
 
 #[tokio::test]
-#[timeout(120000)]
+#[timeout(300000)]
 async fn router_auth_tiers() {
     let bitcoind = spawn_regtest();
     let descriptor = generate_descriptor();
@@ -153,7 +153,7 @@ async fn router_auth_tiers() {
         Some("admin"),
     );
 
-    let client = reqwest::Client::new();
+    let client = http_client();
     let status_url = format!("{}/api/router/status", router.api_endpoint());
     let users_url = format!("{}/api/router/users", router.api_endpoint());
     let system_url = format!("{}/api/system/status", router.api_endpoint());
@@ -369,7 +369,7 @@ async fn add_and_activate_order(
 
     pay_address(wallet_bitcoind, funding_descriptor, &address, amount).await;
 
-    timeout(Duration::from_secs(30), async {
+    async_timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(orders) = router.list_orders(None).await
                 && orders
@@ -388,7 +388,7 @@ async fn add_and_activate_order(
 }
 
 #[tokio::test]
-#[timeout(120000)]
+#[timeout(300000)]
 async fn router() {
     let pool_bitcoind = bitcoind();
     let wallet_bitcoind = spawn_regtest();
@@ -449,7 +449,7 @@ async fn router() {
         );
     }
 
-    timeout(Duration::from_secs(30), async {
+    async_timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(status) = router.get_status().await
                 && status.routing.bucket_order_count == 2
@@ -513,7 +513,7 @@ async fn router() {
 
     drop(pool_a);
 
-    timeout(Duration::from_secs(30), async {
+    async_timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(status) = router.get_status().await
                 && status.downstream.sessions >= 3
@@ -531,7 +531,7 @@ async fn router() {
 
     drop(pool_b);
 
-    timeout(Duration::from_secs(30), async {
+    async_timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(status) = router.get_status().await
                 && status.downstream.sessions == 0
@@ -551,14 +551,14 @@ async fn router() {
 }
 
 #[tokio::test]
-#[timeout(120000)]
+#[timeout(300000)]
 async fn add_order_without_hashdays_rejected() {
     let wallet_bitcoind = spawn_regtest();
     let descriptor = generate_descriptor();
 
     let router = TestRouter::spawn(&descriptor, &wallet_bitcoind, "--start-diff 0.00001");
 
-    let response = reqwest::Client::new()
+    let response = http_client()
         .post(format!("{}/api/router/order", router.api_endpoint()))
         .json(&json!({
             "upstream_target": {
@@ -575,7 +575,7 @@ async fn add_order_without_hashdays_rejected() {
 }
 
 #[tokio::test]
-#[timeout(120000)]
+#[timeout(300000)]
 async fn add_order_with_zero_hashdays_rejected() {
     let wallet_bitcoind = spawn_regtest();
     let descriptor = generate_descriptor();
@@ -598,7 +598,7 @@ async fn add_order_with_zero_hashdays_rejected() {
 }
 
 #[tokio::test]
-#[timeout(120000)]
+#[timeout(300000)]
 async fn add_order_price_overflow_rejected() {
     let wallet_bitcoind = spawn_regtest();
     let descriptor = generate_descriptor();
@@ -621,7 +621,7 @@ async fn add_order_price_overflow_rejected() {
 }
 
 #[tokio::test]
-#[timeout(120000)]
+#[timeout(300000)]
 async fn add_order_rejects_price_below_minimum() {
     let wallet_bitcoind = spawn_regtest();
     let descriptor = generate_descriptor();
@@ -672,7 +672,7 @@ async fn add_order_rejects_price_below_minimum() {
 }
 
 #[tokio::test]
-#[timeout(120000)]
+#[timeout(300000)]
 async fn order_detail() {
     let wallet_bitcoind = spawn_regtest();
     let descriptor = generate_descriptor();
@@ -713,7 +713,7 @@ async fn order_detail() {
 }
 
 #[tokio::test]
-#[timeout(120000)]
+#[timeout(300000)]
 async fn order_activates_after_payment_output_is_spent_before_confirmation() {
     let pool_bitcoind = bitcoind();
     let wallet_bitcoind = spawn_regtest();
@@ -746,7 +746,7 @@ async fn order_activates_after_payment_output_is_spent_before_confirmation() {
             .await;
     assert_in_mempool(&wallet_bitcoind, parent_txid).await;
 
-    timeout(Duration::from_secs(30), async {
+    async_timeout(Duration::from_secs(30), async {
         loop {
             let detail = router.get_order(id).await;
             let status = router.get_status().await;
@@ -784,7 +784,7 @@ async fn order_activates_after_payment_output_is_spent_before_confirmation() {
 
     generate_to_address(&wallet_bitcoind, 1, &funding_address).await;
 
-    timeout(Duration::from_secs(30), async {
+    async_timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(detail) = router.get_order(id).await
                 && detail.status == OrderStatus::Active
@@ -804,7 +804,7 @@ async fn order_activates_after_payment_output_is_spent_before_confirmation() {
     ))
     .spawn();
 
-    timeout(Duration::from_secs(60), async {
+    async_timeout(Duration::from_secs(60), async {
         loop {
             if let Ok(detail) = router.get_order(id).await
                 && (detail.downstream.accepted_shares > 0
@@ -823,7 +823,7 @@ async fn order_activates_after_payment_output_is_spent_before_confirmation() {
 }
 
 #[tokio::test]
-#[timeout(120000)]
+#[timeout(300000)]
 async fn orders() {
     let pool_bitcoind = bitcoind();
     let wallet_bitcoind = spawn_regtest();
@@ -899,7 +899,7 @@ async fn orders() {
 }
 
 #[tokio::test]
-#[timeout(120000)]
+#[timeout(300000)]
 async fn cancelled_order_stays_cancelled_during_activation() {
     let wallet_bitcoind = spawn_regtest();
     let descriptor = generate_descriptor();
@@ -933,7 +933,7 @@ async fn cancelled_order_stays_cancelled_during_activation() {
 
     pay_address(&wallet_bitcoind, &funding_descriptor, &address, amount).await;
 
-    timeout(Duration::from_secs(30), accepted_rx.recv())
+    async_timeout(Duration::from_secs(30), accepted_rx.recv())
         .await
         .expect("Timeout waiting for activation connection")
         .expect("stalled upstream should report activation connection");
@@ -955,7 +955,7 @@ async fn cancelled_order_stays_cancelled_during_activation() {
 }
 
 async fn wait_for_status(router: &TestRouter, id: u32, expected: OrderStatus) {
-    timeout(Duration::from_secs(60), async {
+    async_timeout(Duration::from_secs(60), async {
         loop {
             if let Ok(order) = router.get_order(id).await
                 && order.status == expected
@@ -970,7 +970,7 @@ async fn wait_for_status(router: &TestRouter, id: u32, expected: OrderStatus) {
 }
 
 async fn wait_for_review(router: &TestRouter, id: u32, expected: Review) {
-    timeout(Duration::from_secs(60), async {
+    async_timeout(Duration::from_secs(60), async {
         loop {
             if let Ok(order) = router.get_order(id).await
                 && order.review == expected
@@ -985,7 +985,7 @@ async fn wait_for_review(router: &TestRouter, id: u32, expected: Review) {
 }
 
 #[tokio::test]
-#[timeout(120000)]
+#[timeout(300000)]
 async fn late_payment_flag_is_cleared_and_survives_restart() {
     let bitcoind = spawn_regtest();
     let descriptor = generate_descriptor();
@@ -1034,7 +1034,7 @@ struct RefundResponse {
 }
 
 #[tokio::test]
-#[timeout(120000)]
+#[timeout(300000)]
 async fn refund_order_builds_unsigned_psbt() {
     let bitcoind = spawn_regtest();
     let descriptor = generate_descriptor();
@@ -1055,7 +1055,7 @@ async fn refund_order_builds_unsigned_psbt() {
 
     pay_address(&bitcoind, &funding_descriptor, &address, amount).await;
 
-    let response = timeout(Duration::from_secs(30), async {
+    let response = async_timeout(Duration::from_secs(30), async {
         loop {
             let response = router
                 .refund_order(id, &serde_json::json!({}))
@@ -1110,7 +1110,7 @@ async fn refund_order_builds_unsigned_psbt() {
 }
 
 #[tokio::test]
-#[timeout(120000)]
+#[timeout(300000)]
 async fn order_survives_upstream_bounce_and_drops_sessions() {
     let pool_bitcoind = bitcoind();
     let wallet_bitcoind = spawn_regtest();
@@ -1148,7 +1148,7 @@ async fn order_survives_upstream_bounce_and_drops_sessions() {
     ))
     .spawn();
 
-    timeout(Duration::from_secs(30), async {
+    async_timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(status) = router.get_status().await
                 && status.downstream.sessions >= 1
@@ -1163,7 +1163,7 @@ async fn order_survives_upstream_bounce_and_drops_sessions() {
 
     drop(pool);
 
-    timeout(Duration::from_secs(10), async {
+    async_timeout(Duration::from_secs(10), async {
         loop {
             let status = router.get_status().await;
             let detail = router.get_order(id).await;
@@ -1182,7 +1182,7 @@ async fn order_survives_upstream_bounce_and_drops_sessions() {
 
     let _pool = TestPool::spawn_on_port(&pool_bitcoind, port, "--start-diff 0.00001");
 
-    timeout(Duration::from_secs(30), async {
+    async_timeout(Duration::from_secs(30), async {
         loop {
             let detail = router.get_order(id).await.unwrap();
             if detail.status == OrderStatus::Active && !detail.sessions.is_empty() {
@@ -1199,7 +1199,7 @@ async fn order_survives_upstream_bounce_and_drops_sessions() {
 }
 
 #[tokio::test]
-#[timeout(120000)]
+#[timeout(300000)]
 async fn order_fulfilled_on_hashdays_reached() {
     let pool_bitcoind = bitcoind();
     let wallet_bitcoind = spawn_regtest();
@@ -1239,7 +1239,7 @@ async fn order_fulfilled_on_hashdays_reached() {
     ))
     .spawn();
 
-    timeout(Duration::from_secs(60), async {
+    async_timeout(Duration::from_secs(60), async {
         loop {
             if let Ok(orders) = router.list_orders(None).await
                 && orders.iter().any(|o| o.status == OrderStatus::Fulfilled)
@@ -1272,7 +1272,7 @@ async fn order_fulfilled_on_hashdays_reached() {
 }
 
 #[tokio::test]
-#[timeout(120000)]
+#[timeout(300000)]
 async fn router_rejects_incompatible_resumed_enonce1() {
     let pool_bitcoind = bitcoind();
     let wallet_bitcoind = spawn_regtest();
@@ -1354,7 +1354,7 @@ async fn router_rejects_incompatible_resumed_enonce1() {
 }
 
 #[tokio::test]
-#[timeout(120000)]
+#[timeout(300000)]
 async fn greet_drops_concurrent_probes_independently() {
     let wallet_bitcoind = spawn_regtest();
     let descriptor = generate_descriptor();
@@ -1374,7 +1374,7 @@ async fn greet_drops_concurrent_probes_independently() {
 
     let start = Instant::now();
 
-    timeout(Duration::from_secs(5), async {
+    async_timeout(Duration::from_secs(5), async {
         use tokio::io::AsyncReadExt;
 
         let mut buf = [0u8; 1];
@@ -1396,7 +1396,7 @@ async fn greet_drops_concurrent_probes_independently() {
 }
 
 #[tokio::test]
-#[timeout(120000)]
+#[timeout(300000)]
 async fn filter_orders() {
     let wallet_bitcoind = spawn_regtest();
     let descriptor = generate_descriptor();
@@ -1568,7 +1568,7 @@ async fn filter_orders() {
 }
 
 #[tokio::test]
-#[timeout(120000)]
+#[timeout(300000)]
 async fn order_transitions_to_in_mempool_then_active() {
     let pool_bitcoind = bitcoind();
     let wallet_bitcoind = spawn_regtest();
@@ -1598,7 +1598,7 @@ async fn order_transitions_to_in_mempool_then_active() {
 
     send_to_address_without_mining(&wallet_bitcoind, &funding_descriptor, &address, amount).await;
 
-    timeout(Duration::from_secs(30), async {
+    async_timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(detail) = router.get_order(id).await
                 && detail.status == OrderStatus::InMempool
@@ -1613,7 +1613,7 @@ async fn order_transitions_to_in_mempool_then_active() {
 
     generate_to_address(&wallet_bitcoind, 1, &funding_address).await;
 
-    timeout(Duration::from_secs(30), async {
+    async_timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(detail) = router.get_order(id).await
                 && detail.status == OrderStatus::Active
@@ -1667,7 +1667,7 @@ async fn router_persists_order_stats_across_restart() {
 
     miner.wait().unwrap();
 
-    timeout(Duration::from_secs(30), async {
+    async_timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(detail) = router.get_order(order_id).await
                 && detail.status == OrderStatus::Active
@@ -1689,7 +1689,7 @@ async fn router_persists_order_stats_across_restart() {
         "--start-diff 0.00001 --tick-interval 1",
     );
 
-    timeout(Duration::from_secs(30), async {
+    async_timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(detail) = router.get_order(order_id).await
                 && detail.status == OrderStatus::Active

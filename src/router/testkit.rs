@@ -124,6 +124,7 @@ pub(crate) fn test_settings(data_dir: &Path) -> Arc<Settings> {
                 .unwrap(),
             timeout: 30,
             enonce1_extension_size: ENONCE1_EXTENSION_SIZE,
+            disable_bouncer: false,
         })
         .unwrap(),
     )

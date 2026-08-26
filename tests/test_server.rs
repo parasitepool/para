@@ -39,6 +39,10 @@ impl TestServer {
         .integration_test(true)
         .spawn();
 
+        let mut child = child;
+        drain_pipe(child.stdout.take());
+        drain_pipe(child.stderr.take());
+
         let port_file = tempdir.path().join("http_port");
         let port: u16 = {
             let mut port = None;
@@ -118,6 +122,10 @@ impl TestServer {
         .integration_test(true)
         .spawn();
 
+        let mut child = child;
+        drain_pipe(child.stdout.take());
+        drain_pipe(child.stderr.take());
+
         let port_file = tempdir.path().join("http_port");
         let port: u16 = {
             let mut port = None;
@@ -165,8 +173,7 @@ impl TestServer {
         expected_response: &str,
         api_token: Option<&str>,
     ) {
-        let mut request =
-            reqwest::blocking::Client::new().get(self.url().join(path.as_ref()).unwrap());
+        let mut request = blocking_http_client().get(self.url().join(path.as_ref()).unwrap());
 
         request = if let Some(token) = api_token {
             request.bearer_auth(token)
@@ -204,7 +211,7 @@ impl TestServer {
         path: impl AsRef<str>,
         api_token: Option<&str>,
     ) -> T {
-        let mut request = reqwest::blocking::Client::new()
+        let mut request = blocking_http_client()
             .get(self.url().join(path.as_ref()).unwrap())
             .header(header::ACCEPT, "application/json");
 
@@ -228,7 +235,7 @@ impl TestServer {
 
     #[cfg(target_os = "linux")]
     pub(crate) async fn get_json_async<T: DeserializeOwned>(&self, path: impl AsRef<str>) -> T {
-        let client = reqwest::Client::new();
+        let client = http_client();
         let response = client
             .get(self.url().join(path.as_ref()).unwrap())
             .header(reqwest::header::ACCEPT, "application/json")
@@ -248,7 +255,7 @@ impl TestServer {
 
     #[cfg(target_os = "linux")]
     pub(crate) async fn get_json_async_raw(&self, path: impl AsRef<str>) -> Response {
-        let mut client = reqwest::Client::new()
+        let mut client = http_client()
             .get(self.url().join(path.as_ref()).unwrap())
             .header(reqwest::header::ACCEPT, "application/json");
 
@@ -283,7 +290,7 @@ impl TestServer {
         path: impl AsRef<str>,
         body: &T,
     ) -> Response {
-        let mut client = reqwest::Client::new()
+        let mut client = http_client()
             .post(self.url().join(path.as_ref()).unwrap())
             .json(body);
 
