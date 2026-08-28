@@ -21,6 +21,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        submodules: true
 
     - name: Install Rust Toolchain Components
       uses: actions-rs/toolchain@v1
@@ -42,6 +44,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        submodules: true
 
     - name: Install Rust Toolchain
       uses: actions-rs/toolchain@v1
@@ -68,6 +72,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        submodules: true
 
     - name: Install Rust Toolchain
       uses: actions-rs/toolchain@v1
@@ -84,6 +90,8 @@ jobs:
     
     steps:
     - uses: actions/checkout@v4
+      with:
+        submodules: true
     
     - uses: egor-tensin/setup-gcc@v1
 

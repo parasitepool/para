@@ -1,3 +1,6 @@
 [submodule "bitcoin"]
 	path = bitcoin
 	url = https://github.com/bitcoin/bitcoin.git
+[submodule "ckpool"]
+	path = ckpool
+	url = https://git.parasite.dev/parasitepool/ckpool.git
