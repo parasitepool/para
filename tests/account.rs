@@ -49,7 +49,7 @@ impl TestAccount {
         let secp_message = bitcoin::secp256k1::Message::from_digest(msg_hash.to_byte_array());
 
         let signature = secp.sign_ecdsa_recoverable(&secp_message, &self.private_key.inner);
-        let msg_signature = MessageSignature::new(signature, false);
+        let msg_signature = MessageSignature::new(signature, true);
 
         Ok(general_purpose::STANDARD.encode(msg_signature.serialize()))
     }
@@ -285,6 +285,66 @@ async fn account_update_endpoint_new_account_with_signature() {
     assert_eq!(account.total_diff, 0);
 }
 
+#[test]
+fn account_bip322_signature_prefix() {
+    let account = TestAccount::new();
+    let message = "foo";
+    let signature = account.sign_update(account.native_segwit_address.clone(), message);
+    let signature_without_prefix = signature
+        .strip_prefix(bip322::SIMPLE_SIGNATURE_PREFIX)
+        .unwrap()
+        .to_string();
+
+    assert!(verify_signature(
+        &account.native_segwit_address,
+        message,
+        &signature,
+    ));
+    assert!(verify_signature(
+        &account.native_segwit_address,
+        message,
+        &signature_without_prefix,
+    ));
+}
+
+#[test]
+fn account_bip322_signature_inconclusive() {
+    let account = TestAccount::new();
+    let mut witness = bitcoin::Witness::new();
+    witness.push([]);
+    let mut buffer = Vec::new();
+    witness.consensus_encode(&mut buffer).unwrap();
+    let signature = format!(
+        "{}{}",
+        bip322::SIMPLE_SIGNATURE_PREFIX,
+        general_purpose::STANDARD.encode(buffer),
+    );
+
+    assert_eq!(
+        bip322::verify_simple_encoded(&account.wrapped_segwit_address, "foo", &signature).unwrap(),
+        bip322::Verification::Inconclusive,
+    );
+    assert!(!verify_signature(
+        &account.wrapped_segwit_address,
+        "foo",
+        &signature,
+    ));
+}
+
+#[test]
+fn account_legacy_signature_wrong_key() {
+    let account = TestAccount::new();
+    let other_account = TestAccount::new();
+    let message = "foo";
+    let signature = other_account.sign_update_legacy(message).unwrap();
+
+    assert!(!verify_signature(
+        &account.legacy_address,
+        message,
+        &signature,
+    ));
+}
+
 #[tokio::test]
 async fn test_migrate_accounts_basic() {
     let server = TestServer::spawn_with_db().await;
@@ -485,7 +545,7 @@ async fn account_signature_invalid() {
         &server,
         &test_account.native_segwit_address,
         sign_simple_encoded(
-            &test_account.native_segwit_address,
+            &other_account.native_segwit_address,
             ln_address,
             &[other_account.private_key.to_wif()],
             None,
@@ -498,7 +558,7 @@ async fn account_signature_invalid() {
         .unwrap()
         .assume_checked();
     let to_spend = bip322::create_to_spend(&address, ln_address).unwrap();
-    let to_sign = bip322::create_to_sign(&to_spend, None).unwrap();
+    let to_sign = bip322::create_to_sign(&to_spend, None, bip322::LockParams::default()).unwrap();
     let witness = bip322::create_message_signature_p2wpkh(
         &to_sign,
         &other_account.private_key,

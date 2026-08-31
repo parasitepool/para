@@ -59,7 +59,7 @@ use {
         subcommand::{
             miner::Share,
             server::{
-                account::{Account, AccountMetadataUpdate, AccountUpdate},
+                account::{Account, AccountMetadataUpdate, AccountUpdate, verify_signature},
                 database::{Database, HighestDiff, Payout, PendingPayout},
             },
             sync::{FoundBlockRecord, ShareBatch, Sync, SyncResponse},

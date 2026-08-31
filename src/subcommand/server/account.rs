@@ -173,7 +173,7 @@ pub(crate) async fn account_metadata_update(
 
 pub fn verify_signature(address: &str, message: &str, signature: &String) -> bool {
     match verify_simple_encoded(address, message, signature) {
-        Ok(_) => true,
+        Ok(verification) => matches!(verification, bip322::Verification::Valid { .. }),
         Err(bip322::Error::WitnessMalformed { .. }) => {
             let secp = Secp256k1::verification_only();
             let address = Address::from_str(address)
@@ -189,9 +189,10 @@ pub fn verify_signature(address: &str, message: &str, signature: &String) -> boo
 
             if let Ok(sig_to_validate) = msg_signature {
                 let msg_hash = bitcoin::sign_message::signed_msg_hash(message);
-                sig_to_validate
-                    .is_signed_by_address(&secp, &address, msg_hash)
-                    .is_ok()
+                matches!(
+                    sig_to_validate.is_signed_by_address(&secp, &address, msg_hash),
+                    Ok(true)
+                )
             } else {
                 false
             }
