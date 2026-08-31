@@ -27,7 +27,12 @@ if ! bitcoind --version | grep -qF "v$version" || ! bitcoin-node --version | gre
   # bitcoin-node on PATH like bitcoind instead of installing into libexec.
   # Remove any stale copy from both locations: the node prioritizes libexec,
   # which would leave an outdated binary on future version bumps.
-  rm -f /usr/local/bin/bitcoin-node /usr/local/libexec/bitcoin-node
+  # Unlink every destination before copying: cp writes into the existing
+  # inode, which fails with ETXTBSY if the old binary is still executing.
+  # The running process keeps the unlinked inode until it restarts.
+  rm -f \
+    /usr/local/bin/{bitcoin,bitcoin-cli,bitcoind,bitcoin-node} \
+    /usr/local/libexec/bitcoin-node
 
   cp \
     "$tmp"/bitcoin-$version/bin/{bitcoin,bitcoin-cli,bitcoind} \
