@@ -279,7 +279,18 @@ impl Sync {
         }
 
         let shares = database.get_shares_by_id_range(next_id, target_id).await?;
-        let block = database.get_block_finds(current_blockheight).await?;
+        // Zero-height shares interleave with real ones, so floor the block lookup on the batch's lowest real height.
+        let lookup_height = shares
+            .iter()
+            .filter_map(|share| share.blockheight)
+            .filter(|&height| height > 0)
+            .min()
+            .unwrap_or(current_blockheight);
+        let block = if lookup_height > 0 {
+            database.get_block_finds(lookup_height).await?
+        } else {
+            None
+        };
         let highest_id = shares.last().map(|share| share.id).unwrap_or(target_id);
 
         if shares.is_empty() && block.is_none() {
