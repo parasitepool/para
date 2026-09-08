@@ -110,6 +110,23 @@ function createLogLine(level, text) {
   return line;
 }
 
+let logRenderQueued = false;
+let logRenderDirty = false;
+
+function scheduleRenderLogs() {
+  logRenderDirty = true;
+  if (logRenderQueued) return;
+  logRenderQueued = true;
+  requestAnimationFrame(() => {
+    logRenderQueued = false;
+    if (!logRenderDirty) return;
+    const logsEl = document.getElementById('logs');
+    if (logsEl?.classList.contains('hidden')) return;
+    logRenderDirty = false;
+    renderLogs();
+  });
+}
+
 function renderLogs() {
   const logsEl = document.getElementById('logs');
   const filterInput = document.getElementById('log-filter');
@@ -170,7 +187,7 @@ function connectWs() {
     if (logState.allLogs.length > CONFIG.MAX_LOGS) {
       logState.allLogs.splice(0, logState.allLogs.length - CONFIG.MAX_LOGS);
     }
-    if (!logState.paused) renderLogs();
+    if (!logState.paused) scheduleRenderLogs();
   };
   ws.onerror = () => ws.close();
   ws.onclose = () => {
@@ -446,6 +463,8 @@ function setupLogToggle() {
     showBtn.classList.add('hidden');
     controls.classList.remove('hidden');
     logs.classList.remove('hidden');
+    logRenderDirty = false;
+    renderLogs();
   });
 
   hideBtn.addEventListener('click', () => {
