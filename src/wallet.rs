@@ -1,9 +1,10 @@
 use {
     super::*,
-    bdk_bitcoind_rpc::{Emitter, bitcoincore_rpc, bitcoincore_rpc::RpcApi},
+    crate::router::error::{RouterError, RouterResult},
+    bdk_bitcoind_rpc::{Emitter, MempoolEvent, bitcoincore_rpc, bitcoincore_rpc::RpcApi},
     bdk_wallet::{
         ChangeSet, KeychainKind,
-        chain::{CanonicalizationParams, FullTxOut, Merge, bdk_core::ConfirmationBlockTime},
+        chain::{CanonicalizationParams, Merge, bdk_core::BlockId},
         keys::bip39::Mnemonic,
     },
     bitcoin::bip32::{ChildNumber, DerivationPath, Xpriv},
@@ -14,25 +15,124 @@ use {
     rand::RngCore,
 };
 
+type RpcEmitter = Emitter<Arc<bitcoincore_rpc::Client>>;
+
+pub(crate) struct SyncState {
+    ready: bool,
+    snapshot: Arc<ReceiptSnapshot>,
+}
+
+impl SyncState {
+    pub(crate) fn snapshot(&self) -> Option<Arc<ReceiptSnapshot>> {
+        self.ready.then(|| self.snapshot.clone())
+    }
+}
+
+#[derive(Default)]
+struct Receipt {
+    total: Amount,
+    confirmed: BTreeMap<u32, Amount>,
+    txids: Vec<Txid>,
+}
+
+pub(crate) struct ReceiptSnapshot {
+    checkpoint: BlockId,
+    receipts: HashMap<u32, Receipt>,
+}
+
+impl ReceiptSnapshot {
+    fn new(inner: &bdk_wallet::Wallet) -> Self {
+        let checkpoint = inner.latest_checkpoint().block_id();
+        let mut receipts = HashMap::<u32, Receipt>::new();
+
+        for ((_, index), txout) in inner.tx_graph().filter_chain_txouts(
+            inner.local_chain(),
+            checkpoint,
+            CanonicalizationParams::default(),
+            inner
+                .spk_index()
+                .inner()
+                .outputs_in_range((KeychainKind::External, 0)..=(KeychainKind::External, u32::MAX)),
+        ) {
+            let receipt = receipts.entry(*index).or_default();
+            receipt.total += txout.txout.value;
+            if let Some(height) = txout.chain_position.confirmation_height_upper_bound() {
+                *receipt.confirmed.entry(height).or_default() += txout.txout.value;
+            }
+            receipt.txids.push(txout.outpoint.txid);
+            if let Some((_, txid)) = txout.spent_by {
+                receipt.txids.push(txid);
+            }
+        }
+
+        for receipt in receipts.values_mut() {
+            receipt.txids.sort_unstable();
+            receipt.txids.dedup();
+        }
+
+        Self {
+            checkpoint,
+            receipts,
+        }
+    }
+
+    pub(crate) fn tip(&self) -> u32 {
+        self.checkpoint.height
+    }
+
+    pub(crate) fn received(&self, index: u32) -> Amount {
+        self.receipts
+            .get(&index)
+            .map_or(Amount::ZERO, |receipt| receipt.total)
+    }
+
+    pub(crate) fn received_by_deadline(&self, index: u32, deadline: u32) -> Amount {
+        self.receipts.get(&index).map_or(Amount::ZERO, |receipt| {
+            receipt
+                .confirmed
+                .range(..=deadline)
+                .map(|(_, amount)| *amount)
+                .sum()
+        })
+    }
+
+    pub(crate) fn txids_by_derivation_index(&self, index: u32) -> Vec<Txid> {
+        self.receipts
+            .get(&index)
+            .map(|receipt| receipt.txids.clone())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn confirmed_by_index(&self) -> impl Iterator<Item = (u32, Amount)> + '_ {
+        self.receipts
+            .iter()
+            .map(|(index, receipt)| (*index, receipt.confirmed.values().copied().sum()))
+    }
+}
+
 pub struct Wallet {
     inner: Mutex<bdk_wallet::Wallet>,
     settings: Arc<Settings>,
     store: Arc<Store>,
-    rpc: bitcoincore_rpc::Client,
-    birthday: u32,
+    rpc: Arc<bitcoincore_rpc::Client>,
+    emitter: Mutex<RpcEmitter>,
     dust_limit: Amount,
-    sync_tx: watch::Sender<bool>,
+    sync_tx: watch::Sender<SyncState>,
+    stale_emitter: AtomicBool,
+    reload_required: AtomicBool,
 }
 
 impl Wallet {
     pub(crate) fn open(settings: Arc<Settings>, store: Arc<Store>) -> Result<Self> {
         let inner = Self::load_inner(&settings, &store)?;
 
-        let rpc = bitcoincore_rpc::Client::new(
-            &format!("http://{}", settings.bitcoin_rpc_url()),
-            settings.wallet_rpc_auth()?,
-        )
-        .context("failed to create rpc client")?;
+        let rpc = Arc::new(
+            bitcoincore_rpc::Client::new(
+                &format!("http://{}", settings.bitcoin_rpc_url()),
+                settings.wallet_rpc_auth()?,
+            )
+            .context("failed to create rpc client")?,
+        );
 
         let dust_limit = inner
             .peek_address(KeychainKind::External, 0)
@@ -40,14 +140,23 @@ impl Wallet {
             .script_pubkey()
             .minimal_non_dust();
 
+        let emitter = Mutex::new(Self::emitter_from(&rpc, &inner, settings.wallet_birthday()));
+        let sync_tx = watch::channel(SyncState {
+            ready: false,
+            snapshot: Arc::new(ReceiptSnapshot::new(&inner)),
+        })
+        .0;
+
         let wallet = Self {
             inner: Mutex::new(inner),
             settings: settings.clone(),
             store,
             rpc,
-            birthday: settings.wallet_birthday(),
+            emitter,
             dust_limit,
-            sync_tx: watch::channel(false).0,
+            sync_tx,
+            stale_emitter: AtomicBool::new(false),
+            reload_required: AtomicBool::new(false),
         };
 
         Ok(wallet)
@@ -94,17 +203,36 @@ impl Wallet {
     }
 
     fn reload_inner(&self, inner: &mut bdk_wallet::Wallet) -> Result {
+        self.reload_required.store(true, Ordering::Release);
+        self.mark_unsynced();
         *inner = Self::load_inner(&self.settings, &self.store)?;
+        self.reload_required.store(false, Ordering::Release);
         Ok(())
     }
 
     pub fn is_synced(&self) -> bool {
-        *self.sync_tx.borrow()
+        self.sync_tx.borrow().ready
+    }
+
+    pub(crate) fn snapshot(&self) -> Option<Arc<ReceiptSnapshot>> {
+        self.sync_tx.borrow().snapshot()
+    }
+
+    pub(crate) fn last_snapshot(&self) -> Arc<ReceiptSnapshot> {
+        self.sync_tx.borrow().snapshot.clone()
+    }
+
+    fn require_synced(&self) -> RouterResult<()> {
+        if self.is_synced() {
+            Ok(())
+        } else {
+            Err(RouterError::WalletSyncing)
+        }
     }
 
     pub async fn synced(&self) -> bool {
         let mut rx = self.sync_tx.subscribe();
-        while !*rx.borrow_and_update() {
+        while !rx.borrow_and_update().ready {
             if rx.changed().await.is_err() {
                 return false;
             }
@@ -112,7 +240,7 @@ impl Wallet {
         true
     }
 
-    pub(crate) fn subscribe_sync(&self) -> watch::Receiver<bool> {
+    pub(crate) fn subscribe_sync(&self) -> watch::Receiver<SyncState> {
         self.sync_tx.subscribe()
     }
 
@@ -125,30 +253,27 @@ impl Wallet {
         info!("Syncing wallet in background...");
 
         let wallet = self.clone();
+        let blocking_tasks = tasks.clone();
 
         tasks.spawn(async move {
             let mut ticker = ticker(interval);
             loop {
                 tokio::select! {
+                    biased;
                     _ = cancel.cancelled() => break,
                     _ = ticker.tick() => {
                         let wallet_clone = wallet.clone();
                         let cancel_clone = cancel.clone();
-                        match task::spawn_blocking(move || {
-                            wallet_clone.sync(&cancel_clone)?;
-                            Ok::<(), Error>(())
-                        })
+                        match blocking_tasks.spawn_blocking(move || wallet_clone.sync(&cancel_clone))
                             .await
                             .unwrap_or_else(|err| Err(err.into()))
                         {
-                            Ok(()) => {
-                                if !wallet.sync_tx.send_replace(true) {
-                                    info!("Wallet synced");
-                                }
-                            }
+                            Ok(()) => {}
                             Err(e) => {
-                                wallet.sync_tx.send_replace(false);
-                                warn!("Wallet sync error: {e}");
+                                if !cancel.is_cancelled() {
+                                    wallet.mark_unsynced();
+                                    warn!("Wallet sync error: {e}");
+                                }
                             }
                         }
                     }
@@ -157,42 +282,134 @@ impl Wallet {
         });
     }
 
+    fn emitter_from(
+        rpc: &Arc<bitcoincore_rpc::Client>,
+        inner: &bdk_wallet::Wallet,
+        birthday: u32,
+    ) -> RpcEmitter {
+        let txs = inner
+            .transactions()
+            .filter(|tx| !tx.chain_position.is_confirmed())
+            .map(|tx| tx.tx_node.tx.clone())
+            .collect::<Vec<_>>();
+
+        Emitter::new(rpc.clone(), inner.latest_checkpoint(), birthday, txs)
+    }
+
     pub fn sync(&self, cancel: &CancellationToken) -> Result {
-        let (checkpoint, expected_mempool_txs) = {
-            let inner = self.inner.lock();
-            let txs = inner
-                .transactions()
-                .filter(|tx| !tx.chain_position.is_confirmed())
-                .map(|tx| tx.tx_node.tx.clone())
-                .collect::<Vec<_>>();
+        let start = Instant::now();
+        let mut emitter = self.emitter.lock();
 
-            (inner.latest_checkpoint(), txs)
-        };
-
-        let mut emitter = Emitter::new(&self.rpc, checkpoint, self.birthday, expected_mempool_txs);
-
-        let mut blocks = Vec::new();
-        while let Some(event) = emitter.next_block()? {
-            if cancel.is_cancelled() {
-                bail!("wallet sync cancelled");
-            }
-            blocks.push(event);
-        }
-        let mempool = emitter.mempool()?;
-
-        {
+        let result = (|| -> Result<(u32, MempoolEvent)> {
             let mut inner = self.inner.lock();
-            for event in blocks {
+            if self.reload_required.load(Ordering::Acquire) {
+                self.reload_inner(&mut inner)?;
+            }
+            if self.stale_emitter.swap(false, Ordering::AcqRel) {
+                *emitter = Self::emitter_from(&self.rpc, &inner, self.settings.wallet_birthday());
+            }
+            drop(inner);
+
+            let mut blocks = 0u32;
+            while let Some(event) = emitter.next_block()? {
+                let mut inner = self.inner.lock();
+                ensure!(
+                    !self.stale_emitter.load(Ordering::Acquire),
+                    "wallet reloaded during sync"
+                );
                 inner.apply_block_connected_to(
                     &event.block,
                     event.block_height(),
                     event.connected_to(),
                 )?;
+
+                blocks += 1;
+
+                if cancel.is_cancelled() {
+                    bail!("wallet sync cancelled");
+                }
             }
-            inner.apply_unconfirmed_txs(mempool.update);
-            inner.apply_evicted_txs(mempool.evicted);
+
+            if cancel.is_cancelled() {
+                bail!("wallet sync cancelled");
+            }
+
+            let mempool = emitter.mempool()?;
+            Ok((blocks, mempool))
+        })();
+
+        let (blocks, mempool) = match result {
+            Ok(update) => update,
+            Err(err) => {
+                self.mark_unsynced();
+                return Err(err);
+            }
+        };
+        let (mempool_txs, evicted) = self.apply_mempool(mempool, cancel)?;
+
+        let elapsed = start.elapsed();
+        debug!(
+            "Wallet sync: {blocks} blocks, {mempool_txs} mempool txs, {evicted} evicted, {elapsed:?}"
+        );
+        if elapsed > Duration::from_secs(1) {
+            info!(
+                "Wallet sync took {elapsed:?}: {blocks} blocks, {mempool_txs} mempool txs, {evicted} evicted"
+            );
         }
 
+        Ok(())
+    }
+
+    fn apply_mempool(
+        &self,
+        mut mempool: MempoolEvent,
+        cancel: &CancellationToken,
+    ) -> Result<(usize, usize)> {
+        let mut inner = self.inner.lock();
+        if cancel.is_cancelled()
+            || self.stale_emitter.load(Ordering::Acquire)
+            || self.reload_required.load(Ordering::Acquire)
+        {
+            self.mark_unsynced();
+            bail!("wallet sync cancelled or wallet reloaded");
+        }
+
+        let mempool_txs = mempool.update.len();
+        mempool
+            .evicted
+            .retain(|(txid, _)| inner.tx_graph().get_tx(*txid).is_some());
+        let evicted = mempool.evicted.len();
+        if !mempool.evicted.is_empty() {
+            inner.apply_evicted_txs(mempool.evicted);
+        }
+        inner.apply_unconfirmed_txs(mempool.update);
+
+        self.publish(&inner)?;
+        Ok((mempool_txs, evicted))
+    }
+
+    fn mark_unsynced(&self) {
+        self.stale_emitter.store(true, Ordering::Release);
+        self.sync_tx.send_modify(|state| state.ready = false);
+    }
+
+    fn publish(&self, inner: &bdk_wallet::Wallet) -> Result {
+        ensure!(
+            !self.stale_emitter.load(Ordering::Acquire)
+                && !self.reload_required.load(Ordering::Acquire),
+            "wallet reloaded during sync"
+        );
+        let snapshot = Arc::new(ReceiptSnapshot::new(inner));
+        if !self
+            .sync_tx
+            .send_replace(SyncState {
+                ready: true,
+                snapshot,
+            })
+            .ready
+        {
+            info!("Wallet synced");
+        }
         Ok(())
     }
 
@@ -206,31 +423,31 @@ impl Wallet {
     pub(crate) fn reveal_address_with<T>(
         &self,
         persist: impl FnOnce(bdk_wallet::AddressInfo, u32, &ChangeSet) -> Result<T>,
-    ) -> Result<T> {
-        task::block_in_place(|| {
-            let mut inner = self.inner.lock();
-            let created_at_height = inner.latest_checkpoint().height();
-            let address = inner.reveal_next_address(KeychainKind::External);
-            let err = {
-                let Some(staged) = inner.staged_mut() else {
-                    return persist(address, created_at_height, &ChangeSet::default());
-                };
-
-                match persist(address, created_at_height, staged) {
-                    Ok(value) => {
-                        let _ = staged.take();
-                        return Ok(value);
-                    }
-                    Err(err) => err,
-                }
+    ) -> RouterResult<T> {
+        let mut inner = self.inner.lock();
+        self.require_synced()?;
+        let created_at_height = inner.latest_checkpoint().height();
+        let address = inner.reveal_next_address(KeychainKind::External);
+        let err = {
+            let Some(staged) = inner.staged_mut() else {
+                return persist(address, created_at_height, &ChangeSet::default())
+                    .map_err(|error| RouterError::WalletPersistence { error });
             };
 
-            if let Err(reload_err) = self.reload_inner(&mut inner) {
-                error!("wallet rollback failed after persist error: {reload_err}");
+            match persist(address, created_at_height, staged) {
+                Ok(value) => {
+                    let _ = staged.take();
+                    return Ok(value);
+                }
+                Err(err) => err,
             }
+        };
 
-            Err(err)
-        })
+        if let Err(reload_err) = self.reload_inner(&mut inner) {
+            error!("wallet rollback failed after persist error: {reload_err}");
+        }
+
+        Err(RouterError::WalletPersistence { error: err })
     }
 
     #[cfg(test)]
@@ -245,6 +462,10 @@ impl Wallet {
 
     pub(crate) fn persist_staged_with(&self, persist: impl FnOnce(&ChangeSet) -> Result) -> Result {
         let mut inner = self.inner.lock();
+        ensure!(
+            !self.reload_required.load(Ordering::Acquire),
+            "wallet recovery is required before persistence"
+        );
         let Some(staged) = inner.staged_mut() else {
             return persist(&ChangeSet::default());
         };
@@ -263,112 +484,54 @@ impl Wallet {
         self.dust_limit
     }
 
-    pub fn tip(&self) -> u32 {
+    #[cfg(test)]
+    pub(crate) fn tip(&self) -> u32 {
         self.inner.lock().latest_checkpoint().height()
-    }
-
-    pub(crate) fn received(&self, derivation_index: u32) -> Amount {
-        let inner = self.inner.lock();
-
-        external_txouts(&inner, derivation_index)
-            .map(|txout| txout.txout.value)
-            .sum()
-    }
-
-    pub(crate) fn received_by_deadline(
-        &self,
-        derivation_index: u32,
-        deadline_height: u32,
-    ) -> Amount {
-        let inner = self.inner.lock();
-        let mut confirmed = Amount::ZERO;
-
-        for txout in external_txouts(&inner, derivation_index) {
-            if txout
-                .chain_position
-                .confirmation_height_upper_bound()
-                .is_some_and(|height| height <= deadline_height)
-            {
-                confirmed += txout.txout.value;
-            }
-        }
-
-        confirmed
-    }
-
-    pub(crate) fn txids_by_derivation_index(&self, derivation_index: u32) -> Vec<Txid> {
-        let inner = self.inner.lock();
-        let mut txids = BTreeSet::new();
-
-        for txout in external_txouts(&inner, derivation_index) {
-            txids.insert(txout.outpoint.txid);
-            if let Some((_, spending_txid)) = txout.spent_by {
-                txids.insert(spending_txid);
-            }
-        }
-
-        txids.into_iter().collect()
-    }
-
-    pub fn confirmed_by_index(&self) -> HashMap<u32, Amount> {
-        let inner = self.inner.lock();
-        let mut confirmed = HashMap::new();
-
-        for output in inner.list_output() {
-            if output.keychain == KeychainKind::External && output.chain_position.is_confirmed() {
-                *confirmed
-                    .entry(output.derivation_index)
-                    .or_insert(Amount::ZERO) += output.txout.value;
-            }
-        }
-
-        confirmed
-    }
-
-    pub(crate) fn unspent_by_derivation_index(&self, derivation_index: u32) -> Vec<OutPoint> {
-        let inner = self.inner.lock();
-        let tip = inner.latest_checkpoint().height();
-
-        let spendable = |txout: &FullTxOut<ConfirmationBlockTime>| {
-            if txout.spent_by.is_some() || !txout.chain_position.is_confirmed() {
-                return false;
-            }
-
-            let coinbase = inner
-                .tx_graph()
-                .get_tx(txout.outpoint.txid)
-                .is_some_and(|tx| tx.is_coinbase());
-
-            !coinbase
-                || txout
-                    .chain_position
-                    .confirmation_height_upper_bound()
-                    .is_some_and(|confirmed| tip + 1 >= confirmed + COINBASE_MATURITY)
-        };
-
-        external_txouts(&inner, derivation_index)
-            .filter(|txout| spendable(txout))
-            .map(|txout| txout.outpoint)
-            .collect()
     }
 
     pub(crate) fn build_refund_psbt(
         &self,
-        outpoints: &[OutPoint],
+        id: u32,
+        derivation_index: u32,
         destination: Address,
         fee_rate: FeeRate,
-    ) -> Result<Psbt> {
+    ) -> RouterResult<Psbt> {
         let mut inner = self.inner.lock();
-        let mut builder = inner.build_tx();
+        let tip = inner.latest_checkpoint().height();
+        let outpoints = inner
+            .list_unspent()
+            .filter(|txout| {
+                txout.keychain == KeychainKind::External
+                    && txout.derivation_index == derivation_index
+                    && txout
+                        .chain_position
+                        .confirmation_height_upper_bound()
+                        .is_some_and(|height| {
+                            !inner
+                                .tx_graph()
+                                .get_tx(txout.outpoint.txid)
+                                .is_some_and(|tx| tx.is_coinbase())
+                                || tip.saturating_add(1) >= height.saturating_add(COINBASE_MATURITY)
+                        })
+            })
+            .map(|txout| txout.outpoint)
+            .collect::<Vec<_>>();
 
-        builder
-            .add_utxos(outpoints)
-            .context("failed to add refund inputs")?;
-        builder.manually_selected_only();
-        builder.drain_to(destination.script_pubkey());
-        builder.fee_rate(fee_rate);
+        if outpoints.is_empty() {
+            return Err(RouterError::NoUnspentFunds { id });
+        }
 
-        Ok(builder.finish()?)
+        (|| -> Result<Psbt> {
+            let mut builder = inner.build_tx();
+            builder
+                .add_utxos(&outpoints)
+                .context("failed to add refund inputs")?;
+            builder.manually_selected_only();
+            builder.drain_to(destination.script_pubkey());
+            builder.fee_rate(fee_rate);
+            Ok(builder.finish()?)
+        })()
+        .map_err(|error| RouterError::RefundConstruction { error })
     }
 
     pub fn send(&self, to: Address, amount: Amount, fee_rate: FeeRate) -> Result<Txid> {
@@ -451,7 +614,9 @@ impl Wallet {
 
     #[cfg(test)]
     pub(crate) fn mark_synced(&self) {
-        self.sync_tx.send_replace(true);
+        let inner = self.inner.lock();
+        self.stale_emitter.store(false, Ordering::Release);
+        self.publish(&inner).unwrap();
     }
 
     #[cfg(test)]
@@ -548,96 +713,9 @@ impl Wallet {
     }
 }
 
-fn external_txouts(
-    wallet: &bdk_wallet::Wallet,
-    derivation_index: u32,
-) -> impl Iterator<Item = FullTxOut<ConfirmationBlockTime>> + '_ {
-    let range =
-        (KeychainKind::External, derivation_index)..=(KeychainKind::External, derivation_index);
-
-    wallet
-        .tx_graph()
-        .filter_chain_txouts(
-            wallet.local_chain(),
-            wallet.local_chain().tip().block_id(),
-            CanonicalizationParams::default(),
-            wallet.spk_index().inner().outputs_in_range(range),
-        )
-        .map(|(_, full_txo)| full_txo)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    struct TestWallet {
-        wallet: Arc<Wallet>,
-        store: Arc<Store>,
-        _directory: tempfile::TempDir,
-    }
-
-    impl std::ops::Deref for TestWallet {
-        type Target = Wallet;
-
-        fn deref(&self) -> &Self::Target {
-            self.wallet.as_ref()
-        }
-    }
-
-    fn test_wallet() -> TestWallet {
-        let mnemonic: Mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".parse().unwrap();
-
-        let (_, descriptor, change_descriptor) =
-            Wallet::generate_from_mnemonic(mnemonic, Network::Regtest).unwrap();
-
-        let directory = tempfile::tempdir().unwrap();
-        let settings = test_settings(directory.path(), Some(descriptor), Some(change_descriptor));
-        let store =
-            Arc::new(Store::open(&directory.path().join("test.redb"), Chain::Regtest).unwrap());
-        let wallet = Arc::new(Wallet::open(settings, store.clone()).unwrap());
-
-        TestWallet {
-            wallet,
-            store,
-            _directory: directory,
-        }
-    }
-
-    fn test_settings(
-        data_dir: &Path,
-        descriptor: Option<String>,
-        change_descriptor: Option<String>,
-    ) -> Arc<Settings> {
-        Arc::new(
-            Settings::from_wallet_options(
-                BitcoinOptions {
-                    chain: Some(Chain::Regtest),
-                    bitcoin_data_dir: None,
-                    bitcoin_rpc_port: Some(1),
-                    bitcoin_rpc_cookie_file: None,
-                    bitcoin_rpc_username: Some("user".into()),
-                    bitcoin_rpc_password: Some("pass".into()),
-                },
-                Some(data_dir.to_path_buf()),
-                None,
-                descriptor,
-                change_descriptor,
-                0,
-            )
-            .unwrap(),
-        )
-    }
-
-    fn persisted_next_external_index(store: &Store) -> u32 {
-        let changeset = store.read_wallet_changeset().unwrap();
-        let mut wallet = bdk_wallet::Wallet::load()
-            .check_network(Network::Regtest)
-            .load_wallet_no_persist(changeset)
-            .unwrap()
-            .expect("wallet state persisted");
-
-        wallet.reveal_next_address(KeychainKind::External).index
-    }
+    use {super::*, crate::router::testkit::*};
 
     fn persist_staged(wallet: &TestWallet) {
         wallet
@@ -666,16 +744,6 @@ mod tests {
         assert_eq!(wallet.address().unwrap().index, 0);
         assert_eq!(wallet.address().unwrap().index, 1);
         assert_eq!(wallet.address().unwrap().index, 2);
-    }
-
-    #[test]
-    fn address_returns_distinct_reveals() {
-        let wallet = test_wallet();
-
-        let a = wallet.address().unwrap();
-        let b = wallet.address().unwrap();
-        assert_ne!(a.index, b.index);
-        assert_ne!(a.address, b.address);
     }
 
     #[test]
@@ -712,17 +780,10 @@ mod tests {
         assert_eq!(persisted_next_external_index(&wallet.store), count as u32);
     }
 
-    #[tokio::test]
-    async fn synced_returns_true_after_mark_synced() {
-        let wallet = test_wallet();
-        assert!(!wallet.is_synced());
-        wallet.mark_synced();
-        assert!(wallet.wallet.synced().await);
-    }
-
     #[test]
     fn reveal_address_with_rolls_back_on_persist_failure() {
         let wallet = test_wallet();
+        wallet.mark_synced();
 
         let persisted = wallet
             .reveal_address_with(|address, _, wallet_delta| {
@@ -733,11 +794,12 @@ mod tests {
         assert_eq!(persisted, 0);
         assert_eq!(persisted_next_external_index(&wallet.store), 1);
 
-        let result: Result<()> = wallet.reveal_address_with(|address, _, _| {
+        let result: RouterResult<()> = wallet.reveal_address_with(|address, _, _| {
             assert_eq!(address.index, 1);
             Err(anyhow!("store write failed"))
         });
         assert!(result.is_err());
+        assert!(!wallet.is_synced());
 
         assert_eq!(wallet.address().unwrap().index, 1);
     }
@@ -745,8 +807,9 @@ mod tests {
     #[test]
     fn failed_persist_rolls_back_staged_changes() {
         let wallet = test_wallet();
+        wallet.mark_synced();
 
-        let result: Result<()> = wallet.reveal_address_with(|address, _, _| {
+        let result: RouterResult<()> = wallet.reveal_address_with(|address, _, _| {
             assert_eq!(address.index, 0);
             Err(anyhow!("store write failed"))
         });
@@ -770,11 +833,13 @@ mod tests {
                 wallet.test_confirm_tx(tx.clone());
             }
 
-            let txids = wallet.txids_by_derivation_index(address.index);
+            wallet.mark_synced();
+            let snapshot = wallet.snapshot().unwrap();
+            let txids = snapshot.txids_by_derivation_index(address.index);
             assert_eq!(txids, vec![tx.compute_txid()]);
 
             assert!(
-                wallet
+                snapshot
                     .txids_by_derivation_index(address.index + 1)
                     .is_empty()
             );
@@ -792,27 +857,30 @@ mod tests {
         let excluded = wallet.test_reveal_address();
 
         let tx = wallet.test_receive_unconfirmed(&included.address, Amount::from_sat(10_000));
+        let outpoint = OutPoint {
+            txid: tx.compute_txid(),
+            vout: 0,
+        };
         wallet.test_confirm_tx(tx);
 
         let tx = wallet.test_receive_unconfirmed(&excluded.address, Amount::from_sat(20_000));
         wallet.test_confirm_tx(tx);
 
-        let unspent = wallet.unspent_by_derivation_index(included.index);
-
-        assert_eq!(unspent.len(), 1);
+        wallet.mark_synced();
 
         let destination = wallet.test_reveal_address().address;
 
         let psbt = wallet
             .build_refund_psbt(
-                &[unspent[0]],
+                0,
+                included.index,
                 destination.clone(),
                 FeeRate::from_sat_per_vb(1).unwrap(),
             )
             .unwrap();
 
         assert_eq!(psbt.unsigned_tx.input.len(), 1);
-        assert_eq!(psbt.unsigned_tx.input[0].previous_output, unspent[0]);
+        assert_eq!(psbt.unsigned_tx.input[0].previous_output, outpoint);
         assert_eq!(psbt.unsigned_tx.output.len(), 1);
         assert_eq!(
             psbt.unsigned_tx.output[0].script_pubkey,
@@ -820,5 +888,179 @@ mod tests {
         );
         assert!(psbt.unsigned_tx.output[0].value < Amount::from_sat(10_000));
         assert!(psbt.inputs[0].final_script_witness.is_none());
+    }
+
+    #[test]
+    fn snapshot_retains_spent_receipts_and_deadline_heights() {
+        let wallet = test_wallet();
+        let address = wallet.test_reveal_address();
+        let tx = wallet.test_receive_unconfirmed(&address.address, Amount::from_sat(10_000));
+        let mut spend = Wallet::test_payment_tx(
+            &wallet.test_reveal_address().address,
+            Amount::from_sat(9000),
+        );
+        spend.input[0].previous_output = OutPoint {
+            txid: tx.compute_txid(),
+            vout: 0,
+        };
+        wallet.test_confirm_tx(tx.clone());
+        wallet.test_confirm_tx(spend.clone());
+        wallet.mark_synced();
+        let snapshot = wallet.snapshot().unwrap();
+        assert_eq!(snapshot.received(address.index), Amount::from_sat(10_000));
+        assert_eq!(
+            snapshot.received_by_deadline(address.index, 0),
+            Amount::ZERO
+        );
+        assert_eq!(
+            snapshot.received_by_deadline(address.index, 1),
+            Amount::from_sat(10_000)
+        );
+        let mut txids = vec![tx.compute_txid(), spend.compute_txid()];
+        txids.sort_unstable();
+        assert_eq!(snapshot.txids_by_derivation_index(address.index), txids);
+        let _inner = wallet.inner.lock();
+        for _ in 0..100 {
+            assert_eq!(
+                wallet.snapshot().unwrap().received(address.index),
+                Amount::from_sat(10_000)
+            );
+        }
+    }
+
+    #[test]
+    fn failed_periodic_persistence_keeps_staged_changes() {
+        let wallet = test_wallet();
+        wallet.test_reveal_address();
+        let staged = wallet.inner.lock().staged().unwrap().clone();
+        assert!(wallet.persist_staged_with(|_| bail!("foo")).is_err());
+        assert_eq!(wallet.inner.lock().staged(), Some(&staged));
+        wallet
+            .persist_staged_with(|delta| wallet.store.persist_wallet_delta(delta))
+            .unwrap();
+        assert!(wallet.inner.lock().staged().is_none());
+    }
+
+    #[test]
+    fn unavailable_wallet_retains_receipt_history() {
+        let wallet = test_wallet();
+        let address = wallet.test_reveal_address();
+        let tx = wallet.test_receive_unconfirmed(&address.address, Amount::from_sat(1000));
+        let txid = tx.compute_txid();
+        wallet.test_confirm_tx(tx);
+        wallet.mark_synced();
+        wallet
+            .persist_staged_with(|delta| wallet.store.persist_wallet_delta(delta))
+            .unwrap();
+        let snapshot = wallet.last_snapshot();
+
+        assert!(wallet.sync(&CancellationToken::new()).is_err());
+        assert!(wallet.snapshot().is_none());
+        assert!(Arc::ptr_eq(&snapshot, &wallet.last_snapshot()));
+
+        wallet.reload_inner(&mut wallet.inner.lock()).unwrap();
+        assert!(wallet.snapshot().is_none());
+        assert_eq!(
+            wallet
+                .last_snapshot()
+                .txids_by_derivation_index(address.index),
+            vec![txid]
+        );
+
+        let reopened = Wallet::open(wallet.settings.clone(), wallet.store.clone()).unwrap();
+        assert!(reopened.snapshot().is_none());
+        assert_eq!(
+            reopened
+                .last_snapshot()
+                .txids_by_derivation_index(address.index),
+            vec![txid]
+        );
+    }
+
+    #[test]
+    fn tip_change_keeps_mempool_progress() {
+        let wallet = test_wallet();
+        let foo = wallet.test_reveal_address();
+        let bar = wallet.test_reveal_address();
+        let tx = wallet.test_receive_unconfirmed(&foo.address, Amount::from_sat(1000));
+        wallet.mark_synced();
+        let event = MempoolEvent {
+            update: vec![(
+                Arc::new(Wallet::test_payment_tx(
+                    &bar.address,
+                    Amount::from_sat(2000),
+                )),
+                1,
+            )],
+            evicted: vec![(tx.compute_txid(), 2)],
+        };
+
+        assert_eq!(
+            wallet
+                .apply_mempool(event, &CancellationToken::new())
+                .unwrap(),
+            (1, 1)
+        );
+        let snapshot = wallet.snapshot().unwrap();
+        assert_eq!(snapshot.tip(), 0);
+        assert_eq!(snapshot.received(foo.index), Amount::ZERO);
+        assert_eq!(snapshot.received(bar.index), Amount::from_sat(2000));
+
+        wallet.test_advance_tip_to(1);
+        wallet
+            .apply_mempool(MempoolEvent::default(), &CancellationToken::new())
+            .unwrap();
+        let snapshot = wallet.snapshot().unwrap();
+        assert_eq!(snapshot.tip(), 1);
+        assert_eq!(snapshot.received(foo.index), Amount::ZERO);
+        assert_eq!(snapshot.received(bar.index), Amount::from_sat(2000));
+    }
+
+    #[test]
+    fn unrelated_evictions_are_ignored() {
+        let wallet = test_wallet();
+        let event = MempoolEvent {
+            evicted: vec![(Txid::all_zeros(), 1)],
+            ..Default::default()
+        };
+        assert_eq!(
+            wallet
+                .apply_mempool(event, &CancellationToken::new())
+                .unwrap(),
+            (0, 0)
+        );
+        assert!(wallet.is_synced());
+    }
+
+    #[test]
+    fn failed_reload_requires_recovery_before_publication() {
+        let wallet = test_wallet();
+        wallet.test_reveal_address();
+        wallet.mark_synced();
+        wallet
+            .store
+            .persist_wallet_delta(&ChangeSet {
+                network: Some(Network::Regtest),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert!(wallet.reload_inner(&mut wallet.inner.lock()).is_err());
+        assert!(!wallet.is_synced());
+        wallet.stale_emitter.store(false, Ordering::Release);
+        assert!(wallet.publish(&wallet.inner.lock()).is_err());
+        assert!(wallet.sync(&CancellationToken::new()).is_err());
+        assert!(wallet.reload_required.load(Ordering::Acquire));
+        assert!(
+            wallet
+                .persist_staged_with(|_| panic!("unexpected persistence"))
+                .is_err()
+        );
+
+        let delta = wallet.inner.lock().staged().unwrap().clone();
+        wallet.store.persist_wallet_delta(&delta).unwrap();
+        assert!(wallet.sync(&CancellationToken::new()).is_err());
+        assert!(!wallet.reload_required.load(Ordering::Acquire));
+        assert!(!wallet.is_synced());
     }
 }

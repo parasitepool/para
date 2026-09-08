@@ -61,6 +61,7 @@ impl From<RouterError> for ServerError {
             }
             RouterError::OrderNotFound { .. } => Self::NotFound(error.to_string()),
             RouterError::Halted
+            | RouterError::ShuttingDown
             | RouterError::WalletSyncing
             | RouterError::WalletRequired
             | RouterError::WalletPersistence { .. }
@@ -68,7 +69,9 @@ impl From<RouterError> for ServerError {
                 Self::ServiceUnavailable(error.to_string())
             }
             RouterError::OrderRateLimited { .. } => Self::TooManyRequests(error.to_string()),
-            RouterError::OrderIdExhausted => Self::Internal(error.into()),
+            RouterError::OrderIdExhausted | RouterError::BlockingTask { .. } => {
+                Self::Internal(error.into())
+            }
         }
     }
 }

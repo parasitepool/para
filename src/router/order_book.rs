@@ -400,24 +400,22 @@ impl OrderBook {
     }
 
     pub(crate) fn flag_orders(&self, wallet: &Wallet) {
-        let confirmed = wallet.confirmed_by_index();
+        let Some(snapshot) = wallet.snapshot() else {
+            return;
+        };
 
         for order in self.orders.read().live() {
             let Some(bucket) = &order.bucket else {
                 continue;
             };
 
-            let received = confirmed
-                .get(&bucket.payment.derivation_index)
-                .copied()
-                .unwrap_or(Amount::ZERO);
+            let received = snapshot.received_by_deadline(bucket.payment.derivation_index, u32::MAX);
 
             if order.status().is_terminal() && !order.is_fulfilled() && received > Amount::ZERO {
                 order.set_flagged();
             }
 
-            if wallet.is_synced()
-                && order.status() == OrderStatus::Active
+            if order.status() == OrderStatus::Active
                 && received < bucket.payment.amount
                 && order.set_flagged()
             {
@@ -431,10 +429,10 @@ impl OrderBook {
         let rehydratable = {
             let orders = self.orders.read();
 
-            confirmed
-                .iter()
-                .filter(|(_, amount)| **amount > Amount::ZERO)
-                .filter_map(|(index, _)| orders.cold_id(*index))
+            snapshot
+                .confirmed_by_index()
+                .filter(|(_, amount)| *amount > Amount::ZERO)
+                .filter_map(|(index, _)| orders.cold_id(index))
                 .collect::<Vec<_>>()
         };
 
@@ -470,9 +468,9 @@ impl OrderBook {
     }
 
     pub(crate) fn audit_receipts(&self, wallet: &Wallet) -> Vec<(u32, Amount)> {
-        if !wallet.is_synced() {
+        let Some(snapshot) = wallet.snapshot() else {
             return Vec::new();
-        }
+        };
 
         let orders = self.orders.read();
 
@@ -489,7 +487,7 @@ impl OrderBook {
 
         let mut orphans = Vec::new();
 
-        for (index, amount) in wallet.confirmed_by_index() {
+        for (index, amount) in snapshot.confirmed_by_index() {
             if amount == Amount::ZERO {
                 continue;
             }
@@ -684,6 +682,7 @@ mod tests {
 
         let tx = wallet.test_receive_unconfirmed(&cold.address, Amount::from_sat(1000));
         wallet.test_confirm_tx(tx);
+        wallet.mark_synced();
 
         let before = router.status();
         assert_eq!(before.upstream.accepted_shares, 0);
@@ -750,6 +749,7 @@ mod tests {
         );
 
         let fulfilled = funded_order(&router, &wallet, 5, OrderStatus::Disconnected);
+        wallet.mark_synced();
         set_delivered_work(&router.metatron, fulfilled.as_ref(), 100.0);
 
         add_orders(
@@ -793,6 +793,7 @@ mod tests {
         );
         let tx = wallet.test_receive_unconfirmed(&address.address, Amount::from_sat(1000));
         wallet.test_confirm_tx(tx);
+        wallet.mark_synced();
 
         add_orders(&router, [order.clone()]);
 
@@ -824,6 +825,7 @@ mod tests {
         );
         let tx = wallet.test_receive_unconfirmed(&address.address, Amount::from_sat(1000));
         wallet.test_confirm_tx(tx);
+        wallet.mark_synced();
 
         add_orders(&router, [order.clone()]);
 
@@ -973,6 +975,7 @@ mod tests {
             let tx = wallet.test_receive_unconfirmed(address, Amount::from_sat(1000));
             wallet.test_confirm_tx(tx);
         }
+        wallet.mark_synced();
 
         assert_eq!(
             router.audit_receipts(),
@@ -999,6 +1002,7 @@ mod tests {
         );
         let tx = wallet.test_receive_unconfirmed(&address.address, Amount::from_sat(1000));
         wallet.test_confirm_tx(tx);
+        wallet.mark_synced();
 
         add_orders(router.as_ref(), [order.clone()]);
         order.terminate(OrderStatus::Expired);
@@ -1035,6 +1039,7 @@ mod tests {
         );
         let tx = wallet.test_receive_unconfirmed(&address.address, Amount::from_sat(1000));
         wallet.test_confirm_tx(tx);
+        wallet.mark_synced();
 
         add_orders(router.as_ref(), [order.clone()]);
         order.terminate(OrderStatus::Fulfilled);

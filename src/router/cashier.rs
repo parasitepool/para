@@ -38,12 +38,6 @@ impl Cashier {
             return Err(RouterError::WalletSyncing);
         }
 
-        let outpoints = wallet.unspent_by_derivation_index(derivation_index);
-
-        if outpoints.is_empty() {
-            return Err(RouterError::NoUnspentFunds { id });
-        }
-
         let destination = match destination {
             Some(destination) => destination,
             None => default_destination
@@ -54,9 +48,13 @@ impl Cashier {
 
         let fee_rate = fee_rate.unwrap_or(DEFAULT_REFUND_FEE_RATE);
 
-        let psbt = wallet
-            .build_refund_psbt(&outpoints, destination.clone(), fee_rate)
-            .map_err(|error| RouterError::RefundConstruction { error })?;
+        let psbt = wallet.build_refund_psbt(id, derivation_index, destination.clone(), fee_rate)?;
+        let outpoints = psbt
+            .unsigned_tx
+            .input
+            .iter()
+            .map(|input| input.previous_output)
+            .collect();
 
         let amount = psbt.unsigned_tx.output[0].value;
 
@@ -78,41 +76,50 @@ impl Cashier {
         let mut sync_rx = wallet.subscribe_sync();
 
         loop {
-            let total = wallet.received(payment.derivation_index);
+            let snapshot = sync_rx.borrow_and_update().snapshot();
+            if let Some(snapshot) = snapshot {
+                let total = snapshot.received(payment.derivation_index);
 
-            let timeout = if total >= payment.amount {
-                EXTENDED_PAYMENT_TIMEOUT
-            } else {
-                PAYMENT_TIMEOUT
-            };
+                let timeout = if total >= payment.amount {
+                    EXTENDED_PAYMENT_TIMEOUT
+                } else {
+                    PAYMENT_TIMEOUT
+                };
 
-            let deadline_height = payment.created_at_height.saturating_add(timeout);
+                let deadline_height = payment.created_at_height.saturating_add(timeout);
 
-            let confirmed_by_deadline =
-                wallet.received_by_deadline(payment.derivation_index, deadline_height);
+                let confirmed_by_deadline =
+                    snapshot.received_by_deadline(payment.derivation_index, deadline_height);
 
-            let timed_out = wallet.tip() >= deadline_height;
+                let timed_out = snapshot.tip() >= deadline_height;
 
-            {
-                let lifecycle = order.lifecycle.lock();
+                {
+                    let lifecycle = order.lifecycle.lock();
 
-                if confirmed_by_deadline >= payment.amount && lifecycle.status.awaiting_payment() {
-                    return Ok(true);
+                    if confirmed_by_deadline >= payment.amount
+                        && lifecycle.status.awaiting_payment()
+                    {
+                        return Ok(true);
+                    }
+
+                    if timed_out {
+                        drop(lifecycle);
+                        order.terminate(OrderStatus::Expired);
+                        return Ok(false);
+                    }
                 }
 
-                if timed_out {
-                    drop(lifecycle);
-                    order.terminate(OrderStatus::Expired);
-                    return Ok(false);
-                }
+                order.note_payment_seen(total >= payment.amount);
             }
-
-            order.note_payment_seen(total >= payment.amount);
 
             tokio::select! {
                 biased;
                 _ = order.cancel.cancelled() => return Ok(false),
-                _ = sync_rx.changed() => {}
+                changed = sync_rx.changed() => {
+                    if changed.is_err() {
+                        return Ok(false);
+                    }
+                }
             }
         }
     }
@@ -121,6 +128,37 @@ impl Cashier {
 #[cfg(test)]
 mod tests {
     use {super::*, crate::router::testkit::*};
+
+    fn payment_fixture(
+        status: OrderStatus,
+    ) -> (TestRouter, Arc<Wallet>, bdk_wallet::AddressInfo, Arc<Order>) {
+        let router = test_router();
+        let wallet = router.wallet.clone().unwrap();
+        let address = wallet.test_reveal_address();
+        let order = test_order_with_payment(
+            0,
+            Payment::new(
+                address.address.clone(),
+                address.index,
+                Amount::from_sat(1000),
+                wallet.tip(),
+            ),
+            status,
+            &router.metatron,
+        );
+        (router, wallet, address, order)
+    }
+
+    fn spawn_waiter(router: &TestRouter, order: &Arc<Order>) -> task::JoinHandle<bool> {
+        let monitored = order.clone();
+        let router = router.router.clone();
+        tokio::spawn(async move {
+            router
+                .wait_for_payment(&monitored, payment(&monitored))
+                .await
+                .unwrap()
+        })
+    }
 
     #[test]
     fn build_refund_constructs_unsigned_psbt() {
@@ -133,6 +171,7 @@ mod tests {
         let tx = wallet.test_receive_unconfirmed(&funded.address, Amount::from_sat(10_000));
 
         wallet.test_confirm_tx(tx);
+        wallet.mark_synced();
 
         add_orders(
             router.as_ref(),
@@ -160,6 +199,7 @@ mod tests {
         let cold = wallet.test_reveal_address();
         let tx = wallet.test_receive_unconfirmed(&cold.address, Amount::from_sat(2000));
         wallet.test_confirm_tx(tx);
+        wallet.mark_synced();
 
         let order = funded_bucket_order(1, &cold, 2000, &router.metatron);
         router.book.add_cold(1, order.to_entry());
@@ -235,13 +275,14 @@ mod tests {
         wallet.mark_synced();
 
         assert!(matches!(
-            router.build_refund(1, Some(fee_rate), None),
+            router.build_refund(1, Some(fee_rate), Some(test_address())),
             Err(RouterError::NoUnspentFunds { id: 1 })
         ));
 
         let funded = wallet.test_reveal_address();
         let tx = wallet.test_receive_unconfirmed(&funded.address, Amount::from_sat(1000));
         wallet.test_confirm_tx(tx);
+        wallet.mark_synced();
 
         add_orders(
             router.as_ref(),
@@ -283,20 +324,11 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn wait_for_payment_expires_instead_of_activating_after_extended_timeout() {
-        let router = test_router();
-        let router = router.router.clone();
-        let wallet = router.wallet.as_ref().unwrap();
-        let address = wallet.test_reveal_address();
-        let amount = Amount::from_sat(1000);
-        let order = test_order_with_payment(
-            0,
-            Payment::new(address.address.clone(), address.index, amount, 0),
-            OrderStatus::Pending,
-            &router.metatron,
-        );
+        let (router, wallet, address, order) = payment_fixture(OrderStatus::Pending);
 
-        wallet.test_receive_unconfirmed(&address.address, amount);
+        wallet.test_receive_unconfirmed(&address.address, payment(&order).amount);
         wallet.test_advance_tip_to(EXTENDED_PAYMENT_TIMEOUT);
+        wallet.mark_synced();
 
         assert!(
             !router
@@ -310,20 +342,11 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn wait_for_payment_partial_payment_does_not_extend_deadline() {
-        let router = test_router();
-        let router = router.router.clone();
-        let wallet = router.wallet.as_ref().unwrap();
-        let address = wallet.test_reveal_address();
-        let amount = Amount::from_sat(1000);
-        let order = test_order_with_payment(
-            0,
-            Payment::new(address.address.clone(), address.index, amount, 0),
-            OrderStatus::Pending,
-            &router.metatron,
-        );
+        let (router, wallet, address, order) = payment_fixture(OrderStatus::Pending);
 
         wallet.test_receive_unconfirmed(&address.address, Amount::from_sat(500));
         wallet.test_advance_tip_to(PAYMENT_TIMEOUT);
+        wallet.mark_synced();
 
         assert!(
             !router
@@ -337,29 +360,13 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn wait_for_payment_extends_deadline_while_payment_in_mempool() {
-        let router = test_router();
-        let router = router.router.clone();
-        let wallet = router.wallet.as_ref().unwrap();
-        let address = wallet.test_reveal_address();
-        let amount = Amount::from_sat(1000);
-        let order = test_order_with_payment(
-            0,
-            Payment::new(address.address.clone(), address.index, amount, 0),
-            OrderStatus::Pending,
-            &router.metatron,
-        );
+        let (router, wallet, address, order) = payment_fixture(OrderStatus::Pending);
 
-        wallet.test_receive_unconfirmed(&address.address, amount);
+        wallet.test_receive_unconfirmed(&address.address, payment(&order).amount);
         wallet.test_advance_tip_to(PAYMENT_TIMEOUT);
+        wallet.mark_synced();
 
-        let monitored = order.clone();
-        let waiter_router = router.clone();
-        let waiter = tokio::spawn(async move {
-            waiter_router
-                .wait_for_payment(&monitored, payment(&monitored))
-                .await
-                .unwrap()
-        });
+        let waiter = spawn_waiter(&router, &order);
 
         tokio::task::yield_now().await;
         assert_eq!(order.status(), OrderStatus::InMempool);
@@ -371,28 +378,12 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn wait_for_payment_expires_promptly_after_payment_disappears() {
-        let router = test_router();
-        let router = router.router.clone();
-        let wallet = router.wallet.as_ref().unwrap().clone();
-        let address = wallet.test_reveal_address();
-        let amount = Amount::from_sat(1000);
-        let order = test_order_with_payment(
-            0,
-            Payment::new(address.address.clone(), address.index, amount, 0),
-            OrderStatus::Pending,
-            &router.metatron,
-        );
+        let (router, wallet, address, order) = payment_fixture(OrderStatus::Pending);
 
-        let tx = wallet.test_receive_unconfirmed(&address.address, amount);
+        let tx = wallet.test_receive_unconfirmed(&address.address, payment(&order).amount);
+        wallet.mark_synced();
 
-        let monitored = order.clone();
-        let waiter_router = router.clone();
-        let waiter = tokio::spawn(async move {
-            waiter_router
-                .wait_for_payment(&monitored, payment(&monitored))
-                .await
-                .unwrap()
-        });
+        let waiter = spawn_waiter(&router, &order);
 
         tokio::task::yield_now().await;
         assert_eq!(order.status(), OrderStatus::InMempool);
@@ -424,28 +415,12 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn wait_for_payment_marks_pending_order_in_mempool_before_confirmation() {
-        let router = test_router();
-        let router = router.router.clone();
-        let wallet = router.wallet.as_ref().unwrap().clone();
-        let address = wallet.test_reveal_address();
-        let amount = Amount::from_sat(1000);
-        let order = test_order_with_payment(
-            0,
-            Payment::new(address.address.clone(), address.index, amount, wallet.tip()),
-            OrderStatus::Pending,
-            &router.metatron,
-        );
+        let (router, wallet, address, order) = payment_fixture(OrderStatus::Pending);
 
-        wallet.test_receive_unconfirmed(&address.address, amount);
+        wallet.test_receive_unconfirmed(&address.address, payment(&order).amount);
+        wallet.mark_synced();
 
-        let monitored = order.clone();
-        let waiter_router = router.clone();
-        let waiter = tokio::spawn(async move {
-            waiter_router
-                .wait_for_payment(&monitored, payment(&monitored))
-                .await
-                .unwrap()
-        });
+        let waiter = spawn_waiter(&router, &order);
 
         tokio::task::yield_now().await;
         assert_eq!(order.status(), OrderStatus::InMempool);
@@ -456,25 +431,10 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn wait_for_payment_returns_in_mempool_to_pending_when_total_is_below_amount() {
-        let router = test_router();
-        let router = router.router.clone();
-        let wallet = router.wallet.as_ref().unwrap().clone();
-        let address = wallet.test_reveal_address();
-        let amount = Amount::from_sat(1000);
-        let order = test_order_with_payment(
-            0,
-            Payment::new(address.address.clone(), address.index, amount, wallet.tip()),
-            OrderStatus::InMempool,
-            &router.metatron,
-        );
-        let monitored = order.clone();
-        let waiter_router = router.clone();
-        let waiter = tokio::spawn(async move {
-            waiter_router
-                .wait_for_payment(&monitored, payment(&monitored))
-                .await
-                .unwrap()
-        });
+        let (router, wallet, _address, order) = payment_fixture(OrderStatus::InMempool);
+        wallet.mark_synced();
+
+        let waiter = spawn_waiter(&router, &order);
 
         tokio::task::yield_now().await;
         assert_eq!(order.status(), OrderStatus::Pending);
@@ -485,28 +445,12 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn wait_for_payment_activates_when_confirmed_at_timeout() {
-        let router = test_router();
-        let router = router.router.clone();
-        let wallet = router.wallet.as_ref().unwrap().clone();
-        let address = wallet.test_reveal_address();
-        let amount = Amount::from_sat(1000);
-        let order = test_order_with_payment(
-            0,
-            Payment::new(address.address.clone(), address.index, amount, wallet.tip()),
-            OrderStatus::Pending,
-            &router.metatron,
-        );
+        let (router, wallet, address, order) = payment_fixture(OrderStatus::Pending);
 
-        let tx = wallet.test_receive_unconfirmed(&address.address, amount);
+        let tx = wallet.test_receive_unconfirmed(&address.address, payment(&order).amount);
+        wallet.mark_synced();
 
-        let monitored = order.clone();
-        let waiter_router = router.clone();
-        let waiter = tokio::spawn(async move {
-            waiter_router
-                .wait_for_payment(&monitored, payment(&monitored))
-                .await
-                .unwrap()
-        });
+        let waiter = spawn_waiter(&router, &order);
 
         tokio::task::yield_now().await;
         assert_eq!(order.status(), OrderStatus::InMempool);
@@ -522,21 +466,12 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn wait_for_payment_expires_when_payment_confirms_after_extended_timeout() {
-        let router = test_router();
-        let router = router.router.clone();
-        let wallet = router.wallet.as_ref().unwrap().clone();
-        let address = wallet.test_reveal_address();
-        let amount = Amount::from_sat(1000);
-        let order = test_order_with_payment(
-            0,
-            Payment::new(address.address.clone(), address.index, amount, wallet.tip()),
-            OrderStatus::Pending,
-            &router.metatron,
-        );
+        let (router, wallet, address, order) = payment_fixture(OrderStatus::Pending);
 
-        let tx = wallet.test_receive_unconfirmed(&address.address, amount);
+        let tx = wallet.test_receive_unconfirmed(&address.address, payment(&order).amount);
         wallet.test_advance_tip_to(EXTENDED_PAYMENT_TIMEOUT);
         wallet.test_confirm_tx(tx);
+        wallet.mark_synced();
 
         assert!(
             !router
@@ -550,28 +485,12 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn wait_for_payment_activates_when_confirmed_within_extended_deadline() {
-        let router = test_router();
-        let router = router.router.clone();
-        let wallet = router.wallet.as_ref().unwrap().clone();
-        let address = wallet.test_reveal_address();
-        let amount = Amount::from_sat(1000);
-        let order = test_order_with_payment(
-            0,
-            Payment::new(address.address.clone(), address.index, amount, wallet.tip()),
-            OrderStatus::Pending,
-            &router.metatron,
-        );
+        let (router, wallet, address, order) = payment_fixture(OrderStatus::Pending);
 
-        let tx = wallet.test_receive_unconfirmed(&address.address, amount);
+        let tx = wallet.test_receive_unconfirmed(&address.address, payment(&order).amount);
+        wallet.mark_synced();
 
-        let monitored = order.clone();
-        let waiter_router = router.clone();
-        let waiter = tokio::spawn(async move {
-            waiter_router
-                .wait_for_payment(&monitored, payment(&monitored))
-                .await
-                .unwrap()
-        });
+        let waiter = spawn_waiter(&router, &order);
 
         tokio::task::yield_now().await;
         assert_eq!(order.status(), OrderStatus::InMempool);

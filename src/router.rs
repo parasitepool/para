@@ -33,7 +33,7 @@ pub(crate) mod runner;
 pub(crate) mod testkit;
 
 pub(crate) const PAYMENT_TIMEOUT: u32 = 6;
-pub(crate) const EXTENDED_PAYMENT_TIMEOUT: u32 = 144;
+pub(crate) const EXTENDED_PAYMENT_TIMEOUT: u32 = 36;
 const MAX_ORDER_CREATIONS_PER_MINUTE: usize = 100;
 const SWEEP_INTERVAL: Duration = Duration::from_hours(1);
 
@@ -155,6 +155,26 @@ impl Router {
 
     pub(crate) fn persist(&self) -> Result {
         self.book.persist(self.wallet.as_deref())
+    }
+
+    pub(crate) async fn persist_blocking(self: &Arc<Self>) -> Result {
+        self.blocking(|router| router.persist()).await?
+    }
+
+    pub(crate) async fn blocking<T: Send + 'static>(
+        self: &Arc<Self>,
+        operation: impl FnOnce(&Arc<Self>) -> T + Send + 'static,
+    ) -> RouterResult<T> {
+        let router = self.clone();
+        self.tasks
+            .spawn_blocking(move || {
+                if router.cancel.is_cancelled() {
+                    return Err(RouterError::ShuttingDown);
+                }
+                Ok(operation(&router))
+            })
+            .await
+            .map_err(|error| RouterError::BlockingTask { error })?
     }
 
     pub(crate) fn retire_orders(&self) {
@@ -413,25 +433,22 @@ impl Router {
         let capacity = self.capacity_work();
 
         let order = self.book.add_bucket_order(capacity, target, |id| {
-            wallet
-                .reveal_address_with(|address_info, created_at_height, wallet_delta| {
-                    let bucket = Bucket {
-                        target,
-                        payment: Payment::new(
-                            address_info.address,
-                            address_info.index,
-                            amount,
-                            created_at_height,
-                        ),
-                    };
-                    let order =
-                        Order::new(id, upstream_target, Some(bucket), cancel, metatron.clone());
+            wallet.reveal_address_with(|address_info, created_at_height, wallet_delta| {
+                let bucket = Bucket {
+                    target,
+                    payment: Payment::new(
+                        address_info.address,
+                        address_info.index,
+                        amount,
+                        created_at_height,
+                    ),
+                };
+                let order = Order::new(id, upstream_target, Some(bucket), cancel, metatron.clone());
 
-                    metatron.persist_order(id, &order.to_entry(), wallet_delta)?;
+                metatron.persist_order(id, &order.to_entry(), wallet_delta)?;
 
-                    Ok(order)
-                })
-                .map_err(|error| RouterError::WalletPersistence { error })
+                Ok(order)
+            })
         })?;
 
         self.runner.spawn(order.clone());
@@ -635,7 +652,7 @@ impl Router {
                             router.price_feed.update(bitcoin_client, &router.settings).await;
                         }
 
-                        if let Err(err) = router.persist() {
+                        if let Err(err) = router.persist_blocking().await {
                             warn!("Router persistence error: {err}");
                         }
 
@@ -698,6 +715,39 @@ impl StatusLine for Router {
 #[cfg(test)]
 mod tests {
     use {super::*, crate::router::testkit::*};
+
+    #[tokio::test]
+    async fn blocking_jobs_survive_dropped_waiters() {
+        let router = test_router();
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        let job_router = router.router.clone();
+        let waiter = tokio::spawn(async move {
+            job_router
+                .blocking(move |_| {
+                    started.send(()).unwrap();
+                    wait.recv().unwrap();
+                })
+                .await
+                .unwrap();
+        });
+        ready.await.unwrap();
+        waiter.abort();
+        assert!(waiter.await.unwrap_err().is_cancelled());
+        router.cancel.cancel();
+        router.tasks.close();
+        assert!(
+            timeout(Duration::from_millis(10), router.tasks.wait())
+                .await
+                .is_err()
+        );
+        release.send(()).unwrap();
+        router.tasks.wait().await;
+        assert!(matches!(
+            router.blocking(|_| panic!("unexpected job")).await,
+            Err(RouterError::ShuttingDown)
+        ));
+    }
 
     #[test]
     fn status_serde() {

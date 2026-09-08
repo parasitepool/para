@@ -82,7 +82,7 @@ use {
     sqlx::{Pool, Postgres, postgres::PgPoolOptions},
     std::{
         cmp::Reverse,
-        collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
+        collections::{BTreeMap, HashMap, HashSet, VecDeque},
         env,
         fmt::{self, Display, Formatter},
         fs,

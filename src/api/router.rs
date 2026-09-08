@@ -270,7 +270,8 @@ async fn order_detail(
     let txids_for = |derivation_index: u32| {
         router
             .wallet()
-            .map(|wallet| wallet.txids_by_derivation_index(derivation_index))
+            .map(Wallet::last_snapshot)
+            .map(|snapshot| snapshot.txids_by_derivation_index(derivation_index))
             .unwrap_or_default()
     };
 
@@ -308,11 +309,15 @@ async fn add_order(
     State(router): State<Arc<Router>>,
     Json(request): Json<OrderRequest>,
 ) -> ServerResult<Response> {
-    let order = router.add_bucket_order(
-        request.upstream_target,
-        request.hash_days,
-        request.hash_price,
-    )?;
+    let order = router
+        .blocking(move |router| {
+            router.add_bucket_order(
+                request.upstream_target,
+                request.hash_days,
+                request.hash_price,
+            )
+        })
+        .await??;
 
     let Some(bucket) = &order.bucket else {
         return Err(anyhow!("bucket order missing bucket").into());
@@ -684,7 +689,9 @@ async fn refund_order(
         })
         .transpose()?;
 
-    let refund = router.build_refund(id, fee_rate, destination)?;
+    let refund = router
+        .blocking(move |router| router.build_refund(id, fee_rate, destination))
+        .await??;
 
     Ok(Json(RefundResponse {
         psbt: refund.psbt.to_string(),

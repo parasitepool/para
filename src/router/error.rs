@@ -5,6 +5,10 @@ pub(crate) type RouterResult<T> = Result<T, RouterError>;
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub(crate)))]
 pub(crate) enum RouterError {
+    #[snafu(display("router is shutting down"))]
+    ShuttingDown,
+    #[snafu(display("blocking task failed: {error}"))]
+    BlockingTask { error: task::JoinError },
     #[snafu(display("router is halted"))]
     Halted,
     #[snafu(display("hash days must be positive"))]

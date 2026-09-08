@@ -12,6 +12,14 @@ pub(crate) struct TestRouter {
     pub(crate) _directory: Option<tempfile::TempDir>,
 }
 
+impl std::ops::Deref for TestWallet {
+    type Target = Wallet;
+
+    fn deref(&self) -> &Self::Target {
+        self.wallet.as_ref()
+    }
+}
+
 impl std::ops::Deref for TestRouter {
     type Target = Arc<Router>;
 
