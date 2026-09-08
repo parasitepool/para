@@ -1183,7 +1183,9 @@ impl Database {
             }
             Ok(None) => {}
             Err(e) => {
-                warn!("Refinery badge fetch failed for {username}, keeping cached value: {e}");
+                if !ExternalBadgeSources::is_not_found(&e) {
+                    warn!("Refinery badge fetch failed for {username}, keeping cached value: {e}");
+                }
                 carry_forward(REFINERY_BADGE_ID, &mut types);
             }
         }
@@ -1207,7 +1209,9 @@ impl Database {
             }
             Ok(None) => {}
             Err(e) => {
-                warn!("Dispenser badge fetch failed for {username}, keeping cached value: {e}");
+                if !ExternalBadgeSources::is_not_found(&e) {
+                    warn!("Dispenser badge fetch failed for {username}, keeping cached value: {e}");
+                }
                 for id in [DISPENSER_BADGE_ID, BRAVOCADO_BADGE_ID, MINER_BADGE_ID] {
                     carry_forward(id, &mut types);
                 }
@@ -1223,7 +1227,9 @@ impl Database {
             }
             Ok(None) => {}
             Err(e) => {
-                warn!("Auction badge fetch failed for {username}, keeping cached value: {e}");
+                if !ExternalBadgeSources::is_not_found(&e) {
+                    warn!("Auction badge fetch failed for {username}, keeping cached value: {e}");
+                }
                 carry_forward(AUCTION_WINNER_BADGE_ID, &mut types);
             }
         }

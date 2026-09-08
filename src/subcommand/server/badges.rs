@@ -355,6 +355,11 @@ impl ExternalBadgeSources {
         self.router.is_some() || self.guac.is_some()
     }
 
+    pub(crate) fn is_not_found(err: &anyhow::Error) -> bool {
+        err.downcast_ref::<reqwest::Error>()
+            .is_some_and(|e| e.status() == Some(reqwest::StatusCode::NOT_FOUND))
+    }
+
     async fn get_json(&self, url: String, endpoint: &ServiceEndpoint) -> Result<serde_json::Value> {
         let mut request = self.client.get(&url);
         if let Some(token) = &endpoint.token {
