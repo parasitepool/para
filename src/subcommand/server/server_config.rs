@@ -29,6 +29,12 @@ pub(crate) struct ServerConfig {
     nodes: Vec<Url>,
     #[arg(long, help = "Send shares to HTTP <SYNC_ENDPOINT>.")]
     sync_endpoint: Option<String>,
+    #[arg(
+        long,
+        env = "PARA_NODE_TOKEN",
+        help = "Authenticate to <SYNC_ENDPOINT> with <NODE_TOKEN>."
+    )]
+    node_token: Option<String>,
     #[arg(long, help = "Cache <TTL> in seconds.", default_value = "30")]
     ttl: u64,
     #[arg(long, help = "Run account migration before processing sync batches.")]
@@ -121,6 +127,10 @@ impl ServerConfig {
 
     pub(crate) fn sync_endpoint(&self) -> Option<String> {
         self.sync_endpoint.clone()
+    }
+
+    pub(crate) fn node_token(&self) -> Option<&str> {
+        self.node_token.as_deref()
     }
 
     pub(crate) fn ttl(&self) -> Duration {

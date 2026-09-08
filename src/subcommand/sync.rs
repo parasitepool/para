@@ -36,7 +36,11 @@ pub struct Sync {
         default_value = "postgres://satoshi:nakamoto@127.0.0.1:5432/ckpool"
     )]
     pub database_url: String,
-    #[arg(long, help = "<ADMIN_TOKEN> for bearer auth on sync endpoint.")]
+    #[arg(
+        long,
+        alias = "node-token",
+        help = "<ADMIN_TOKEN> or node token for bearer auth on sync endpoint."
+    )]
     admin_token: Option<String>,
     #[arg(
         long,

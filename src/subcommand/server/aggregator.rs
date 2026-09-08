@@ -8,7 +8,7 @@ impl Aggregator {
         database: Option<Database>,
     ) -> Result<axum::Router> {
         let mut headers = header::HeaderMap::new();
-        if let Some(token) = config.api_token() {
+        if let Some(token) = config.api_token().or(config.admin_token()) {
             headers.insert(
                 header::AUTHORIZATION,
                 HeaderValue::from_str(&format!("Bearer {token}"))?,
@@ -121,19 +121,12 @@ pub(crate) async fn blockheight(
     if let Some(sync_endpoint) = config.sync_endpoint() {
         nodes.push(Url::from_str(&sync_endpoint).map_err(|err| anyhow!(err))?);
     }
-    let admin_token = config.admin_token();
 
     let fetches = nodes.iter().map(|url| {
         let client = client.clone();
         async move {
             async {
-                let mut request_builder = client.get(url.join("/status")?);
-
-                if let Some(token) = admin_token {
-                    request_builder = request_builder.bearer_auth(token);
-                }
-
-                let resp = request_builder.send().await?;
+                let resp = client.get(url.join("/status")?).send().await?;
                 let status: NodeStatus =
                     serde_json::from_str(&resp.text().await?).map_err(|err| anyhow!(err))?;
 

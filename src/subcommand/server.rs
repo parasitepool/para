@@ -11,6 +11,7 @@ use {
             server::{
                 account::account_router,
                 badges::{ExternalBadgeSources, badges_router},
+                node_tokens::NodeAuth,
                 payouts::payouts_router,
                 rounds::rounds_router,
                 sharediff::share_difficulty_router,
@@ -44,6 +45,7 @@ mod badges;
 mod cache;
 pub mod database;
 mod node_status;
+mod node_tokens;
 
 pub use node_status::NodeStatus;
 pub mod notifications;
@@ -111,6 +113,15 @@ impl Modify for SecurityAddon {
                     Http::builder()
                         .scheme(HttpAuthScheme::Bearer)
                         .description(Some("Admin token for privileged operations"))
+                        .build(),
+                ),
+            );
+            components.add_security_scheme(
+                "node_token",
+                SecurityScheme::Http(
+                    Http::builder()
+                        .scheme(HttpAuthScheme::Bearer)
+                        .description(Some("Per-node token minted with `para node-token`"))
                         .build(),
                 ),
             );
@@ -261,7 +272,7 @@ impl Server {
 
         router = router
             .route("/", get(Self::home))
-            .route("/status", get(status).layer(from_extractor::<AdminAuth>()))
+            .route("/status", get(status).layer(from_extractor::<ApiAuth>()))
             .route("/static/{*path}", get(Self::static_assets));
 
         #[cfg(feature = "swagger-ui")]
@@ -274,6 +285,10 @@ impl Server {
 
         let database = match Database::new(config.database_url()).await {
             Ok(database) => {
+                if let Err(err) = database.ensure_node_tokens_table().await {
+                    warn!("{err:#}");
+                }
+
                 if config.migrate_accounts() {
                     let pool = database.pool.clone();
                     tokio::spawn(async move {
@@ -447,7 +462,7 @@ impl Server {
 #[utoipa::path(
     get,
     path = "/status",
-    security(("admin_token" = [])),
+    security(("api_token" = [])),
     responses(
         (status = 200, description = "Server status", body = NodeStatus),
     ),

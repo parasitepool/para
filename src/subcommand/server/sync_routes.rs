@@ -7,7 +7,6 @@ pub(crate) fn sync_router(config: Arc<ServerConfig>, database: Database) -> axum
             post(sync_batch).layer(DefaultBodyLimit::max(50 * MEBIBYTE)),
         )
         .layer(Extension(database))
-        .layer(from_extractor::<AdminAuth>())
         .layer(Extension(config))
 }
 
@@ -15,7 +14,7 @@ pub(crate) fn sync_router(config: Arc<ServerConfig>, database: Database) -> axum
 #[utoipa::path(
     post,
     path = "/sync/batch",
-    security(("admin_token" = [])),
+    security(("node_token" = []), ("admin_token" = [])),
     request_body = ShareBatch,
     responses(
         (status = 200, description = "Batch processed", body = SyncResponse),
@@ -23,6 +22,7 @@ pub(crate) fn sync_router(config: Arc<ServerConfig>, database: Database) -> axum
     tag = "sync"
 )]
 pub(crate) async fn sync_batch(
+    NodeAuth { name }: NodeAuth,
     Extension(database): Extension<Database>,
     Extension(config): Extension<Arc<ServerConfig>>,
     Json(batch): Json<ShareBatch>,
@@ -33,6 +33,20 @@ pub(crate) async fn sync_batch(
         batch.shares.len(),
         batch.hostname
     );
+
+    if let Some(name) = &name {
+        if batch.hostname != *name {
+            warn!(
+                "Rejecting sync batch {} from {}: token is bound to {name}",
+                batch.batch_id, batch.hostname
+            );
+            return Err(StatusCode::FORBIDDEN);
+        }
+
+        if let Err(err) = database.touch_node_token(name).await {
+            warn!("{err:#}");
+        }
+    }
 
     if config.migrate_accounts() && !MIGRATION_DONE.get_or_init(|| false) {
         warn!(

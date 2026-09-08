@@ -109,6 +109,8 @@ mod event_sink;
 #[cfg(target_os = "linux")]
 mod generator;
 #[cfg(target_os = "linux")]
+mod node_token;
+#[cfg(target_os = "linux")]
 mod payouts;
 #[cfg(target_os = "linux")]
 mod ping;

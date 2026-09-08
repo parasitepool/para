@@ -1,6 +1,7 @@
 use super::*;
 
 pub mod miner;
+pub mod node_token;
 pub mod ping;
 pub mod pool;
 pub mod probe;
@@ -14,6 +15,8 @@ pub mod wallet;
 pub(crate) enum Subcommand {
     #[command(about = "Run a toy miner")]
     Miner(miner::Miner),
+    #[command(about = "Manage per-node sync tokens")]
+    NodeToken(node_token::NodeToken),
     #[command(about = "Measure Stratum message ping")]
     Ping(ping::Ping),
     #[command(about = "Run a toy solo pool")]
@@ -40,6 +43,7 @@ impl Subcommand {
     ) -> Result {
         match self {
             Self::Miner(miner) => miner.run(cancel_token).await,
+            Self::NodeToken(node_token) => node_token.run().await,
             Self::Ping(ping) => ping.run(cancel_token).await,
             Self::Pool(pool) => pool.run(cancel_token, logs).await,
             Self::Probe(probe) => probe.run(cancel_token).await,
@@ -56,7 +60,9 @@ impl Subcommand {
                     if !sync_endpoint.contains(&hostname) {
                         let mut sync = sync::Sync::default().with_endpoint(sync_endpoint.clone());
 
-                        if let Some(token) = server.config.admin_token() {
+                        if let Some(token) =
+                            server.config.node_token().or(server.config.admin_token())
+                        {
                             sync = sync.with_admin_token(token);
                         }
 

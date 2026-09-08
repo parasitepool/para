@@ -456,7 +456,8 @@ fn status_json() {
 
 #[test]
 fn status_with_auth() {
-    let server = TestServer::spawn_with_args("--admin-token verysecrettoken");
+    let server =
+        TestServer::spawn_with_args("--api-token crazysecrettoken --admin-token verysecrettoken");
 
     let response = blocking_http_client()
         .get(format!("{}status", server.url()))
@@ -465,13 +466,15 @@ fn status_with_auth() {
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
-    let response = blocking_http_client()
-        .get(format!("{}status", server.url()))
-        .bearer_auth("verysecrettoken")
-        .send()
-        .unwrap();
+    for token in ["crazysecrettoken", "verysecrettoken"] {
+        let response = blocking_http_client()
+            .get(format!("{}status", server.url()))
+            .bearer_auth(token)
+            .send()
+            .unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.status(), StatusCode::OK);
+    }
 }
 
 #[test]
@@ -790,7 +793,7 @@ fn auth_tiers() {
     case(&server, "/pool/pool.status", Some("foo"), StatusCode::OK);
     case(&server, "/pool/pool.status", Some("bar"), StatusCode::OK);
     case(&server, "/status", None, StatusCode::UNAUTHORIZED);
-    case(&server, "/status", Some("foo"), StatusCode::UNAUTHORIZED);
+    case(&server, "/status", Some("foo"), StatusCode::OK);
     case(&server, "/status", Some("bar"), StatusCode::OK);
 }
 

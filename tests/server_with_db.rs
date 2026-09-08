@@ -716,7 +716,10 @@ async fn aggregator_blockheight_no_nodes() {
 
 #[tokio::test]
 async fn aggregator_blockheight_returns_minimum() {
-    let low_node = TestServer::spawn_with_db_args("--admin-token admin_token").await;
+    let low_node = TestServer::spawn_with_db_args(
+        "--api-token aggregator_api_token --admin-token admin_token",
+    )
+    .await;
     fs::write(low_node.tempdir.path().join("current_id.txt"), "1").unwrap();
     let source_db_url = low_node.database_url().unwrap();
     setup_test_schema(source_db_url.clone()).await.unwrap();
@@ -724,7 +727,10 @@ async fn aggregator_blockheight_returns_minimum() {
         .await
         .unwrap();
 
-    let high_node = TestServer::spawn_with_db_args("--admin-token admin_token").await;
+    let high_node = TestServer::spawn_with_db_args(
+        "--api-token aggregator_api_token --admin-token admin_token",
+    )
+    .await;
     fs::write(high_node.tempdir.path().join("current_id.txt"), "1").unwrap();
     let source_db_url = high_node.database_url().unwrap();
     setup_test_schema(source_db_url.clone()).await.unwrap();
@@ -1823,4 +1829,36 @@ async fn test_badges_external_outage_keeps_cached_value() {
         .get("refinery")
         .expect("refinery badge should be carried forward through an outage");
     assert_eq!(refinery.total, 7);
+}
+
+#[tokio::test]
+async fn aggregator_blockheight_with_admin_token_only() {
+    let node = TestServer::spawn_with_db_args("--admin-token admin_token").await;
+    fs::write(node.tempdir.path().join("current_id.txt"), "1").unwrap();
+    let source_db_url = node.database_url().unwrap();
+    setup_test_schema(source_db_url.clone()).await.unwrap();
+    insert_test_shares(source_db_url.clone(), 1, 800000)
+        .await
+        .unwrap();
+
+    let aggregator =
+        TestServer::spawn_with_db_args(format!("--nodes {} --admin-token admin_token", node.url()))
+            .await;
+    setup_test_schema(aggregator.database_url().unwrap())
+        .await
+        .unwrap();
+
+    let response = http_client()
+        .get(aggregator.url().join("/aggregator/blockheight").unwrap())
+        .header(reqwest::header::ACCEPT, "application/json")
+        .bearer_auth("admin_token")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let blockheight: i32 = response.json().await.unwrap();
+
+    assert_eq!(blockheight, 800000);
 }

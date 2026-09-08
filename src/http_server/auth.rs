@@ -124,7 +124,7 @@ impl BearerAuth {
         accepted
     }
 
-    fn accepts_admin(&self, token: &str) -> bool {
+    pub(crate) fn accepts_admin(&self, token: &str) -> bool {
         self.admin_hash
             .as_ref()
             .is_some_and(|h| Self::hashes_equal(h, &Self::hash(token)))
@@ -201,7 +201,7 @@ impl<S: Send + Sync> FromRequestParts<S> for AdminAuth {
     }
 }
 
-fn unauthorized() -> Response<Body> {
+pub(crate) fn unauthorized() -> Response<Body> {
     Response::builder()
         .status(StatusCode::UNAUTHORIZED)
         .header(WWW_AUTHENTICATE, "Bearer")

@@ -359,6 +359,14 @@ PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
 "
 
 PGPASSWORD="nakamoto" psql -h localhost -U satoshi -d ckpool -c "
+  CREATE TABLE IF NOT EXISTS node_tokens (
+    name TEXT PRIMARY KEY,
+    token_hash BYTEA NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    revoked_at TIMESTAMPTZ,
+    last_seen_at TIMESTAMPTZ
+  );
+
   CREATE TABLE IF NOT EXISTS payouts
   (
       id                BIGSERIAL PRIMARY KEY,
