@@ -28,10 +28,11 @@ pub(crate) async fn sync_batch(
     Json(batch): Json<ShareBatch>,
 ) -> Result<Json<SyncResponse>, StatusCode> {
     info!(
-        "Received sync batch {} with {} shares from {}",
+        "Received sync batch {} with {} shares from {} (auth: {})",
         batch.batch_id,
         batch.shares.len(),
-        batch.hostname
+        batch.hostname,
+        name.as_deref().unwrap_or("admin")
     );
 
     if let Some(name) = &name {
@@ -252,7 +253,8 @@ async fn process_share_batch(batch: &ShareBatch, database: &Database) -> Result<
         })?;
     }
 
-    let mut account_updates: HashMap<String, AccountUpdate> = HashMap::new();
+    // Sorted enforces a non-deadlocking order for later query
+    let mut account_updates: BTreeMap<String, AccountUpdate> = BTreeMap::new();
 
     for share in &batch.shares {
         if let Some(username) = &share.username {

@@ -602,6 +602,15 @@ mod tests {
     }
 
     #[test]
+    fn node_token_from_env() {
+        // SAFETY: tests in this module don't read PARA_NODE_TOKEN concurrently
+        unsafe { std::env::set_var("PARA_NODE_TOKEN", "fromenv") };
+        let config = parse_server_config("para server");
+        unsafe { std::env::remove_var("PARA_NODE_TOKEN") };
+        assert_eq!(config.node_token(), Some("fromenv"));
+    }
+
+    #[test]
     fn admin_token() {
         let config = parse_server_config("para server --admin-token verysecrettoken");
         assert_eq!(config.admin_token(), Some("verysecrettoken"));
