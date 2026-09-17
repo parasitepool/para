@@ -7,8 +7,6 @@ const GREET_MAX_MESSAGES: usize = 8;
 #[derive(Default)]
 pub(crate) struct Prelude {
     pub(crate) inbox: VecDeque<Message>,
-    pub(crate) resume_enonce1: Option<Extranonce>,
-    pub(crate) suggested_difficulty: Option<Difficulty>,
 }
 
 pub(crate) async fn greet(
@@ -48,24 +46,7 @@ pub(crate) async fn greet(
         };
 
         match serde_json::from_str::<Message>(&line) {
-            Ok(message) => {
-                match &message {
-                    Message::Request { method, .. } | Message::Notification { method } => {
-                        match method {
-                            Method::Subscribe(subscribe) => {
-                                prelude.resume_enonce1 = subscribe.enonce1.clone();
-                            }
-                            Method::SuggestDifficulty(suggest) => {
-                                prelude.suggested_difficulty = Some(suggest.difficulty());
-                            }
-                            _ => {}
-                        }
-                    }
-                    _ => {}
-                }
-
-                prelude.inbox.push_back(message);
-            }
+            Ok(message) => prelude.inbox.push_back(message),
             Err(err) => {
                 warn!("Invalid stratum message during greet from {addr}: {err}");
                 return None;
@@ -73,12 +54,7 @@ pub(crate) async fn greet(
         }
     }
 
-    debug!(
-        "Greeted {addr}: resume={:?} suggested={:?} buffered={}",
-        prelude.resume_enonce1,
-        prelude.suggested_difficulty,
-        prelude.inbox.len(),
-    );
+    debug!("Greeted {addr}: buffered={}", prelude.inbox.len());
 
     Some((reader, prelude))
 }
@@ -120,7 +96,7 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn greet_captures_prelude_signals() {
+    async fn greet_buffers_messages() {
         let (_, prelude) = greeted_lines(&[
             "{\"id\":1,\"method\":\"mining.suggest_difficulty\",\"params\":[1000]}\n",
             "{\"id\":2,\"method\":\"mining.subscribe\",\"params\":[\"foo\",\"deadbeef\"]}\n",
@@ -128,8 +104,6 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(prelude.suggested_difficulty, Some(Difficulty::from(1000)));
-        assert_eq!(prelude.resume_enonce1, Some("deadbeef".parse().unwrap()));
         assert_eq!(prelude.inbox.len(), 2);
         assert!(matches!(
             &prelude.inbox[0],
@@ -148,14 +122,12 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn greet_buffers_non_signal_messages() {
+    async fn greet_buffers_unknown_method() {
         let (_, prelude) = greeted("{\"id\":1,\"method\":\"mining.foo\",\"params\":[]}\n")
             .await
             .unwrap();
 
         assert_eq!(prelude.inbox.len(), 1);
-        assert!(prelude.resume_enonce1.is_none());
-        assert!(prelude.suggested_difficulty.is_none());
     }
 
     #[tokio::test(start_paused = true)]

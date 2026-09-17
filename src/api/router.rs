@@ -7,25 +7,6 @@ use {
     axum::extract::RawQuery,
 };
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub struct PlacementCounts {
-    pub targeted: usize,
-    pub estimated: usize,
-    pub blind: usize,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RoutingInfo {
-    pub intents_created_1h: usize,
-    pub intents_expired_1h: usize,
-    pub intent_claimed_1h: usize,
-    pub placements_1h: PlacementCounts,
-    pub deficit_hashrate: HashRate,
-    pub bucket_order_count: usize,
-    pub sink_order_count: usize,
-    pub starving_order_count: usize,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WalletInfo {
     pub synced: bool,
@@ -44,7 +25,8 @@ pub struct RouterStatus {
     pub halt: bool,
     pub boost: bool,
     pub wallet: WalletInfo,
-    pub routing: RoutingInfo,
+    pub deficit_hashrate: HashRate,
+    pub starving_order_count: usize,
     pub upstream: UpstreamStats,
     pub downstream: DownstreamStats,
     pub git_commit: String,

@@ -1300,10 +1300,6 @@ async fn writer_task(
 
 impl<W: Workbase> Drop for Stratifier<W> {
     fn drop(&mut self) {
-        if let Some(order) = &self.order {
-            order.release_placement(&self.socket_addr);
-        }
-
         let reason = self.disconnect_reason.unwrap_or(DisconnectReason::Client);
 
         if let Some(session) = self.state.working() {

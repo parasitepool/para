@@ -198,12 +198,6 @@ impl Metatron {
             .is_some()
     }
 
-    pub(crate) fn disconnected_info(&self, enonce1: &Extranonce, now: Instant) -> Option<HashRate> {
-        self.disconnected
-            .get(enonce1)
-            .map(|entry| entry.value().0.hashrate_1m(now))
-    }
-
     pub(crate) fn evict_oldest_disconnected(&self, order_id: u32) -> bool {
         let oldest_key = self
             .disconnected

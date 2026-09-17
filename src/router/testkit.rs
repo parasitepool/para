@@ -347,10 +347,6 @@ pub(crate) fn addr(port: u16) -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], port))
 }
 
-pub(crate) fn blank() -> Prelude {
-    Prelude::default()
-}
-
 pub(crate) fn ids(orders: Vec<Arc<Order>>) -> Vec<u32> {
     orders.into_iter().map(|order| order.id).collect()
 }

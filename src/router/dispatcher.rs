@@ -1,4 +1,7 @@
-use {super::*, crate::event_sink::Event};
+use {
+    super::{greeter::greet, *},
+    crate::event_sink::Event,
+};
 
 pub(crate) struct Dispatcher {
     settings: Arc<Settings>,
@@ -23,7 +26,7 @@ impl Dispatcher {
         self: &Arc<Self>,
         listener: TcpListener,
         event_tx: Option<mpsc::Sender<Event>>,
-        select: impl Fn(SocketAddr, &Prelude) -> Option<Arc<Order>> + Send + Sync + 'static,
+        select: impl Fn() -> Option<Arc<Order>> + Send + Sync + 'static,
         on_shutdown: impl Fn() -> Result + Send + Sync + 'static,
         cancel_token: CancellationToken,
     ) -> Result {
@@ -76,7 +79,7 @@ impl Dispatcher {
                     return;
                 };
 
-                let Some(order) = select(addr, &prelude) else {
+                let Some(order) = select() else {
                     warn!("No order to match with available, dropping connection from {addr}");
                     connection.reject();
                     return;
@@ -96,7 +99,6 @@ impl Dispatcher {
 
                 let Some((upstream, allocator)) = order.upstream_route() else {
                     error!("Dropping {addr}: order {} has no upstream route", order.id);
-                    order.release_placement(&addr);
                     connection.reject();
                     return;
                 };
@@ -131,7 +133,7 @@ mod tests {
     use {super::*, crate::router::testkit::*, tokio::io::AsyncBufReadExt};
 
     #[tokio::test]
-    async fn serve_drops_connection_and_releases_placement_when_order_has_no_upstream_route() {
+    async fn serve_drops_connection_when_order_has_no_upstream_route() {
         let router = test_router();
         let order = test_order(0, None, OrderStatus::Active, &router.metatron);
         *order.upstream.lock() = None;
@@ -155,7 +157,7 @@ mod tests {
                 .serve(
                     listener,
                     None,
-                    move |addr, prelude| select_router.next_order(addr, prelude),
+                    move || select_router.next_order(),
                     || Ok(()),
                     server_cancel,
                 )
@@ -174,14 +176,20 @@ mod tests {
 
         timeout(Duration::from_secs(5), async {
             loop {
-                if order.placements.lock().is_empty() {
+                if router
+                    .metatron
+                    .connections()
+                    .downstream()
+                    .routing_rejects_1h
+                    == 1
+                {
                     break;
                 }
                 sleep(Duration::from_millis(10)).await;
             }
         })
         .await
-        .expect("placement should be released after connection is dropped");
+        .expect("connection should be rejected after order without upstream route");
 
         let mut line = String::new();
         let read = timeout(Duration::from_secs(5), reader.read_line(&mut line))
@@ -234,7 +242,7 @@ mod tests {
                 .serve(
                     listener,
                     None,
-                    move |addr, prelude| select_router.next_order(addr, prelude),
+                    move || select_router.next_order(),
                     || Ok(()),
                     server_cancel,
                 )

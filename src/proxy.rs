@@ -3,8 +3,8 @@ use {
     crate::{
         event_sink::Event,
         router::{
-            control::Control, dispatcher::Dispatcher, error::RouterResult, greeter::Prelude,
-            order::Order, order_book::OrderBook, runner::OrderRunner,
+            control::Control, dispatcher::Dispatcher, error::RouterResult, order::Order,
+            order_book::OrderBook, runner::OrderRunner,
         },
     },
 };
@@ -32,7 +32,7 @@ impl Proxy {
             cancel.child_token(),
         ));
 
-        let control = Control::new(settings.clone(), metatron.clone());
+        let control = Control::default();
 
         let runner = Arc::new(OrderRunner::new(
             settings.clone(),
@@ -140,11 +140,7 @@ impl Proxy {
 
         let selector = {
             let proxy = self.clone();
-            move |addr: SocketAddr, prelude: &Prelude| {
-                proxy
-                    .control
-                    .next_order(&proxy.book.routable(), addr, prelude)
-            }
+            move || proxy.control.next_order(&proxy.book.routable())
         };
 
         let on_shutdown = {

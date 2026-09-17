@@ -265,14 +265,14 @@
       <button type=button data-tab=info>Info</button>
       <button type=button data-tab=traffic>Traffic</button>
       <button type=button data-tab=total>Total</button>
-      <button type=button data-tab=routing>Routing</button>
     </div>
 
     <div data-tab-panel=info>
       <table class=compact-table>
         <tbody>
-          <tr><td>Active Orders</td><td data-value=routing.bucket_order_count></td></tr>
-          <tr><td>Starving</td><td data-value=routing.starving_order_count></td></tr>
+          <tr><td>Active Orders</td><td data-value=upstream.orders></td></tr>
+          <tr><td>Starving</td><td data-value=starving_order_count></td></tr>
+          <tr><td>Deficit</td><td data-value=deficit_hashrate data-format=hashrate></td></tr>
           <tr><td>Uptime</td><td data-value=uptime_secs data-format=duration></td></tr>
           <tr><td>Available</td><td id=available_work></td></tr>
           <tr><td>Used</td><td data-value=used_capacity_hash_days data-format=hash_days></td></tr>
@@ -337,21 +337,6 @@
           <tr><td>Rejected Work</td><td data-value=upstream.totals data-format=rejection_work class=copyable></td><td data-value=downstream.totals data-format=rejection_work class=copyable></td></tr>
           <tr><td>Delivered Work</td><td data-value=upstream.totals data-format=delivered_work></td><td data-value=downstream.totals data-format=delivered_work></td></tr>
           <tr><td>Delivered Hashdays</td><td data-value=upstream.totals.delivered_hash_days data-format=hash_days class=copyable></td><td data-value=downstream.totals.delivered_hash_days data-format=hash_days class=copyable></td></tr>
-        </tbody>
-      </table>
-    </div>
-
-    <div data-tab-panel=routing class=hidden>
-      <table class="compact-table routing-table">
-        <tbody>
-          <tr><td>Deficit</td><td data-value=routing.deficit_hashrate data-format=hashrate></td></tr>
-          <tr><td>Placements (1h)</td><td data-value=routing.placements_1h data-format=placement_total></td></tr>
-          <tr><td class=sub>Targeted</td><td data-value=routing.placements_1h.targeted></td></tr>
-          <tr><td class=sub>Estimated</td><td data-value=routing.placements_1h.estimated></td></tr>
-          <tr><td class=sub>Blind</td><td data-value=routing.placements_1h.blind></td></tr>
-          <tr><td>Intents (1h)</td><td data-value=routing.intents_created_1h></td></tr>
-          <tr><td class=sub>Hit</td><td data-value=routing.intent_claimed_1h></td></tr>
-          <tr><td class=sub>Expired</td><td data-value=routing.intents_expired_1h></td></tr>
         </tbody>
       </table>
     </div>

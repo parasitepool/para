@@ -1,7 +1,5 @@
 use {
     super::*,
-    greeter::Prelude,
-    intents::Intents,
     order::{Order, Trim},
     rand::{Rng, SeedableRng, rngs::StdRng},
 };
@@ -9,84 +7,6 @@ use {
 pub(crate) const TRIM_COOLDOWN: Duration = Duration::from_secs(600);
 const MAX_TRIMS_PER_TICK: usize = 1;
 const DEFICIT_PERSIST_TICKS: usize = 2;
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(crate) struct ControlMetricsSnapshot {
-    pub(crate) intents_created_1h: usize,
-    pub(crate) intents_expired_1h: usize,
-    pub(crate) intent_claimed_1h: usize,
-    pub(crate) placements_1h: PlacementCounts,
-}
-
-#[derive(Clone, Copy, Debug)]
-enum Placement {
-    Targeted,
-    Estimated,
-    Blind,
-}
-
-struct ControlMetrics {
-    intents_created_1h: RollingCounter,
-    intents_expired_1h: RollingCounter,
-    intent_claimed_1h: RollingCounter,
-    placements_targeted_1h: RollingCounter,
-    placements_estimated_1h: RollingCounter,
-    placements_blind_1h: RollingCounter,
-}
-
-impl Default for ControlMetrics {
-    fn default() -> Self {
-        Self::new(Instant::now())
-    }
-}
-
-impl ControlMetrics {
-    fn new(origin: Instant) -> Self {
-        Self {
-            intents_created_1h: RollingCounter::new(origin),
-            intents_expired_1h: RollingCounter::new(origin),
-            intent_claimed_1h: RollingCounter::new(origin),
-            placements_targeted_1h: RollingCounter::new(origin),
-            placements_estimated_1h: RollingCounter::new(origin),
-            placements_blind_1h: RollingCounter::new(origin),
-        }
-    }
-
-    fn record_intents_created(&mut self, count: usize, now: Instant) {
-        self.intents_created_1h.record(count, now);
-    }
-
-    fn record_intents_expired(&mut self, count: usize, now: Instant) {
-        self.intents_expired_1h.record(count, now);
-    }
-
-    fn record_intent_claim(&mut self, now: Instant) {
-        self.intent_claimed_1h.record(1, now);
-    }
-
-    fn record_placement(&mut self, placement: Placement, now: Instant) {
-        let counter = match placement {
-            Placement::Targeted => &mut self.placements_targeted_1h,
-            Placement::Estimated => &mut self.placements_estimated_1h,
-            Placement::Blind => &mut self.placements_blind_1h,
-        };
-
-        counter.record(1, now);
-    }
-
-    fn snapshot(&self, now: Instant) -> ControlMetricsSnapshot {
-        ControlMetricsSnapshot {
-            intents_created_1h: self.intents_created_1h.count(now),
-            intents_expired_1h: self.intents_expired_1h.count(now),
-            intent_claimed_1h: self.intent_claimed_1h.count(now),
-            placements_1h: PlacementCounts {
-                targeted: self.placements_targeted_1h.count(now),
-                estimated: self.placements_estimated_1h.count(now),
-                blind: self.placements_blind_1h.count(now),
-            },
-        }
-    }
-}
 
 #[derive(Clone, Copy, Debug)]
 struct Demand {
@@ -99,7 +19,6 @@ impl Demand {
     fn snapshot(
         orders: &[Arc<Order>],
         now: Instant,
-        intents: &Intents,
         deficit_ticks: &mut HashMap<u32, usize>,
     ) -> Self {
         deficit_ticks.retain(|id, _| orders.iter().any(|order| order.id == *id));
@@ -111,9 +30,7 @@ impl Demand {
         for order in orders.iter().filter(|order| !order.is_sink()) {
             has_unfulfilled_bucket |= order.has_connected_upstream() && !order.is_fulfilled();
 
-            let intents_expected = intents.expected_for(order.id, now);
-
-            let raw_deficit = order.hashrate_deficit(now, intents_expected);
+            let raw_deficit = order.hashrate_deficit(now);
 
             if raw_deficit == HashRate::ZERO {
                 deficit_ticks.remove(&order.id);
@@ -128,7 +45,7 @@ impl Demand {
             }
 
             deficit += raw_deficit;
-            severe |= order.is_severely_starving(now, intents_expected);
+            severe |= order.is_severely_starving(now);
         }
 
         Self {
@@ -166,154 +83,49 @@ fn log_rebalance(
     );
 }
 
-fn worst_fit<'a>(
-    buckets: &[&'a Arc<Order>],
-    hashrate: HashRate,
-    now: Instant,
-    intents: &Intents,
-) -> Option<&'a Arc<Order>> {
-    let residual =
-        |order: &Arc<Order>| order.residual_deficit(now, intents.expected_for(order.id, now));
-
-    buckets
-        .iter()
-        .filter(|order| residual(order) >= hashrate)
-        .max_by_key(|order| residual(order))
-        .or_else(|| {
-            buckets
-                .iter()
-                .filter(|order| residual(order) > HashRate::ZERO)
-                .max_by_key(|order| residual(order))
-        })
-        .copied()
-}
-
 pub(crate) struct Control {
-    settings: Arc<Settings>,
-    metatron: Arc<Metatron>,
-    intents: Mutex<Intents>,
     cooldowns: Mutex<HashMap<Extranonce, Instant>>,
     deficit_ticks: Mutex<HashMap<u32, usize>>,
     rng: Mutex<StdRng>,
-    metrics: Mutex<ControlMetrics>,
 }
 
-impl Control {
-    pub(crate) fn new(settings: Arc<Settings>, metatron: Arc<Metatron>) -> Self {
+impl Default for Control {
+    fn default() -> Self {
         Self {
-            settings,
-            metatron,
-            intents: Mutex::new(Intents::default()),
             cooldowns: Mutex::new(HashMap::new()),
             deficit_ticks: Mutex::new(HashMap::new()),
             rng: Mutex::new(StdRng::from_rng(&mut rand::rng())),
-            metrics: Mutex::new(ControlMetrics::default()),
         }
     }
+}
 
+impl Control {
     #[cfg(test)]
     pub(crate) fn seed_rng(&self, seed: u64) {
         *self.rng.lock() = StdRng::seed_from_u64(seed);
     }
 
-    pub(crate) fn metrics(&self, now: Instant) -> ControlMetricsSnapshot {
-        self.metrics.lock().snapshot(now)
-    }
-
-    fn estimated_hashrate(&self, difficulty: Difficulty) -> HashRate {
-        HashRate::from_dsps(difficulty.as_f64() / self.settings.vardiff_period().as_secs_f64())
-    }
-
-    pub(crate) fn next_order(
-        &self,
-        candidates: &[Arc<Order>],
-        addr: SocketAddr,
-        prelude: &Prelude,
-    ) -> Option<Arc<Order>> {
+    pub(crate) fn next_order(&self, candidates: &[Arc<Order>]) -> Option<Arc<Order>> {
         let now = Instant::now();
-
-        let intent = self
-            .intents
-            .lock()
-            .claim(prelude.resume_enonce1.as_ref(), now);
-
-        if let Some(intent) = intent {
-            if let Some(order) = candidates.iter().find(|order| order.id == intent.order_id) {
-                order.place(addr, intent.expected);
-
-                {
-                    let mut metrics = self.metrics.lock();
-                    metrics.record_placement(Placement::Targeted, now);
-                    metrics.record_intent_claim(now);
-                }
-
-                debug!(
-                    "Routing {addr} to order {} via intent ({})",
-                    order.id, intent.expected,
-                );
-
-                return Some(order.clone());
-            }
-
-            debug!("Intent for unroutable order {} discarded", intent.order_id);
-        }
-
-        let known = prelude
-            .resume_enonce1
-            .as_ref()
-            .and_then(|enonce1| self.metatron.disconnected_info(enonce1, now))
-            .filter(|rate| *rate > HashRate::ZERO)
-            .or_else(|| {
-                prelude
-                    .suggested_difficulty
-                    .map(|difficulty| self.estimated_hashrate(difficulty))
-            });
 
         let buckets = candidates
             .iter()
             .filter(|order| !order.is_sink())
             .collect::<Vec<_>>();
 
-        let order = if buckets.is_empty() {
+        if buckets.is_empty() {
             candidates
                 .iter()
                 .filter(|order| order.is_sink())
                 .min_by_key(|order| order.hashrate_1m(now))
                 .cloned()
         } else {
-            Some(self.select_bucket(&buckets, known, now))
-        }?;
-
-        order.place(addr, known.unwrap_or(HashRate::ZERO));
-
-        let placement = if known.is_some() {
-            Placement::Estimated
-        } else {
-            Placement::Blind
-        };
-
-        self.metrics.lock().record_placement(placement, now);
-
-        Some(order)
+            Some(self.select_bucket(&buckets, now))
+        }
     }
 
-    fn select_bucket(
-        &self,
-        buckets: &[&Arc<Order>],
-        known: Option<HashRate>,
-        now: Instant,
-    ) -> Arc<Order> {
-        let intents = self.intents.lock();
-        let residual =
-            |order: &Arc<Order>| order.residual_deficit(now, intents.expected_for(order.id, now));
-
-        if let Some(estimated) = known {
-            return Arc::clone(
-                worst_fit(buckets, estimated, now, &intents)
-                    .or_else(|| buckets.iter().max_by_key(|order| residual(order)).copied())
-                    .expect("buckets is non-empty"),
-            );
-        }
+    fn select_bucket(&self, buckets: &[&Arc<Order>], now: Instant) -> Arc<Order> {
+        let residual = |order: &Arc<Order>| order.residual_deficit(now);
 
         let total = buckets
             .iter()
@@ -355,24 +167,11 @@ impl Control {
     pub(crate) fn rebalance(&self, orders: &[Arc<Order>], boost: bool) {
         let now = Instant::now();
 
-        for order in orders {
-            order.sweep_placements(now);
-        }
-
-        let expired = self.intents.lock().expire(now);
-
-        self.metrics.lock().record_intents_expired(expired, now);
-
         self.cooldowns
             .lock()
             .retain(|_, since| now.duration_since(*since) < TRIM_COOLDOWN);
 
-        let demand = Demand::snapshot(
-            orders,
-            now,
-            &self.intents.lock(),
-            &mut self.deficit_ticks.lock(),
-        );
+        let demand = Demand::snapshot(orders, now, &mut self.deficit_ticks.lock());
 
         if !demand.has_unfulfilled_bucket || demand.deficit == HashRate::ZERO {
             return;
@@ -442,16 +241,8 @@ impl Control {
             sink_trimmed += trimmed;
         }
 
-        let mut intents_created = 0;
-
         {
             let mut cooldowns = self.cooldowns.lock();
-            let mut intents = self.intents.lock();
-
-            let buckets = orders
-                .iter()
-                .filter(|order| !order.is_sink())
-                .collect::<Vec<_>>();
 
             for detail in overflow_trimmed
                 .sessions
@@ -459,21 +250,8 @@ impl Control {
                 .chain(sink_trimmed.sessions.iter())
             {
                 cooldowns.insert(detail.enonce1.clone(), now);
-
-                if detail.hashrate == HashRate::ZERO {
-                    continue;
-                }
-
-                if let Some(target) = worst_fit(&buckets, detail.hashrate, now, &intents) {
-                    intents.create(detail.enonce1.clone(), target.id, detail.hashrate, now);
-                    intents_created += 1;
-                }
             }
         }
-
-        self.metrics
-            .lock()
-            .record_intents_created(intents_created, now);
 
         log_rebalance(
             demand,
@@ -489,7 +267,6 @@ impl Control {
 mod tests {
     use {
         super::*,
-        crate::rolling::ROLLING_COUNTER_WINDOW,
         order::{Bucket, OrderStatus, Payment},
     };
 
@@ -512,41 +289,10 @@ mod tests {
         let metatron = Arc::new(metatron);
 
         TestControl {
-            control: Control::new(Arc::new(Settings::default()), metatron.clone()),
+            control: Control::default(),
             metatron,
             _dir: dir,
         }
-    }
-
-    #[test]
-    fn control_metrics_rolls_every_counter_at_the_one_hour_boundary() {
-        let start = Instant::now();
-        let mut metrics = ControlMetrics::new(start);
-
-        metrics.record_intents_created(2, start);
-        metrics.record_intents_expired(4, start);
-        metrics.record_intent_claim(start);
-        metrics.record_placement(Placement::Targeted, start);
-        metrics.record_placement(Placement::Estimated, start);
-        metrics.record_placement(Placement::Blind, start);
-
-        assert_eq!(
-            metrics.snapshot(start + ROLLING_COUNTER_WINDOW - Duration::from_nanos(1)),
-            ControlMetricsSnapshot {
-                intents_created_1h: 2,
-                intents_expired_1h: 4,
-                intent_claimed_1h: 1,
-                placements_1h: PlacementCounts {
-                    targeted: 1,
-                    estimated: 1,
-                    blind: 1,
-                },
-            }
-        );
-        assert_eq!(
-            metrics.snapshot(start + ROLLING_COUNTER_WINDOW),
-            ControlMetricsSnapshot::default()
-        );
     }
 
     fn test_address() -> Address {
@@ -627,62 +373,12 @@ mod tests {
         SocketAddr::from(([127, 0, 0, 1], port))
     }
 
-    fn blank() -> Prelude {
-        Prelude::default()
-    }
-
     fn hash_days(value: f64) -> HashDays {
         HashDays::new(value).unwrap()
     }
 
     fn set_delivered_work(metatron: &Metatron, order: &Order, value: f64) {
         metatron.set_order_delivered_work(order.id, hash_days(value).to_hash_work());
-    }
-
-    #[test]
-    fn demand_nets_expectations() {
-        let control = test_control();
-        let order = test_order(
-            0,
-            Some(hash_days(100.0)),
-            OrderStatus::Active,
-            &control.metatron,
-        );
-        let orders = [order];
-        let now = Instant::now();
-        let mut intents = Intents::default();
-        let mut deficit_ticks = HashMap::new();
-
-        let demand = Demand::snapshot(&orders, now, &intents, &mut deficit_ticks);
-        assert!(demand.has_unfulfilled_bucket);
-        assert_eq!(demand.deficit, HashRate::ZERO);
-        assert!(!demand.severe);
-
-        let demand = Demand::snapshot(&orders, now, &intents, &mut deficit_ticks);
-        assert_eq!(demand.deficit, HashRate::from_hps(100.0));
-        assert!(demand.severe);
-
-        intents.create(
-            "deadbeef".parse().unwrap(),
-            0,
-            HashRate::from_hps(60.0),
-            now,
-        );
-
-        let demand = Demand::snapshot(&orders, now, &intents, &mut deficit_ticks);
-        assert_eq!(demand.deficit, HashRate::from_hps(40.0));
-        assert!(!demand.severe);
-
-        intents.create(
-            "cafebabe".parse().unwrap(),
-            0,
-            HashRate::from_hps(40.0),
-            now,
-        );
-
-        let demand = Demand::snapshot(&orders, now, &intents, &mut deficit_ticks);
-        assert_eq!(demand.deficit, HashRate::ZERO);
-        assert!(deficit_ticks.is_empty());
     }
 
     #[test]
@@ -696,15 +392,14 @@ mod tests {
         );
         let orders = [order];
         let now = Instant::now();
-        let intents = Intents::default();
         let mut deficit_ticks = HashMap::new();
 
         for i in 1..DEFICIT_PERSIST_TICKS {
-            let demand = Demand::snapshot(&orders, now, &intents, &mut deficit_ticks);
+            let demand = Demand::snapshot(&orders, now, &mut deficit_ticks);
             assert_eq!(demand.deficit, HashRate::ZERO, "tick {i} trimmed early");
         }
 
-        let demand = Demand::snapshot(&orders, now, &intents, &mut deficit_ticks);
+        let demand = Demand::snapshot(&orders, now, &mut deficit_ticks);
         assert_eq!(demand.deficit, HashRate::from_hps(100.0));
     }
 
@@ -728,12 +423,7 @@ mod tests {
         disconnected.upstream().unwrap().set_connected(false);
         let orders = [fed, disconnected];
 
-        let demand = Demand::snapshot(
-            &orders,
-            Instant::now(),
-            &Intents::default(),
-            &mut HashMap::new(),
-        );
+        let demand = Demand::snapshot(&orders, Instant::now(), &mut HashMap::new());
         assert!(demand.has_unfulfilled_bucket);
         assert_eq!(demand.deficit, HashRate::ZERO);
         assert!(!demand.severe);
@@ -742,7 +432,7 @@ mod tests {
     #[test]
     fn next_order_none_when_empty() {
         let control = test_control();
-        assert!(control.next_order(&[], addr(1), &blank()).is_none());
+        assert!(control.next_order(&[]).is_none());
     }
 
     #[test]
@@ -765,10 +455,7 @@ mod tests {
 
         let orders = [supplied, unserved];
 
-        assert_eq!(
-            control.next_order(&orders, addr(1), &blank()).unwrap().id,
-            1
-        );
+        assert_eq!(control.next_order(&orders).unwrap().id, 1);
     }
 
     #[test]
@@ -784,14 +471,8 @@ mod tests {
 
         let orders = [bucket, sink];
 
-        for port in 1..=3 {
-            assert_eq!(
-                control
-                    .next_order(&orders, addr(port), &blank())
-                    .unwrap()
-                    .id,
-                0
-            );
+        for _ in 1..=3 {
+            assert_eq!(control.next_order(&orders).unwrap().id, 0);
         }
     }
 
@@ -808,262 +489,7 @@ mod tests {
 
         let orders = [bucket];
 
-        assert_eq!(
-            control.next_order(&orders, addr(1), &blank()).unwrap().id,
-            0
-        );
-    }
-
-    #[test]
-    fn next_order_routes_via_intent_enonce1() {
-        let control = test_control();
-        let bucket = test_order(
-            0,
-            Some(hash_days(100.0)),
-            OrderStatus::Active,
-            &control.metatron,
-        );
-        let sink = test_order(1, None, OrderStatus::Active, &control.metatron);
-
-        let orders = [bucket, sink.clone()];
-
-        let now = Instant::now();
-        control.intents.lock().create(
-            "deadbeef".parse().unwrap(),
-            1,
-            HashRate::from_hps(100.0),
-            now,
-        );
-
-        let prelude = Prelude {
-            resume_enonce1: Some("deadbeef".parse().unwrap()),
-            ..blank()
-        };
-
-        assert_eq!(
-            control.next_order(&orders, addr(1), &prelude).unwrap().id,
-            1
-        );
-        assert_eq!(sink.expected_incoming(), HashRate::from_hps(100.0));
-        assert_eq!(
-            control.metrics(Instant::now()),
-            ControlMetricsSnapshot {
-                intent_claimed_1h: 1,
-                placements_1h: PlacementCounts {
-                    targeted: 1,
-                    ..PlacementCounts::default()
-                },
-                ..ControlMetricsSnapshot::default()
-            }
-        );
-        assert_eq!(control.intents.lock().len(), 0);
-    }
-
-    #[test]
-    fn next_order_discards_intent_for_unroutable_order() {
-        let control = test_control();
-        let bucket = test_order(
-            0,
-            Some(hash_days(100.0)),
-            OrderStatus::Active,
-            &control.metatron,
-        );
-
-        let orders = [bucket];
-
-        control.intents.lock().create(
-            "deadbeef".parse().unwrap(),
-            99,
-            HashRate::from_hps(100.0),
-            Instant::now(),
-        );
-
-        let prelude = Prelude {
-            resume_enonce1: Some("deadbeef".parse().unwrap()),
-            ..blank()
-        };
-
-        assert_eq!(
-            control.next_order(&orders, addr(1), &prelude).unwrap().id,
-            0
-        );
-        assert_eq!(
-            control.metrics(Instant::now()),
-            ControlMetricsSnapshot {
-                placements_1h: PlacementCounts {
-                    blind: 1,
-                    ..PlacementCounts::default()
-                },
-                ..ControlMetricsSnapshot::default()
-            }
-        );
-    }
-
-    #[test]
-    fn next_order_parked_session_provides_rate_hint() {
-        let control = test_control();
-        let home = test_order(
-            0,
-            Some(hash_days(100.0)),
-            OrderStatus::Active,
-            &control.metatron,
-        );
-        let other = test_order(
-            1,
-            Some(hash_days(100.0)),
-            OrderStatus::Active,
-            &control.metatron,
-        );
-
-        let orders = [home.clone(), other];
-
-        let session =
-            control
-                .metatron
-                .new_session(test_authorization("deadbeef", "foo"), 0, addr(4444));
-        session.record_accepted(Difficulty::from(10.0), Difficulty::from(10.0));
-        control
-            .metatron
-            .retire_session(session, home.allocator().unwrap().clone());
-
-        let prelude = Prelude {
-            resume_enonce1: Some("deadbeef".parse().unwrap()),
-            ..blank()
-        };
-
-        control.next_order(&orders, addr(1), &prelude);
-
-        assert_eq!(
-            control.metrics(Instant::now()),
-            ControlMetricsSnapshot {
-                placements_1h: PlacementCounts {
-                    estimated: 1,
-                    ..PlacementCounts::default()
-                },
-                ..ControlMetricsSnapshot::default()
-            }
-        );
-    }
-
-    #[test]
-    fn next_order_records_placement_source() {
-        #[track_caller]
-        fn case(parked_difficulty: Option<f64>, suggested: Option<f64>, expected: PlacementCounts) {
-            let control = test_control();
-            let order = test_order(
-                0,
-                Some(hash_days(100.0)),
-                OrderStatus::Active,
-                &control.metatron,
-            );
-
-            if let Some(difficulty) = parked_difficulty {
-                let session = control.metatron.new_session(
-                    test_authorization("deadbeef", "foo"),
-                    0,
-                    addr(4444),
-                );
-
-                if difficulty > 0.0 {
-                    session.record_accepted(
-                        Difficulty::from(difficulty),
-                        Difficulty::from(difficulty),
-                    );
-                }
-
-                control
-                    .metatron
-                    .retire_session(session, order.allocator().unwrap().clone());
-            }
-
-            let prelude = Prelude {
-                resume_enonce1: parked_difficulty.map(|_| "deadbeef".parse().unwrap()),
-                suggested_difficulty: suggested.map(Difficulty::from),
-                ..blank()
-            };
-
-            control.next_order(&[order], addr(1), &prelude).unwrap();
-
-            assert_eq!(
-                control.metrics(Instant::now()),
-                ControlMetricsSnapshot {
-                    placements_1h: expected,
-                    ..ControlMetricsSnapshot::default()
-                }
-            );
-        }
-
-        case(
-            None,
-            None,
-            PlacementCounts {
-                blind: 1,
-                ..PlacementCounts::default()
-            },
-        );
-        case(
-            None,
-            Some(1000.0),
-            PlacementCounts {
-                estimated: 1,
-                ..PlacementCounts::default()
-            },
-        );
-        case(
-            Some(100.0),
-            None,
-            PlacementCounts {
-                estimated: 1,
-                ..PlacementCounts::default()
-            },
-        );
-        case(
-            Some(0.0),
-            None,
-            PlacementCounts {
-                blind: 1,
-                ..PlacementCounts::default()
-            },
-        );
-    }
-
-    #[test]
-    fn next_order_suggested_difficulty_worst_fit() {
-        #[track_caller]
-        fn case(place_a: f64, place_b: f64, suggested: f64, expected: u32) {
-            let control = test_control();
-            let order_a = test_order(
-                0,
-                Some(hash_days(100.0)),
-                OrderStatus::Active,
-                &control.metatron,
-            );
-            let order_b = test_order(
-                1,
-                Some(hash_days(100.0)),
-                OrderStatus::Active,
-                &control.metatron,
-            );
-
-            order_a.place(addr(42), HashRate::from_hps(place_a));
-            order_b.place(addr(43), HashRate::from_hps(place_b));
-
-            let orders = [order_a, order_b];
-
-            let prelude = Prelude {
-                suggested_difficulty: Some(Difficulty::from(suggested)),
-                ..blank()
-            };
-
-            assert_eq!(
-                control.next_order(&orders, addr(1), &prelude).unwrap().id,
-                expected
-            );
-        }
-
-        case(0.0, 40.0, 5.4e-8, 0);
-        case(50.0, 0.0, 5.4e-8, 1);
-        case(90.0, 95.0, 5.4e-8, 0);
+        assert_eq!(control.next_order(&orders).unwrap().id, 0);
     }
 
     #[test]
@@ -1073,7 +499,7 @@ mod tests {
 
         let order_a = test_order(
             0,
-            Some(hash_days(100.0)),
+            Some(hash_days(50.0)),
             OrderStatus::Active,
             &control.metatron,
         );
@@ -1084,17 +510,12 @@ mod tests {
             &control.metatron,
         );
 
-        order_a.place(addr(42), HashRate::from_hps(50.0));
-
         let orders = [order_a, order_b];
 
         let mut counts = [0usize; 2];
 
-        for port in 1..=30 {
-            let picked = control
-                .next_order(&orders, addr(port), &blank())
-                .unwrap()
-                .id;
+        for _ in 1..=30 {
+            let picked = control.next_order(&orders).unwrap().id;
             counts[picked as usize] += 1;
         }
 
@@ -1135,20 +556,7 @@ mod tests {
 
             let orders = [sink_a, sink_b];
 
-            assert_eq!(
-                control.next_order(&orders, addr(3), &blank()).unwrap().id,
-                expected
-            );
-            assert_eq!(
-                control.metrics(Instant::now()),
-                ControlMetricsSnapshot {
-                    placements_1h: PlacementCounts {
-                        blind: 1,
-                        ..PlacementCounts::default()
-                    },
-                    ..ControlMetricsSnapshot::default()
-                }
-            );
+            assert_eq!(control.next_order(&orders).unwrap().id, expected);
         }
 
         case(100.0, 0.0, 1);
@@ -1167,7 +575,7 @@ mod tests {
                 OrderStatus::Active,
                 &control.metatron,
             );
-            bucket.place(addr(42), HashRate::from_hps(6e8));
+            register_session(&control.metatron, &bucket, "eeeeeeee", "qux", 10.0);
 
             let sink = test_order(1, None, OrderStatus::Active, &control.metatron);
             let cancels = [
@@ -1189,13 +597,6 @@ mod tests {
                     .count(),
                 expected_trimmed,
             );
-            assert_eq!(
-                control.metrics(Instant::now()),
-                ControlMetricsSnapshot {
-                    intents_created_1h: expected_trimmed,
-                    ..ControlMetricsSnapshot::default()
-                }
-            );
         }
 
         case(false, 1);
@@ -1203,7 +604,7 @@ mod tests {
     }
 
     #[test]
-    fn rebalance_overflow_trimmed_before_sink_shed_and_intented() {
+    fn rebalance_overflow_trimmed_before_sink_shed() {
         let control = test_control();
         let over = overflowing_order(&control, 0);
         let starving = test_order(
@@ -1212,7 +613,7 @@ mod tests {
             OrderStatus::Active,
             &control.metatron,
         );
-        starving.place(addr(42), HashRate::from_hps(6e8));
+        register_session(&control.metatron, &starving, "eeee", "qux", 10.0);
 
         let sink = test_order(2, None, OrderStatus::Active, &control.metatron);
         let sink_cancel = register_session(&control.metatron, &sink, "dddd", "qux", 100.0);
@@ -1225,13 +626,6 @@ mod tests {
 
         assert!(over.cancel_mid.is_cancelled());
         assert!(!sink_cancel.is_cancelled());
-
-        let intent = control
-            .intents
-            .lock()
-            .claim(Some(&"bbbb".parse().unwrap()), Instant::now());
-
-        assert_eq!(intent.map(|intent| intent.order_id), Some(1));
     }
 
     #[test]
@@ -1298,13 +692,6 @@ mod tests {
 
         assert!(cancel_a.is_cancelled());
         assert!(!cancel_b.is_cancelled());
-
-        let intent = control
-            .intents
-            .lock()
-            .claim(Some(&"deadbeef".parse().unwrap()), Instant::now());
-
-        assert_eq!(intent.map(|intent| intent.order_id), Some(0));
     }
 
     #[test]
@@ -1331,30 +718,6 @@ mod tests {
     }
 
     #[test]
-    fn rebalance_records_only_intents_removed_by_the_expiry_sweep() {
-        let control = test_control();
-        let now = Instant::now();
-
-        control.intents.lock().create(
-            "deadbeef".parse().unwrap(),
-            7,
-            HashRate::from_hps(100.0),
-            now - intents::INTENT_TTL,
-        );
-
-        control.rebalance(&[], false);
-
-        assert_eq!(control.intents.lock().len(), 0);
-        assert_eq!(
-            control.metrics(Instant::now()),
-            ControlMetricsSnapshot {
-                intents_expired_1h: 1,
-                ..ControlMetricsSnapshot::default()
-            }
-        );
-    }
-
-    #[test]
     fn rebalance_falls_back_to_zero_rate_sink_session() {
         let control = test_control();
         let bucket = test_order(
@@ -1374,7 +737,6 @@ mod tests {
         }
 
         assert!(cancel.is_cancelled());
-        assert_eq!(control.intents.lock().len(), 0);
     }
 
     #[test]
@@ -1405,28 +767,6 @@ mod tests {
         assert!(!cooldowns.contains_key(&"deadbeef".parse().unwrap()));
         assert!(cooldowns.contains_key(&"cafebabe".parse().unwrap()));
         drop(cooldowns);
-
-        let mut intents = control.intents.lock();
-        assert!(
-            intents
-                .claim(Some(&"deadbeef".parse().unwrap()), Instant::now())
-                .is_none()
-        );
-        assert_eq!(
-            intents
-                .claim(Some(&"cafebabe".parse().unwrap()), Instant::now())
-                .map(|intent| intent.order_id),
-            Some(0)
-        );
-        drop(intents);
-
-        assert_eq!(
-            control.metrics(Instant::now()),
-            ControlMetricsSnapshot {
-                intents_created_1h: 1,
-                ..ControlMetricsSnapshot::default()
-            }
-        );
     }
 
     struct OverflowingOrder {
@@ -1436,7 +776,7 @@ mod tests {
         cancel_small: CancellationToken,
     }
 
-    fn overflowing_order(control: &Control, id: u32) -> OverflowingOrder {
+    fn overflowing_order(control: &TestControl, id: u32) -> OverflowingOrder {
         let order = test_order(
             id,
             Some(hash_days(1e9)),

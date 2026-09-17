@@ -1,17 +1,13 @@
 use {
     super::*,
     crate::{
-        api::{
-            DownstreamStats, PlacementCounts, RouterStatus, RoutingInfo, UpstreamStats,
-            UpstreamTotals, WalletInfo,
-        },
+        api::{DownstreamStats, RouterStatus, UpstreamStats, UpstreamTotals, WalletInfo},
         event_sink::Event,
     },
     cashier::{Cashier, Refund},
     control::Control,
     dispatcher::Dispatcher,
     error::{RouterError, RouterResult},
-    greeter::{Prelude, greet},
     order::{Bucket, Order, OrderStatus, Payment},
     order_book::OrderBook,
     price_feed::PriceFeed,
@@ -23,7 +19,6 @@ pub(crate) mod control;
 pub(crate) mod dispatcher;
 pub(crate) mod error;
 pub(crate) mod greeter;
-mod intents;
 pub mod order;
 pub(crate) mod order_book;
 pub(crate) mod price_feed;
@@ -74,7 +69,7 @@ impl Router {
         let capacity_work = settings.capacity_work();
         let premium_percent = settings.premium_percent();
 
-        let control = Control::new(settings.clone(), metatron.clone());
+        let control = Control::default();
 
         let book = Arc::new(OrderBook::new(
             settings.clone(),
@@ -332,9 +327,8 @@ impl Router {
         self.metatron.clone()
     }
 
-    pub(crate) fn next_order(&self, addr: SocketAddr, prelude: &Prelude) -> Option<Arc<Order>> {
-        self.control
-            .next_order(&self.book.routable(), addr, prelude)
+    pub(crate) fn next_order(&self) -> Option<Arc<Order>> {
+        self.control.next_order(&self.book.routable())
     }
 
     pub(crate) fn add_sink_order(
@@ -478,7 +472,6 @@ impl Router {
         let orders = snapshot.live;
 
         let mut bucket_order_count = 0;
-        let mut sink_order_count = 0;
         let mut starving_order_count = 0;
         let mut deficit_hashrate = HashRate::ZERO;
         let mut pending = 0;
@@ -496,9 +489,7 @@ impl Router {
 
             match order.status() {
                 OrderStatus::Active => {
-                    if order.is_sink() {
-                        sink_order_count += 1;
-                    } else {
+                    if !order.is_sink() {
                         bucket_order_count += 1;
                         let measured = order.hashrate_1m(now);
 
@@ -570,8 +561,6 @@ impl Router {
         let used_capacity_hash_days =
             HashDays::from_raw(used.as_f64().min(total_capacity_hash_days.as_f64()));
 
-        let control_metrics = self.control.metrics(now);
-
         RouterStatus {
             uptime_secs: metatron.uptime().as_secs(),
             block_count: metatron.block_count() as u64,
@@ -589,16 +578,8 @@ impl Router {
                     .as_ref()
                     .is_some_and(|wallet| wallet.is_synced()),
             },
-            routing: RoutingInfo {
-                intents_created_1h: control_metrics.intents_created_1h,
-                intents_expired_1h: control_metrics.intents_expired_1h,
-                intent_claimed_1h: control_metrics.intent_claimed_1h,
-                placements_1h: control_metrics.placements_1h,
-                deficit_hashrate,
-                bucket_order_count,
-                sink_order_count,
-                starving_order_count,
-            },
+            deficit_hashrate,
+            starving_order_count,
             upstream: UpstreamStats {
                 users: active_addresses.len(),
                 workers: active_workers.len(),
@@ -680,7 +661,7 @@ impl Router {
 
         let selector = {
             let router = self.clone();
-            move |addr: SocketAddr, prelude: &Prelude| router.next_order(addr, prelude)
+            move || router.next_order()
         };
 
         let on_shutdown = {
@@ -843,7 +824,6 @@ mod tests {
         );
 
         let status = router.status();
-        assert_eq!(status.routing.sink_order_count, 1);
         assert_eq!(status.upstream.orders, 0);
         assert_eq!(status.upstream.users, 0);
         assert_eq!(status.upstream.workers, 0);
@@ -1184,7 +1164,7 @@ mod tests {
 
         add_orders(router.as_ref(), [bucket]);
 
-        assert!(router.next_order(addr(1), &blank()).is_none());
+        assert!(router.next_order().is_none());
     }
 
     #[tokio::test]
@@ -1774,7 +1754,7 @@ mod tests {
         let status = router.status();
         assert_eq!(status.total_capacity_hash_days.as_f64(), 500.0);
         assert_eq!(status.used_capacity_hash_days.as_f64(), 300.0);
-        assert_eq!(status.routing.bucket_order_count, 1);
+        assert_eq!(status.upstream.orders, 1);
     }
 
     #[test]
@@ -1795,24 +1775,7 @@ mod tests {
         );
 
         let status = router.status();
-        assert_eq!(status.routing.deficit_hashrate, HashRate::from_hps(100.0));
-        assert_eq!(status.routing.starving_order_count, 1);
-    }
-
-    #[test]
-    fn status_reports_placements() {
-        let router = test_router();
-        let sink = test_order(0, None, OrderStatus::Active, &router.metatron);
-        add_orders(router.as_ref(), [sink]);
-
-        router.next_order(addr(1), &blank()).unwrap();
-
-        assert_eq!(
-            router.status().routing.placements_1h,
-            PlacementCounts {
-                blind: 1,
-                ..PlacementCounts::default()
-            }
-        );
+        assert_eq!(status.deficit_hashrate, HashRate::from_hps(100.0));
+        assert_eq!(status.starving_order_count, 1);
     }
 }

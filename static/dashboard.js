@@ -525,7 +525,6 @@ const FORMATTERS = {
   sats_phd: price => price + ' sats/PHd',
   multiplier: value => formatTruncated(value) + '×',
   address: address => ({ text: truncateMiddle(address, 20, 8), full: address }),
-  placement_total: p => p.targeted + p.estimated + p.blind,
   delivered_work: total => formatDifficulty(total.accepted_work + total.rejected_work),
   username: username => ({ text: truncateMiddle(username), full: username }),
   rejection_shares: side => ({

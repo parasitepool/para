@@ -3,7 +3,6 @@ use {super::*, control::TRIM_COOLDOWN, epoch};
 pub(crate) const HYSTERESIS_LOW: f64 = 0.95;
 pub(crate) const HYSTERESIS_HIGH: f64 = 1.3;
 pub(crate) const SEVERE_STARVATION: f64 = 0.5;
-pub(crate) const PLACEMENT_TTL: Duration = Duration::from_secs(90);
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -110,8 +109,6 @@ pub struct Order {
     pub(crate) cancel: CancellationToken,
     pub(crate) metatron: Arc<Metatron>,
     pub(crate) sessions: Mutex<HashMap<SessionId, SessionRegistration>>,
-    pub(crate) placements: Mutex<HashMap<SocketAddr, (HashRate, Instant)>>,
-    pub(crate) expected_placements: AtomicU64,
 }
 
 impl Order {
@@ -139,8 +136,6 @@ impl Order {
             cancel,
             metatron,
             sessions: Mutex::new(HashMap::new()),
-            placements: Mutex::new(HashMap::new()),
-            expected_placements: AtomicU64::new(0),
         })
     }
 
@@ -210,44 +205,7 @@ impl Order {
             cancel,
             metatron,
             sessions: Mutex::new(HashMap::new()),
-            placements: Mutex::new(HashMap::new()),
-            expected_placements: AtomicU64::new(0),
         }))
-    }
-
-    pub(crate) fn place(&self, addr: SocketAddr, expected: HashRate) {
-        let mut placements = self.placements.lock();
-        placements.insert(addr, (expected, Instant::now()));
-        self.store_expected(&placements);
-    }
-
-    pub(crate) fn release_placement(&self, addr: &SocketAddr) {
-        let mut placements = self.placements.lock();
-        if placements.remove(addr).is_some() {
-            self.store_expected(&placements);
-        }
-    }
-
-    pub(crate) fn sweep_placements(&self, now: Instant) {
-        let mut placements = self.placements.lock();
-        placements.retain(|_, (_, created)| now.duration_since(*created) < PLACEMENT_TTL);
-        self.store_expected(&placements);
-    }
-
-    fn store_expected(&self, placements: &HashMap<SocketAddr, (HashRate, Instant)>) {
-        let total = placements
-            .values()
-            .map(|(rate, _)| rate.as_hps())
-            .sum::<f64>();
-
-        self.expected_placements
-            .store(total.to_bits(), Ordering::Relaxed);
-    }
-
-    pub(crate) fn expected_incoming(&self) -> HashRate {
-        HashRate::from_hps(f64::from_bits(
-            self.expected_placements.load(Ordering::Relaxed),
-        ))
     }
 
     pub(crate) fn add_session(
@@ -256,8 +214,6 @@ impl Order {
         cancel: CancellationToken,
         addr: SocketAddr,
     ) {
-        self.release_placement(&addr);
-
         self.sessions
             .lock()
             .insert(session.id(), (session, cancel, addr));
@@ -425,11 +381,6 @@ impl Order {
             .is_some_and(|upstream| upstream.is_connected())
     }
 
-    #[cfg(test)]
-    pub(crate) fn allocator(&self) -> Option<&Arc<EnonceAllocator>> {
-        self.allocator.get()
-    }
-
     pub(crate) fn status(&self) -> OrderStatus {
         self.lifecycle.lock().status
     }
@@ -470,11 +421,7 @@ impl Order {
         self.delivered_work() >= bucket.target.to_hash_work()
     }
 
-    pub(crate) fn supplied(&self, now: Instant, intents_expected: HashRate) -> HashRate {
-        self.hashrate_1m(now) + self.expected_incoming() + intents_expected
-    }
-
-    pub(crate) fn hashrate_deficit(&self, now: Instant, intents_expected: HashRate) -> HashRate {
+    pub(crate) fn hashrate_deficit(&self, now: Instant) -> HashRate {
         if self.bucket.is_none() {
             return HashRate::ZERO;
         }
@@ -483,16 +430,16 @@ impl Order {
             return HashRate::ZERO;
         }
 
-        let supplied = self.supplied(now, intents_expected);
+        let measured = self.hashrate_1m(now);
 
-        if self.is_starving(supplied) {
-            self.hashrate_shortfall(supplied)
+        if self.is_starving(measured) {
+            self.hashrate_shortfall(measured)
         } else {
             HashRate::ZERO
         }
     }
 
-    pub(crate) fn residual_deficit(&self, now: Instant, intents_expected: HashRate) -> HashRate {
+    pub(crate) fn residual_deficit(&self, now: Instant) -> HashRate {
         if self.bucket.is_none() {
             return HashRate::ZERO;
         }
@@ -501,19 +448,17 @@ impl Order {
             return HashRate::ZERO;
         }
 
-        let supplied = self.supplied(now, intents_expected);
-        self.hashrate_shortfall(supplied)
+        self.hashrate_shortfall(self.hashrate_1m(now))
     }
 
-    pub(crate) fn is_severely_starving(&self, now: Instant, intents_expected: HashRate) -> bool {
+    pub(crate) fn is_severely_starving(&self, now: Instant) -> bool {
         let Some(bucket) = &self.bucket else {
             return false;
         };
 
         self.has_connected_upstream()
             && !self.is_fulfilled()
-            && self.supplied(now, intents_expected)
-                < bucket.target.target_hashrate() * SEVERE_STARVATION
+            && self.hashrate_1m(now) < bucket.target.target_hashrate() * SEVERE_STARVATION
     }
 
     pub(crate) fn is_overflowing(&self, now: Instant) -> bool {
@@ -1031,12 +976,7 @@ mod tests {
                 );
             }
 
-            assert_eq!(
-                order
-                    .hashrate_deficit(Instant::now(), HashRate::ZERO)
-                    .as_hps(),
-                expected
-            );
+            assert_eq!(order.hashrate_deficit(Instant::now()).as_hps(), expected);
         }
 
         case(None, None, None, 0.0);
@@ -1047,38 +987,11 @@ mod tests {
         let (metatron, _dir) = Metatron::test();
         let metatron = Arc::new(metatron);
         let starving = test_order(&metatron, Some(HashDays::new(100.0).unwrap()));
-        assert_eq!(
-            starving.hashrate_deficit(Instant::now(), HashRate::ZERO),
-            HashRate::ZERO
-        );
+        assert_eq!(starving.hashrate_deficit(Instant::now()), HashRate::ZERO);
         connect_upstream(&starving, &metatron);
-        assert!(starving.hashrate_deficit(Instant::now(), HashRate::ZERO) > HashRate::ZERO);
+        assert!(starving.hashrate_deficit(Instant::now()) > HashRate::ZERO);
         starving.upstream().unwrap().set_connected(false);
-        assert_eq!(
-            starving.hashrate_deficit(Instant::now(), HashRate::ZERO),
-            HashRate::ZERO
-        );
-
-        let (metatron, _dir) = Metatron::test();
-        let metatron = Arc::new(metatron);
-        let order = test_order(&metatron, Some(HashDays::new(100.0).unwrap()));
-        connect_upstream(&order, &metatron);
-        order.place(
-            SocketAddr::from(([127, 0, 0, 1], 4444)),
-            HashRate::from_hps(30.0),
-        );
-        assert_eq!(
-            order
-                .hashrate_deficit(Instant::now(), HashRate::ZERO)
-                .as_hps(),
-            70.0
-        );
-        assert_eq!(
-            order
-                .hashrate_deficit(Instant::now(), HashRate::from_hps(70.0))
-                .as_hps(),
-            0.0
-        );
+        assert_eq!(starving.hashrate_deficit(Instant::now()), HashRate::ZERO);
     }
 
     #[test]
@@ -1087,10 +1000,7 @@ mod tests {
         let metatron = Arc::new(metatron);
         let sink = test_order(&metatron, None);
         connect_upstream(&sink, &metatron);
-        assert_eq!(
-            sink.residual_deficit(Instant::now(), HashRate::ZERO),
-            HashRate::ZERO
-        );
+        assert_eq!(sink.residual_deficit(Instant::now()), HashRate::ZERO);
 
         let (metatron, _dir) = Metatron::test();
         let metatron = Arc::new(metatron);
@@ -1098,30 +1008,12 @@ mod tests {
         connect_upstream(&order, &metatron);
 
         assert_eq!(
-            order.residual_deficit(Instant::now(), HashRate::ZERO),
+            order.residual_deficit(Instant::now()),
             HashRate::from_hps(100.0)
         );
 
-        order.place(
-            SocketAddr::from(([127, 0, 0, 1], 4444)),
-            HashRate::from_hps(30.0),
-        );
-
-        assert_eq!(
-            order.residual_deficit(Instant::now(), HashRate::ZERO),
-            HashRate::from_hps(70.0)
-        );
-
-        assert_eq!(
-            order.residual_deficit(Instant::now(), HashRate::from_hps(70.0)),
-            HashRate::ZERO
-        );
-
         order.upstream().unwrap().set_connected(false);
-        assert_eq!(
-            order.residual_deficit(Instant::now(), HashRate::ZERO),
-            HashRate::ZERO
-        );
+        assert_eq!(order.residual_deficit(Instant::now()), HashRate::ZERO);
 
         let (metatron, _dir) = Metatron::test();
         let metatron = Arc::new(metatron);
@@ -1129,10 +1021,7 @@ mod tests {
         connect_upstream(&fulfilled, &metatron);
         metatron
             .set_order_delivered_work(fulfilled.id, HashDays::new(100.0).unwrap().to_hash_work());
-        assert_eq!(
-            fulfilled.residual_deficit(Instant::now(), HashRate::ZERO),
-            HashRate::ZERO
-        );
+        assert_eq!(fulfilled.residual_deficit(Instant::now()), HashRate::ZERO);
     }
 
     #[test]
@@ -1142,61 +1031,17 @@ mod tests {
         let order = test_order(&metatron, Some(HashDays::new(100.0).unwrap()));
         connect_upstream(&order, &metatron);
 
-        assert!(order.is_severely_starving(Instant::now(), HashRate::ZERO));
+        assert!(order.is_severely_starving(Instant::now()));
 
-        order.place(
-            SocketAddr::from(([127, 0, 0, 1], 4444)),
-            HashRate::from_hps(60.0),
-        );
+        register_session(&metatron, &order, "deadbeef", 10_000.0);
 
-        assert!(!order.is_severely_starving(Instant::now(), HashRate::ZERO));
-        assert!(order.is_starving(order.supplied(Instant::now(), HashRate::ZERO)));
+        assert!(!order.is_severely_starving(Instant::now()));
 
         order.upstream().unwrap().set_connected(false);
-        assert!(!order.is_severely_starving(Instant::now(), HashRate::ZERO));
+        assert!(!order.is_severely_starving(Instant::now()));
 
         let sink = test_order(&metatron, None);
-        assert!(!sink.is_severely_starving(Instant::now(), HashRate::ZERO));
-    }
-
-    #[test]
-    fn placements_debit_expected_incoming() {
-        let (metatron, _dir) = Metatron::test();
-        let metatron = Arc::new(metatron);
-        let order = test_order(&metatron, Some(HashDays::new(100.0).unwrap()));
-        let addr = SocketAddr::from(([127, 0, 0, 1], 4444));
-
-        assert_eq!(order.expected_incoming(), HashRate::ZERO);
-
-        order.place(addr, HashRate::from_hps(10.0));
-        order.place(
-            SocketAddr::from(([127, 0, 0, 2], 4444)),
-            HashRate::from_hps(20.0),
-        );
-        assert_eq!(order.expected_incoming(), HashRate::from_hps(30.0));
-
-        order.release_placement(&addr);
-        assert_eq!(order.expected_incoming(), HashRate::from_hps(20.0));
-
-        order.sweep_placements(Instant::now() + PLACEMENT_TTL + Duration::from_secs(1));
-        assert_eq!(order.expected_incoming(), HashRate::ZERO);
-    }
-
-    #[test]
-    fn add_session_releases_placement() {
-        let (metatron, _dir) = Metatron::test();
-        let metatron = Arc::new(metatron);
-        let order = test_order(&metatron, Some(HashDays::new(100.0).unwrap()));
-        let addr = SocketAddr::from(([127, 0, 0, 1], 4444));
-
-        order.place(addr, HashRate::from_hps(10.0));
-        assert_eq!(order.expected_incoming(), HashRate::from_hps(10.0));
-
-        register_session(&metatron, &order, "deadbeef", 1.0);
-
-        let now = Instant::now();
-        assert_eq!(order.expected_incoming(), HashRate::ZERO);
-        assert_eq!(order.supplied(now, HashRate::ZERO), order.hashrate_1m(now));
+        assert!(!sink.is_severely_starving(Instant::now()));
     }
 
     #[test]

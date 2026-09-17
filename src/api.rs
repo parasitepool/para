@@ -15,10 +15,7 @@ pub use {
     http_server::{BitcoinStatus, SystemStatus},
     pool::PoolStatus,
     proxy::ProxyStatus,
-    router::{
-        OrderDetail, OrderRequest, OrderResponse, OrderSummary, PlacementCounts, RouterStatus,
-        RoutingInfo, WalletInfo,
-    },
+    router::{OrderDetail, OrderRequest, OrderResponse, OrderSummary, RouterStatus, WalletInfo},
     users::{SessionDetail, UserDetail, UserSummary, WorkerDetail},
 };
 
