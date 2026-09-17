@@ -20,6 +20,15 @@ impl Display for SessionId {
     }
 }
 
+pub(crate) struct SessionConfig {
+    pub(crate) enonce1: Extranonce,
+    pub(crate) address: Address,
+    pub(crate) workername: String,
+    pub(crate) username: Username,
+    pub(crate) version_mask: Option<Version>,
+    pub(crate) socket_addr: SocketAddr,
+}
+
 pub(crate) struct Session {
     id: SessionId,
     enonce1: Extranonce,
@@ -27,30 +36,34 @@ pub(crate) struct Session {
     workername: String,
     username: Username,
     version_mask: Option<Version>,
+    socket_addr: SocketAddr,
+    trimmed: AtomicBool,
     stats: Mutex<Stats>,
     dirty: Arc<AtomicBool>,
 }
 
 impl Session {
-    pub(crate) fn new(
-        id: SessionId,
-        enonce1: Extranonce,
-        address: Address,
-        workername: String,
-        username: Username,
-        version_mask: Option<Version>,
-        dirty: Arc<AtomicBool>,
-    ) -> Self {
+    pub(crate) fn new(id: SessionId, config: SessionConfig, dirty: Arc<AtomicBool>) -> Self {
         Self {
             id,
-            enonce1,
-            address,
-            workername,
-            username,
-            version_mask,
+            enonce1: config.enonce1,
+            address: config.address,
+            workername: config.workername,
+            username: config.username,
+            version_mask: config.version_mask,
+            socket_addr: config.socket_addr,
+            trimmed: AtomicBool::new(false),
             stats: Mutex::new(Stats::new()),
             dirty,
         }
+    }
+
+    pub(crate) fn mark_trimmed(&self) {
+        self.trimmed.store(true, Ordering::Relaxed);
+    }
+
+    pub(crate) fn is_trimmed(&self) -> bool {
+        self.trimmed.load(Ordering::Relaxed)
     }
 
     pub(crate) fn id(&self) -> SessionId {
@@ -79,6 +92,10 @@ impl Session {
 
     pub(crate) fn version_mask(&self) -> Option<Version> {
         self.version_mask
+    }
+
+    pub(crate) fn socket_addr(&self) -> SocketAddr {
+        self.socket_addr
     }
 
     pub(crate) fn last_share(&self) -> Option<Instant> {

@@ -56,6 +56,8 @@ impl Dispatcher {
                 }
             };
 
+            let mut connection = self.metatron.connections().accept(Instant::now());
+
             let _ = stream.set_nodelay(true);
 
             let event_tx = event_tx.clone();
@@ -76,6 +78,7 @@ impl Dispatcher {
 
                 let Some(order) = select(addr, &prelude) else {
                     warn!("No order to match with available, dropping connection from {addr}");
+                    connection.reject();
                     return;
                 };
 
@@ -94,11 +97,13 @@ impl Dispatcher {
                 let Some((upstream, allocator)) = order.upstream_route() else {
                     error!("Dropping {addr}: order {} has no upstream route", order.id);
                     order.release_placement(&addr);
+                    connection.reject();
                     return;
                 };
 
                 let stratifier: Stratifier<Notify> = Stratifier::new(
                     addr,
+                    connection,
                     settings,
                     allocator,
                     metatron,
@@ -188,6 +193,91 @@ mod tests {
             (0, ""),
             "expected EOF after dropped connection"
         );
+
+        let connects = router.metatron.connections().downstream();
+        assert_eq!(connects.connects_1h, 1);
+        assert_eq!(connects.routing_rejects_1h, 1);
+        assert_eq!(connects.pending_1h, 0);
+        assert_eq!(connects.probes_1h, 0);
+        assert_eq!(connects.disconnects_1h, 1);
+        assert_eq!(connects.reject_1h, 1);
+        assert_eq!(connects.server_1h, 0);
+        assert_eq!(connects.client_1h, 0);
+
+        router.cancel.cancel();
+        cancel.cancel();
+        timeout(Duration::from_secs(5), server)
+            .await
+            .expect("dispatcher should shut down")
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn serve_records_disconnect_when_greet_fails() {
+        let router = test_router();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let dispatcher = Arc::new(Dispatcher::new(
+            router.settings.clone(),
+            router.metatron.clone(),
+            TaskTracker::new(),
+        ));
+
+        let cancel = CancellationToken::new();
+        let server_cancel = cancel.clone();
+
+        let select_router = router.router.clone();
+        let server = tokio::spawn(async move {
+            dispatcher
+                .serve(
+                    listener,
+                    None,
+                    move |addr, prelude| select_router.next_order(addr, prelude),
+                    || Ok(()),
+                    server_cancel,
+                )
+                .await
+                .unwrap();
+        });
+
+        let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        timeout(Duration::from_secs(5), async {
+            while router.metatron.connections().downstream().connects_1h == 0 {
+                sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap();
+
+        let connects = router.metatron.connections().downstream();
+        assert_eq!(connects.pending_1h, 1);
+        assert_eq!(connects.probes_1h, 0);
+
+        tokio::io::AsyncWriteExt::write_all(&mut stream, b"not json\n")
+            .await
+            .unwrap();
+        let mut reader = tokio::io::BufReader::new(stream);
+
+        let mut line = String::new();
+        let read = timeout(Duration::from_secs(5), reader.read_line(&mut line))
+            .await
+            .expect("client should observe the drop")
+            .unwrap();
+        assert_eq!(
+            (read, line.as_str()),
+            (0, ""),
+            "expected EOF after greet failure"
+        );
+
+        let connects = router.metatron.connections().downstream();
+        assert_eq!(connects.connects_1h, 1);
+        assert_eq!(connects.probes_1h, 1);
+        assert_eq!(connects.pending_1h, 0);
+        assert_eq!(connects.routing_rejects_1h, 0);
+        assert_eq!(connects.disconnects_1h, 1);
+        assert_eq!(connects.client_1h, 1);
 
         router.cancel.cancel();
         cancel.cancel();

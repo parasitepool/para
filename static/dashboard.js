@@ -564,6 +564,7 @@ function renderSessionRow(session) {
   const safeShortSessionUser = escapeHtml(shortSessionUser);
   return `<tr>
     <td><span class=copyable data-full="${safeSessionUser}" data-formatted="${safeShortSessionUser}">${safeShortSessionUser}</span></td>
+    <td>${escapeHtml(session.remote_address || '-')}</td>
     <td>${escapeHtml(formatHashrate(stats.hashrate_1m))}</td>
     <td>${escapeHtml(formatTruncated(stats.sps_1m))}</td>
     <td>${escapeHtml(bestShare || '-')}</td>
@@ -587,6 +588,7 @@ function initSessionsTable(root) {
     defaultSort: { column: 'hashrate_1m', direction: 'desc' },
     sorts: {
       username: 'string',
+      remote_address: 'string',
       hashrate_1m: compareStat('hashrate_1m'),
       sps_1m: compareStat('sps_1m'),
       best_share: compareNullableStat('best_share'),

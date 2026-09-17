@@ -37,6 +37,7 @@ use {
     chain::Chain,
     clap::{Args, Parser},
     coinbase_builder::CoinbaseBuilder,
+    connections::{Connections, DisconnectReason, DownstreamConnection, DownstreamConnects},
     dashmap::DashMap,
     decay::{DecayingAverage, calculate_time_bias},
     enonce_allocator::EnonceAllocator,
@@ -52,7 +53,7 @@ use {
     logs::logs_enabled,
     metatron::{
         Metatron,
-        session::{Session, SessionId},
+        session::{Session, SessionConfig, SessionId},
         stats::Stats,
         user::User,
         worker::Worker,
@@ -60,6 +61,7 @@ use {
     parking_lot::{Mutex, RwLock},
     reqwest::Url,
     retry::{Backoff, BackoffEnd, retry_with_backoff},
+    rolling::RollingCounter,
     router::{
         Router,
         order::{Bucket, Order, OrderStatus, Review},
@@ -88,7 +90,7 @@ use {
         fs,
         io::{self, Write},
         iter::Sum,
-        net::{SocketAddr, ToSocketAddrs},
+        net::{IpAddr, SocketAddr, ToSocketAddrs},
         ops::{Add, AddAssign, Div, Mul, Sub, SubAssign},
         path::{Path, PathBuf},
         process,
@@ -145,6 +147,7 @@ mod block_template;
 mod chain;
 pub mod ckpool;
 mod coinbase_builder;
+mod connections;
 mod decay;
 mod enonce_allocator;
 mod epoch;
@@ -159,6 +162,7 @@ mod logs;
 mod metatron;
 mod proxy;
 mod retry;
+mod rolling;
 pub mod router;
 pub mod settings;
 mod signal;

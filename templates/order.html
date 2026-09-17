@@ -120,6 +120,8 @@
     <div class=row><span>Status</span><span id=status></span></div>
     <div class=row><span>Review</span><span id=review></span></div>
     <div class=row><span>Endpoint</span><span data-value=upstream_target.endpoint></span></div>
+    <div class=row><span>Address</span><span data-value=upstream_address class=copyable></span></div>
+    <div class=row><span>Upstream Disconnects</span><span data-value=upstream_disconnects_total></span></div>
     <div class=row><span>Username</span><span data-value=upstream_target.username data-format=username class=copyable></span></div>
     <div class=row><span>Requested Hashdays</span><span id=requested_hash_days></span></div>
     <div class=row><span>Delivered Hashdays</span><span data-value=upstream.delivered_hash_days data-format=hash_days class=copyable></span></div>
@@ -167,6 +169,7 @@
         <thead>
           <tr>
             <th data-sort=username aria-sort=none>Username</th>
+            <th data-sort=remote_address aria-sort=none>IP</th>
             <th data-sort=hashrate_1m aria-sort=descending>Hashrate</th>
             <th data-sort=sps_1m aria-sort=none>SPS</th>
             <th data-sort=best_share aria-sort=none>Best Share</th>

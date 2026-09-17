@@ -21,6 +21,7 @@ enum Acquisition {
 pub(crate) struct Stratifier<W: Workbase> {
     state: State,
     socket_addr: SocketAddr,
+    connection: DownstreamConnection,
     settings: Arc<Settings>,
     allocator: Arc<EnonceAllocator>,
     metatron: Arc<Metatron>,
@@ -36,12 +37,14 @@ pub(crate) struct Stratifier<W: Workbase> {
     bouncer: Bouncer,
     event_tx: Option<mpsc::Sender<Event>>,
     order: Option<Arc<Order>>,
+    disconnect_reason: Option<DisconnectReason>,
 }
 
 impl<W: Workbase> Stratifier<W> {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         socket_addr: SocketAddr,
+        connection: DownstreamConnection,
         settings: Arc<Settings>,
         allocator: Arc<EnonceAllocator>,
         metatron: Arc<Metatron>,
@@ -72,6 +75,7 @@ impl<W: Workbase> Stratifier<W> {
         Self {
             state: State::new(),
             socket_addr,
+            connection,
             settings,
             allocator,
             metatron,
@@ -87,11 +91,17 @@ impl<W: Workbase> Stratifier<W> {
             bouncer,
             event_tx,
             order,
+            disconnect_reason: None,
         }
     }
 
     pub(crate) async fn serve(mut self) -> Result {
         let result = self.run().await;
+
+        if result.is_err() {
+            self.disconnect_reason
+                .get_or_insert(DisconnectReason::Server);
+        }
 
         let writer_handle = self.writer_handle.take();
 
@@ -117,12 +127,22 @@ impl<W: Workbase> Stratifier<W> {
 
         loop {
             tokio::select! {
+                biased;
+
                 _ = cancel.cancelled() => {
                     info!("Session cancelled, sending client.reconnect to {}", self.socket_addr);
 
                     if let Err(err) = self.send_reconnect() {
                         warn!("Failed to send client.reconnect to {}: {err}", self.socket_addr);
                     }
+
+                    self.disconnect_reason = Some(
+                        if self.state.working().is_some_and(|session| session.is_trimmed()) {
+                            DisconnectReason::Trim
+                        } else {
+                            DisconnectReason::Server
+                        },
+                    );
 
                     break;
                 }
@@ -133,11 +153,13 @@ impl<W: Workbase> Stratifier<W> {
                             self.socket_addr,
                             self.bouncer.last_interaction_since().as_secs()
                         );
+                        self.disconnect_reason = Some(DisconnectReason::Server);
                         break
                     }
                 }
                 _ = writer_tx.closed() => {
                     warn!("Writer task exited for {}, closing connection", self.socket_addr);
+                    self.disconnect_reason.get_or_insert(DisconnectReason::Client);
                     break;
                 }
                 message = self.read_message() => {
@@ -204,6 +226,7 @@ impl<W: Workbase> Stratifier<W> {
                                     let session = self.metatron.new_session(
                                         auth.clone(),
                                         self.allocator.order_id(),
+                                        self.socket_addr,
                                     );
 
                                     if let Some(order) = &self.order {
@@ -215,6 +238,7 @@ impl<W: Workbase> Stratifier<W> {
                                     }
 
                                     self.state = State::Working(session.clone());
+                                    self.connection.start_session();
 
                                     session
                                 },
@@ -255,6 +279,8 @@ impl<W: Workbase> Stratifier<W> {
                         if let Err(err) = self.send_reconnect() {
                             warn!("Failed to send client.reconnect to {}: {err}", self.socket_addr);
                         }
+
+                        self.disconnect_reason = Some(DisconnectReason::Server);
 
                         break;
                     }
@@ -349,6 +375,7 @@ impl<W: Workbase> Stratifier<W> {
                         .map(|d| d.as_secs())
                         .unwrap_or(0)
                 );
+                self.disconnect_reason = Some(DisconnectReason::Server);
                 true
             }
         }
@@ -397,6 +424,7 @@ impl<W: Workbase> Stratifier<W> {
                         .map(|d| d.as_secs())
                         .unwrap_or(0)
                 );
+                self.disconnect_reason = Some(DisconnectReason::Server);
                 true
             }
         }
@@ -1186,16 +1214,20 @@ impl<W: Workbase> Stratifier<W> {
         }
 
         match self.reader.next().await {
-            Some(Ok(line)) => {
-                let message = serde_json::from_str::<Message>(&line).map_err(|e| {
-                    anyhow!(
+            Some(Ok(line)) => match serde_json::from_str::<Message>(&line) {
+                Ok(message) => Ok(Some(message)),
+                Err(e) => {
+                    self.disconnect_reason = Some(DisconnectReason::Client);
+                    Err(anyhow!(
                         "invalid stratum message from {}: {e}; line={line:?}",
                         self.socket_addr
-                    )
-                })?;
-                Ok(Some(message))
+                    ))
+                }
+            },
+            Some(Err(e)) => {
+                self.disconnect_reason = Some(DisconnectReason::Client);
+                Err(anyhow!("read error from {}: {e}", self.socket_addr))
             }
-            Some(Err(e)) => Err(anyhow!("read error from {}: {e}", self.socket_addr)),
             None => {
                 debug!("Client {} disconnected", self.socket_addr);
                 Ok(None)
@@ -1203,22 +1235,26 @@ impl<W: Workbase> Stratifier<W> {
         }
     }
 
-    fn send(&self, message: Message) -> Result<()> {
+    fn send(&mut self, message: Message) -> Result<()> {
         let frame = serde_json::to_string(&message)?;
         self.writer_tx
             .try_send(frame)
+            .inspect_err(|_| {
+                self.disconnect_reason
+                    .get_or_insert(DisconnectReason::Client);
+            })
             .context("writer queue full, dropping slow client")?;
         Ok(())
     }
 
-    fn send_reconnect(&self) -> Result<()> {
+    fn send_reconnect(&mut self) -> Result<()> {
         self.send(Message::Notification {
             method: Method::Reconnect(Reconnect::default()),
         })
     }
 
     fn send_error(
-        &self,
+        &mut self,
         id: Id,
         error: StratumError,
         traceback: Option<serde_json::Value>,
@@ -1268,6 +1304,8 @@ impl<W: Workbase> Drop for Stratifier<W> {
             order.release_placement(&self.socket_addr);
         }
 
+        let reason = self.disconnect_reason.unwrap_or(DisconnectReason::Client);
+
         if let Some(session) = self.state.working() {
             info!(
                 "Retiring session for {} with workername {} and enonce1 {}",
@@ -1286,6 +1324,123 @@ impl<W: Workbase> Drop for Stratifier<W> {
             self.allocator.release_enonce1(enonce1);
         }
 
+        self.connection.disconnect(reason);
+
         debug!("Shutting down stratifier for {}", self.socket_addr,);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use {super::*, stratum::client::Client};
+
+    #[tokio::test]
+    async fn connection_lifecycle_counts_sessions_and_disconnect_reasons() {
+        async fn case(reason: DisconnectReason) {
+            let (metatron, _directory) = Metatron::test();
+            let metatron = Arc::new(metatron);
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let client = Client::new(
+                listener.local_addr().unwrap().to_string(),
+                "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.foo"
+                    .parse()
+                    .unwrap(),
+                None,
+                "bar".into(),
+                Duration::from_secs(5),
+            );
+            let _events = client.connect().await.unwrap();
+            let (stream, addr) = listener.accept().await.unwrap();
+            let connection = metatron.connections().accept(Instant::now());
+            let (reader, writer) = stream.into_split();
+            let upstream = Upstream::test(0, metatron.clone());
+            let (_workbase_tx, workbase_rx) =
+                watch::channel(upstream.workbase_rx().borrow().clone());
+            let cancel = CancellationToken::new();
+            let order = Order::new(
+                0,
+                format!("{}@foo:3333", client.username()).parse().unwrap(),
+                None,
+                cancel.clone(),
+                metatron.clone(),
+            );
+            let stratifier = Stratifier::new(
+                addr,
+                connection,
+                Arc::new(Settings::default()),
+                Arc::new(EnonceAllocator::new(
+                    Extranonces::Pool(PoolExtranonces::new(4, 8).unwrap()),
+                    order.id,
+                )),
+                metatron.clone(),
+                None,
+                FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_MESSAGE_SIZE)),
+                FramedWrite::new(writer, LinesCodec::new()),
+                VecDeque::new(),
+                workbase_rx,
+                cancel.clone(),
+                None,
+                Difficulty::from(1u64),
+                Some(order.clone()),
+            );
+            let server = tokio::spawn(stratifier.serve());
+
+            client.subscribe().await.unwrap();
+            client.authorize().await.unwrap();
+            assert_eq!(metatron.connections().downstream().pending_1h, 1);
+
+            for _ in 0..2 {
+                assert!(
+                    client
+                        .submit(
+                            "ff".parse().unwrap(),
+                            "0000000000000000".parse().unwrap(),
+                            "504e86b9".parse().unwrap(),
+                            "00000000".parse().unwrap(),
+                            None,
+                        )
+                        .await
+                        .is_err()
+                );
+            }
+
+            let connects = metatron.connections().downstream();
+            assert_eq!(connects.sessions_1h, 1);
+            assert_eq!(connects.pending_1h, 0);
+
+            match reason {
+                DisconnectReason::Client => client.disconnect().await,
+                DisconnectReason::Server => cancel.cancel(),
+                DisconnectReason::Trim => {
+                    let id = *order.sessions.lock().keys().next().unwrap();
+                    assert!(order.trim_session(id, Instant::now()));
+                }
+                DisconnectReason::Reject => unreachable!(),
+            }
+
+            timeout(Duration::from_secs(5), server)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+
+            assert_eq!(
+                metatron.connections().downstream(),
+                DownstreamConnects {
+                    connects_1h: 1,
+                    sessions_1h: 1,
+                    disconnects_1h: 1,
+                    client_1h: usize::from(reason == DisconnectReason::Client),
+                    server_1h: usize::from(reason == DisconnectReason::Server),
+                    trim_1h: usize::from(reason == DisconnectReason::Trim),
+                    ..DownstreamConnects::default()
+                }
+            );
+            assert_eq!(metatron.total_sessions(), 0);
+        }
+
+        case(DisconnectReason::Client).await;
+        case(DisconnectReason::Server).await;
+        case(DisconnectReason::Trim).await;
     }
 }

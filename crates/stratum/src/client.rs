@@ -145,11 +145,11 @@ impl Client {
         })
     }
 
-    pub async fn peer_address(&self) -> Result<std::net::SocketAddr> {
+    pub async fn upstream_address(&self) -> Result<std::net::SocketAddr> {
         let (respond_to, rx) = oneshot::channel();
 
         self.tx
-            .send(ClientMessage::PeerAddress { respond_to })
+            .send(ClientMessage::UpstreamAddress { respond_to })
             .await
             .map_err(|_| ClientError::NotConnected)?;
 
@@ -488,7 +488,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn peer_address() {
+    async fn upstream_address() {
         let addr = mock_server(false).await;
 
         let client = Client::new(
@@ -502,13 +502,13 @@ mod tests {
         );
 
         assert!(matches!(
-            client.peer_address().await,
+            client.upstream_address().await,
             Err(ClientError::NotConnected)
         ));
 
         client.connect().await.unwrap();
 
-        assert_eq!(client.peer_address().await.unwrap(), addr);
+        assert_eq!(client.upstream_address().await.unwrap(), addr);
     }
 
     async fn mock_subscribe_server(enonce2_size: usize) -> SocketAddr {

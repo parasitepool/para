@@ -472,6 +472,7 @@ impl Router {
     pub(crate) fn status(&self) -> RouterStatus {
         let now = Instant::now();
         let metatron = &self.metatron;
+        let upstream_disconnects = metatron.connections().upstream_disconnects(now);
         let snapshot = self.book.status_snapshot();
         let used = snapshot.used;
         let orders = snapshot.live;
@@ -589,7 +590,6 @@ impl Router {
                     .is_some_and(|wallet| wallet.is_synced()),
             },
             routing: RoutingInfo {
-                sessions_trimmed_1h: control_metrics.sessions_trimmed_1h,
                 intents_created_1h: control_metrics.intents_created_1h,
                 intents_expired_1h: control_metrics.intents_expired_1h,
                 intent_claimed_1h: control_metrics.intent_claimed_1h,
@@ -605,6 +605,7 @@ impl Router {
                 orders: bucket_order_count,
                 pending,
                 disconnected,
+                disconnects_1h: upstream_disconnects,
                 hashrate_1m: active.hashrate_1m(now),
                 hashrate_5m: active.hashrate_5m(now),
                 hashrate_15m: active.hashrate_15m(now),
@@ -786,9 +787,11 @@ mod tests {
             Difficulty::from(1.0),
         );
 
-        let session = router
-            .metatron
-            .new_session(test_authorization("deadbeef", "foo"), order.id);
+        let session = router.metatron.new_session(
+            test_authorization("deadbeef", "foo"),
+            order.id,
+            addr(4444),
+        );
         session.record_accepted(Difficulty::from(1.0), Difficulty::from(1.0));
 
         let status = router.status();
@@ -1350,8 +1353,8 @@ mod tests {
 
         let cancel_kept = CancellationToken::new();
         let cancel_trimmed = CancellationToken::new();
-        let kept = metatron.new_session(test_authorization("deadbeef", "foo"), 0);
-        let trimmed = metatron.new_session(test_authorization("cafebabe", "bar"), 0);
+        let kept = metatron.new_session(test_authorization("deadbeef", "foo"), 0, addr(4444));
+        let trimmed = metatron.new_session(test_authorization("cafebabe", "bar"), 0, addr(4444));
         order.add_session(kept.clone(), cancel_kept.clone(), addr(1));
         order.add_session(trimmed.clone(), cancel_trimmed.clone(), addr(2));
 

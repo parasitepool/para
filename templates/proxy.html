@@ -23,6 +23,15 @@
           <tr><td>Orders / Sessions</td><td data-value=upstream.orders></td><td data-value=downstream.sessions></td></tr>
           <tr><td>Pending / Idle</td><td data-value=upstream.pending></td><td data-value=downstream.idle></td></tr>
           <tr><td>Disconnected</td><td data-value=upstream.disconnected></td><td data-value=downstream.disconnected></td></tr>
+          <tr><td>Connects (1h)</td><td></td><td data-value=downstream.connects_1h.total></td></tr>
+          <tr><td class=sub>Sessions</td><td></td><td data-value=downstream.connects_1h.sessions></td></tr>
+          <tr><td class=sub>Probes</td><td></td><td data-value=downstream.connects_1h.probes></td></tr>
+          <tr><td class=sub>Rejects</td><td></td><td data-value=downstream.connects_1h.rejects></td></tr>
+          <tr><td class=sub>Pending</td><td></td><td data-value=downstream.connects_1h.pending></td></tr>
+          <tr><td>Disconnects (1h)</td><td data-value=upstream.disconnects_1h></td><td data-value=downstream.disconnects_1h.total></td></tr>
+          <tr><td class=sub>Client</td><td></td><td data-value=downstream.disconnects_1h.client></td></tr>
+          <tr><td class=sub>Server</td><td></td><td data-value=downstream.disconnects_1h.server></td></tr>
+          <tr><td class=sub>Rejects</td><td></td><td data-value=downstream.disconnects_1h.rejects></td></tr>
         </tbody>
       </table>
     </div>
@@ -34,6 +43,7 @@
           <tr><td>Ping</td><td><span data-value=upstream_info.ping_ms data-format=ping></span>ms</td></tr>
           <tr><td>Uptime</td><td data-value=uptime_secs data-format=duration></td></tr>
           <tr><td>Endpoint</td><td data-value=upstream_info.endpoint></td></tr>
+          <tr><td>Address</td><td data-value=upstream_info.upstream_address class=copyable></td></tr>
           <tr><td>Username</td><td data-value=upstream_info.username data-format=username class=copyable></td></tr>
           <tr><td>Difficulty</td><td data-value=upstream_info.difficulty data-format=difficulty class=copyable></td></tr>
           <tr><td>Extranonce1</td><td data-value=upstream_info.enonce1></td></tr>

@@ -302,6 +302,26 @@
           <tr><td>Disconnected</td><td data-value=upstream.disconnected></td><td data-value=downstream.disconnected></td></tr>
         </tbody>
       </table>
+
+      <hr class=divider>
+
+      <table class=compact-table>
+        <tbody>
+          <tr><td>Connects (1h)</td><td data-value=downstream.connects_1h.total></td></tr>
+          <tr><td class=sub>Sessions</td><td data-value=downstream.connects_1h.sessions></td></tr>
+          <tr><td class=sub>Probes</td><td data-value=downstream.connects_1h.probes></td></tr>
+          <tr><td class=sub>Rejects</td><td data-value=downstream.connects_1h.rejects></td></tr>
+          <tr><td class=sub>Pending</td><td data-value=downstream.connects_1h.pending></td></tr>
+          <tr><td class=sub>Probe share</td><td id=probe_share></td></tr>
+          <tr><td>Disconnects (1h)</td><td data-value=downstream.disconnects_1h.total></td></tr>
+          <tr><td class=sub>Client</td><td data-value=downstream.disconnects_1h.client></td></tr>
+          <tr><td class=sub>Server</td><td data-value=downstream.disconnects_1h.server></td></tr>
+          <tr><td class=sub>Rejects</td><td data-value=downstream.disconnects_1h.rejects></td></tr>
+          <tr><td class=sub>Trim</td><td data-value=downstream.disconnects_1h.trim></td></tr>
+          <tr><td class=sub>Trim share</td><td id=trim_share></td></tr>
+          <tr><td>Upstream Disconnects (1h)</td><td data-value=upstream.disconnects_1h></td></tr>
+        </tbody>
+      </table>
     </div>
 
     <div data-tab-panel=total class=hidden>
@@ -325,14 +345,13 @@
       <table class="compact-table routing-table">
         <tbody>
           <tr><td>Deficit</td><td data-value=routing.deficit_hashrate data-format=hashrate></td></tr>
-          <tr><td>Trims (1h)</td><td data-value=routing.sessions_trimmed_1h></td></tr>
-          <tr><td>Intents (1h)</td><td data-value=routing.intents_created_1h></td></tr>
-          <tr><td class=sub>Hit</td><td data-value=routing.intent_claimed_1h></td></tr>
-          <tr><td class=sub>Expired</td><td data-value=routing.intents_expired_1h></td></tr>
           <tr><td>Placements (1h)</td><td data-value=routing.placements_1h data-format=placement_total></td></tr>
           <tr><td class=sub>Targeted</td><td data-value=routing.placements_1h.targeted></td></tr>
           <tr><td class=sub>Estimated</td><td data-value=routing.placements_1h.estimated></td></tr>
           <tr><td class=sub>Blind</td><td data-value=routing.placements_1h.blind></td></tr>
+          <tr><td>Intents (1h)</td><td data-value=routing.intents_created_1h></td></tr>
+          <tr><td class=sub>Hit</td><td data-value=routing.intent_claimed_1h></td></tr>
+          <tr><td class=sub>Expired</td><td data-value=routing.intents_expired_1h></td></tr>
         </tbody>
       </table>
     </div>
@@ -646,6 +665,13 @@ async function refresh(signal) {
     ? routerData.total_capacity_hash_days - routerData.used_capacity_hash_days
     : null;
   set('available_work', available, formatHashDays);
+
+  const connects = routerData.downstream?.connects_1h;
+  const disconnects = routerData.downstream?.disconnects_1h;
+  const probeShare = connects?.total > 0 ? (connects.probes / connects.total) * 100 : null;
+  const trimShare = disconnects?.total > 0 ? (disconnects.trim / disconnects.total) * 100 : null;
+  set('probe_share', probeShare, value => formatTruncated(value) + '%');
+  set('trim_share', trimShare, value => formatTruncated(value) + '%');
 
   renderBitcoinData(bitcoinData);
   renderSystemData(systemData);

@@ -142,6 +142,8 @@ impl Pool {
                 }
             };
 
+            let connection = metatron.connections().accept(Instant::now());
+
             debug!("Spawning stratifier task for {addr}");
 
             let workbase_rx = workbase_rx.clone();
@@ -158,6 +160,7 @@ impl Pool {
 
                 let stratifier: Stratifier<BlockTemplate> = Stratifier::new(
                     addr,
+                    connection,
                     settings.clone(),
                     allocator,
                     metatron,

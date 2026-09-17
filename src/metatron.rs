@@ -39,6 +39,7 @@ pub(crate) struct Metatron {
     blocks: RwLock<Vec<BlockHash>>,
     counter: AtomicU32,
     disconnected: DashMap<Extranonce, (Arc<Session>, Instant, Arc<EnonceAllocator>)>,
+    connections: Arc<Connections>,
     started: Instant,
     orders: DashMap<u32, OrderSlot>,
     users: DashMap<Address, Arc<User>>,
@@ -67,13 +68,15 @@ impl Metatron {
             .collect::<Result<_>>()?;
 
         let blocks = store.read_blocks()?;
+        let started = Instant::now();
 
         Ok(Self {
             store,
             blocks: RwLock::new(blocks),
             counter: AtomicU32::new(0),
             disconnected: DashMap::new(),
-            started: Instant::now(),
+            connections: Arc::new(Connections::new(started)),
+            started,
             orders: DashMap::new(),
             users,
             persist_lock: Mutex::new(()),
@@ -82,6 +85,10 @@ impl Metatron {
 
     pub(crate) fn store(&self) -> &Arc<Store> {
         &self.store
+    }
+
+    pub(crate) fn connections(&self) -> &Arc<Connections> {
+        &self.connections
     }
 
     pub(crate) fn spawn(self: &Arc<Self>, cancel: CancellationToken, tasks: &TaskTracker) {
@@ -124,7 +131,12 @@ impl Metatron {
             .retain(|_, user| user.session_count() > 0 || user.has_accepted());
     }
 
-    pub(crate) fn new_session(&self, auth: Arc<Authorization>, order_id: u32) -> Arc<Session> {
+    pub(crate) fn new_session(
+        &self,
+        auth: Arc<Authorization>,
+        order_id: u32,
+        socket_addr: SocketAddr,
+    ) -> Arc<Session> {
         let id = SessionId::new(order_id, self.counter.fetch_add(1, Ordering::Relaxed));
 
         let session = {
@@ -135,11 +147,14 @@ impl Metatron {
 
             let session = Arc::new(Session::new(
                 id,
-                auth.enonce1.clone(),
-                auth.address.clone(),
-                auth.workername.clone(),
-                auth.username.clone(),
-                auth.version_mask,
+                SessionConfig {
+                    enonce1: auth.enonce1.clone(),
+                    address: auth.address.clone(),
+                    workername: auth.workername.clone(),
+                    username: auth.username.clone(),
+                    version_mask: auth.version_mask,
+                    socket_addr,
+                },
                 user.dirty.clone(),
             ));
 
@@ -555,6 +570,10 @@ mod tests {
         auth(test_address_2(), enonce1, workername)
     }
 
+    fn test_addr() -> SocketAddr {
+        SocketAddr::from(([127, 0, 0, 1], 4444))
+    }
+
     #[test]
     fn new_metatron_starts_at_zero() {
         let (metatron, _dir) = Metatron::test();
@@ -572,8 +591,8 @@ mod tests {
         let (metatron, _dir) = Metatron::test();
         assert_eq!(metatron.total_sessions(), 0);
 
-        let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0);
-        let s2 = metatron.new_session(test_auth("cafebabe", "foo"), 0);
+        let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0, test_addr());
+        let s2 = metatron.new_session(test_auth("cafebabe", "foo"), 0, test_addr());
         assert_eq!(metatron.total_sessions(), 2);
 
         metatron.retire_session(s1, test_allocator());
@@ -587,11 +606,11 @@ mod tests {
     fn new_session_creates_user_and_worker() {
         let (metatron, _dir) = Metatron::test();
 
-        metatron.new_session(test_auth("deadbeef", "rig1"), 0);
+        metatron.new_session(test_auth("deadbeef", "rig1"), 0, test_addr());
         assert_eq!(metatron.total_users(), 1);
         assert_eq!(metatron.total_workers(), 1);
 
-        metatron.new_session(test_auth("cafebabe", "rig2"), 0);
+        metatron.new_session(test_auth("cafebabe", "rig2"), 0, test_addr());
         assert_eq!(metatron.total_users(), 1);
         assert_eq!(metatron.total_workers(), 2);
     }
@@ -599,7 +618,7 @@ mod tests {
     #[test]
     fn record_share_updates_stats() {
         let (metatron, _dir) = Metatron::test();
-        let session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+        let session = metatron.new_session(test_auth("deadbeef", "foo"), 0, test_addr());
 
         session.record_accepted(Difficulty::from(1000.0), Difficulty::from(1500.0));
         session.record_accepted(Difficulty::from(1000.0), Difficulty::from(1500.0));
@@ -635,13 +654,13 @@ mod tests {
 
         assert_eq!(metatron.snapshot().accepted_work, HashWork::ZERO);
 
-        let foo_session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+        let foo_session = metatron.new_session(test_auth("deadbeef", "foo"), 0, test_addr());
         foo_session.record_accepted(pool_diff, Difficulty::from(200.0));
         foo_session.record_accepted(pool_diff, Difficulty::from(50.0));
 
         assert_eq!(metatron.snapshot().accepted_work, expected + expected);
 
-        let bar_session = metatron.new_session(test_auth("cafebabe", "bar"), 0);
+        let bar_session = metatron.new_session(test_auth("cafebabe", "bar"), 0, test_addr());
         bar_session.record_accepted(pool_diff, Difficulty::from(400.0));
 
         assert_eq!(
@@ -656,7 +675,7 @@ mod tests {
         let enonce1: Extranonce = "deadbeef".parse().unwrap();
         assert!(!metatron.resume_session(&enonce1, 0));
 
-        let session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+        let session = metatron.new_session(test_auth("deadbeef", "foo"), 0, test_addr());
         metatron.retire_session(session, test_allocator());
         assert_eq!(metatron.total_disconnected(), 1);
 
@@ -667,7 +686,7 @@ mod tests {
     #[test]
     fn retire_session_folds_stats() {
         let (metatron, _dir) = Metatron::test();
-        let session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+        let session = metatron.new_session(test_auth("deadbeef", "foo"), 0, test_addr());
 
         let pool_diff = Difficulty::from(100.0);
         session.record_accepted(pool_diff, Difficulty::from(200.0));
@@ -691,8 +710,8 @@ mod tests {
         let (metatron, _dir) = Metatron::test();
         let now = Instant::now();
 
-        let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0);
-        let s2 = metatron.new_session(test_auth("cafebabe", "bar"), 0);
+        let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0, test_addr());
+        let s2 = metatron.new_session(test_auth("cafebabe", "bar"), 0, test_addr());
 
         let pool_diff = Difficulty::from(100.0);
         s1.record_accepted(pool_diff, Difficulty::from(200.0));
@@ -717,7 +736,7 @@ mod tests {
         let (metatron, _dir) = Metatron::test();
         let now = Instant::now();
 
-        let session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+        let session = metatron.new_session(test_auth("deadbeef", "foo"), 0, test_addr());
         session.record_accepted(Difficulty::from(100.0), Difficulty::from(200.0));
 
         metatron.retire_session(session, test_allocator());
@@ -734,8 +753,8 @@ mod tests {
         let (metatron, _dir) = Metatron::test();
         let now = Instant::now();
 
-        metatron.new_session(test_auth("deadbeef", "foo"), 0);
-        let s2 = metatron.new_session(test_auth_2("cafebabe", "bar"), 0);
+        metatron.new_session(test_auth("deadbeef", "foo"), 0, test_addr());
+        let s2 = metatron.new_session(test_auth_2("cafebabe", "bar"), 0, test_addr());
 
         let downstream = metatron.downstream(now);
         assert_eq!(downstream.users, 2);
@@ -760,8 +779,8 @@ mod tests {
     #[test]
     fn retire_accumulates_across_multiple_sessions() {
         let (metatron, _dir) = Metatron::test();
-        let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0);
-        let s2 = metatron.new_session(test_auth("cafebabe", "foo"), 0);
+        let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0, test_addr());
+        let s2 = metatron.new_session(test_auth("cafebabe", "foo"), 0, test_addr());
 
         let pool_diff = Difficulty::from(100.0);
         s1.record_accepted(pool_diff, Difficulty::from(50.0));
@@ -779,8 +798,8 @@ mod tests {
     #[test]
     fn stats_combine_active_sessions_and_lifetime() {
         let (metatron, _dir) = Metatron::test();
-        let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0);
-        let s2 = metatron.new_session(test_auth("cafebabe", "foo"), 0);
+        let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0, test_addr());
+        let s2 = metatron.new_session(test_auth("cafebabe", "foo"), 0, test_addr());
 
         let pool_diff = Difficulty::from(100.0);
         s1.record_accepted(pool_diff, Difficulty::from(50.0));
@@ -799,7 +818,7 @@ mod tests {
         let (metatron, _dir) = Metatron::test();
 
         let enonce1: Extranonce = "deadbeef".parse().unwrap();
-        let session = metatron.new_session(test_auth("deadbeef", "foo"), 1);
+        let session = metatron.new_session(test_auth("deadbeef", "foo"), 1, test_addr());
         metatron.retire_session(session, test_allocator());
 
         assert!(!metatron.resume_session(&enonce1, 0));
@@ -820,7 +839,8 @@ mod tests {
         for name in ["foo", "bar", "baz"] {
             let enonce1 = allocator.next_enonce1().unwrap();
             enonces.push(enonce1.clone());
-            let session = metatron.new_session(test_auth(&enonce1.to_string(), name), 0);
+            let session =
+                metatron.new_session(test_auth(&enonce1.to_string(), name), 0, test_addr());
             metatron.retire_session(session, allocator.clone());
             thread::sleep(Duration::from_millis(1));
         }
@@ -846,13 +866,13 @@ mod tests {
         let (metatron, _dir) = Metatron::test();
 
         let e0 = allocator.next_enonce1().unwrap();
-        let s0 = metatron.new_session(test_auth(&e0.to_string(), "foo"), 0);
+        let s0 = metatron.new_session(test_auth(&e0.to_string(), "foo"), 0, test_addr());
         metatron.retire_session(s0, allocator.clone());
 
         thread::sleep(Duration::from_millis(1));
 
         let e1 = allocator.next_enonce1().unwrap();
-        let s1 = metatron.new_session(test_auth(&e1.to_string(), "bar"), 1);
+        let s1 = metatron.new_session(test_auth(&e1.to_string(), "bar"), 1, test_addr());
         metatron.retire_session(s1, allocator.clone());
 
         assert!(metatron.evict_oldest_disconnected(1));
@@ -868,7 +888,7 @@ mod tests {
 
         assert!(!metatron.evict_oldest_disconnected(0));
 
-        let session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+        let session = metatron.new_session(test_auth("deadbeef", "foo"), 0, test_addr());
         metatron.retire_session(session, test_allocator());
 
         assert!(!metatron.evict_oldest_disconnected(1));
@@ -887,7 +907,7 @@ mod tests {
 
         let (metatron, _dir) = Metatron::test();
 
-        let session = metatron.new_session(test_auth(&enonce1.to_string(), "foo"), 0);
+        let session = metatron.new_session(test_auth(&enonce1.to_string(), "foo"), 0, test_addr());
         metatron.retire_session(session, allocator.clone());
 
         assert_eq!(allocator.allocated_count(), 1);
@@ -907,8 +927,8 @@ mod tests {
         let (metatron, _dir) = Metatron::test();
         let now = Instant::now();
 
-        let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0);
-        let s2 = metatron.new_session(test_auth("cafebabe", "bar"), 1);
+        let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0, test_addr());
+        let s2 = metatron.new_session(test_auth("cafebabe", "bar"), 1, test_addr());
 
         let (sessions0, _) = metatron.downstream_snapshot(0, now);
         let (sessions1, _) = metatron.downstream_snapshot(1, now);
@@ -924,8 +944,8 @@ mod tests {
         let (metatron, _dir) = Metatron::test();
         let now = Instant::now();
 
-        let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0);
-        let s2 = metatron.new_session(test_auth("cafebabe", "bar"), 1);
+        let s1 = metatron.new_session(test_auth("deadbeef", "foo"), 0, test_addr());
+        let s2 = metatron.new_session(test_auth("cafebabe", "bar"), 1, test_addr());
 
         s1.record_accepted(Difficulty::from(100.0), Difficulty::from(200.0));
         s2.record_rejected(Difficulty::from(300.0));
@@ -944,7 +964,7 @@ mod tests {
         let (metatron, _dir) = Metatron::test();
         let now = Instant::now();
 
-        let session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+        let session = metatron.new_session(test_auth("deadbeef", "foo"), 0, test_addr());
         let (sessions, _) = metatron.downstream_snapshot(0, now);
         assert_eq!(sessions.len(), 1);
 
@@ -1051,7 +1071,7 @@ mod tests {
     #[test]
     fn record_marks_user_dirty() {
         let (metatron, _dir) = Metatron::test();
-        let session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+        let session = metatron.new_session(test_auth("deadbeef", "foo"), 0, test_addr());
 
         let user = metatron.users().get(&test_address()).unwrap().clone();
         assert!(user.is_dirty());
@@ -1071,7 +1091,7 @@ mod tests {
     #[test]
     fn persist_skips_users_without_accepted_work() {
         let (metatron, _dir) = Metatron::test();
-        let session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+        let session = metatron.new_session(test_auth("deadbeef", "foo"), 0, test_addr());
 
         metatron.persist(&[], &ChangeSet::default()).unwrap();
         assert!(metatron.store().read_users().unwrap().is_empty());
@@ -1093,8 +1113,8 @@ mod tests {
     #[test]
     fn persist_upserts_only_dirty_users() {
         let (metatron, _dir) = Metatron::test();
-        let foo = metatron.new_session(test_auth("deadbeef", "foo"), 0);
-        metatron.new_session(test_auth_2("cafebabe", "bar"), 0);
+        let foo = metatron.new_session(test_auth("deadbeef", "foo"), 0, test_addr());
+        metatron.new_session(test_auth_2("cafebabe", "bar"), 0, test_addr());
 
         foo.record_accepted(Difficulty::from(100.0), Difficulty::from(200.0));
         metatron.persist(&[], &ChangeSet::default()).unwrap();
@@ -1122,7 +1142,7 @@ mod tests {
     #[test]
     fn zero_work_user_pruned_after_sessions_end() {
         let (metatron, _dir) = Metatron::test();
-        let session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+        let session = metatron.new_session(test_auth("deadbeef", "foo"), 0, test_addr());
 
         metatron.cleanup_expired(Instant::now());
         assert_eq!(metatron.total_users(), 1);
@@ -1138,12 +1158,12 @@ mod tests {
     #[test]
     fn pruned_then_resurrected_user_keeps_stats() {
         let (metatron, _dir) = Metatron::test();
-        let session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+        let session = metatron.new_session(test_auth("deadbeef", "foo"), 0, test_addr());
         metatron.retire_session(session, test_allocator());
         metatron.cleanup_expired(Instant::now());
         assert_eq!(metatron.total_users(), 0);
 
-        let session = metatron.new_session(test_auth("cafebabe", "foo"), 0);
+        let session = metatron.new_session(test_auth("cafebabe", "foo"), 0, test_addr());
         session.record_accepted(Difficulty::from(100.0), Difficulty::from(200.0));
         metatron.persist(&[], &ChangeSet::default()).unwrap();
 
@@ -1164,7 +1184,7 @@ mod tests {
 
         {
             let metatron = Metatron::test_with_store(store.clone());
-            let session = metatron.new_session(test_auth("deadbeef", "foo"), 0);
+            let session = metatron.new_session(test_auth("deadbeef", "foo"), 0, test_addr());
             session.record_accepted(Difficulty::from(100.0), Difficulty::from(200.0));
             metatron.retire_session(session, test_allocator());
             metatron.persist(&[], &ChangeSet::default()).unwrap();

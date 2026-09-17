@@ -16,7 +16,6 @@ pub struct PlacementCounts {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoutingInfo {
-    pub sessions_trimmed_1h: usize,
     pub intents_created_1h: usize,
     pub intents_expired_1h: usize,
     pub intent_claimed_1h: usize,
@@ -128,6 +127,8 @@ pub struct OrderDetail {
     pub status: OrderStatus,
     pub review: Review,
     pub upstream_target: UpstreamTarget,
+    pub upstream_address: Option<SocketAddr>,
+    pub upstream_disconnects_total: usize,
     pub requested_hash_days: Option<HashDays>,
     pub hash_price: Option<HashPrice>,
     pub payment_address: Option<Address<NetworkUnchecked>>,
@@ -149,6 +150,7 @@ impl OrderDetail {
     ) -> Self {
         let upstream_conn = order.upstream();
         let bucket = order.bucket.as_ref();
+        let disconnects = metatron.connections().order_disconnects(order.id);
 
         let (sessions, downstream) = match &upstream_conn {
             Some(upstream) => metatron.downstream_snapshot(upstream.id(), now),
@@ -160,6 +162,10 @@ impl OrderDetail {
             status: order.status(),
             review: order.review(),
             upstream_target: order.upstream_target.clone(),
+            upstream_address: upstream_conn
+                .as_ref()
+                .and_then(|upstream| upstream.upstream_address()),
+            upstream_disconnects_total: disconnects,
             requested_hash_days: bucket.map(|bucket| bucket.target),
             hash_price: bucket
                 .map(|bucket| HashPrice::from_total(bucket.payment.amount, bucket.target)),
@@ -177,8 +183,14 @@ impl OrderDetail {
         }
     }
 
-    pub(crate) fn from_entry(id: u32, entry: &entry::OrderEntry, txids: Vec<Txid>) -> Result<Self> {
+    pub(crate) fn from_entry(
+        id: u32,
+        entry: &entry::OrderEntry,
+        connections: &Connections,
+        txids: Vec<Txid>,
+    ) -> Result<Self> {
         let now = Instant::now();
+        let disconnects = connections.order_disconnects(id);
         let bucket = entry.bucket.as_ref();
         let stats = Stats::from_entry(entry.stats.clone())?;
 
@@ -187,6 +199,8 @@ impl OrderDetail {
             status: entry.status,
             review: entry.review,
             upstream_target: entry.upstream_target.clone(),
+            upstream_address: None,
+            upstream_disconnects_total: disconnects,
             requested_hash_days: bucket.map(|bucket| bucket.target),
             hash_price: bucket.map(|bucket| {
                 HashPrice::from_total(Amount::from_sat(bucket.amount_sat), bucket.target)
@@ -301,7 +315,13 @@ async fn order_detail(
         .map(|bucket| txids_for(bucket.derivation_index))
         .unwrap_or_default();
 
-    Ok(Json(OrderDetail::from_entry(id, &entry, txids)?).into_response())
+    Ok(Json(OrderDetail::from_entry(
+        id,
+        &entry,
+        metatron.connections(),
+        txids,
+    )?)
+    .into_response())
 }
 
 async fn add_order(
@@ -763,7 +783,8 @@ mod tests {
     #[test]
     fn order_detail_from_entry_maps_fields() {
         let entry = test_entry(OrderStatus::Expired);
-        let detail = OrderDetail::from_entry(7, &entry, Vec::new()).unwrap();
+        let connections = Connections::new(Instant::now());
+        let detail = OrderDetail::from_entry(7, &entry, &connections, Vec::new()).unwrap();
 
         assert_eq!(detail.id, 7);
         assert_eq!(detail.status, OrderStatus::Expired);
@@ -777,6 +798,46 @@ mod tests {
         assert_eq!(detail.upstream.accepted_shares, 0);
         assert!(detail.sessions.is_empty());
         assert_eq!(detail.downstream.accepted_shares, 0);
+    }
+
+    #[test]
+    fn order_disconnects_survive_retirement_but_not_restart() {
+        use crate::router::testkit::*;
+
+        let router = test_router();
+        let metatron = router.metatron();
+        let order = test_order(0, None, OrderStatus::Active, &metatron);
+        add_orders(router.as_ref(), [order.clone()]);
+        metatron.connections().record_upstream_disconnect(order.id);
+
+        assert_eq!(
+            OrderDetail::from_order(&order, &metatron, Instant::now(), Vec::new())
+                .upstream_disconnects_total,
+            1
+        );
+
+        order.terminate(OrderStatus::Fulfilled);
+        router.persist().unwrap();
+        router.retire_orders();
+        drop(order);
+
+        assert!(router.get_order(0).is_none());
+        let entry = router.cold_order(0).unwrap();
+        assert_eq!(
+            OrderDetail::from_entry(0, &entry, metatron.connections(), Vec::new())
+                .unwrap()
+                .upstream_disconnects_total,
+            1
+        );
+
+        let metatron = Metatron::test_with_store(metatron.store().clone());
+        let entry = metatron.store().read_order(0).unwrap().unwrap();
+        assert_eq!(
+            OrderDetail::from_entry(0, &entry, metatron.connections(), Vec::new())
+                .unwrap()
+                .upstream_disconnects_total,
+            0
+        );
     }
 
     #[test]

@@ -58,6 +58,7 @@ async fn status(State(router): State<Arc<Proxy>>) -> ServerResult<Response> {
 
     let stats = order.stats();
     let connected = usize::from(upstream.is_connected());
+    let disconnects = metatron.connections().upstream_disconnects(now);
 
     Ok(Json(ProxyStatus {
         uptime_secs: metatron.uptime().as_secs(),
@@ -70,6 +71,7 @@ async fn status(State(router): State<Arc<Proxy>>) -> ServerResult<Response> {
             orders: connected,
             pending: 0,
             disconnected: 1 - connected,
+            disconnects_1h: disconnects,
             hashrate_1m: stats.hashrate_1m(now),
             hashrate_5m: stats.hashrate_5m(now),
             hashrate_15m: stats.hashrate_15m(now),

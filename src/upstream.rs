@@ -22,6 +22,7 @@ pub(crate) struct Upstream {
     enonce2_size: usize,
     version_mask: Option<Version>,
     metatron: Arc<Metatron>,
+    upstream_address: Option<SocketAddr>,
     connected: watch::Sender<bool>,
     ping: Arc<RwLock<Duration>>,
     difficulty: Arc<RwLock<Difficulty>>,
@@ -72,6 +73,12 @@ impl Upstream {
             .connect()
             .await
             .context("failed to connect to upstream")?;
+
+        let upstream_address = client.upstream_address().await.ok();
+
+        if let Some(upstream_address) = upstream_address {
+            info!("Connected to upstream at {upstream_address}");
+        }
 
         let version_mask = match client
             .configure(
@@ -158,6 +165,7 @@ impl Upstream {
         let (workbase_tx, workbase_rx) = watch::channel(Arc::new(first_notify));
 
         let difficulty_clone = difficulty.clone();
+        let connections = metatron.connections().clone();
         let disconnect = Disconnect(connected.clone());
         let mut notify_deadline = tokio::time::Instant::now() + notify_timeout;
 
@@ -177,6 +185,7 @@ impl Upstream {
                             "No work received from upstream for {}s, disconnecting",
                             notify_timeout.as_secs()
                         );
+                        connections.record_upstream_disconnect(id);
                         break;
                     }
 
@@ -196,10 +205,12 @@ impl Upstream {
                             }
                             Ok(Event::Reconnect(_)) | Ok(Event::Disconnected) => {
                                 warn!("Disconnected from upstream");
+                                connections.record_upstream_disconnect(id);
                                 break;
                             }
                             Err(err) => {
                                 error!("Upstream event error: {}", err);
+                                connections.record_upstream_disconnect(id);
                                 break;
                             }
                         }
@@ -218,6 +229,7 @@ impl Upstream {
             ping: Arc::new(RwLock::new(ping)),
             difficulty,
             metatron,
+            upstream_address,
             version_mask,
             workbase_rx,
             tasks: tasks.clone(),
@@ -313,6 +325,10 @@ impl Upstream {
         &self.endpoint
     }
 
+    pub(crate) fn upstream_address(&self) -> Option<SocketAddr> {
+        self.upstream_address
+    }
+
     pub(crate) fn username(&self) -> &Username {
         self.client.username()
     }
@@ -373,6 +389,7 @@ impl Upstream {
             ping: Arc::new(RwLock::new(Duration::ZERO)),
             difficulty: Arc::new(RwLock::new(Difficulty::from(1u64))),
             metatron,
+            upstream_address: Some("127.0.0.1:3333".parse().unwrap()),
             version_mask: None,
             workbase_rx,
             tasks: TaskTracker::new(),
@@ -498,6 +515,7 @@ mod tests {
         let (metatron, _dir) = Metatron::test();
         let addr = mock_upstream(true).await;
         let tasks = TaskTracker::new();
+        let connections = metatron.connections().clone();
 
         let upstream = Upstream::connect(
             0,
@@ -514,6 +532,9 @@ mod tests {
         timeout(Duration::from_secs(2), upstream.disconnected())
             .await
             .expect("upstream must disconnect when notifies stall");
+
+        assert_eq!(connections.order_disconnects(0), 1);
+        assert_eq!(connections.upstream_disconnects(Instant::now()), 1);
     }
 
     #[tokio::test]

@@ -39,7 +39,7 @@ fn probe_with_ckpool() {
 
     let tcp = output.tcp.unwrap();
     assert_eq!(
-        tcp.peer_address.port(),
+        tcp.upstream_address.port(),
         stratum_endpoint
             .rsplit(':')
             .next()

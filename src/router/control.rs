@@ -8,43 +8,10 @@ use {
 
 pub(crate) const TRIM_COOLDOWN: Duration = Duration::from_secs(600);
 const MAX_TRIMS_PER_TICK: usize = 1;
-const ROLLING_COUNTER_WINDOW: Duration = Duration::from_secs(60 * 60);
 const DEFICIT_PERSIST_TICKS: usize = 2;
-
-#[derive(Default)]
-struct RollingCounter {
-    entries: VecDeque<(Instant, usize)>,
-}
-
-impl RollingCounter {
-    fn record(&mut self, count: usize, now: Instant) {
-        if count == 0 {
-            return;
-        }
-
-        self.prune(now);
-        self.entries.push_back((now, count));
-    }
-
-    fn count(&mut self, now: Instant) -> usize {
-        self.prune(now);
-        self.entries
-            .iter()
-            .fold(0usize, |total, (_, count)| total.saturating_add(*count))
-    }
-
-    fn prune(&mut self, now: Instant) {
-        while self.entries.front().is_some_and(|(created, _)| {
-            now.saturating_duration_since(*created) >= ROLLING_COUNTER_WINDOW
-        }) {
-            self.entries.pop_front();
-        }
-    }
-}
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct ControlMetricsSnapshot {
-    pub(crate) sessions_trimmed_1h: usize,
     pub(crate) intents_created_1h: usize,
     pub(crate) intents_expired_1h: usize,
     pub(crate) intent_claimed_1h: usize,
@@ -58,9 +25,7 @@ enum Placement {
     Blind,
 }
 
-#[derive(Default)]
 struct ControlMetrics {
-    sessions_trimmed_1h: RollingCounter,
     intents_created_1h: RollingCounter,
     intents_expired_1h: RollingCounter,
     intent_claimed_1h: RollingCounter,
@@ -69,9 +34,22 @@ struct ControlMetrics {
     placements_blind_1h: RollingCounter,
 }
 
+impl Default for ControlMetrics {
+    fn default() -> Self {
+        Self::new(Instant::now())
+    }
+}
+
 impl ControlMetrics {
-    fn record_sessions_trimmed(&mut self, count: usize, now: Instant) {
-        self.sessions_trimmed_1h.record(count, now);
+    fn new(origin: Instant) -> Self {
+        Self {
+            intents_created_1h: RollingCounter::new(origin),
+            intents_expired_1h: RollingCounter::new(origin),
+            intent_claimed_1h: RollingCounter::new(origin),
+            placements_targeted_1h: RollingCounter::new(origin),
+            placements_estimated_1h: RollingCounter::new(origin),
+            placements_blind_1h: RollingCounter::new(origin),
+        }
     }
 
     fn record_intents_created(&mut self, count: usize, now: Instant) {
@@ -96,9 +74,8 @@ impl ControlMetrics {
         counter.record(1, now);
     }
 
-    fn snapshot(&mut self, now: Instant) -> ControlMetricsSnapshot {
+    fn snapshot(&self, now: Instant) -> ControlMetricsSnapshot {
         ControlMetricsSnapshot {
-            sessions_trimmed_1h: self.sessions_trimmed_1h.count(now),
             intents_created_1h: self.intents_created_1h.count(now),
             intents_expired_1h: self.intents_expired_1h.count(now),
             intent_claimed_1h: self.intent_claimed_1h.count(now),
@@ -494,16 +471,9 @@ impl Control {
             }
         }
 
-        let sessions_trimmed = overflow_trimmed
-            .sessions
-            .len()
-            .saturating_add(sink_trimmed.sessions.len());
-
-        {
-            let mut metrics = self.metrics.lock();
-            metrics.record_intents_created(intents_created, now);
-            metrics.record_sessions_trimmed(sessions_trimmed, now);
-        }
+        self.metrics
+            .lock()
+            .record_intents_created(intents_created, now);
 
         log_rebalance(
             demand,
@@ -519,6 +489,7 @@ impl Control {
 mod tests {
     use {
         super::*,
+        crate::rolling::ROLLING_COUNTER_WINDOW,
         order::{Bucket, OrderStatus, Payment},
     };
 
@@ -548,33 +519,10 @@ mod tests {
     }
 
     #[test]
-    fn rolling_counter_counts_only_the_trailing_hour_and_ignores_zero() {
-        let mut counter = RollingCounter::default();
-        let start = Instant::now();
-
-        counter.record(0, start);
-        assert!(counter.entries.is_empty());
-
-        counter.record(2, start);
-        counter.record(3, start + Duration::from_secs(30 * 60));
-
-        assert_eq!(
-            counter.count(start + ROLLING_COUNTER_WINDOW - Duration::from_secs(1)),
-            5
-        );
-        assert_eq!(counter.count(start + ROLLING_COUNTER_WINDOW), 3);
-        assert_eq!(
-            counter.count(start + ROLLING_COUNTER_WINDOW + Duration::from_secs(30 * 60)),
-            0
-        );
-    }
-
-    #[test]
     fn control_metrics_rolls_every_counter_at_the_one_hour_boundary() {
-        let mut metrics = ControlMetrics::default();
         let start = Instant::now();
+        let mut metrics = ControlMetrics::new(start);
 
-        metrics.record_sessions_trimmed(1, start);
         metrics.record_intents_created(2, start);
         metrics.record_intents_expired(4, start);
         metrics.record_intent_claim(start);
@@ -585,7 +533,6 @@ mod tests {
         assert_eq!(
             metrics.snapshot(start + ROLLING_COUNTER_WINDOW - Duration::from_nanos(1)),
             ControlMetricsSnapshot {
-                sessions_trimmed_1h: 1,
                 intents_created_1h: 2,
                 intents_expired_1h: 4,
                 intent_claimed_1h: 1,
@@ -664,7 +611,8 @@ mod tests {
         worker: &str,
         difficulty: f64,
     ) -> CancellationToken {
-        let session = metatron.new_session(test_authorization(enonce1, worker), order.id);
+        let session =
+            metatron.new_session(test_authorization(enonce1, worker), order.id, addr(4444));
 
         if difficulty > 0.0 {
             session.record_accepted(Difficulty::from(difficulty), Difficulty::from(difficulty));
@@ -969,9 +917,10 @@ mod tests {
 
         let orders = [home.clone(), other];
 
-        let session = control
-            .metatron
-            .new_session(test_authorization("deadbeef", "foo"), 0);
+        let session =
+            control
+                .metatron
+                .new_session(test_authorization("deadbeef", "foo"), 0, addr(4444));
         session.record_accepted(Difficulty::from(10.0), Difficulty::from(10.0));
         control
             .metatron
@@ -1009,9 +958,11 @@ mod tests {
             );
 
             if let Some(difficulty) = parked_difficulty {
-                let session = control
-                    .metatron
-                    .new_session(test_authorization("deadbeef", "foo"), 0);
+                let session = control.metatron.new_session(
+                    test_authorization("deadbeef", "foo"),
+                    0,
+                    addr(4444),
+                );
 
                 if difficulty > 0.0 {
                     session.record_accepted(
@@ -1163,17 +1114,21 @@ mod tests {
             let sink_b = test_order(1, None, OrderStatus::Active, &control.metatron);
 
             if a_diff > 0.0 {
-                let session = control
-                    .metatron
-                    .new_session(test_authorization("deadbeef", "foo"), 0);
+                let session = control.metatron.new_session(
+                    test_authorization("deadbeef", "foo"),
+                    0,
+                    addr(4444),
+                );
                 sink_a.add_session(session.clone(), CancellationToken::new(), addr(1));
                 session.record_accepted(Difficulty::from(a_diff), Difficulty::from(a_diff));
             }
 
             if b_diff > 0.0 {
-                let session = control
-                    .metatron
-                    .new_session(test_authorization("cafebabe", "bar"), 1);
+                let session = control.metatron.new_session(
+                    test_authorization("cafebabe", "bar"),
+                    1,
+                    addr(4444),
+                );
                 sink_b.add_session(session.clone(), CancellationToken::new(), addr(2));
                 session.record_accepted(Difficulty::from(b_diff), Difficulty::from(b_diff));
             }
@@ -1237,7 +1192,6 @@ mod tests {
             assert_eq!(
                 control.metrics(Instant::now()),
                 ControlMetricsSnapshot {
-                    sessions_trimmed_1h: expected_trimmed,
                     intents_created_1h: expected_trimmed,
                     ..ControlMetricsSnapshot::default()
                 }
@@ -1323,12 +1277,14 @@ mod tests {
 
         let cancel_a = CancellationToken::new();
         let cancel_b = CancellationToken::new();
-        let session_a = control
-            .metatron
-            .new_session(test_authorization("deadbeef", "foo"), 1);
-        let session_b = control
-            .metatron
-            .new_session(test_authorization("cafebabe", "bar"), 2);
+        let session_a =
+            control
+                .metatron
+                .new_session(test_authorization("deadbeef", "foo"), 1, addr(4444));
+        let session_b =
+            control
+                .metatron
+                .new_session(test_authorization("cafebabe", "bar"), 2, addr(4444));
         sink_a.add_session(session_a.clone(), cancel_a.clone(), addr(1));
         sink_b.add_session(session_b.clone(), cancel_b.clone(), addr(2));
         session_a.record_accepted(Difficulty::from(200.0), Difficulty::from(200.0));
@@ -1419,13 +1375,6 @@ mod tests {
 
         assert!(cancel.is_cancelled());
         assert_eq!(control.intents.lock().len(), 0);
-        assert_eq!(
-            control.metrics(Instant::now()),
-            ControlMetricsSnapshot {
-                sessions_trimmed_1h: 1,
-                ..ControlMetricsSnapshot::default()
-            }
-        );
     }
 
     #[test]
@@ -1474,7 +1423,6 @@ mod tests {
         assert_eq!(
             control.metrics(Instant::now()),
             ControlMetricsSnapshot {
-                sessions_trimmed_1h: 1,
                 intents_created_1h: 1,
                 ..ControlMetricsSnapshot::default()
             }

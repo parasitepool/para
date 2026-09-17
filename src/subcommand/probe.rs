@@ -39,7 +39,7 @@ pub struct DnsInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TcpInfo {
-    pub peer_address: SocketAddr,
+    pub upstream_address: SocketAddr,
     pub connect_ms: f64,
 }
 
@@ -159,16 +159,16 @@ impl Probe {
 
             match client.connect().await {
                 Ok(events) => {
-                    let peer_address = match client.peer_address().await {
-                        Ok(peer_address) => peer_address,
+                    let upstream_address = match client.upstream_address().await {
+                        Ok(upstream_address) => upstream_address,
                         Err(err) => bail_with_report!(
                             output,
-                            anyhow!(err).context("failed to get peer address")
+                            anyhow!(err).context("failed to get upstream address")
                         ),
                     };
 
                     output.tcp = Some(TcpInfo {
-                        peer_address,
+                        upstream_address,
                         connect_ms: start.elapsed().as_secs_f64() * 1000.0,
                     });
 

@@ -8,7 +8,7 @@ use {
 struct ConnectionState {
     writer: BufWriter<tokio::net::tcp::OwnedWriteHalf>,
     reader_handle: tokio::task::JoinHandle<()>,
-    peer_address: SocketAddr,
+    upstream_address: SocketAddr,
 }
 
 enum IncomingMessage {
@@ -36,7 +36,7 @@ pub(super) enum ClientMessage {
         method: Method,
         respond_to: oneshot::Sender<Result<(Message, usize)>>,
     },
-    PeerAddress {
+    UpstreamAddress {
         respond_to: oneshot::Sender<Result<SocketAddr>>,
     },
     Disconnect {
@@ -120,14 +120,14 @@ impl ClientActor {
                                 }
                             }
                         }
-                        ClientMessage::PeerAddress { respond_to } => {
+                        ClientMessage::UpstreamAddress { respond_to } => {
                             let result = self
                                 .connection
                                 .as_ref()
-                                .map(|connection| connection.peer_address)
+                                .map(|connection| connection.upstream_address)
                                 .ok_or(ClientError::NotConnected);
                             if respond_to.send(result).is_err() {
-                                debug!("PeerAddress response dropped: caller gave up");
+                                debug!("UpstreamAddress response dropped: caller gave up");
                             }
                         }
                         ClientMessage::Disconnect { respond_to } => {
@@ -187,11 +187,11 @@ impl ClientActor {
             .set_nodelay(true)
             .map_err(|source| ClientError::Io { source })?;
 
-        let peer_address = stream
+        let upstream_address = stream
             .peer_addr()
             .map_err(|source| ClientError::Io { source })?;
 
-        debug!("Connected to {} -> {peer_address}", self.inner.address);
+        debug!("Connected to {} -> {upstream_address}", self.inner.address);
 
         let (reader, writer) = stream.into_split();
         let writer = BufWriter::new(writer);
@@ -205,7 +205,7 @@ impl ClientActor {
         self.connection = Some(ConnectionState {
             writer,
             reader_handle,
-            peer_address,
+            upstream_address,
         });
 
         Ok(())

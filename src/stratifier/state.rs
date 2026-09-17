@@ -281,13 +281,16 @@ mod tests {
 
         let session = Arc::new(Session::new(
             SessionId::new(0, 0),
-            test_enonce1(),
-            test_address(),
-            "bar".into(),
-            "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.bar"
-                .parse()
-                .unwrap(),
-            None,
+            SessionConfig {
+                enonce1: test_enonce1(),
+                address: test_address(),
+                workername: "bar".into(),
+                username: "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.bar"
+                    .parse()
+                    .unwrap(),
+                version_mask: None,
+                socket_addr: SocketAddr::from(([127, 0, 0, 1], 4444)),
+            },
             Arc::new(AtomicBool::new(false)),
         ));
         state = State::Working(session);
@@ -333,13 +336,16 @@ mod tests {
 
         let session = Arc::new(Session::new(
             SessionId::new(0, 0),
-            test_enonce1(),
-            test_address(),
-            "bar".into(),
-            "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.bar"
-                .parse()
-                .unwrap(),
-            None,
+            SessionConfig {
+                enonce1: test_enonce1(),
+                address: test_address(),
+                workername: "bar".into(),
+                username: "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.bar"
+                    .parse()
+                    .unwrap(),
+                version_mask: None,
+                socket_addr: SocketAddr::from(([127, 0, 0, 1], 4444)),
+            },
             Arc::new(AtomicBool::new(false)),
         ));
         let state = State::Working(session);

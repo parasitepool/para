@@ -130,12 +130,56 @@ pub struct UpstreamTotals {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Connects1h {
+    pub total: usize,
+    pub sessions: usize,
+    pub probes: usize,
+    pub rejects: usize,
+    pub pending: usize,
+}
+
+impl Connects1h {
+    pub(crate) fn from_downstream(connects: DownstreamConnects) -> Self {
+        Self {
+            total: connects.connects_1h,
+            sessions: connects.sessions_1h,
+            probes: connects.probes_1h,
+            rejects: connects.routing_rejects_1h,
+            pending: connects.pending_1h,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Disconnects1h {
+    pub total: usize,
+    pub client: usize,
+    pub server: usize,
+    pub trim: usize,
+    pub rejects: usize,
+}
+
+impl Disconnects1h {
+    pub(crate) fn from_downstream(connects: DownstreamConnects) -> Self {
+        Self {
+            total: connects.disconnects_1h,
+            client: connects.client_1h,
+            server: connects.server_1h,
+            trim: connects.trim_1h,
+            rejects: connects.reject_1h,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DownstreamStats {
     pub users: usize,
     pub workers: usize,
     pub sessions: usize,
     pub idle: usize,
     pub disconnected: usize,
+    pub connects_1h: Connects1h,
+    pub disconnects_1h: Disconnects1h,
     pub hashrate_1m: HashRate,
     pub hashrate_5m: HashRate,
     pub hashrate_15m: HashRate,
@@ -160,6 +204,7 @@ impl DownstreamStats {
     pub(crate) fn from_metatron(metatron: &Metatron, now: Instant) -> Self {
         let downstream = metatron.downstream(now);
         let traffic = &downstream.traffic;
+        let connects = metatron.connections().downstream();
 
         Self {
             users: downstream.users,
@@ -167,6 +212,8 @@ impl DownstreamStats {
             sessions: downstream.sessions,
             idle: downstream.idle,
             disconnected: metatron.total_disconnected(),
+            connects_1h: Connects1h::from_downstream(connects),
+            disconnects_1h: Disconnects1h::from_downstream(connects),
             hashrate_1m: traffic.hashrate_1m(now),
             hashrate_5m: traffic.hashrate_5m(now),
             hashrate_15m: traffic.hashrate_15m(now),
@@ -201,6 +248,7 @@ pub struct UpstreamStats {
     pub orders: usize,
     pub pending: usize,
     pub disconnected: usize,
+    pub disconnects_1h: usize,
     pub hashrate_1m: HashRate,
     pub hashrate_5m: HashRate,
     pub hashrate_15m: HashRate,
@@ -224,6 +272,7 @@ pub struct UpstreamStats {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpstreamInfo {
     pub endpoint: String,
+    pub upstream_address: Option<SocketAddr>,
     pub connected: bool,
     pub ping_ms: u128,
     pub difficulty: Difficulty,
@@ -237,6 +286,7 @@ impl UpstreamInfo {
     pub(crate) fn from_upstream(upstream: &Upstream) -> Self {
         Self {
             endpoint: upstream.endpoint().to_string(),
+            upstream_address: upstream.upstream_address(),
             connected: upstream.is_connected(),
             ping_ms: upstream.ping_ms(),
             difficulty: upstream.difficulty(),

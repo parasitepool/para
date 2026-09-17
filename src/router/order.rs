@@ -610,6 +610,7 @@ impl Order {
             self.upstream_target,
         );
 
+        session.mark_trimmed();
         cancel.cancel();
         true
     }
@@ -702,7 +703,11 @@ mod tests {
         enonce1: &str,
         difficulty: f64,
     ) -> CancellationToken {
-        let session = metatron.new_session(test_authorization(enonce1), 0);
+        let session = metatron.new_session(
+            test_authorization(enonce1),
+            0,
+            SocketAddr::from(([127, 0, 0, 1], 4444)),
+        );
         session.record_accepted(Difficulty::from(difficulty), Difficulty::from(difficulty));
         let cancel = CancellationToken::new();
         bucket.add_session(
@@ -715,6 +720,32 @@ mod tests {
 
     fn no_cooldowns() -> HashMap<Extranonce, Instant> {
         HashMap::new()
+    }
+
+    #[test]
+    fn trim_session_marks_the_session_trimmed() {
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
+        let bucket = test_order(&metatron, Some(HashDays::new(1e9).unwrap()));
+
+        let session = metatron.new_session(
+            test_authorization("deadbeef"),
+            0,
+            SocketAddr::from(([127, 0, 0, 1], 4444)),
+        );
+        session.record_accepted(Difficulty::from(1000.0), Difficulty::from(1000.0));
+
+        let cancel = CancellationToken::new();
+        bucket.add_session(
+            session.clone(),
+            cancel.clone(),
+            SocketAddr::from(([127, 0, 0, 1], 4444)),
+        );
+
+        assert!(!session.is_trimmed());
+        assert!(bucket.trim_session(session.id(), Instant::now()));
+        assert!(session.is_trimmed());
+        assert!(cancel.is_cancelled());
     }
 
     #[test]

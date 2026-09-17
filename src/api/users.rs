@@ -94,6 +94,7 @@ pub struct SessionDetail {
     pub username: String,
     pub enonce1: Extranonce,
     pub version_mask: Option<Version>,
+    pub remote_address: IpAddr,
     pub stats: MiningStats,
 }
 
@@ -108,6 +109,7 @@ impl SessionDetail {
             username: session.username().to_string(),
             enonce1: session.enonce1().clone(),
             version_mask: session.version_mask(),
+            remote_address: session.socket_addr().ip(),
             stats: MiningStats::from_stats(&stats, now),
         }
     }
