@@ -1,8 +1,7 @@
-use {super::*, control::TRIM_COOLDOWN, epoch};
+use {super::*, epoch};
 
 pub(crate) const HYSTERESIS_LOW: f64 = 0.95;
 pub(crate) const HYSTERESIS_HIGH: f64 = 1.3;
-pub(crate) const SEVERE_STARVATION: f64 = 0.5;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -78,25 +77,33 @@ pub struct Bucket {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Trim {
-    pub(crate) hashrate: HashRate,
     pub(crate) sessions: Vec<SessionDetail>,
+}
+
+impl Trim {
+    pub(crate) fn hashrate(&self) -> HashRate {
+        self.sessions
+            .iter()
+            .fold(HashRate::ZERO, |sum, detail| sum + detail.hashrate)
+    }
 }
 
 impl AddAssign for Trim {
     fn add_assign(&mut self, rhs: Self) {
-        self.hashrate += rhs.hashrate;
         self.sessions.extend(rhs.sessions);
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct SessionDetail {
     pub(crate) id: SessionId,
-    pub(crate) enonce1: Extranonce,
     pub(crate) hashrate: HashRate,
 }
 
-type SessionRegistration = (Arc<Session>, CancellationToken, SocketAddr);
+pub(crate) struct SessionRegistration {
+    pub(crate) session: Arc<Session>,
+    pub(crate) cancel: CancellationToken,
+}
 
 pub struct Order {
     pub(crate) id: u32,
@@ -208,15 +215,10 @@ impl Order {
         }))
     }
 
-    pub(crate) fn add_session(
-        &self,
-        session: Arc<Session>,
-        cancel: CancellationToken,
-        addr: SocketAddr,
-    ) {
+    pub(crate) fn add_session(&self, session: Arc<Session>, cancel: CancellationToken) {
         self.sessions
             .lock()
-            .insert(session.id(), (session, cancel, addr));
+            .insert(session.id(), SessionRegistration { session, cancel });
     }
 
     pub(crate) fn remove_session(&self, id: SessionId) {
@@ -227,7 +229,7 @@ impl Order {
         self.sessions
             .lock()
             .values()
-            .for_each(|(_, cancel, _)| cancel.cancel());
+            .for_each(|registration| registration.cancel.cancel());
     }
 
     pub(crate) fn lifecycle(&self) -> Lifecycle {
@@ -405,6 +407,34 @@ impl Order {
         }
     }
 
+    pub(crate) fn hashrate_surplus(&self, supplied: HashRate) -> HashRate {
+        let Some(bucket) = &self.bucket else {
+            return HashRate::ZERO;
+        };
+
+        let target = bucket.target.target_hashrate();
+
+        if supplied > target {
+            supplied - target
+        } else {
+            HashRate::ZERO
+        }
+    }
+
+    pub(crate) fn relative_load(&self, supplied: HashRate) -> f64 {
+        let Some(bucket) = &self.bucket else {
+            return f64::INFINITY;
+        };
+
+        let target = bucket.target.target_hashrate();
+
+        if target == HashRate::ZERO {
+            return f64::INFINITY;
+        }
+
+        supplied.as_hps() / target.as_hps()
+    }
+
     pub(crate) fn stats(&self) -> Stats {
         self.metatron.order_stats(self.id)
     }
@@ -451,16 +481,6 @@ impl Order {
         self.hashrate_shortfall(self.hashrate_1m(now))
     }
 
-    pub(crate) fn is_severely_starving(&self, now: Instant) -> bool {
-        let Some(bucket) = &self.bucket else {
-            return false;
-        };
-
-        self.has_connected_upstream()
-            && !self.is_fulfilled()
-            && self.hashrate_1m(now) < bucket.target.target_hashrate() * SEVERE_STARVATION
-    }
-
     pub(crate) fn is_overflowing(&self, now: Instant) -> bool {
         self.bucket.as_ref().is_some_and(|bucket| {
             self.hashrate_1m(now) > bucket.target.target_hashrate() * HYSTERESIS_HIGH
@@ -471,20 +491,14 @@ impl Order {
         self.sessions
             .lock()
             .values()
-            .map(|(session, _, _)| SessionDetail {
-                id: session.id(),
-                enonce1: session.enonce1().clone(),
-                hashrate: session.hashrate_1m(now),
+            .map(|registration| SessionDetail {
+                id: registration.session.id(),
+                hashrate: registration.session.hashrate_1m(now),
             })
             .collect()
     }
 
-    pub(super) fn trim(
-        &self,
-        max_sessions: Option<usize>,
-        now: Instant,
-        cooldowns: &HashMap<Extranonce, Instant>,
-    ) -> Trim {
+    pub(super) fn trim(&self, max_sessions: Option<usize>, now: Instant) -> Trim {
         let Some(bucket) = &self.bucket else {
             return Trim::default();
         };
@@ -517,20 +531,12 @@ impl Order {
                 continue;
             }
 
-            if cooldowns
-                .get(&detail.enonce1)
-                .is_some_and(|since| now.duration_since(*since) < TRIM_COOLDOWN)
-            {
-                continue;
-            }
-
             if !self.trim_session(detail.id, now) {
                 continue;
             }
 
             min_trim -= detail.hashrate;
             max_trim -= detail.hashrate;
-            trimmed.hashrate += detail.hashrate;
             trimmed.sessions.push(detail);
         }
 
@@ -540,23 +546,23 @@ impl Order {
     pub(crate) fn trim_session(&self, id: SessionId, now: Instant) -> bool {
         let sessions = self.sessions.lock();
 
-        let Some((session, cancel, _)) = sessions.get(&id) else {
+        let Some(registration) = sessions.get(&id) else {
             return false;
         };
 
-        if cancel.is_cancelled() {
+        if registration.cancel.is_cancelled() {
             return false;
         }
 
         info!(
             "Trimming session {id} ({}) from order {} at {}",
-            session.hashrate_1m(now),
+            registration.session.hashrate_1m(now),
             self.id,
             self.upstream_target,
         );
 
-        session.mark_trimmed();
-        cancel.cancel();
+        registration.session.mark_trimmed();
+        registration.cancel.cancel();
         true
     }
 
@@ -655,16 +661,8 @@ mod tests {
         );
         session.record_accepted(Difficulty::from(difficulty), Difficulty::from(difficulty));
         let cancel = CancellationToken::new();
-        bucket.add_session(
-            session,
-            cancel.clone(),
-            SocketAddr::from(([127, 0, 0, 1], 4444)),
-        );
+        bucket.add_session(session, cancel.clone());
         cancel
-    }
-
-    fn no_cooldowns() -> HashMap<Extranonce, Instant> {
-        HashMap::new()
     }
 
     #[test]
@@ -681,11 +679,7 @@ mod tests {
         session.record_accepted(Difficulty::from(1000.0), Difficulty::from(1000.0));
 
         let cancel = CancellationToken::new();
-        bucket.add_session(
-            session.clone(),
-            cancel.clone(),
-            SocketAddr::from(([127, 0, 0, 1], 4444)),
-        );
+        bucket.add_session(session.clone(), cancel.clone());
 
         assert!(!session.is_trimmed());
         assert!(bucket.trim_session(session.id(), Instant::now()));
@@ -698,7 +692,7 @@ mod tests {
         let (metatron, _dir) = Metatron::test();
         let metatron = Arc::new(metatron);
         let sink = test_order(&metatron, None);
-        sink.trim(None, Instant::now(), &no_cooldowns());
+        sink.trim(None, Instant::now());
     }
 
     #[test]
@@ -709,7 +703,7 @@ mod tests {
 
         let cancel = register_session(&metatron, &bucket, "deadbeef", 1.0);
 
-        bucket.trim(None, Instant::now(), &no_cooldowns());
+        bucket.trim(None, Instant::now());
         assert!(!cancel.is_cancelled());
     }
 
@@ -721,7 +715,7 @@ mod tests {
 
         let cancel = register_session(&metatron, &bucket, "deadbeef", 10_000.0);
 
-        bucket.trim(None, Instant::now(), &no_cooldowns());
+        bucket.trim(None, Instant::now());
         assert!(!cancel.is_cancelled());
     }
 
@@ -734,7 +728,7 @@ mod tests {
         let cancel_a = register_session(&metatron, &bucket, "aaaa", 12.0);
         let cancel_b = register_session(&metatron, &bucket, "bbbb", 12.0);
 
-        bucket.trim(None, Instant::now(), &no_cooldowns());
+        bucket.trim(None, Instant::now());
         assert!(!cancel_a.is_cancelled());
         assert!(!cancel_b.is_cancelled());
     }
@@ -749,7 +743,7 @@ mod tests {
         let cancel_mid = register_session(&metatron, &bucket, "bbbb", 7.0);
         let cancel_small = register_session(&metatron, &bucket, "cccc", 4.0);
 
-        bucket.trim(None, Instant::now(), &no_cooldowns());
+        bucket.trim(None, Instant::now());
         assert!(!cancel_fat.is_cancelled());
         assert!(cancel_mid.is_cancelled());
         assert!(!cancel_small.is_cancelled());
@@ -768,7 +762,7 @@ mod tests {
             })
             .collect();
 
-        bucket.trim(None, Instant::now(), &no_cooldowns());
+        bucket.trim(None, Instant::now());
 
         let cancelled = cancels.iter().filter(|c| c.is_cancelled()).count();
         assert!(
@@ -790,7 +784,7 @@ mod tests {
             })
             .collect();
 
-        let trimmed = bucket.trim(Some(1), Instant::now(), &no_cooldowns());
+        let trimmed = bucket.trim(Some(1), Instant::now());
 
         assert_eq!(trimmed.sessions.len(), 1);
         assert_eq!(cancels.iter().filter(|c| c.is_cancelled()).count(), 1);
@@ -809,7 +803,7 @@ mod tests {
             register_session(&metatron, &bucket, "dddd", 4.5),
         ];
 
-        bucket.trim(None, Instant::now(), &no_cooldowns());
+        bucket.trim(None, Instant::now());
 
         let cancelled = cancels.iter().filter(|c| c.is_cancelled()).count();
         assert_eq!(cancelled, 1);
@@ -828,7 +822,7 @@ mod tests {
             })
             .collect();
 
-        bucket.trim(None, Instant::now(), &no_cooldowns());
+        bucket.trim(None, Instant::now());
 
         let surviving = cancels.iter().filter(|c| !c.is_cancelled()).count();
         assert!(
@@ -849,7 +843,7 @@ mod tests {
         let cancel_c = register_session(&metatron, &bucket, "dddd", 3.0);
         let cancel_d = register_session(&metatron, &bucket, "eeee", 3.0);
 
-        bucket.trim(None, Instant::now(), &no_cooldowns());
+        bucket.trim(None, Instant::now());
 
         assert!(!cancel_huge.is_cancelled());
         let trimmed = [&cancel_a, &cancel_b, &cancel_c, &cancel_d]
@@ -869,7 +863,7 @@ mod tests {
         let cancel_b = register_session(&metatron, &bucket, "bbbb", 17.0);
         let cancel_c = register_session(&metatron, &bucket, "cccc", 7.0);
 
-        bucket.trim(None, Instant::now(), &no_cooldowns());
+        bucket.trim(None, Instant::now());
 
         assert!(cancel_a.is_cancelled());
         assert!(!cancel_b.is_cancelled());
@@ -949,6 +943,51 @@ mod tests {
     }
 
     #[test]
+    fn hashrate_surplus() {
+        #[track_caller]
+        fn case(target: Option<f64>, supplied: f64, expected: f64) {
+            let (metatron, _dir) = Metatron::test();
+            let metatron = Arc::new(metatron);
+            let order = test_order(
+                &metatron,
+                target.map(|target| HashDays::new(target).unwrap()),
+            );
+
+            assert_eq!(
+                order.hashrate_surplus(HashRate::from_hps(supplied)),
+                HashRate::from_hps(expected),
+            );
+        }
+
+        case(None, 200.0, 0.0);
+        case(Some(100.0), 50.0, 0.0);
+        case(Some(100.0), 100.0, 0.0);
+        case(Some(100.0), 150.0, 50.0);
+    }
+
+    #[test]
+    fn relative_load() {
+        #[track_caller]
+        fn case(target: Option<f64>, supplied: f64, expected: f64) {
+            let (metatron, _dir) = Metatron::test();
+            let metatron = Arc::new(metatron);
+            let order = test_order(
+                &metatron,
+                target.map(|target| HashDays::new(target).unwrap()),
+            );
+
+            assert_eq!(order.relative_load(HashRate::from_hps(supplied)), expected,);
+        }
+
+        case(None, 200.0, f64::INFINITY);
+        case(Some(0.0), 0.0, f64::INFINITY);
+        case(Some(0.0), 200.0, f64::INFINITY);
+        case(Some(100.0), 50.0, 0.5);
+        case(Some(100.0), 100.0, 1.0);
+        case(Some(100.0), 200.0, 2.0);
+    }
+
+    #[test]
     fn hashrate_deficit() {
         #[track_caller]
         fn case(
@@ -1022,45 +1061,6 @@ mod tests {
         metatron
             .set_order_delivered_work(fulfilled.id, HashDays::new(100.0).unwrap().to_hash_work());
         assert_eq!(fulfilled.residual_deficit(Instant::now()), HashRate::ZERO);
-    }
-
-    #[test]
-    fn is_severely_starving() {
-        let (metatron, _dir) = Metatron::test();
-        let metatron = Arc::new(metatron);
-        let order = test_order(&metatron, Some(HashDays::new(100.0).unwrap()));
-        connect_upstream(&order, &metatron);
-
-        assert!(order.is_severely_starving(Instant::now()));
-
-        register_session(&metatron, &order, "deadbeef", 10_000.0);
-
-        assert!(!order.is_severely_starving(Instant::now()));
-
-        order.upstream().unwrap().set_connected(false);
-        assert!(!order.is_severely_starving(Instant::now()));
-
-        let sink = test_order(&metatron, None);
-        assert!(!sink.is_severely_starving(Instant::now()));
-    }
-
-    #[test]
-    fn trim_skips_cooled_sessions() {
-        let (metatron, _dir) = Metatron::test();
-        let metatron = Arc::new(metatron);
-        let bucket = test_order(&metatron, Some(HashDays::new(1e9).unwrap()));
-
-        let cancel_fat = register_session(&metatron, &bucket, "aaaa", 13.0);
-        let cancel_mid = register_session(&metatron, &bucket, "bbbb", 7.0);
-        let cancel_small = register_session(&metatron, &bucket, "cccc", 4.0);
-
-        let cooldowns = HashMap::from([("bbbb".parse().unwrap(), Instant::now())]);
-
-        bucket.trim(None, Instant::now(), &cooldowns);
-
-        assert!(!cancel_fat.is_cancelled());
-        assert!(!cancel_mid.is_cancelled());
-        assert!(cancel_small.is_cancelled());
     }
 
     fn connect_upstream(order: &Order, metatron: &Arc<Metatron>) {

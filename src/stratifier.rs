@@ -230,11 +230,7 @@ impl<W: Workbase> Stratifier<W> {
                                     );
 
                                     if let Some(order) = &self.order {
-                                        order.add_session(
-                                            session.clone(),
-                                            self.cancel.clone(),
-                                            self.socket_addr,
-                                        );
+                                        order.add_session(session.clone(), self.cancel.clone());
                                     }
 
                                     self.state = State::Working(session.clone());

@@ -4,15 +4,13 @@ use {
     rand::{Rng, SeedableRng, rngs::StdRng},
 };
 
-pub(crate) const TRIM_COOLDOWN: Duration = Duration::from_secs(600);
 const MAX_TRIMS_PER_TICK: usize = 1;
 const DEFICIT_PERSIST_TICKS: usize = 2;
 
 #[derive(Clone, Copy, Debug)]
 struct Demand {
-    has_unfulfilled_bucket: bool,
     deficit: HashRate,
-    severe: bool,
+    surplus: HashRate,
 }
 
 impl Demand {
@@ -23,12 +21,13 @@ impl Demand {
     ) -> Self {
         deficit_ticks.retain(|id, _| orders.iter().any(|order| order.id == *id));
 
-        let mut has_unfulfilled_bucket = false;
         let mut deficit = HashRate::ZERO;
-        let mut severe = false;
+        let mut surplus = HashRate::ZERO;
 
         for order in orders.iter().filter(|order| !order.is_sink()) {
-            has_unfulfilled_bucket |= order.has_connected_upstream() && !order.is_fulfilled();
+            if order.has_connected_upstream() && !order.is_fulfilled() {
+                surplus += order.hashrate_surplus(order.hashrate_1m(now));
+            }
 
             let raw_deficit = order.hashrate_deficit(now);
 
@@ -45,14 +44,9 @@ impl Demand {
             }
 
             deficit += raw_deficit;
-            severe |= order.is_severely_starving(now);
         }
 
-        Self {
-            has_unfulfilled_bucket,
-            deficit,
-            severe,
-        }
+        Self { deficit, surplus }
     }
 
     fn exhausted(self) -> bool {
@@ -60,31 +54,11 @@ impl Demand {
     }
 
     fn consume(&mut self, trimmed: &Trim) {
-        self.deficit -= trimmed.hashrate;
+        self.deficit -= trimmed.hashrate();
     }
 }
 
-fn log_rebalance(
-    demand: Demand,
-    session_budget: usize,
-    overflow_trimmed: &Trim,
-    sink_trimmed: &Trim,
-    remaining: HashRate,
-) {
-    debug!(
-        "Rebalance decision: deficit={} severe={} session_budget={} overflow_sessions={} overflow_hashrate={} sink_sessions={} sink_hashrate={} remaining_deficit={remaining}",
-        demand.deficit,
-        demand.severe,
-        session_budget,
-        overflow_trimmed.sessions.len(),
-        overflow_trimmed.hashrate,
-        sink_trimmed.sessions.len(),
-        sink_trimmed.hashrate,
-    );
-}
-
 pub(crate) struct Control {
-    cooldowns: Mutex<HashMap<Extranonce, Instant>>,
     deficit_ticks: Mutex<HashMap<u32, usize>>,
     rng: Mutex<StdRng>,
 }
@@ -92,7 +66,6 @@ pub(crate) struct Control {
 impl Default for Control {
     fn default() -> Self {
         Self {
-            cooldowns: Mutex::new(HashMap::new()),
             deficit_ticks: Mutex::new(HashMap::new()),
             rng: Mutex::new(StdRng::from_rng(&mut rand::rng())),
         }
@@ -133,12 +106,17 @@ impl Control {
             .sum::<f64>();
 
         if total <= 0.0 {
-            return Arc::clone(
-                buckets
-                    .iter()
-                    .max_by_key(|order| residual(order))
-                    .expect("buckets is non-empty"),
-            );
+            let loads = buckets
+                .iter()
+                .map(|order| (*order, order.relative_load(order.hashrate_1m(now))))
+                .collect::<Vec<_>>();
+
+            let (least_loaded, _) = loads
+                .iter()
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+                .expect("buckets is non-empty");
+
+            return Arc::clone(least_loaded);
         }
 
         let mut draw = self.rng.lock().random::<f64>() * total;
@@ -156,8 +134,8 @@ impl Control {
         Arc::clone(buckets.last().expect("buckets is non-empty"))
     }
 
-    fn trim_budget(&self, severe: bool, boost: bool) -> usize {
-        if severe || boost {
+    fn trim_budget(&self, boost: bool) -> usize {
+        if boost {
             usize::MAX
         } else {
             MAX_TRIMS_PER_TICK
@@ -167,52 +145,33 @@ impl Control {
     pub(crate) fn rebalance(&self, orders: &[Arc<Order>], boost: bool) {
         let now = Instant::now();
 
-        self.cooldowns
-            .lock()
-            .retain(|_, since| now.duration_since(*since) < TRIM_COOLDOWN);
-
         let demand = Demand::snapshot(orders, now, &mut self.deficit_ticks.lock());
 
-        if !demand.has_unfulfilled_bucket || demand.deficit == HashRate::ZERO {
+        if demand.exhausted() {
             return;
         }
 
         let mut budget = demand;
-        let mut session_budget = self.trim_budget(demand.severe, boost);
+        let mut session_budget = self.trim_budget(boost);
         let mut overflow_trimmed = Trim::default();
         let mut sink_trimmed = Trim::default();
 
-        {
-            let cooldowns = self.cooldowns.lock();
-
-            for order in orders.iter().filter(|order| order.is_overflowing(now)) {
-                if budget.exhausted() || session_budget == 0 {
-                    break;
-                }
-
-                let trimmed = order.trim(Some(session_budget), now, &cooldowns);
-                session_budget -= trimmed.sessions.len();
-                budget.consume(&trimmed);
-                overflow_trimmed += trimmed;
+        for order in orders.iter().filter(|order| order.is_overflowing(now)) {
+            if budget.exhausted() || session_budget == 0 {
+                break;
             }
+
+            let trimmed = order.trim(Some(session_budget), now);
+            session_budget -= trimmed.sessions.len();
+            budget.consume(&trimmed);
+            overflow_trimmed += trimmed;
         }
 
         let mut candidates = Vec::new();
 
-        {
-            let cooldowns = self.cooldowns.lock();
-
-            for order in orders.iter().filter(|order| order.is_sink()) {
-                for detail in order.session_details(now) {
-                    if cooldowns
-                        .get(&detail.enonce1)
-                        .is_some_and(|since| now.duration_since(*since) < TRIM_COOLDOWN)
-                    {
-                        continue;
-                    }
-
-                    candidates.push((order, detail));
-                }
+        for order in orders.iter().filter(|order| order.is_sink()) {
+            for detail in order.session_details(now) {
+                candidates.push((order, detail));
             }
         }
 
@@ -232,8 +191,7 @@ impl Control {
             }
 
             let trimmed = Trim {
-                hashrate: detail.hashrate,
-                sessions: vec![detail.clone()],
+                sessions: vec![*detail],
             };
 
             session_budget -= 1;
@@ -241,23 +199,14 @@ impl Control {
             sink_trimmed += trimmed;
         }
 
-        {
-            let mut cooldowns = self.cooldowns.lock();
-
-            for detail in overflow_trimmed
-                .sessions
-                .iter()
-                .chain(sink_trimmed.sessions.iter())
-            {
-                cooldowns.insert(detail.enonce1.clone(), now);
-            }
-        }
-
-        log_rebalance(
-            demand,
-            session_budget,
-            &overflow_trimmed,
-            &sink_trimmed,
+        info!(
+            "Rebalance: deficit={} surplus={} overflow_trimmed={} sessions {} sink_trimmed={} sessions {} remaining_deficit={}",
+            demand.deficit,
+            demand.surplus,
+            overflow_trimmed.sessions.len(),
+            overflow_trimmed.hashrate(),
+            sink_trimmed.sessions.len(),
+            sink_trimmed.hashrate(),
             budget.deficit,
         );
     }
@@ -365,7 +314,7 @@ mod tests {
         }
 
         let cancel = CancellationToken::new();
-        order.add_session(session, cancel.clone(), addr(4444));
+        order.add_session(session, cancel.clone());
         cancel
     }
 
@@ -404,29 +353,26 @@ mod tests {
     }
 
     #[test]
-    fn demand_keeps_unfulfilled_bucket_without_deficit() {
+    fn demand_surplus_skips_debounce_and_fulfilled_orders() {
         let control = test_control();
-        let fed = test_order(
+        let over = test_order(
             0,
             Some(hash_days(1.0)),
             OrderStatus::Active,
             &control.metatron,
         );
-        register_session(&control.metatron, &fed, "deadbeef", "foo", 1000.0);
+        register_session(&control.metatron, &over, "deadbeef", "foo", 10_000.0);
 
-        let disconnected = test_order(
-            1,
-            Some(hash_days(100.0)),
-            OrderStatus::Active,
-            &control.metatron,
-        );
-        disconnected.upstream().unwrap().set_connected(false);
-        let orders = [fed, disconnected];
+        let orders = [over];
 
         let demand = Demand::snapshot(&orders, Instant::now(), &mut HashMap::new());
-        assert!(demand.has_unfulfilled_bucket);
         assert_eq!(demand.deficit, HashRate::ZERO);
-        assert!(!demand.severe);
+        assert!(demand.surplus > HashRate::ZERO);
+
+        set_delivered_work(&control.metatron, &orders[0], 1.0);
+
+        let demand = Demand::snapshot(&orders, Instant::now(), &mut HashMap::new());
+        assert_eq!(demand.surplus, HashRate::ZERO);
     }
 
     #[test]
@@ -527,6 +473,30 @@ mod tests {
     }
 
     #[test]
+    fn next_order_fallback_prefers_lower_relative_load() {
+        let control = test_control();
+        let overflowing = test_order(
+            0,
+            Some(hash_days(1e9)),
+            OrderStatus::Active,
+            &control.metatron,
+        );
+        register_session(&control.metatron, &overflowing, "deadbeef", "foo", 20.0);
+
+        let barely_over = test_order(
+            1,
+            Some(hash_days(1e11)),
+            OrderStatus::Active,
+            &control.metatron,
+        );
+        register_session(&control.metatron, &barely_over, "cafebabe", "bar", 1467.0);
+
+        let orders = [overflowing, barely_over];
+
+        assert_eq!(control.next_order(&orders).unwrap().id, 1);
+    }
+
+    #[test]
     fn next_order_prefers_sink_with_least_hashrate() {
         #[track_caller]
         fn case(a_diff: f64, b_diff: f64, expected: u32) {
@@ -540,7 +510,7 @@ mod tests {
                     0,
                     addr(4444),
                 );
-                sink_a.add_session(session.clone(), CancellationToken::new(), addr(1));
+                sink_a.add_session(session.clone(), CancellationToken::new());
                 session.record_accepted(Difficulty::from(a_diff), Difficulty::from(a_diff));
             }
 
@@ -550,7 +520,7 @@ mod tests {
                     1,
                     addr(4444),
                 );
-                sink_b.add_session(session.clone(), CancellationToken::new(), addr(2));
+                sink_b.add_session(session.clone(), CancellationToken::new());
                 session.record_accepted(Difficulty::from(b_diff), Difficulty::from(b_diff));
             }
 
@@ -604,6 +574,39 @@ mod tests {
     }
 
     #[test]
+    fn rebalance_caps_trims_for_fully_starved_bucket_without_boost() {
+        let control = test_control();
+        let bucket = test_order(
+            0,
+            Some(hash_days(1e9)),
+            OrderStatus::Active,
+            &control.metatron,
+        );
+
+        let sink = test_order(1, None, OrderStatus::Active, &control.metatron);
+        let cancels = [
+            register_session(&control.metatron, &sink, "aaaaaaaa", "foo", 1.0),
+            register_session(&control.metatron, &sink, "bbbbbbbb", "bar", 1.0),
+            register_session(&control.metatron, &sink, "cccccccc", "baz", 1.0),
+        ];
+
+        let orders = [bucket, sink];
+
+        for _ in 0..DEFICIT_PERSIST_TICKS {
+            control.rebalance(&orders, false);
+        }
+
+        assert_eq!(
+            cancels
+                .iter()
+                .filter(|cancel| cancel.is_cancelled())
+                .count(),
+            1,
+            "fully-starved bucket must not unlock unlimited trims without boost",
+        );
+    }
+
+    #[test]
     fn rebalance_overflow_trimmed_before_sink_shed() {
         let control = test_control();
         let over = overflowing_order(&control, 0);
@@ -629,35 +632,6 @@ mod tests {
     }
 
     #[test]
-    fn rebalance_cooldown_skips_recently_trimmed() {
-        let control = test_control();
-        let bucket = test_order(
-            0,
-            Some(hash_days(100.0)),
-            OrderStatus::Active,
-            &control.metatron,
-        );
-
-        let sink = test_order(1, None, OrderStatus::Active, &control.metatron);
-        let cancel_a = register_session(&control.metatron, &sink, "deadbeef", "foo", 200.0);
-        let cancel_b = register_session(&control.metatron, &sink, "cafebabe", "bar", 100.0);
-
-        control
-            .cooldowns
-            .lock()
-            .insert("deadbeef".parse().unwrap(), Instant::now());
-
-        let orders = [bucket, sink];
-
-        for _ in 0..DEFICIT_PERSIST_TICKS {
-            control.rebalance(&orders, false);
-        }
-
-        assert!(!cancel_a.is_cancelled());
-        assert!(cancel_b.is_cancelled());
-    }
-
-    #[test]
     fn rebalance_trims_fattest_sink_when_bucket_starving() {
         let control = test_control();
         let active = test_order(
@@ -679,8 +653,8 @@ mod tests {
             control
                 .metatron
                 .new_session(test_authorization("cafebabe", "bar"), 2, addr(4444));
-        sink_a.add_session(session_a.clone(), cancel_a.clone(), addr(1));
-        sink_b.add_session(session_b.clone(), cancel_b.clone(), addr(2));
+        sink_a.add_session(session_a.clone(), cancel_a.clone());
+        sink_b.add_session(session_b.clone(), cancel_b.clone());
         session_a.record_accepted(Difficulty::from(200.0), Difficulty::from(200.0));
         session_b.record_accepted(Difficulty::from(100.0), Difficulty::from(100.0));
 
@@ -763,10 +737,6 @@ mod tests {
             live.is_cancelled(),
             "cancelled session consumed trim budget"
         );
-        let cooldowns = control.cooldowns.lock();
-        assert!(!cooldowns.contains_key(&"deadbeef".parse().unwrap()));
-        assert!(cooldowns.contains_key(&"cafebabe".parse().unwrap()));
-        drop(cooldowns);
     }
 
     struct OverflowingOrder {

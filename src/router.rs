@@ -474,6 +474,7 @@ impl Router {
         let mut bucket_order_count = 0;
         let mut starving_order_count = 0;
         let mut deficit_hashrate = HashRate::ZERO;
+        let mut surplus_hashrate = HashRate::ZERO;
         let mut pending = 0;
         let mut disconnected = 0;
 
@@ -498,6 +499,7 @@ impl Router {
                                 starving_order_count += 1;
                             }
                             deficit_hashrate += order.hashrate_shortfall(measured);
+                            surplus_hashrate += order.hashrate_surplus(measured);
                         }
 
                         active_addresses.insert(username.address());
@@ -579,6 +581,7 @@ impl Router {
                     .is_some_and(|wallet| wallet.is_synced()),
             },
             deficit_hashrate,
+            surplus_hashrate,
             starving_order_count,
             upstream: UpstreamStats {
                 users: active_addresses.len(),
@@ -1335,8 +1338,8 @@ mod tests {
         let cancel_trimmed = CancellationToken::new();
         let kept = metatron.new_session(test_authorization("deadbeef", "foo"), 0, addr(4444));
         let trimmed = metatron.new_session(test_authorization("cafebabe", "bar"), 0, addr(4444));
-        order.add_session(kept.clone(), cancel_kept.clone(), addr(1));
-        order.add_session(trimmed.clone(), cancel_trimmed.clone(), addr(2));
+        order.add_session(kept.clone(), cancel_kept.clone());
+        order.add_session(trimmed.clone(), cancel_trimmed.clone());
 
         assert!(order.trim_session(trimmed.id(), Instant::now()));
         assert!(!order.trim_session(trimmed.id(), Instant::now()));
@@ -1777,5 +1780,31 @@ mod tests {
         let status = router.status();
         assert_eq!(status.deficit_hashrate, HashRate::from_hps(100.0));
         assert_eq!(status.starving_order_count, 1);
+    }
+
+    #[test]
+    fn status_surplus_counts_only_active_unfulfilled_buckets() {
+        let router = test_router();
+        let metatron = &router.metatron;
+
+        let over = test_order(0, Some(hash_days(1.0)), OrderStatus::Active, metatron);
+        let session = metatron.new_session(test_authorization("deadbeef", "foo"), 0, addr(4444));
+        session.record_accepted(Difficulty::from(10_000.0), Difficulty::from(10_000.0));
+
+        let fulfilled = test_order(1, Some(hash_days(1.0)), OrderStatus::Active, metatron);
+        set_delivered_work(metatron, &fulfilled, 1.0);
+        let session = metatron.new_session(test_authorization("cafebabe", "bar"), 1, addr(4444));
+        session.record_accepted(Difficulty::from(10_000.0), Difficulty::from(10_000.0));
+
+        let sink = test_order(2, None, OrderStatus::Active, metatron);
+        let session = metatron.new_session(test_authorization("feedface", "baz"), 2, addr(4444));
+        session.record_accepted(Difficulty::from(10_000.0), Difficulty::from(10_000.0));
+
+        add_orders(router.as_ref(), [over, fulfilled, sink]);
+
+        let status = router.status();
+        assert!(status.surplus_hashrate > HashRate::ZERO);
+        assert_eq!(status.deficit_hashrate, HashRate::ZERO);
+        assert_eq!(status.starving_order_count, 0);
     }
 }

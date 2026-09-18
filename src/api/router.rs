@@ -26,6 +26,7 @@ pub struct RouterStatus {
     pub boost: bool,
     pub wallet: WalletInfo,
     pub deficit_hashrate: HashRate,
+    pub surplus_hashrate: HashRate,
     pub starving_order_count: usize,
     pub upstream: UpstreamStats,
     pub downstream: DownstreamStats,

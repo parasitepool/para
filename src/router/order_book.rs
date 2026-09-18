@@ -1208,7 +1208,7 @@ mod tests {
 
         let session = metatron.new_session(test_authorization("deadbeef", "foo"), 0, addr(4444));
         session.record_accepted(Difficulty::from(1000.0), Difficulty::from(1000.0));
-        bucket.add_session(session, CancellationToken::new(), addr(1));
+        bucket.add_session(session, CancellationToken::new());
 
         orders.add(bucket);
 
