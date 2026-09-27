@@ -483,6 +483,7 @@ impl Router {
 
         let mut active = Stats::new();
         let mut live = Stats::new();
+        let mut traffic = snapshot.cold_traffic;
 
         for order in &orders {
             let username = order.upstream_target.username();
@@ -510,6 +511,10 @@ impl Router {
                 OrderStatus::Pending | OrderStatus::InMempool => pending += 1,
                 OrderStatus::Disconnected => disconnected += 1,
                 _ => {}
+            }
+
+            if !order.is_sink() {
+                traffic.absorb(stats.clone(), now);
             }
 
             live.absorb(stats, now);
@@ -590,17 +595,17 @@ impl Router {
                 pending,
                 disconnected,
                 disconnects_1h: upstream_disconnects,
-                hashrate_1m: active.hashrate_1m(now),
-                hashrate_5m: active.hashrate_5m(now),
-                hashrate_15m: active.hashrate_15m(now),
-                hashrate_1hr: active.hashrate_1hr(now),
-                hashrate_6hr: active.hashrate_6hr(now),
-                hashrate_1d: active.hashrate_1d(now),
-                hashrate_7d: active.hashrate_7d(now),
-                sps_1m: active.sps_1m(now),
-                sps_5m: active.sps_5m(now),
-                sps_15m: active.sps_15m(now),
-                sps_1hr: active.sps_1hr(now),
+                hashrate_1m: traffic.hashrate_1m(now),
+                hashrate_5m: traffic.hashrate_5m(now),
+                hashrate_15m: traffic.hashrate_15m(now),
+                hashrate_1hr: traffic.hashrate_1hr(now),
+                hashrate_6hr: traffic.hashrate_6hr(now),
+                hashrate_1d: traffic.hashrate_1d(now),
+                hashrate_7d: traffic.hashrate_7d(now),
+                sps_1m: traffic.sps_1m(now),
+                sps_5m: traffic.sps_5m(now),
+                sps_15m: traffic.sps_15m(now),
+                sps_1hr: traffic.sps_1hr(now),
                 accepted_shares: active.accepted_shares,
                 rejected_shares: active.rejected_shares,
                 accepted_work: active.accepted_work,
@@ -872,6 +877,48 @@ mod tests {
             status.upstream.totals.best_share,
             Some(Difficulty::from(400.97e12)),
         );
+    }
+
+    #[test]
+    fn status_traffic_hashrate_includes_inactive_and_retired_orders() {
+        let router = test_router();
+        let order = test_order(
+            0,
+            Some(hash_days(100.0)),
+            OrderStatus::Active,
+            &router.metatron,
+        );
+        add_orders(router.as_ref(), [order.clone()]);
+        set_hashrate(&router.metatron, &order);
+
+        assert!(router.status().upstream.hashrate_1m > HashRate::ZERO);
+
+        order.terminate(OrderStatus::Fulfilled);
+        order.clear_dirty();
+
+        assert!(router.status().upstream.hashrate_1m > HashRate::ZERO);
+
+        router.retire_orders();
+
+        assert_eq!(router.book.cold_count(), 1);
+        assert!(router.status().upstream.hashrate_1m > HashRate::ZERO);
+    }
+
+    #[test]
+    fn status_traffic_hashrate_excludes_sinks() {
+        let router = test_router();
+        let sink = test_order(0, None, OrderStatus::Active, &router.metatron);
+        add_orders(router.as_ref(), [sink.clone()]);
+        set_hashrate(&router.metatron, &sink);
+
+        assert_eq!(router.status().upstream.hashrate_1m, HashRate::ZERO);
+
+        sink.terminate(OrderStatus::Cancelled);
+        sink.clear_dirty();
+        router.retire_orders();
+
+        assert_eq!(router.book.cold_count(), 1);
+        assert_eq!(router.status().upstream.hashrate_1m, HashRate::ZERO);
     }
 
     #[test]

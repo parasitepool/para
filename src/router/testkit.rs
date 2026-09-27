@@ -335,6 +335,12 @@ pub(crate) fn set_delivered_work(metatron: &Metatron, order: &Order, value: f64)
     metatron.set_order_delivered_work(order.id, hash_days(value).to_hash_work());
 }
 
+pub(crate) fn set_hashrate(metatron: &Metatron, order: &Order) {
+    let mut stats = Stats::new();
+    stats.dsps_1m = DecayingAverage::restore(1.0, Duration::from_mins(1), Instant::now());
+    metatron.restore_order_stats(order.id, stats);
+}
+
 pub(crate) fn add_orders(router: &Router, orders: impl IntoIterator<Item = Arc<Order>>) {
     let mut stored = router.book.orders().write();
 

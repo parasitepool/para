@@ -19,12 +19,14 @@ pub(crate) struct ColdTotals {
     pub(crate) best_share: Option<Difficulty>,
     pub(crate) last_share_secs: Option<f64>,
     pub(crate) addresses: HashSet<Address<NetworkUnchecked>>,
+    pub(crate) traffic: Stats,
 }
 
 pub(crate) struct StatusSnapshot {
     pub(crate) used: HashDays,
     pub(crate) live: Vec<Arc<Order>>,
     pub(crate) cold: ColdStats,
+    pub(crate) cold_traffic: Stats,
     pub(crate) cold_count: usize,
     pub(crate) total_users: usize,
 }
@@ -41,7 +43,7 @@ impl ColdTotals {
         }
     }
 
-    fn absorb(&mut self, entry: &entry::OrderEntry) {
+    fn absorb(&mut self, id: u32, entry: &entry::OrderEntry) {
         let stats = &entry.stats;
 
         self.accepted_shares += stats.accepted_shares;
@@ -64,6 +66,15 @@ impl ColdTotals {
 
         self.addresses
             .insert(entry.upstream_target.username().address().clone());
+
+        if entry.bucket.is_none() {
+            return;
+        }
+
+        match Stats::from_entry(stats.clone()) {
+            Ok(stats) => self.traffic.absorb(stats, Instant::now()),
+            Err(err) => warn!("Skipping traffic for cold order {id} with invalid stats: {err:#}"),
+        }
     }
 }
 
@@ -130,7 +141,7 @@ impl Orders {
             self.cold_by_index.insert(bucket.derivation_index, id);
         }
 
-        self.cold_totals.absorb(&entry);
+        self.cold_totals.absorb(id, &entry);
 
         self.cold.insert(id, entry);
     }
@@ -146,8 +157,8 @@ impl Orders {
 
         let mut totals = ColdTotals::default();
 
-        for entry in self.cold.values() {
-            totals.absorb(entry);
+        for (id, entry) in &self.cold {
+            totals.absorb(*id, entry);
         }
 
         self.cold_totals = totals;
@@ -281,6 +292,7 @@ impl OrderBook {
             used: orders.used_work(),
             live,
             cold: cold.stats(),
+            cold_traffic: cold.traffic.clone(),
             cold_count: orders.cold_count(),
             total_users,
         }
@@ -633,25 +645,43 @@ mod tests {
 
         let first = test_order(0, None, OrderStatus::Expired, &router.metatron).to_entry();
         let second = test_order(1, None, OrderStatus::Expired, &router.metatron).to_entry();
+        let bucket = test_order(
+            2,
+            Some(hash_days(100.0)),
+            OrderStatus::Expired,
+            &router.metatron,
+        );
+        set_hashrate(&router.metatron, &bucket);
+        let bucket = bucket.to_entry();
 
         let mut orders = router.book.orders().write();
 
         orders.add_cold(0, first);
         orders.add_cold(1, second);
+        orders.add_cold(2, bucket);
 
         let totals = orders.cold_totals();
         assert_eq!(totals.accepted_shares, 3);
         assert!(totals.best_share.is_some());
         assert!(totals.last_share_secs.is_some());
         assert_eq!(totals.addresses.len(), 1);
-        assert_eq!(orders.cold_count(), 2);
+        assert!(totals.traffic.hashrate_1m(Instant::now()) > HashRate::ZERO);
+        assert_eq!(orders.cold_count(), 3);
 
         orders.remove_cold(0);
 
         let totals = orders.cold_totals();
         assert_eq!(totals.accepted_shares, 2);
         assert_eq!(totals.addresses.len(), 1);
-        assert_eq!(orders.cold_count(), 1);
+        assert!(totals.traffic.hashrate_1m(Instant::now()) > HashRate::ZERO);
+        assert_eq!(orders.cold_count(), 2);
+
+        orders.remove_cold(2);
+
+        assert_eq!(
+            orders.cold_totals().traffic.hashrate_1m(Instant::now()),
+            HashRate::ZERO,
+        );
 
         orders.remove_cold(0);
 
