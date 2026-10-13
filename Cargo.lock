@@ -1342,6 +1342,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "disburse"
+version = "0.0.1"
+dependencies = [
+ "bitcoin",
+ "snafu 0.8.9",
+]
+
+[[package]]
 name = "dispatch2"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
