@@ -7,7 +7,7 @@ pub(crate) const BLOCK_UNIQUE_CAP: i64 = 3;
 /// Version of the cached badge payload written into `account_metadata.data`.
 /// Bump this when the payload shape or computation changes so stale caches are
 /// recomputed on the next read.
-pub(crate) const BADGES_VERSION: u32 = 2;
+pub(crate) const BADGES_VERSION: u32 = 3;
 
 /// A loyalty badge instance is earned per this many blocks the user has
 /// submitted a share in (`account_metadata.data.block_count`).
@@ -20,6 +20,7 @@ pub(crate) const REFINERY_BADGE_ID: &str = "refinery";
 pub(crate) const DISPENSER_BADGE_ID: &str = "dispenser";
 pub(crate) const BRAVOCADO_BADGE_ID: &str = "bravocado";
 pub(crate) const MINER_BADGE_ID: &str = "miner";
+pub(crate) const AUCTION_BIDDER_BADGE_ID: &str = "auction_bidder";
 pub(crate) const AUCTION_WINNER_BADGE_ID: &str = "auction_winner";
 
 /// Dispenser asset registry names that have a badge of their own. Matched
@@ -235,6 +236,16 @@ pub(crate) fn badge_catalog_definitions() -> Vec<BadgeDefinition> {
             unique_cap: None,
         },
         BadgeDefinition {
+            id: AUCTION_BIDDER_BADGE_ID.to_string(),
+            name: "Auction Bidder".to_string(),
+            description: "Awarded for placing a bid in the dispenser's auction house. Stacks once \
+                          per auction bid on, whether or not the bid won."
+                .to_string(),
+            icon: "paddle".to_string(),
+            stacking: KIND_BUCKET.to_string(),
+            unique_cap: None,
+        },
+        BadgeDefinition {
             id: AUCTION_WINNER_BADGE_ID.to_string(),
             name: "Auction Winner".to_string(),
             description: "Awarded for winning an auction in the dispenser's auction house. Stacks \
@@ -440,19 +451,31 @@ impl ExternalBadgeSources {
         Ok(Some(assigned_asset_counts(&eligibility, &tiers)))
     }
 
+    /// Number of auctions this address has placed a bid on, won or not.
+    /// `Ok(None)` when the guac source is not configured.
+    pub(crate) async fn auction_bids(&self, address: &str) -> Result<Option<i64>> {
+        self.auction_count("bid", address).await
+    }
+
     /// Number of auctions this address has WON (settled auctions whose winning
     /// bid it placed). `Ok(None)` when the guac source is not configured.
     pub(crate) async fn auction_wins(&self, address: &str) -> Result<Option<i64>> {
+        self.auction_count("won", address).await
+    }
+
+    /// Length of guac's `/auctions/{list}/{address}` array, where `list` is
+    /// `bid` (auctions bid on) or `won` (auctions won).
+    async fn auction_count(&self, list: &str, address: &str) -> Result<Option<i64>> {
         let Some(guac) = &self.guac else {
             return Ok(None);
         };
 
         // Percent-encode: `address` is caller-supplied and must not be able to
         // escape this path segment (e.g. `..%2F`) into other guac endpoints.
-        let won = self
+        let auctions = self
             .get_json(
                 format!(
-                    "{}/auctions/won/{}",
+                    "{}/auctions/{list}/{}",
                     guac.base(),
                     urlencoding::encode(address)
                 ),
@@ -460,7 +483,9 @@ impl ExternalBadgeSources {
             )
             .await?;
 
-        Ok(Some(won.as_array().map(|a| a.len() as i64).unwrap_or(0)))
+        Ok(Some(
+            auctions.as_array().map(|a| a.len() as i64).unwrap_or(0),
+        ))
     }
 }
 

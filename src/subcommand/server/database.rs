@@ -1,10 +1,10 @@
 use {
     super::*,
     badges::{
-        AUCTION_WINNER_BADGE_ID, BADGES_VERSION, BLOCK_BADGE_ID, BLOCK_WINNER_BADGE_ID,
-        BRAVOCADO_ASSET, BRAVOCADO_BADGE_ID, BadgeLookup, BadgesPayload, DISPENSER_BADGE_ID,
-        ExternalBadgeSources, LOYALTY_BADGE_ID, LOYALTY_BLOCKS_PER_INSTANCE, MINER_ASSET,
-        MINER_BADGE_ID, REFINERY_BADGE_ID, build_block_badge_type, build_bucket_badge,
+        AUCTION_BIDDER_BADGE_ID, AUCTION_WINNER_BADGE_ID, BADGES_VERSION, BLOCK_BADGE_ID,
+        BLOCK_WINNER_BADGE_ID, BRAVOCADO_ASSET, BRAVOCADO_BADGE_ID, BadgeLookup, BadgesPayload,
+        DISPENSER_BADGE_ID, ExternalBadgeSources, LOYALTY_BADGE_ID, LOYALTY_BLOCKS_PER_INSTANCE,
+        MINER_ASSET, MINER_BADGE_ID, REFINERY_BADGE_ID, build_block_badge_type, build_bucket_badge,
         build_unique_badge, payload_is_fresh, payload_within_max_age,
     },
     rounds::{Round, RoundParticipant},
@@ -1218,6 +1218,24 @@ impl Database {
             }
         }
 
+        match self.external.auction_bids(username).await {
+            Ok(Some(count)) => {
+                types.insert(
+                    AUCTION_BIDDER_BADGE_ID.to_string(),
+                    build_bucket_badge(count),
+                );
+            }
+            Ok(None) => {}
+            Err(e) => {
+                if !ExternalBadgeSources::is_not_found(&e) {
+                    warn!(
+                        "Auction bidder badge fetch failed for {username}, keeping cached value: {e}"
+                    );
+                }
+                carry_forward(AUCTION_BIDDER_BADGE_ID, &mut types);
+            }
+        }
+
         match self.external.auction_wins(username).await {
             Ok(Some(count)) => {
                 types.insert(
@@ -1228,7 +1246,9 @@ impl Database {
             Ok(None) => {}
             Err(e) => {
                 if !ExternalBadgeSources::is_not_found(&e) {
-                    warn!("Auction badge fetch failed for {username}, keeping cached value: {e}");
+                    warn!(
+                        "Auction winner badge fetch failed for {username}, keeping cached value: {e}"
+                    );
                 }
                 carry_forward(AUCTION_WINNER_BADGE_ID, &mut types);
             }

@@ -1463,7 +1463,7 @@ async fn test_badges_three_unique_no_bucket() {
     seed_block_participation(&server, &[10, 20, 30]).await;
 
     let payload: BadgesPayload = server.get_json_async("/badges/foo").await;
-    assert_eq!(payload.version, 2);
+    assert_eq!(payload.version, 3);
 
     let block = payload.types.get("block").unwrap();
     assert_eq!(block.total, 3);
@@ -1534,7 +1534,7 @@ async fn test_badges_catalog() {
     let block = catalog.iter().find(|d| d.id == "block").unwrap();
     assert_eq!(block.unique_cap, Some(3));
 
-    for id in ["bravocado", "miner", "auction_winner"] {
+    for id in ["bravocado", "miner", "auction_bidder", "auction_winner"] {
         let badge = catalog
             .iter()
             .find(|d| d.id == id)
@@ -1685,11 +1685,12 @@ async fn seed_cached_badges(database_url: String, username: &str, badges: serde_
     pool.close().await;
 }
 
-/// Minimal stand-in for the guac dispenser, serving the three endpoints the
+/// Minimal stand-in for the guac dispenser, serving the four endpoints the
 /// badge fetcher reads. Returns the base URL to pass as `--guac-url`.
 async fn spawn_mock_guac(
     assigned_utxos: serde_json::Value,
     tiers: serde_json::Value,
+    auctions_bid: serde_json::Value,
     auctions_won: serde_json::Value,
 ) -> String {
     use axum::{Json, Router, extract::Path as AxumPath, routing::get};
@@ -1712,6 +1713,13 @@ async fn spawn_mock_guac(
             }),
         )
         .route(
+            "/auctions/bid/{address}",
+            get(move |AxumPath(_): AxumPath<String>| {
+                let body = auctions_bid.clone();
+                async move { Json(body) }
+            }),
+        )
+        .route(
             "/auctions/won/{address}",
             get(move |AxumPath(_): AxumPath<String>| {
                 let body = auctions_won.clone();
@@ -1729,7 +1737,7 @@ async fn spawn_mock_guac(
 }
 
 /// The dispenser-sourced badges: distinct asset types (`dispenser`), the
-/// per-asset `bravocado`/`miner` badges, and auctions won.
+/// per-asset `bravocado`/`miner` badges, and auctions bid on and won.
 #[tokio::test]
 async fn test_badges_dispenser_assets_and_auction_wins() {
     let guac = spawn_mock_guac(
@@ -1744,6 +1752,8 @@ async fn test_badges_dispenser_assets_and_auction_wins() {
             { "name": "10T", "threshold": 10, "asset": "bravocado" },
             { "name": "100T", "threshold": 100, "asset": "miner" },
         ]),
+        // Bid on three auctions, won one of them.
+        serde_json::json!([{ "id": "auction-0" }, { "id": "auction-1" }, { "id": "auction-2" }]),
         serde_json::json!([{ "id": "auction-0" }]),
     )
     .await;
@@ -1762,6 +1772,7 @@ async fn test_badges_dispenser_assets_and_auction_wins() {
     // Two bravocados, but the badge is earned-or-not: a single medal.
     assert_eq!(payload.types.get("bravocado").unwrap().total, 1);
     assert_eq!(payload.types.get("miner").unwrap().total, 1);
+    assert_eq!(payload.types.get("auction_bidder").unwrap().total, 3);
     assert_eq!(payload.types.get("auction_winner").unwrap().total, 1);
 }
 
@@ -1772,6 +1783,7 @@ async fn test_badges_dispenser_assets_absent_are_zero() {
     let guac = spawn_mock_guac(
         serde_json::json!({}),
         serde_json::json!([{ "name": "1T", "threshold": 1, "asset": "bravocado" }]),
+        serde_json::json!([]),
         serde_json::json!([]),
     )
     .await;
@@ -1787,6 +1799,7 @@ async fn test_badges_dispenser_assets_absent_are_zero() {
 
     assert_eq!(payload.types.get("bravocado").unwrap().total, 0);
     assert_eq!(payload.types.get("miner").unwrap().total, 0);
+    assert_eq!(payload.types.get("auction_bidder").unwrap().total, 0);
     assert_eq!(payload.types.get("auction_winner").unwrap().total, 0);
 }
 
