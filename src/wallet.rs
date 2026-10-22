@@ -192,7 +192,10 @@ impl Wallet {
             }
 
             if descriptor.is_some() || change_descriptor.is_some() {
-                params = params.extract_keys();
+                #[allow(deprecated)]
+                {
+                    params = params.extract_keys();
+                }
             }
 
             params

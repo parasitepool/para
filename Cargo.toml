@@ -52,8 +52,8 @@ axum = { version = "0.8.3", features = ["http2", "ws"] }
 axum-server = "0.8.0"
 backon = "1.6.0"
 base64 = "0.23.1"
-bdk_bitcoind_rpc = "0.22.0"
-bdk_wallet = { version = "3.1.0", features = ["keys-bip39"] }
+bdk_bitcoind_rpc = "0.22.1"
+bdk_wallet = { version = "3.2.0", features = ["keys-bip39"] }
 bip322 = "0.0.12"
 bitcoin.workspace = true
 bitcoind-async-client.workspace = true
@@ -64,18 +64,18 @@ ciborium = "0.2.2"
 clap.workspace = true
 dashmap = "6.1.0"
 derive_more.workspace = true
-dirs = "6.0.0"
+dirs = "7.0.0"
 futures.workspace = true
 hex.workspace = true
 mime_guess = "2.0.5"
-miniscript = "13.0.0"
-parking_lot = "0.12.5"
+miniscript = "13.2.0"
+parking_lot = "0.13.0"
 primitive-types.workspace = true
 rand.workspace = true
-redb = "4.2.0"
-reqwest = { version = "0.13.2", features = ["blocking", "json"] }
-rust-embed = "8.7.1"
-rustls = { version = "0.23.26", features = ["ring"] }
+redb = "4.4.0"
+reqwest = { version = "0.13.5", features = ["blocking", "json"] }
+rust-embed = "8.13.0"
+rustls = { version = "0.23.46", features = ["ring"] }
 rustls-acme = { version = "0.15.4", default-features = false, features = ["axum", "ring", "tls12", "webpki-roots"] }
 serde.workspace = true
 serde_json.workspace = true
@@ -86,20 +86,20 @@ stratum = { path = "crates/stratum", version = "0.0.7", features = ["client"] }
 sysinfo = "0.39.5"
 tokio-util = { workspace = true, features = ["rt"] }
 tokio.workspace = true
-tower-http = { version = "0.7.0", features = ["fs", "set-header"] }
+tower-http = { version = "0.7.1", features = ["fs", "set-header"] }
 tracing-appender = "0.2.3"
 tracing-subscriber = { version =  "0.3.19", features = ["env-filter", "fmt"] }
 tracing.workspace = true
 urlencoding = "2.1.3"
-utoipa = "5.4.0"
-utoipa-swagger-ui = { version =  "9.0.2", features = ["axum"], optional = true }
+utoipa = "6.0.0"
+utoipa-swagger-ui = { version =  "10.0.2", features = ["axum"], optional = true }
 zeromq = "0.6.0"
 
 [dev-dependencies]
 chrono = "0.4.41"
 harness = { path = "crates/harness" }
 nix = { version = "0.31.2", features = ["signal", "process"] }
-ntest = "0.9.3"
+ntest = "0.10.0"
 once_cell = "1.21.3"
 pretty_assertions = "1.4.1"
 serial_test = "4.0.1"
