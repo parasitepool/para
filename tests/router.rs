@@ -163,17 +163,17 @@ async fn router_auth_tiers() {
     assert_eq!(login_page.status(), StatusCode::OK);
     assert!(login_page.text().await.unwrap().contains("login-form"));
 
-    let home = client
-        .get(router.api_endpoint())
-        .send()
-        .await
-        .unwrap()
-        .text()
-        .await
+    let no_redirect = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
         .unwrap();
+    let home = no_redirect.get(router.api_endpoint()).send().await.unwrap();
 
-    assert!(home.contains("navbar-login"));
-    assert!(!home.contains("navbar-logout"));
+    assert_eq!(home.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        home.headers().get(reqwest::header::LOCATION).unwrap(),
+        "/login?next=%2F"
+    );
 
     assert_eq!(
         client.get(&status_url).send().await.unwrap().status(),

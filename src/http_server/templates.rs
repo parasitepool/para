@@ -157,6 +157,11 @@ pub(crate) fn render_page(
     chain: Chain,
     auth: NavbarAuth,
 ) -> Response {
+    if auth.enabled && !auth.authed {
+        return Redirect::to(&format!("/login?next={}", urlencoding::encode(&auth.next)))
+            .into_response();
+    }
+
     #[cfg(feature = "reload")]
     let body = {
         let title = content.title();

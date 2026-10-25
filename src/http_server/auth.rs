@@ -28,24 +28,31 @@ pub(crate) struct AdminAuth;
 pub(crate) struct NavbarAuth {
     pub(crate) enabled: bool,
     pub(crate) authed: bool,
+    pub(crate) next: String,
 }
 
 impl<S: Send + Sync> FromRequestParts<S> for NavbarAuth {
     type Rejection = Infallible;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        let next = parts
+            .uri
+            .path_and_query()
+            .map_or("/", |path| path.as_str())
+            .to_string();
+
         let Some(auth) = parts.extensions.get::<BearerAuth>() else {
             return Ok(Self {
                 enabled: false,
                 authed: false,
+                next,
             });
         };
 
         Ok(Self {
             enabled: auth.enabled(),
-            authed: auth.enabled()
-                && BearerAuth::token(&parts.headers)
-                    .is_some_and(|token| auth.role(&token).is_some()),
+            authed: auth.enabled() && auth.role_from_headers(&parts.headers).is_some(),
+            next,
         })
     }
 }
@@ -135,7 +142,23 @@ impl BearerAuth {
             return Some(token.to_string());
         }
 
-        Self::cookie_token(headers)
+        Self::cookie_tokens(headers).next()
+    }
+
+    fn role_from_headers(&self, headers: &HeaderMap) -> Option<&'static str> {
+        if let Some(role) = Self::bearer_token(headers).and_then(|token| self.role(token)) {
+            return Some(role);
+        }
+
+        Self::cookie_tokens(headers).find_map(|token| self.role(&token))
+    }
+
+    fn accepts(&self, headers: &HeaderMap, accept: fn(&Self, &str) -> bool) -> bool {
+        if Self::bearer_token(headers).is_some_and(|token| accept(self, token)) {
+            return true;
+        }
+
+        Self::cookie_tokens(headers).any(|token| accept(self, &token))
     }
 
     fn bearer_token(headers: &HeaderMap) -> Option<&str> {
@@ -149,17 +172,21 @@ impl BearerAuth {
         }
     }
 
-    fn cookie_token(headers: &HeaderMap) -> Option<String> {
-        let header = headers.get(COOKIE)?.to_str().ok()?;
-
-        header.split(';').find_map(|cookie| {
-            let (name, value) = cookie.trim().split_once('=')?;
-            if name != AUTH_COOKIE {
-                return None;
-            }
-            let bytes = URL_SAFE_NO_PAD.decode(value).ok()?;
-            String::from_utf8(bytes).ok()
-        })
+    fn cookie_tokens(headers: &HeaderMap) -> impl Iterator<Item = String> + use<'_> {
+        headers
+            .get_all(COOKIE)
+            .iter()
+            .filter_map(|header| header.to_str().ok())
+            .flat_map(|header| {
+                header.split(';').filter_map(|cookie| {
+                    let (name, value) = cookie.trim().split_once('=')?;
+                    if name != AUTH_COOKIE {
+                        return None;
+                    }
+                    let bytes = URL_SAFE_NO_PAD.decode(value).ok()?;
+                    String::from_utf8(bytes).ok()
+                })
+            })
     }
 }
 
@@ -176,7 +203,7 @@ fn check_auth(
         return Ok(());
     }
 
-    if BearerAuth::token(&parts.headers).is_some_and(|token| accept(auth, &token)) {
+    if auth.accepts(&parts.headers, accept) {
         Ok(())
     } else {
         Err(unauthorized())
@@ -305,6 +332,48 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn multiple_cookie_headers() {
+        let auth = BearerAuth::new(Some("foo"), None);
+        let value = URL_SAFE_NO_PAD.encode("foo");
+        let request = Request::builder()
+            .header(COOKIE, "cf_clearance=clearance")
+            .header(COOKIE, format!("{AUTH_COOKIE}={value}"))
+            .body(())
+            .unwrap();
+
+        assert!(check::<ApiAuth>(Some(auth), request).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn tries_all_cookie_candidates() {
+        let auth = BearerAuth::new(Some("foo"), None);
+        let wrong = URL_SAFE_NO_PAD.encode("wrong");
+        let right = URL_SAFE_NO_PAD.encode("foo");
+        let request = Request::builder()
+            .header(
+                COOKIE,
+                format!("{AUTH_COOKIE}={wrong}; {AUTH_COOKIE}={right}"),
+            )
+            .body(())
+            .unwrap();
+
+        assert!(check::<ApiAuth>(Some(auth), request).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn valid_cookie_with_invalid_bearer() {
+        let auth = BearerAuth::new(Some("foo"), None);
+        let value = URL_SAFE_NO_PAD.encode("foo");
+        let request = Request::builder()
+            .header(AUTHORIZATION, "Bearer wrong")
+            .header(COOKIE, format!("{AUTH_COOKIE}={value}"))
+            .body(())
+            .unwrap();
+
+        assert!(check::<ApiAuth>(Some(auth), request).await.is_ok());
     }
 
     #[tokio::test]
