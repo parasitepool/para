@@ -36,6 +36,7 @@
 
 <script>
 const apiBase = '{{ self.api_base }}';
+const USER_PAGE_LIMIT = 500;
 
 function renderRow(user) {
   const safeAddress = escapeHtml(user.address);
@@ -65,8 +66,22 @@ const usersTable = initFilterTable({
 });
 
 async function refresh(signal) {
-  const users = await fetchJson(`${apiBase}/users?${usersTable.buildQuery()}`, { signal });
-  usersTable.setRows(users || []);
+  const params = new URLSearchParams(usersTable.buildQuery());
+  params.set('sort', 'address');
+  params.set('limit', String(USER_PAGE_LIMIT));
+
+  const users = [];
+  const seen = new Set();
+
+  while (true) {
+    const page = await fetchPage(`${apiBase}/users?${params}`, signal);
+    users.push(...page.rows);
+    if (page.nextCursor == null || seen.has(page.nextCursor)) break;
+    seen.add(page.nextCursor);
+    params.set('cursor', page.nextCursor);
+  }
+
+  usersTable.setRows(users);
 }
 
 startPolling(refresh);

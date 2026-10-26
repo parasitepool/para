@@ -24,11 +24,29 @@ pub mod proxy;
 pub mod router;
 pub mod users;
 
+mod pagination;
+
+pub(crate) use pagination::{CountResponse, effective_limit, page_response};
+
 fn decode_query_component(value: &str) -> ServerResult<String> {
     let value = value.replace('+', " ");
     urlencoding::decode(&value)
         .map(|value| value.into_owned())
         .map_err(|err| ServerError::BadRequest(format!("invalid query encoding: {err}")))
+}
+
+pub(crate) fn parse_query_pairs(raw: Option<&str>) -> ServerResult<Vec<(String, String)>> {
+    let Some(raw) = raw else {
+        return Ok(Vec::new());
+    };
+
+    raw.split('&')
+        .filter(|pair| !pair.is_empty())
+        .map(|pair| {
+            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+            Ok((decode_query_component(key)?, decode_query_component(value)?))
+        })
+        .collect()
 }
 
 fn parse_usize_query_param(name: &str, value: &str) -> ServerResult<usize> {

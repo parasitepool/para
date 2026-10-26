@@ -219,6 +219,7 @@ pub(crate) fn router(
         .route("/api/router/order", post(add_order))
         .route("/api/router/order/{id}", get(order_detail))
         .route("/api/router/orders", get(list_orders))
+        .route("/api/router/orders/count", get(count_orders))
         .route("/api/router/order/{id}/cancel", post(cancel_order))
         .route("/api/router/order/{id}/clear", post(clear_order))
         .route("/api/router/order/{id}/refund", post(refund_order))
@@ -337,12 +338,29 @@ async fn add_order(
         .into_response())
 }
 
+#[derive(Copy, Clone)]
+enum OrderKind {
+    Bucket,
+    Sink,
+}
+
+impl OrderKind {
+    fn matches(self, has_bucket: bool) -> bool {
+        match self {
+            Self::Bucket => has_bucket,
+            Self::Sink => !has_bucket,
+        }
+    }
+}
+
 #[derive(Default)]
 struct OrdersQuery {
     search: Option<String>,
     address: Option<Address<NetworkUnchecked>>,
     statuses: Vec<OrderStatus>,
     review: Option<Review>,
+    kind: Option<OrderKind>,
+    cursor: Option<u32>,
     limit: Option<usize>,
 }
 
@@ -350,15 +368,7 @@ impl OrdersQuery {
     fn parse(raw: Option<&str>) -> ServerResult<Self> {
         let mut query = Self::default();
 
-        let Some(raw) = raw else {
-            return Ok(query);
-        };
-
-        for pair in raw.split('&').filter(|pair| !pair.is_empty()) {
-            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
-            let key = decode_query_component(key)?;
-            let value = decode_query_component(value)?;
-
+        for (key, value) in parse_query_pairs(raw)? {
             match key.as_str() {
                 "search" if !value.trim().is_empty() => {
                     query.search = Some(value.trim().to_lowercase());
@@ -379,6 +389,16 @@ impl OrdersQuery {
                     query.review = Some(parse_review(&value)?);
                 }
                 "review" => query.review = None,
+                "kind" if !value.trim().is_empty() => {
+                    query.kind = Some(parse_order_kind(&value)?);
+                }
+                "kind" => query.kind = None,
+                "cursor" if !value.trim().is_empty() => {
+                    query.cursor = Some(value.parse().map_err(|err| {
+                        ServerError::BadRequest(format!("invalid cursor `{value}`: {err}"))
+                    })?);
+                }
+                "cursor" => query.cursor = None,
                 "limit" if !value.trim().is_empty() => {
                     query.limit = Some(parse_usize_query_param("limit", &value)?);
                 }
@@ -412,6 +432,13 @@ impl OrdersQuery {
             return false;
         }
 
+        if self
+            .kind
+            .is_some_and(|kind| !kind.matches(order.bucket.is_some()))
+        {
+            return false;
+        }
+
         if let Some(search) = &self.search
             && !matches_search(order.id, &order.upstream_target, payment_address, search)
         {
@@ -440,6 +467,13 @@ impl OrdersQuery {
             return false;
         }
 
+        if self
+            .kind
+            .is_some_and(|kind| !kind.matches(entry.bucket.is_some()))
+        {
+            return false;
+        }
+
         if let Some(search) = &self.search
             && !matches_search(id, &entry.upstream_target, payment_address, search)
         {
@@ -461,6 +495,16 @@ fn parse_order_status(value: &str) -> ServerResult<OrderStatus> {
         "expired" => Ok(OrderStatus::Expired),
         _ => Err(ServerError::BadRequest(format!(
             "invalid order status filter `{value}`"
+        ))),
+    }
+}
+
+fn parse_order_kind(value: &str) -> ServerResult<OrderKind> {
+    match value {
+        "bucket" => Ok(OrderKind::Bucket),
+        "sink" => Ok(OrderKind::Sink),
+        _ => Err(ServerError::BadRequest(format!(
+            "invalid order kind filter `{value}`"
         ))),
     }
 }
@@ -509,21 +553,54 @@ async fn list_orders(
 ) -> ServerResult<Response> {
     let now = Instant::now();
     let query = OrdersQuery::parse(raw_query.as_deref())?;
+    let limit = effective_limit(query.limit)?;
 
-    let (live, cold) = router.order_snapshots(|id, entry| query.matches_entry(id, entry));
+    let (live, cold) = router.order_page(
+        query.cursor,
+        limit + 1,
+        |order| query.matches(order),
+        |id, entry| query.matches_entry(id, entry),
+    );
 
-    Ok(Json(merge_summaries(&live, cold, &query, now)).into_response())
+    let mut orders = merge_summaries(&live, cold, now);
+    let next_cursor = if orders.len() > limit {
+        orders.truncate(limit);
+        orders.last().map(|order| order.id.to_string())
+    } else {
+        None
+    };
+
+    Ok(page_response(orders, limit, next_cursor))
+}
+
+async fn count_orders(
+    _: ApiAuth,
+    State(router): State<Arc<Router>>,
+    RawQuery(raw_query): RawQuery,
+) -> ServerResult<Response> {
+    let query = OrdersQuery::parse(raw_query.as_deref())?;
+
+    if query.cursor.is_some() {
+        return Err(ServerError::BadRequest(
+            "cursor is not supported for order counts".into(),
+        ));
+    }
+
+    let count = router.count_orders(
+        |order| query.matches(order),
+        |id, entry| query.matches_entry(id, entry),
+    );
+
+    Ok(Json(CountResponse { count }).into_response())
 }
 
 fn merge_summaries(
     live: &[Arc<Order>],
     cold: Vec<(u32, entry::OrderEntry)>,
-    query: &OrdersQuery,
     now: Instant,
 ) -> Vec<OrderSummary> {
     let mut orders = live
         .iter()
-        .filter(|order| query.matches(order))
         .map(|order| OrderSummary::from_order(order, now))
         .collect::<Vec<_>>();
 
@@ -535,8 +612,6 @@ fn merge_summaries(
     }
 
     orders.sort_by_key(|order| Reverse(order.id));
-    orders.truncate(query.limit.unwrap_or(usize::MAX));
-
     orders
 }
 
@@ -708,7 +783,7 @@ async fn refund_order(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use {super::*, crate::api::pagination::DEFAULT_PAGE_LIMIT};
 
     fn test_entry(status: OrderStatus) -> entry::OrderEntry {
         entry::OrderEntry {
@@ -749,6 +824,8 @@ mod tests {
         case(Some("status=active,expired"), true);
         case(Some("review=clean"), true);
         case(Some("review=flagged"), false);
+        case(Some("kind=bucket"), true);
+        case(Some("kind=sink"), false);
         case(Some("search=bar"), true);
         case(Some("search=baz"), false);
         case(Some("search=7"), true);
@@ -834,8 +911,140 @@ mod tests {
         assert_eq!(summary.requested_hash_days.unwrap().as_f64(), 100.0);
     }
 
+    async fn json_body<T: serde::de::DeserializeOwned>(response: Response) -> T {
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        serde_json::from_slice(&body).unwrap()
+    }
+
+    #[tokio::test]
+    async fn list_orders_pages_across_live_and_cold() {
+        use crate::router::testkit::*;
+
+        let router = test_router();
+        let metatron = router.metatron();
+        add_orders(
+            router.as_ref(),
+            [2, 4, 6].map(|id| test_order(id, None, OrderStatus::Active, &metatron)),
+        );
+        add_cold_orders(
+            router.as_ref(),
+            [1, 3, 5].map(|id| (id, test_entry(OrderStatus::Expired))),
+        );
+
+        let page = |query: &str| {
+            let router = router.router.clone();
+            let query = query.to_string();
+            async move {
+                let response = list_orders(ApiAuth, State(router), RawQuery(Some(query)))
+                    .await
+                    .ok()
+                    .expect("list_orders handler failed");
+                let next_cursor = response
+                    .headers()
+                    .get("x-next-cursor")
+                    .map(|cursor| cursor.to_str().unwrap().to_string());
+                let ids = json_body::<Vec<OrderSummary>>(response)
+                    .await
+                    .iter()
+                    .map(|order| order.id)
+                    .collect::<Vec<_>>();
+                (ids, next_cursor)
+            }
+        };
+
+        assert_eq!(page("limit=2").await, (vec![6, 5], Some("5".into())));
+        assert_eq!(
+            page("limit=2&cursor=5").await,
+            (vec![4, 3], Some("3".into()))
+        );
+        assert_eq!(page("limit=2&cursor=3").await, (vec![2, 1], None));
+        assert_eq!(page("cursor=1").await, (vec![], None));
+
+        assert_eq!(
+            page("status=expired&limit=2").await,
+            (vec![5, 3], Some("3".into()))
+        );
+        assert_eq!(
+            page("status=expired&limit=2&cursor=3").await,
+            (vec![1], None)
+        );
+        assert_eq!(
+            page("kind=sink&limit=1&cursor=6").await,
+            (vec![4], Some("4".into()))
+        );
+
+        let response = list_orders(ApiAuth, State(router.router.clone()), RawQuery(None))
+            .await
+            .ok()
+            .unwrap();
+        assert_eq!(
+            response.headers()["x-limit"],
+            DEFAULT_PAGE_LIMIT.to_string()
+        );
+
+        let count = |query: &str| {
+            let router = router.router.clone();
+            let query = query.to_string();
+            async move {
+                let response = count_orders(ApiAuth, State(router), RawQuery(Some(query)))
+                    .await
+                    .ok()
+                    .expect("count_orders handler failed");
+                json_body::<serde_json::Value>(response).await["count"]
+                    .as_u64()
+                    .unwrap()
+            }
+        };
+
+        assert_eq!(count("").await, 6);
+        assert_eq!(count("limit=1").await, 6);
+        assert_eq!(count("status=expired").await, 3);
+    }
+
     #[test]
-    fn merge_summaries_sorts_descending_and_truncates_across_tiers() {
+    fn kind_filters_live_and_cold_orders() {
+        use crate::router::testkit::*;
+
+        let router = test_router();
+        let metatron = router.metatron();
+        add_orders(
+            router.as_ref(),
+            [
+                test_order(1, None, OrderStatus::Active, &metatron),
+                test_order(2, Some(hash_days(1.0)), OrderStatus::Active, &metatron),
+            ],
+        );
+        let mut cold_sink = test_entry(OrderStatus::Expired);
+        cold_sink.bucket = None;
+        add_cold_orders(
+            router.as_ref(),
+            [(3, test_entry(OrderStatus::Expired)), (4, cold_sink)],
+        );
+
+        let bucket = OrdersQuery::parse(Some("kind=bucket")).ok().unwrap();
+        assert_eq!(
+            router.count_orders(
+                |order| bucket.matches(order),
+                |id, entry| bucket.matches_entry(id, entry),
+            ),
+            2
+        );
+
+        let sink = OrdersQuery::parse(Some("kind=sink")).ok().unwrap();
+        assert_eq!(
+            router.count_orders(
+                |order| sink.matches(order),
+                |id, entry| sink.matches_entry(id, entry),
+            ),
+            2
+        );
+        assert!(OrdersQuery::parse(Some("kind=unknown")).is_err());
+    }
+
+    #[test]
+    fn merge_summaries_sorts_descending_across_tiers() {
         let (metatron, _directory) = Metatron::test();
         let metatron = Arc::new(metatron);
 
@@ -861,24 +1070,10 @@ mod tests {
 
         let now = Instant::now();
 
-        let merged = merge_summaries(&live, cold.clone(), &OrdersQuery::default(), now);
+        let merged = merge_summaries(&live, cold, now);
         assert_eq!(
             merged.iter().map(|summary| summary.id).collect::<Vec<_>>(),
             [5, 4, 3, 2],
-        );
-
-        let query = OrdersQuery {
-            limit: Some(3),
-            ..OrdersQuery::default()
-        };
-
-        let truncated = merge_summaries(&live, cold, &query, now);
-        assert_eq!(
-            truncated
-                .iter()
-                .map(|summary| summary.id)
-                .collect::<Vec<_>>(),
-            [5, 4, 3],
         );
     }
 }

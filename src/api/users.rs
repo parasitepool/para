@@ -160,6 +160,10 @@ pub(crate) fn routes(service: Service, metatron: Arc<Metatron>) -> axum::Router 
         .route("/user/{address}", get(user_page))
         .route(&format!("{}/users", service.api_base()), get(users))
         .route(
+            &format!("{}/users/count", service.api_base()),
+            get(count_users),
+        )
+        .route(
             &format!("{}/user/{{address}}", service.api_base()),
             get(user),
         )
@@ -196,9 +200,18 @@ async fn user_page(
     )
 }
 
+#[derive(Copy, Clone, Default, PartialEq, Eq)]
+enum UserSort {
+    #[default]
+    Hashrate,
+    Address,
+}
+
 #[derive(Default)]
 struct UsersQuery {
     search: Option<String>,
+    sort: UserSort,
+    cursor: Option<String>,
     limit: Option<usize>,
 }
 
@@ -206,26 +219,43 @@ impl UsersQuery {
     fn parse(raw: Option<&str>) -> ServerResult<Self> {
         let mut query = Self::default();
 
-        let Some(raw) = raw else {
-            return Ok(query);
-        };
-
-        for pair in raw.split('&').filter(|pair| !pair.is_empty()) {
-            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
-            let key = decode_query_component(key)?;
-            let value = decode_query_component(value)?;
-
+        for (key, value) in parse_query_pairs(raw)? {
             match key.as_str() {
                 "search" if !value.trim().is_empty() => {
                     query.search = Some(value.trim().to_lowercase());
                 }
                 "search" => query.search = None,
+                "sort" if !value.trim().is_empty() => {
+                    query.sort = match value.as_str() {
+                        "hashrate" => UserSort::Hashrate,
+                        "address" => UserSort::Address,
+                        _ => {
+                            return Err(ServerError::BadRequest(format!(
+                                "invalid user sort `{value}`"
+                            )));
+                        }
+                    };
+                }
+                "sort" => query.sort = UserSort::Hashrate,
+                "cursor" if !value.trim().is_empty() => {
+                    let address = value.parse::<Address<NetworkUnchecked>>().map_err(|err| {
+                        ServerError::BadRequest(format!("invalid address cursor `{value}`: {err}"))
+                    })?;
+                    query.cursor = Some(address.assume_checked().to_string());
+                }
+                "cursor" => query.cursor = None,
                 "limit" if !value.trim().is_empty() => {
                     query.limit = Some(parse_usize_query_param("limit", &value)?);
                 }
                 "limit" => query.limit = None,
                 _ => {}
             }
+        }
+
+        if query.sort != UserSort::Address && query.cursor.is_some() {
+            return Err(ServerError::BadRequest(
+                "address cursor requires sort=address".into(),
+            ));
         }
 
         Ok(query)
@@ -257,6 +287,7 @@ async fn users(
 ) -> ServerResult<Response> {
     let now = Instant::now();
     let query = UsersQuery::parse(raw_query.as_deref())?;
+    let limit = effective_limit(query.limit)?;
 
     let mut users = Vec::new();
 
@@ -268,10 +299,53 @@ async fn users(
         }
     }
 
-    users.sort_by_key(|user| Reverse(user.hashrate));
-    users.truncate(query.limit.unwrap_or(usize::MAX));
+    let address = |user: &UserSummary| user.address.clone().assume_checked().to_string();
 
-    Ok(Json(users).into_response())
+    match query.sort {
+        UserSort::Hashrate => {
+            users.sort_by_cached_key(|user| (Reverse(user.hashrate), address(user)));
+        }
+        UserSort::Address => {
+            users.sort_by_cached_key(address);
+
+            if let Some(cursor) = &query.cursor {
+                let start = users.partition_point(|user| address(user).as_str() <= cursor.as_str());
+                users.drain(..start);
+            }
+        }
+    }
+
+    let has_more = users.len() > limit;
+    users.truncate(limit);
+
+    let next_cursor = (query.sort == UserSort::Address && has_more)
+        .then(|| users.last().map(address))
+        .flatten();
+
+    Ok(page_response(users, limit, next_cursor))
+}
+
+async fn count_users(
+    _: ApiAuth,
+    State(state): State<UsersState>,
+    RawQuery(raw_query): RawQuery,
+) -> ServerResult<Response> {
+    let query = UsersQuery::parse(raw_query.as_deref())?;
+
+    if query.cursor.is_some() {
+        return Err(ServerError::BadRequest(
+            "cursor is not supported for user counts".into(),
+        ));
+    }
+
+    let count = state
+        .metatron
+        .users()
+        .iter()
+        .filter(|entry| query.matches(entry.value()))
+        .count() as u64;
+
+    Ok(Json(CountResponse { count }).into_response())
 }
 
 async fn user(
@@ -288,4 +362,154 @@ async fn user(
         .ok_or_not_found(|| format!("User {address}"))?;
 
     Ok(Json(UserDetail::from_user(&user, Instant::now())).into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use {
+        super::*,
+        axum::{body::to_bytes, extract::State},
+    };
+
+    fn address(value: &str) -> Address {
+        value
+            .parse::<Address<NetworkUnchecked>>()
+            .unwrap()
+            .assume_checked()
+    }
+
+    async fn request_page(state: &UsersState, query: &str) -> Response {
+        users(
+            ApiAuth,
+            State(state.clone()),
+            RawQuery(Some(query.to_string())),
+        )
+        .await
+        .ok()
+        .expect("users handler failed")
+    }
+
+    async fn decode_page(response: Response) -> Vec<UserSummary> {
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        serde_json::from_slice(&body).unwrap()
+    }
+
+    async fn page(state: &UsersState, query: &str) -> Vec<UserSummary> {
+        decode_page(request_page(state, query).await).await
+    }
+
+    async fn count(state: &UsersState, query: &str) -> u64 {
+        let response = count_users(
+            ApiAuth,
+            State(state.clone()),
+            RawQuery(Some(query.to_string())),
+        )
+        .await
+        .ok()
+        .expect("count_users handler failed");
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        value["count"].as_u64().unwrap()
+    }
+
+    fn addresses(users: &[UserSummary]) -> Vec<String> {
+        users
+            .iter()
+            .map(|user| user.address.clone().assume_checked().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn address_cursor_requires_address_sort() {
+        assert!(
+            UsersQuery::parse(Some("cursor=tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc")).is_err()
+        );
+        assert!(
+            UsersQuery::parse(Some(
+                "sort=address&cursor=tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc"
+            ))
+            .is_ok()
+        );
+        assert!(UsersQuery::parse(Some("sort=unknown")).is_err());
+    }
+
+    #[tokio::test]
+    async fn address_sort_paginates_all_users() {
+        let (metatron, _directory) = Metatron::test();
+        let metatron = Arc::new(metatron);
+
+        let expected = [
+            "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc",
+            "tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx",
+            "tb1qft5p2uhsdcdc3l2ua4ap5qqfg4pjaqlp250x7us7a8qqhrxrxfsqaqh7jw",
+        ]
+        .map(address);
+
+        for address in &expected {
+            metatron
+                .users()
+                .insert(address.clone(), Arc::new(User::new(address.clone())));
+        }
+
+        let mut expected = expected.iter().map(ToString::to_string).collect::<Vec<_>>();
+        expected.sort();
+
+        let state = UsersState {
+            service: Service::Router,
+            metatron,
+        };
+
+        let first_response = request_page(&state, "sort=address&limit=2").await;
+        assert_eq!(first_response.headers()["x-limit"], "2");
+        assert_eq!(first_response.headers()["x-next-cursor"], expected[1]);
+        let first = decode_page(first_response).await;
+        assert_eq!(addresses(&first), expected[..2]);
+
+        let second_response = request_page(
+            &state,
+            &format!("sort=address&limit=2&cursor={}", expected[1]),
+        )
+        .await;
+        assert!(!second_response.headers().contains_key("x-next-cursor"));
+        let second = decode_page(second_response).await;
+        assert_eq!(addresses(&second), expected[2..]);
+
+        let after_last = page(
+            &state,
+            &format!("sort=address&limit=2&cursor={}", expected[2]),
+        )
+        .await;
+        assert!(after_last.is_empty());
+
+        let narrowed_address = address("tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx").to_string();
+
+        let narrowed = page(&state, "search=w508&sort=address&limit=2").await;
+        assert_eq!(addresses(&narrowed), vec![narrowed_address.clone()]);
+
+        let narrowed_after = page(
+            &state,
+            &format!("search=w508&sort=address&cursor={narrowed_address}"),
+        )
+        .await;
+        assert!(narrowed_after.is_empty());
+
+        let top_by_hashrate = request_page(&state, "limit=2").await;
+        assert!(!top_by_hashrate.headers().contains_key("x-next-cursor"));
+        assert_eq!(decode_page(top_by_hashrate).await.len(), 2);
+
+        let clamped = request_page(&state, "limit=999").await;
+        assert_eq!(clamped.headers()["x-limit"], "500");
+
+        assert_eq!(count(&state, "").await, 3);
+        assert_eq!(count(&state, "search=w508").await, 1);
+
+        let count_with_cursor = count_users(
+            ApiAuth,
+            State(state.clone()),
+            RawQuery(Some(format!("sort=address&cursor={}", expected[0]))),
+        )
+        .await;
+        assert!(count_with_cursor.is_err());
+    }
 }

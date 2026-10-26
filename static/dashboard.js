@@ -625,6 +625,7 @@ function initFilterTable({
   tiebreak,
   renderRow,
   onFilterChange,
+  serverPaging,
   pageSize = 25,
 }) {
   const tbody = root.querySelector('tbody');
@@ -742,7 +743,7 @@ function initFilterTable({
     for (const multi of multiSelects) params.delete(multi.dataset.filter);
     for (const select of selects) params.delete(select.dataset.filter);
     for (const name of ['sort', 'direction', 'page']) params.delete(stateParam(name));
-    addStateParams(params, true);
+    addStateParams(params, !serverPaging);
     const query = params.toString();
     history.replaceState(null, '', query ? `${location.pathname}?${query}` : location.pathname);
   }
@@ -766,7 +767,9 @@ function initFilterTable({
       : defaultSort.direction;
 
     const requestedPage = Number(params.get(stateParam('page')));
-    currentPage = Number.isInteger(requestedPage) && requestedPage > 1 ? requestedPage - 1 : 0;
+    currentPage = !serverPaging && Number.isInteger(requestedPage) && requestedPage > 1
+      ? requestedPage - 1
+      : 0;
   }
 
   function applyFilterChange() {
@@ -810,6 +813,13 @@ function initFilterTable({
     if (!tbody || tbody.querySelector('.copyable:hover')) return;
 
     const sorted = rows.slice().sort(compareRows);
+
+    if (serverPaging) {
+      tbody.innerHTML = sorted.map(renderRow).join('');
+      updateSortHeaders();
+      return;
+    }
+
     totalCount = sorted.length;
     const pageCount = Math.max(1, Math.ceil(sorted.length / pageSize));
     const previousPage = currentPage;
@@ -833,6 +843,12 @@ function initFilterTable({
   function setRows(newRows) {
     rows = newRows;
     render();
+  }
+
+  function setPageState({ page, hasPrev, hasNext }) {
+    if (pageStatus) pageStatus.textContent = `Page ${page + 1}`;
+    if (prevButton) prevButton.disabled = !hasPrev;
+    if (nextButton) nextButton.disabled = !hasNext;
   }
 
   searchInput?.addEventListener('input', scheduleFilterChange);
@@ -881,7 +897,9 @@ function initFilterTable({
   }
 
   prevButton?.addEventListener('click', () => {
-    if (currentPage > 0) {
+    if (serverPaging) {
+      serverPaging.onPrev();
+    } else if (currentPage > 0) {
       currentPage -= 1;
       syncUrl();
       render();
@@ -889,7 +907,9 @@ function initFilterTable({
   });
 
   nextButton?.addEventListener('click', () => {
-    if ((currentPage + 1) * pageSize < totalCount) {
+    if (serverPaging) {
+      serverPaging.onNext();
+    } else if ((currentPage + 1) * pageSize < totalCount) {
       currentPage += 1;
       syncUrl();
       render();
@@ -900,7 +920,7 @@ function initFilterTable({
   syncUrl();
   updateSortHeaders();
 
-  return { buildQuery, setRows, render };
+  return { buildQuery, setRows, setPageState, render };
 }
 
 async function fetchJson(url, options) {
@@ -911,6 +931,24 @@ async function fetchJson(url, options) {
   }
   if (!r.ok) throw new Error(`${url}: ${r.status}`);
   return r.json();
+}
+
+async function fetchCount(url, signal) {
+  const data = await fetchJson(url, { signal });
+  return Number(data?.count) || 0;
+}
+
+async function fetchPage(url, signal) {
+  const r = await fetch(url, withAuthOptions({ signal }));
+  if (r.status === 401) {
+    redirectToLogin();
+    throw new Error(`${url}: ${r.status}`);
+  }
+  if (!r.ok) throw new Error(`${url}: ${r.status}`);
+  return {
+    rows: (await r.json()) || [],
+    nextCursor: r.headers.get('X-Next-Cursor'),
+  };
 }
 
 async function fetchJsonAllow404(url, options) {

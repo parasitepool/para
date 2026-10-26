@@ -349,6 +349,17 @@ pub(crate) fn add_orders(router: &Router, orders: impl IntoIterator<Item = Arc<O
     }
 }
 
+pub(crate) fn add_cold_orders(
+    router: &Router,
+    orders: impl IntoIterator<Item = (u32, entry::OrderEntry)>,
+) {
+    let mut stored = router.book.orders().write();
+
+    for (id, entry) in orders {
+        stored.add_cold(id, entry);
+    }
+}
+
 pub(crate) fn addr(port: u16) -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], port))
 }

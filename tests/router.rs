@@ -498,8 +498,45 @@ async fn router() {
 
     assert!(unmatched.is_empty());
 
+    let user_count = http_client()
+        .get(format!(
+            "{}/api/router/users/count?search=miner",
+            router.api_endpoint()
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json::<serde_json::Value>()
+        .await
+        .unwrap();
+    assert_eq!(user_count["count"], 1);
+
     let invalid_limit = router.users_query("limit=foo").await.unwrap();
     assert_eq!(invalid_limit.status(), StatusCode::BAD_REQUEST);
+
+    let invalid_cursor = router
+        .users_query(&format!("cursor={miner_address}"))
+        .await
+        .unwrap();
+    assert_eq!(invalid_cursor.status(), StatusCode::BAD_REQUEST);
+
+    let address_sorted = router
+        .users_query("sort=address&limit=1")
+        .await
+        .unwrap()
+        .json::<Vec<api::UserSummary>>()
+        .await
+        .unwrap();
+    assert_eq!(address_sorted.len(), 1);
+
+    let after_address = router
+        .users_query(&format!("sort=address&cursor={miner_address}"))
+        .await
+        .unwrap()
+        .json::<Vec<api::UserSummary>>()
+        .await
+        .unwrap();
+    assert!(after_address.is_empty());
 
     let user = router.get_user(&miner_address).await.unwrap();
     assert_eq!(
@@ -1551,16 +1588,154 @@ async fn filter_orders() {
 
     assert_eq!(review_clean.len(), 3);
 
-    let limited = router
-        .list_orders_query("limit=1")
+    let buckets = router
+        .list_orders_query("kind=bucket")
         .await
         .unwrap()
+        .json::<Vec<api::OrderSummary>>()
+        .await
+        .unwrap();
+    assert_eq!(buckets.len(), 3);
+
+    let sinks = router
+        .list_orders_query("kind=sink")
+        .await
+        .unwrap()
+        .json::<Vec<api::OrderSummary>>()
+        .await
+        .unwrap();
+    assert!(sinks.is_empty());
+
+    let invalid_kind = router.list_orders_query("kind=unknown").await.unwrap();
+    assert_eq!(invalid_kind.status(), StatusCode::BAD_REQUEST);
+
+    let limited_response = router.list_orders_query("limit=1").await.unwrap();
+    assert_eq!(limited_response.headers()["x-limit"], "1");
+    assert_eq!(
+        limited_response.headers()["x-next-cursor"]
+            .to_str()
+            .unwrap(),
+        id_b.to_string()
+    );
+    let limited = limited_response
         .json::<Vec<api::OrderSummary>>()
         .await
         .unwrap();
 
     assert_eq!(limited.len(), 1);
     assert_eq!(limited[0].id, id_b);
+
+    let first_page_response = router.list_orders_query("limit=2").await.unwrap();
+    assert_eq!(
+        first_page_response.headers()["x-next-cursor"]
+            .to_str()
+            .unwrap(),
+        id_a2.to_string()
+    );
+    let first_page = first_page_response
+        .json::<Vec<api::OrderSummary>>()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        first_page.iter().map(|order| order.id).collect::<Vec<_>>(),
+        [id_b, id_a2]
+    );
+
+    let second_page_response = router
+        .list_orders_query(&format!("limit=1&cursor={id_a2}"))
+        .await
+        .unwrap();
+    assert!(!second_page_response.headers().contains_key("x-next-cursor"));
+    let second_page = second_page_response
+        .json::<Vec<api::OrderSummary>>()
+        .await
+        .unwrap();
+
+    assert_eq!(second_page.len(), 1);
+    assert_eq!(second_page[0].id, id_a1);
+
+    let after_last = router
+        .list_orders_query(&format!("cursor={id_a1}"))
+        .await
+        .unwrap()
+        .json::<Vec<api::OrderSummary>>()
+        .await
+        .unwrap();
+
+    assert!(after_last.is_empty());
+
+    let invalid_cursor = router.list_orders_query("cursor=nope").await.unwrap();
+    assert_eq!(invalid_cursor.status(), StatusCode::BAD_REQUEST);
+
+    let zero_limit = router.list_orders_query("limit=0").await.unwrap();
+    assert_eq!(zero_limit.status(), StatusCode::BAD_REQUEST);
+
+    let clamped = router.list_orders_query("limit=1000").await.unwrap();
+    assert_eq!(clamped.headers()["x-limit"], "500");
+    assert!(!clamped.headers().contains_key("x-next-cursor"));
+
+    let count_all = http_client()
+        .get(format!("{}/api/router/orders/count", router.api_endpoint()))
+        .send()
+        .await
+        .unwrap()
+        .json::<serde_json::Value>()
+        .await
+        .unwrap();
+    assert_eq!(count_all["count"], 3);
+
+    let count_address = http_client()
+        .get(format!(
+            "{}/api/router/orders/count?address={}",
+            router.api_endpoint(),
+            urlencoding::encode(&username_a.address().clone().assume_checked().to_string())
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json::<serde_json::Value>()
+        .await
+        .unwrap();
+    assert_eq!(count_address["count"], 2);
+
+    let count_fulfilled = http_client()
+        .get(format!(
+            "{}/api/router/orders/count?status=fulfilled",
+            router.api_endpoint()
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json::<serde_json::Value>()
+        .await
+        .unwrap();
+    assert_eq!(count_fulfilled["count"], 0);
+
+    for (kind, expected) in [("bucket", 3), ("sink", 0)] {
+        let count = http_client()
+            .get(format!(
+                "{}/api/router/orders/count?kind={kind}",
+                router.api_endpoint()
+            ))
+            .send()
+            .await
+            .unwrap()
+            .json::<serde_json::Value>()
+            .await
+            .unwrap();
+        assert_eq!(count["count"], expected);
+    }
+
+    let count_with_cursor = http_client()
+        .get(format!(
+            "{}/api/router/orders/count?cursor={id_a1}",
+            router.api_endpoint()
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(count_with_cursor.status(), StatusCode::BAD_REQUEST);
 
     let invalid_status = router.list_orders_query("status=unknown").await.unwrap();
 

@@ -1,6 +1,7 @@
 <div class="grid grid-stack">
   <div class="column column-full">
     <h2>Flagged Orders</h2>
+    <div class=table-summary id=flagged-summary></div>
     <table class=compact-table id=flagged-table>
       <thead>
         <tr><th>ID</th><th>Status</th><th>Endpoint</th><th>Username</th><th>Requested</th><th>Progress</th></tr>
@@ -11,6 +12,7 @@
 
   <div class="column column-full">
     <h2>Cleared Orders</h2>
+    <div class=table-summary id=cleared-summary></div>
     <table class=compact-table id=cleared-table>
       <thead>
         <tr><th>ID</th><th>Status</th><th>Endpoint</th><th>Username</th><th>Requested</th><th>Progress</th></tr>
@@ -53,6 +55,7 @@ function renderOrders(bodyId, orders) {
   body.innerHTML = orders.map(orderRow).join('');
 }
 
+const REVIEW_LIMIT = 500;
 const CLEARED_PAGE_SIZE = 10;
 let clearedPage = 0;
 let clearedOrders = [];
@@ -91,7 +94,8 @@ function renderClearedPage() {
 }
 
 async function fetchOrders(review, signal) {
-  const r = await fetch(`/api/router/orders?review=${review}`, withAuthOptions({ signal }));
+  const params = new URLSearchParams({ review, limit: String(REVIEW_LIMIT) });
+  const r = await fetch(`/api/router/orders?${params}`, withAuthOptions({ signal }));
   if (r.status === 401) {
     redirectToLogin();
     throw new Error(`/api/router/orders: ${r.status}`);
@@ -100,15 +104,44 @@ async function fetchOrders(review, signal) {
   return r.json();
 }
 
+async function countOrShown(shown, review, signal) {
+  if (shown < REVIEW_LIMIT) return shown;
+
+  try {
+    return await fetchCount(`/api/router/orders/count?review=${review}`, signal);
+  } catch (e) {
+    if (e.name === 'AbortError') throw e;
+    console.error(`count ${review} orders error:`, e);
+    return shown;
+  }
+}
+
+function reviewSummary(shown, total, label) {
+  return total > shown
+    ? `Showing latest ${shown} of ${total} ${label}`
+    : `${total} ${label}`;
+}
+
 async function refresh(signal) {
   const [flagged, cleared] = await Promise.all([
     fetchOrders('flagged', signal),
     fetchOrders('cleared', signal),
   ]);
 
-  renderOrders('flagged-body', flagged);
-  clearedOrders = cleared;
+  const flaggedRows = flagged || [];
+  const clearedRows = cleared || [];
+  const [flaggedTotal, clearedTotal] = await Promise.all([
+    countOrShown(flaggedRows.length, 'flagged', signal),
+    countOrShown(clearedRows.length, 'cleared', signal),
+  ]);
+
+  renderOrders('flagged-body', flaggedRows);
+  clearedOrders = clearedRows;
   renderClearedPage();
+  document.getElementById('flagged-summary').textContent =
+    reviewSummary(flaggedRows.length, flaggedTotal, 'flagged orders');
+  document.getElementById('cleared-summary').textContent =
+    reviewSummary(clearedRows.length, clearedTotal, 'cleared orders');
 }
 
 initAuthProbe().then(ok => {

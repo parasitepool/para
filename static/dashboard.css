@@ -273,6 +273,12 @@ table tbody tr:hover { background: #1a1a1a; }
 .filter-table .table-pagination button:hover { color: #eee; }
 .filter-table .table-pagination button:disabled { opacity: 0.3; cursor: not-allowed; }
 .filter-table .page-status { text-align: center; }
+
+.table-summary {
+  color: #888;
+  font-size: 0.9em;
+  margin: -4px 0 8px;
+}
 @media (max-width: 1140px) {
   body { padding: 76px 20px 20px; }
   .navbar { padding: 10px 20px; gap: 16px; }

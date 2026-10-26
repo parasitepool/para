@@ -398,23 +398,16 @@ impl ExternalBadgeSources {
         // Percent-encode: `address` is caller-supplied and must not be able to
         // inject extra query parameters into the outbound request.
         let url = format!(
-            "{}/api/router/orders?address={}",
+            "{}/api/router/orders/count?address={}&status=fulfilled&kind=bucket",
             router.base(),
             urlencoding::encode(address)
         );
-        let orders = self.get_json(url, router).await?;
+        let response = self.get_json(url, router).await?;
 
-        let count = orders
-            .as_array()
-            .map(|orders| {
-                orders
-                    .iter()
-                    .filter(|order| {
-                        order.get("status").and_then(|s| s.as_str()) == Some("fulfilled")
-                    })
-                    .count() as i64
-            })
-            .unwrap_or(0);
+        let count = response
+            .get("count")
+            .and_then(serde_json::Value::as_i64)
+            .context("router order count response missing `count`")?;
 
         Ok(Some(count))
     }

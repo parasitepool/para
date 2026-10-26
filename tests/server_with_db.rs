@@ -1685,6 +1685,35 @@ async fn seed_cached_badges(database_url: String, username: &str, badges: serde_
     pool.close().await;
 }
 
+/// Minimal stand-in for the Router order-count endpoint used by refinery badges.
+async fn spawn_mock_router_order_count(address: &str, count: u64) -> String {
+    use axum::{Json, Router, extract::RawQuery, routing::get};
+
+    let expected = format!(
+        "address={}&status=fulfilled&kind=bucket",
+        urlencoding::encode(address)
+    );
+
+    let app = Router::new().route(
+        "/api/router/orders/count",
+        get(move |RawQuery(query): RawQuery| {
+            let expected = expected.clone();
+            async move {
+                assert_eq!(query.as_deref(), Some(expected.as_str()));
+                Json(serde_json::json!({ "count": count }))
+            }
+        }),
+    );
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    format!("http://{addr}")
+}
+
 /// Minimal stand-in for the guac dispenser, serving the four endpoints the
 /// badge fetcher reads. Returns the base URL to pass as `--guac-url`.
 async fn spawn_mock_guac(
@@ -1801,6 +1830,21 @@ async fn test_badges_dispenser_assets_absent_are_zero() {
     assert_eq!(payload.types.get("miner").unwrap().total, 0);
     assert_eq!(payload.types.get("auction_bidder").unwrap().total, 0);
     assert_eq!(payload.types.get("auction_winner").unwrap().total, 0);
+}
+
+#[tokio::test]
+async fn test_badges_refinery_uses_exact_router_count() {
+    let router = spawn_mock_router_order_count("foo", 137).await;
+    let server = TestServer::spawn_with_db_args(format!("--router-url {router}")).await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+    insert_test_account_with_diff(db_url.clone(), "foo", None, 0)
+        .await
+        .unwrap();
+
+    let payload: BadgesPayload = server.get_json_async("/badges/foo").await;
+
+    assert_eq!(payload.types.get("refinery").unwrap().total, 137);
 }
 
 #[tokio::test]

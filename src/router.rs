@@ -136,11 +136,23 @@ impl Router {
         self.wallet.as_deref()
     }
 
-    pub(crate) fn order_snapshots(
+    pub(crate) fn order_page(
         &self,
+        cursor: Option<u32>,
+        limit: usize,
+        live_filter: impl Fn(&Order) -> bool,
         cold_filter: impl Fn(u32, &entry::OrderEntry) -> bool,
     ) -> (Vec<Arc<Order>>, Vec<(u32, entry::OrderEntry)>) {
-        self.book.order_snapshots(cold_filter)
+        self.book
+            .order_page(cursor, limit, live_filter, cold_filter)
+    }
+
+    pub(crate) fn count_orders(
+        &self,
+        live_filter: impl Fn(&Order) -> bool,
+        cold_filter: impl Fn(u32, &entry::OrderEntry) -> bool,
+    ) -> u64 {
+        self.book.count_orders(live_filter, cold_filter)
     }
 
     #[cfg(test)]

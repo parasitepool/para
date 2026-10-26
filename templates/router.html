@@ -346,6 +346,7 @@
 
   <div class="column column-full">
     <h2>Orders</h2>
+    <div class=table-summary id=orders-summary></div>
     <div id=orders-root class=filter-table>
       <div class="table-toolbar two-filters">
         <label for=orders-search class=toolbar-search>Search
@@ -521,6 +522,10 @@
 let currentHashPrice = null;
 let currentCapacity = null;
 let currentPremium = null;
+const ORDER_PAGE_SIZE = 50;
+let ordersCursor = null;
+let ordersCursorStack = [];
+let ordersNextCursor = null;
 const ORDER_STATUS_PRIORITY = Object.fromEntries(
   ['active', 'in_mempool', 'pending', 'expired', 'disconnected', 'fulfilled', 'cancelled']
     .map((status, i) => [status, i])
@@ -576,7 +581,11 @@ const ordersTable = initFilterTable({
   ascByDefault: ['status'],
   tiebreak: (a, b) => compareNumber(b.id, a.id),
   renderRow,
-  onFilterChange: () => startPolling(refresh),
+  onFilterChange: () => {
+    resetOrders();
+    startPolling(refresh);
+  },
+  serverPaging: { onPrev: prevOrdersPage, onNext: nextOrdersPage },
 });
 
 async function fetchCurrentHashPrice(signal) {
@@ -588,19 +597,47 @@ async function fetchCurrentHashPrice(signal) {
   return match[1];
 }
 
-async function fetchOrders(signal) {
-  const query = ordersTable.buildQuery();
-  const r = await fetch(`/api/router/orders?${query}`, withAuthOptions({ signal }));
-  if (r.status === 401) {
-    redirectToLogin();
-    throw new Error(`/api/router/orders: ${r.status}`);
-  }
-  if (!r.ok) throw new Error(`/api/router/orders: ${r.status}`);
-  return r.json();
+function resetOrders() {
+  ordersCursor = null;
+  ordersCursorStack = [];
+  ordersNextCursor = null;
+}
+
+function nextOrdersPage() {
+  if (ordersNextCursor == null) return;
+  ordersCursorStack.push(ordersCursor);
+  ordersCursor = ordersNextCursor;
+  ordersNextCursor = null;
+  startPolling(refresh);
+}
+
+function prevOrdersPage() {
+  if (ordersCursorStack.length === 0) return;
+  ordersCursor = ordersCursorStack.pop();
+  startPolling(refresh);
+}
+
+function applyOrderPage(page) {
+  ordersNextCursor = page.nextCursor;
+  ordersTable.setRows(page.rows);
+  ordersTable.setPageState({
+    page: ordersCursorStack.length,
+    hasPrev: ordersCursorStack.length > 0,
+    hasNext: ordersNextCursor != null,
+  });
+  document.getElementById('orders-summary').textContent =
+    'Newest first, sorting applies to the current page';
+}
+
+function fetchOrders(signal) {
+  const params = new URLSearchParams(ordersTable.buildQuery());
+  params.set('limit', String(ORDER_PAGE_SIZE));
+  if (ordersCursor != null) params.set('cursor', ordersCursor);
+  return fetchPage(`/api/router/orders?${params}`, signal);
 }
 
 async function refresh(signal) {
-  const [routerData, ordersData, systemData, bitcoinData] = await Promise.all([
+  const [routerData, ordersPage, systemData, bitcoinData] = await Promise.all([
     fetchJson('/api/router/status', { signal }),
     fetchOrders(signal),
     fetchJsonIfAllowed('/api/system/status', { signal }),
@@ -663,7 +700,7 @@ async function refresh(signal) {
   renderBitcoinData(bitcoinData);
   renderSystemData(systemData);
 
-  ordersTable.setRows(ordersData || []);
+  if (!signal.aborted) applyOrderPage(ordersPage);
 }
 initLogControls();
 setupLogToggle();

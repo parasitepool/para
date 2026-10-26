@@ -185,8 +185,20 @@ impl Orders {
         self.cold.get(&id)
     }
 
-    pub(crate) fn cold_entries(&self) -> impl Iterator<Item = (u32, &entry::OrderEntry)> {
-        self.cold.iter().map(|(id, entry)| (*id, entry))
+    fn cold_page(
+        &self,
+        cursor: Option<u32>,
+        limit: usize,
+        filter: impl Fn(u32, &entry::OrderEntry) -> bool,
+    ) -> Vec<(u32, entry::OrderEntry)> {
+        self.cold
+            .iter()
+            .rev()
+            .skip_while(|(id, _)| cursor.is_some_and(|cursor| **id >= cursor))
+            .filter(|(id, entry)| filter(**id, entry))
+            .take(limit)
+            .map(|(id, entry)| (*id, entry.clone()))
+            .collect()
     }
 
     pub(crate) fn get(&self, id: u32) -> Option<Arc<Order>> {
@@ -195,6 +207,22 @@ impl Orders {
 
     pub(crate) fn live(&self) -> Vec<Arc<Order>> {
         self.live.values().cloned().collect()
+    }
+
+    fn live_page(
+        &self,
+        cursor: Option<u32>,
+        limit: usize,
+        filter: impl Fn(&Order) -> bool,
+    ) -> Vec<Arc<Order>> {
+        self.live
+            .iter()
+            .rev()
+            .skip_while(|(id, _)| cursor.is_some_and(|cursor| **id >= cursor))
+            .filter(|(_, order)| filter(order))
+            .take(limit)
+            .map(|(_, order)| order.clone())
+            .collect()
     }
 
     pub(crate) fn active(&self) -> Vec<Arc<Order>> {
@@ -255,21 +283,40 @@ impl OrderBook {
         }
     }
 
-    pub(crate) fn order_snapshots(
+    pub(crate) fn order_page(
         &self,
+        cursor: Option<u32>,
+        limit: usize,
+        live_filter: impl Fn(&Order) -> bool,
         cold_filter: impl Fn(u32, &entry::OrderEntry) -> bool,
     ) -> (Vec<Arc<Order>>, Vec<(u32, entry::OrderEntry)>) {
         let orders = self.orders.read();
 
-        let live = orders.live();
+        (
+            orders.live_page(cursor, limit, live_filter),
+            orders.cold_page(cursor, limit, cold_filter),
+        )
+    }
 
+    pub(crate) fn count_orders(
+        &self,
+        live_filter: impl Fn(&Order) -> bool,
+        cold_filter: impl Fn(u32, &entry::OrderEntry) -> bool,
+    ) -> u64 {
+        let orders = self.orders.read();
+
+        let live = orders
+            .live
+            .values()
+            .filter(|order| live_filter(order))
+            .count();
         let cold = orders
-            .cold_entries()
-            .filter(|(id, entry)| cold_filter(*id, entry))
-            .map(|(id, entry)| (id, entry.clone()))
-            .collect();
+            .cold
+            .iter()
+            .filter(|(id, entry)| cold_filter(**id, entry))
+            .count();
 
-        (live, cold)
+        (live + cold) as u64
     }
 
     pub(crate) fn status_snapshot(&self) -> StatusSnapshot {
@@ -627,6 +674,51 @@ mod tests {
         assert_eq!(snapshot.cold.accepted_shares, 1);
         assert_eq!(snapshot.total_users, 2);
         assert_eq!(router.status().upstream.totals.users, 2);
+    }
+
+    #[test]
+    fn order_page_walks_live_and_cold_by_cursor() {
+        let router = test_router();
+
+        for id in [2, 4, 6] {
+            router
+                .book
+                .add(test_order(id, None, OrderStatus::Active, &router.metatron));
+        }
+
+        for id in [1, 3, 5] {
+            router.book.add_cold(
+                id,
+                test_order(id, None, OrderStatus::Expired, &router.metatron).to_entry(),
+            );
+        }
+
+        let page_ids = |cursor,
+                        live_filter: fn(&Order) -> bool,
+                        cold_filter: fn(u32, &entry::OrderEntry) -> bool| {
+            let (live, cold) = router.book.order_page(cursor, 2, live_filter, cold_filter);
+            let mut ids = live
+                .iter()
+                .map(|order| order.id)
+                .chain(cold.iter().map(|(id, _)| *id))
+                .collect::<Vec<_>>();
+            ids.sort_unstable_by(|a, b| b.cmp(a));
+            ids.truncate(2);
+            ids
+        };
+
+        let page = |cursor| page_ids(cursor, |_| true, |_, _| true);
+
+        assert_eq!(page(None), [6, 5]);
+        assert_eq!(page(Some(5)), [4, 3]);
+        assert_eq!(page(Some(3)), [2, 1]);
+        assert!(page(Some(1)).is_empty());
+
+        let filtered = |cursor| page_ids(cursor, |order| order.id != 6, |id, _| id != 5);
+
+        assert_eq!(filtered(None), [4, 3]);
+        assert_eq!(filtered(Some(3)), [2, 1]);
+        assert!(filtered(Some(1)).is_empty());
     }
 
     #[test]
