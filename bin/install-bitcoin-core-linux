@@ -3,8 +3,8 @@
 set -euxo pipefail
 
 # Pin by hash, updates should update both fields
-version=31.1
-sha256=b80d9c3e04da78fb6f0569685673418cf686fadba9042d926d13fb87ff503f9e
+version=31.2
+sha256=2f38996afaa74dfa469a23bf4727887133dfc09784df1f21ddf1c74d0dc82300
 
 # bitcoin-node is the multiprocess daemon that serves the mining IPC socket
 if ! bitcoind --version | grep -qF "v$version" || ! bitcoin-node --version | grep -qF "v$version"; then
