@@ -42,7 +42,7 @@ pub use {
     nonce::Nonce,
     ntime::Ntime,
     prevhash::PrevHash,
-    si::{EXA, GIGA, KILO, MEGA, PETA, TERA, YOTTA, ZETTA, format_si, parse_si},
+    si::{EXA, GIGA, KILO, MEGA, PETA, TERA, YOTTA, ZETTA, format_si, format_si_spaced, parse_si},
     username::Username,
     version::Version,
 };

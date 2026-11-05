@@ -268,11 +268,16 @@ function formatSi(v, unit) {
   const i = Math.max(0, Math.min(Math.floor(Math.log10(v) / 3), SI_PREFIXES.length - 1));
   const scaled = v / Math.pow(1000, i);
   const truncated = Math.floor(scaled * 100) / 100;
-  return truncated.toFixed(2) + ' ' + SI_PREFIXES[i] + unit;
+  const suffix = SI_PREFIXES[i] + unit;
+  return truncated.toFixed(2) + (suffix ? ' ' + suffix : '');
 }
 
 function formatHashrate(h) { return formatSi(h, 'H/s'); }
 function formatHashDays(v) { return formatSi(v, 'Hd'); }
+function formatHashWork(v) {
+  if (v === null || v === undefined) return null;
+  return v < 1 ? formatDifficulty(v) : formatSi(v, '');
+}
 
 function formatTimestamp(ts) {
   if (ts === null || ts === undefined) return '-';
@@ -321,7 +326,7 @@ function rejectionDetail(accepted, rejected) {
 }
 
 function rejectionWorkDetail(accepted, rejected) {
-  return `${formatDifficulty(rejected || 0)} / ${formatDifficulty((accepted || 0) + (rejected || 0))}`;
+  return `${formatHashWork(rejected || 0)} / ${formatHashWork((accepted || 0) + (rejected || 0))}`;
 }
 
 function truncateMiddle(s, maxLen = 15, edgeLen = 6) {
@@ -525,7 +530,7 @@ const FORMATTERS = {
   sats_phd: price => price + ' sats/PHd',
   multiplier: value => formatTruncated(value) + '×',
   address: address => ({ text: truncateMiddle(address, 20, 8), full: address }),
-  delivered_work: total => formatDifficulty(total.accepted_work + total.rejected_work),
+  delivered_work: total => formatHashWork(total.accepted_work + total.rejected_work),
   username: username => ({ text: truncateMiddle(username), full: username }),
   rejection_shares: side => ({
     text: rejectionPct(side.accepted_shares, side.rejected_shares),

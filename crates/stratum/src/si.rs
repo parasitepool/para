@@ -23,6 +23,20 @@ pub const SI_PREFIXES: &[(&str, f64)] = &[
 
 /// Format a value with SI prefixes (K, M, G, T, P, ...)
 pub fn format_si(value: f64, unit: &str, f: &mut Formatter<'_>) -> fmt::Result {
+    format_si_impl(value, unit, false, f)
+}
+
+/// Format a value with SI prefixes separated from the number by a space.
+pub fn format_si_spaced(value: f64, unit: &str, f: &mut Formatter<'_>) -> fmt::Result {
+    format_si_impl(value, unit, true, f)
+}
+
+fn format_si_impl(
+    value: f64,
+    unit: &str,
+    space_before_prefix: bool,
+    f: &mut Formatter<'_>,
+) -> fmt::Result {
     if value == 0.0 {
         return if unit.is_empty() {
             write!(f, "0")
@@ -47,7 +61,7 @@ pub fn format_si(value: f64, unit: &str, f: &mut Formatter<'_>) -> fmt::Result {
 
     if suffix.is_empty() {
         write!(f, "{trimmed}")
-    } else if unit.is_empty() {
+    } else if unit.is_empty() && !space_before_prefix {
         write!(f, "{trimmed}{suffix}")
     } else {
         write!(f, "{trimmed} {suffix}")
@@ -116,6 +130,14 @@ mod tests {
         }
     }
 
+    struct FormatSiSpaced(f64, &'static str);
+
+    impl Display for FormatSiSpaced {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            format_si_spaced(self.0, self.1, f)
+        }
+    }
+
     #[test]
     fn format() {
         #[track_caller]
@@ -140,6 +162,20 @@ mod tests {
         case(9999.0, "", "9.99K");
         case(999_999.0, "", "999.99K");
         case(9_999_999.0, "", "9.99M");
+    }
+
+    #[test]
+    fn format_spaced() {
+        #[track_caller]
+        fn case(value: f64, unit: &'static str, expected: &str) {
+            assert_eq!(FormatSiSpaced(value, unit).to_string(), expected);
+        }
+
+        case(0.0, "", "0");
+        case(1.0, "", "1");
+        case(1e3, "", "1 K");
+        case(1.5e12, "", "1.5 T");
+        case(1.567e12, "H/s", "1.56 TH/s");
     }
 
     #[test]

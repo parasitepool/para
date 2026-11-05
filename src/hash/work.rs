@@ -51,7 +51,7 @@ impl From<HashWork> for f64 {
 
 impl Display for HashWork {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        format_si(self.0, "", f)
+        format_si_spaced(self.0, "", f)
     }
 }
 
@@ -90,8 +90,13 @@ mod tests {
     #[test]
     fn display() {
         assert_eq!(HashWork::new(0.0).unwrap().to_string(), "0");
-        assert_eq!(HashWork::new(3_161_600_000.0).unwrap().to_string(), "3.16G");
-        assert_eq!(HashWork::new(1e6).unwrap().to_string(), "1M");
+        assert_eq!(HashWork::new(1.0).unwrap().to_string(), "1");
+        assert_eq!(
+            HashWork::new(3_161_600_000.0).unwrap().to_string(),
+            "3.16 G"
+        );
+        assert_eq!(HashWork::new(1e6).unwrap().to_string(), "1 M");
+        assert_eq!(HashWork::new(1e12).unwrap().to_string(), "1 T");
     }
 
     #[test]

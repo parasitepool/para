@@ -108,7 +108,7 @@ use {
         Authorize, Configure, Difficulty, Extranonce, Id, JobId, MAX_ENONCE_SIZE, MAX_MESSAGE_SIZE,
         MIN_ENONCE_SIZE, MerkleNode, Message, Method, Nbits, Nonce, Notify, Ntime, PETA, PrevHash,
         Reconnect, SetDifficulty, StratumError, Submit, Subscribe, SubscribeResponse, Username,
-        Version, format_si, merkle_root, parse_si,
+        Version, format_si, format_si_spaced, merkle_root, parse_si,
     },
     subcommand::server::account::Account,
     sysinfo::{Disks, System},
