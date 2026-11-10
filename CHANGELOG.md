@@ -1,6 +1,13 @@
 Changelog
 =========
 
+[0.6.2](https://github.com/parasitepool/para/releases/tag/0.6.2) - 2026-11-10
+-----------------------------------------------------------------------------
+
+### Added
+- Add blockwork transfer system (#653)
+- Update dependecies (#656)
+
 [0.6.1](https://github.com/parasitepool/para/releases/tag/0.6.1) - 2026-11-10
 -----------------------------------------------------------------------------
 
