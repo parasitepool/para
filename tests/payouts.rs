@@ -237,6 +237,98 @@ async fn test_payout_distribution_proportional_to_diff() {
 }
 
 #[tokio::test]
+async fn test_diff_transfer_flows_through_block_payout() {
+    let mut server =
+        TestServer::spawn_with_db_args("--admin-token testtoken --enable-payout-transfers").await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
+
+    for (user, diff) in [("user_a", 1000), ("user_b", 1000)] {
+        insert_test_account(
+            db_url.clone(),
+            user,
+            Some(&format!("{user}@ln.com")),
+            vec![],
+            diff,
+        )
+        .await
+        .unwrap();
+    }
+
+    server.admin_token = Some("testtoken".into());
+    let transfer = serde_json::json!({ "from": "user_a", "to": "user_b", "diff": 1000 });
+    let _: serde_json::Value = server.post_json("/payouts/transfer", &transfer).await;
+
+    let mut test_block = create_test_block(800003);
+    test_block.coinbasevalue = Some(600000000);
+    test_block.username = Some("finder".to_string());
+
+    let batch = ShareBatch {
+        block: Some(test_block),
+        shares: vec![],
+        hostname: "test-node".to_string(),
+        batch_id: BATCH_COUNTER.fetch_add(1, Ordering::SeqCst) as u64,
+        total_shares: 0,
+        start_id: 1,
+        end_id: 1,
+    };
+
+    let response: SyncResponse = server.post_json("/sync/batch", &batch).await;
+    assert_eq!(response.status, "OK");
+
+    // Source is fully transferred out, so only the destination is paid
+    let block_payouts: Vec<(String, i64, i64)> = sqlx::query_as(
+        "SELECT a.username, p.amount, p.diff_paid
+         FROM payouts p
+         JOIN accounts a ON p.account_id = a.id
+         WHERE p.blockheight_end = 800003
+         ORDER BY a.username",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(block_payouts, vec![("user_b".into(), 500000000, 2000)]);
+
+    let pending: Vec<PendingPayout> = server
+        .get_json_async_raw("/payouts?format=json")
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].btc_address, "user_b");
+    assert_eq!(pending[0].amount_sats, 500000000);
+
+    let history: Vec<serde_json::Value> = server
+        .get_json_async_raw("/payouts/history")
+        .await
+        .json()
+        .await
+        .unwrap();
+    let transfers: Vec<_> = history
+        .iter()
+        .filter(|p| p["status"] == "success")
+        .collect();
+    assert_eq!(transfers.len(), 2);
+    assert!(transfers.iter().all(|p| p["amount_sats"] == 0));
+
+    // Both accounts now have zero unpaid diff
+    for (from, to) in [("user_a", "user_b"), ("user_b", "user_a")] {
+        let res = server
+            .post_json_raw(
+                "/payouts/transfer",
+                &serde_json::json!({ "from": from, "to": to, "diff": 1 }),
+            )
+            .await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    }
+
+    pool.close().await;
+}
+
+#[tokio::test]
 async fn test_payout_excludes_cancelled_payouts_from_calculation() {
     let server = TestServer::spawn_with_db().await;
     let db_url = server.database_url().unwrap();

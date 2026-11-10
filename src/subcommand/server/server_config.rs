@@ -39,6 +39,8 @@ pub(crate) struct ServerConfig {
     ttl: u64,
     #[arg(long, help = "Run account migration before processing sync batches.")]
     migrate_accounts: bool,
+    #[arg(long, help = "Enable the admin POST /payouts/transfer endpoint.")]
+    enable_payout_transfers: bool,
     #[arg(long, help = "Base URL of the Router service for refinery badges.")]
     router_url: Option<String>,
     #[arg(long, help = "Bearer token for the Router service.")]
@@ -137,6 +139,10 @@ impl ServerConfig {
 
     pub(crate) fn migrate_accounts(&self) -> bool {
         self.migrate_accounts
+    }
+
+    pub(crate) fn enable_payout_transfers(&self) -> bool {
+        self.enable_payout_transfers
     }
 
     pub(crate) fn router_url(&self) -> Option<String> {

@@ -70,6 +70,33 @@ pub struct UpdatePayoutStatusRequest {
     pub failure_reason: Option<String>,
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone, ToSchema)]
+pub struct TransferDiffRequest {
+    pub from: String,
+    pub to: String,
+    pub diff: i64,
+}
+
+#[derive(Debug)]
+pub enum TransferDiffError {
+    UnknownAccount(String),
+    InsufficientDiff { username: String, unpaid: i64 },
+    Database(Error),
+}
+
+impl From<sqlx::Error> for TransferDiffError {
+    fn from(err: sqlx::Error) -> Self {
+        Self::Database(anyhow!(err))
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, ToSchema)]
+pub struct TransferDiffResponse {
+    pub from_payout_id: i64,
+    pub to_payout_id: i64,
+    pub diff: i64,
+}
+
 #[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone, PartialEq, ToSchema)]
 pub struct HistoricalPayout {
     pub id: i64,
@@ -819,16 +846,23 @@ impl Database {
         .await
         .map_err(|err| anyhow!(err))?;
 
+        // Accounts sharing a lightning address are paid together. Accounts
+        // without one are kept apart by username, otherwise every account
+        // with no lnurl would collapse into a single payout credited to
+        // whichever account came first.
         let mut grouped: HashMap<String, PendingPayout> = HashMap::new();
         for (payout_id, row) in (1i64..).zip(rows) {
-            let entry = grouped
-                .entry(row.ln_address.clone())
-                .or_insert_with(|| PendingPayout {
-                    ln_address: row.ln_address.clone(),
-                    btc_address: row.username.clone(),
-                    amount_sats: 0,
-                    payout_ids: Vec::new(),
-                });
+            let key = if row.ln_address.is_empty() {
+                format!("username:{}", row.username)
+            } else {
+                row.ln_address.clone()
+            };
+            let entry = grouped.entry(key).or_insert_with(|| PendingPayout {
+                ln_address: row.ln_address.clone(),
+                btc_address: row.username.clone(),
+                amount_sats: 0,
+                payout_ids: Vec::new(),
+            });
             entry.amount_sats += row.amount;
             entry.payout_ids.push(payout_id);
         }
@@ -837,6 +871,87 @@ impl Database {
         result.sort_by_key(|b| Reverse(b.amount_sats));
 
         Ok(result)
+    }
+
+    /// Move unpaid diff between accounts via a zero-amount payout pair
+    pub async fn transfer_diff(
+        &self,
+        from: &str,
+        to: &str,
+        diff: i64,
+    ) -> Result<TransferDiffResponse, TransferDiffError> {
+        // Negative heights keyed on id avoid unique_payout_per_block collisions
+        const INSERT: &str = "
+            INSERT INTO payouts
+                (id, account_id, amount, diff_paid, blockheight_start, blockheight_end, status, failure_reason)
+            SELECT nid, $1, 0, $2, (-nid)::INTEGER, (-nid)::INTEGER, 'success', $3
+            FROM nextval(pg_get_serial_sequence('payouts', 'id')) AS nid
+            RETURNING id
+        ";
+
+        let mut tx = self.pool.begin().await?;
+
+        // Lock both accounts in id order so concurrent transfers serialize without deadlocks
+        let locked = sqlx::query_as::<_, (i64, String)>(
+            "SELECT id, username FROM accounts WHERE username IN ($1, $2) ORDER BY id FOR UPDATE",
+        )
+        .bind(from)
+        .bind(to)
+        .fetch_all(&mut *tx)
+        .await?;
+
+        let account_id = |username: &str| {
+            locked
+                .iter()
+                .find(|(_, name)| name == username)
+                .map(|(id, _)| *id)
+                .ok_or_else(|| TransferDiffError::UnknownAccount(username.into()))
+        };
+        let from_id = account_id(from)?;
+        let to_id = account_id(to)?;
+
+        // Read under the lock so every committed transfer is counted
+        let unpaid = sqlx::query_scalar::<_, i64>(
+            "
+            SELECT (COALESCE(a.total_diff, 0) - COALESCE(SUM(p.diff_paid), 0))::BIGINT
+            FROM accounts a
+            LEFT JOIN payouts p ON p.account_id = a.id AND p.status != 'cancelled'
+            WHERE a.id = $1
+            GROUP BY a.id, a.total_diff
+            ",
+        )
+        .bind(from_id)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        if diff > unpaid {
+            return Err(TransferDiffError::InsufficientDiff {
+                username: from.into(),
+                unpaid,
+            });
+        }
+
+        let from_payout_id = sqlx::query_scalar::<_, i64>(INSERT)
+            .bind(from_id)
+            .bind(diff)
+            .bind(format!("diff transfer to {to}"))
+            .fetch_one(&mut *tx)
+            .await?;
+
+        let to_payout_id = sqlx::query_scalar::<_, i64>(INSERT)
+            .bind(to_id)
+            .bind(-diff)
+            .bind(format!("diff transfer from {from}"))
+            .fetch_one(&mut *tx)
+            .await?;
+
+        tx.commit().await?;
+
+        Ok(TransferDiffResponse {
+            from_payout_id,
+            to_payout_id,
+            diff,
+        })
     }
 
     pub async fn update_payout_status(

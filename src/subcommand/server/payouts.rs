@@ -2,14 +2,15 @@ use {
     super::*,
     crate::subcommand::server::{
         database::{
-            FailedPayout, HistoricalPayout, Payout, PendingPayout, Split, UpdatePayoutStatusRequest,
+            FailedPayout, HistoricalPayout, Payout, PendingPayout, Split, TransferDiffError,
+            TransferDiffRequest, TransferDiffResponse, UpdatePayoutStatusRequest,
         },
         templates::simulate_payouts::SimulatePayoutsHtml,
     },
 };
 
 pub(crate) fn payouts_router(config: Arc<ServerConfig>, database: Database) -> axum::Router {
-    axum::Router::new()
+    let mut router = axum::Router::new()
         .route("/payouts", get(payouts_all))
         .route("/payouts/failed", get(payouts_failed))
         .route("/payouts/history", get(payouts_history))
@@ -25,7 +26,13 @@ pub(crate) fn payouts_router(config: Arc<ServerConfig>, database: Database) -> a
             get(user_payout_range),
         )
         .route("/split", get(open_split))
-        .route("/split/{blockheight}", get(sat_split))
+        .route("/split/{blockheight}", get(sat_split));
+
+    if config.enable_payout_transfers() {
+        router = router.route("/payouts/transfer", post(transfer_diff));
+    }
+
+    router
         .layer(Extension(database))
         .layer(from_extractor::<AdminAuth>())
         .layer(Extension(config))
@@ -371,4 +378,47 @@ pub(crate) async fn update_payout_status(
         "rows_affected": rows_affected,
     }))
     .into_response())
+}
+
+/// Move unpaid diff from one account to another (requires --enable-payout-transfers)
+#[utoipa::path(
+    post,
+    path = "/payouts/transfer",
+    security(("admin_token" = [])),
+    request_body = TransferDiffRequest,
+    responses(
+        (status = 200, description = "Diff transferred", body = TransferDiffResponse),
+        (status = 400, description = "Invalid diff or same account"),
+        (status = 404, description = "Account not found"),
+    ),
+    tag = "payouts"
+)]
+pub(crate) async fn transfer_diff(
+    Extension(database): Extension<Database>,
+    Json(request): Json<TransferDiffRequest>,
+) -> ServerResult<Response> {
+    if request.diff <= 0 {
+        return Err(ServerError::BadRequest("diff must be positive".into()));
+    }
+
+    if request.from == request.to {
+        return Err(ServerError::BadRequest(
+            "from and to must be different accounts".into(),
+        ));
+    }
+
+    let response = database
+        .transfer_diff(&request.from, &request.to, request.diff)
+        .await
+        .map_err(|err| match err {
+            TransferDiffError::UnknownAccount(username) => {
+                ServerError::NotFound(format!("account {username} not found"))
+            }
+            TransferDiffError::InsufficientDiff { username, unpaid } => {
+                ServerError::BadRequest(format!("{username} has only {unpaid} unpaid diff"))
+            }
+            TransferDiffError::Database(err) => ServerError::Internal(err),
+        })?;
+
+    Ok(Json(response).into_response())
 }

@@ -157,6 +157,7 @@ impl Modify for SecurityAddon {
         payouts::user_payout_range,
         payouts::update_payout_status,
         payouts::payouts_simulate,
+        payouts::transfer_diff,
         // Round endpoints
         rounds::rounds,
         rounds::round_current,
@@ -189,6 +190,8 @@ impl Modify for SecurityAddon {
         database::PendingPayout,
         database::FailedPayout,
         database::UpdatePayoutStatusRequest,
+        database::TransferDiffRequest,
+        database::TransferDiffResponse,
         // Round schemas
         rounds::Round,
         rounds::RoundParticipant,

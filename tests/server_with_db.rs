@@ -936,6 +936,163 @@ async fn test_payouts_simulate_requires_auth() {
 }
 
 #[tokio::test]
+async fn test_payouts_transfer_moves_unpaid_diff() {
+    let mut server =
+        TestServer::spawn_with_db_args("--admin-token testtoken --enable-payout-transfers").await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    for user in ["user1", "user2"] {
+        insert_test_account_with_diff(db_url.clone(), user, Some(&format!("{user}@ln.test")), 1000)
+            .await
+            .unwrap();
+    }
+
+    server.admin_token = Some("testtoken".into());
+    let response: serde_json::Value = server
+        .post_json(
+            "/payouts/transfer",
+            &serde_json::json!({ "from": "user1", "to": "user2", "diff": 500 }),
+        )
+        .await;
+    assert_eq!(response["diff"], 500);
+
+    let payouts: Vec<PendingPayout> = server
+        .get_json_async_raw("/payouts/simulate?format=json&coinbase_value=400000000")
+        .await
+        .json()
+        .await
+        .unwrap();
+
+    let amount = |user: &str| {
+        payouts
+            .iter()
+            .find(|p| p.btc_address == user)
+            .unwrap()
+            .amount_sats
+    };
+    assert_eq!(amount("user1"), 100_000_000);
+    assert_eq!(amount("user2"), 300_000_000);
+
+    let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
+    let rows: Vec<(i64, i64, String)> = sqlx::query_as(
+        "SELECT amount, diff_paid, status FROM payouts WHERE id IN ($1, $2) ORDER BY diff_paid DESC",
+    )
+    .bind(response["from_payout_id"].as_i64().unwrap())
+    .bind(response["to_payout_id"].as_i64().unwrap())
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        rows,
+        vec![(0, 500, "success".into()), (0, -500, "success".into())]
+    );
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn test_payouts_transfer_concurrent_requests_cannot_overdraw() {
+    let mut server =
+        TestServer::spawn_with_db_args("--admin-token testtoken --enable-payout-transfers").await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    insert_test_account_with_diff(db_url.clone(), "user1", Some("user1@ln.test"), 1000)
+        .await
+        .unwrap();
+    insert_test_account_with_diff(db_url.clone(), "user2", Some("user2@ln.test"), 1000)
+        .await
+        .unwrap();
+
+    server.admin_token = Some("testtoken".into());
+    let body = serde_json::json!({ "from": "user1", "to": "user2", "diff": 600 });
+    let responses =
+        futures::future::join_all((0..8).map(|_| server.post_json_raw("/payouts/transfer", &body)))
+            .await;
+
+    let ok = responses
+        .iter()
+        .filter(|r| r.status() == StatusCode::OK)
+        .count();
+    let rejected = responses
+        .iter()
+        .filter(|r| r.status() == StatusCode::BAD_REQUEST)
+        .count();
+    assert_eq!((ok, rejected), (1, 7));
+
+    let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
+    let moved: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(p.diff_paid), 0)::BIGINT FROM payouts p
+         JOIN accounts a ON a.id = p.account_id WHERE a.username = 'user1'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(moved, 600);
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn test_payouts_transfer_disabled_by_default() {
+    let mut server = TestServer::spawn_with_db_args("--admin-token testtoken").await;
+    setup_test_schema(server.database_url().unwrap())
+        .await
+        .unwrap();
+
+    server.admin_token = Some("testtoken".into());
+    let res = server
+        .post_json_raw(
+            "/payouts/transfer",
+            &serde_json::json!({ "from": "user1", "to": "user2", "diff": 1 }),
+        )
+        .await;
+    // GET /payouts/{blockheight} captures the path, so POST is 405 not 404
+    assert_eq!(res.status(), StatusCode::METHOD_NOT_ALLOWED);
+}
+
+#[tokio::test]
+async fn test_payouts_transfer_rejects_invalid_requests() {
+    let mut server =
+        TestServer::spawn_with_db_args("--admin-token testtoken --enable-payout-transfers").await;
+    let db_url = server.database_url().unwrap();
+    setup_test_schema(db_url.clone()).await.unwrap();
+
+    insert_test_account_with_diff(db_url.clone(), "user1", Some("user1@ln.test"), 1000)
+        .await
+        .unwrap();
+    insert_test_account_with_diff(db_url.clone(), "user2", Some("user2@ln.test"), 1000)
+        .await
+        .unwrap();
+    insert_test_payout(db_url.clone(), "user1", 0, 800, "success")
+        .await
+        .unwrap();
+
+    let transfer = |from: &str, to: &str, diff: i64| serde_json::json!({ "from": from, "to": to, "diff": diff });
+
+    let res = server
+        .post_json_raw("/payouts/transfer", &transfer("user1", "user2", 100))
+        .await;
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+    server.admin_token = Some("testtoken".into());
+
+    for (body, status) in [
+        (transfer("user1", "user2", 201), StatusCode::BAD_REQUEST),
+        (transfer("user1", "user2", 0), StatusCode::BAD_REQUEST),
+        (transfer("user1", "user1", 100), StatusCode::BAD_REQUEST),
+        (transfer("user1", "nobody", 100), StatusCode::NOT_FOUND),
+    ] {
+        let res = server.post_json_raw("/payouts/transfer", &body).await;
+        assert_eq!(res.status(), status, "{body}");
+    }
+
+    let res = server
+        .post_json_raw("/payouts/transfer", &transfer("user1", "user2", 200))
+        .await;
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[tokio::test]
 async fn test_payouts_simulate_groups_by_lnurl() {
     let mut server = TestServer::spawn_with_db_args("--admin-token testtoken").await;
     setup_test_schema(server.database_url().unwrap())
@@ -989,6 +1146,49 @@ async fn test_payouts_simulate_groups_by_lnurl() {
         .unwrap();
 
     assert_eq!(shared_payout.amount_sats, other_payout.amount_sats);
+}
+
+#[tokio::test]
+async fn test_payouts_simulate_keeps_accounts_without_lnurl_apart() {
+    let mut server = TestServer::spawn_with_db_args("--admin-token testtoken").await;
+    setup_test_schema(server.database_url().unwrap())
+        .await
+        .unwrap();
+
+    insert_test_account_with_diff(server.database_url().unwrap(), "user1", None, 1000)
+        .await
+        .unwrap();
+
+    insert_test_account_with_diff(server.database_url().unwrap(), "user2", None, 3000)
+        .await
+        .unwrap();
+
+    insert_test_account_with_diff(
+        server.database_url().unwrap(),
+        "user3",
+        Some("user3@ln.test"),
+        1000,
+    )
+    .await
+    .unwrap();
+
+    server.admin_token = Some("testtoken".into());
+    let payouts: Vec<PendingPayout> = server
+        .get_json_async_raw("/payouts/simulate?format=json")
+        .await
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(payouts.len(), 3);
+
+    let user1_payout = payouts.iter().find(|p| p.btc_address == "user1").unwrap();
+    let user2_payout = payouts.iter().find(|p| p.btc_address == "user2").unwrap();
+    assert_eq!(user1_payout.ln_address, "");
+    assert_eq!(user2_payout.ln_address, "");
+    assert_eq!(user1_payout.payout_ids.len(), 1);
+    assert_eq!(user2_payout.payout_ids.len(), 1);
+    assert_eq!(user2_payout.amount_sats, 3 * user1_payout.amount_sats);
 }
 
 #[tokio::test]
