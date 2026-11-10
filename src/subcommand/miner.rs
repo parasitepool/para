@@ -60,7 +60,7 @@ impl Miner {
             Duration::from_secs(10),
         );
 
-        let mut system = System::new();
+        let mut system = System::new()?;
         system.refresh_cpu_all();
         let available_cpu_cores = system.cpus().len();
 

@@ -343,7 +343,7 @@ impl Sync {
         let batch = ShareBatch {
             block: block.clone(),
             shares: shares.to_vec(),
-            hostname: System::host_name().ok_or(anyhow!("no hostname found"))?,
+            hostname: System::host_name().context("no hostname found")?,
             batch_id,
             total_shares: shares.len(),
             start_id,

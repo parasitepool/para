@@ -1,6 +1,40 @@
 Changelog
 =========
 
+[0.6.1](https://github.com/parasitepool/para/releases/tag/0.6.1) - 2026-11-10
+-----------------------------------------------------------------------------
+
+### Added
+- Add implicit cursor pagination to orders and users endpoints (#647)
+- Add Auction Badges (#644)
+- Add disburse crate (#641)
+- Track disconnects to differentiate churn, probes and trims (#633)
+- Speed up wallet (#628)
+
+### Changed 
+- Tweak hashwork formatting (#652)
+- Small copr/testing config tweaks (#651)
+- Update Bitcoin Core dependency to v32.1 (#650)
+- Upgrade pinned Bitcoin Core to 31.2 (#649)
+- Decay upstream hashrate (#637)
+- Deprecate severe starvation and trim cooldown, add surplus and relative load (#636)
+- Deprecate intents machinery (#635)
+- Update bip322 dep (#624)
+- Add ckpool submodule (#623)
+
+### Fixed
+- Fix login (#648)
+- Sort db entries to avoid deadlock retry (#634)
+- Fix dashboard memory consumption (#632)
+- Correct bitcoin node deployment script (#625)
+
+### Misc
+- Update dependencies (#645)
+- Improve key management/isolation (#631)
+- Silence errors on expected return values (#626)
+- Cleanup errant block alerts (#629)
+- Improve CI reliability (#618)
+
 [0.6.0](https://github.com/parasitepool/para/releases/tag/0.6.0) - 2026-08-25
 -----------------------------------------------------------------------------
 

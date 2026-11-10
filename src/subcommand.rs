@@ -55,7 +55,7 @@ impl Subcommand {
                 let mut sync_task = None;
 
                 if let Some(sync_endpoint) = server.config.sync_endpoint() {
-                    let hostname = System::host_name().ok_or(anyhow!("no hostname found"))?;
+                    let hostname = System::host_name().context("no hostname found")?;
 
                     if !sync_endpoint.contains(&hostname) {
                         let mut sync = sync::Sync::default().with_endpoint(sync_endpoint.clone());

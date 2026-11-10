@@ -474,14 +474,14 @@ pub(crate) async fn status(
     let blockheight = Server::get_synced_blockheight(&config).await;
 
     task::block_in_place(|| {
-        let mut system = System::new_all();
+        let mut system = System::new_all()?;
         system.refresh_all();
 
         let path = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
 
         let mut disk_usage_percent = 0.0;
         let disks =
-            Disks::new_with_refreshed_list_specifics(DiskRefreshKind::nothing().with_storage());
+            Disks::new_with_refreshed_list_specifics(DiskRefreshKind::nothing().with_storage())?;
         for disk in &disks {
             if path.starts_with(disk.mount_point()) {
                 let total = disk.total_space();
@@ -513,7 +513,7 @@ pub(crate) async fn status(
             disk_usage_percent,
             memory_usage_percent,
             cpu_usage_percent,
-            uptime: System::uptime(),
+            uptime: System::uptime()?,
             hashrate: parsed_status.map(|st| st.hash_rates.hashrate1m),
             users: parsed_status.map(|st| st.pool.users),
             workers: parsed_status.map(|st| st.pool.workers),

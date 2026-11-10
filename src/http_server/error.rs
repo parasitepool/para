@@ -45,6 +45,12 @@ impl From<Error> for ServerError {
     }
 }
 
+impl From<sysinfo::Error> for ServerError {
+    fn from(error: sysinfo::Error) -> Self {
+        Self::Internal(error.into())
+    }
+}
+
 impl From<RouterError> for ServerError {
     fn from(error: RouterError) -> Self {
         match &error {

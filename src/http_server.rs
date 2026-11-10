@@ -363,16 +363,16 @@ fn round2(value: f64) -> f64 {
     (value * 100.0).round() / 100.0
 }
 
-pub(crate) async fn system_status(_: AdminAuth) -> Json<SystemStatus> {
-    Json(task::block_in_place(|| {
-        let system = System::new_all();
+pub(crate) async fn system_status(_: AdminAuth) -> ServerResult<Json<SystemStatus>> {
+    let status = task::block_in_place(|| -> ServerResult<SystemStatus> {
+        let system = System::new_all()?;
 
         let path = env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
 
         let mut disk_usage_percent = 0.0;
 
         let disks =
-            Disks::new_with_refreshed_list_specifics(DiskRefreshKind::nothing().with_storage());
+            Disks::new_with_refreshed_list_specifics(DiskRefreshKind::nothing().with_storage())?;
 
         for disk in &disks {
             if path.starts_with(disk.mount_point()) {
@@ -394,13 +394,15 @@ pub(crate) async fn system_status(_: AdminAuth) -> Json<SystemStatus> {
 
         let cpu_usage_percent: f64 = system.global_cpu_usage().into();
 
-        SystemStatus {
+        Ok(SystemStatus {
             cpu_usage_percent: round2(cpu_usage_percent),
             memory_usage_percent: round2(memory_usage_percent),
             disk_usage_percent: round2(disk_usage_percent),
-            uptime: System::uptime(),
-        }
-    }))
+            uptime: System::uptime()?,
+        })
+    })?;
+
+    Ok(Json(status))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

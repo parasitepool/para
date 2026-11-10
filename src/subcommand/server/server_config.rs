@@ -89,9 +89,7 @@ impl ServerConfig {
         if !self.acme_domain.is_empty() {
             Ok(self.acme_domain.clone())
         } else {
-            Ok(vec![
-                System::host_name().ok_or(anyhow!("no hostname found"))?,
-            ])
+            Ok(vec![System::host_name().context("no hostname found")?])
         }
     }
 
