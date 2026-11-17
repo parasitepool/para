@@ -128,11 +128,11 @@ impl OrderRunner {
             }
         }
 
-        if order.status().awaiting_payment() && !cashier.wait_for_payment(order, payment).await? {
-            return Ok(false);
+        if !order.status().awaiting_payment() {
+            return Ok(true);
         }
 
-        Ok(true)
+        cashier.wait_for_payment(order, payment).await
     }
 
     fn terminate_unless_shutting_down(&self, order: &Order) {

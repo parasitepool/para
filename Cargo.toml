@@ -2,7 +2,6 @@
 name = "para"
 description = "Parasite toolkit"
 version = "0.6.2"
-homepage = "https://github.com/parasitepool/para"
 autotests = false
 exclude = ["/bitcoin", "/ckpool"]
 
