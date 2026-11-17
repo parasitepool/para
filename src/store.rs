@@ -333,6 +333,7 @@ mod tests {
                 .unwrap(),
             bucket: Some(entry::BucketEntry {
                 target: HashDays::new(10.0).unwrap(),
+                hash_rate: None,
                 address: "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc"
                     .parse::<Address<NetworkUnchecked>>()
                     .unwrap(),

@@ -216,7 +216,7 @@ impl Control {
 mod tests {
     use {
         super::*,
-        order::{Bucket, OrderStatus, Payment},
+        order::{Bucket, OrderStatus, Payment, Terms},
     };
 
     struct TestControl {
@@ -257,16 +257,24 @@ mod tests {
         status: OrderStatus,
         metatron: &Arc<Metatron>,
     ) -> Arc<Order> {
-        let bucket = target.map(|target| Bucket {
-            target,
-            payment: Payment::new(test_address(), 0, Amount::from_sat(1000), 0),
+        let terms = target.map(|target| Terms {
+            payment: Payment {
+                address: test_address(),
+                derivation_index: 0,
+                amount: Amount::from_sat(1000),
+                created_at_height: 0,
+            },
+            bucket: Bucket {
+                target,
+                hash_rate: None,
+            },
         });
         let order = Order::new(
             id,
             "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333"
                 .parse()
                 .unwrap(),
-            bucket,
+            terms,
             CancellationToken::new(),
             metatron.clone(),
         );

@@ -1,7 +1,13 @@
-use {super::*, epoch};
+use {
+    super::*,
+    crate::hash::{SECONDS_PER_DAY, price::blocks_until_adjustment},
+    epoch,
+};
 
 pub(crate) const HYSTERESIS_LOW: f64 = 0.95;
 pub(crate) const HYSTERESIS_HIGH: f64 = 1.3;
+
+const MIN_DELIVERY: Duration = Duration::from_hours(1);
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -54,25 +60,64 @@ pub struct Payment {
     pub(crate) created_at_height: u32,
 }
 
-impl Payment {
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Bucket {
+    pub(crate) target: HashDays,
+    pub(crate) hash_rate: Option<HashRate>,
+}
+
+impl Bucket {
     pub(crate) fn new(
-        address: Address,
-        derivation_index: u32,
-        amount: Amount,
-        created_at_height: u32,
-    ) -> Self {
+        target: HashDays,
+        hash_rate: Option<HashRate>,
+        tip: u32,
+    ) -> RouterResult<Self> {
+        if let Some(hash_rate) = hash_rate {
+            let default = target.target_hashrate();
+
+            let days_until_adjustment = f64::from(blocks_until_adjustment(tip.into()) - 1)
+                * f64::from(TARGET_BLOCK_SPACING)
+                / SECONDS_PER_DAY;
+
+            let min = default / days_until_adjustment.max(1.0);
+            let max = default * (SECONDS_PER_DAY / MIN_DELIVERY.as_secs_f64());
+
+            if hash_rate < min || hash_rate > max {
+                return Err(RouterError::HashRateOutOfRange {
+                    hash_rate,
+                    min,
+                    max,
+                });
+            }
+        }
+
+        Ok(Self { target, hash_rate })
+    }
+
+    pub(crate) fn target_hashrate(self) -> HashRate {
+        self.hash_rate
+            .unwrap_or_else(|| self.target.target_hashrate())
+    }
+}
+
+impl From<&entry::BucketEntry> for Bucket {
+    fn from(entry: &entry::BucketEntry) -> Self {
         Self {
-            address,
-            derivation_index,
-            amount,
-            created_at_height,
+            target: entry.target,
+            hash_rate: entry.hash_rate,
         }
     }
 }
 
-pub struct Bucket {
-    pub(crate) target: HashDays,
+pub struct Terms {
     pub(crate) payment: Payment,
+    pub(crate) bucket: Bucket,
+}
+
+impl Terms {
+    pub(crate) fn hash_price(&self) -> HashPrice {
+        HashPrice::from_total(self.payment.amount, self.bucket.target)
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -108,7 +153,7 @@ pub(crate) struct SessionRegistration {
 pub struct Order {
     pub(crate) id: u32,
     pub(crate) upstream_target: UpstreamTarget,
-    pub(crate) bucket: Option<Bucket>,
+    pub(crate) terms: Option<Terms>,
     pub(crate) upstream: Mutex<Option<Arc<Upstream>>>,
     pub(crate) allocator: OnceLock<Arc<EnonceAllocator>>,
     pub(crate) lifecycle: Mutex<Lifecycle>,
@@ -122,7 +167,7 @@ impl Order {
     pub(crate) fn new(
         id: u32,
         upstream_target: UpstreamTarget,
-        bucket: Option<Bucket>,
+        terms: Option<Terms>,
         cancel: CancellationToken,
         metatron: Arc<Metatron>,
     ) -> Arc<Self> {
@@ -131,7 +176,7 @@ impl Order {
         Arc::new(Self {
             id,
             upstream_target,
-            bucket,
+            terms,
             upstream: Mutex::new(None),
             allocator: OnceLock::new(),
             lifecycle: Mutex::new(Lifecycle {
@@ -154,13 +199,17 @@ impl Order {
             status: lifecycle.status,
             review: lifecycle.review,
             upstream_target: self.upstream_target.clone(),
-            bucket: self.bucket.as_ref().map(|bucket| entry::BucketEntry {
-                target: bucket.target,
-                address: bucket.payment.address.as_unchecked().clone(),
-                derivation_index: bucket.payment.derivation_index,
-                amount_sat: bucket.payment.amount.to_sat(),
-                created_at_height: bucket.payment.created_at_height,
-            }),
+            bucket: self
+                .terms
+                .as_ref()
+                .map(|Terms { payment, bucket }| entry::BucketEntry {
+                    target: bucket.target,
+                    hash_rate: bucket.hash_rate,
+                    address: payment.address.as_unchecked().clone(),
+                    derivation_index: payment.derivation_index,
+                    amount_sat: payment.amount.to_sat(),
+                    created_at_height: payment.created_at_height,
+                }),
             created_at_secs: epoch::instant_to_epoch_secs(self.created_at, now),
             stats: self.stats().to_entry(now),
         }
@@ -175,22 +224,24 @@ impl Order {
     ) -> Result<Arc<Self>> {
         let stats = Stats::from_entry(order_entry.stats)?;
 
-        let bucket = order_entry
+        let terms = order_entry
             .bucket
-            .map(|bucket| -> Result<Bucket> {
+            .as_ref()
+            .map(|bucket| -> Result<Terms> {
                 let address = bucket
                     .address
+                    .clone()
                     .require_network(network)
                     .with_context(|| format!("restore order {id} payment address"))?;
 
-                Ok(Bucket {
-                    target: bucket.target,
-                    payment: Payment::new(
+                Ok(Terms {
+                    payment: Payment {
                         address,
-                        bucket.derivation_index,
-                        Amount::from_sat(bucket.amount_sat),
-                        bucket.created_at_height,
-                    ),
+                        derivation_index: bucket.derivation_index,
+                        amount: Amount::from_sat(bucket.amount_sat),
+                        created_at_height: bucket.created_at_height,
+                    },
+                    bucket: bucket.into(),
                 })
             })
             .transpose()?;
@@ -200,7 +251,7 @@ impl Order {
         Ok(Arc::new(Self {
             id,
             upstream_target: order_entry.upstream_target,
-            bucket,
+            terms,
             upstream: Mutex::new(None),
             allocator: OnceLock::new(),
             lifecycle: Mutex::new(Lifecycle {
@@ -356,13 +407,32 @@ impl Order {
     }
 
     pub(crate) fn is_sink(&self) -> bool {
-        self.bucket.is_none()
+        self.terms.is_none()
+    }
+
+    pub(crate) fn payment(&self) -> Option<&Payment> {
+        self.terms.as_ref().map(|terms| &terms.payment)
+    }
+
+    pub(crate) fn bucket(&self) -> Option<Bucket> {
+        self.terms.as_ref().map(|terms| terms.bucket)
+    }
+
+    pub(crate) fn hash_price(&self) -> Option<HashPrice> {
+        self.terms.as_ref().map(Terms::hash_price)
+    }
+
+    pub(crate) fn target(&self) -> Option<HashDays> {
+        self.bucket().map(|bucket| bucket.target)
+    }
+
+    pub(crate) fn target_hashrate(&self) -> Option<HashRate> {
+        self.bucket().map(Bucket::target_hashrate)
     }
 
     pub(crate) fn is_starving(&self, hashrate: HashRate) -> bool {
-        self.bucket
-            .as_ref()
-            .is_some_and(|bucket| hashrate < bucket.target.target_hashrate() * HYSTERESIS_LOW)
+        self.target_hashrate()
+            .is_some_and(|target| hashrate < target * HYSTERESIS_LOW)
     }
 
     pub(crate) fn upstream(&self) -> Option<Arc<Upstream>> {
@@ -394,11 +464,9 @@ impl Order {
     }
 
     pub(crate) fn hashrate_shortfall(&self, supplied: HashRate) -> HashRate {
-        let Some(bucket) = &self.bucket else {
+        let Some(target) = self.target_hashrate() else {
             return HashRate::ZERO;
         };
-
-        let target = bucket.target.target_hashrate();
 
         if supplied >= target {
             HashRate::ZERO
@@ -408,11 +476,9 @@ impl Order {
     }
 
     pub(crate) fn hashrate_surplus(&self, supplied: HashRate) -> HashRate {
-        let Some(bucket) = &self.bucket else {
+        let Some(target) = self.target_hashrate() else {
             return HashRate::ZERO;
         };
-
-        let target = bucket.target.target_hashrate();
 
         if supplied > target {
             supplied - target
@@ -422,11 +488,9 @@ impl Order {
     }
 
     pub(crate) fn relative_load(&self, supplied: HashRate) -> f64 {
-        let Some(bucket) = &self.bucket else {
+        let Some(target) = self.target_hashrate() else {
             return f64::INFINITY;
         };
-
-        let target = bucket.target.target_hashrate();
 
         if target == HashRate::ZERO {
             return f64::INFINITY;
@@ -444,15 +508,15 @@ impl Order {
     }
 
     pub(crate) fn is_fulfilled(&self) -> bool {
-        let Some(bucket) = &self.bucket else {
+        let Some(target) = self.target() else {
             return false;
         };
 
-        self.delivered_work() >= bucket.target.to_hash_work()
+        self.delivered_work() >= target.to_hash_work()
     }
 
     pub(crate) fn hashrate_deficit(&self, now: Instant) -> HashRate {
-        if self.bucket.is_none() {
+        if self.is_sink() {
             return HashRate::ZERO;
         }
 
@@ -470,7 +534,7 @@ impl Order {
     }
 
     pub(crate) fn residual_deficit(&self, now: Instant) -> HashRate {
-        if self.bucket.is_none() {
+        if self.is_sink() {
             return HashRate::ZERO;
         }
 
@@ -482,9 +546,8 @@ impl Order {
     }
 
     pub(crate) fn is_overflowing(&self, now: Instant) -> bool {
-        self.bucket.as_ref().is_some_and(|bucket| {
-            self.hashrate_1m(now) > bucket.target.target_hashrate() * HYSTERESIS_HIGH
-        })
+        self.target_hashrate()
+            .is_some_and(|target| self.hashrate_1m(now) > target * HYSTERESIS_HIGH)
     }
 
     pub(crate) fn session_details(&self, now: Instant) -> Vec<SessionDetail> {
@@ -499,12 +562,11 @@ impl Order {
     }
 
     pub(super) fn trim(&self, max_sessions: Option<usize>, now: Instant) -> Trim {
-        let Some(bucket) = &self.bucket else {
+        let Some(target) = self.target_hashrate() else {
             return Trim::default();
         };
 
         let current = self.hashrate_1m(now);
-        let target = bucket.target.target_hashrate();
         let ceiling = target * HYSTERESIS_HIGH;
 
         if current <= ceiling {
@@ -621,16 +683,41 @@ mod tests {
     }
 
     fn test_order(metatron: &Arc<Metatron>, target: Option<HashDays>) -> Arc<Order> {
-        let bucket = target.map(|target| Bucket {
-            target,
-            payment: Payment::new(test_address(), 0, Amount::from_sat(1000), 0),
+        test_bucket_order(
+            metatron,
+            target.map(|target| Bucket {
+                target,
+                hash_rate: None,
+            }),
+        )
+    }
+
+    fn rated_order(metatron: &Arc<Metatron>, target: f64, hash_rate: f64) -> Arc<Order> {
+        test_bucket_order(
+            metatron,
+            Some(Bucket {
+                target: HashDays::new(target).unwrap(),
+                hash_rate: Some(HashRate::from_hps(hash_rate)),
+            }),
+        )
+    }
+
+    fn test_bucket_order(metatron: &Arc<Metatron>, bucket: Option<Bucket>) -> Arc<Order> {
+        let terms = bucket.map(|bucket| Terms {
+            payment: Payment {
+                address: test_address(),
+                derivation_index: 0,
+                amount: Amount::from_sat(1000),
+                created_at_height: 0,
+            },
+            bucket,
         });
         Order::new(
             0,
             "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333"
                 .parse()
                 .unwrap(),
-            bucket,
+            terms,
             CancellationToken::new(),
             metatron.clone(),
         )
@@ -988,6 +1075,108 @@ mod tests {
     }
 
     #[test]
+    fn bucket_new_bounds_requested_hash_rate() {
+        #[track_caller]
+        fn case(tip: u32, hash_rate: Option<f64>, accepted: bool) {
+            let result = Bucket::new(
+                HashDays::new(100.0).unwrap(),
+                hash_rate.map(HashRate::from_hps),
+                tip,
+            );
+
+            assert_eq!(
+                result.is_ok(),
+                accepted,
+                "tip {tip}, hash_rate {hash_rate:?}"
+            );
+        }
+
+        let three_days_out = 2015 - 432;
+        let half_day_out = 2015 - 72;
+        let last_block = 2015;
+
+        for tip in [0, three_days_out, half_day_out, last_block] {
+            case(tip, None, true);
+            case(tip, Some(100.0), true);
+            case(tip, Some(2400.0), true);
+            case(tip, Some(2401.0), false);
+            case(tip, Some(0.0), false);
+        }
+
+        case(three_days_out, Some(100.0 / 3.0), true);
+        case(three_days_out, Some(25.0), false);
+        case(half_day_out, Some(99.0), false);
+        case(last_block, Some(99.0), false);
+    }
+
+    #[test]
+    fn bucket_new_reports_bounds() {
+        let target = HashDays::new(100.0).unwrap();
+        let tip = 2015 - 432;
+        let error = Bucket::new(target, Some(HashRate::ZERO), tip).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "hash rate 0 H/s must be between 33.34 H/s and 2.4 KH/s"
+        );
+        assert!(matches!(
+            error,
+            RouterError::HashRateOutOfRange { min, max, .. }
+                if min == HashRate::from_hps(100.0 / 3.0) && max == HashRate::from_hps(2400.0)
+        ));
+        assert!(Bucket::new(target, Some("33.34 H/s".parse().unwrap()), tip).is_ok());
+    }
+
+    #[test]
+    fn requested_hash_rate_overrides_default_target() {
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
+        let order = rated_order(&metatron, 100.0, 50.0);
+
+        assert_eq!(order.target_hashrate(), Some(HashRate::from_hps(50.0)));
+        assert!(order.is_starving(HashRate::from_hps(47.0)));
+        assert!(!order.is_starving(HashRate::from_hps(48.0)));
+        assert_eq!(
+            order.hashrate_shortfall(HashRate::from_hps(20.0)),
+            HashRate::from_hps(30.0)
+        );
+        assert_eq!(
+            order.hashrate_surplus(HashRate::from_hps(80.0)),
+            HashRate::from_hps(30.0)
+        );
+        assert_eq!(order.relative_load(HashRate::from_hps(25.0)), 0.5);
+    }
+
+    #[test]
+    fn requested_hash_rate_drives_overflow_and_trim() {
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
+
+        let default = test_order(&metatron, Some(HashDays::new(1e15).unwrap()));
+        register_session(&metatron, &default, "aaaa", 13.0);
+        let default_mid = register_session(&metatron, &default, "bbbb", 7.0);
+        register_session(&metatron, &default, "cccc", 4.0);
+
+        assert!(!default.is_overflowing(Instant::now()));
+        default.trim(None, Instant::now());
+        assert!(!default_mid.is_cancelled());
+
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
+
+        let rated = rated_order(&metatron, 1e15, 1e9);
+        let fat = register_session(&metatron, &rated, "aaaa", 13.0);
+        let mid = register_session(&metatron, &rated, "bbbb", 7.0);
+        let small = register_session(&metatron, &rated, "cccc", 4.0);
+
+        assert!(rated.is_overflowing(Instant::now()));
+        rated.trim(None, Instant::now());
+        assert!(!fat.is_cancelled());
+        assert!(mid.is_cancelled());
+        assert!(!small.is_cancelled());
+    }
+
+    #[test]
     fn hashrate_deficit() {
         #[track_caller]
         fn case(
@@ -1061,6 +1250,63 @@ mod tests {
         metatron
             .set_order_delivered_work(fulfilled.id, HashDays::new(100.0).unwrap().to_hash_work());
         assert_eq!(fulfilled.residual_deficit(Instant::now()), HashRate::ZERO);
+    }
+
+    #[test]
+    fn to_entry_round_trip_preserves_payment_and_target() {
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
+        let order = test_order(&metatron, Some(HashDays::new(100.0).unwrap()));
+        let entry = order.to_entry();
+        let restored = Order::restore(
+            0,
+            entry,
+            Network::Testnet,
+            CancellationToken::new(),
+            metatron,
+        )
+        .unwrap();
+
+        assert_eq!(restored.payment().unwrap().address, test_address());
+        assert_eq!(restored.payment().unwrap().amount, Amount::from_sat(1000));
+        assert_eq!(restored.target(), Some(HashDays::new(100.0).unwrap()));
+        assert_eq!(restored.bucket().unwrap().hash_rate, None);
+        assert_eq!(restored.target_hashrate(), Some(HashRate::from_hps(100.0)));
+    }
+
+    #[test]
+    fn to_entry_round_trip_preserves_hash_rate() {
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
+        let order = rated_order(&metatron, 100.0, 50.0);
+        let entry = order.to_entry();
+
+        assert_eq!(
+            entry.bucket.as_ref().unwrap().hash_rate,
+            Some(HashRate::from_hps(50.0))
+        );
+
+        let restored = Order::restore(
+            0,
+            entry,
+            Network::Testnet,
+            CancellationToken::new(),
+            metatron,
+        )
+        .unwrap();
+
+        assert_eq!(restored.target_hashrate(), Some(HashRate::from_hps(50.0)));
+    }
+
+    #[test]
+    fn sink_to_entry_has_no_payment() {
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
+        let sink = test_order(&metatron, None);
+
+        assert!(sink.is_sink());
+        assert!(sink.terms.is_none());
+        assert!(sink.to_entry().bucket.is_none());
     }
 
     fn connect_upstream(order: &Order, metatron: &Arc<Metatron>) {

@@ -265,7 +265,12 @@ pub(crate) fn add_test_bucket_order(router: &Arc<Router>) -> Arc<Order> {
     wallet.mark_synced();
 
     router
-        .add_bucket_order(test_upstream_target(), hash_days(1e18), router.hash_price())
+        .add_bucket_order(
+            test_upstream_target(),
+            hash_days(1e18),
+            None,
+            router.hash_price(),
+        )
         .unwrap()
 }
 
@@ -275,16 +280,38 @@ pub(crate) fn test_order(
     status: OrderStatus,
     metatron: &Arc<Metatron>,
 ) -> Arc<Order> {
-    let bucket = target.map(|target| Bucket {
-        target,
-        payment: Payment::new(test_address(), 0, Amount::from_sat(1000), 0),
+    test_bucket_order(
+        id,
+        target.map(|target| Bucket {
+            target,
+            hash_rate: None,
+        }),
+        status,
+        metatron,
+    )
+}
+
+pub(crate) fn test_bucket_order(
+    id: u32,
+    bucket: Option<Bucket>,
+    status: OrderStatus,
+    metatron: &Arc<Metatron>,
+) -> Arc<Order> {
+    let terms = bucket.map(|bucket| Terms {
+        payment: Payment {
+            address: test_address(),
+            derivation_index: 0,
+            amount: Amount::from_sat(1000),
+            created_at_height: 0,
+        },
+        bucket,
     });
     let order = Order::new(
         id,
         "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333"
             .parse()
             .unwrap(),
-        bucket,
+        terms,
         CancellationToken::new(),
         metatron.clone(),
     );
@@ -311,9 +338,12 @@ pub(crate) fn test_order_with_payment(
     let order = Order::new(
         id,
         test_upstream_target(),
-        Some(Bucket {
-            target: hash_days(100.0),
+        Some(Terms {
             payment,
+            bucket: Bucket {
+                target: hash_days(100.0),
+                hash_rate: None,
+            },
         }),
         CancellationToken::new(),
         metatron.clone(),
@@ -324,7 +354,7 @@ pub(crate) fn test_order_with_payment(
 }
 
 pub(crate) fn payment(order: &Order) -> &Payment {
-    &order.bucket.as_ref().unwrap().payment
+    order.payment().unwrap()
 }
 
 pub(crate) fn hash_days(value: f64) -> HashDays {
@@ -379,14 +409,17 @@ pub(crate) fn funded_bucket_order(
         "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4.foo@bar:3333"
             .parse()
             .unwrap(),
-        Some(Bucket {
-            target: hash_days(100.0),
-            payment: Payment::new(
-                funded.address.clone(),
-                funded.index,
-                Amount::from_sat(amount),
-                0,
-            ),
+        Some(Terms {
+            payment: Payment {
+                address: funded.address.clone(),
+                derivation_index: funded.index,
+                amount: Amount::from_sat(amount),
+                created_at_height: 0,
+            },
+            bucket: Bucket {
+                target: hash_days(100.0),
+                hash_rate: None,
+            },
         }),
         CancellationToken::new(),
         metatron.clone(),

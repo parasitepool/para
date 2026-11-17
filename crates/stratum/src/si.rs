@@ -23,18 +23,24 @@ pub const SI_PREFIXES: &[(&str, f64)] = &[
 
 /// Format a value with SI prefixes (K, M, G, T, P, ...)
 pub fn format_si(value: f64, unit: &str, f: &mut Formatter<'_>) -> fmt::Result {
-    format_si_impl(value, unit, false, f)
+    format_si_impl(value, unit, false, f64::trunc, f)
 }
 
 /// Format a value with SI prefixes separated from the number by a space.
 pub fn format_si_spaced(value: f64, unit: &str, f: &mut Formatter<'_>) -> fmt::Result {
-    format_si_impl(value, unit, true, f)
+    format_si_impl(value, unit, true, f64::trunc, f)
+}
+
+/// Like `format_si`, but rounds up so the shown value is never below `value`.
+pub fn format_si_ceil(value: f64, unit: &str, f: &mut Formatter<'_>) -> fmt::Result {
+    format_si_impl(value, unit, false, f64::ceil, f)
 }
 
 fn format_si_impl(
     value: f64,
     unit: &str,
     space_before_prefix: bool,
+    round: fn(f64) -> f64,
     f: &mut Formatter<'_>,
 ) -> fmt::Result {
     if value == 0.0 {
@@ -54,7 +60,7 @@ fn format_si_impl(
     let scaled = value / divisor;
     let precision = f.precision().unwrap_or(2);
     let factor = 10_f64.powi(precision as i32);
-    let s = format!("{:.precision$}", (scaled * factor).trunc() / factor);
+    let s = format!("{:.precision$}", round(scaled * factor) / factor);
     let trimmed = s.trim_end_matches('0').trim_end_matches('.');
 
     let suffix = format!("{prefix}{unit}");
@@ -138,6 +144,14 @@ mod tests {
         }
     }
 
+    struct FormatSiCeil(f64, &'static str);
+
+    impl Display for FormatSiCeil {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            format_si_ceil(self.0, self.1, f)
+        }
+    }
+
     #[test]
     fn format() {
         #[track_caller]
@@ -176,6 +190,20 @@ mod tests {
         case(1e3, "", "1 K");
         case(1.5e12, "", "1.5 T");
         case(1.567e12, "H/s", "1.56 TH/s");
+    }
+
+    #[test]
+    fn format_ceil() {
+        #[track_caller]
+        fn case(value: f64, unit: &'static str, expected: &str) {
+            assert_eq!(FormatSiCeil(value, unit).to_string(), expected);
+        }
+
+        case(0.0, "H/s", "0 H/s");
+        case(1e12, "H/s", "1 TH/s");
+        case(1.561e12, "H/s", "1.57 TH/s");
+        case(1.567e12, "H/s", "1.57 TH/s");
+        case(100.0 / 3.0 * 1e12, "H/s", "33.34 TH/s");
     }
 
     #[test]

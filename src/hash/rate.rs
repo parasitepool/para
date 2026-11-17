@@ -46,6 +46,18 @@ impl HashRate {
         self.0 / HASHES_PER_DIFF_1 as f64
     }
 
+    pub(crate) fn display_ceil(self) -> impl Display {
+        struct Ceil(f64);
+
+        impl Display for Ceil {
+            fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+                format_si_ceil(self.0, "H/s", f)
+            }
+        }
+
+        Ceil(self.0)
+    }
+
     #[cfg(test)]
     pub(crate) fn estimate(total_difficulty: f64, window: Duration) -> Self {
         if window.is_zero() {

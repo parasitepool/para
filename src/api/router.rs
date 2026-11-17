@@ -25,6 +25,7 @@ pub struct RouterStatus {
     pub halt: bool,
     pub boost: bool,
     pub wallet: WalletInfo,
+    pub target_hashrate: HashRate,
     pub deficit_hashrate: HashRate,
     pub surplus_hashrate: HashRate,
     pub starving_order_count: usize,
@@ -38,6 +39,7 @@ pub struct OrderRequest {
     pub upstream_target: UpstreamTarget,
     pub hash_days: HashDays,
     pub hash_price: HashPrice,
+    pub hash_rate: Option<HashRate>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -49,12 +51,12 @@ pub struct OrderResponse {
 }
 
 impl OrderResponse {
-    pub(crate) fn from_order(order: &Order, bucket: &Bucket) -> Self {
+    pub(crate) fn from_order(order: &Order, terms: &Terms) -> Self {
         Self {
             order_id: order.id,
-            payment_address: bucket.payment.address.as_unchecked().clone(),
-            payment_amount: bucket.payment.amount,
-            hash_price: HashPrice::from_total(bucket.payment.amount, bucket.target),
+            payment_address: terms.payment.address.as_unchecked().clone(),
+            payment_amount: terms.payment.amount,
+            hash_price: terms.hash_price(),
         }
     }
 }
@@ -67,6 +69,7 @@ pub struct OrderSummary {
     pub endpoint: String,
     pub username: String,
     pub requested_hash_days: Option<HashDays>,
+    pub target_hashrate: Option<HashRate>,
     pub hashrate: HashRate,
     pub delivered_hash_days: HashDays,
     pub best_share: Option<Difficulty>,
@@ -81,7 +84,8 @@ impl OrderSummary {
             review: order.review(),
             endpoint: order.upstream_target.endpoint().to_string(),
             username: order.upstream_target.username().to_string(),
-            requested_hash_days: order.bucket.as_ref().map(|bucket| bucket.target),
+            requested_hash_days: order.target(),
+            target_hashrate: order.target_hashrate(),
             hashrate: stats.hashrate_1m(now),
             delivered_hash_days: stats.delivered_work().to_hash_days(),
             best_share: stats.best_share,
@@ -97,6 +101,10 @@ impl OrderSummary {
             endpoint: entry.upstream_target.endpoint().to_string(),
             username: entry.upstream_target.username().to_string(),
             requested_hash_days: entry.bucket.as_ref().map(|bucket| bucket.target),
+            target_hashrate: entry
+                .bucket
+                .as_ref()
+                .map(|bucket| Bucket::from(bucket).target_hashrate()),
             hashrate: stats.hashrate_1m(now),
             delivered_hash_days: stats.delivered_work().to_hash_days(),
             best_share: stats.best_share,
@@ -113,6 +121,7 @@ pub struct OrderDetail {
     pub upstream_address: Option<SocketAddr>,
     pub upstream_disconnects_total: usize,
     pub requested_hash_days: Option<HashDays>,
+    pub target_hashrate: Option<HashRate>,
     pub hash_price: Option<HashPrice>,
     pub payment_address: Option<Address<NetworkUnchecked>>,
     pub payment_amount: Option<Amount>,
@@ -132,7 +141,7 @@ impl OrderDetail {
         txids: Vec<Txid>,
     ) -> Self {
         let upstream_conn = order.upstream();
-        let bucket = order.bucket.as_ref();
+        let payment = order.payment();
         let disconnects = metatron.connections().order_disconnects(order.id);
 
         let (sessions, downstream) = match &upstream_conn {
@@ -149,14 +158,14 @@ impl OrderDetail {
                 .as_ref()
                 .and_then(|upstream| upstream.upstream_address()),
             upstream_disconnects_total: disconnects,
-            requested_hash_days: bucket.map(|bucket| bucket.target),
-            hash_price: bucket
-                .map(|bucket| HashPrice::from_total(bucket.payment.amount, bucket.target)),
-            payment_address: bucket.map(|bucket| bucket.payment.address.as_unchecked().clone()),
-            payment_amount: bucket.map(|bucket| bucket.payment.amount),
+            requested_hash_days: order.target(),
+            target_hashrate: order.target_hashrate(),
+            hash_price: order.hash_price(),
+            payment_address: payment.map(|payment| payment.address.as_unchecked().clone()),
+            payment_amount: payment.map(|payment| payment.amount),
             txids,
             created_at: epoch::instant_to_epoch_secs(order.created_at, now) as u64,
-            created_at_height: bucket.map(|bucket| bucket.payment.created_at_height),
+            created_at_height: payment.map(|payment| payment.created_at_height),
             upstream: MiningStats::from_stats(&order.stats(), now),
             downstream: MiningStats::from_stats(&downstream, now),
             sessions: sessions
@@ -185,6 +194,7 @@ impl OrderDetail {
             upstream_address: None,
             upstream_disconnects_total: disconnects,
             requested_hash_days: bucket.map(|bucket| bucket.target),
+            target_hashrate: bucket.map(|bucket| Bucket::from(bucket).target_hashrate()),
             hash_price: bucket.map(|bucket| {
                 HashPrice::from_total(Amount::from_sat(bucket.amount_sat), bucket.target)
             }),
@@ -275,9 +285,8 @@ async fn order_detail(
 
     if let Some(order) = router.get_order(id) {
         let txids = order
-            .bucket
-            .as_ref()
-            .map(|bucket| txids_for(bucket.payment.derivation_index))
+            .payment()
+            .map(|payment| txids_for(payment.derivation_index))
             .unwrap_or_default();
 
         return Ok(Json(OrderDetail::from_order(
@@ -318,14 +327,13 @@ async fn add_order(
             router.add_bucket_order(
                 request.upstream_target,
                 request.hash_days,
+                request.hash_rate,
                 request.hash_price,
             )
         })
         .await??;
 
-    let Some(bucket) = &order.bucket else {
-        return Err(anyhow!("bucket order missing bucket").into());
-    };
+    let terms = order.terms.as_ref().context("bucket order missing terms")?;
 
     Ok((
         StatusCode::CREATED,
@@ -333,7 +341,7 @@ async fn add_order(
             axum::http::header::LOCATION,
             format!("/api/router/order/{}", order.id),
         )],
-        Json(OrderResponse::from_order(&order, bucket)),
+        Json(OrderResponse::from_order(&order, terms)),
     )
         .into_response())
 }
@@ -412,9 +420,8 @@ impl OrdersQuery {
 
     fn matches(&self, order: &Order) -> bool {
         let payment_address = order
-            .bucket
-            .as_ref()
-            .map(|bucket| bucket.payment.address.as_unchecked());
+            .payment()
+            .map(|payment| payment.address.as_unchecked());
 
         if let Some(address) = &self.address
             && !matches_address(&order.upstream_target, payment_address, address)
@@ -434,7 +441,7 @@ impl OrdersQuery {
 
         if self
             .kind
-            .is_some_and(|kind| !kind.matches(order.bucket.is_some()))
+            .is_some_and(|kind| !kind.matches(!order.is_sink()))
         {
             return false;
         }
@@ -794,6 +801,7 @@ mod tests {
                 .unwrap(),
             bucket: Some(entry::BucketEntry {
                 target: HashDays::new(100.0).unwrap(),
+                hash_rate: None,
                 address: "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc"
                     .parse()
                     .unwrap(),
@@ -842,11 +850,13 @@ mod tests {
 
     #[test]
     fn order_detail_from_entry_maps_fields() {
-        let entry = test_entry(OrderStatus::Expired);
+        let mut entry = test_entry(OrderStatus::Expired);
+        entry.bucket.as_mut().unwrap().hash_rate = Some(HashRate::from_hps(50.0));
         let connections = Connections::new(Instant::now());
         let detail = OrderDetail::from_entry(7, &entry, &connections, Vec::new()).unwrap();
 
         assert_eq!(detail.id, 7);
+        assert_eq!(detail.target_hashrate, Some(HashRate::from_hps(50.0)));
         assert_eq!(detail.status, OrderStatus::Expired);
         assert_eq!(detail.created_at, 1_700_000_000);
         assert_eq!(detail.created_at_height, Some(42));
@@ -909,6 +919,7 @@ mod tests {
         assert_eq!(summary.status, OrderStatus::Fulfilled);
         assert_eq!(summary.endpoint, "bar:3333");
         assert_eq!(summary.requested_hash_days.unwrap().as_f64(), 100.0);
+        assert_eq!(summary.target_hashrate, Some(HashRate::from_hps(100.0)));
     }
 
     async fn json_body<T: serde::de::DeserializeOwned>(response: Response) -> T {

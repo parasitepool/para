@@ -109,7 +109,7 @@ impl OrderRunner {
     }
 
     async fn await_payment(&self, order: &Arc<Order>) -> RouterResult<bool> {
-        let Some(bucket) = &order.bucket else {
+        let Some(payment) = order.payment() else {
             return Ok(true);
         };
 
@@ -128,9 +128,7 @@ impl OrderRunner {
             }
         }
 
-        if order.status().awaiting_payment()
-            && !cashier.wait_for_payment(order, &bucket.payment).await?
-        {
+        if order.status().awaiting_payment() && !cashier.wait_for_payment(order, payment).await? {
             return Ok(false);
         }
 

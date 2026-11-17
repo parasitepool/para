@@ -308,6 +308,7 @@ function parseSi(s, units) {
 }
 
 function parseHashDays(s) { return parseSi(s, ['Hd']); }
+function parseHashRate(s) { return parseSi(s, ['H/s', 'H']); }
 
 function formatTruncated(n) {
   if (n === null || n === undefined) return '-';

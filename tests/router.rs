@@ -110,6 +110,7 @@ async fn add_order(
             upstream_target: target.parse().unwrap(),
             hash_days,
             hash_price,
+            hash_rate: None,
         })
         .await
         .unwrap();
@@ -626,6 +627,7 @@ async fn add_order_with_zero_hashdays_rejected() {
                 .unwrap(),
             hash_days: HashDays::new(0.0).unwrap(),
             hash_price: current_hash_price(&router).await,
+            hash_rate: None,
         })
         .await
         .unwrap();
@@ -649,6 +651,7 @@ async fn add_order_price_overflow_rejected() {
                 .unwrap(),
             hash_days: HashDays::new(f64::MAX).unwrap(),
             hash_price: HashPrice::from_sats(u64::MAX),
+            hash_rate: None,
         })
         .await
         .unwrap();
@@ -672,6 +675,7 @@ async fn add_order_rejects_price_below_minimum() {
                 .unwrap(),
             hash_days: HashDays::new(2e5).unwrap(),
             hash_price: HashPrice::from_sats(0),
+            hash_rate: None,
         })
         .await
         .unwrap();
@@ -700,6 +704,7 @@ async fn add_order_rejects_price_below_minimum() {
                 .unwrap(),
             hash_days: HashDays::new(1e-10).unwrap(),
             hash_price,
+            hash_rate: None,
         })
         .await
         .unwrap();
@@ -747,6 +752,63 @@ async fn order_detail() {
     assert!(detail.sessions.is_empty());
     assert_eq!(detail.downstream.accepted_shares, 0);
     assert_eq!(detail.downstream.rejected_shares, 0);
+    assert_eq!(
+        detail.target_hashrate,
+        Some(para::hash::HashRate::from_hps(1e5))
+    );
+}
+
+#[tokio::test]
+#[timeout(300000)]
+async fn order_hash_rate_is_bounded_and_survives_restart() {
+    use para::hash::HashRate;
+
+    let bitcoind = spawn_regtest();
+    let descriptor = generate_descriptor();
+
+    let router = TestRouter::spawn(&descriptor, &bitcoind, "--start-diff 0.00001");
+
+    let hash_price = current_hash_price(&router).await;
+    let request = |hash_rate: f64| api::OrderRequest {
+        upstream_target: "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.worker@bar:3333"
+            .parse()
+            .unwrap(),
+        hash_days: HashDays::new(1e5).unwrap(),
+        hash_price,
+        hash_rate: Some(HashRate::from_hps(hash_rate)),
+    };
+
+    for hash_rate in [0.0, 25e5] {
+        let response = router.add_order(&request(hash_rate)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(response.text().await.unwrap().contains("must be between"));
+    }
+
+    let response = router.add_order(&request(2e5)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let id = response
+        .json::<api::OrderResponse>()
+        .await
+        .unwrap()
+        .order_id;
+
+    let expected = Some(HashRate::from_hps(2e5));
+
+    assert_eq!(
+        router.get_order(id).await.unwrap().target_hashrate,
+        expected
+    );
+    assert_eq!(
+        router.list_orders(None).await.unwrap()[0].target_hashrate,
+        expected
+    );
+
+    let router = router.restart(&descriptor, &bitcoind, "--start-diff 0.00001");
+
+    assert_eq!(
+        router.get_order(id).await.unwrap().target_hashrate,
+        expected
+    );
 }
 
 #[tokio::test]
@@ -888,6 +950,7 @@ async fn orders() {
             hash_days: HashDays::new(1e5).unwrap(),
             upstream_target: format!("{username}@127.0.0.1:1").parse().unwrap(),
             hash_price,
+            hash_rate: None,
         })
         .await
         .unwrap();

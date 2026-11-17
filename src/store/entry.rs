@@ -14,6 +14,7 @@ pub(crate) struct OrderEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct BucketEntry {
     pub(crate) target: HashDays,
+    pub(crate) hash_rate: Option<HashRate>,
     pub(crate) address: Address<NetworkUnchecked>,
     pub(crate) derivation_index: u32,
     pub(crate) amount_sat: u64,
@@ -88,6 +89,7 @@ mod tests {
                 .unwrap(),
             bucket: Some(BucketEntry {
                 target: HashDays::new(1.0).unwrap(),
+                hash_rate: None,
                 address: test_address(),
                 derivation_index: 9,
                 amount_sat: 1_000,
@@ -135,6 +137,33 @@ mod tests {
 
         assert_eq!(decoded.status, OrderStatus::Expired);
         assert_eq!(decoded.review, Review::Clean);
+    }
+
+    #[test]
+    fn bucket_entry_decodes_legacy_record_without_hash_rate() {
+        #[derive(Serialize)]
+        struct Legacy {
+            target: HashDays,
+            address: Address<NetworkUnchecked>,
+            derivation_index: u32,
+            amount_sat: u64,
+            created_at_height: u32,
+        }
+
+        let legacy = Legacy {
+            target: HashDays::new(1.0).unwrap(),
+            address: test_address(),
+            derivation_index: 9,
+            amount_sat: 1_000,
+            created_at_height: 100,
+        };
+
+        let mut bytes = Vec::new();
+        ciborium::into_writer(&legacy, &mut bytes).unwrap();
+        let decoded: BucketEntry = ciborium::from_reader(bytes.as_slice()).unwrap();
+
+        assert_eq!(decoded.hash_rate, None);
+        assert_eq!(decoded.derivation_index, 9);
     }
 
     #[test]

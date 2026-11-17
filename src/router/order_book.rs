@@ -118,6 +118,7 @@ impl Orders {
         let used = self.used_work();
         if used.as_f64() + target.as_f64() > capacity.as_f64() {
             let available = HashDays::from_raw((capacity.as_f64() - used.as_f64()).max(0.0));
+
             return Err(RouterError::InsufficientCapacity {
                 requested: target,
                 available,
@@ -249,8 +250,7 @@ impl Orders {
         self.live
             .values()
             .filter(|order| order.status() == status)
-            .filter_map(|order| order.bucket.as_ref())
-            .map(|bucket| bucket.target)
+            .filter_map(|order| order.target())
             .sum()
     }
 
@@ -310,6 +310,7 @@ impl OrderBook {
             .values()
             .filter(|order| live_filter(order))
             .count();
+
         let cold = orders
             .cold
             .iter()
@@ -327,6 +328,7 @@ impl OrderBook {
             .iter()
             .map(|order| order.upstream_target.username().address())
             .collect::<HashSet<_>>();
+
         let mut total_users = cold.addresses.len();
 
         for address in live_addresses {
@@ -464,23 +466,23 @@ impl OrderBook {
         };
 
         for order in self.orders.read().live() {
-            let Some(bucket) = &order.bucket else {
+            let Some(payment) = order.payment() else {
                 continue;
             };
 
-            let received = snapshot.received_by_deadline(bucket.payment.derivation_index, u32::MAX);
+            let received = snapshot.received_by_deadline(payment.derivation_index, u32::MAX);
 
             if order.status().is_terminal() && !order.is_fulfilled() && received > Amount::ZERO {
                 order.set_flagged();
             }
 
             if order.status() == OrderStatus::Active
-                && received < bucket.payment.amount
+                && received < payment.amount
                 && order.set_flagged()
             {
                 warn!(
                     "Active order {} payment vanished (received {received} of {})",
-                    order.id, bucket.payment.amount,
+                    order.id, payment.amount,
                 );
             }
         }
@@ -536,12 +538,8 @@ impl OrderBook {
         let known = orders
             .live()
             .iter()
-            .filter_map(|order| {
-                order
-                    .bucket
-                    .as_ref()
-                    .map(|bucket| bucket.payment.derivation_index)
-            })
+            .filter_map(|order| order.payment())
+            .map(|payment| payment.derivation_index)
             .collect::<HashSet<_>>();
 
         let mut orphans = Vec::new();
@@ -794,7 +792,12 @@ mod tests {
 
         let cold_entry = test_order_with_payment(
             1,
-            Payment::new(cold.address.clone(), cold.index, Amount::from_sat(1000), 0),
+            Payment {
+                address: cold.address.clone(),
+                derivation_index: cold.index,
+                amount: Amount::from_sat(1000),
+                created_at_height: 0,
+            },
             OrderStatus::Expired,
             &router.metatron,
         )
@@ -839,12 +842,12 @@ mod tests {
             let address = wallet.test_reveal_address();
             let order = test_order_with_payment(
                 id,
-                Payment::new(
-                    address.address.clone(),
-                    address.index,
-                    Amount::from_sat(1000),
-                    0,
-                ),
+                Payment {
+                    address: address.address.clone(),
+                    derivation_index: address.index,
+                    amount: Amount::from_sat(1000),
+                    created_at_height: 0,
+                },
                 status,
                 &router.metatron,
             );
@@ -860,12 +863,12 @@ mod tests {
 
         let unfunded = test_order_with_payment(
             4,
-            Payment::new(
-                wallet.test_reveal_address().address,
-                99,
-                Amount::from_sat(1000),
-                0,
-            ),
+            Payment {
+                address: wallet.test_reveal_address().address,
+                derivation_index: 99,
+                amount: Amount::from_sat(1000),
+                created_at_height: 0,
+            },
             OrderStatus::Expired,
             &router.metatron,
         );
@@ -904,12 +907,12 @@ mod tests {
         let address = wallet.test_reveal_address();
         let order = test_order_with_payment(
             0,
-            Payment::new(
-                address.address.clone(),
-                address.index,
-                Amount::from_sat(1000),
-                0,
-            ),
+            Payment {
+                address: address.address.clone(),
+                derivation_index: address.index,
+                amount: Amount::from_sat(1000),
+                created_at_height: 0,
+            },
             OrderStatus::Expired,
             &router.metatron,
         );
@@ -936,12 +939,12 @@ mod tests {
         let address = wallet.test_reveal_address();
         let order = test_order_with_payment(
             0,
-            Payment::new(
-                address.address.clone(),
-                address.index,
-                Amount::from_sat(1000),
-                0,
-            ),
+            Payment {
+                address: address.address.clone(),
+                derivation_index: address.index,
+                amount: Amount::from_sat(1000),
+                created_at_height: 0,
+            },
             OrderStatus::Expired,
             &router.metatron,
         );
@@ -1077,7 +1080,12 @@ mod tests {
             router.as_ref(),
             [test_order_with_payment(
                 0,
-                Payment::new(live.address.clone(), live.index, Amount::from_sat(1000), 0),
+                Payment {
+                    address: live.address.clone(),
+                    derivation_index: live.index,
+                    amount: Amount::from_sat(1000),
+                    created_at_height: 0,
+                },
                 OrderStatus::Active,
                 &router.metatron,
             )],
@@ -1085,7 +1093,12 @@ mod tests {
 
         let cold_entry = test_order_with_payment(
             1,
-            Payment::new(cold.address.clone(), cold.index, Amount::from_sat(1000), 0),
+            Payment {
+                address: cold.address.clone(),
+                derivation_index: cold.index,
+                amount: Amount::from_sat(1000),
+                created_at_height: 0,
+            },
             OrderStatus::Expired,
             &router.metatron,
         )
@@ -1113,12 +1126,12 @@ mod tests {
         let address = wallet.test_reveal_address();
         let order = test_order_with_payment(
             0,
-            Payment::new(
-                address.address.clone(),
-                address.index,
-                Amount::from_sat(1000),
-                0,
-            ),
+            Payment {
+                address: address.address.clone(),
+                derivation_index: address.index,
+                amount: Amount::from_sat(1000),
+                created_at_height: 0,
+            },
             OrderStatus::Pending,
             &router.metatron,
         );
@@ -1150,12 +1163,12 @@ mod tests {
         let address = wallet.test_reveal_address();
         let order = test_order_with_payment(
             0,
-            Payment::new(
-                address.address.clone(),
-                address.index,
-                Amount::from_sat(1000),
-                0,
-            ),
+            Payment {
+                address: address.address.clone(),
+                derivation_index: address.index,
+                amount: Amount::from_sat(1000),
+                created_at_height: 0,
+            },
             OrderStatus::Pending,
             &router.metatron,
         );
@@ -1180,7 +1193,12 @@ mod tests {
         let router = test_router();
         let order = test_order_with_payment(
             0,
-            Payment::new(test_address(), 0, Amount::from_sat(1000), 0),
+            Payment {
+                address: test_address(),
+                derivation_index: 0,
+                amount: Amount::from_sat(1000),
+                created_at_height: 0,
+            },
             OrderStatus::Active,
             &router.metatron,
         );
@@ -1296,7 +1314,7 @@ mod tests {
             Arc::new(Store::open(&directory.path().join("test.redb"), Chain::Regtest).unwrap());
         let metatron = Arc::new(Metatron::test_with_store(store.clone()));
         let expired = test_order(3, Some(hash_days(100.0)), OrderStatus::Expired, &metatron);
-        let index = expired.bucket.as_ref().unwrap().payment.derivation_index;
+        let index = expired.payment().unwrap().derivation_index;
 
         let txn = store.begin().unwrap();
         txn.insert_order(expired.id, &expired.to_entry()).unwrap();

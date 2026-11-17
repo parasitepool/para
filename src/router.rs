@@ -8,7 +8,7 @@ use {
     control::Control,
     dispatcher::Dispatcher,
     error::{RouterError, RouterResult},
-    order::{Bucket, Order, OrderStatus, Payment},
+    order::{Bucket, Order, OrderStatus, Payment, Terms},
     order_book::OrderBook,
     price_feed::PriceFeed,
     runner::OrderRunner,
@@ -210,13 +210,10 @@ impl Router {
 
     fn refund_target(&self, id: u32) -> RouterResult<(u32, Address<NetworkUnchecked>)> {
         if let Some(order) = self.book.get_order(id) {
-            let bucket = order
-                .bucket
-                .as_ref()
-                .ok_or(RouterError::NotABucketOrder { id })?;
+            let payment = order.payment().ok_or(RouterError::NotABucketOrder { id })?;
 
             return Ok((
-                bucket.payment.derivation_index,
+                payment.derivation_index,
                 order.upstream_target.username().address().clone(),
             ));
         }
@@ -381,6 +378,7 @@ impl Router {
         self: &Arc<Self>,
         upstream_target: UpstreamTarget,
         target: HashDays,
+        hash_rate: Option<HashRate>,
         price: HashPrice,
     ) -> RouterResult<Arc<Order>> {
         {
@@ -416,6 +414,8 @@ impl Router {
             return Err(RouterError::InvalidHashdays);
         }
 
+        let bucket = Bucket::new(target, hash_rate, wallet.last_snapshot().tip())?;
+
         let minimum = self.hash_price().tolerance();
 
         if price < minimum {
@@ -440,16 +440,17 @@ impl Router {
 
         let order = self.book.add_bucket_order(capacity, target, |id| {
             wallet.reveal_address_with(|address_info, created_at_height, wallet_delta| {
-                let bucket = Bucket {
-                    target,
-                    payment: Payment::new(
-                        address_info.address,
-                        address_info.index,
+                let terms = Terms {
+                    payment: Payment {
+                        address: address_info.address,
+                        derivation_index: address_info.index,
                         amount,
                         created_at_height,
-                    ),
+                    },
+                    bucket,
                 };
-                let order = Order::new(id, upstream_target, Some(bucket), cancel, metatron.clone());
+
+                let order = Order::new(id, upstream_target, Some(terms), cancel, metatron.clone());
 
                 metatron.persist_order(id, &order.to_entry(), wallet_delta)?;
 
@@ -485,6 +486,7 @@ impl Router {
 
         let mut bucket_order_count = 0;
         let mut starving_order_count = 0;
+        let mut target_hashrate = HashRate::ZERO;
         let mut deficit_hashrate = HashRate::ZERO;
         let mut surplus_hashrate = HashRate::ZERO;
         let mut pending = 0;
@@ -511,6 +513,11 @@ impl Router {
                             if order.is_starving(measured) {
                                 starving_order_count += 1;
                             }
+
+                            if let Some(target) = order.target_hashrate() {
+                                target_hashrate += target;
+                            }
+
                             deficit_hashrate += order.hashrate_shortfall(measured);
                             surplus_hashrate += order.hashrate_surplus(measured);
                         }
@@ -597,6 +604,7 @@ impl Router {
                     .as_ref()
                     .is_some_and(|wallet| wallet.is_synced()),
             },
+            target_hashrate,
             deficit_hashrate,
             surplus_hashrate,
             starving_order_count,
@@ -829,6 +837,59 @@ mod tests {
         assert!(json["downstream"]["totals"]["users"].is_number());
         assert!(json.get("traffic").is_none());
         assert!(json.get("history").is_none());
+    }
+
+    #[test]
+    fn status_target_hashrate_sums_active_unfulfilled_targets() {
+        let router = test_router();
+        let metatron = &router.metatron;
+
+        let supplied = test_order(0, Some(hash_days(100.0)), OrderStatus::Active, metatron);
+        let rated = test_bucket_order(
+            1,
+            Some(Bucket {
+                target: hash_days(100.0),
+                hash_rate: Some(HashRate::from_hps(200.0)),
+            }),
+            OrderStatus::Active,
+            metatron,
+        );
+        let fulfilled = test_order(2, Some(hash_days(1000.0)), OrderStatus::Active, metatron);
+        let pending = test_order(3, Some(hash_days(1000.0)), OrderStatus::Pending, metatron);
+        let in_mempool = test_order(4, Some(hash_days(1000.0)), OrderStatus::InMempool, metatron);
+        let sink = test_order(5, None, OrderStatus::Active, metatron);
+
+        set_delivered_work(metatron, &fulfilled, 1000.0);
+        metatron
+            .new_session(
+                test_authorization("deadbeef", "foo"),
+                supplied.id,
+                addr(4444),
+            )
+            .record_accepted(Difficulty::from(1.0), Difficulty::from(1.0));
+
+        add_orders(
+            router.as_ref(),
+            [
+                supplied.clone(),
+                rated,
+                fulfilled,
+                pending,
+                in_mempool,
+                sink,
+            ],
+        );
+
+        let status = router.status();
+        let measured = supplied.hashrate_1m(Instant::now()).as_hps();
+
+        assert_eq!(status.used_capacity_hash_days, hash_days(2200.0));
+        assert_eq!(status.target_hashrate, HashRate::from_hps(300.0));
+        assert_eq!(status.deficit_hashrate, HashRate::from_hps(200.0));
+
+        let identity = status.target_hashrate.as_hps() - status.deficit_hashrate.as_hps()
+            + status.surplus_hashrate.as_hps();
+        assert!((identity - measured).abs() <= measured * 1e-3);
     }
 
     #[test]
@@ -1089,6 +1150,7 @@ mod tests {
             router.add_bucket_order(
                 test_upstream_target(),
                 hash_days(1.0),
+                None,
                 HashPrice::from_sats(1),
             )
         };
@@ -1164,9 +1226,17 @@ mod tests {
         let order = Order::new(
             0,
             test_upstream_target(),
-            Some(Bucket {
-                target: hash_days(100.0),
-                payment: Payment::new(test_address(), 0, Amount::from_sat(1000), 0),
+            Some(Terms {
+                payment: Payment {
+                    address: test_address(),
+                    derivation_index: 0,
+                    amount: Amount::from_sat(1000),
+                    created_at_height: 0,
+                },
+                bucket: Bucket {
+                    target: hash_days(100.0),
+                    hash_rate: None,
+                },
             }),
             router.cancel.child_token(),
             router.metatron.clone(),
@@ -1185,9 +1255,17 @@ mod tests {
         let order = Order::new(
             0,
             test_upstream_target(),
-            Some(Bucket {
-                target: hash_days(100.0),
-                payment: Payment::new(test_address(), 0, Amount::from_sat(1000), 0),
+            Some(Terms {
+                payment: Payment {
+                    address: test_address(),
+                    derivation_index: 0,
+                    amount: Amount::from_sat(1000),
+                    created_at_height: 0,
+                },
+                bucket: Bucket {
+                    target: hash_days(100.0),
+                    hash_rate: None,
+                },
             }),
             router.cancel.child_token(),
             router.metatron.clone(),
@@ -1419,15 +1497,47 @@ mod tests {
         assert!(!wallet.is_synced());
 
         assert!(matches!(
-            router.add_bucket_order(target.clone(), hash_days(1e18), price),
+            router.add_bucket_order(target.clone(), hash_days(1e18), None, price),
             Err(RouterError::WalletSyncing),
         ));
 
         wallet.mark_synced();
 
         router
-            .add_bucket_order(target, hash_days(1e18), price)
+            .add_bucket_order(target, hash_days(1e18), None, price)
             .unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn add_bucket_order_bounds_requested_hash_rate() {
+        let router = test_router();
+        router.wallet.as_ref().unwrap().mark_synced();
+        let price = router.hash_price();
+
+        let add = |hash_rate: Option<f64>| {
+            router.add_bucket_order(
+                test_upstream_target(),
+                hash_days(1e18),
+                hash_rate.map(HashRate::from_hps),
+                price,
+            )
+        };
+
+        for hash_rate in [Some(0.0), Some(25e18)] {
+            assert!(matches!(
+                add(hash_rate),
+                Err(RouterError::HashRateOutOfRange { .. }),
+            ));
+        }
+
+        assert_eq!(
+            add(None).unwrap().target_hashrate(),
+            Some(HashRate::from_hps(1e18)),
+        );
+        assert_eq!(
+            add(Some(24e18)).unwrap().target_hashrate(),
+            Some(HashRate::from_hps(24e18)),
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1441,21 +1551,31 @@ mod tests {
             .unwrap();
 
         assert!(matches!(
-            router.add_bucket_order(target.clone(), hash_days(1e18), HashPrice::from_sats(102)),
+            router.add_bucket_order(
+                target.clone(),
+                hash_days(1e18),
+                None,
+                HashPrice::from_sats(102)
+            ),
             Err(RouterError::HashPriceBelowMinimum { .. }),
         ));
 
         let order = router
-            .add_bucket_order(target.clone(), hash_days(1e18), HashPrice::from_sats(103))
+            .add_bucket_order(
+                target.clone(),
+                hash_days(1e18),
+                None,
+                HashPrice::from_sats(103),
+            )
             .unwrap();
 
         assert_eq!(
-            order.bucket.as_ref().unwrap().payment.amount,
+            order.payment().unwrap().amount,
             HashPrice::from_sats(103).total(hash_days(1e18)).unwrap(),
         );
 
         router
-            .add_bucket_order(target, hash_days(1e18), HashPrice::from_sats(105))
+            .add_bucket_order(target, hash_days(1e18), None, HashPrice::from_sats(105))
             .unwrap();
     }
 
@@ -1470,6 +1590,7 @@ mod tests {
             router.add_bucket_order(
                 test_upstream_target(),
                 hash_days(1e18),
+                None,
                 HashPrice::from_sats(206),
             ),
             Err(RouterError::HashPriceBelowMinimum { .. }),
@@ -1479,12 +1600,13 @@ mod tests {
             .add_bucket_order(
                 test_upstream_target(),
                 hash_days(1e18),
+                None,
                 HashPrice::from_sats(250),
             )
             .unwrap();
 
         assert_eq!(
-            order.bucket.as_ref().unwrap().payment.amount,
+            order.payment().unwrap().amount,
             HashPrice::from_sats(250).total(hash_days(1e18)).unwrap(),
         );
     }
@@ -1548,7 +1670,7 @@ mod tests {
         ));
 
         let order = add_test_bucket_order(&router);
-        let payment = &order.bucket.as_ref().unwrap().payment;
+        let payment = order.payment().unwrap();
 
         assert_eq!(
             persisted_next_external_index(&store),
@@ -1562,7 +1684,7 @@ mod tests {
         let router = test_router();
 
         let first = add_test_bucket_order(&router);
-        let first_payment = &first.bucket.as_ref().unwrap().payment;
+        let first_payment = first.payment().unwrap();
         let first_index = first_payment.derivation_index;
         let first_address = first_payment.address.clone();
 
@@ -1570,7 +1692,7 @@ mod tests {
         assert_eq!(first.status(), OrderStatus::Expired);
 
         let second = add_test_bucket_order(&router);
-        let second_payment = &second.bucket.as_ref().unwrap().payment;
+        let second_payment = second.payment().unwrap();
 
         assert_eq!(second_payment.derivation_index, first_index + 1);
         assert_ne!(second_payment.address, first_address);
@@ -1599,7 +1721,7 @@ mod tests {
         ));
 
         let first = add_test_bucket_order(&router);
-        let first_index = first.bucket.as_ref().unwrap().payment.derivation_index;
+        let first_index = first.payment().unwrap().derivation_index;
         router.persist().unwrap();
 
         router.cancel_order(first.id).unwrap();
@@ -1630,7 +1752,7 @@ mod tests {
         };
 
         let second = add_test_bucket_order(&restarted);
-        let second_index = second.bucket.as_ref().unwrap().payment.derivation_index;
+        let second_index = second.payment().unwrap().derivation_index;
 
         assert_eq!(second_index, first_index + 1);
     }
@@ -1643,7 +1765,7 @@ mod tests {
             .unwrap();
 
         assert!(matches!(
-            router.add_bucket_order(target, hash_days(1.0), router.hash_price(),),
+            router.add_bucket_order(target, hash_days(1.0), None, router.hash_price(),),
             Err(RouterError::WalletRequired),
         ));
     }
@@ -1663,13 +1785,13 @@ mod tests {
         let price = router.hash_price();
 
         assert!(matches!(
-            router.add_bucket_order(target.clone(), hash_days(1e18), price),
+            router.add_bucket_order(target.clone(), hash_days(1e18), None, price),
             Err(RouterError::Halted),
         ));
 
         router.set_halt(false);
         router
-            .add_bucket_order(target, hash_days(1e18), price)
+            .add_bucket_order(target, hash_days(1e18), None, price)
             .unwrap();
     }
 
@@ -1696,12 +1818,12 @@ mod tests {
         router.set_capacity_work(hash_days(1e18));
 
         let order = router
-            .add_bucket_order(test_upstream_target(), hash_days(6e17), price)
+            .add_bucket_order(test_upstream_target(), hash_days(6e17), None, price)
             .unwrap();
         order.force_status(OrderStatus::Active);
 
         assert!(matches!(
-            router.add_bucket_order(test_upstream_target(), hash_days(6e17), price),
+            router.add_bucket_order(test_upstream_target(), hash_days(6e17), None, price),
             Err(RouterError::InsufficientCapacity { .. }),
         ));
     }
@@ -1715,12 +1837,12 @@ mod tests {
         router.set_capacity_work(hash_days(1e18));
 
         let order = router
-            .add_bucket_order(test_upstream_target(), hash_days(5e17), price)
+            .add_bucket_order(test_upstream_target(), hash_days(5e17), None, price)
             .unwrap();
         order.force_status(OrderStatus::Active);
 
         router
-            .add_bucket_order(test_upstream_target(), hash_days(5e17), price)
+            .add_bucket_order(test_upstream_target(), hash_days(5e17), None, price)
             .unwrap();
     }
 
@@ -1733,11 +1855,11 @@ mod tests {
         router.set_capacity_work(hash_days(1e18));
 
         router
-            .add_bucket_order(test_upstream_target(), hash_days(6e17), price)
+            .add_bucket_order(test_upstream_target(), hash_days(6e17), None, price)
             .unwrap();
 
         router
-            .add_bucket_order(test_upstream_target(), hash_days(6e17), price)
+            .add_bucket_order(test_upstream_target(), hash_days(6e17), None, price)
             .unwrap();
     }
 
@@ -1750,17 +1872,17 @@ mod tests {
         router.set_capacity_work(hash_days(1e18));
 
         let order = router
-            .add_bucket_order(test_upstream_target(), hash_days(6e17), price)
+            .add_bucket_order(test_upstream_target(), hash_days(6e17), None, price)
             .unwrap();
         order.force_status(OrderStatus::Active);
 
         assert!(matches!(
-            router.add_bucket_order(test_upstream_target(), hash_days(6e17), price),
+            router.add_bucket_order(test_upstream_target(), hash_days(6e17), None, price),
             Err(RouterError::InsufficientCapacity { .. }),
         ));
 
         let next = router
-            .add_bucket_order(test_upstream_target(), hash_days(4e17), price)
+            .add_bucket_order(test_upstream_target(), hash_days(4e17), None, price)
             .unwrap();
         assert_eq!(next.id, order.id + 1);
     }
@@ -1775,6 +1897,7 @@ mod tests {
                 router.add_bucket_order(
                     test_upstream_target(),
                     hash_days(1.0),
+                    None,
                     HashPrice::from_sats(1),
                 ),
                 Err(RouterError::Halted),
@@ -1785,6 +1908,7 @@ mod tests {
             router.add_bucket_order(
                 test_upstream_target(),
                 hash_days(1.0),
+                None,
                 HashPrice::from_sats(1),
             ),
             Err(RouterError::OrderRateLimited { .. }),

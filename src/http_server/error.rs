@@ -55,6 +55,7 @@ impl From<RouterError> for ServerError {
     fn from(error: RouterError) -> Self {
         match &error {
             RouterError::InvalidHashdays
+            | RouterError::HashRateOutOfRange { .. }
             | RouterError::HashPriceOverflow
             | RouterError::BelowDustLimit { .. }
             | RouterError::NotABucketOrder { .. }

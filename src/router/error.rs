@@ -13,6 +13,15 @@ pub(crate) enum RouterError {
     Halted,
     #[snafu(display("hash days must be positive"))]
     InvalidHashdays,
+    #[snafu(display(
+        "hash rate {hash_rate} must be between {} and {max}",
+        min.display_ceil()
+    ))]
+    HashRateOutOfRange {
+        hash_rate: HashRate,
+        min: HashRate,
+        max: HashRate,
+    },
     #[snafu(display("price calculation overflow"))]
     HashPriceOverflow,
     #[snafu(display("hash price bid {bid} is below minimum {minimum}"))]

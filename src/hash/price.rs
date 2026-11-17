@@ -69,10 +69,14 @@ impl FromStr for HashPrice {
     }
 }
 
+pub(crate) fn blocks_until_adjustment(tip: u64) -> u32 {
+    DIFFCHANGE_INTERVAL - (tip % u64::from(DIFFCHANGE_INTERVAL)) as u32
+}
+
 fn multiplier(height: u64, start_time: u32, now: u64) -> f64 {
     let tip = height.saturating_sub(1);
     let blocks_into_epoch = tip % u64::from(DIFFCHANGE_INTERVAL);
-    let blocks_until_adjustment = DIFFCHANGE_INTERVAL - blocks_into_epoch as u32;
+    let blocks_until_adjustment = blocks_until_adjustment(tip);
 
     if blocks_until_adjustment > DELIVERY_WINDOW_BLOCKS {
         return 1.0;
@@ -101,7 +105,7 @@ pub(crate) async fn difficulty_multiplier(client: &BitcoindClient, height: u64) 
     let tip = height.saturating_sub(1);
     let blocks_into_epoch = tip % u64::from(DIFFCHANGE_INTERVAL);
 
-    if DIFFCHANGE_INTERVAL - blocks_into_epoch as u32 > DELIVERY_WINDOW_BLOCKS {
+    if blocks_until_adjustment(tip) > DELIVERY_WINDOW_BLOCKS {
         return 1.0;
     }
 
@@ -145,6 +149,20 @@ mod tests {
         case(1947, 0, 11_682_000, 69.0 / 144.0 + 75.0 / 144.0 / 0.25);
         case(1947, 0, 100, 1.0);
         case(2016, 100, 0, 1.0);
+    }
+
+    #[test]
+    fn blocks_until_adjustment() {
+        #[track_caller]
+        fn case(tip: u64, expected: u32) {
+            assert_eq!(super::blocks_until_adjustment(tip), expected);
+        }
+
+        case(0, 2016);
+        case(1, 2015);
+        case(2015, 1);
+        case(2016, 2016);
+        case(4031, 1);
     }
 
     #[test]

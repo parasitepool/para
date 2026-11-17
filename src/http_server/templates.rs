@@ -8,14 +8,6 @@ pub(crate) struct DashboardHtml<T: DashboardContent> {
 }
 
 impl<T: DashboardContent> DashboardHtml<T> {
-    pub(crate) fn new(content: T, chain: Chain, auth: NavbarAuth) -> Self {
-        Self {
-            content,
-            chain,
-            auth,
-        }
-    }
-
     fn superscript(&self) -> &'static str {
         match self.chain {
             Chain::Mainnet => "",
@@ -171,15 +163,15 @@ pub(crate) fn render_page(
             .map(|r| r.to_string())
             .unwrap_or_else(|_| content.to_string());
 
-        let dashboard = DashboardHtml::new(
-            ReloadedContent {
+        let dashboard = DashboardHtml {
+            content: ReloadedContent {
                 html,
                 title,
                 show_review,
             },
             chain,
             auth,
-        );
+        };
 
         dashboard
             .reload_from_path()
@@ -188,7 +180,12 @@ pub(crate) fn render_page(
     };
 
     #[cfg(not(feature = "reload"))]
-    let body = DashboardHtml::new(content, chain, auth).to_string();
+    let body = DashboardHtml {
+        content,
+        chain,
+        auth,
+    }
+    .to_string();
 
     ([(CONTENT_TYPE, "text/html;charset=utf-8")], body).into_response()
 }

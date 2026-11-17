@@ -124,6 +124,8 @@
     <div class=row><span>Upstream Disconnects</span><span data-value=upstream_disconnects_total></span></div>
     <div class=row><span>Username</span><span data-value=upstream_target.username data-format=username class=copyable></span></div>
     <div class=row><span>Requested Hashdays</span><span id=requested_hash_days></span></div>
+    <div class=row><span>Target Hashrate</span><span data-value=target_hashrate data-format=hashrate></span></div>
+    <div class=row><span>Expected Duration</span><span id=expected_duration></span></div>
     <div class=row><span>Delivered Hashdays</span><span data-value=upstream.delivered_hash_days data-format=hash_days class=copyable></span></div>
     <div class=row><span>Hash Price</span><span data-value=hash_price data-format=sats_phd></span></div>
     <div class=row><span>Payment Amount</span><span data-value=payment_amount data-format=amount></span></div>
@@ -241,6 +243,9 @@ function populateOrder(data) {
   set('review', data.review, formatStatus);
   setClass('review', data.review || '');
   set('requested_hash_days', data.requested_hash_days == null ? 'Unlimited' : formatHashDays(data.requested_hash_days));
+  set('expected_duration', data.target_hashrate > 0
+    ? formatDuration(data.requested_hash_days / data.target_hashrate * 86400)
+    : '-');
   const txidsEl = document.getElementById('txids');
   if (txidsEl) {
     if (data.txids && data.txids.length > 0) {

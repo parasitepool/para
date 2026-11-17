@@ -273,6 +273,7 @@
           <tr><td>Active Orders</td><td data-value=upstream.orders></td></tr>
           <tr><td>Starving</td><td data-value=starving_order_count></td></tr>
           <tr><td>Hashrate</td><td data-value=downstream.hashrate_1m data-format=hashrate></td></tr>
+          <tr><td>Target</td><td data-value=target_hashrate data-format=hashrate></td></tr>
           <tr><td>Deficit</td><td data-value=deficit_hashrate data-format=hashrate></td></tr>
           <tr><td>Surplus</td><td data-value=surplus_hashrate data-format=hashrate></td></tr>
           <tr><td>Uptime</td><td data-value=uptime_secs data-format=duration></td></tr>
@@ -415,6 +416,8 @@
         <input id=order-password placeholder="optional">
         <label for=order-hashdays>Hashdays</label>
         <input id=order-hashdays placeholder="e.g. 1.5 PHd, 500 THd">
+        <label for=order-hashrate>Hashrate</label>
+        <input id=order-hashrate placeholder="optional, defaults to 1 day delivery">
         <label for=order-price>Price (sats/PHd)</label>
         <input id=order-price placeholder="e.g. 1000" inputmode="numeric">
       </div>
@@ -717,6 +720,7 @@ initAuthProbe().then(ok => {
   const username = document.getElementById('order-username');
   const password = document.getElementById('order-password');
   const hashdays = document.getElementById('order-hashdays');
+  const hashrate = document.getElementById('order-hashrate');
   const price = document.getElementById('order-price');
   const error = document.getElementById('order-error');
   const formFields = document.getElementById('order-form-fields');
@@ -732,6 +736,7 @@ initAuthProbe().then(ok => {
     username.value = '';
     password.value = '';
     hashdays.value = '';
+    hashrate.value = '';
     price.value = currentHashPrice || '';
     error.textContent = '';
     modalTitle.textContent = 'Add Order';
@@ -790,6 +795,15 @@ initAuthProbe().then(ok => {
       return;
     }
 
+    let parsedHashrate = null;
+    if (hashrate.value.trim()) {
+      parsedHashrate = parseHashRate(hashrate.value);
+      if (parsedHashrate === null || parsedHashrate <= 0) {
+        error.textContent = 'Hashrate must be positive (e.g. 1.5 PH/s, 500 TH/s)';
+        return;
+      }
+    }
+
     const parsedPrice = price.value.trim();
     if (!/^\d+$/.test(parsedPrice)) {
       error.textContent = 'Price (sats/PHd) must be a non-negative integer';
@@ -799,11 +813,12 @@ initAuthProbe().then(ok => {
     const target = { endpoint: endpoint.value, username: username.value };
     if (password.value) target.password = password.value;
 
-    const requestBody = JSON.stringify({
-      upstream_target: target,
-      hash_days: parsedHashdays,
-      hash_price: 0,
-    }).replace('"hash_price":0', `"hash_price":${parsedPrice}`);
+    const order = { upstream_target: target, hash_days: parsedHashdays };
+    if (parsedHashrate !== null) order.hash_rate = parsedHashrate;
+    order.hash_price = 0;
+
+    const requestBody = JSON.stringify(order)
+      .replace('"hash_price":0', `"hash_price":${parsedPrice}`);
 
     try {
       const res = await fetch('/api/router/order', {

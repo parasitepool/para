@@ -137,12 +137,12 @@ mod tests {
         let address = wallet.test_reveal_address();
         let order = test_order_with_payment(
             0,
-            Payment::new(
-                address.address.clone(),
-                address.index,
-                Amount::from_sat(1000),
-                wallet.tip(),
-            ),
+            Payment {
+                address: address.address.clone(),
+                derivation_index: address.index,
+                amount: Amount::from_sat(1000),
+                created_at_height: wallet.tip(),
+            },
             status,
             &router.metatron,
         );
@@ -256,12 +256,12 @@ mod tests {
             router.as_ref(),
             [test_order_with_payment(
                 1,
-                Payment::new(
-                    unfunded.address.clone(),
-                    unfunded.index,
-                    Amount::from_sat(1000),
-                    0,
-                ),
+                Payment {
+                    address: unfunded.address.clone(),
+                    derivation_index: unfunded.index,
+                    amount: Amount::from_sat(1000),
+                    created_at_height: 0,
+                },
                 OrderStatus::Expired,
                 &router.metatron,
             )],
@@ -288,12 +288,12 @@ mod tests {
             router.as_ref(),
             [test_order_with_payment(
                 2,
-                Payment::new(
-                    funded.address.clone(),
-                    funded.index,
-                    Amount::from_sat(1000),
-                    0,
-                ),
+                Payment {
+                    address: funded.address.clone(),
+                    derivation_index: funded.index,
+                    amount: Amount::from_sat(1000),
+                    created_at_height: 0,
+                },
                 OrderStatus::Expired,
                 &router.metatron,
             )],
@@ -310,7 +310,12 @@ mod tests {
             router.as_ref(),
             [test_order_with_payment(
                 0,
-                Payment::new(test_address(), 0, Amount::from_sat(1000), 0),
+                Payment {
+                    address: test_address(),
+                    derivation_index: 0,
+                    amount: Amount::from_sat(1000),
+                    created_at_height: 0,
+                },
                 OrderStatus::Expired,
                 &router.metatron,
             )],
@@ -401,7 +406,12 @@ mod tests {
         let router = test_router_with_wallet(None);
         let order = test_order_with_payment(
             0,
-            Payment::new(test_address(), 0, Amount::from_sat(1000), 0),
+            Payment {
+                address: test_address(),
+                derivation_index: 0,
+                amount: Amount::from_sat(1000),
+                created_at_height: 0,
+            },
             OrderStatus::Pending,
             &router.metatron,
         );
