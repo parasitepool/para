@@ -530,9 +530,10 @@ pub(crate) fn assigned_asset_counts(
 
 /// Age in seconds of a cached payload, or `None` if the timestamp is unparseable.
 fn payload_age_secs(computed_at: &str) -> Option<i64> {
-    chrono::DateTime::parse_from_rfc3339(computed_at)
+    computed_at
+        .parse::<jiff::Timestamp>()
         .ok()
-        .map(|timestamp| (chrono::Utc::now() - timestamp.with_timezone(&chrono::Utc)).num_seconds())
+        .map(|timestamp| jiff::Timestamp::now().duration_since(timestamp).as_secs())
 }
 
 /// True when a cached payload is within the external re-poll TTL.
@@ -633,5 +634,18 @@ mod tests {
         assert_eq!(badge.unique.len(), 3);
         // 3 unique medals + a "+10" bucket.
         assert_eq!(badge.bucket.count, 10);
+    }
+
+    #[test]
+    fn payload_age_parses_rfc3339_offsets() {
+        #[track_caller]
+        fn case(computed_at: &str, parseable: bool) {
+            assert_eq!(payload_age_secs(computed_at).is_some(), parseable);
+        }
+
+        case("2020-01-01T00:00:00Z", true);
+        case("2020-01-01T00:00:00+00:00", true);
+        case("2020-01-01T00:00:00-05:00", true);
+        case("foo", false);
     }
 }

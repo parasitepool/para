@@ -100,7 +100,7 @@ async fn insert_test_shares_with_diff(
         .bind(true)
         .bind(format!("{}_worker", username))
         .bind(username)
-        .bind(chrono::Utc::now().to_rfc3339())
+        .bind(jiff::Timestamp::now().to_string())
         .bind("test")
         .bind("test")
         .bind("127.0.0.1")
@@ -208,7 +208,7 @@ async fn insert_test_shares_with_users(
             .bind(true)
             .bind(format!("{}_worker", username))
             .bind(username)
-            .bind(chrono::Utc::now().to_rfc3339())
+            .bind(jiff::Timestamp::now().to_string())
             .bind("test")
             .bind("test")
             .bind("127.0.0.1")
@@ -1623,6 +1623,7 @@ struct BadgeType {
 #[derive(Deserialize, Debug)]
 struct BadgesPayload {
     version: u32,
+    computed_at: String,
     types: std::collections::HashMap<String, BadgeType>,
 }
 
@@ -1664,6 +1665,7 @@ async fn test_badges_three_unique_no_bucket() {
 
     let payload: BadgesPayload = server.get_json_async("/badges/foo").await;
     assert_eq!(payload.version, 3);
+    assert!(payload.computed_at.ends_with("+00:00"));
 
     let block = payload.types.get("block").unwrap();
     assert_eq!(block.total, 3);

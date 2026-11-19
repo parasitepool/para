@@ -1378,7 +1378,9 @@ impl Database {
 
         let payload = BadgesPayload {
             version: BADGES_VERSION,
-            computed_at: chrono::Utc::now().to_rfc3339(),
+            computed_at: jiff::Timestamp::now()
+                .display_with_offset(jiff::tz::Offset::UTC)
+                .to_string(),
             source_tip,
             source_blocks,
             types,

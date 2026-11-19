@@ -318,11 +318,15 @@ impl Probe {
             .collect();
 
         let ntime_unix = u32::from(notify.ntime);
-        let ntime_human = chrono::DateTime::from_timestamp(ntime_unix.into(), 0)
-            .map(|dt| dt.to_rfc3339())
-            .unwrap_or_else(|| ntime_unix.to_string());
+        let ntime_human = jiff::Timestamp::from_second(ntime_unix.into())
+            .map(|timestamp| {
+                timestamp
+                    .display_with_offset(jiff::tz::Offset::UTC)
+                    .to_string()
+            })
+            .unwrap_or_else(|_| ntime_unix.to_string());
 
-        let ntime_skew_seconds = i64::from(ntime_unix) - chrono::Utc::now().timestamp();
+        let ntime_skew_seconds = i64::from(ntime_unix) - jiff::Timestamp::now().as_second();
 
         let merkle_root = merkle_root(
             &notify.coinb1,
