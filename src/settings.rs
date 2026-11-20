@@ -50,7 +50,7 @@ pub(crate) struct Settings {
     wallet_birthday: u32,
     sink_orders: Vec<UpstreamTarget>,
     halt: bool,
-    boost: bool,
+    pace: bool,
     capacity_work: HashDays,
     premium_percent: f64,
     store_path: Option<PathBuf>,
@@ -98,7 +98,7 @@ impl Default for Settings {
             wallet_birthday: 0,
             sink_orders: Vec::new(),
             halt: false,
-            boost: false,
+            pace: false,
             capacity_work: HashDays::from_raw(1e18),
             premium_percent: 5.0,
             store_path: None,
@@ -272,7 +272,7 @@ impl Settings {
             tick_interval,
             sink_order,
             halt,
-            boost,
+            pace,
             capacity_work,
             premium_percent,
         } = options;
@@ -286,7 +286,7 @@ impl Settings {
             wallet_birthday,
             sink_orders: sink_order,
             halt,
-            boost,
+            pace,
             capacity_work: HashDays::new(capacity_work)?,
             premium_percent,
             ..Self::from_common_options(common)?
@@ -696,8 +696,8 @@ impl Settings {
         self.halt
     }
 
-    pub(crate) fn boost(&self) -> bool {
-        self.boost
+    pub(crate) fn pace(&self) -> bool {
+        self.pace
     }
 
     pub(crate) fn capacity_work(&self) -> HashDays {
@@ -1617,7 +1617,7 @@ mod tests {
         assert_eq!(settings.http_api_token(), None);
         assert_eq!(settings.http_admin_token(), None);
         assert!(!settings.halt());
-        assert!(!settings.boost());
+        assert!(!settings.pace());
     }
 
     #[test]
@@ -1628,11 +1628,10 @@ mod tests {
     }
 
     #[test]
-    fn router_boost_flag() {
+    fn router_pace_flag() {
         let settings =
-            Settings::from_router_options(parse_router_options(&router_command("--boost")))
-                .unwrap();
-        assert!(settings.boost());
+            Settings::from_router_options(parse_router_options(&router_command("--pace"))).unwrap();
+        assert!(settings.pace());
     }
 
     #[test]

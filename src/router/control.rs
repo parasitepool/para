@@ -1,6 +1,6 @@
 use {
     super::*,
-    order::{Order, Trim},
+    order::{Order, SessionDetail, Trim},
     rand::{Rng, SeedableRng, rngs::StdRng},
 };
 
@@ -78,7 +78,7 @@ impl Control {
         *self.rng.lock() = StdRng::seed_from_u64(seed);
     }
 
-    pub(crate) fn next_order(&self, candidates: &[Arc<Order>]) -> Option<Arc<Order>> {
+    pub(crate) fn next_order(&self, candidates: &[Arc<Order>], pace: bool) -> Option<Arc<Order>> {
         let now = Instant::now();
 
         let buckets = candidates
@@ -87,17 +87,29 @@ impl Control {
             .collect::<Vec<_>>();
 
         if buckets.is_empty() {
-            candidates
-                .iter()
-                .filter(|order| order.is_sink())
-                .min_by_key(|order| order.hashrate_1m(now))
-                .cloned()
-        } else {
-            Some(self.select_bucket(&buckets, now))
+            return Self::select_sink(candidates, now);
         }
+
+        if let Some(bucket) = self.select_deficit_bucket(&buckets, now) {
+            return Some(bucket);
+        }
+
+        if pace && let Some(sink) = Self::select_sink(candidates, now) {
+            return Some(sink);
+        }
+
+        Self::select_least_loaded_bucket(&buckets, now)
     }
 
-    fn select_bucket(&self, buckets: &[&Arc<Order>], now: Instant) -> Arc<Order> {
+    fn select_sink(candidates: &[Arc<Order>], now: Instant) -> Option<Arc<Order>> {
+        candidates
+            .iter()
+            .filter(|order| order.is_sink())
+            .min_by_key(|order| order.hashrate_1m(now))
+            .cloned()
+    }
+
+    fn select_deficit_bucket(&self, buckets: &[&Arc<Order>], now: Instant) -> Option<Arc<Order>> {
         let residual = |order: &Arc<Order>| order.residual_deficit(now);
 
         let total = buckets
@@ -106,17 +118,7 @@ impl Control {
             .sum::<f64>();
 
         if total <= 0.0 {
-            let loads = buckets
-                .iter()
-                .map(|order| (*order, order.relative_load(order.hashrate_1m(now))))
-                .collect::<Vec<_>>();
-
-            let (least_loaded, _) = loads
-                .iter()
-                .min_by(|a, b| a.1.total_cmp(&b.1))
-                .expect("buckets is non-empty");
-
-            return Arc::clone(least_loaded);
+            return None;
         }
 
         let mut draw = self.rng.lock().random::<f64>() * total;
@@ -125,24 +127,53 @@ impl Control {
             let weight = residual(order).as_hps();
 
             if draw < weight {
-                return Arc::clone(order);
+                return Some(Arc::clone(order));
             }
 
             draw -= weight;
         }
 
-        Arc::clone(buckets.last().expect("buckets is non-empty"))
+        buckets.last().copied().cloned()
     }
 
-    fn trim_budget(&self, boost: bool) -> usize {
-        if boost {
-            usize::MAX
-        } else {
-            MAX_TRIMS_PER_TICK
+    fn select_least_loaded_bucket(buckets: &[&Arc<Order>], now: Instant) -> Option<Arc<Order>> {
+        buckets
+            .iter()
+            .map(|order| (*order, order.relative_load(order.hashrate_1m(now))))
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(order, _)| Arc::clone(order))
+    }
+
+    fn trim_sink_sessions(
+        candidates: &[(&Arc<Order>, SessionDetail)],
+        budget: &mut Demand,
+        session_budget: &mut usize,
+        now: Instant,
+    ) -> Trim {
+        let mut sink_trimmed = Trim::default();
+
+        for (order, detail) in candidates {
+            if budget.exhausted() || *session_budget == 0 {
+                break;
+            }
+
+            if !order.trim_session(detail.id, now) {
+                continue;
+            }
+
+            let trimmed = Trim {
+                sessions: vec![*detail],
+            };
+
+            *session_budget -= 1;
+            budget.consume(&trimmed);
+            sink_trimmed += trimmed;
         }
+
+        sink_trimmed
     }
 
-    pub(crate) fn rebalance(&self, orders: &[Arc<Order>], boost: bool) {
+    pub(crate) fn rebalance(&self, orders: &[Arc<Order>]) {
         let now = Instant::now();
 
         let demand = Demand::snapshot(orders, now, &mut self.deficit_ticks.lock());
@@ -152,9 +183,24 @@ impl Control {
         }
 
         let mut budget = demand;
-        let mut session_budget = self.trim_budget(boost);
+        let mut session_budget = MAX_TRIMS_PER_TICK;
         let mut overflow_trimmed = Trim::default();
-        let mut sink_trimmed = Trim::default();
+
+        let mut sink_candidates = Vec::new();
+
+        for order in orders.iter().filter(|order| order.is_sink()) {
+            for detail in order.session_details(now) {
+                sink_candidates.push((order, detail));
+            }
+        }
+
+        sink_candidates.sort_by_key(|(_, detail)| Reverse(detail.hashrate));
+
+        let split = sink_candidates.partition_point(|(_, detail)| detail.hashrate > HashRate::ZERO);
+        let (active_sinks, zero_rate_sinks) = sink_candidates.split_at(split);
+
+        let mut sink_trimmed =
+            Self::trim_sink_sessions(active_sinks, &mut budget, &mut session_budget, now);
 
         for order in orders.iter().filter(|order| order.is_overflowing(now)) {
             if budget.exhausted() || session_budget == 0 {
@@ -167,36 +213,9 @@ impl Control {
             overflow_trimmed += trimmed;
         }
 
-        let mut candidates = Vec::new();
-
-        for order in orders.iter().filter(|order| order.is_sink()) {
-            for detail in order.session_details(now) {
-                candidates.push((order, detail));
-            }
-        }
-
-        candidates.sort_by_key(|(_, detail)| Reverse(detail.hashrate));
-
-        for (order, detail) in &candidates {
-            if budget.exhausted() || session_budget == 0 {
-                break;
-            }
-
-            if detail.hashrate == HashRate::ZERO && !sink_trimmed.sessions.is_empty() {
-                break;
-            }
-
-            if !order.trim_session(detail.id, now) {
-                continue;
-            }
-
-            let trimmed = Trim {
-                sessions: vec![*detail],
-            };
-
-            session_budget -= 1;
-            budget.consume(&trimmed);
-            sink_trimmed += trimmed;
+        if sink_trimmed.sessions.is_empty() && overflow_trimmed.sessions.is_empty() {
+            sink_trimmed +=
+                Self::trim_sink_sessions(zero_rate_sinks, &mut budget, &mut session_budget, now);
         }
 
         info!(
@@ -386,7 +405,8 @@ mod tests {
     #[test]
     fn next_order_none_when_empty() {
         let control = test_control();
-        assert!(control.next_order(&[]).is_none());
+        assert!(control.next_order(&[], false).is_none());
+        assert!(control.next_order(&[], true).is_none());
     }
 
     #[test]
@@ -409,11 +429,52 @@ mod tests {
 
         let orders = [supplied, unserved];
 
-        assert_eq!(control.next_order(&orders).unwrap().id, 1);
+        assert_eq!(control.next_order(&orders, false).unwrap().id, 1);
+        assert_eq!(control.next_order(&orders, true).unwrap().id, 1);
     }
 
     #[test]
-    fn next_order_never_routes_to_sink_while_bucket_open() {
+    fn next_order_never_routes_to_sink_while_bucket_open_in_default_mode() {
+        let control = test_control();
+        let bucket = test_order(
+            0,
+            Some(hash_days(100.0)),
+            OrderStatus::Active,
+            &control.metatron,
+        );
+        register_session(&control.metatron, &bucket, "deadbeef", "foo", 10_000.0);
+        let sink = test_order(1, None, OrderStatus::Active, &control.metatron);
+
+        let orders = [bucket, sink];
+
+        for _ in 1..=3 {
+            assert_eq!(control.next_order(&orders, false).unwrap().id, 0);
+        }
+    }
+
+    #[test]
+    fn next_order_pace_spills_to_least_loaded_sink_when_buckets_satisfied() {
+        let control = test_control();
+        let bucket = test_order(
+            0,
+            Some(hash_days(100.0)),
+            OrderStatus::Active,
+            &control.metatron,
+        );
+        register_session(&control.metatron, &bucket, "deadbeef", "foo", 10_000.0);
+
+        let busy_sink = test_order(1, None, OrderStatus::Active, &control.metatron);
+        register_session(&control.metatron, &busy_sink, "cafebabe", "bar", 200.0);
+        let quiet_sink = test_order(2, None, OrderStatus::Active, &control.metatron);
+        register_session(&control.metatron, &quiet_sink, "feedface", "baz", 100.0);
+
+        let orders = [bucket, busy_sink, quiet_sink];
+
+        assert_eq!(control.next_order(&orders, true).unwrap().id, 2);
+    }
+
+    #[test]
+    fn next_order_pace_prefers_deficit_bucket_over_sink() {
         let control = test_control();
         let bucket = test_order(
             0,
@@ -425,9 +486,7 @@ mod tests {
 
         let orders = [bucket, sink];
 
-        for _ in 1..=3 {
-            assert_eq!(control.next_order(&orders).unwrap().id, 0);
-        }
+        assert_eq!(control.next_order(&orders, true).unwrap().id, 0);
     }
 
     #[test]
@@ -443,7 +502,8 @@ mod tests {
 
         let orders = [bucket];
 
-        assert_eq!(control.next_order(&orders).unwrap().id, 0);
+        assert_eq!(control.next_order(&orders, false).unwrap().id, 0);
+        assert_eq!(control.next_order(&orders, true).unwrap().id, 0);
     }
 
     #[test]
@@ -469,7 +529,7 @@ mod tests {
         let mut counts = [0usize; 2];
 
         for _ in 1..=30 {
-            let picked = control.next_order(&orders).unwrap().id;
+            let picked = control.next_order(&orders, false).unwrap().id;
             counts[picked as usize] += 1;
         }
 
@@ -501,7 +561,7 @@ mod tests {
 
         let orders = [overflowing, barely_over];
 
-        assert_eq!(control.next_order(&orders).unwrap().id, 1);
+        assert_eq!(control.next_order(&orders, false).unwrap().id, 1);
     }
 
     #[test]
@@ -534,7 +594,7 @@ mod tests {
 
             let orders = [sink_a, sink_b];
 
-            assert_eq!(control.next_order(&orders).unwrap().id, expected);
+            assert_eq!(control.next_order(&orders, false).unwrap().id, expected);
         }
 
         case(100.0, 0.0, 1);
@@ -543,46 +603,7 @@ mod tests {
     }
 
     #[test]
-    fn rebalance_trim_budget() {
-        #[track_caller]
-        fn case(boost: bool, expected_trimmed: usize) {
-            let control = test_control();
-            let bucket = test_order(
-                0,
-                Some(hash_days(1e9)),
-                OrderStatus::Active,
-                &control.metatron,
-            );
-            register_session(&control.metatron, &bucket, "eeeeeeee", "qux", 10.0);
-
-            let sink = test_order(1, None, OrderStatus::Active, &control.metatron);
-            let cancels = [
-                register_session(&control.metatron, &sink, "aaaaaaaa", "foo", 1.0),
-                register_session(&control.metatron, &sink, "bbbbbbbb", "bar", 1.0),
-                register_session(&control.metatron, &sink, "cccccccc", "baz", 1.0),
-            ];
-
-            let orders = [bucket, sink];
-
-            for _ in 0..DEFICIT_PERSIST_TICKS {
-                control.rebalance(&orders, boost);
-            }
-
-            assert_eq!(
-                cancels
-                    .iter()
-                    .filter(|cancel| cancel.is_cancelled())
-                    .count(),
-                expected_trimmed,
-            );
-        }
-
-        case(false, 1);
-        case(true, 3);
-    }
-
-    #[test]
-    fn rebalance_caps_trims_for_fully_starved_bucket_without_boost() {
+    fn rebalance_caps_trims_at_max_per_tick() {
         let control = test_control();
         let bucket = test_order(
             0,
@@ -601,7 +622,7 @@ mod tests {
         let orders = [bucket, sink];
 
         for _ in 0..DEFICIT_PERSIST_TICKS {
-            control.rebalance(&orders, false);
+            control.rebalance(&orders);
         }
 
         assert_eq!(
@@ -609,13 +630,12 @@ mod tests {
                 .iter()
                 .filter(|cancel| cancel.is_cancelled())
                 .count(),
-            1,
-            "fully-starved bucket must not unlock unlimited trims without boost",
+            MAX_TRIMS_PER_TICK,
         );
     }
 
     #[test]
-    fn rebalance_overflow_trimmed_before_sink_shed() {
+    fn rebalance_sink_shed_before_overflow_trim() {
         let control = test_control();
         let over = overflowing_order(&control, 0);
         let starving = test_order(
@@ -632,11 +652,11 @@ mod tests {
         let orders = [over.order.clone(), starving, sink];
 
         for _ in 0..DEFICIT_PERSIST_TICKS {
-            control.rebalance(&orders, false);
+            control.rebalance(&orders);
         }
 
-        assert!(over.cancel_mid.is_cancelled());
-        assert!(!sink_cancel.is_cancelled());
+        assert!(sink_cancel.is_cancelled());
+        assert!(!over.cancel_mid.is_cancelled());
     }
 
     #[test]
@@ -669,7 +689,7 @@ mod tests {
         let orders = [active, sink_a, sink_b];
 
         for _ in 0..DEFICIT_PERSIST_TICKS {
-            control.rebalance(&orders, false);
+            control.rebalance(&orders);
         }
 
         assert!(cancel_a.is_cancelled());
@@ -693,7 +713,7 @@ mod tests {
 
         let orders = [over.order.clone(), satisfied, sink];
 
-        control.rebalance(&orders, false);
+        control.rebalance(&orders);
 
         assert!(!over.cancel_mid.is_cancelled());
         assert!(!sink_cancel.is_cancelled());
@@ -715,7 +735,7 @@ mod tests {
         let orders = [bucket, sink];
 
         for _ in 0..DEFICIT_PERSIST_TICKS {
-            control.rebalance(&orders, false);
+            control.rebalance(&orders);
         }
 
         assert!(cancel.is_cancelled());
@@ -738,7 +758,7 @@ mod tests {
         already_cancelled.cancel();
 
         for _ in 0..DEFICIT_PERSIST_TICKS {
-            control.rebalance(&[bucket.clone(), sink.clone()], false);
+            control.rebalance(&[bucket.clone(), sink.clone()]);
         }
 
         assert!(
@@ -788,7 +808,7 @@ mod tests {
         let orders = [over.order.clone(), starving];
 
         for _ in 0..DEFICIT_PERSIST_TICKS {
-            control.rebalance(&orders, false);
+            control.rebalance(&orders);
         }
 
         assert!(!over.cancel_fat.is_cancelled());
@@ -797,7 +817,7 @@ mod tests {
     }
 
     #[test]
-    fn rebalance_does_not_shed_sink_after_overflow_covers_deficit() {
+    fn rebalance_overflow_trimmed_before_zero_rate_sink() {
         let control = test_control();
         let over = overflowing_order(&control, 0);
         let starving = test_order(
@@ -807,12 +827,12 @@ mod tests {
             &control.metatron,
         );
         let sink = test_order(2, None, OrderStatus::Active, &control.metatron);
-        let sink_cancel = register_session(&control.metatron, &sink, "dddd", "qux", 100.0);
+        let sink_cancel = register_session(&control.metatron, &sink, "dddd", "qux", 0.0);
 
         let orders = [over.order.clone(), starving, sink];
 
         for _ in 0..DEFICIT_PERSIST_TICKS {
-            control.rebalance(&orders, false);
+            control.rebalance(&orders);
         }
 
         assert!(over.cancel_mid.is_cancelled());
@@ -834,7 +854,7 @@ mod tests {
         let orders = [first.order.clone(), second.order.clone(), starving];
 
         for _ in 0..DEFICIT_PERSIST_TICKS {
-            control.rebalance(&orders, false);
+            control.rebalance(&orders);
         }
 
         assert!(first.cancel_mid.is_cancelled());
@@ -857,42 +877,8 @@ mod tests {
 
         let orders = [zombie, sink];
 
-        control.rebalance(&orders, false);
+        control.rebalance(&orders);
 
         assert!(!cancel.is_cancelled());
-    }
-
-    #[test]
-    fn rebalance_boost_noop_without_connected_unfulfilled_bucket() {
-        #[track_caller]
-        fn case(fulfilled: bool, connected: bool) {
-            let control = test_control();
-
-            let bucket = test_order(
-                0,
-                Some(hash_days(100.0)),
-                OrderStatus::Active,
-                &control.metatron,
-            );
-
-            if fulfilled {
-                set_delivered_work(&control.metatron, &bucket, 100.0);
-            }
-
-            if !connected {
-                bucket.upstream().unwrap().set_connected(false);
-            }
-
-            let sink = test_order(1, None, OrderStatus::Active, &control.metatron);
-            let cancel = register_session(&control.metatron, &sink, "deadbeef", "foo", 100.0);
-
-            let orders = [bucket, sink];
-            control.rebalance(&orders, true);
-
-            assert!(!cancel.is_cancelled());
-        }
-
-        case(true, true);
-        case(false, false);
     }
 }

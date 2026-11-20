@@ -140,7 +140,7 @@ impl Proxy {
 
         let selector = {
             let proxy = self.clone();
-            move || proxy.control.next_order(&proxy.book.routable())
+            move || proxy.control.next_order(&proxy.book.routable(), false)
         };
 
         let on_shutdown = {

@@ -46,7 +46,7 @@ pub(crate) struct Router {
     price_feed: PriceFeed,
     creation_window: Mutex<RateWindow>,
     halt: AtomicBool,
-    boost: AtomicBool,
+    pace: AtomicBool,
     capacity_work: AtomicU64,
     premium_percent: AtomicU64,
     control: Control,
@@ -65,7 +65,7 @@ impl Router {
         initial_hash_value: HashValue,
     ) -> Self {
         let halt = settings.halt();
-        let boost = settings.boost();
+        let pace = settings.pace();
         let capacity_work = settings.capacity_work();
         let premium_percent = settings.premium_percent();
 
@@ -100,7 +100,7 @@ impl Router {
                 count: 0,
             }),
             halt: AtomicBool::new(halt),
-            boost: AtomicBool::new(boost),
+            pace: AtomicBool::new(pace),
             capacity_work: AtomicU64::new(capacity_work.as_f64().to_bits()),
             premium_percent: AtomicU64::new(premium_percent.to_bits()),
             control,
@@ -261,7 +261,7 @@ impl Router {
     }
 
     fn rebalance(&self) {
-        self.control.rebalance(&self.book.active(), self.boost());
+        self.control.rebalance(&self.book.active());
     }
 
     #[cfg(test)]
@@ -282,12 +282,12 @@ impl Router {
         self.halt.store(enabled, Ordering::Relaxed);
     }
 
-    pub(crate) fn boost(&self) -> bool {
-        self.boost.load(Ordering::Relaxed)
+    pub(crate) fn pace(&self) -> bool {
+        self.pace.load(Ordering::Relaxed)
     }
 
-    pub(crate) fn set_boost(&self, enabled: bool) {
-        self.boost.store(enabled, Ordering::Relaxed);
+    pub(crate) fn set_pace(&self, enabled: bool) {
+        self.pace.store(enabled, Ordering::Relaxed);
     }
 
     pub(crate) fn capacity_work(&self) -> HashDays {
@@ -337,7 +337,7 @@ impl Router {
     }
 
     pub(crate) fn next_order(&self) -> Option<Arc<Order>> {
-        self.control.next_order(&self.book.routable())
+        self.control.next_order(&self.book.routable(), self.pace())
     }
 
     pub(crate) fn add_sink_order(
@@ -597,7 +597,7 @@ impl Router {
             total_capacity_hash_days,
             used_capacity_hash_days,
             halt: self.halt(),
-            boost: self.boost(),
+            pace: self.pace(),
             wallet: WalletInfo {
                 synced: self
                     .wallet
@@ -1796,17 +1796,32 @@ mod tests {
     }
 
     #[test]
-    fn boost() {
+    fn pace() {
         let router = test_router();
+        let bucket = test_order(
+            0,
+            Some(hash_days(100.0)),
+            OrderStatus::Active,
+            &router.metatron,
+        );
+        let sink = test_order(1, None, OrderStatus::Active, &router.metatron);
+        router
+            .metatron
+            .new_session(test_authorization("deadbeef", "foo"), bucket.id, addr(4444))
+            .record_accepted(Difficulty::from(1.0), Difficulty::from(1.0));
+        add_orders(router.as_ref(), [bucket, sink]);
 
-        assert!(!router.boost());
-        assert!(!router.status().boost);
+        assert!(!router.pace());
+        assert!(!router.status().pace);
+        assert_eq!(router.next_order().unwrap().id, 0);
 
-        router.set_boost(true);
-        assert!(router.status().boost);
+        router.set_pace(true);
+        assert!(router.status().pace);
+        assert_eq!(router.next_order().unwrap().id, 1);
 
-        router.set_boost(false);
-        assert!(!router.status().boost);
+        router.set_pace(false);
+        assert!(!router.status().pace);
+        assert_eq!(router.next_order().unwrap().id, 0);
     }
 
     #[tokio::test(flavor = "multi_thread")]

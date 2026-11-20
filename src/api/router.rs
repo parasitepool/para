@@ -23,7 +23,7 @@ pub struct RouterStatus {
     pub total_capacity_hash_days: HashDays,
     pub used_capacity_hash_days: HashDays,
     pub halt: bool,
-    pub boost: bool,
+    pub pace: bool,
     pub wallet: WalletInfo,
     pub target_hashrate: HashRate,
     pub deficit_hashrate: HashRate,
@@ -234,7 +234,7 @@ pub(crate) fn router(
         .route("/api/router/order/{id}/clear", post(clear_order))
         .route("/api/router/order/{id}/refund", post(refund_order))
         .route("/api/router/halt", put(set_halt))
-        .route("/api/router/boost", put(set_boost))
+        .route("/api/router/pace", put(set_pace))
         .route("/api/router/capacity", put(set_capacity))
         .route("/api/router/premium", put(set_premium))
         .with_state(state)
@@ -645,18 +645,18 @@ async fn set_halt(
 }
 
 #[derive(Serialize)]
-struct BoostResponse {
-    boost: bool,
+struct PaceResponse {
+    pace: bool,
 }
 
-async fn set_boost(
+async fn set_pace(
     _: AdminAuth,
     State(router): State<Arc<Router>>,
     Json(request): Json<ToggleRequest>,
 ) -> ServerResult<Response> {
-    router.set_boost(request.enabled);
-    Ok(Json(BoostResponse {
-        boost: router.boost(),
+    router.set_pace(request.enabled);
+    Ok(Json(PaceResponse {
+        pace: router.pace(),
     })
     .into_response())
 }

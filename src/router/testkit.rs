@@ -176,7 +176,7 @@ pub(crate) fn test_router_settings() -> Arc<Settings> {
             tick_interval: 60,
             sink_order: Vec::new(),
             halt: false,
-            boost: false,
+            pace: false,
             capacity_work: 1e18,
             premium_percent: 5.0,
         })

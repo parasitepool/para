@@ -19,7 +19,7 @@
   .action-bar button:disabled { opacity: 0.4; cursor: not-allowed; }
 
   #halt-btn.active { background: #663300; border-color: #886600; color: #ffcc00; }
-  #boost-btn.active { background: #1a4d1a; border-color: #2d7a2d; color: #5fdf5f; }
+  #pace-btn.active { background: #1a4d1a; border-color: #2d7a2d; color: #5fdf5f; }
 
   .confirm-overlay {
     position: fixed;
@@ -255,7 +255,7 @@
   <div class=action-bar>
     <button id=capacity-btn class=hidden>Capacity</button>
     <button id=premium-btn class=hidden>Premium</button>
-    <button id=boost-btn class=hidden>Boost: OFF</button>
+    <button id=pace-btn class=hidden>Pace: OFF</button>
     <button id=halt-btn class=hidden>Halt: OFF</button>
     <button id=add-order-btn>Add Order</button>
   </div>
@@ -448,13 +448,13 @@
     </div>
   </div>
 
-  <div id=boost-overlay class="confirm-overlay hidden">
+  <div id=pace-overlay class="confirm-overlay hidden">
     <div class=confirm-modal>
-      <h2 id=boost-modal-title></h2>
-      <p id=boost-modal-desc></p>
+      <h2 id=pace-modal-title></h2>
+      <p id=pace-modal-desc></p>
       <div class=modal-buttons>
-        <button id=boost-cancel>Cancel</button>
-        <button id=boost-confirm>Confirm</button>
+        <button id=pace-cancel>Cancel</button>
+        <button id=pace-confirm>Confirm</button>
       </div>
     </div>
   </div>
@@ -652,17 +652,17 @@ async function refresh(signal) {
   }
 
   const haltBtn = document.getElementById('halt-btn');
-  const boostBtn = document.getElementById('boost-btn');
+  const paceBtn = document.getElementById('pace-btn');
   const addOrderBtn = document.getElementById('add-order-btn');
   if (haltBtn) {
     haltBtn.dataset.active = routerData.halt;
     haltBtn.textContent = routerData.halt ? 'Halt: ON' : 'Halt: OFF';
     haltBtn.classList.toggle('active', routerData.halt);
   }
-  if (boostBtn) {
-    boostBtn.dataset.active = routerData.boost;
-    boostBtn.textContent = routerData.boost ? 'Boost: ON' : 'Boost: OFF';
-    boostBtn.classList.toggle('active', routerData.boost);
+  if (paceBtn) {
+    paceBtn.dataset.active = routerData.pace;
+    paceBtn.textContent = routerData.pace ? 'Pace: ON' : 'Pace: OFF';
+    paceBtn.classList.toggle('active', routerData.pace);
   }
   currentCapacity = formatHashDays(routerData.total_capacity_hash_days);
 
@@ -894,10 +894,10 @@ initConfirmModal('halt', '/api/router/halt',
   'New bucket orders will be rejected until halt is disabled.',
   'New bucket orders will be accepted again.');
 
-initConfirmModal('boost', '/api/router/boost',
-  'Enable Boost', 'Disable Boost',
-  'All sink hashrate will be directed to bucket orders.',
-  'Hashrate will be distributed normally across orders.');
+initConfirmModal('pace', '/api/router/pace',
+  'Enable Pace', 'Disable Pace',
+  'New connections will spill to sink orders once all open buckets reach target.',
+  'Bucket orders will absorb all incoming hashrate while open.');
 
 {
   const overlay = document.getElementById('capacity-overlay');

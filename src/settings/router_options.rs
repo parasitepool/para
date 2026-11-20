@@ -40,8 +40,11 @@ pub(crate) struct RouterOptions {
     #[arg(long, help = "Start halted, rejecting new bucket orders.")]
     pub(crate) halt: bool,
 
-    #[arg(long, help = "Direct all hashrate to bucket orders.")]
-    pub(crate) boost: bool,
+    #[arg(
+        long,
+        help = "Tightly pace bucket orders by routing excess to sink orders."
+    )]
+    pub(crate) pace: bool,
 
     #[arg(
         long,
