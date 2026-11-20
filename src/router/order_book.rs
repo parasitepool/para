@@ -257,11 +257,7 @@ impl Orders {
     pub(crate) fn routable(&self) -> Vec<Arc<Order>> {
         self.live
             .values()
-            .filter(|order| {
-                order.status() == OrderStatus::Active
-                    && order.has_connected_upstream()
-                    && (order.is_sink() || !order.is_fulfilled())
-            })
+            .filter(|order| order.is_routable())
             .cloned()
             .collect()
     }

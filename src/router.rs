@@ -261,7 +261,7 @@ impl Router {
     }
 
     fn rebalance(&self) {
-        self.control.rebalance(&self.book.active());
+        self.control.rebalance(&self.book.active(), self.pace());
     }
 
     #[cfg(test)]

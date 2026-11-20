@@ -173,49 +173,90 @@ impl Control {
         sink_trimmed
     }
 
-    pub(crate) fn rebalance(&self, orders: &[Arc<Order>]) {
+    fn drain_sink_sessions(orders: &[Arc<Order>], now: Instant) -> Trim {
+        let mut sink_trimmed = Trim::default();
+
+        for order in orders.iter().filter(|order| order.is_sink()) {
+            for detail in order.session_details(now) {
+                if !order.trim_session(detail.id, now) {
+                    continue;
+                }
+
+                sink_trimmed.sessions.push(detail);
+            }
+        }
+
+        sink_trimmed
+    }
+
+    pub(crate) fn rebalance(&self, orders: &[Arc<Order>], pace: bool) {
         let now = Instant::now();
 
         let demand = Demand::snapshot(orders, now, &mut self.deficit_ticks.lock());
-
-        if demand.exhausted() {
-            return;
-        }
 
         let mut budget = demand;
         let mut session_budget = MAX_TRIMS_PER_TICK;
         let mut overflow_trimmed = Trim::default();
 
-        let mut sink_candidates = Vec::new();
-
-        for order in orders.iter().filter(|order| order.is_sink()) {
-            for detail in order.session_details(now) {
-                sink_candidates.push((order, detail));
-            }
-        }
-
-        sink_candidates.sort_by_key(|(_, detail)| Reverse(detail.hashrate));
-
-        let split = sink_candidates.partition_point(|(_, detail)| detail.hashrate > HashRate::ZERO);
-        let (active_sinks, zero_rate_sinks) = sink_candidates.split_at(split);
-
-        let mut sink_trimmed =
-            Self::trim_sink_sessions(active_sinks, &mut budget, &mut session_budget, now);
-
-        for order in orders.iter().filter(|order| order.is_overflowing(now)) {
-            if budget.exhausted() || session_budget == 0 {
-                break;
-            }
-
-            let trimmed = order.trim(Some(session_budget), now);
-            session_budget -= trimmed.sessions.len();
+        let mut sink_trimmed = if !pace
+            && orders
+                .iter()
+                .any(|order| !order.is_sink() && order.is_routable())
+        {
+            let trimmed = Self::drain_sink_sessions(orders, now);
             budget.consume(&trimmed);
-            overflow_trimmed += trimmed;
+            trimmed
+        } else {
+            Trim::default()
+        };
+
+        if !demand.exhausted() {
+            let zero_rate_sinks = if pace {
+                let mut sink_candidates = Vec::new();
+
+                for order in orders.iter().filter(|order| order.is_sink()) {
+                    for detail in order.session_details(now) {
+                        sink_candidates.push((order, detail));
+                    }
+                }
+
+                sink_candidates.sort_by_key(|(_, detail)| Reverse(detail.hashrate));
+
+                let split =
+                    sink_candidates.partition_point(|(_, detail)| detail.hashrate > HashRate::ZERO);
+                let (active_sinks, zero_rate_sinks) = sink_candidates.split_at(split);
+
+                sink_trimmed +=
+                    Self::trim_sink_sessions(active_sinks, &mut budget, &mut session_budget, now);
+
+                zero_rate_sinks.to_vec()
+            } else {
+                Vec::new()
+            };
+
+            for order in orders.iter().filter(|order| order.is_overflowing(now)) {
+                if budget.exhausted() || session_budget == 0 {
+                    break;
+                }
+
+                let trimmed = order.trim(Some(session_budget), now);
+                session_budget -= trimmed.sessions.len();
+                budget.consume(&trimmed);
+                overflow_trimmed += trimmed;
+            }
+
+            if pace && sink_trimmed.sessions.is_empty() && overflow_trimmed.sessions.is_empty() {
+                sink_trimmed += Self::trim_sink_sessions(
+                    &zero_rate_sinks,
+                    &mut budget,
+                    &mut session_budget,
+                    now,
+                );
+            }
         }
 
-        if sink_trimmed.sessions.is_empty() && overflow_trimmed.sessions.is_empty() {
-            sink_trimmed +=
-                Self::trim_sink_sessions(zero_rate_sinks, &mut budget, &mut session_budget, now);
+        if demand.exhausted() && sink_trimmed.sessions.is_empty() {
+            return;
         }
 
         info!(
@@ -603,7 +644,7 @@ mod tests {
     }
 
     #[test]
-    fn rebalance_caps_trims_at_max_per_tick() {
+    fn rebalance_caps_trims_at_max_per_tick_when_paced() {
         let control = test_control();
         let bucket = test_order(
             0,
@@ -622,7 +663,7 @@ mod tests {
         let orders = [bucket, sink];
 
         for _ in 0..DEFICIT_PERSIST_TICKS {
-            control.rebalance(&orders);
+            control.rebalance(&orders, true);
         }
 
         assert_eq!(
@@ -632,6 +673,95 @@ mod tests {
                 .count(),
             MAX_TRIMS_PER_TICK,
         );
+    }
+
+    #[test]
+    fn rebalance_drains_all_sinks_when_pace_off() {
+        let control = test_control();
+        let over = overflowing_order(&control, 0);
+        let sink_a = test_order(1, None, OrderStatus::Active, &control.metatron);
+        let sink_b = test_order(2, None, OrderStatus::Active, &control.metatron);
+        let cancels = [
+            register_session(&control.metatron, &sink_a, "aaaaaaaa", "foo", 10.0),
+            register_session(&control.metatron, &sink_a, "bbbbbbbb", "bar", 0.0),
+            register_session(&control.metatron, &sink_b, "cccccccc", "baz", 5.0),
+        ];
+
+        let orders = [over.order.clone(), sink_a, sink_b];
+
+        control.rebalance(&orders, false);
+
+        assert!(cancels.iter().all(|cancel| cancel.is_cancelled()));
+        assert!(!over.cancel_mid.is_cancelled());
+    }
+
+    #[test]
+    fn rebalance_pace_off_skips_sinks_without_routable_bucket() {
+        #[track_caller]
+        fn case(fulfilled: bool, connected: bool) {
+            let control = test_control();
+            let bucket = test_order(
+                0,
+                Some(hash_days(100.0)),
+                OrderStatus::Active,
+                &control.metatron,
+            );
+
+            if fulfilled {
+                set_delivered_work(&control.metatron, &bucket, 100.0);
+            }
+
+            if !connected {
+                bucket.upstream().unwrap().set_connected(false);
+            }
+
+            let sink = test_order(1, None, OrderStatus::Active, &control.metatron);
+            let cancel = register_session(&control.metatron, &sink, "deadbeef", "foo", 100.0);
+
+            let orders = [bucket, sink];
+
+            for _ in 0..DEFICIT_PERSIST_TICKS {
+                control.rebalance(&orders, false);
+            }
+
+            assert!(!cancel.is_cancelled());
+        }
+
+        case(true, true);
+        case(false, false);
+    }
+
+    #[test]
+    fn rebalance_pace_off_consumes_deficit_with_drained_sinks() {
+        #[track_caller]
+        fn case(starving_target: f64, expected_overflow_trimmed: bool) {
+            let control = test_control();
+            let over = overflowing_order(&control, 0);
+            let starving = test_order(
+                1,
+                Some(hash_days(starving_target)),
+                OrderStatus::Active,
+                &control.metatron,
+            );
+            let sink = test_order(2, None, OrderStatus::Active, &control.metatron);
+            let sink_cancel = register_session(&control.metatron, &sink, "dddd", "qux", 100.0);
+
+            let orders = [over.order.clone(), starving, sink];
+
+            for _ in 1..DEFICIT_PERSIST_TICKS {
+                control.rebalance(&orders, true);
+            }
+
+            assert!(!sink_cancel.is_cancelled());
+
+            control.rebalance(&orders, false);
+
+            assert!(sink_cancel.is_cancelled());
+            assert_eq!(over.cancel_mid.is_cancelled(), expected_overflow_trimmed);
+        }
+
+        case(1e9, false);
+        case(1e20, true);
     }
 
     #[test]
@@ -652,7 +782,7 @@ mod tests {
         let orders = [over.order.clone(), starving, sink];
 
         for _ in 0..DEFICIT_PERSIST_TICKS {
-            control.rebalance(&orders);
+            control.rebalance(&orders, true);
         }
 
         assert!(sink_cancel.is_cancelled());
@@ -689,7 +819,7 @@ mod tests {
         let orders = [active, sink_a, sink_b];
 
         for _ in 0..DEFICIT_PERSIST_TICKS {
-            control.rebalance(&orders);
+            control.rebalance(&orders, true);
         }
 
         assert!(cancel_a.is_cancelled());
@@ -697,7 +827,7 @@ mod tests {
     }
 
     #[test]
-    fn rebalance_noop_without_starving_demand() {
+    fn rebalance_noop_without_starving_demand_when_paced() {
         let control = test_control();
         let over = overflowing_order(&control, 0);
         let satisfied = test_order(
@@ -713,7 +843,7 @@ mod tests {
 
         let orders = [over.order.clone(), satisfied, sink];
 
-        control.rebalance(&orders);
+        control.rebalance(&orders, true);
 
         assert!(!over.cancel_mid.is_cancelled());
         assert!(!sink_cancel.is_cancelled());
@@ -735,7 +865,7 @@ mod tests {
         let orders = [bucket, sink];
 
         for _ in 0..DEFICIT_PERSIST_TICKS {
-            control.rebalance(&orders);
+            control.rebalance(&orders, true);
         }
 
         assert!(cancel.is_cancelled());
@@ -758,7 +888,7 @@ mod tests {
         already_cancelled.cancel();
 
         for _ in 0..DEFICIT_PERSIST_TICKS {
-            control.rebalance(&[bucket.clone(), sink.clone()]);
+            control.rebalance(&[bucket.clone(), sink.clone()], true);
         }
 
         assert!(
@@ -796,24 +926,30 @@ mod tests {
 
     #[test]
     fn rebalance_sheds_overflow_when_another_order_starving() {
-        let control = test_control();
-        let over = overflowing_order(&control, 0);
-        let starving = test_order(
-            1,
-            Some(hash_days(1e20)),
-            OrderStatus::Active,
-            &control.metatron,
-        );
+        #[track_caller]
+        fn case(pace: bool) {
+            let control = test_control();
+            let over = overflowing_order(&control, 0);
+            let starving = test_order(
+                1,
+                Some(hash_days(1e20)),
+                OrderStatus::Active,
+                &control.metatron,
+            );
 
-        let orders = [over.order.clone(), starving];
+            let orders = [over.order.clone(), starving];
 
-        for _ in 0..DEFICIT_PERSIST_TICKS {
-            control.rebalance(&orders);
+            for _ in 0..DEFICIT_PERSIST_TICKS {
+                control.rebalance(&orders, pace);
+            }
+
+            assert!(!over.cancel_fat.is_cancelled());
+            assert!(over.cancel_mid.is_cancelled());
+            assert!(!over.cancel_small.is_cancelled());
         }
 
-        assert!(!over.cancel_fat.is_cancelled());
-        assert!(over.cancel_mid.is_cancelled());
-        assert!(!over.cancel_small.is_cancelled());
+        case(false);
+        case(true);
     }
 
     #[test]
@@ -832,7 +968,7 @@ mod tests {
         let orders = [over.order.clone(), starving, sink];
 
         for _ in 0..DEFICIT_PERSIST_TICKS {
-            control.rebalance(&orders);
+            control.rebalance(&orders, true);
         }
 
         assert!(over.cancel_mid.is_cancelled());
@@ -841,44 +977,56 @@ mod tests {
 
     #[test]
     fn rebalance_stops_trimming_overflow_after_deficit_is_covered() {
-        let control = test_control();
-        let first = overflowing_order(&control, 0);
-        let second = overflowing_order(&control, 1);
-        let starving = test_order(
-            2,
-            Some(hash_days(1.0)),
-            OrderStatus::Active,
-            &control.metatron,
-        );
+        #[track_caller]
+        fn case(pace: bool) {
+            let control = test_control();
+            let first = overflowing_order(&control, 0);
+            let second = overflowing_order(&control, 1);
+            let starving = test_order(
+                2,
+                Some(hash_days(1.0)),
+                OrderStatus::Active,
+                &control.metatron,
+            );
 
-        let orders = [first.order.clone(), second.order.clone(), starving];
+            let orders = [first.order.clone(), second.order.clone(), starving];
 
-        for _ in 0..DEFICIT_PERSIST_TICKS {
-            control.rebalance(&orders);
+            for _ in 0..DEFICIT_PERSIST_TICKS {
+                control.rebalance(&orders, pace);
+            }
+
+            assert!(first.cancel_mid.is_cancelled());
+            assert!(!second.cancel_mid.is_cancelled());
         }
 
-        assert!(first.cancel_mid.is_cancelled());
-        assert!(!second.cancel_mid.is_cancelled());
+        case(false);
+        case(true);
     }
 
     #[test]
     fn rebalance_skips_starving_order_with_disconnected_upstream() {
-        let control = test_control();
-        let zombie = test_order(
-            0,
-            Some(hash_days(100.0)),
-            OrderStatus::Active,
-            &control.metatron,
-        );
-        zombie.upstream().unwrap().set_connected(false);
+        #[track_caller]
+        fn case(pace: bool) {
+            let control = test_control();
+            let zombie = test_order(
+                0,
+                Some(hash_days(100.0)),
+                OrderStatus::Active,
+                &control.metatron,
+            );
+            zombie.upstream().unwrap().set_connected(false);
 
-        let sink = test_order(1, None, OrderStatus::Active, &control.metatron);
-        let cancel = register_session(&control.metatron, &sink, "deadbeef", "foo", 100.0);
+            let sink = test_order(1, None, OrderStatus::Active, &control.metatron);
+            let cancel = register_session(&control.metatron, &sink, "deadbeef", "foo", 100.0);
 
-        let orders = [zombie, sink];
+            let orders = [zombie, sink];
 
-        control.rebalance(&orders);
+            control.rebalance(&orders, pace);
 
-        assert!(!cancel.is_cancelled());
+            assert!(!cancel.is_cancelled());
+        }
+
+        case(false);
+        case(true);
     }
 }

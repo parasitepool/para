@@ -515,6 +515,12 @@ impl Order {
         self.delivered_work() >= target.to_hash_work()
     }
 
+    pub(crate) fn is_routable(&self) -> bool {
+        self.status() == OrderStatus::Active
+            && self.has_connected_upstream()
+            && (self.is_sink() || !self.is_fulfilled())
+    }
+
     pub(crate) fn hashrate_deficit(&self, now: Instant) -> HashRate {
         if self.is_sink() {
             return HashRate::ZERO;
