@@ -2,10 +2,13 @@ use {
     super::*,
     bdk_wallet::{ChangeSet, chain::Merge},
     redb::{
-        Database, Durability, ReadableDatabase, ReadableTable, TableDefinition, WriteTransaction,
+        ConcurrencyMode, Database, Durability, Key, MultimapTableHandle, ReadTransaction,
+        ReadableDatabase, ReadableTable, TableDefinition, TableHandle, Value, WriteTransaction,
+        backends::FileBackend,
     },
 };
 
+mod backup;
 pub(crate) mod entry;
 
 const SCHEMA_VERSION: u64 = 3;
@@ -28,7 +31,6 @@ struct Metadata {
 
 pub(crate) struct Store {
     db: Database,
-    durability: Durability,
 }
 
 impl Store {
@@ -43,6 +45,8 @@ impl Store {
 
         let mut builder = Database::builder();
 
+        builder.set_concurrency_mode(ConcurrencyMode::SingleWriter);
+
         builder.set_repair_callback(|session| {
             warn!("redb repair {:.0}%", session.progress() * 100.0);
         });
@@ -51,14 +55,11 @@ impl Store {
             .create(path)
             .with_context(|| format!("failed to open store database {}", path.display()))?;
 
-        let store = Self {
-            db,
-            durability: Durability::Immediate,
-        };
+        let store = Self { db };
 
         let mut transaction = store.db.begin_write()?;
         transaction.set_quick_repair(true);
-        transaction.set_durability(store.durability)?;
+        transaction.set_durability(Durability::Immediate)?;
 
         {
             let mut metadata = transaction.open_table(METADATA)?;
@@ -123,7 +124,7 @@ impl Store {
     pub(crate) fn begin(&self) -> Result<WriteTxn> {
         let mut inner = self.db.begin_write()?;
         inner.set_quick_repair(true);
-        inner.set_durability(self.durability)?;
+        inner.set_durability(Durability::Immediate)?;
 
         Ok(WriteTxn { inner })
     }
@@ -276,8 +277,7 @@ mod tests {
 
     fn temporary_store(chain: Chain) -> (tempfile::TempDir, Store) {
         let directory = tempfile::tempdir().unwrap();
-        let mut store = Store::open(&directory.path().join("test.redb"), chain).unwrap();
-        store.durability = Durability::None;
+        let store = Store::open(&directory.path().join("test.redb"), chain).unwrap();
         (directory, store)
     }
 
@@ -320,7 +320,7 @@ mod tests {
         table.iter().unwrap().count()
     }
 
-    fn test_order_entry(status: OrderStatus) -> entry::OrderEntry {
+    pub(super) fn test_order_entry(status: OrderStatus) -> entry::OrderEntry {
         let now = Instant::now();
         let mut stats = Stats::new();
         stats.record_accepted(Difficulty::from(100.0), Difficulty::from(200.0), now);

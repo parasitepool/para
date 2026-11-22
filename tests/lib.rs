@@ -104,6 +104,7 @@ mod to_args;
 #[cfg(target_os = "linux")]
 mod account;
 mod alerts;
+mod db;
 #[cfg(target_os = "linux")]
 mod event_sink;
 #[cfg(target_os = "linux")]

@@ -1,5 +1,6 @@
 use super::*;
 
+pub mod db;
 pub mod miner;
 pub mod node_token;
 pub mod ping;
@@ -13,6 +14,8 @@ pub mod wallet;
 
 #[derive(Debug, Parser)]
 pub(crate) enum Subcommand {
+    #[command(about = "Manage redb databases")]
+    Db(db::Db),
     #[command(about = "Run a toy miner")]
     Miner(miner::Miner),
     #[command(about = "Manage per-node sync tokens")]
@@ -42,6 +45,7 @@ impl Subcommand {
         logs: Arc<logs::Logs>,
     ) -> Result {
         match self {
+            Self::Db(db) => db.run(cancel_token).await,
             Self::Miner(miner) => miner.run(cancel_token).await,
             Self::NodeToken(node_token) => node_token.run().await,
             Self::Ping(ping) => ping.run(cancel_token).await,
