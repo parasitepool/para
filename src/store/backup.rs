@@ -463,15 +463,16 @@ mod tests {
             &dir.path().join("missing_dir").join("bar.redb"),
             "failed to create temporary backup file",
         );
-        case(
-            &source,
-            &existing.join("bar.redb"),
-            "failed to inspect destination",
-        );
 
         #[cfg(unix)]
         {
             use std::os::unix::fs::symlink;
+
+            case(
+                &source,
+                &existing.join("bar.redb"),
+                "failed to inspect destination",
+            );
 
             let symlink_to_source = dir.path().join("link.redb");
             symlink(&source, &symlink_to_source).unwrap();
