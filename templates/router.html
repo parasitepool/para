@@ -896,7 +896,7 @@ initConfirmModal('halt', '/api/router/halt',
 
 initConfirmModal('pace', '/api/router/pace',
   'Enable Pace', 'Disable Pace',
-  'New connections will spill to sink orders once all open buckets reach target.',
+  'New connections spill to sink orders once open buckets reach target, and persistent bucket overflow is shed to sinks.',
   'Bucket orders will absorb all incoming hashrate while open.');
 
 {

@@ -5,6 +5,7 @@ use {
 };
 
 pub(crate) const HYSTERESIS_LOW: f64 = 0.95;
+pub(crate) const TRIM_FLOOR: f64 = 1.05;
 pub(crate) const HYSTERESIS_HIGH: f64 = 1.3;
 
 const MIN_DELIVERY: Duration = Duration::from_hours(1);
@@ -552,8 +553,19 @@ impl Order {
     }
 
     pub(crate) fn is_overflowing(&self, now: Instant) -> bool {
+        if !self.has_connected_upstream() || self.is_fulfilled() {
+            return false;
+        }
+
         self.target_hashrate()
             .is_some_and(|target| self.hashrate_1m(now) > target * HYSTERESIS_HIGH)
+    }
+
+    pub(crate) fn has_sessions(&self) -> bool {
+        self.sessions
+            .lock()
+            .values()
+            .any(|registration| !registration.cancel.is_cancelled())
     }
 
     pub(crate) fn session_details(&self, now: Instant) -> Vec<SessionDetail> {
@@ -580,7 +592,7 @@ impl Order {
         }
 
         let mut min_trim = current - ceiling;
-        let mut max_trim = current - target;
+        let mut max_trim = current - target * TRIM_FLOOR;
         let mut trimmed = Trim::default();
 
         let mut sessions = self.session_details(now);
@@ -964,6 +976,36 @@ mod tests {
     }
 
     #[test]
+    fn trim_respects_floor() {
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
+        let bucket = test_order(&metatron, Some(HashDays::new(1e9).unwrap()));
+
+        let cancel_keep = register_session(&metatron, &bucket, "aaaa", 14.3);
+        let cancel_over_floor = register_session(&metatron, &bucket, "bbbb", 5.2);
+
+        bucket.trim(None, Instant::now());
+
+        assert!(!cancel_keep.is_cancelled());
+        assert!(!cancel_over_floor.is_cancelled());
+    }
+
+    #[test]
+    fn has_sessions() {
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
+        let bucket = test_order(&metatron, Some(HashDays::new(1e9).unwrap()));
+
+        assert!(!bucket.has_sessions());
+
+        let cancel = register_session(&metatron, &bucket, "deadbeef", 1.0);
+        assert!(bucket.has_sessions());
+
+        cancel.cancel();
+        assert!(!bucket.has_sessions());
+    }
+
+    #[test]
     fn is_starving() {
         fn starving(order: &Order) -> bool {
             order.is_starving(order.hashrate_1m(Instant::now()))
@@ -1159,6 +1201,7 @@ mod tests {
         let metatron = Arc::new(metatron);
 
         let default = test_order(&metatron, Some(HashDays::new(1e15).unwrap()));
+        connect_upstream(&default, &metatron);
         register_session(&metatron, &default, "aaaa", 13.0);
         let default_mid = register_session(&metatron, &default, "bbbb", 7.0);
         register_session(&metatron, &default, "cccc", 4.0);
@@ -1171,6 +1214,7 @@ mod tests {
         let metatron = Arc::new(metatron);
 
         let rated = rated_order(&metatron, 1e15, 1e9);
+        connect_upstream(&rated, &metatron);
         let fat = register_session(&metatron, &rated, "aaaa", 13.0);
         let mid = register_session(&metatron, &rated, "bbbb", 7.0);
         let small = register_session(&metatron, &rated, "cccc", 4.0);
@@ -1256,6 +1300,46 @@ mod tests {
         metatron
             .set_order_delivered_work(fulfilled.id, HashDays::new(100.0).unwrap().to_hash_work());
         assert_eq!(fulfilled.residual_deficit(Instant::now()), HashRate::ZERO);
+    }
+
+    #[test]
+    fn is_overflowing() {
+        #[track_caller]
+        fn case(
+            target: Option<f64>,
+            session_diff: f64,
+            connected: bool,
+            delivered: Option<f64>,
+            expected: bool,
+        ) {
+            let (metatron, _dir) = Metatron::test();
+            let metatron = Arc::new(metatron);
+            let order = test_order(
+                &metatron,
+                target.map(|target| HashDays::new(target).unwrap()),
+            );
+
+            if connected {
+                connect_upstream(&order, &metatron);
+            }
+
+            register_session(&metatron, &order, "deadbeef", session_diff);
+
+            if let Some(delivered) = delivered {
+                metatron.set_order_delivered_work(
+                    order.id,
+                    HashDays::new(delivered).unwrap().to_hash_work(),
+                );
+            }
+
+            assert_eq!(order.is_overflowing(Instant::now()), expected);
+        }
+
+        case(None, 20.0, true, None, false);
+        case(Some(1e9), 10.0, true, None, false);
+        case(Some(1e9), 20.0, true, None, true);
+        case(Some(1e9), 20.0, false, None, false);
+        case(Some(1e9), 20.0, true, Some(1e9), false);
     }
 
     #[test]
