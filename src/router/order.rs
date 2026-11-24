@@ -522,9 +522,30 @@ impl Order {
         self.delivered_work() >= target.to_hash_work()
     }
 
+    pub(crate) fn available_enonce_slots(&self) -> usize {
+        let Some(allocator) = self.allocator.get() else {
+            return 0;
+        };
+
+        let free = allocator.available_slots();
+
+        if free == usize::MAX {
+            return usize::MAX;
+        }
+
+        free.saturating_add(self.metatron.evictable_disconnected_count(self.id))
+    }
+
+    pub(crate) fn has_enonce_capacity(&self) -> bool {
+        self.allocator.get().is_some_and(|allocator| {
+            allocator.has_capacity() || self.metatron.evictable_disconnected_count(self.id) > 0
+        })
+    }
+
     pub(crate) fn is_routable(&self) -> bool {
         self.status() == OrderStatus::Active
             && self.has_connected_upstream()
+            && self.has_enonce_capacity()
             && (self.is_sink() || !self.is_fulfilled())
     }
 
@@ -533,7 +554,7 @@ impl Order {
             return HashRate::ZERO;
         }
 
-        if !self.has_connected_upstream() || self.is_fulfilled() {
+        if !self.has_connected_upstream() || self.is_fulfilled() || !self.has_enonce_capacity() {
             return HashRate::ZERO;
         }
 
@@ -551,7 +572,7 @@ impl Order {
             return HashRate::ZERO;
         }
 
-        if !self.has_connected_upstream() || self.is_fulfilled() {
+        if !self.has_connected_upstream() || self.is_fulfilled() || !self.has_enonce_capacity() {
             return HashRate::ZERO;
         }
 
@@ -677,6 +698,7 @@ impl Order {
 
         if let Some(allocator) = self.allocator.get() {
             allocator.update_extranonces(extranonces);
+            self.metatron.prune_disconnected(self.id);
         } else {
             let allocator = Arc::new(EnonceAllocator::new(extranonces, self.id));
 
@@ -1409,6 +1431,10 @@ mod tests {
 
     fn connect_upstream(order: &Order, metatron: &Arc<Metatron>) {
         *order.upstream.lock() = Some(Upstream::test(order.id, metatron.clone()));
+        let _ = order.allocator.set(Arc::new(EnonceAllocator::new(
+            Extranonces::Pool(PoolExtranonces::new(4, 4).unwrap()),
+            order.id,
+        )));
     }
 
     #[test]
@@ -1426,5 +1452,58 @@ mod tests {
         assert!(cancel_a.is_cancelled());
         assert!(cancel_b.is_cancelled());
         assert!(cancel_c.is_cancelled());
+    }
+
+    #[test]
+    fn enonce_saturation_controls_routability_and_deficit() {
+        let (metatron, _dir) = Metatron::test();
+        let metatron = Arc::new(metatron);
+        let order = test_order(&metatron, Some(HashDays::new(100.0).unwrap()));
+        order.force_status(OrderStatus::Active);
+        *order.upstream.lock() = Some(Upstream::test(order.id, metatron.clone()));
+
+        let upstream_enonce1 = Extranonce::from_bytes(&[0xde, 0xad, 0xbe, 0xef]);
+        let allocator = Arc::new(EnonceAllocator::new(
+            Extranonces::Proxy(ProxyExtranonces::new(upstream_enonce1, 8, 1).unwrap()),
+            order.id,
+        ));
+        assert!(order.allocator.set(allocator.clone()).is_ok());
+
+        let now = Instant::now();
+        assert_eq!(order.available_enonce_slots(), 256);
+        assert!(order.is_routable());
+        assert!(order.hashrate_deficit(now) > HashRate::ZERO);
+        assert!(order.residual_deficit(now) > HashRate::ZERO);
+
+        let first = allocator.next_enonce1().unwrap();
+        for _ in 1..256 {
+            allocator.next_enonce1().unwrap();
+        }
+
+        assert_eq!(order.available_enonce_slots(), 0);
+        assert!(!order.is_routable());
+        assert_eq!(order.hashrate_deficit(now), HashRate::ZERO);
+        assert_eq!(order.residual_deficit(now), HashRate::ZERO);
+
+        let session = metatron.new_session(
+            test_authorization(&first.to_string()),
+            order.id,
+            SocketAddr::from(([127, 0, 0, 1], 4444)),
+        );
+        metatron.retire_session(session, allocator.clone());
+
+        assert_eq!(order.available_enonce_slots(), 1);
+        assert!(order.is_routable());
+        assert!(order.hashrate_deficit(now) > HashRate::ZERO);
+        assert!(order.residual_deficit(now) > HashRate::ZERO);
+
+        assert!(metatron.evict_oldest_disconnected(order.id));
+        let reallocated = allocator.next_enonce1().unwrap();
+        assert_eq!(order.available_enonce_slots(), 0);
+        assert!(!order.is_routable());
+
+        allocator.release_enonce1(&reallocated);
+        assert_eq!(order.available_enonce_slots(), 1);
+        assert!(order.is_routable());
     }
 }

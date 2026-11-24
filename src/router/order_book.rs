@@ -282,6 +282,7 @@ impl Orders {
             .sum()
     }
 
+    #[cfg(test)]
     pub(crate) fn routable(&self) -> Vec<Arc<Order>> {
         self.live
             .values()
@@ -389,7 +390,10 @@ impl OrderBook {
     }
 
     pub(crate) fn routable(&self) -> Vec<Arc<Order>> {
-        self.orders.read().routable()
+        let live = self.orders.read().live();
+        live.into_iter()
+            .filter(|order| order.is_routable())
+            .collect()
     }
 
     pub(crate) fn add(&self, order: Arc<Order>) {

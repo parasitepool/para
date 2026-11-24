@@ -13,9 +13,22 @@ pub(crate) mod stats;
 pub(crate) mod user;
 pub(crate) mod worker;
 
+struct DisconnectedSession {
+    session: Arc<Session>,
+    disconnected_at: Instant,
+    allocator: Arc<EnonceAllocator>,
+}
+
+impl DisconnectedSession {
+    fn is_compatible(&self) -> bool {
+        self.allocator.is_compatible_enonce1(self.session.enonce1())
+    }
+}
+
 struct OrderSlot {
     stats: Mutex<Stats>,
     sessions: DashMap<SessionId, Arc<Session>>,
+    disconnected: Mutex<HashMap<Extranonce, DisconnectedSession>>,
 }
 
 impl OrderSlot {
@@ -23,6 +36,7 @@ impl OrderSlot {
         Self {
             stats: Mutex::new(Stats::new()),
             sessions: DashMap::new(),
+            disconnected: Mutex::new(HashMap::new()),
         }
     }
 
@@ -30,6 +44,7 @@ impl OrderSlot {
         Self {
             stats: Mutex::new(stats),
             sessions: DashMap::new(),
+            disconnected: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -38,7 +53,6 @@ pub(crate) struct Metatron {
     store: Arc<Store>,
     blocks: RwLock<Vec<BlockHash>>,
     counter: AtomicU32,
-    disconnected: DashMap<Extranonce, (Arc<Session>, Instant, Arc<EnonceAllocator>)>,
     connections: Arc<Connections>,
     started: Instant,
     orders: DashMap<u32, OrderSlot>,
@@ -74,7 +88,6 @@ impl Metatron {
             store,
             blocks: RwLock::new(blocks),
             counter: AtomicU32::new(0),
-            disconnected: DashMap::new(),
             connections: Arc::new(Connections::new(started)),
             started,
             orders: DashMap::new(),
@@ -118,14 +131,15 @@ impl Metatron {
     }
 
     fn cleanup_expired(&self, now: Instant) {
-        self.disconnected
-            .retain(|_, (session, disconnected_at, allocator)| {
-                let keep = now.duration_since(*disconnected_at) < SESSION_TTL;
+        for slot in self.orders.iter() {
+            slot.disconnected.lock().retain(|_, entry| {
+                let keep = now.duration_since(entry.disconnected_at) < SESSION_TTL;
                 if !keep {
-                    allocator.release_enonce1(session.enonce1());
+                    entry.allocator.release_enonce1(entry.session.enonce1());
                 }
                 keep
             });
+        }
 
         self.users
             .retain(|_, user| user.session_count() > 0 || user.has_accepted());
@@ -182,36 +196,60 @@ impl Metatron {
 
         if let Some(slot) = self.orders.get(&session.id().order_id()) {
             slot.sessions.remove(&session.id());
-        }
 
-        self.disconnected.insert(
-            session.enonce1().clone(),
-            (session, Instant::now(), allocator),
-        );
+            let mut disconnected = slot.disconnected.lock();
+            if allocator.is_compatible_enonce1(session.enonce1()) {
+                disconnected.insert(
+                    session.enonce1().clone(),
+                    DisconnectedSession {
+                        session,
+                        disconnected_at: Instant::now(),
+                        allocator,
+                    },
+                );
+            }
+        }
     }
 
     pub(crate) fn resume_session(&self, enonce1: &Extranonce, order_id: u32) -> bool {
-        self.disconnected
-            .remove_if(enonce1, |_, (session, _, _)| {
-                session.id().order_id() == order_id
-            })
-            .is_some()
+        self.orders
+            .get(&order_id)
+            .is_some_and(|slot| slot.disconnected.lock().remove(enonce1).is_some())
+    }
+
+    pub(crate) fn prune_disconnected(&self, order_id: u32) {
+        if let Some(slot) = self.orders.get(&order_id) {
+            slot.disconnected
+                .lock()
+                .retain(|_, entry| entry.is_compatible());
+        }
+    }
+
+    pub(crate) fn evictable_disconnected_count(&self, order_id: u32) -> usize {
+        self.orders
+            .get(&order_id)
+            .map_or(0, |slot| slot.disconnected.lock().len())
     }
 
     pub(crate) fn evict_oldest_disconnected(&self, order_id: u32) -> bool {
-        let oldest_key = self
-            .disconnected
+        let Some(slot) = self.orders.get(&order_id) else {
+            return false;
+        };
+
+        let mut disconnected = slot.disconnected.lock();
+
+        let oldest_key = disconnected
             .iter()
-            .filter(|entry| entry.value().0.id().order_id() == order_id)
-            .min_by_key(|entry| entry.value().1)
-            .map(|entry| entry.key().clone());
+            .filter(|(_, entry)| entry.is_compatible())
+            .min_by_key(|(_, entry)| entry.disconnected_at)
+            .map(|(enonce1, _)| enonce1.clone());
 
         let Some(key) = oldest_key else {
             return false;
         };
 
-        if let Some((_, (session, _, allocator))) = self.disconnected.remove(&key) {
-            allocator.release_enonce1(session.enonce1());
+        if let Some(entry) = disconnected.remove(&key) {
+            entry.allocator.release_enonce1(entry.session.enonce1());
             true
         } else {
             false
@@ -296,7 +334,10 @@ impl Metatron {
     }
 
     pub(crate) fn total_disconnected(&self) -> usize {
-        self.disconnected.len()
+        self.orders
+            .iter()
+            .map(|slot| slot.disconnected.lock().len())
+            .sum()
     }
 
     pub(crate) fn users(&self) -> &DashMap<Address, Arc<User>> {
@@ -924,6 +965,65 @@ mod tests {
 
         assert!(!metatron.evict_oldest_disconnected(1));
         assert_eq!(metatron.total_disconnected(), 1);
+    }
+
+    #[test]
+    fn prune_disconnected_prevents_stale_prefix_reuse_and_ignores_stale_retire() {
+        let prefix_a = Extranonce::from_bytes(&[0xde, 0xad, 0xbe, 0xef]);
+        let prefix_b = Extranonce::from_bytes(&[0xca, 0xfe, 0xba, 0xbe]);
+        let allocator = Arc::new(EnonceAllocator::new(
+            Extranonces::Proxy(ProxyExtranonces::new(prefix_a.clone(), 8, 1).unwrap()),
+            0,
+        ));
+
+        let (metatron, _dir) = Metatron::test();
+
+        let enonce_a1 = allocator.next_enonce1().unwrap();
+        let enonce_a2 = allocator.next_enonce1().unwrap();
+        let s1 = metatron.new_session(test_auth(&enonce_a1.to_string(), "foo"), 0, test_addr());
+        let s2 = metatron.new_session(test_auth(&enonce_a2.to_string(), "bar"), 0, test_addr());
+        metatron.retire_session(s1, allocator.clone());
+
+        allocator.update_extranonces(Extranonces::Proxy(
+            ProxyExtranonces::new(prefix_b, 8, 1).unwrap(),
+        ));
+        metatron.prune_disconnected(0);
+
+        metatron.retire_session(s2, allocator.clone());
+
+        assert_eq!(metatron.evictable_disconnected_count(0), 0);
+        assert!(!metatron.evict_oldest_disconnected(0));
+        assert_eq!(metatron.total_disconnected(), 0);
+
+        allocator.update_extranonces(Extranonces::Proxy(
+            ProxyExtranonces::new(prefix_a, 8, 1).unwrap(),
+        ));
+        metatron.prune_disconnected(0);
+
+        let live_enonce = allocator.next_enonce1().unwrap();
+        let _live =
+            metatron.new_session(test_auth(&live_enonce.to_string(), "baz"), 0, test_addr());
+
+        assert_eq!(metatron.evictable_disconnected_count(0), 0);
+        assert!(!metatron.evict_oldest_disconnected(0));
+        assert_eq!(allocator.allocated_count(), 1);
+    }
+
+    #[test]
+    fn disconnected_sessions_isolated_across_orders_with_same_enonce1() {
+        let (metatron, _dir) = Metatron::test();
+        let enonce1 = Extranonce::from_bytes(&[0xde, 0xad, 0xbe, 0xef]);
+
+        let s0 = metatron.new_session(test_auth("deadbeef", "foo"), 0, test_addr());
+        let s1 = metatron.new_session(test_auth("deadbeef", "bar"), 1, test_addr());
+
+        metatron.retire_session(s0, test_allocator());
+        metatron.retire_session(s1, test_allocator());
+
+        assert_eq!(metatron.total_disconnected(), 2);
+        assert!(metatron.resume_session(&enonce1, 0));
+        assert!(metatron.resume_session(&enonce1, 1));
+        assert_eq!(metatron.total_disconnected(), 0);
     }
 
     #[test]

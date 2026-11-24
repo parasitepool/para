@@ -2104,6 +2104,66 @@ mod tests {
         assert_eq!(router.next_order().unwrap().id, 0);
     }
 
+    #[test]
+    fn next_order_skips_enonce_saturated_orders() {
+        fn saturate(order: &Order) -> Extranonce {
+            let upstream_enonce1 = Extranonce::from_bytes(&[0xde, 0xad, 0xbe, 0xef]);
+            let allocator = order.allocator.get().unwrap();
+            allocator.update_extranonces(Extranonces::Proxy(
+                ProxyExtranonces::new(upstream_enonce1, 8, 1).unwrap(),
+            ));
+            let first = allocator.next_enonce1().unwrap();
+            for _ in 1..256 {
+                allocator.next_enonce1().unwrap();
+            }
+            first
+        }
+
+        let router = test_router();
+        let bucket = test_order(
+            0,
+            Some(hash_days(100.0)),
+            OrderStatus::Active,
+            &router.metatron,
+        );
+        let full_sink = test_order(1, None, OrderStatus::Active, &router.metatron);
+        let open_sink = test_order(2, None, OrderStatus::Active, &router.metatron);
+        router
+            .metatron
+            .new_session(
+                test_authorization("cafebabe", "foo"),
+                open_sink.id,
+                addr(4444),
+            )
+            .record_accepted(Difficulty::from(100.0), Difficulty::from(100.0));
+
+        let bucket_enonce1 = saturate(&bucket);
+        saturate(&full_sink);
+        add_orders(
+            router.as_ref(),
+            [bucket.clone(), full_sink, open_sink.clone()],
+        );
+
+        assert_eq!(router.next_order().unwrap().id, open_sink.id);
+
+        router.set_pace(true);
+        assert_eq!(router.next_order().unwrap().id, open_sink.id);
+
+        saturate(&open_sink);
+        assert!(router.next_order().is_none());
+
+        let session = router.metatron.new_session(
+            test_authorization(&bucket_enonce1.to_string(), "bar"),
+            bucket.id,
+            addr(4444),
+        );
+        router
+            .metatron
+            .retire_session(session, bucket.allocator.get().unwrap().clone());
+
+        assert_eq!(router.next_order().unwrap().id, bucket.id);
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn capacity_enforcement() {
         let router = test_router();

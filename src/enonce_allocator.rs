@@ -83,6 +83,20 @@ impl EnonceAllocator {
         }
     }
 
+    pub(crate) fn available_slots(&self) -> usize {
+        let extranonces = self.extranonces.read();
+        let max = extranonces.max_clients();
+        if max > MAX_TRACKED_CLIENTS {
+            usize::MAX
+        } else {
+            max.saturating_sub(self.allocated.lock().count_for(&extranonces))
+        }
+    }
+
+    pub(crate) fn has_capacity(&self) -> bool {
+        self.available_slots() > 0
+    }
+
     pub(crate) fn next_enonce1(&self) -> Option<Extranonce> {
         let extranonces = self.extranonces.read();
         let max = extranonces.max_clients();
@@ -481,5 +495,37 @@ mod tests {
 
         allocator.track_enonce1(&e1);
         assert_eq!(allocator.allocated_count(), 1);
+    }
+
+    #[test]
+    fn has_capacity_tracks_saturation_release_and_prefix_rotation() {
+        assert_eq!(pool_allocator().available_slots(), usize::MAX);
+        assert!(pool_allocator().has_capacity());
+
+        let allocator = proxy_allocator(1);
+        assert_eq!(allocator.available_slots(), 256);
+        assert!(allocator.has_capacity());
+
+        let first = allocator.next_enonce1().unwrap();
+        for _ in 1..256 {
+            allocator.next_enonce1().unwrap();
+        }
+        assert_eq!(allocator.available_slots(), 0);
+        assert!(!allocator.has_capacity());
+
+        allocator.release_enonce1(&first);
+        assert_eq!(allocator.available_slots(), 1);
+        assert!(allocator.has_capacity());
+
+        allocator.next_enonce1().unwrap();
+        assert_eq!(allocator.available_slots(), 0);
+        assert!(!allocator.has_capacity());
+
+        let next_upstream = Extranonce::from_bytes(&[0xca, 0xfe, 0xba, 0xbe]);
+        allocator.update_extranonces(Extranonces::Proxy(
+            ProxyExtranonces::new(next_upstream, 8, 1).unwrap(),
+        ));
+        assert_eq!(allocator.available_slots(), 256);
+        assert!(allocator.has_capacity());
     }
 }

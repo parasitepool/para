@@ -65,7 +65,13 @@ where
     let mut backoff = Backoff::new();
 
     loop {
-        match factory().await {
+        let attempt = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return Err(BackoffEnd::Cancelled),
+            attempt = factory() => attempt,
+        };
+
+        match attempt {
             Ok(value) => return Ok(value),
             Err(err) => warn!("{label} attempt failed: {err}"),
         }
@@ -95,6 +101,26 @@ mod tests {
         });
 
         let outcome = retry_with_backoff(&cancel, "foo", || async { Err::<(), _>("bar") }).await;
+        assert!(matches!(outcome, Err(BackoffEnd::Cancelled)));
+    }
+
+    #[tokio::test]
+    async fn cancelled_during_attempt() {
+        let cancel = CancellationToken::new();
+        let cancel_clone = cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            cancel_clone.cancel();
+        });
+
+        let outcome = timeout(
+            Duration::from_secs(1),
+            retry_with_backoff(&cancel, "foo", || {
+                std::future::pending::<Result<(), &str>>()
+            }),
+        )
+        .await
+        .unwrap();
         assert!(matches!(outcome, Err(BackoffEnd::Cancelled)));
     }
 

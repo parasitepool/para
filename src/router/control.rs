@@ -18,6 +18,7 @@ struct Ticks {
 struct Demand {
     deficit: HashRate,
     surplus: HashRate,
+    slots: usize,
 }
 
 impl Demand {
@@ -30,6 +31,7 @@ impl Demand {
 
         let mut deficit = HashRate::ZERO;
         let mut surplus = HashRate::ZERO;
+        let mut slots = 0usize;
 
         for order in orders.iter().filter(|order| !order.is_sink()) {
             if order.has_connected_upstream() && !order.is_fulfilled() {
@@ -47,6 +49,7 @@ impl Demand {
             if !order.has_sessions() {
                 deficit_ticks.remove(&order.id);
                 deficit += raw_deficit;
+                slots = slots.saturating_add(order.available_enonce_slots());
 
                 continue;
             }
@@ -59,17 +62,23 @@ impl Demand {
             }
 
             deficit += raw_deficit;
+            slots = slots.saturating_add(order.available_enonce_slots());
         }
 
-        Self { deficit, surplus }
+        Self {
+            deficit,
+            surplus,
+            slots,
+        }
     }
 
     fn exhausted(self) -> bool {
-        self.deficit == HashRate::ZERO
+        self.deficit == HashRate::ZERO || self.slots == 0
     }
 
-    fn consume(&mut self, hashrate: HashRate) {
+    fn consume(&mut self, hashrate: HashRate, sessions: usize) {
         self.deficit -= hashrate;
+        self.slots = self.slots.saturating_sub(sessions);
     }
 }
 
@@ -224,7 +233,7 @@ impl Control {
 
             if detail.hashrate <= max_trim && order.trim_session(detail.id, now) {
                 max_trim -= detail.hashrate;
-                budget.consume(detail.hashrate);
+                budget.consume(detail.hashrate, 1);
                 trimmed.sessions.push(*detail);
             }
         }
@@ -237,9 +246,13 @@ impl Control {
         budget: &mut Demand,
         now: Instant,
     ) -> Trim {
+        if budget.exhausted() {
+            return Trim::default();
+        }
+
         for (order, detail) in candidates.iter().rev() {
             if order.trim_session(detail.id, now) {
-                budget.consume(detail.hashrate);
+                budget.consume(detail.hashrate, 1);
 
                 return Trim {
                     sessions: vec![*detail],
@@ -259,6 +272,10 @@ impl Control {
 
         for order in orders {
             let remaining = MAX_OVERFLOW_TRIMS_PER_TICK - trimmed.sessions.len();
+            let remaining = match budget.as_deref() {
+                Some(budget) => remaining.min(budget.slots),
+                None => remaining,
+            };
 
             if remaining == 0 || budget.as_deref().is_some_and(|budget| budget.exhausted()) {
                 break;
@@ -267,7 +284,7 @@ impl Control {
             let order_trimmed = order.trim(Some(remaining), now);
 
             if let Some(budget) = budget.as_deref_mut() {
-                budget.consume(order_trimmed.hashrate());
+                budget.consume(order_trimmed.hashrate(), order_trimmed.sessions.len());
             }
 
             trimmed += order_trimmed;
@@ -276,17 +293,32 @@ impl Control {
         trimmed
     }
 
-    fn drain_sinks(orders: &[Arc<Order>], now: Instant) -> Trim {
+    fn drain_sinks(orders: &[Arc<Order>], max_sessions: usize, now: Instant) -> Trim {
+        let mut sessions = orders
+            .iter()
+            .filter(|order| order.is_sink())
+            .flat_map(|order| {
+                order
+                    .session_details(now)
+                    .into_iter()
+                    .map(move |detail| (order, detail))
+            })
+            .collect::<Vec<_>>();
+
+        sessions.sort_by_key(|(_, detail)| Reverse(detail.hashrate));
+
         let mut sink_trimmed = Trim::default();
 
-        for order in orders.iter().filter(|order| order.is_sink()) {
-            for detail in order.session_details(now) {
-                if !order.trim_session(detail.id, now) {
-                    continue;
-                }
-
-                sink_trimmed.sessions.push(detail);
+        for (order, detail) in sessions {
+            if sink_trimmed.sessions.len() >= max_sessions {
+                break;
             }
+
+            if !order.trim_session(detail.id, now) {
+                continue;
+            }
+
+            sink_trimmed.sessions.push(detail);
         }
 
         sink_trimmed
@@ -340,13 +372,16 @@ impl Control {
                 )
             }
         } else {
-            let sink_trimmed = if orders
+            let bucket_slots = orders
                 .iter()
-                .any(|order| !order.is_sink() && order.is_routable())
-            {
-                let trimmed = Self::drain_sinks(orders, now);
+                .filter(|order| !order.is_sink() && order.is_routable())
+                .map(|order| order.available_enonce_slots())
+                .fold(0usize, usize::saturating_add);
 
-                budget.consume(trimmed.hashrate());
+            let sink_trimmed = if bucket_slots > 0 {
+                let trimmed = Self::drain_sinks(orders, bucket_slots, now);
+
+                budget.consume(trimmed.hashrate(), trimmed.sessions.len());
 
                 trimmed
             } else {
@@ -1395,6 +1430,136 @@ mod tests {
             control.rebalance(&orders, pace);
 
             assert!(!cancel.is_cancelled());
+        }
+
+        case(false);
+        case(true);
+    }
+
+    fn fill_order_slots(order: &Order, leave_free: usize) {
+        let upstream_enonce1 = Extranonce::from_bytes(&[0xde, 0xad, 0xbe, 0xef]);
+        let allocator = order.allocator.get().unwrap();
+        allocator.update_extranonces(Extranonces::Proxy(
+            ProxyExtranonces::new(upstream_enonce1, 8, 1).unwrap(),
+        ));
+        for _ in 0..256 - leave_free {
+            allocator.next_enonce1().unwrap();
+        }
+    }
+
+    fn saturate_order(order: &Order) {
+        fill_order_slots(order, 0);
+    }
+
+    #[test]
+    fn rebalance_skips_saturated_deficit_bucket() {
+        #[track_caller]
+        fn case(pace: bool) {
+            let control = test_control();
+            let bucket = test_order(
+                0,
+                Some(hash_days(100.0)),
+                OrderStatus::Active,
+                &control.metatron,
+            );
+            saturate_order(&bucket);
+
+            let sink = test_order(1, None, OrderStatus::Active, &control.metatron);
+            let cancel = register_session(&control.metatron, &sink, "deadbeef", "foo", 100.0);
+
+            control.rebalance(&[bucket, sink], pace);
+
+            assert!(!cancel.is_cancelled());
+        }
+
+        case(false);
+        case(true);
+    }
+
+    #[test]
+    fn rebalance_pace_does_not_shed_overflow_into_saturated_sink() {
+        let control = test_control();
+        let over = overflowing_order(&control, 0);
+        let sink = test_order(1, None, OrderStatus::Active, &control.metatron);
+        saturate_order(&sink);
+
+        let orders = [over.order.clone(), sink];
+
+        for _ in 0..OVERFLOW_PERSIST_TICKS {
+            control.rebalance(&orders, true);
+        }
+
+        assert!(!over.cancel_mid.is_cancelled());
+    }
+
+    #[test]
+    fn rebalance_still_trims_saturated_overflowing_bucket() {
+        let control = test_control();
+        let over = overflowing_order(&control, 0);
+        saturate_order(&over.order);
+        let sink = test_order(1, None, OrderStatus::Active, &control.metatron);
+
+        let orders = [over.order.clone(), sink];
+
+        for _ in 0..OVERFLOW_PERSIST_TICKS {
+            control.rebalance(&orders, true);
+        }
+
+        assert!(over.cancel_mid.is_cancelled());
+    }
+
+    #[test]
+    fn rebalance_caps_sink_trims_to_available_bucket_slots() {
+        #[track_caller]
+        fn case(pace: bool) {
+            let control = test_control();
+            let bucket = test_order(
+                0,
+                Some(hash_days(1e12)),
+                OrderStatus::Active,
+                &control.metatron,
+            );
+            fill_order_slots(&bucket, 2);
+
+            let sink = test_order(1, None, OrderStatus::Active, &control.metatron);
+            let small = register_session(&control.metatron, &sink, "aaaa", "foo", 5.0);
+            let largest = register_session(&control.metatron, &sink, "bbbb", "bar", 30.0);
+            let medium = register_session(&control.metatron, &sink, "cccc", "baz", 10.0);
+            let second = register_session(&control.metatron, &sink, "dddd", "qux", 20.0);
+
+            control.rebalance(&[bucket, sink], pace);
+
+            assert!(largest.is_cancelled());
+            assert!(second.is_cancelled());
+            assert!(!medium.is_cancelled());
+            assert!(!small.is_cancelled());
+        }
+
+        case(false);
+        case(true);
+    }
+
+    #[test]
+    fn rebalance_does_not_trim_overflow_after_sink_trims_exhaust_bucket_slots() {
+        #[track_caller]
+        fn case(pace: bool) {
+            let control = test_control();
+            let over = overflowing_order(&control, 0);
+            let starving = test_order(
+                1,
+                Some(hash_days(1e12)),
+                OrderStatus::Active,
+                &control.metatron,
+            );
+            fill_order_slots(&starving, 1);
+
+            let sink = test_order(2, None, OrderStatus::Active, &control.metatron);
+            let sink_cancel = register_session(&control.metatron, &sink, "eeee", "foo", 10.0);
+
+            control.rebalance(&[over.order.clone(), starving, sink], pace);
+
+            assert!(sink_cancel.is_cancelled());
+            assert!(!over.cancel_mid.is_cancelled());
         }
 
         case(false);
