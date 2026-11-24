@@ -61,6 +61,76 @@ impl OrderResponse {
     }
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+pub struct TapRequest {
+    pub upstream_target: UpstreamTarget,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TapResponse {
+    pub tap_id: u32,
+    pub payment_address: Address<NetworkUnchecked>,
+    pub upstream_target: UpstreamTarget,
+}
+
+impl TapResponse {
+    pub(crate) fn from_tap(tap: &Tap) -> Self {
+        Self {
+            tap_id: tap.id,
+            payment_address: tap.address.as_unchecked().clone(),
+            upstream_target: tap.upstream_target.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TapSummary {
+    pub id: u32,
+    pub status: TapStatus,
+    pub endpoint: String,
+    pub username: String,
+    pub payment_address: Address<NetworkUnchecked>,
+    pub order_count: usize,
+}
+
+impl TapSummary {
+    pub(crate) fn from_tap(tap: &Tap) -> Self {
+        Self {
+            id: tap.id,
+            status: tap.status(),
+            endpoint: tap.upstream_target.endpoint().to_string(),
+            username: tap.upstream_target.username().to_string(),
+            payment_address: tap.address.as_unchecked().clone(),
+            order_count: tap.order_count(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TapDetail {
+    pub id: u32,
+    pub status: TapStatus,
+    pub upstream_target: UpstreamTarget,
+    pub payment_address: Address<NetworkUnchecked>,
+    pub created_at: u64,
+    pub created_at_height: u32,
+    pub orders: Vec<u32>,
+}
+
+impl TapDetail {
+    pub(crate) fn from_tap(tap: &Tap, now: Instant) -> Self {
+        Self {
+            id: tap.id,
+            status: tap.status(),
+            upstream_target: tap.upstream_target.clone(),
+            payment_address: tap.address.as_unchecked().clone(),
+            created_at: epoch::instant_to_epoch_secs(tap.created_at, now) as u64,
+            created_at_height: tap.created_at_height,
+            orders: tap.order_ids(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrderSummary {
     pub id: u32,
@@ -125,6 +195,7 @@ pub struct OrderDetail {
     pub hash_price: Option<HashPrice>,
     pub payment_address: Option<Address<NetworkUnchecked>>,
     pub payment_amount: Option<Amount>,
+    pub tap_id: Option<u32>,
     pub txids: Vec<Txid>,
     pub created_at: u64,
     pub created_at_height: Option<u32>,
@@ -163,6 +234,7 @@ impl OrderDetail {
             hash_price: order.hash_price(),
             payment_address: payment.map(|payment| payment.address.as_unchecked().clone()),
             payment_amount: payment.map(|payment| payment.amount),
+            tap_id: payment.and_then(|payment| payment.tap_id),
             txids,
             created_at: epoch::instant_to_epoch_secs(order.created_at, now) as u64,
             created_at_height: payment.map(|payment| payment.created_at_height),
@@ -200,6 +272,7 @@ impl OrderDetail {
             }),
             payment_address: bucket.map(|bucket| bucket.address.clone()),
             payment_amount: bucket.map(|bucket| Amount::from_sat(bucket.amount_sat)),
+            tap_id: bucket.and_then(|bucket| bucket.tap_id),
             txids,
             created_at: entry.created_at_secs as u64,
             created_at_height: bucket.map(|bucket| bucket.created_at_height),
@@ -233,6 +306,11 @@ pub(crate) fn router(
         .route("/api/router/order/{id}/cancel", post(cancel_order))
         .route("/api/router/order/{id}/clear", post(clear_order))
         .route("/api/router/order/{id}/refund", post(refund_order))
+        .route("/api/router/tap", post(add_tap))
+        .route("/api/router/tap/{id}", get(tap_detail))
+        .route("/api/router/taps", get(list_taps))
+        .route("/api/router/taps/count", get(count_taps))
+        .route("/api/router/tap/{id}/cancel", post(cancel_tap))
         .route("/api/router/halt", put(set_halt))
         .route("/api/router/pace", put(set_pace))
         .route("/api/router/capacity", put(set_capacity))
@@ -275,18 +353,21 @@ async fn order_detail(
 ) -> ServerResult<Response> {
     let metatron = router.metatron();
 
-    let txids_for = |derivation_index: u32| {
+    let txids_for = |derivation_index: u32, outpoint: Option<OutPoint>| {
         router
             .wallet()
             .map(Wallet::last_snapshot)
-            .map(|snapshot| snapshot.txids_by_derivation_index(derivation_index))
+            .map(|snapshot| match outpoint {
+                Some(outpoint) => snapshot.txids_for_outpoint(outpoint),
+                None => snapshot.txids_by_derivation_index(derivation_index),
+            })
             .unwrap_or_default()
     };
 
     if let Some(order) = router.get_order(id) {
         let txids = order
             .payment()
-            .map(|payment| txids_for(payment.derivation_index))
+            .map(|payment| txids_for(payment.derivation_index, payment.outpoint))
             .unwrap_or_default();
 
         return Ok(Json(OrderDetail::from_order(
@@ -305,7 +386,7 @@ async fn order_detail(
     let txids = entry
         .bucket
         .as_ref()
-        .map(|bucket| txids_for(bucket.derivation_index))
+        .map(|bucket| txids_for(bucket.derivation_index, bucket.outpoint))
         .unwrap_or_default();
 
     Ok(Json(OrderDetail::from_entry(
@@ -346,6 +427,198 @@ async fn add_order(
         .into_response())
 }
 
+async fn add_tap(
+    _: ApiAuth,
+    State(router): State<Arc<Router>>,
+    Json(request): Json<TapRequest>,
+) -> ServerResult<Response> {
+    let tap = router
+        .blocking(move |router| router.add_tap(request.upstream_target))
+        .await??;
+
+    Ok((
+        StatusCode::CREATED,
+        [(
+            axum::http::header::LOCATION,
+            format!("/api/router/tap/{}", tap.id),
+        )],
+        Json(TapResponse::from_tap(&tap)),
+    )
+        .into_response())
+}
+
+async fn tap_detail(
+    _: ApiAuth,
+    State(router): State<Arc<Router>>,
+    Path(id): Path<u32>,
+) -> ServerResult<Response> {
+    let tap = router.get_tap(id).ok_or_not_found(|| format!("Tap {id}"))?;
+
+    Ok(Json(TapDetail::from_tap(&tap, Instant::now())).into_response())
+}
+
+#[derive(Default)]
+struct ListQuery {
+    search: Option<String>,
+    address: Option<Address<NetworkUnchecked>>,
+    cursor: Option<u32>,
+    limit: Option<usize>,
+}
+
+impl ListQuery {
+    fn apply(&mut self, key: &str, value: &str) -> ServerResult<bool> {
+        match key {
+            "search" if !value.trim().is_empty() => {
+                self.search = Some(value.trim().to_lowercase());
+            }
+            "search" => self.search = None,
+            "address" if !value.trim().is_empty() => {
+                self.address = Some(value.parse().map_err(|err| {
+                    ServerError::BadRequest(format!("invalid address filter `{value}`: {err}"))
+                })?);
+            }
+            "address" => self.address = None,
+            "cursor" if !value.trim().is_empty() => {
+                self.cursor = Some(value.parse().map_err(|err| {
+                    ServerError::BadRequest(format!("invalid cursor `{value}`: {err}"))
+                })?);
+            }
+            "cursor" => self.cursor = None,
+            "limit" if !value.trim().is_empty() => {
+                self.limit = Some(parse_usize_query_param("limit", value)?);
+            }
+            "limit" => self.limit = None,
+            _ => return Ok(false),
+        }
+
+        Ok(true)
+    }
+
+    fn matches(
+        &self,
+        id: u32,
+        upstream_target: &UpstreamTarget,
+        payment_address: Option<&Address<NetworkUnchecked>>,
+    ) -> bool {
+        if let Some(address) = &self.address
+            && !matches_address(upstream_target, payment_address, address)
+        {
+            return false;
+        }
+
+        if let Some(search) = &self.search
+            && !matches_search(id, upstream_target, payment_address, search)
+        {
+            return false;
+        }
+
+        true
+    }
+}
+
+#[derive(Default)]
+struct TapsQuery {
+    list: ListQuery,
+    statuses: Vec<TapStatus>,
+}
+
+impl TapsQuery {
+    fn parse(raw: Option<&str>) -> ServerResult<Self> {
+        let mut query = Self::default();
+
+        for (key, value) in parse_query_pairs(raw)? {
+            if query.list.apply(&key, &value)? {
+                continue;
+            }
+
+            if key == "status" {
+                for status in value.split(',').filter(|status| !status.is_empty()) {
+                    query.statuses.push(parse_tap_status(status)?);
+                }
+            }
+        }
+
+        Ok(query)
+    }
+
+    fn matches(&self, tap: &Tap) -> bool {
+        if !self.statuses.is_empty() && !self.statuses.contains(&tap.status()) {
+            return false;
+        }
+
+        self.list.matches(
+            tap.id,
+            &tap.upstream_target,
+            Some(tap.address.as_unchecked()),
+        )
+    }
+}
+
+fn parse_tap_status(value: &str) -> ServerResult<TapStatus> {
+    match value {
+        "active" => Ok(TapStatus::Active),
+        "cancelled" => Ok(TapStatus::Cancelled),
+        _ => Err(ServerError::BadRequest(format!(
+            "invalid tap status filter `{value}`"
+        ))),
+    }
+}
+
+async fn list_taps(
+    _: ApiAuth,
+    State(router): State<Arc<Router>>,
+    RawQuery(raw_query): RawQuery,
+) -> ServerResult<Response> {
+    let query = TapsQuery::parse(raw_query.as_deref())?;
+    let limit = effective_limit(query.list.limit)?;
+
+    let mut taps = router
+        .tap_page(query.list.cursor, limit + 1, |tap| query.matches(tap))
+        .into_iter()
+        .map(|tap| TapSummary::from_tap(&tap))
+        .collect::<Vec<_>>();
+
+    let next_cursor = if taps.len() > limit {
+        taps.truncate(limit);
+        taps.last().map(|tap| tap.id.to_string())
+    } else {
+        None
+    };
+
+    Ok(page_response(taps, limit, next_cursor))
+}
+
+async fn count_taps(
+    _: ApiAuth,
+    State(router): State<Arc<Router>>,
+    RawQuery(raw_query): RawQuery,
+) -> ServerResult<Response> {
+    let query = TapsQuery::parse(raw_query.as_deref())?;
+
+    if query.list.cursor.is_some() {
+        return Err(ServerError::BadRequest(
+            "cursor is not supported for tap counts".into(),
+        ));
+    }
+
+    let count = router.count_taps(|tap| query.matches(tap));
+
+    Ok(Json(CountResponse { count }).into_response())
+}
+
+async fn cancel_tap(
+    _: AdminAuth,
+    State(router): State<Arc<Router>>,
+    Path(id): Path<u32>,
+) -> ServerResult<Response> {
+    router
+        .blocking(move |router| router.cancel_tap(id))
+        .await??
+        .ok_or_not_found(|| format!("Tap {id}"))?;
+
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
 #[derive(Copy, Clone)]
 enum OrderKind {
     Bucket,
@@ -363,13 +636,10 @@ impl OrderKind {
 
 #[derive(Default)]
 struct OrdersQuery {
-    search: Option<String>,
-    address: Option<Address<NetworkUnchecked>>,
+    list: ListQuery,
     statuses: Vec<OrderStatus>,
     review: Option<Review>,
     kind: Option<OrderKind>,
-    cursor: Option<u32>,
-    limit: Option<usize>,
 }
 
 impl OrdersQuery {
@@ -377,17 +647,11 @@ impl OrdersQuery {
         let mut query = Self::default();
 
         for (key, value) in parse_query_pairs(raw)? {
+            if query.list.apply(&key, &value)? {
+                continue;
+            }
+
             match key.as_str() {
-                "search" if !value.trim().is_empty() => {
-                    query.search = Some(value.trim().to_lowercase());
-                }
-                "search" => query.search = None,
-                "address" if !value.trim().is_empty() => {
-                    query.address = Some(value.parse().map_err(|err| {
-                        ServerError::BadRequest(format!("invalid address filter `{value}`: {err}"))
-                    })?);
-                }
-                "address" => query.address = None,
                 "status" => {
                     for status in value.split(',').filter(|status| !status.is_empty()) {
                         query.statuses.push(parse_order_status(status)?);
@@ -401,16 +665,6 @@ impl OrdersQuery {
                     query.kind = Some(parse_order_kind(&value)?);
                 }
                 "kind" => query.kind = None,
-                "cursor" if !value.trim().is_empty() => {
-                    query.cursor = Some(value.parse().map_err(|err| {
-                        ServerError::BadRequest(format!("invalid cursor `{value}`: {err}"))
-                    })?);
-                }
-                "cursor" => query.cursor = None,
-                "limit" if !value.trim().is_empty() => {
-                    query.limit = Some(parse_usize_query_param("limit", &value)?);
-                }
-                "limit" => query.limit = None,
                 _ => {}
             }
         }
@@ -419,16 +673,6 @@ impl OrdersQuery {
     }
 
     fn matches(&self, order: &Order) -> bool {
-        let payment_address = order
-            .payment()
-            .map(|payment| payment.address.as_unchecked());
-
-        if let Some(address) = &self.address
-            && !matches_address(&order.upstream_target, payment_address, address)
-        {
-            return false;
-        }
-
         if !self.statuses.is_empty() && !self.statuses.contains(&order.status()) {
             return false;
         }
@@ -446,24 +690,15 @@ impl OrdersQuery {
             return false;
         }
 
-        if let Some(search) = &self.search
-            && !matches_search(order.id, &order.upstream_target, payment_address, search)
-        {
-            return false;
-        }
+        let payment_address = order
+            .payment()
+            .map(|payment| payment.address.as_unchecked());
 
-        true
+        self.list
+            .matches(order.id, &order.upstream_target, payment_address)
     }
 
     fn matches_entry(&self, id: u32, entry: &entry::OrderEntry) -> bool {
-        let payment_address = entry.bucket.as_ref().map(|bucket| &bucket.address);
-
-        if let Some(address) = &self.address
-            && !matches_address(&entry.upstream_target, payment_address, address)
-        {
-            return false;
-        }
-
         if !self.statuses.is_empty() && !self.statuses.contains(&entry.status) {
             return false;
         }
@@ -481,13 +716,10 @@ impl OrdersQuery {
             return false;
         }
 
-        if let Some(search) = &self.search
-            && !matches_search(id, &entry.upstream_target, payment_address, search)
-        {
-            return false;
-        }
+        let payment_address = entry.bucket.as_ref().map(|bucket| &bucket.address);
 
-        true
+        self.list
+            .matches(id, &entry.upstream_target, payment_address)
     }
 }
 
@@ -560,10 +792,10 @@ async fn list_orders(
 ) -> ServerResult<Response> {
     let now = Instant::now();
     let query = OrdersQuery::parse(raw_query.as_deref())?;
-    let limit = effective_limit(query.limit)?;
+    let limit = effective_limit(query.list.limit)?;
 
     let (live, cold) = router.order_page(
-        query.cursor,
+        query.list.cursor,
         limit + 1,
         |order| query.matches(order),
         |id, entry| query.matches_entry(id, entry),
@@ -587,7 +819,7 @@ async fn count_orders(
 ) -> ServerResult<Response> {
     let query = OrdersQuery::parse(raw_query.as_deref())?;
 
-    if query.cursor.is_some() {
+    if query.list.cursor.is_some() {
         return Err(ServerError::BadRequest(
             "cursor is not supported for order counts".into(),
         ));
@@ -808,6 +1040,8 @@ mod tests {
                 derivation_index: 3,
                 amount_sat: 1_000,
                 created_at_height: 42,
+                outpoint: None,
+                tap_id: None,
             }),
             created_at_secs: 1_700_000_000.0,
             stats: Stats::new().to_entry(Instant::now()),
@@ -1086,5 +1320,306 @@ mod tests {
             merged.iter().map(|summary| summary.id).collect::<Vec<_>>(),
             [5, 4, 3, 2],
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn tap_endpoints_lifecycle_and_outpoint_scoped_order_detail() {
+        use crate::router::testkit::*;
+
+        let router = test_router();
+        let wallet = router.wallet().unwrap();
+        wallet.mark_synced();
+        router.set_hash_value(HashValue::from_sats(100));
+        router.set_premium_percent(0.0);
+
+        let response = add_tap(
+            ApiAuth,
+            State(router.router.clone()),
+            Json(TapRequest {
+                upstream_target: test_upstream_target(),
+            }),
+        )
+        .await
+        .ok()
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        assert_eq!(response.headers()["location"], "/api/router/tap/0");
+        let first = json_body::<TapResponse>(response).await;
+        assert_eq!(first.tap_id, 0);
+
+        let second_target: UpstreamTarget =
+            "tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx.baz@qux:3333"
+                .parse()
+                .unwrap();
+        let response = add_tap(
+            ApiAuth,
+            State(router.router.clone()),
+            Json(TapRequest {
+                upstream_target: second_target,
+            }),
+        )
+        .await
+        .ok()
+        .unwrap();
+        let second = json_body::<TapResponse>(response).await;
+        assert_eq!(second.tap_id, 1);
+
+        let first_address = first.payment_address.clone().assume_checked();
+        let tx1 =
+            wallet.test_receive_unconfirmed_with_salt(&first_address, Amount::from_sat(5_000), 1);
+        let tx2 =
+            wallet.test_receive_unconfirmed_with_salt(&first_address, Amount::from_sat(7_000), 2);
+        wallet.test_confirm_tx(tx1.clone());
+        wallet.test_confirm_tx(tx2.clone());
+        wallet.mark_synced();
+        router.process_taps();
+
+        let detail = json_body::<TapDetail>(
+            tap_detail(ApiAuth, State(router.router.clone()), Path(0))
+                .await
+                .ok()
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(detail.id, 0);
+        assert_eq!(detail.status, TapStatus::Active);
+        assert_eq!(detail.orders, vec![0, 1]);
+
+        let order0 = json_body::<OrderDetail>(
+            order_detail(ApiAuth, State(router.router.clone()), Path(0))
+                .await
+                .ok()
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(order0.tap_id, Some(0));
+        assert_eq!(order0.txids, vec![tx1.compute_txid()]);
+
+        let order1 = json_body::<OrderDetail>(
+            order_detail(ApiAuth, State(router.router.clone()), Path(1))
+                .await
+                .ok()
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(order1.tap_id, Some(0));
+        assert_eq!(order1.txids, vec![tx2.compute_txid()]);
+
+        router
+            .get_order(0)
+            .unwrap()
+            .terminate(OrderStatus::Fulfilled);
+        router.persist().unwrap();
+        router.retire_orders();
+        assert!(router.get_order(0).is_none());
+
+        let cold_order0 = json_body::<OrderDetail>(
+            order_detail(ApiAuth, State(router.router.clone()), Path(0))
+                .await
+                .ok()
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(cold_order0.tap_id, Some(0));
+        assert_eq!(cold_order0.txids, vec![tx1.compute_txid()]);
+
+        let response = cancel_tap(AdminAuth, State(router.router.clone()), Path(0))
+            .await
+            .ok()
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+        let response = list_taps(
+            ApiAuth,
+            State(router.router.clone()),
+            RawQuery(Some("limit=1".into())),
+        )
+        .await
+        .ok()
+        .unwrap();
+        assert_eq!(response.headers()["x-next-cursor"], "1");
+        let page1 = json_body::<Vec<TapSummary>>(response).await;
+        assert_eq!(page1.len(), 1);
+        assert_eq!(page1[0].id, 1);
+
+        let response = list_taps(
+            ApiAuth,
+            State(router.router.clone()),
+            RawQuery(Some("status=cancelled".into())),
+        )
+        .await
+        .ok()
+        .unwrap();
+        let cancelled = json_body::<Vec<TapSummary>>(response).await;
+        assert_eq!(cancelled.len(), 1);
+        assert_eq!(cancelled[0].id, 0);
+        assert_eq!(cancelled[0].order_count, 2);
+
+        let response = count_taps(
+            ApiAuth,
+            State(router.router.clone()),
+            RawQuery(Some(format!("address={first_address}"))),
+        )
+        .await
+        .ok()
+        .unwrap();
+        assert_eq!(
+            json_body::<serde_json::Value>(response).await["count"].as_u64(),
+            Some(1),
+        );
+
+        assert!(
+            tap_detail(ApiAuth, State(router.router.clone()), Path(99))
+                .await
+                .is_err()
+        );
+        assert!(
+            cancel_tap(AdminAuth, State(router.router.clone()), Path(99))
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn taps_query_validation_and_search() {
+        use crate::router::testkit::*;
+
+        let router = test_router();
+        router.wallet().unwrap().mark_synced();
+        let tap = router.add_tap(test_upstream_target()).unwrap();
+
+        #[track_caller]
+        fn case(tap: &Tap, raw: Option<&str>, expected: bool) {
+            let query = TapsQuery::parse(raw).ok().unwrap();
+            assert_eq!(query.matches(tap), expected, "query: {raw:?}");
+        }
+
+        case(&tap, None, true);
+        case(&tap, Some("status=active"), true);
+        case(&tap, Some("status=cancelled"), false);
+        case(&tap, Some("status=active,cancelled"), true);
+        case(&tap, Some("search=bar"), true);
+        case(&tap, Some("search=baz"), false);
+        case(&tap, Some("search=0"), true);
+        case(
+            &tap,
+            Some(&format!(
+                "search={}",
+                tap.address.to_string().to_uppercase()
+            )),
+            true,
+        );
+        case(&tap, Some(&format!("address={}", tap.address)), true);
+        case(
+            &tap,
+            Some("address=tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx"),
+            false,
+        );
+
+        for invalid in [
+            "status=unknown",
+            "cursor=foo",
+            "address=not-an-address",
+            "limit=foo",
+        ] {
+            assert!(
+                TapsQuery::parse(Some(invalid)).is_err(),
+                "expected error for {invalid}",
+            );
+        }
+
+        assert!(
+            list_taps(
+                ApiAuth,
+                State(router.router.clone()),
+                RawQuery(Some("limit=0".into())),
+            )
+            .await
+            .is_err()
+        );
+        assert!(
+            count_taps(
+                ApiAuth,
+                State(router.router.clone()),
+                RawQuery(Some("cursor=0".into())),
+            )
+            .await
+            .is_err()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn tap_routes_enforce_api_and_admin_auth() {
+        use crate::router::testkit::*;
+
+        let router = test_router();
+        router.wallet().unwrap().mark_synced();
+
+        let bitcoin_client = Arc::new(
+            BitcoindClient::new(
+                "http://127.0.0.1:1".into(),
+                Auth::UserPass("foo".into(), "bar".into()),
+                None,
+                None,
+                None,
+            )
+            .unwrap(),
+        );
+
+        let app = super::router(
+            router.router.clone(),
+            bitcoin_client,
+            Chain::Regtest,
+            logs::Logs::test(),
+            Some("api-token"),
+            Some("admin-token"),
+        );
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let client = reqwest::Client::new();
+        let base = format!("http://{addr}");
+        let body = TapRequest {
+            upstream_target: test_upstream_target(),
+        };
+
+        let unauth = client
+            .post(format!("{base}/api/router/tap"))
+            .json(&body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(unauth.status(), StatusCode::UNAUTHORIZED);
+
+        let created = client
+            .post(format!("{base}/api/router/tap"))
+            .bearer_auth("api-token")
+            .json(&body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(created.status(), StatusCode::CREATED);
+
+        let cancel_with_api = client
+            .post(format!("{base}/api/router/tap/0/cancel"))
+            .bearer_auth("api-token")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(cancel_with_api.status(), StatusCode::UNAUTHORIZED);
+
+        let cancel_with_admin = client
+            .post(format!("{base}/api/router/tap/0/cancel"))
+            .bearer_auth("admin-token")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(cancel_with_admin.status(), StatusCode::NO_CONTENT);
+
+        server.abort();
     }
 }

@@ -78,10 +78,21 @@ impl ColdTotals {
     }
 }
 
+fn rehydratable_if_funded(entry: &entry::OrderEntry) -> bool {
+    entry.status != OrderStatus::Fulfilled && entry.review == Review::Clean
+}
+
+#[derive(Default)]
+struct OrphanReceipts {
+    indexes: Vec<(u32, Amount)>,
+    outpoints: Vec<(u32, OutPoint, Amount)>,
+}
+
 pub(crate) struct Orders {
     live: BTreeMap<u32, Arc<Order>>,
     cold: BTreeMap<u32, entry::OrderEntry>,
     cold_by_index: HashMap<u32, u32>,
+    cold_unreviewed_by_outpoint: HashMap<OutPoint, u32>,
     cold_totals: ColdTotals,
 }
 
@@ -89,6 +100,7 @@ pub(crate) struct OrderBook {
     orders: RwLock<Orders>,
     next_id: AtomicU32,
     logged_orphan_receipts: Mutex<HashSet<u32>>,
+    logged_orphan_outpoints: Mutex<HashSet<OutPoint>>,
     settings: Arc<Settings>,
     metatron: Arc<Metatron>,
     cancel: CancellationToken,
@@ -100,6 +112,7 @@ impl Orders {
             live: BTreeMap::new(),
             cold: BTreeMap::new(),
             cold_by_index: HashMap::new(),
+            cold_unreviewed_by_outpoint: HashMap::new(),
             cold_totals: ColdTotals::default(),
         }
     }
@@ -139,7 +152,15 @@ impl Orders {
         debug_assert!(!self.cold.contains_key(&id));
 
         if let Some(bucket) = &entry.bucket {
-            self.cold_by_index.insert(bucket.derivation_index, id);
+            match bucket.outpoint {
+                Some(outpoint) if rehydratable_if_funded(&entry) => {
+                    self.cold_unreviewed_by_outpoint.insert(outpoint, id);
+                }
+                Some(_) => {}
+                None => {
+                    self.cold_by_index.insert(bucket.derivation_index, id);
+                }
+            }
         }
 
         self.cold_totals.absorb(id, &entry);
@@ -153,7 +174,14 @@ impl Orders {
         };
 
         if let Some(bucket) = &entry.bucket {
-            self.cold_by_index.remove(&bucket.derivation_index);
+            match bucket.outpoint {
+                Some(outpoint) => {
+                    self.cold_unreviewed_by_outpoint.remove(&outpoint);
+                }
+                None => {
+                    self.cold_by_index.remove(&bucket.derivation_index);
+                }
+            }
         }
 
         let mut totals = ColdTotals::default();
@@ -273,6 +301,7 @@ impl OrderBook {
             orders: RwLock::new(Orders::new()),
             next_id: AtomicU32::new(0),
             logged_orphan_receipts: Mutex::new(HashSet::new()),
+            logged_orphan_outpoints: Mutex::new(HashSet::new()),
             settings,
             metatron,
             cancel,
@@ -466,6 +495,20 @@ impl OrderBook {
                 continue;
             };
 
+            if let Some(outpoint) = payment.outpoint {
+                let confirmed = snapshot.is_confirmed_outpoint(outpoint);
+
+                if order.status().is_terminal() && !order.is_fulfilled() && confirmed {
+                    order.set_flagged();
+                }
+
+                if order.status() == OrderStatus::Active && !confirmed && order.set_flagged() {
+                    warn!("Active order {} payment vanished ({outpoint})", order.id);
+                }
+
+                continue;
+            }
+
             let received = snapshot.received_by_deadline(payment.derivation_index, u32::MAX);
 
             if order.status().is_terminal() && !order.is_fulfilled() && received > Amount::ZERO {
@@ -486,11 +529,22 @@ impl OrderBook {
         let rehydratable = {
             let orders = self.orders.read();
 
-            snapshot
+            let mut ids = snapshot
                 .confirmed_by_index()
                 .filter(|(_, amount)| *amount > Amount::ZERO)
                 .filter_map(|(index, _)| orders.cold_id(index))
-                .collect::<Vec<_>>()
+                .filter(|id| orders.cold_entry(*id).is_some_and(rehydratable_if_funded))
+                .collect::<Vec<_>>();
+
+            ids.extend(
+                orders
+                    .cold_unreviewed_by_outpoint
+                    .iter()
+                    .filter(|(outpoint, _)| snapshot.is_confirmed_outpoint(**outpoint))
+                    .map(|(_, id)| *id),
+            );
+
+            ids
         };
 
         for id in rehydratable {
@@ -500,7 +554,7 @@ impl OrderBook {
                 continue;
             };
 
-            if entry.status == OrderStatus::Fulfilled || entry.review != Review::Clean {
+            if !rehydratable_if_funded(&entry) {
                 continue;
             }
 
@@ -524,9 +578,9 @@ impl OrderBook {
         }
     }
 
-    pub(crate) fn audit_receipts(&self, wallet: &Wallet) -> Vec<(u32, Amount)> {
+    fn audit_orphan_receipts(&self, wallet: &Wallet, taps: &TapBook) -> OrphanReceipts {
         let Some(snapshot) = wallet.snapshot() else {
-            return Vec::new();
+            return OrphanReceipts::default();
         };
 
         let orders = self.orders.read();
@@ -535,30 +589,66 @@ impl OrderBook {
             .live()
             .iter()
             .filter_map(|order| order.payment())
+            .filter(|payment| payment.outpoint.is_none())
             .map(|payment| payment.derivation_index)
             .collect::<HashSet<_>>();
 
-        let mut orphans = Vec::new();
+        let mut orphans = OrphanReceipts::default();
 
         for (index, amount) in snapshot.confirmed_by_index() {
             if amount == Amount::ZERO {
                 continue;
             }
 
+            if let Some(tap) = taps.by_derivation_index(index) {
+                for (outpoint, value, _) in snapshot.confirmed_outpoints(index) {
+                    if value >= wallet.dust_limit() && !tap.is_processed(outpoint) {
+                        orphans.outpoints.push((index, outpoint, value));
+                    }
+                }
+
+                continue;
+            }
+
             if !known.contains(&index) && orders.cold_id(index).is_none() {
-                orphans.push((index, amount));
+                orphans.indexes.push((index, amount));
             }
         }
 
         orphans
     }
 
-    pub(crate) fn sweep_orphan_receipts(&self, wallet: &Wallet) {
-        let mut logged = self.logged_orphan_receipts.lock();
+    #[cfg(test)]
+    pub(crate) fn audit_receipts(&self, wallet: &Wallet, taps: &TapBook) -> Vec<(u32, Amount)> {
+        let mut orphans = self.audit_orphan_receipts(wallet, taps);
+        let mut by_index = BTreeMap::<u32, Amount>::new();
 
-        for (index, amount) in self.audit_receipts(wallet) {
-            if logged.insert(index) {
+        for (index, _, value) in orphans.outpoints {
+            *by_index.entry(index).or_default() += value;
+        }
+
+        orphans.indexes.extend(by_index);
+        orphans.indexes
+    }
+
+    pub(crate) fn sweep_orphan_receipts(&self, wallet: &Wallet, taps: &TapBook) {
+        let orphans = self.audit_orphan_receipts(wallet, taps);
+
+        let mut logged_indexes = self.logged_orphan_receipts.lock();
+
+        for (index, amount) in orphans.indexes {
+            if logged_indexes.insert(index) {
                 warn!("Received {amount} at derivation index {index} with no matching order");
+            }
+        }
+
+        let mut logged_outpoints = self.logged_orphan_outpoints.lock();
+
+        for (index, outpoint, amount) in orphans.outpoints {
+            if logged_outpoints.insert(outpoint) {
+                warn!(
+                    "Received {amount} ({outpoint}) at tap derivation index {index} with no matching order",
+                );
             }
         }
     }
@@ -793,6 +883,8 @@ mod tests {
                 derivation_index: cold.index,
                 amount: Amount::from_sat(1000),
                 created_at_height: 0,
+                outpoint: None,
+                tap_id: None,
             },
             OrderStatus::Expired,
             &router.metatron,
@@ -843,6 +935,8 @@ mod tests {
                     derivation_index: address.index,
                     amount: Amount::from_sat(1000),
                     created_at_height: 0,
+                    outpoint: None,
+                    tap_id: None,
                 },
                 status,
                 &router.metatron,
@@ -864,6 +958,8 @@ mod tests {
                 derivation_index: 99,
                 amount: Amount::from_sat(1000),
                 created_at_height: 0,
+                outpoint: None,
+                tap_id: None,
             },
             OrderStatus::Expired,
             &router.metatron,
@@ -908,6 +1004,8 @@ mod tests {
                 derivation_index: address.index,
                 amount: Amount::from_sat(1000),
                 created_at_height: 0,
+                outpoint: None,
+                tap_id: None,
             },
             OrderStatus::Expired,
             &router.metatron,
@@ -940,6 +1038,8 @@ mod tests {
                 derivation_index: address.index,
                 amount: Amount::from_sat(1000),
                 created_at_height: 0,
+                outpoint: None,
+                tap_id: None,
             },
             OrderStatus::Expired,
             &router.metatron,
@@ -1081,6 +1181,8 @@ mod tests {
                     derivation_index: live.index,
                     amount: Amount::from_sat(1000),
                     created_at_height: 0,
+                    outpoint: None,
+                    tap_id: None,
                 },
                 OrderStatus::Active,
                 &router.metatron,
@@ -1094,6 +1196,8 @@ mod tests {
                 derivation_index: cold.index,
                 amount: Amount::from_sat(1000),
                 created_at_height: 0,
+                outpoint: None,
+                tap_id: None,
             },
             OrderStatus::Expired,
             &router.metatron,
@@ -1127,6 +1231,8 @@ mod tests {
                 derivation_index: address.index,
                 amount: Amount::from_sat(1000),
                 created_at_height: 0,
+                outpoint: None,
+                tap_id: None,
             },
             OrderStatus::Pending,
             &router.metatron,
@@ -1164,6 +1270,8 @@ mod tests {
                 derivation_index: address.index,
                 amount: Amount::from_sat(1000),
                 created_at_height: 0,
+                outpoint: None,
+                tap_id: None,
             },
             OrderStatus::Pending,
             &router.metatron,
@@ -1194,6 +1302,8 @@ mod tests {
                 derivation_index: 0,
                 amount: Amount::from_sat(1000),
                 created_at_height: 0,
+                outpoint: None,
+                tap_id: None,
             },
             OrderStatus::Active,
             &router.metatron,
@@ -1285,6 +1395,7 @@ mod tests {
             TaskTracker::new(),
             CancellationToken::new(),
             HashValue::from_sats(1),
+            1.0,
         ));
 
         router.restore(&[]).unwrap();
@@ -1323,6 +1434,7 @@ mod tests {
             TaskTracker::new(),
             CancellationToken::new(),
             HashValue::from_sats(1),
+            1.0,
         ));
 
         router.restore(&[]).unwrap();
@@ -1403,5 +1515,138 @@ mod tests {
 
         assert_eq!(orders.active_work().as_f64(), 100.0);
         assert_eq!(orders.in_flight_work().as_f64(), 200.0);
+    }
+
+    #[test]
+    fn flag_orders_rehydrates_and_flags_cold_funded_tap_order() {
+        let directory = tempfile::tempdir().unwrap();
+        let (router, wallet) = regtest_wallet_router(&directory);
+        wallet.mark_synced();
+
+        let tap = router.add_tap(test_upstream_target()).unwrap();
+        let tx =
+            wallet.test_receive_unconfirmed_with_salt(&tap.address, Amount::from_sat(5_000), 1);
+        let outpoint = OutPoint {
+            txid: tx.compute_txid(),
+            vout: 0,
+        };
+        wallet.test_confirm_tx(tx);
+
+        let order = test_order_with_payment(
+            0,
+            Payment {
+                address: tap.address.clone(),
+                derivation_index: tap.derivation_index,
+                amount: Amount::from_sat(5_000),
+                created_at_height: 1,
+                outpoint: Some(outpoint),
+                tap_id: Some(tap.id),
+            },
+            OrderStatus::Active,
+            &router.metatron,
+        );
+
+        add_orders(router.as_ref(), [order.clone()]);
+        order.terminate(OrderStatus::Disconnected);
+        router.persist().unwrap();
+        router.retire_orders();
+        assert!(router.get_order(0).is_none());
+        assert!(router.cold_order(0).is_some());
+        assert_eq!(
+            router
+                .book
+                .orders()
+                .read()
+                .cold_unreviewed_by_outpoint
+                .len(),
+            1
+        );
+
+        wallet.mark_synced();
+        router.flag_orders();
+
+        let rehydrated = router.get_order(0).unwrap();
+        assert_eq!(rehydrated.status(), OrderStatus::Disconnected);
+        assert!(rehydrated.is_flagged());
+        assert!(router.cold_order(0).is_none());
+        assert!(
+            router
+                .book
+                .orders()
+                .read()
+                .cold_unreviewed_by_outpoint
+                .is_empty()
+        );
+
+        rehydrated.set_cleared();
+        router.persist().unwrap();
+        router.retire_orders();
+        assert!(router.cold_order(0).is_some());
+        assert!(
+            router
+                .book
+                .orders()
+                .read()
+                .cold_unreviewed_by_outpoint
+                .is_empty()
+        );
+
+        let fulfilled = test_order_with_payment(
+            1,
+            Payment {
+                address: tap.address.clone(),
+                derivation_index: tap.derivation_index,
+                amount: Amount::from_sat(5_000),
+                created_at_height: 1,
+                outpoint: Some(OutPoint {
+                    txid: Txid::from_byte_array([2; 32]),
+                    vout: 0,
+                }),
+                tap_id: Some(tap.id),
+            },
+            OrderStatus::Fulfilled,
+            &router.metatron,
+        );
+        router.book.add_cold(1, fulfilled.to_entry());
+        assert!(
+            router
+                .book
+                .orders()
+                .read()
+                .cold_unreviewed_by_outpoint
+                .is_empty()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn audit_receipts_reports_unprocessed_tap_utxo_and_ignores_dust() {
+        let router = test_router();
+        let wallet = router.wallet.clone().unwrap();
+        wallet.mark_synced();
+
+        let tap = router.add_tap(test_upstream_target()).unwrap();
+
+        let dust = wallet.dust_limit() - Amount::from_sat(1);
+        let dust_tx = wallet.test_receive_unconfirmed_with_salt(&tap.address, dust, 1);
+        wallet.test_confirm_tx(dust_tx);
+        wallet.mark_synced();
+
+        assert!(router.audit_receipts().is_empty());
+
+        let tx =
+            wallet.test_receive_unconfirmed_with_salt(&tap.address, Amount::from_sat(5_000), 2);
+        wallet.test_confirm_tx(tx);
+        wallet.mark_synced();
+
+        assert_eq!(
+            router.audit_receipts(),
+            vec![(tap.derivation_index, Amount::from_sat(5_000))],
+        );
+
+        router.set_hash_value(HashValue::from_sats(100));
+        router.set_premium_percent(0.0);
+        router.process_taps();
+
+        assert!(router.audit_receipts().is_empty());
     }
 }

@@ -1,6 +1,6 @@
 use {
     super::*,
-    crate::{api, generator::get_block_template, http_server},
+    crate::{api, generator::get_block_template, hash::price::difficulty_multiplier, http_server},
 };
 
 #[derive(Parser, Debug)]
@@ -25,6 +25,8 @@ impl RouterCommand {
         let bitcoin_client = Arc::new(settings.bitcoin_rpc_client().await?);
         let template = get_block_template(&bitcoin_client, &settings).await?;
         let initial_hash_value = HashValue::compute(template.coinbase_value, template.bits);
+        let initial_difficulty_multiplier =
+            difficulty_multiplier(&bitcoin_client, template.height).await;
 
         let store = Arc::new(Store::open(
             &settings.store_path("router.redb")?,
@@ -52,6 +54,7 @@ impl RouterCommand {
             tasks.clone(),
             cancel_token.clone(),
             initial_hash_value,
+            initial_difficulty_multiplier,
         ));
 
         router.restore(settings.sink_orders())?;

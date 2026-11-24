@@ -9,10 +9,10 @@ pub(crate) struct PriceFeed {
 }
 
 impl PriceFeed {
-    pub(crate) fn new(initial_hash_value: HashValue) -> Self {
+    pub(crate) fn new(initial_hash_value: HashValue, initial_difficulty_multiplier: f64) -> Self {
         Self {
             hash_value: AtomicU64::new(initial_hash_value.to_sats()),
-            difficulty_multiplier: AtomicU64::new(1.0f64.to_bits()),
+            difficulty_multiplier: AtomicU64::new(initial_difficulty_multiplier.to_bits()),
         }
     }
 
@@ -53,5 +53,18 @@ impl PriceFeed {
             }
             Err(err) => warn!("Failed to update hash value: {err}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_uses_initial_difficulty_multiplier() {
+        let feed = PriceFeed::new(HashValue::from_sats(100), 2.0);
+
+        assert_eq!(feed.difficulty_multiplier(), 2.0);
+        assert_eq!(feed.hash_price(5.0), HashPrice::from_sats(210));
     }
 }

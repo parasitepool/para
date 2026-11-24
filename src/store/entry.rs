@@ -19,6 +19,22 @@ pub(crate) struct BucketEntry {
     pub(crate) derivation_index: u32,
     pub(crate) amount_sat: u64,
     pub(crate) created_at_height: u32,
+    #[serde(default)]
+    pub(crate) outpoint: Option<OutPoint>,
+    #[serde(default)]
+    pub(crate) tap_id: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct TapEntry {
+    pub(crate) status: TapStatus,
+    pub(crate) upstream_target: UpstreamTarget,
+    pub(crate) address: Address<NetworkUnchecked>,
+    pub(crate) derivation_index: u32,
+    pub(crate) created_at_secs: f64,
+    pub(crate) created_at_height: u32,
+    #[serde(default)]
+    pub(crate) processed_outpoints: BTreeMap<OutPoint, u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,6 +110,8 @@ mod tests {
                 derivation_index: 9,
                 amount_sat: 1_000,
                 created_at_height: 100,
+                outpoint: None,
+                tap_id: None,
             }),
             created_at_secs: instant_to_epoch_secs(now, now),
             stats: test_stats(now).to_entry(now),
@@ -164,6 +182,37 @@ mod tests {
 
         assert_eq!(decoded.hash_rate, None);
         assert_eq!(decoded.derivation_index, 9);
+        assert_eq!(decoded.outpoint, None);
+        assert_eq!(decoded.tap_id, None);
+    }
+
+    #[test]
+    fn tap_entry_cbor_round_trips() {
+        let now = Instant::now();
+        let outpoint = OutPoint {
+            txid: Txid::from_byte_array([1; 32]),
+            vout: 2,
+        };
+        let entry = TapEntry {
+            status: TapStatus::Active,
+            upstream_target: "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.foo@bar:3333"
+                .parse()
+                .unwrap(),
+            address: test_address(),
+            derivation_index: 4,
+            created_at_secs: instant_to_epoch_secs(now, now),
+            created_at_height: 55,
+            processed_outpoints: BTreeMap::from([(outpoint, 12)]),
+        };
+
+        let mut bytes = Vec::new();
+        ciborium::into_writer(&entry, &mut bytes).unwrap();
+        let decoded: TapEntry = ciborium::from_reader(bytes.as_slice()).unwrap();
+
+        assert_eq!(decoded.status, TapStatus::Active);
+        assert_eq!(decoded.derivation_index, 4);
+        assert_eq!(decoded.created_at_height, 55);
+        assert_eq!(decoded.processed_outpoints.get(&outpoint), Some(&12));
     }
 
     #[test]

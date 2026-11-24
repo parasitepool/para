@@ -81,6 +81,7 @@ pub(crate) fn test_router() -> TestRouter {
         TaskTracker::new(),
         CancellationToken::new(),
         HashValue::from_sats(1),
+        1.0,
     ));
 
     TestRouter {
@@ -194,6 +195,7 @@ pub(crate) fn router_with_wallet(wallet: Option<Arc<Wallet>>) -> (Arc<Router>, t
         TaskTracker::new(),
         CancellationToken::new(),
         HashValue::from_sats(1),
+        1.0,
     ));
     (router, directory)
 }
@@ -303,6 +305,8 @@ pub(crate) fn test_bucket_order(
             derivation_index: 0,
             amount: Amount::from_sat(1000),
             created_at_height: 0,
+            outpoint: None,
+            tap_id: None,
         },
         bucket,
     });
@@ -415,6 +419,8 @@ pub(crate) fn funded_bucket_order(
                 derivation_index: funded.index,
                 amount: Amount::from_sat(amount),
                 created_at_height: 0,
+                outpoint: None,
+                tap_id: None,
             },
             bucket: Bucket {
                 target: hash_days(100.0),
@@ -445,6 +451,7 @@ pub(crate) fn regtest_wallet_router(directory: &tempfile::TempDir) -> (Arc<Route
         TaskTracker::new(),
         CancellationToken::new(),
         HashValue::from_sats(1),
+        1.0,
     ));
     (router, wallet)
 }

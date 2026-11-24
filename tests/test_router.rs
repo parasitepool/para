@@ -1,6 +1,8 @@
 use {
     super::*,
-    api::{OrderDetail, OrderSummary, RouterStatus, UserDetail, UserSummary},
+    api::{
+        OrderDetail, OrderSummary, RouterStatus, TapDetail, TapSummary, UserDetail, UserSummary,
+    },
 };
 
 pub(crate) struct TestRouter {
@@ -289,6 +291,45 @@ impl TestRouter {
         http_client()
             .post(format!(
                 "{}/api/router/order/{id}/clear",
+                self.api_endpoint()
+            ))
+            .send()
+            .await
+    }
+
+    pub(crate) async fn add_tap(
+        &self,
+        tap: &api::TapRequest,
+    ) -> reqwest::Result<reqwest::Response> {
+        http_client()
+            .post(format!("{}/api/router/tap", self.api_endpoint()))
+            .json(tap)
+            .send()
+            .await
+    }
+
+    pub(crate) async fn get_tap(&self, id: u32) -> reqwest::Result<TapDetail> {
+        http_client()
+            .get(format!("{}/api/router/tap/{id}", self.api_endpoint()))
+            .send()
+            .await?
+            .json()
+            .await
+    }
+
+    pub(crate) async fn list_taps(&self) -> reqwest::Result<Vec<TapSummary>> {
+        http_client()
+            .get(format!("{}/api/router/taps", self.api_endpoint()))
+            .send()
+            .await?
+            .json()
+            .await
+    }
+
+    pub(crate) async fn cancel_tap(&self, id: u32) -> reqwest::Result<reqwest::Response> {
+        http_client()
+            .post(format!(
+                "{}/api/router/tap/{id}/cancel",
                 self.api_endpoint()
             ))
             .send()

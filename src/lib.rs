@@ -65,6 +65,7 @@ use {
     router::{
         Router,
         order::{Bucket, Order, OrderStatus, Review, Terms},
+        tap::{Tap, TapStatus},
     },
     rust_embed::RustEmbed,
     rustls_acme::{

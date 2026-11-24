@@ -38,6 +38,18 @@ impl Logs {
         let msg: Arc<str> = format!("level\t{level}").into();
         let _ = self.broadcast_tx.send(msg);
     }
+
+    #[cfg(test)]
+    pub(crate) fn test() -> Arc<Self> {
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let (broadcast_tx, _) = broadcast::channel(1);
+        Arc::new(Self {
+            tx,
+            backlog: Mutex::new(VecDeque::new()),
+            level: Mutex::new(String::from("info")),
+            broadcast_tx,
+        })
+    }
 }
 
 pub(crate) fn logs_enabled() -> bool {

@@ -2,6 +2,13 @@ use super::*;
 
 pub(crate) const DEFAULT_REFUND_FEE_RATE: FeeRate = FeeRate::from_sat_per_kwu(250);
 
+pub(crate) struct RefundTarget {
+    pub(crate) id: u32,
+    pub(crate) derivation_index: u32,
+    pub(crate) outpoint: Option<OutPoint>,
+    pub(crate) default_destination: Address<NetworkUnchecked>,
+}
+
 pub(crate) struct Refund {
     pub(crate) psbt: Psbt,
     pub(crate) destination: Address,
@@ -26,9 +33,7 @@ impl Cashier {
 
     pub(crate) fn build_refund(
         &self,
-        id: u32,
-        derivation_index: u32,
-        default_destination: &Address<NetworkUnchecked>,
+        target: &RefundTarget,
         fee_rate: Option<FeeRate>,
         destination: Option<Address>,
     ) -> RouterResult<Refund> {
@@ -40,15 +45,22 @@ impl Cashier {
 
         let destination = match destination {
             Some(destination) => destination,
-            None => default_destination
+            None => target
+                .default_destination
                 .clone()
                 .require_network(self.settings.chain().network())
-                .map_err(|_| RouterError::InvalidRefundDestination { id })?,
+                .map_err(|_| RouterError::InvalidRefundDestination { id: target.id })?,
         };
 
         let fee_rate = fee_rate.unwrap_or(DEFAULT_REFUND_FEE_RATE);
 
-        let psbt = wallet.build_refund_psbt(id, derivation_index, destination.clone(), fee_rate)?;
+        let psbt = wallet.build_refund_psbt(
+            target.id,
+            target.derivation_index,
+            target.outpoint,
+            destination.clone(),
+            fee_rate,
+        )?;
         let outpoints = psbt
             .unsigned_tx
             .input
@@ -142,6 +154,8 @@ mod tests {
                 derivation_index: address.index,
                 amount: Amount::from_sat(1000),
                 created_at_height: wallet.tip(),
+                outpoint: None,
+                tap_id: None,
             },
             status,
             &router.metatron,
@@ -261,6 +275,8 @@ mod tests {
                     derivation_index: unfunded.index,
                     amount: Amount::from_sat(1000),
                     created_at_height: 0,
+                    outpoint: None,
+                    tap_id: None,
                 },
                 OrderStatus::Expired,
                 &router.metatron,
@@ -293,6 +309,8 @@ mod tests {
                     derivation_index: funded.index,
                     amount: Amount::from_sat(1000),
                     created_at_height: 0,
+                    outpoint: None,
+                    tap_id: None,
                 },
                 OrderStatus::Expired,
                 &router.metatron,
@@ -315,6 +333,8 @@ mod tests {
                     derivation_index: 0,
                     amount: Amount::from_sat(1000),
                     created_at_height: 0,
+                    outpoint: None,
+                    tap_id: None,
                 },
                 OrderStatus::Expired,
                 &router.metatron,
@@ -411,6 +431,8 @@ mod tests {
                 derivation_index: 0,
                 amount: Amount::from_sat(1000),
                 created_at_height: 0,
+                outpoint: None,
+                tap_id: None,
             },
             OrderStatus::Pending,
             &router.metatron,

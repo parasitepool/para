@@ -51,6 +51,7 @@ impl Store {
 
         copy_table(&read_txn, &write_txn, METADATA, cancel_token)?;
         copy_table(&read_txn, &write_txn, ORDERS, cancel_token)?;
+        copy_table(&read_txn, &write_txn, TAPS, cancel_token)?;
         copy_table(&read_txn, &write_txn, WALLET, cancel_token)?;
         copy_table(&read_txn, &write_txn, USERS, cancel_token)?;
         copy_table(&read_txn, &write_txn, BLOCKS, cancel_token)?;
@@ -155,6 +156,7 @@ fn verify_known_tables(read_txn: &ReadTransaction, source: &Path) -> Result {
     let known = [
         METADATA.name(),
         ORDERS.name(),
+        TAPS.name(),
         WALLET.name(),
         USERS.name(),
         BLOCKS.name(),
@@ -239,7 +241,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use {super::*, crate::store::tests::test_order_entry, redb::MultimapTableDefinition};
+    use {
+        super::*,
+        crate::store::tests::{test_order_entry, test_tap_entry},
+        redb::MultimapTableDefinition,
+    };
 
     fn populate_store(store: &Store) {
         let address = "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc"
@@ -259,6 +265,8 @@ mod tests {
         txn.insert_order(1, &test_order_entry(OrderStatus::Active))
             .unwrap();
         txn.insert_order(2, &test_order_entry(OrderStatus::Fulfilled))
+            .unwrap();
+        txn.insert_tap(1, &test_tap_entry(TapStatus::Active))
             .unwrap();
         txn.merge_wallet(&changeset).unwrap();
         txn.upsert_user(
@@ -314,6 +322,10 @@ mod tests {
         assert_eq!(orders[0].1.status, OrderStatus::Active);
         assert_eq!(orders[1].0, 2);
         assert_eq!(orders[1].1.status, OrderStatus::Fulfilled);
+        let taps = restored.read_taps().unwrap();
+        assert_eq!(taps.len(), 1);
+        assert_eq!(taps[0].0, 1);
+        assert_eq!(taps[0].1.status, TapStatus::Active);
         assert_eq!(
             restored.read_wallet_changeset().unwrap().network,
             Some(Network::Regtest)

@@ -28,22 +28,32 @@ impl SyncState {
     }
 }
 
+#[derive(Clone, Copy)]
+struct TxOutReceipt {
+    value: Amount,
+    confirmation_height: Option<u32>,
+    spent_by: Option<Txid>,
+}
+
 #[derive(Default)]
 struct Receipt {
     total: Amount,
     confirmed: BTreeMap<u32, Amount>,
     txids: Vec<Txid>,
+    outpoints: Vec<OutPoint>,
 }
 
 pub(crate) struct ReceiptSnapshot {
     checkpoint: BlockId,
     receipts: HashMap<u32, Receipt>,
+    outpoints: HashMap<OutPoint, TxOutReceipt>,
 }
 
 impl ReceiptSnapshot {
     fn new(inner: &bdk_wallet::Wallet) -> Self {
         let checkpoint = inner.latest_checkpoint().block_id();
         let mut receipts = HashMap::<u32, Receipt>::new();
+        let mut outpoints = HashMap::<OutPoint, TxOutReceipt>::new();
 
         for ((_, index), txout) in inner.tx_graph().filter_chain_txouts(
             inner.local_chain(),
@@ -54,15 +64,28 @@ impl ReceiptSnapshot {
                 .inner()
                 .outputs_in_range((KeychainKind::External, 0)..=(KeychainKind::External, u32::MAX)),
         ) {
+            let confirmation_height = txout.chain_position.confirmation_height_upper_bound();
+            let spent_by = txout.spent_by.map(|(_, txid)| txid);
+
             let receipt = receipts.entry(*index).or_default();
             receipt.total += txout.txout.value;
-            if let Some(height) = txout.chain_position.confirmation_height_upper_bound() {
+            if let Some(height) = confirmation_height {
                 *receipt.confirmed.entry(height).or_default() += txout.txout.value;
             }
             receipt.txids.push(txout.outpoint.txid);
-            if let Some((_, txid)) = txout.spent_by {
+            if let Some(txid) = spent_by {
                 receipt.txids.push(txid);
             }
+            receipt.outpoints.push(txout.outpoint);
+
+            outpoints.insert(
+                txout.outpoint,
+                TxOutReceipt {
+                    value: txout.txout.value,
+                    confirmation_height,
+                    spent_by,
+                },
+            );
         }
 
         for receipt in receipts.values_mut() {
@@ -73,6 +96,7 @@ impl ReceiptSnapshot {
         Self {
             checkpoint,
             receipts,
+            outpoints,
         }
     }
 
@@ -101,6 +125,47 @@ impl ReceiptSnapshot {
             .get(&index)
             .map(|receipt| receipt.txids.clone())
             .unwrap_or_default()
+    }
+
+    pub(crate) fn txids_for_outpoint(&self, outpoint: OutPoint) -> Vec<Txid> {
+        let mut txids = vec![outpoint.txid];
+
+        if let Some(txid) = self
+            .outpoints
+            .get(&outpoint)
+            .and_then(|receipt| receipt.spent_by)
+        {
+            txids.push(txid);
+        }
+
+        txids.sort_unstable();
+        txids.dedup();
+        txids
+    }
+
+    pub(crate) fn confirmed_outpoints(&self, index: u32) -> Vec<(OutPoint, Amount, u32)> {
+        let Some(receipt) = self.receipts.get(&index) else {
+            return Vec::new();
+        };
+
+        let mut confirmed = receipt
+            .outpoints
+            .iter()
+            .filter_map(|outpoint| {
+                let info = self.outpoints.get(outpoint)?;
+                let height = info.confirmation_height?;
+                Some((*outpoint, info.value, height))
+            })
+            .collect::<Vec<_>>();
+
+        confirmed.sort_unstable_by_key(|(outpoint, _, height)| (*height, *outpoint));
+        confirmed
+    }
+
+    pub(crate) fn is_confirmed_outpoint(&self, outpoint: OutPoint) -> bool {
+        self.outpoints
+            .get(&outpoint)
+            .is_some_and(|receipt| receipt.confirmation_height.is_some())
     }
 
     pub(crate) fn confirmed_by_index(&self) -> impl Iterator<Item = (u32, Amount)> + '_ {
@@ -496,6 +561,7 @@ impl Wallet {
         &self,
         id: u32,
         derivation_index: u32,
+        outpoint: Option<OutPoint>,
         destination: Address,
         fee_rate: FeeRate,
     ) -> RouterResult<Psbt> {
@@ -506,6 +572,7 @@ impl Wallet {
             .filter(|txout| {
                 txout.keychain == KeychainKind::External
                     && txout.derivation_index == derivation_index
+                    && outpoint.is_none_or(|target| txout.outpoint == target)
                     && txout
                         .chain_position
                         .confirmation_height_upper_bound()
@@ -634,8 +701,18 @@ impl Wallet {
         address: &Address,
         amount: Amount,
     ) -> Transaction {
+        self.test_receive_unconfirmed_with_salt(address, amount, 0)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_receive_unconfirmed_with_salt(
+        &self,
+        address: &Address,
+        amount: Amount,
+        salt: u32,
+    ) -> Transaction {
         let mut inner = self.inner.lock();
-        let tx = Self::test_payment_tx(address, amount);
+        let tx = Self::test_payment_tx_with_salt(address, amount, salt);
         inner.apply_unconfirmed_txs([(tx.clone(), 1)]);
         tx
     }
@@ -672,6 +749,11 @@ impl Wallet {
 
     #[cfg(test)]
     fn test_payment_tx(address: &Address, amount: Amount) -> Transaction {
+        Self::test_payment_tx_with_salt(address, amount, 0)
+    }
+
+    #[cfg(test)]
+    fn test_payment_tx_with_salt(address: &Address, amount: Amount, salt: u32) -> Transaction {
         let txid = Txid::from_raw_hash(bitcoin::hashes::sha256d::Hash::hash(
             address.script_pubkey().as_bytes(),
         ));
@@ -680,7 +762,7 @@ impl Wallet {
             version: bitcoin::transaction::Version::TWO,
             lock_time: LockTime::ZERO,
             input: vec![TxIn {
-                previous_output: OutPoint { txid, vout: 0 },
+                previous_output: OutPoint { txid, vout: salt },
                 script_sig: ScriptBuf::new(),
                 sequence: Sequence::MAX,
                 witness: Witness::new(),
@@ -877,6 +959,7 @@ mod tests {
             .build_refund_psbt(
                 0,
                 included.index,
+                None,
                 destination.clone(),
                 FeeRate::from_sat_per_vb(1).unwrap(),
             )
@@ -891,6 +974,81 @@ mod tests {
         );
         assert!(psbt.unsigned_tx.output[0].value < Amount::from_sat(10_000));
         assert!(psbt.inputs[0].final_script_witness.is_none());
+    }
+
+    #[test]
+    fn build_refund_psbt_spends_only_requested_outpoint_on_reused_address() {
+        let wallet = test_wallet();
+        let tap_address = wallet.test_reveal_address();
+
+        let tx_a = wallet.test_receive_unconfirmed_with_salt(
+            &tap_address.address,
+            Amount::from_sat(5_000),
+            1,
+        );
+        let outpoint_a = OutPoint {
+            txid: tx_a.compute_txid(),
+            vout: 0,
+        };
+        wallet.test_confirm_tx(tx_a);
+
+        let tx_b = wallet.test_receive_unconfirmed_with_salt(
+            &tap_address.address,
+            Amount::from_sat(10_000),
+            2,
+        );
+        let outpoint_b = OutPoint {
+            txid: tx_b.compute_txid(),
+            vout: 0,
+        };
+        wallet.test_confirm_tx(tx_b);
+
+        wallet.mark_synced();
+
+        let snapshot = wallet.snapshot().unwrap();
+        assert_eq!(
+            snapshot.confirmed_outpoints(tap_address.index),
+            vec![
+                (outpoint_a, Amount::from_sat(5_000), 1),
+                (outpoint_b, Amount::from_sat(10_000), 2),
+            ],
+        );
+        assert!(snapshot.is_confirmed_outpoint(outpoint_a));
+        assert!(snapshot.is_confirmed_outpoint(outpoint_b));
+        assert_eq!(
+            snapshot.txids_for_outpoint(outpoint_a),
+            vec![outpoint_a.txid]
+        );
+
+        let destination = wallet.test_reveal_address().address;
+        let psbt = wallet
+            .build_refund_psbt(
+                0,
+                tap_address.index,
+                Some(outpoint_a),
+                destination.clone(),
+                FeeRate::from_sat_per_vb(1).unwrap(),
+            )
+            .unwrap();
+
+        assert_eq!(psbt.unsigned_tx.input.len(), 1);
+        assert_eq!(psbt.unsigned_tx.input[0].previous_output, outpoint_a);
+        assert!(psbt.unsigned_tx.output[0].value < Amount::from_sat(5_000));
+
+        let mut spend = Wallet::test_payment_tx(&destination, Amount::from_sat(4_000));
+        spend.input[0].previous_output = outpoint_a;
+        let spend_txid = spend.compute_txid();
+        wallet.test_confirm_tx(spend);
+        wallet.mark_synced();
+
+        let snapshot = wallet.snapshot().unwrap();
+        let mut expected_a = vec![outpoint_a.txid, spend_txid];
+        expected_a.sort_unstable();
+        assert_eq!(snapshot.txids_for_outpoint(outpoint_a), expected_a);
+        assert_eq!(
+            snapshot.txids_for_outpoint(outpoint_b),
+            vec![outpoint_b.txid],
+        );
     }
 
     #[test]

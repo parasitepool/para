@@ -11,7 +11,7 @@ use {
 mod backup;
 pub(crate) mod entry;
 
-const SCHEMA_VERSION: u64 = 3;
+const SCHEMA_VERSION: u64 = 4;
 
 const METADATA_KEY: u32 = 0;
 const CHANGESET_KEY: u32 = 0;
@@ -19,6 +19,7 @@ const BLOCKS_KEY: u64 = 0;
 
 const METADATA: TableDefinition<u32, &[u8]> = TableDefinition::new("METADATA");
 const ORDERS: TableDefinition<u32, &[u8]> = TableDefinition::new("ORDERS");
+const TAPS: TableDefinition<u32, &[u8]> = TableDefinition::new("TAPS");
 const WALLET: TableDefinition<u32, &[u8]> = TableDefinition::new("WALLET");
 const USERS: TableDefinition<&str, &[u8]> = TableDefinition::new("USERS");
 const BLOCKS: TableDefinition<u64, &[u8]> = TableDefinition::new("BLOCKS");
@@ -62,44 +63,56 @@ impl Store {
         transaction.set_durability(Durability::Immediate)?;
 
         {
-            let mut metadata = transaction.open_table(METADATA)?;
-
-            let stored: Option<Metadata> = metadata
-                .get(METADATA_KEY)?
-                .map(|value| ciborium::from_reader(value.value()).context("decode store meta"))
-                .transpose()?;
+            let stored: Option<Metadata> = {
+                let metadata = transaction.open_table(METADATA)?;
+                metadata
+                    .get(METADATA_KEY)?
+                    .map(|value| ciborium::from_reader(value.value()).context("decode store meta"))
+                    .transpose()?
+            };
 
             match stored {
-                Some(stored) => {
-                    ensure!(
-                        stored.schema_version == SCHEMA_VERSION,
-                        "store schema version mismatch at {}: expected {SCHEMA_VERSION}, got {}",
-                        path.display(),
-                        stored.schema_version,
-                    );
-
+                Some(mut stored) => {
                     ensure!(
                         stored.chain == chain,
                         "store chain mismatch at {}: expected {chain}, got {}",
                         path.display(),
                         stored.chain,
                     );
+
+                    ensure!(
+                        stored.schema_version <= SCHEMA_VERSION,
+                        "store schema version mismatch at {}: expected {SCHEMA_VERSION}, got {}",
+                        path.display(),
+                        stored.schema_version,
+                    );
+
+                    if stored.schema_version < SCHEMA_VERSION {
+                        let from = stored.schema_version;
+                        migrate(&transaction, &mut stored, path)?;
+                        let mut metadata = transaction.open_table(METADATA)?;
+                        write_metadata(&mut metadata, &stored)?;
+                        info!(
+                            "Migrated store {} from schema version {from} to {}",
+                            path.display(),
+                            stored.schema_version,
+                        );
+                    }
                 }
                 None => {
-                    let mut bytes = Vec::with_capacity(32);
-                    ciborium::into_writer(
+                    let mut metadata = transaction.open_table(METADATA)?;
+                    write_metadata(
+                        &mut metadata,
                         &Metadata {
                             schema_version: SCHEMA_VERSION,
                             chain,
                         },
-                        &mut bytes,
-                    )
-                    .context("encode store meta")?;
-                    metadata.insert(METADATA_KEY, bytes.as_slice())?;
+                    )?;
                 }
             }
 
             transaction.open_table(ORDERS)?;
+            transaction.open_table(TAPS)?;
             transaction.open_table(WALLET)?;
             transaction.open_table(USERS)?;
             transaction.open_table(BLOCKS)?;
@@ -156,6 +169,36 @@ impl Store {
         }
 
         Ok(orders)
+    }
+
+    pub(crate) fn read_taps(&self) -> Result<Vec<(u32, entry::TapEntry)>> {
+        let transaction = self.db.begin_read()?;
+        let table = transaction.open_table(TAPS)?;
+        let mut taps = Vec::new();
+
+        for item in table.iter()? {
+            let (id, value) = item?;
+            let id = id.value();
+            taps.push((
+                id,
+                ciborium::from_reader(value.value()).with_context(|| format!("decode tap {id}"))?,
+            ));
+        }
+
+        Ok(taps)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn read_tap(&self, id: u32) -> Result<Option<entry::TapEntry>> {
+        let transaction = self.db.begin_read()?;
+        let table = transaction.open_table(TAPS)?;
+
+        table
+            .get(id)?
+            .map(|value| {
+                ciborium::from_reader(value.value()).with_context(|| format!("decode tap {id}"))
+            })
+            .transpose()
     }
 
     #[cfg(test)]
@@ -219,6 +262,16 @@ impl WriteTxn {
         Ok(())
     }
 
+    pub(crate) fn insert_tap(&self, id: u32, tap: &entry::TapEntry) -> Result {
+        let mut table = self.inner.open_table(TAPS)?;
+        let mut bytes = Vec::with_capacity(512);
+
+        ciborium::into_writer(tap, &mut bytes).with_context(|| format!("encode tap {id}"))?;
+        table.insert(id, bytes.as_slice())?;
+
+        Ok(())
+    }
+
     pub(crate) fn merge_wallet(&self, wallet_delta: &ChangeSet) -> Result {
         if wallet_delta.is_empty() {
             return Ok(());
@@ -265,6 +318,32 @@ impl WriteTxn {
     pub(crate) fn commit(self) -> Result {
         Ok(self.inner.commit()?)
     }
+}
+
+fn write_metadata(table: &mut redb::Table<u32, &[u8]>, metadata: &Metadata) -> Result {
+    let mut bytes = Vec::with_capacity(32);
+    ciborium::into_writer(metadata, &mut bytes).context("encode store meta")?;
+    table.insert(METADATA_KEY, bytes.as_slice())?;
+    Ok(())
+}
+
+fn migrate(transaction: &WriteTransaction, metadata: &mut Metadata, path: &Path) -> Result {
+    while metadata.schema_version < SCHEMA_VERSION {
+        match metadata.schema_version {
+            3 => {
+                transaction.open_table(TAPS)?;
+                metadata.schema_version = 4;
+            }
+            version => {
+                bail!(
+                    "store schema version mismatch at {}: expected {SCHEMA_VERSION}, got {version}",
+                    path.display(),
+                );
+            }
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -340,6 +419,8 @@ mod tests {
                 derivation_index: 3,
                 amount_sat: 1_000,
                 created_at_height: 42,
+                outpoint: None,
+                tap_id: None,
             }),
             created_at_secs: crate::epoch::instant_to_epoch_secs(now, now),
             stats: stats.to_entry(now),
@@ -629,6 +710,24 @@ mod tests {
         assert!(error.to_string().contains("chain mismatch"));
     }
 
+    pub(super) fn test_tap_entry(status: TapStatus) -> entry::TapEntry {
+        let now = Instant::now();
+
+        entry::TapEntry {
+            status,
+            upstream_target: "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.foo@bar:3333"
+                .parse()
+                .unwrap(),
+            address: "tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc"
+                .parse::<Address<NetworkUnchecked>>()
+                .unwrap(),
+            derivation_index: 5,
+            created_at_secs: crate::epoch::instant_to_epoch_secs(now, now),
+            created_at_height: 42,
+            processed_outpoints: BTreeMap::new(),
+        }
+    }
+
     #[test]
     fn reopen_persists_state() {
         let directory = tempfile::tempdir().unwrap();
@@ -639,11 +738,102 @@ mod tests {
             let store = Store::open(&path, Chain::Regtest).unwrap();
             let txn = store.begin().unwrap();
             txn.merge_wallet(&changeset).unwrap();
+            txn.insert_tap(0, &test_tap_entry(TapStatus::Active))
+                .unwrap();
             txn.commit().unwrap();
         }
 
         let store = Store::open(&path, Chain::Regtest).unwrap();
 
         assert_eq!(store.read_wallet_changeset().unwrap(), changeset);
+        assert_eq!(store.read_taps().unwrap().len(), 1);
+        assert_eq!(
+            store.read_tap(0).unwrap().unwrap().status,
+            TapStatus::Active
+        );
+    }
+
+    #[test]
+    fn migrates_v3_store_to_v4() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("test.redb");
+
+        {
+            let db = Database::create(&path).unwrap();
+            let txn = db.begin_write().unwrap();
+            {
+                let mut metadata = txn.open_table(METADATA).unwrap();
+                write_metadata(
+                    &mut metadata,
+                    &Metadata {
+                        schema_version: 3,
+                        chain: Chain::Regtest,
+                    },
+                )
+                .unwrap();
+
+                let mut orders = txn.open_table(ORDERS).unwrap();
+                let mut bytes = Vec::new();
+                ciborium::into_writer(&test_order_entry(OrderStatus::Active), &mut bytes).unwrap();
+                orders.insert(7, bytes.as_slice()).unwrap();
+
+                txn.open_table(WALLET).unwrap();
+                txn.open_table(USERS).unwrap();
+                txn.open_table(BLOCKS).unwrap();
+            }
+            txn.commit().unwrap();
+        }
+
+        let store = Store::open(&path, Chain::Regtest).unwrap();
+
+        let read_txn = store.db.begin_read().unwrap();
+        let meta_table = read_txn.open_table(METADATA).unwrap();
+        let meta: Metadata =
+            ciborium::from_reader(meta_table.get(METADATA_KEY).unwrap().unwrap().value()).unwrap();
+        assert_eq!(meta.schema_version, SCHEMA_VERSION);
+        drop(meta_table);
+        drop(read_txn);
+
+        assert_eq!(
+            store.read_order(7).unwrap().unwrap().status,
+            OrderStatus::Active
+        );
+        assert!(store.read_taps().unwrap().is_empty());
+
+        let txn = store.begin().unwrap();
+        txn.insert_tap(0, &test_tap_entry(TapStatus::Active))
+            .unwrap();
+        txn.commit().unwrap();
+
+        assert_eq!(store.read_taps().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn unsupported_old_schema_version_rejected() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("test.redb");
+
+        let db = Database::create(&path).unwrap();
+        let txn = db.begin_write().unwrap();
+        {
+            let mut metadata = txn.open_table(METADATA).unwrap();
+            write_metadata(
+                &mut metadata,
+                &Metadata {
+                    schema_version: 2,
+                    chain: Chain::Regtest,
+                },
+            )
+            .unwrap();
+        }
+        txn.commit().unwrap();
+        drop(db);
+
+        let error = match Store::open(&path, Chain::Regtest) {
+            Ok(_) => panic!("unsupported schema version should fail"),
+            Err(error) => error,
+        };
+
+        assert!(error.to_string().contains("schema version mismatch"));
     }
 }

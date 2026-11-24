@@ -59,6 +59,8 @@ pub struct Payment {
     pub(crate) derivation_index: u32,
     pub(crate) amount: Amount,
     pub(crate) created_at_height: u32,
+    pub(crate) outpoint: Option<OutPoint>,
+    pub(crate) tap_id: Option<u32>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -210,6 +212,8 @@ impl Order {
                     derivation_index: payment.derivation_index,
                     amount_sat: payment.amount.to_sat(),
                     created_at_height: payment.created_at_height,
+                    outpoint: payment.outpoint,
+                    tap_id: payment.tap_id,
                 }),
             created_at_secs: epoch::instant_to_epoch_secs(self.created_at, now),
             stats: self.stats().to_entry(now),
@@ -241,6 +245,8 @@ impl Order {
                         derivation_index: bucket.derivation_index,
                         amount: Amount::from_sat(bucket.amount_sat),
                         created_at_height: bucket.created_at_height,
+                        outpoint: bucket.outpoint,
+                        tap_id: bucket.tap_id,
                     },
                     bucket: bucket.into(),
                 })
@@ -727,6 +733,8 @@ mod tests {
                 derivation_index: 0,
                 amount: Amount::from_sat(1000),
                 created_at_height: 0,
+                outpoint: None,
+                tap_id: None,
             },
             bucket,
         });

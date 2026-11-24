@@ -7,6 +7,7 @@ use {
 
 const METADATA: TableDefinition<u32, &[u8]> = TableDefinition::new("METADATA");
 const ORDERS: TableDefinition<u32, &[u8]> = TableDefinition::new("ORDERS");
+const TAPS: TableDefinition<u32, &[u8]> = TableDefinition::new("TAPS");
 const WALLET: TableDefinition<u32, &[u8]> = TableDefinition::new("WALLET");
 const USERS: TableDefinition<&str, &[u8]> = TableDefinition::new("USERS");
 const BLOCKS: TableDefinition<u64, &[u8]> = TableDefinition::new("BLOCKS");
@@ -31,7 +32,7 @@ fn create_live_store(path: &std::path::Path) -> Database {
         let mut bytes = Vec::new();
         ciborium::into_writer(
             &Metadata {
-                schema_version: 3,
+                schema_version: 4,
                 chain: "regtest",
             },
             &mut bytes,
@@ -42,6 +43,7 @@ fn create_live_store(path: &std::path::Path) -> Database {
         let mut orders = txn.open_table(ORDERS).unwrap();
         orders.insert(1, b"foo".as_slice()).unwrap();
 
+        txn.open_table(TAPS).unwrap();
         txn.open_table(WALLET).unwrap();
         txn.open_table(USERS).unwrap();
         txn.open_table(BLOCKS).unwrap();

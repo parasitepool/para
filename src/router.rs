@@ -4,7 +4,7 @@ use {
         api::{DownstreamStats, RouterStatus, UpstreamStats, UpstreamTotals, WalletInfo},
         event_sink::Event,
     },
-    cashier::{Cashier, Refund},
+    cashier::{Cashier, Refund, RefundTarget},
     control::Control,
     dispatcher::Dispatcher,
     error::{RouterError, RouterResult},
@@ -12,6 +12,7 @@ use {
     order_book::OrderBook,
     price_feed::PriceFeed,
     runner::OrderRunner,
+    tap::TapBook,
 };
 
 pub(crate) mod cashier;
@@ -23,6 +24,7 @@ pub mod order;
 pub(crate) mod order_book;
 pub(crate) mod price_feed;
 pub(crate) mod runner;
+pub mod tap;
 
 #[cfg(test)]
 pub(crate) mod testkit;
@@ -42,6 +44,8 @@ pub(crate) struct Router {
     metatron: Arc<Metatron>,
     wallet: Option<Arc<Wallet>>,
     book: Arc<OrderBook>,
+    taps: Arc<TapBook>,
+    skipped_tap_outpoints: Mutex<HashSet<OutPoint>>,
     cashier: Option<Arc<Cashier>>,
     price_feed: PriceFeed,
     creation_window: Mutex<RateWindow>,
@@ -63,6 +67,7 @@ impl Router {
         tasks: TaskTracker,
         cancel: CancellationToken,
         initial_hash_value: HashValue,
+        initial_difficulty_multiplier: f64,
     ) -> Self {
         let halt = settings.halt();
         let pace = settings.pace();
@@ -76,6 +81,8 @@ impl Router {
             metatron.clone(),
             cancel.child_token(),
         ));
+
+        let taps = Arc::new(TapBook::new());
 
         let cashier = wallet
             .clone()
@@ -93,8 +100,10 @@ impl Router {
             metatron,
             wallet,
             book,
+            taps,
+            skipped_tap_outpoints: Mutex::new(HashSet::new()),
             cashier,
-            price_feed: PriceFeed::new(initial_hash_value),
+            price_feed: PriceFeed::new(initial_hash_value, initial_difficulty_multiplier),
             creation_window: Mutex::new(RateWindow {
                 start: Instant::now(),
                 count: 0,
@@ -197,25 +206,27 @@ impl Router {
     #[cfg(test)]
     pub(crate) fn audit_receipts(&self) -> Vec<(u32, Amount)> {
         match &self.wallet {
-            Some(wallet) => self.book.audit_receipts(wallet),
+            Some(wallet) => self.book.audit_receipts(wallet, &self.taps),
             None => Vec::new(),
         }
     }
 
     pub(crate) fn sweep_orphan_receipts(&self) {
         if let Some(wallet) = &self.wallet {
-            self.book.sweep_orphan_receipts(wallet);
+            self.book.sweep_orphan_receipts(wallet, &self.taps);
         }
     }
 
-    fn refund_target(&self, id: u32) -> RouterResult<(u32, Address<NetworkUnchecked>)> {
+    fn refund_target(&self, id: u32) -> RouterResult<RefundTarget> {
         if let Some(order) = self.book.get_order(id) {
             let payment = order.payment().ok_or(RouterError::NotABucketOrder { id })?;
 
-            return Ok((
-                payment.derivation_index,
-                order.upstream_target.username().address().clone(),
-            ));
+            return Ok(RefundTarget {
+                id,
+                derivation_index: payment.derivation_index,
+                outpoint: payment.outpoint,
+                default_destination: order.upstream_target.username().address().clone(),
+            });
         }
 
         let entry = self
@@ -225,10 +236,12 @@ impl Router {
 
         let bucket = entry.bucket.ok_or(RouterError::NotABucketOrder { id })?;
 
-        Ok((
-            bucket.derivation_index,
-            entry.upstream_target.username().address().clone(),
-        ))
+        Ok(RefundTarget {
+            id,
+            derivation_index: bucket.derivation_index,
+            outpoint: bucket.outpoint,
+            default_destination: entry.upstream_target.username().address().clone(),
+        })
     }
 
     pub(crate) fn build_refund(
@@ -237,18 +250,12 @@ impl Router {
         fee_rate: Option<FeeRate>,
         destination: Option<Address>,
     ) -> RouterResult<Refund> {
-        let (derivation_index, default_destination) = self.refund_target(id)?;
+        let target = self.refund_target(id)?;
 
         self.cashier
             .as_ref()
             .ok_or(RouterError::WalletRequired)?
-            .build_refund(
-                id,
-                derivation_index,
-                &default_destination,
-                fee_rate,
-                destination,
-            )
+            .build_refund(&target, fee_rate, destination)
     }
 
     #[cfg(test)]
@@ -374,6 +381,194 @@ impl Router {
         }
     }
 
+    fn check_creation_rate_limit(&self) -> RouterResult<()> {
+        let mut window = self.creation_window.lock();
+
+        if window.start.elapsed() >= Duration::from_secs(60) {
+            *window = RateWindow {
+                start: Instant::now(),
+                count: 0,
+            };
+        }
+
+        if window.count >= MAX_ORDER_CREATIONS_PER_MINUTE {
+            return Err(RouterError::OrderRateLimited {
+                limit: MAX_ORDER_CREATIONS_PER_MINUTE,
+            });
+        }
+
+        window.count += 1;
+
+        Ok(())
+    }
+
+    pub(crate) fn get_tap(&self, id: u32) -> Option<Arc<Tap>> {
+        self.taps.get(id)
+    }
+
+    pub(crate) fn tap_page(
+        &self,
+        cursor: Option<u32>,
+        limit: usize,
+        filter: impl Fn(&Tap) -> bool,
+    ) -> Vec<Arc<Tap>> {
+        self.taps.tap_page(cursor, limit, filter)
+    }
+
+    pub(crate) fn count_taps(&self, filter: impl Fn(&Tap) -> bool) -> u64 {
+        self.taps.count_taps(filter)
+    }
+
+    pub(crate) fn cancel_tap(&self, id: u32) -> RouterResult<Option<Arc<Tap>>> {
+        let Some(tap) = self.taps.get(id) else {
+            return Ok(None);
+        };
+
+        tap.cancel_with(|entry| self.metatron.persist_tap_entry(id, entry))?;
+
+        Ok(Some(tap))
+    }
+
+    pub(crate) fn add_tap(
+        self: &Arc<Self>,
+        upstream_target: UpstreamTarget,
+    ) -> RouterResult<Arc<Tap>> {
+        self.check_creation_rate_limit()?;
+
+        if self.halt() {
+            return Err(RouterError::Halted);
+        }
+
+        let wallet = self.wallet.as_ref().ok_or(RouterError::WalletRequired)?;
+
+        if !wallet.is_synced() {
+            return Err(RouterError::WalletSyncing);
+        }
+
+        let metatron = self.metatron.clone();
+
+        self.taps.add_tap(|id| {
+            wallet.reveal_address_with(|address_info, created_at_height, wallet_delta| {
+                let tap = Tap::new(
+                    id,
+                    upstream_target,
+                    address_info.address,
+                    address_info.index,
+                    created_at_height,
+                );
+
+                metatron.persist_tap(id, &tap.to_entry(), wallet_delta)?;
+
+                Ok(tap)
+            })
+        })
+    }
+
+    pub(crate) fn process_taps(self: &Arc<Self>) {
+        let Some(wallet) = &self.wallet else {
+            return;
+        };
+
+        let Some(snapshot) = wallet.snapshot() else {
+            return;
+        };
+
+        let dust_limit = wallet.dust_limit();
+
+        for tap in self.taps.all() {
+            for (outpoint, amount, height) in snapshot.confirmed_outpoints(tap.derivation_index) {
+                if self.cancel.is_cancelled() {
+                    return;
+                }
+
+                if tap.is_processed(outpoint) {
+                    continue;
+                }
+
+                if amount < dust_limit {
+                    if self.skipped_tap_outpoints.lock().insert(outpoint) {
+                        warn!(
+                            "Skipping dust deposit {amount} ({outpoint}) on tap {}",
+                            tap.id,
+                        );
+                    }
+                    continue;
+                }
+
+                let price = self.hash_price();
+                let Some(target) = price.hash_days(amount) else {
+                    warn!(
+                        "Cannot price deposit {amount} ({outpoint}) on tap {} at {price}",
+                        tap.id,
+                    );
+                    continue;
+                };
+
+                let spawned = tap.process_outpoint_with(
+                    outpoint,
+                    || self.book.allocate_id(),
+                    |order_id, status, tap_entry| {
+                        let terms = Terms {
+                            payment: Payment {
+                                address: tap.address.clone(),
+                                derivation_index: tap.derivation_index,
+                                amount,
+                                created_at_height: height,
+                                outpoint: Some(outpoint),
+                                tap_id: Some(tap.id),
+                            },
+                            bucket: Bucket {
+                                target,
+                                hash_rate: None,
+                            },
+                        };
+
+                        let order = Order::new(
+                            order_id,
+                            tap.upstream_target.clone(),
+                            Some(terms),
+                            self.cancel.child_token(),
+                            self.metatron.clone(),
+                        );
+
+                        if status == TapStatus::Cancelled {
+                            order.terminate(OrderStatus::Cancelled);
+                            order.set_flagged();
+                        }
+
+                        order.clear_dirty();
+                        self.metatron.persist_tap_order(
+                            order_id,
+                            &order.to_entry(),
+                            tap.id,
+                            tap_entry,
+                        )?;
+
+                        Ok(order)
+                    },
+                );
+
+                match spawned {
+                    Ok(Some(order)) => {
+                        self.book.add(order.clone());
+                        info!(
+                            "Tap {} spawned order {} for {amount} ({outpoint}) at {price}",
+                            tap.id, order.id,
+                        );
+                        self.runner.spawn(order);
+                    }
+                    Ok(None) => {}
+                    Err(err) => {
+                        warn!(
+                            "Failed to process deposit {amount} ({outpoint}) on tap {}: {err}",
+                            tap.id,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     pub(crate) fn add_bucket_order(
         self: &Arc<Self>,
         upstream_target: UpstreamTarget,
@@ -381,24 +576,7 @@ impl Router {
         hash_rate: Option<HashRate>,
         price: HashPrice,
     ) -> RouterResult<Arc<Order>> {
-        {
-            let mut window = self.creation_window.lock();
-
-            if window.start.elapsed() >= Duration::from_secs(60) {
-                *window = RateWindow {
-                    start: Instant::now(),
-                    count: 0,
-                };
-            }
-
-            if window.count >= MAX_ORDER_CREATIONS_PER_MINUTE {
-                return Err(RouterError::OrderRateLimited {
-                    limit: MAX_ORDER_CREATIONS_PER_MINUTE,
-                });
-            }
-
-            window.count += 1;
-        }
+        self.check_creation_rate_limit()?;
 
         if self.halt() {
             return Err(RouterError::Halted);
@@ -446,6 +624,8 @@ impl Router {
                         derivation_index: address_info.index,
                         amount,
                         created_at_height,
+                        outpoint: None,
+                        tap_id: None,
                     },
                     bucket,
                 };
@@ -464,6 +644,9 @@ impl Router {
     }
 
     pub(crate) fn restore(self: &Arc<Self>, sink_orders: &[UpstreamTarget]) -> Result {
+        self.taps
+            .restore(self.metatron.store(), self.settings.chain().network())?;
+
         self.book.restore(sink_orders, &|order| {
             self.book.add(order.clone());
             self.runner.spawn(order);
@@ -686,6 +869,35 @@ impl Router {
                 }
             }
         });
+
+        if let Some(wallet) = self.wallet.clone() {
+            let router = self.clone();
+
+            self.tasks.spawn(async move {
+                let mut sync_rx = wallet.subscribe_sync();
+
+                loop {
+                    if sync_rx.borrow_and_update().snapshot().is_some()
+                        && let Err(err) = router.blocking(|router| router.process_taps()).await
+                    {
+                        if !router.cancel.is_cancelled() {
+                            warn!("Tap watcher error: {err}");
+                        }
+                        break;
+                    }
+
+                    tokio::select! {
+                        biased;
+                        _ = router.cancel.cancelled() => break,
+                        changed = sync_rx.changed() => {
+                            if changed.is_err() {
+                                break;
+                            }
+                        }
+                    }
+                }
+            });
+        }
 
         let selector = {
             let router = self.clone();
@@ -1232,6 +1444,8 @@ mod tests {
                     derivation_index: 0,
                     amount: Amount::from_sat(1000),
                     created_at_height: 0,
+                    outpoint: None,
+                    tap_id: None,
                 },
                 bucket: Bucket {
                     target: hash_days(100.0),
@@ -1261,6 +1475,8 @@ mod tests {
                     derivation_index: 0,
                     amount: Amount::from_sat(1000),
                     created_at_height: 0,
+                    outpoint: None,
+                    tap_id: None,
                 },
                 bucket: Bucket {
                     target: hash_days(100.0),
@@ -1289,6 +1505,64 @@ mod tests {
         handle.await.unwrap();
 
         assert_eq!(order.status(), OrderStatus::Pending);
+    }
+
+    #[tokio::test]
+    async fn execute_tap_order_waits_for_wallet_sync() {
+        let router = test_router();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = listener.local_addr().unwrap();
+        let upstream_target: UpstreamTarget =
+            format!("tb1qkrrl75qekv9ree0g2qt49j8vdynsvlc4kuctrc.foo@{endpoint}")
+                .parse()
+                .unwrap();
+
+        let order = Order::new(
+            0,
+            upstream_target,
+            Some(Terms {
+                payment: Payment {
+                    address: test_address(),
+                    derivation_index: 0,
+                    amount: Amount::from_sat(1000),
+                    created_at_height: 0,
+                    outpoint: Some(OutPoint {
+                        txid: Txid::from_byte_array([1; 32]),
+                        vout: 0,
+                    }),
+                    tap_id: Some(0),
+                },
+                bucket: Bucket {
+                    target: hash_days(100.0),
+                    hash_rate: None,
+                },
+            }),
+            router.cancel.child_token(),
+            router.metatron.clone(),
+        );
+        add_orders(router.as_ref(), [order.clone()]);
+
+        let order_clone = order.clone();
+        let router_clone = router.router.clone();
+        let handle = tokio::spawn(async move {
+            router_clone.execute_order(&order_clone).await.unwrap();
+        });
+
+        assert!(
+            timeout(Duration::from_millis(50), listener.accept())
+                .await
+                .is_err()
+        );
+
+        router.wallet.as_ref().unwrap().mark_synced();
+
+        let (_stream, _) = timeout(Duration::from_secs(1), listener.accept())
+            .await
+            .unwrap()
+            .unwrap();
+
+        router.cancel.cancel();
+        handle.await.unwrap();
     }
 
     #[test]
@@ -1339,6 +1613,7 @@ mod tests {
             TaskTracker::new(),
             CancellationToken::new(),
             HashValue::from_sats(1),
+            1.0,
         ));
 
         router.restore(&[test_upstream_target()]).unwrap();
@@ -1375,6 +1650,7 @@ mod tests {
             TaskTracker::new(),
             CancellationToken::new(),
             HashValue::from_sats(1),
+            1.0,
         ));
 
         router.restore(&[]).unwrap();
@@ -1407,6 +1683,7 @@ mod tests {
             TaskTracker::new(),
             CancellationToken::new(),
             HashValue::from_sats(1),
+            1.0,
         ));
 
         router.restore(std::slice::from_ref(&target)).unwrap();
@@ -1667,6 +1944,7 @@ mod tests {
             TaskTracker::new(),
             CancellationToken::new(),
             HashValue::from_sats(1),
+            1.0,
         ));
 
         let order = add_test_bucket_order(&router);
@@ -1718,6 +1996,7 @@ mod tests {
             TaskTracker::new(),
             CancellationToken::new(),
             HashValue::from_sats(1),
+            1.0,
         ));
 
         let first = add_test_bucket_order(&router);
@@ -1746,6 +2025,7 @@ mod tests {
                 TaskTracker::new(),
                 CancellationToken::new(),
                 HashValue::from_sats(1),
+                1.0,
             )),
             _wallet: None,
             _directory: None,
@@ -2004,5 +2284,321 @@ mod tests {
         assert!(status.surplus_hashrate > HashRate::ZERO);
         assert_eq!(status.deficit_hashrate, HashRate::ZERO);
         assert_eq!(status.starving_order_count, 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn add_tap_validates_wallet_sync_halt_and_persists() {
+        let without_wallet = test_router_with_wallet(None);
+        assert!(matches!(
+            without_wallet.add_tap(test_upstream_target()),
+            Err(RouterError::WalletRequired),
+        ));
+
+        let router = test_router();
+        assert!(matches!(
+            router.add_tap(test_upstream_target()),
+            Err(RouterError::WalletSyncing),
+        ));
+
+        let wallet = router.wallet.as_ref().unwrap();
+        wallet.mark_synced();
+
+        router.set_halt(true);
+        assert!(matches!(
+            router.add_tap(test_upstream_target()),
+            Err(RouterError::Halted),
+        ));
+
+        router.set_halt(false);
+        let tap = router.add_tap(test_upstream_target()).unwrap();
+        assert_eq!(tap.id, 0);
+        assert_eq!(tap.status(), TapStatus::Active);
+        assert_eq!(
+            persisted_next_external_index(router.metatron.store()),
+            tap.derivation_index + 1,
+        );
+        assert_eq!(router.metatron.store().read_taps().unwrap().len(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn process_taps_spawns_order_per_confirmed_utxo_at_spot_price() {
+        let router = test_router();
+        let wallet = router.wallet.clone().unwrap();
+        wallet.mark_synced();
+        router.set_hash_value(HashValue::from_sats(100));
+        router.set_premium_percent(0.0);
+
+        let tap = router.add_tap(test_upstream_target()).unwrap();
+
+        let tx1 =
+            wallet.test_receive_unconfirmed_with_salt(&tap.address, Amount::from_sat(10_000), 1);
+        let outpoint1 = OutPoint {
+            txid: tx1.compute_txid(),
+            vout: 0,
+        };
+        wallet.mark_synced();
+
+        router.process_taps();
+        assert!(router.live_orders().is_empty());
+
+        wallet.test_confirm_tx(tx1);
+        wallet.mark_synced();
+        router.process_taps();
+
+        assert_eq!(router.live_orders().len(), 1);
+        let first = router.get_order(0).unwrap();
+        assert_eq!(first.payment().unwrap().outpoint, Some(outpoint1));
+        assert_eq!(first.payment().unwrap().tap_id, Some(tap.id));
+        assert_eq!(first.payment().unwrap().amount, Amount::from_sat(10_000));
+        assert_eq!(
+            first.target(),
+            HashPrice::from_sats(100).hash_days(Amount::from_sat(10_000)),
+        );
+        assert_eq!(first.bucket().unwrap().hash_rate, None);
+        assert!(router.audit_receipts().is_empty());
+
+        router.set_hash_value(HashValue::from_sats(200));
+        let tx2 =
+            wallet.test_receive_unconfirmed_with_salt(&tap.address, Amount::from_sat(20_000), 2);
+        let outpoint2 = OutPoint {
+            txid: tx2.compute_txid(),
+            vout: 0,
+        };
+        wallet.test_confirm_tx(tx2);
+        wallet.mark_synced();
+
+        router.process_taps();
+        router.process_taps();
+
+        assert_eq!(router.live_orders().len(), 2);
+        let second = router.get_order(1).unwrap();
+        assert_eq!(second.payment().unwrap().outpoint, Some(outpoint2));
+        assert_eq!(
+            second.target(),
+            HashPrice::from_sats(200).hash_days(Amount::from_sat(20_000)),
+        );
+        assert_eq!(tap.order_ids(), vec![0, 1]);
+        assert!(router.audit_receipts().is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn process_taps_bypasses_halt_and_capacity_and_skips_dust() {
+        let router = test_router();
+        let wallet = router.wallet.clone().unwrap();
+        wallet.mark_synced();
+        router.set_hash_value(HashValue::from_sats(100));
+        router.set_premium_percent(0.0);
+
+        let tap = router.add_tap(test_upstream_target()).unwrap();
+
+        router.set_halt(true);
+        router.set_capacity_work(HashDays::new(0.0).unwrap());
+
+        let dust_amount = wallet.dust_limit() - Amount::from_sat(1);
+        let dust_tx = wallet.test_receive_unconfirmed_with_salt(&tap.address, dust_amount, 1);
+        wallet.test_confirm_tx(dust_tx);
+        wallet.mark_synced();
+
+        router.process_taps();
+        assert!(router.live_orders().is_empty());
+        assert!(router.audit_receipts().is_empty());
+
+        let tx =
+            wallet.test_receive_unconfirmed_with_salt(&tap.address, Amount::from_sat(5_000), 2);
+        wallet.test_confirm_tx(tx);
+        wallet.mark_synced();
+
+        router.process_taps();
+        assert_eq!(router.live_orders().len(), 1);
+        assert_eq!(
+            router.get_order(0).unwrap().payment().unwrap().amount,
+            Amount::from_sat(5_000)
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cancelled_tap_spawns_flagged_cancelled_order_and_refunds_single_outpoint() {
+        let router = test_router();
+        let wallet = router.wallet.clone().unwrap();
+        wallet.mark_synced();
+        router.set_hash_value(HashValue::from_sats(100));
+        router.set_premium_percent(0.0);
+
+        let tap = router.add_tap(test_upstream_target()).unwrap();
+
+        let tx1 =
+            wallet.test_receive_unconfirmed_with_salt(&tap.address, Amount::from_sat(5_000), 1);
+        wallet.test_confirm_tx(tx1);
+        wallet.mark_synced();
+        router.process_taps();
+
+        assert!(router.cancel_tap(tap.id).unwrap().is_some());
+        assert_eq!(tap.status(), TapStatus::Cancelled);
+
+        let first = router.get_order(0).unwrap();
+        assert_ne!(first.status(), OrderStatus::Cancelled);
+
+        let tx2 =
+            wallet.test_receive_unconfirmed_with_salt(&tap.address, Amount::from_sat(8_000), 2);
+        let outpoint2 = OutPoint {
+            txid: tx2.compute_txid(),
+            vout: 0,
+        };
+        wallet.test_confirm_tx(tx2);
+        wallet.mark_synced();
+        router.process_taps();
+
+        let second = router.get_order(1).unwrap();
+        assert_eq!(second.status(), OrderStatus::Cancelled);
+        assert!(second.is_flagged());
+        assert_eq!(second.payment().unwrap().outpoint, Some(outpoint2));
+
+        let destination = wallet.test_reveal_address().address;
+        let refund = router
+            .build_refund(
+                second.id,
+                Some(FeeRate::from_sat_per_vb(1).unwrap()),
+                Some(destination),
+            )
+            .unwrap();
+        assert_eq!(refund.outpoints, vec![outpoint2]);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn tap_and_orders_survive_restart_without_duplicate_spawn() {
+        let directory = tempfile::tempdir().unwrap();
+        let store_path = directory.path().join("test.redb");
+        let store = Arc::new(Store::open(&store_path, Chain::Regtest).unwrap());
+        let wallet = Arc::new(
+            Wallet::open(
+                wallet_settings_with_descriptors(directory.path()),
+                store.clone(),
+            )
+            .unwrap(),
+        );
+        let metatron = Arc::new(Metatron::test_with_store(store.clone()));
+        let router = Arc::new(Router::new(
+            test_settings(directory.path()),
+            metatron,
+            Some(wallet.clone()),
+            TaskTracker::new(),
+            CancellationToken::new(),
+            HashValue::from_sats(100),
+            1.0,
+        ));
+
+        wallet.mark_synced();
+        let tap = router.add_tap(test_upstream_target()).unwrap();
+        let tap_address = tap.address.clone();
+
+        let tx1 =
+            wallet.test_receive_unconfirmed_with_salt(&tap_address, Amount::from_sat(5_000), 1);
+        wallet.test_confirm_tx(tx1);
+        wallet.mark_synced();
+        router.process_taps();
+        assert_eq!(router.live_orders().len(), 1);
+
+        router.persist().unwrap();
+        router.cancel.cancel();
+        router.tasks.close();
+        timeout(Duration::from_secs(1), router.tasks.wait())
+            .await
+            .unwrap();
+        drop(router);
+        drop(wallet);
+        drop(store);
+
+        let store = Arc::new(Store::open(&store_path, Chain::Regtest).unwrap());
+        let wallet =
+            Arc::new(Wallet::open(wallet_settings_without_descriptors(), store.clone()).unwrap());
+        let metatron = Arc::new(Metatron::test_with_store(store.clone()));
+        let restarted = Arc::new(Router::new(
+            test_router_settings(),
+            metatron,
+            Some(wallet.clone()),
+            TaskTracker::new(),
+            CancellationToken::new(),
+            HashValue::from_sats(100),
+            1.0,
+        ));
+
+        restarted.restore(&[]).unwrap();
+        wallet.mark_synced();
+        restarted.process_taps();
+
+        assert_eq!(restarted.live_orders().len(), 1);
+        assert_eq!(restarted.get_tap(0).unwrap().order_ids(), vec![0]);
+
+        let tx2 =
+            wallet.test_receive_unconfirmed_with_salt(&tap_address, Amount::from_sat(6_000), 2);
+        wallet.test_confirm_tx(tx2);
+        wallet.mark_synced();
+        restarted.process_taps();
+
+        assert_eq!(restarted.live_orders().len(), 2);
+        assert_eq!(restarted.get_tap(0).unwrap().order_ids(), vec![0, 1]);
+
+        restarted.cancel.cancel();
+        restarted.tasks.close();
+        timeout(Duration::from_secs(1), restarted.tasks.wait())
+            .await
+            .unwrap();
+    }
+
+    #[test]
+    fn flag_orders_flags_reorged_tap_order_despite_sibling_utxo() {
+        let router = test_router();
+        let wallet = router.wallet.clone().unwrap();
+        wallet.mark_synced();
+
+        let tap = router.add_tap(test_upstream_target()).unwrap();
+        let confirmed_tx =
+            wallet.test_receive_unconfirmed_with_salt(&tap.address, Amount::from_sat(10_000), 1);
+        let confirmed_outpoint = OutPoint {
+            txid: confirmed_tx.compute_txid(),
+            vout: 0,
+        };
+        wallet.test_confirm_tx(confirmed_tx);
+        wallet.mark_synced();
+
+        let missing_outpoint = OutPoint {
+            txid: Txid::from_byte_array([9; 32]),
+            vout: 0,
+        };
+
+        let intact = test_order_with_payment(
+            0,
+            Payment {
+                address: tap.address.clone(),
+                derivation_index: tap.derivation_index,
+                amount: Amount::from_sat(10_000),
+                created_at_height: 1,
+                outpoint: Some(confirmed_outpoint),
+                tap_id: Some(tap.id),
+            },
+            OrderStatus::Active,
+            &router.metatron,
+        );
+
+        let vanished = test_order_with_payment(
+            1,
+            Payment {
+                address: tap.address.clone(),
+                derivation_index: tap.derivation_index,
+                amount: Amount::from_sat(5_000),
+                created_at_height: 1,
+                outpoint: Some(missing_outpoint),
+                tap_id: Some(tap.id),
+            },
+            OrderStatus::Active,
+            &router.metatron,
+        );
+
+        add_orders(router.as_ref(), [intact.clone(), vanished.clone()]);
+
+        router.flag_orders();
+
+        assert!(!intact.is_flagged());
+        assert!(vanished.is_flagged());
     }
 }

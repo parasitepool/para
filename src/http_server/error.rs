@@ -76,9 +76,9 @@ impl From<RouterError> for ServerError {
                 Self::ServiceUnavailable(error.to_string())
             }
             RouterError::OrderRateLimited { .. } => Self::TooManyRequests(error.to_string()),
-            RouterError::OrderIdExhausted | RouterError::BlockingTask { .. } => {
-                Self::Internal(error.into())
-            }
+            RouterError::OrderIdExhausted
+            | RouterError::TapIdExhausted
+            | RouterError::BlockingTask { .. } => Self::Internal(error.into()),
         }
     }
 }

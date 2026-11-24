@@ -429,6 +429,8 @@ mod tests {
                 derivation_index: 0,
                 amount: Amount::from_sat(1000),
                 created_at_height: 0,
+                outpoint: None,
+                tap_id: None,
             },
             bucket: Bucket {
                 target,

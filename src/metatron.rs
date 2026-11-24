@@ -439,6 +439,43 @@ impl Metatron {
         txn.commit()
     }
 
+    pub(crate) fn persist_tap(
+        &self,
+        id: u32,
+        tap: &store::entry::TapEntry,
+        wallet_delta: &ChangeSet,
+    ) -> Result {
+        let txn = self.store.begin()?;
+
+        txn.insert_tap(id, tap)?;
+        txn.merge_wallet(wallet_delta)?;
+
+        txn.commit()
+    }
+
+    pub(crate) fn persist_tap_entry(&self, id: u32, tap: &store::entry::TapEntry) -> Result {
+        let txn = self.store.begin()?;
+
+        txn.insert_tap(id, tap)?;
+
+        txn.commit()
+    }
+
+    pub(crate) fn persist_tap_order(
+        &self,
+        order_id: u32,
+        order: &store::entry::OrderEntry,
+        tap_id: u32,
+        tap: &store::entry::TapEntry,
+    ) -> Result {
+        let txn = self.store.begin()?;
+
+        txn.insert_order(order_id, order)?;
+        txn.insert_tap(tap_id, tap)?;
+
+        txn.commit()
+    }
+
     pub(crate) fn order_delivered_work(&self, order_id: u32) -> HashWork {
         self.orders
             .get(&order_id)

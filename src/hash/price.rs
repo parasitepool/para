@@ -49,6 +49,32 @@ impl HashPrice {
 
         Some(Amount::from_sat(sats as u64))
     }
+
+    pub fn hash_days(self, amount: Amount) -> Option<HashDays> {
+        let price = self.to_sats();
+
+        if price == 0 {
+            return None;
+        }
+
+        let days = amount.to_sat() as f64 * PETA / price as f64;
+
+        if !days.is_finite() || days <= 0.0 {
+            return None;
+        }
+
+        let candidate = HashDays::new(days).ok()?;
+
+        if Self::from_total(amount, candidate) < self {
+            let adjusted = days.next_down();
+
+            if adjusted > 0.0 {
+                return HashDays::new(adjusted).ok();
+            }
+        }
+
+        Some(candidate)
+    }
 }
 
 impl Display for HashPrice {
@@ -278,6 +304,50 @@ mod tests {
         case(50000, 500e12);
         case(1000, 1e15);
         case(1234, PETA);
+    }
+
+    #[test]
+    fn hash_days() {
+        #[track_caller]
+        fn case(price: u64, amount_sat: u64, expected: Option<f64>) {
+            let actual = HashPrice::from_sats(price)
+                .hash_days(Amount::from_sat(amount_sat))
+                .map(HashDays::as_f64);
+
+            match (actual, expected) {
+                (Some(actual), Some(expected)) => {
+                    assert!(
+                        ((actual - expected) / expected).abs() < 1e-12,
+                        "got {actual}, want {expected}",
+                    );
+                }
+                _ => assert_eq!(actual, expected),
+            }
+        }
+
+        case(50000, 50000, Some(1e15));
+        case(50000, 100000, Some(2e15));
+        case(50000, 25000, Some(500e12));
+        case(1000, 1, Some(1e12));
+        case(0, 1000, None);
+        case(1000, 0, None);
+    }
+
+    #[test]
+    fn hash_days_round_trips_with_from_total() {
+        #[track_caller]
+        fn case(price: u64, amount_sat: u64) {
+            let price = HashPrice::from_sats(price);
+            let amount = Amount::from_sat(amount_sat);
+            let days = price.hash_days(amount).unwrap();
+            assert_eq!(HashPrice::from_total(amount, days), price);
+        }
+
+        for price in [100, 103, 105, 107, 997, 50_000, 123_456] {
+            for amount in [330, 1_000, 10_000, 123_456, 100_000_000] {
+                case(price, amount);
+            }
+        }
     }
 
     #[test]

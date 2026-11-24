@@ -34,6 +34,8 @@ pub(crate) enum RouterError {
     OrderRateLimited { limit: usize },
     #[snafu(display("order id space exhausted"))]
     OrderIdExhausted,
+    #[snafu(display("tap id space exhausted"))]
+    TapIdExhausted,
     #[snafu(display("requested {requested} exceeds available capacity of {available}"))]
     InsufficientCapacity {
         requested: HashDays,

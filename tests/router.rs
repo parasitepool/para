@@ -1951,3 +1951,107 @@ async fn router_persists_order_stats_across_restart() {
         "downstream worker should survive restart"
     );
 }
+
+#[tokio::test]
+#[timeout(300000)]
+async fn tap_spawns_orders_survives_restart_and_refunds_after_cancel() {
+    let pool_bitcoind = bitcoind();
+    let wallet_bitcoind = spawn_regtest();
+    let descriptor = generate_descriptor();
+    let funding_descriptor = generate_descriptor();
+    let funding_address = fund_wallet(&wallet_bitcoind, &funding_descriptor).await;
+
+    let pool = TestPool::spawn_with_args(&pool_bitcoind, "--start-diff 0.00001");
+    let username = signet_username();
+
+    let router = TestRouter::spawn(
+        &descriptor,
+        &wallet_bitcoind,
+        "--start-diff 0.00001 --tick-interval 1",
+    );
+
+    let response = router
+        .add_tap(&api::TapRequest {
+            upstream_target: format!("{username}@{}", pool.stratum_endpoint())
+                .parse()
+                .unwrap(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let tap: api::TapResponse = response.json().await.unwrap();
+    let tap_address = tap.payment_address.assume_checked().to_string();
+
+    let tx1 =
+        send_to_address_without_mining(&wallet_bitcoind, &funding_descriptor, &tap_address, 10_000)
+            .await;
+    mine_tx_to_address(&wallet_bitcoind, tx1, &funding_address).await;
+
+    async_timeout(Duration::from_secs(30), async {
+        loop {
+            if let Ok(detail) = router.get_tap(tap.tap_id).await
+                && detail.orders.len() == 1
+            {
+                break;
+            }
+            sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("confirmed deposit should spawn first order");
+
+    let first_id = router.get_tap(tap.tap_id).await.unwrap().orders[0];
+    wait_for_status(&router, first_id, OrderStatus::Active).await;
+
+    let first_detail = router.get_order(first_id).await.unwrap();
+    assert_eq!(first_detail.tap_id, Some(tap.tap_id));
+    assert_eq!(first_detail.txids, vec![tx1]);
+
+    let router = router.restart(
+        &descriptor,
+        &wallet_bitcoind,
+        "--start-diff 0.00001 --tick-interval 1",
+    );
+
+    let taps = router.list_taps().await.unwrap();
+    assert_eq!(taps.len(), 1);
+    assert_eq!(taps[0].id, tap.tap_id);
+    assert_eq!(taps[0].order_count, 1);
+
+    let response = router.cancel_tap(tap.tap_id).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    let tx2 =
+        send_to_address_without_mining(&wallet_bitcoind, &funding_descriptor, &tap_address, 12_000)
+            .await;
+    mine_tx_to_address(&wallet_bitcoind, tx2, &funding_address).await;
+
+    async_timeout(Duration::from_secs(30), async {
+        loop {
+            if let Ok(detail) = router.get_tap(tap.tap_id).await
+                && detail.orders.len() == 2
+            {
+                break;
+            }
+            sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("deposit after cancel should spawn flagged cancelled order");
+
+    let second_id = router.get_tap(tap.tap_id).await.unwrap().orders[1];
+    let second_detail = router.get_order(second_id).await.unwrap();
+    assert_eq!(second_detail.status, OrderStatus::Cancelled);
+    assert_eq!(second_detail.review, Review::Flagged);
+    assert_eq!(second_detail.txids, vec![tx2]);
+
+    let refund_response = router
+        .refund_order(second_id, &json!({ "destination": funding_address }))
+        .await
+        .unwrap();
+    assert_eq!(refund_response.status(), StatusCode::OK);
+    let refund: serde_json::Value = refund_response.json().await.unwrap();
+    let outpoints = refund["outpoints"].as_array().unwrap();
+    assert_eq!(outpoints.len(), 1);
+    assert!(outpoints[0].as_str().unwrap().starts_with(&tx2.to_string()));
+}

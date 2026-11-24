@@ -128,7 +128,7 @@ impl OrderRunner {
             }
         }
 
-        if !order.status().awaiting_payment() {
+        if payment.outpoint.is_some() || !order.status().awaiting_payment() {
             return Ok(true);
         }
 
