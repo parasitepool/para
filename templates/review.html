@@ -19,7 +19,7 @@
       </thead>
       <tbody id=cleared-body></tbody>
     </table>
-    <div class=table-pagination>
+    <div class="table-pagination hidden">
       <button class=page-prev type=button>&lsaquo; Prev</button>
       <span class=page-status>1/1</span>
       <button class=page-next type=button>Next &rsaquo;</button>
@@ -29,26 +29,14 @@
 
 <script>
 function orderRow(order) {
-  const safeId = escapeHtml(order.id);
-  const shortUsername = truncateMiddle(order.username);
-  const target = order.requested_hash_days == null ? 'Unlimited' : formatHashDays(order.requested_hash_days);
-  const href = `/order/${safeId}`;
-  const a = (content) => `<a class=order-link href="${href}">${content}</a>`;
-  return `<tr>
-    <td>${a(safeId)}</td>
-    <td class="${escapeHtml(statusClass(order.status))}">${a(escapeHtml(formatStatus(order.status)))}</td>
-    <td>${a(escapeHtml(order.endpoint))}</td>
-    <td>${a(escapeHtml(shortUsername))}</td>
-    <td>${a(escapeHtml(target))}</td>
-    <td>${a(formatOrderProgress(order))}</td>
-  </tr>`;
+  return renderOrderRow(order, { showHashrate: false, showReview: false });
 }
 
 function renderOrders(bodyId, orders) {
   const body = document.getElementById(bodyId);
 
   if (!orders || orders.length === 0) {
-    body.innerHTML = '<tr><td colspan=6>None</td></tr>';
+    body.innerHTML = '<tr><td colspan=6 class=table-empty>None</td></tr>';
     return;
   }
 
@@ -60,9 +48,10 @@ const CLEARED_PAGE_SIZE = 10;
 let clearedPage = 0;
 let clearedOrders = [];
 
-const prevButton = document.querySelector('#cleared-table + .table-pagination .page-prev');
-const nextButton = document.querySelector('#cleared-table + .table-pagination .page-next');
-const pageStatus = document.querySelector('#cleared-table + .table-pagination .page-status');
+const pagination = document.querySelector('#cleared-table + .table-pagination');
+const prevButton = pagination.querySelector('.page-prev');
+const nextButton = pagination.querySelector('.page-next');
+const pageStatus = pagination.querySelector('.page-status');
 
 prevButton.addEventListener('click', () => {
   clearedPage--;
@@ -83,25 +72,22 @@ function renderClearedPage() {
   const rows = clearedOrders.slice(pageStart, pageStart + CLEARED_PAGE_SIZE);
 
   if (rows.length === 0) {
-    body.innerHTML = '<tr><td colspan=6>None</td></tr>';
+    body.innerHTML = '<tr><td colspan=6 class=table-empty>None</td></tr>';
   } else {
     body.innerHTML = rows.map(orderRow).join('');
   }
 
+  const hasPrev = clearedPage > 0;
+  const hasNext = clearedPage < pageCount - 1;
   pageStatus.textContent = clearedOrders.length === 0 ? '0/0' : `${clearedPage + 1}/${pageCount} (${clearedOrders.length})`;
-  prevButton.disabled = clearedPage === 0;
-  nextButton.disabled = clearedPage >= pageCount - 1;
+  prevButton.disabled = !hasPrev;
+  nextButton.disabled = !hasNext;
+  pagination.classList.toggle('hidden', !hasPrev && !hasNext);
 }
 
-async function fetchOrders(review, signal) {
+function fetchOrders(review, signal) {
   const params = new URLSearchParams({ review, limit: String(REVIEW_LIMIT) });
-  const r = await fetch(`/api/router/orders?${params}`, withAuthOptions({ signal }));
-  if (r.status === 401) {
-    redirectToLogin();
-    throw new Error(`/api/router/orders: ${r.status}`);
-  }
-  if (!r.ok) throw new Error(`/api/router/orders: ${r.status}`);
-  return r.json();
+  return fetchJson(`/api/router/orders?${params}`, { signal });
 }
 
 async function countOrShown(shown, review, signal) {
@@ -144,8 +130,5 @@ async function refresh(signal) {
     reviewSummary(clearedRows.length, clearedTotal, 'cleared orders');
 }
 
-initAuthProbe().then(ok => {
-  if (!ok) return;
-  startPolling(refresh);
-});
+startPolling(refresh);
 </script>

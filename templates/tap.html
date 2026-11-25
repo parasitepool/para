@@ -1,0 +1,120 @@
+<div class="grid grid-stack">
+  <div class="column column-full">
+    <h2>Tap</h2>
+    <div class=row><span>ID</span><span data-value=id></span></div>
+    <div class=row><span>Status</span><span id=status></span></div>
+    <div class=row><span>Endpoint</span><span data-value=upstream_target.endpoint></span></div>
+    <div class=row><span>Username</span><span data-value=upstream_target.username data-format=username class=copyable></span></div>
+    <div class=row><span>Payment Address</span><span data-value=payment_address data-format=address class=copyable></span></div>
+    <div class=row><span>Created At</span><span data-value=created_at data-format=timestamp></span></div>
+    <div class=row><span>Created At Height</span><span data-value=created_at_height></span></div>
+  </div>
+  <button id=cancel-tap class="btn btn-block hidden">Cancel Tap</button>
+
+  <div class="column column-full">
+    <h2>Orders (<span id=orders_count>0</span>)</h2>
+    <div class=table-summary id=orders-summary></div>
+    <div id=orders-root class=filter-table>
+      <div class=table-scroll>
+      <table id=orders-table>
+        <thead>
+          <tr>
+            <th data-sort=id aria-sort=descending>ID</th>
+            <th data-sort=status aria-sort=none>Status</th>
+            <th data-sort=requested_hash_days aria-sort=none>Requested</th>
+            <th data-sort=hashrate aria-sort=none>Hashrate</th>
+            <th data-sort=progress aria-sort=none>Progress</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      </div>
+      <div class="table-pagination hidden">
+        <button class=page-prev type=button>&lsaquo; Prev</button>
+        <span class=page-status>1/1</span>
+        <button class=page-next type=button>Next &rsaquo;</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id=cancel-overlay class="confirm-overlay hidden">
+  <div class=confirm-modal>
+    <h2>Cancel Tap</h2>
+    <p>This tap will be cancelled and cannot be resumed. Future deposits to its payment address will be flagged for review.</p>
+    <div class=modal-buttons>
+      <button id=cancel-dismiss>Cancel</button>
+      <button id=cancel-confirm>Confirm</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const tapId = pathSegment();
+const encodedTapId = encodeURIComponent(tapId);
+
+const h1 = document.querySelector('h1');
+document.title = document.title.replace('Tap', `Tap ${tapId}`);
+h1.childNodes[0].textContent = `Router | Tap ${tapId}`;
+
+const ordersTable = initFilterTable({
+  root: document.getElementById('orders-root'),
+  defaultSort: { column: 'id', direction: 'desc' },
+  sorts: {
+    status: compareOrderStatus,
+    requested_hash_days: (a, b) => compareNullableNumber(a.requested_hash_days, b.requested_hash_days),
+    progress: compareOrderProgress,
+  },
+  ascByDefault: ['status'],
+  tiebreak: (a, b) => compareNumber(b.id, a.id),
+  renderRow: order => renderOrderRow(order, { showEndpoint: false }),
+  cursorPaging: {
+    url: '/api/router/orders',
+    pageSize: 50,
+    extraParams: { tap_id: tapId },
+    summaryEl: document.getElementById('orders-summary'),
+    onPageChange: () => startPolling(refresh),
+  },
+});
+
+function showNotFound() {
+  document.querySelector('.grid').innerHTML = '<div class="column column-full"><h2>Tap Not Found</h2></div>';
+  stopPolling();
+}
+
+async function refresh(signal) {
+  const data = await fetchJsonAllow404(`/api/router/tap/${encodedTapId}`, { signal });
+
+  if (!data) {
+    showNotFound();
+    return;
+  }
+
+  const ordersPage = await ordersTable.fetchPage(signal);
+
+  document.getElementById('cancel-tap').classList.toggle('hidden', data.status === 'cancelled');
+
+  set('status', formatStatus(data.status));
+  setClass('status', statusClass(data.status));
+  set('orders_count', (data.orders || []).length);
+
+  applyData(data);
+
+  if (!signal.aborted) ordersTable.applyPage(ordersPage);
+}
+
+initConfirmAction({
+  triggerId: 'cancel-tap',
+  overlayId: 'cancel-overlay',
+  dismissId: 'cancel-dismiss',
+  confirmId: 'cancel-confirm',
+  url: `/api/router/tap/${encodedTapId}/cancel`,
+  onSuccess: () => startPolling(refresh),
+});
+
+if (!isU32(tapId)) {
+  showNotFound();
+} else {
+  startPolling(refresh);
+}
+</script>

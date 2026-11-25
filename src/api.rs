@@ -5,8 +5,8 @@ use {
         self, common_routes,
         error::{OptionExt, ServerError, ServerResult},
         templates::{
-            OrderHtml, PoolHtml, ProxyHtml, ReviewHtml, RouterHtml, UserHtml, UsersHtml,
-            render_page,
+            OrderHtml, PoolHtml, ProxyHtml, ReviewHtml, RouterHtml, TapHtml, TapsHtml, UserHtml,
+            UsersHtml, render_page,
         },
     },
 };

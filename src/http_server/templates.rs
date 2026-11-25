@@ -22,7 +22,7 @@ impl<T: DashboardContent> DashboardHtml<T> {
 pub(crate) trait DashboardContent: fmt::Display + 'static {
     fn title(&self) -> &'static str;
 
-    fn show_review(&self) -> bool {
+    fn is_router(&self) -> bool {
         false
     }
 }
@@ -53,7 +53,7 @@ impl DashboardContent for RouterHtml {
         "Router"
     }
 
-    fn show_review(&self) -> bool {
+    fn is_router(&self) -> bool {
         true
     }
 }
@@ -66,7 +66,33 @@ impl DashboardContent for ReviewHtml {
         "Router | Review"
     }
 
-    fn show_review(&self) -> bool {
+    fn is_router(&self) -> bool {
+        true
+    }
+}
+
+#[derive(Boilerplate)]
+pub(crate) struct TapsHtml;
+
+impl DashboardContent for TapsHtml {
+    fn title(&self) -> &'static str {
+        "Router | Taps"
+    }
+
+    fn is_router(&self) -> bool {
+        true
+    }
+}
+
+#[derive(Boilerplate)]
+pub(crate) struct TapHtml;
+
+impl DashboardContent for TapHtml {
+    fn title(&self) -> &'static str {
+        "Router | Tap"
+    }
+
+    fn is_router(&self) -> bool {
         true
     }
 }
@@ -82,7 +108,7 @@ impl DashboardContent for OrderHtml {
         "Router | Order"
     }
 
-    fn show_review(&self) -> bool {
+    fn is_router(&self) -> bool {
         true
     }
 }
@@ -98,7 +124,7 @@ impl DashboardContent for UsersHtml {
         self.title
     }
 
-    fn show_review(&self) -> bool {
+    fn is_router(&self) -> bool {
         self.api_base == "/api/router"
     }
 }
@@ -114,7 +140,7 @@ impl DashboardContent for UserHtml {
         self.title
     }
 
-    fn show_review(&self) -> bool {
+    fn is_router(&self) -> bool {
         self.api_base == "/api/router"
     }
 }
@@ -123,7 +149,7 @@ impl DashboardContent for UserHtml {
 pub(crate) struct ReloadedContent {
     pub(crate) html: String,
     pub(crate) title: &'static str,
-    pub(crate) show_review: bool,
+    pub(crate) is_router: bool,
 }
 
 #[cfg(feature = "reload")]
@@ -139,8 +165,8 @@ impl DashboardContent for ReloadedContent {
         self.title
     }
 
-    fn show_review(&self) -> bool {
-        self.show_review
+    fn is_router(&self) -> bool {
+        self.is_router
     }
 }
 
@@ -157,7 +183,7 @@ pub(crate) fn render_page(
     #[cfg(feature = "reload")]
     let body = {
         let title = content.title();
-        let show_review = content.show_review();
+        let is_router = content.is_router();
         let html = content
             .reload_from_path()
             .map(|r| r.to_string())
@@ -167,7 +193,7 @@ pub(crate) fn render_page(
             content: ReloadedContent {
                 html,
                 title,
-                show_review,
+                is_router,
             },
             chain,
             auth,

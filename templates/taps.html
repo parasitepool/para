@@ -1,0 +1,227 @@
+<style>
+  .taps-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+  }
+
+  .taps-header h2 { margin: 0; }
+</style>
+
+<div class="grid grid-stack">
+  <div class="column column-full">
+    <div class=taps-header>
+      <h2>Taps</h2>
+      <button id=add-tap-btn class=btn>Add Tap</button>
+    </div>
+    <div class=table-summary id=taps-summary></div>
+    <div id=taps-root class=filter-table>
+      <div class=table-toolbar>
+        <label for=taps-search class=toolbar-search>Search
+          <input id=taps-search type=search data-filter=search placeholder="ID, address, username, endpoint">
+        </label>
+        <div>
+          <div class=toolbar-label>Status</div>
+          <div class=multi-select data-filter=status>
+            <button class=multi-select-toggle type=button aria-expanded=false>
+              <span class=multi-select-label>Any</span>
+            </button>
+            <div class="multi-select-options hidden">
+              <label><input type=checkbox value=active> Active</label>
+              <label><input type=checkbox value=cancelled> Cancelled</label>
+            </div>
+          </div>
+        </div>
+        <button class=table-reset type=button>Reset</button>
+      </div>
+      <div class=table-scroll>
+      <table id=taps-table>
+        <thead>
+          <tr>
+            <th data-sort=id aria-sort=descending>ID</th>
+            <th data-sort=status aria-sort=none>Status</th>
+            <th data-sort=endpoint aria-sort=none class=col-flex>Endpoint</th>
+            <th data-sort=username aria-sort=none>Username</th>
+            <th data-sort=payment_address aria-sort=none>Payment Address</th>
+            <th data-sort=order_count aria-sort=none>Orders</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      </div>
+      <div class="table-pagination hidden">
+        <button class=page-prev type=button>&lsaquo; Prev</button>
+        <span class=page-status>1/1</span>
+        <button class=page-next type=button>Next &rsaquo;</button>
+      </div>
+    </div>
+  </div>
+
+  <div id=tap-overlay class="confirm-overlay hidden">
+    <div id=tap-modal class="confirm-modal form-modal">
+      <h2 id=tap-modal-title>Add Tap</h2>
+      <div id=tap-form-fields>
+        <label for=tap-endpoint>Endpoint</label>
+        <input id=tap-endpoint placeholder="host:port">
+        <label for=tap-username>Username</label>
+        <input id=tap-username placeholder="user.worker">
+        <label for=tap-password>Password</label>
+        <input id=tap-password placeholder="optional">
+      </div>
+      <div id=tap-error class=modal-error></div>
+      <div id=tap-form-buttons class=modal-buttons>
+        <button id=tap-cancel>Cancel</button>
+        <button id=tap-submit>Add</button>
+      </div>
+      <div id=tap-payment class="modal-payment hidden">
+        <p>Send BTC to this address to spawn orders at the current hash price:</p>
+        <div class=address id=tap-payment-address></div>
+        <div class=copied id=tap-payment-copied></div>
+        <a class=detail-link id=tap-payment-link></a>
+        <div class=modal-buttons>
+          <button id=tap-payment-close>Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const TAP_STATUS_PRIORITY = { active: 0, cancelled: 1 };
+
+function compareTapStatus(a, b) {
+  const aValue = TAP_STATUS_PRIORITY[a.status] ?? Number.MAX_SAFE_INTEGER;
+  const bValue = TAP_STATUS_PRIORITY[b.status] ?? Number.MAX_SAFE_INTEGER;
+  return aValue === bValue ? compareString(a.status, b.status) : aValue - bValue;
+}
+
+function renderRow(tap) {
+  const safeId = escapeHtml(tap.id);
+  const shortUsername = truncateMiddle(tap.username);
+  const fullAddress = escapeHtml(tap.payment_address);
+  const shortAddress = escapeHtml(truncateMiddle(tap.payment_address, 20, 8));
+  const href = `/tap/${safeId}`;
+  const a = (content) => `<a class=row-link href="${href}">${content}</a>`;
+  return `<tr>
+    <td>${a(safeId)}</td>
+    <td class="${escapeHtml(statusClass(tap.status))}">${a(escapeHtml(formatStatus(tap.status)))}</td>
+    <td class=col-flex>${a(escapeHtml(tap.endpoint))}</td>
+    <td>${a(escapeHtml(shortUsername))}</td>
+    <td><span class=copyable data-full="${fullAddress}" data-formatted="${shortAddress}">${shortAddress}</span></td>
+    <td>${a(escapeHtml(tap.order_count))}</td>
+  </tr>`;
+}
+
+const tapsTable = initFilterTable({
+  root: document.getElementById('taps-root'),
+  defaultSort: { column: 'id', direction: 'desc' },
+  sorts: {
+    status: compareTapStatus,
+    endpoint: 'string',
+    username: 'string',
+    payment_address: 'string',
+  },
+  ascByDefault: ['status'],
+  tiebreak: (a, b) => compareNumber(b.id, a.id),
+  renderRow,
+  onFilterChange: () => startPolling(refresh),
+  cursorPaging: {
+    url: '/api/router/taps',
+    pageSize: 50,
+    summaryEl: document.getElementById('taps-summary'),
+    onPageChange: () => startPolling(refresh),
+  },
+});
+
+async function refresh(signal) {
+  const [routerData, tapsPage] = await Promise.all([
+    fetchJson('/api/router/status', { signal }),
+    tapsTable.fetchPage(signal),
+  ]);
+
+  const addTapBtn = document.getElementById('add-tap-btn');
+  if (addTapBtn) {
+    addTapBtn.disabled = routerData.halt;
+    addTapBtn.title = routerData.halt ? 'Router is halted' : '';
+  }
+
+  if (!signal.aborted) tapsTable.applyPage(tapsPage);
+}
+
+startPolling(refresh);
+
+{
+  const modal = bindModal(document.getElementById('tap-overlay'), ['tap-cancel', 'tap-payment-close']);
+  const endpoint = document.getElementById('tap-endpoint');
+  const username = document.getElementById('tap-username');
+  const password = document.getElementById('tap-password');
+  const error = document.getElementById('tap-error');
+  const formFields = document.getElementById('tap-form-fields');
+  const formButtons = document.getElementById('tap-form-buttons');
+  const modalTitle = document.getElementById('tap-modal-title');
+  const payment = document.getElementById('tap-payment');
+  const paymentAddress = document.getElementById('tap-payment-address');
+  const paymentCopied = document.getElementById('tap-payment-copied');
+  const paymentLink = document.getElementById('tap-payment-link');
+  const submitBtn = document.getElementById('tap-submit');
+
+  document.getElementById('add-tap-btn').addEventListener('click', () => {
+    endpoint.value = '';
+    username.value = '';
+    password.value = '';
+    error.textContent = '';
+    modalTitle.textContent = 'Add Tap';
+    formFields.classList.remove('hidden');
+    formButtons.classList.remove('hidden');
+    payment.classList.add('hidden');
+    paymentCopied.textContent = '';
+    modal.open();
+    endpoint.focus();
+  });
+
+  paymentAddress.addEventListener('click', () => {
+    copyToClipboard(paymentAddress.textContent, paymentCopied);
+  });
+
+  submitBtn.addEventListener('click', async () => {
+    if (submitBtn.disabled) return;
+    error.textContent = '';
+
+    if (!endpoint.value || !username.value) {
+      error.textContent = 'Endpoint and username are required';
+      return;
+    }
+
+    const target = { endpoint: endpoint.value, username: username.value };
+    if (password.value) target.password = password.value;
+
+    submitBtn.disabled = true;
+    try {
+      const data = await sendJson('POST', '/api/router/tap', { upstream_target: target });
+      showModalPayment(
+        {
+          title: modalTitle,
+          hide: [formFields, formButtons],
+          error,
+          address: paymentAddress,
+          link: paymentLink,
+          payment,
+        },
+        {
+          title: 'Tap Created',
+          address: data.payment_address,
+          linkHref: `/tap/${data.tap_id}`,
+          linkText: `View Tap #${data.tap_id}`,
+        },
+      );
+      tapsTable.resetCursor();
+      startPolling(refresh);
+    } catch (e) {
+      error.textContent = e.message;
+    } finally {
+      submitBtn.disabled = false;
+    }
+  });
+}
+</script>

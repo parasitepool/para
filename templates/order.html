@@ -1,17 +1,4 @@
 <style>
-  #cancel-order, #refund-order, #clear-order {
-    margin: 8px 0;
-    width: 100%;
-    background: #333;
-    border: 1px solid #444;
-    color: #eee;
-    padding: 8px 16px;
-    cursor: pointer;
-    font: inherit;
-  }
-
-  #cancel-order:hover, #refund-order:hover, #clear-order:hover { background: #444; }
-
   #clear-order { margin-bottom: 0; }
   #refund-order { margin-top: 0; }
 
@@ -31,92 +18,13 @@
   }
 
   #refund-close:hover { color: #eee; }
-
-  .confirm-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.7);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 2000;
-  }
-
-  .confirm-overlay.hidden { display: none; }
-
-  .confirm-modal {
-    background: #1a1a1a;
-    border: 1px solid #444;
-    padding: 30px;
-    width: 400px;
-    max-width: 90vw;
-    text-align: center;
-  }
-
-  .confirm-modal h2 {
-    margin: 0 0 16px;
-    font-size: 1.22em;
-    color: #888;
-  }
-
-  .confirm-modal p {
-    color: #aaa;
-    margin: 0 0 20px;
-    font-size: 0.9em;
-  }
-
-  .confirm-modal .modal-buttons {
-    display: flex;
-    gap: 10px;
-  }
-
-  .confirm-modal .modal-buttons button {
-    flex: 1;
-    background: #333;
-    border: 1px solid #444;
-    color: #eee;
-    padding: 8px 16px;
-    cursor: pointer;
-    font: inherit;
-  }
-
-  .confirm-modal .modal-buttons button:hover { background: #444; }
-
-  #refund-overlay .confirm-modal { text-align: left; }
-
-  #refund-overlay h2 { text-align: center; }
-
-  #refund-overlay label {
-    display: block;
-    margin-bottom: 4px;
-    color: #888;
-    font-size: 0.9em;
-  }
-
-  #refund-overlay input {
-    width: 100%;
-    background: #111;
-    border: 1px solid #444;
-    color: #eee;
-    padding: 8px 12px;
-    font: inherit;
-    box-sizing: border-box;
-    margin-bottom: 14px;
-  }
-
-  #refund-overlay input::placeholder { color: #555; }
-
-  #refund-error {
-    color: #f55;
-    font-size: 0.85em;
-    margin-bottom: 10px;
-  }
 </style>
 
 <div class="grid grid-stack">
   <div class="column column-full">
     <h2>Order</h2>
     <div class=row><span>ID</span><span data-value=id></span></div>
+    <div class="row hidden" id=tap-row><span>Tap</span><a id=tap-link></a></div>
     <div class=row><span>Status</span><span id=status></span></div>
     <div class=row><span>Review</span><span id=review></span></div>
     <div class=row><span>Endpoint</span><span data-value=upstream_target.endpoint></span></div>
@@ -134,9 +42,9 @@
     <div class=row><span>Created At</span><span data-value=created_at data-format=timestamp></span></div>
     <div class=row><span>Created At Height</span><span data-value=created_at_height></span></div>
   </div>
-  <button id=cancel-order class=hidden>Cancel Order</button>
-  <button id=clear-order class=hidden>Mark Cleared</button>
-  <button id=refund-order class=hidden>Build Refund PSBT</button>
+  <button id=cancel-order class="btn btn-block hidden">Cancel Order</button>
+  <button id=clear-order class="btn btn-block hidden">Mark Cleared</button>
+  <button id=refund-order class="btn btn-block hidden">Build Refund PSBT</button>
 
   <div id=refund-result class="column column-full hidden">
     <h2>Refund PSBT<button id=refund-close title=Collapse>×</button></h2>
@@ -182,7 +90,7 @@
         <tbody id=sessions-list></tbody>
       </table>
       </div>
-      <div class=table-pagination>
+      <div class="table-pagination hidden">
         <button class=page-prev type=button>&lsaquo; Prev</button>
         <span class=page-status>1/1</span>
         <button class=page-next type=button>Next &rsaquo;</button>
@@ -214,11 +122,11 @@
 </div>
 
 <div id=refund-overlay class="confirm-overlay hidden">
-  <div class=confirm-modal>
+  <div class="confirm-modal form-modal">
     <h2>Build Refund PSBT</h2>
     <label for=refund-fee-input>Fee Rate (sat/vB)</label>
     <input id=refund-fee-input placeholder="optional, default 1" inputmode="numeric">
-    <div id=refund-error></div>
+    <div id=refund-error class=modal-error></div>
     <div class=modal-buttons>
       <button id=refund-dismiss>Cancel</button>
       <button id=refund-confirm>Confirm</button>
@@ -227,7 +135,8 @@
 </div>
 
 <script>
-const orderId = window.location.pathname.split('/').filter(Boolean).pop();
+const orderId = pathSegment();
+const encodedOrderId = encodeURIComponent(orderId);
 
 const sessionsTable = initSessionsTable(document.getElementById('sessions-root'));
 
@@ -237,7 +146,23 @@ h1.childNodes[0].textContent = `Router | Order ${orderId}`;
 
 const TERMINAL = ['fulfilled', 'cancelled', 'disconnected', 'expired'];
 
+function showNotFound() {
+  document.querySelector('.grid').innerHTML = '<div class="column column-full"><h2>Order Not Found</h2></div>';
+  stopPolling();
+}
+
 function populateOrder(data) {
+  const tapRow = document.getElementById('tap-row');
+  const tapLink = document.getElementById('tap-link');
+  if (tapRow && tapLink) {
+    if (data.tap_id != null) {
+      tapLink.href = `/tap/${data.tap_id}`;
+      tapLink.textContent = `#${data.tap_id}`;
+      tapRow.classList.remove('hidden');
+    } else {
+      tapRow.classList.add('hidden');
+    }
+  }
   set('status', formatStatus(data.status));
   setClass('status', statusClass(data.status));
   set('review', data.review, formatStatus);
@@ -246,43 +171,32 @@ function populateOrder(data) {
   set('expected_duration', data.target_hashrate > 0
     ? formatDuration(data.requested_hash_days / data.target_hashrate * 86400)
     : '-');
+
   const txidsEl = document.getElementById('txids');
   if (txidsEl) {
-    if (data.txids && data.txids.length > 0) {
-      txidsEl.innerHTML = data.txids.map(txid => {
-        const short = truncateMiddle(txid, 20, 8);
-        return `<a href="https://mempool.space/tx/${txid}" target=_blank rel=noopener `
-          + `class=copyable data-full="${txid}" data-formatted="${short}">${short}</a>`;
-      }).join('<br>');
-      txidsEl.querySelectorAll('.copyable').forEach(el => {
-        el.addEventListener('click', async (e) => {
-          e.preventDefault();
-          const full = el.dataset.full;
-          if (!full) return;
-          try {
-            await navigator.clipboard.writeText(full);
-            const formatted = el.dataset.formatted || el.textContent;
-            el.textContent = 'Copied!';
-            el.classList.add('copied');
-            setTimeout(() => {
-              el.textContent = formatted;
-              el.classList.remove('copied');
-            }, CONFIG.COPY_FEEDBACK_DURATION);
-          } catch (err) { console.error('Copy failed:', err); }
-        });
-      });
-    } else {
-      txidsEl.textContent = '-';
+    const txids = data.txids || [];
+    const key = txids.join(',');
+    if (txidsEl.dataset.txids !== key) {
+      txidsEl.dataset.txids = key;
+      if (txids.length > 0) {
+        txidsEl.innerHTML = txids.map(txid => {
+          const safe = escapeHtml(txid);
+          const short = escapeHtml(truncateMiddle(txid, 20, 8));
+          return `<a href="https://mempool.space/tx/${safe}" target=_blank rel=noopener `
+            + `class=copyable data-full="${safe}" data-formatted="${short}">${short}</a>`;
+        }).join('<br>');
+      } else {
+        txidsEl.textContent = '-';
+      }
     }
   }
 }
 
 async function refresh(signal) {
-  const data = await fetchJsonAllow404(`/api/router/order/${orderId}`, { signal });
+  const data = await fetchJsonAllow404(`/api/router/order/${encodedOrderId}`, { signal });
 
   if (!data) {
-    document.querySelector('.grid').innerHTML = '<div class="column column-full"><h2>Order Not Found</h2></div>';
-    stopPolling();
+    showNotFound();
     return;
   }
 
@@ -305,61 +219,39 @@ async function refresh(signal) {
   }
 }
 
-function setupOverlay(triggerId, overlayId, dismissId, confirmId, endpoint) {
-  const overlay = document.getElementById(overlayId);
+initConfirmAction({
+  triggerId: 'cancel-order',
+  overlayId: 'cancel-overlay',
+  dismissId: 'cancel-dismiss',
+  confirmId: 'cancel-confirm',
+  url: `/api/router/order/${encodedOrderId}/cancel`,
+  onSuccess: () => startPolling(refresh),
+});
 
-  document.getElementById(triggerId).addEventListener('click', () => {
-    overlay.classList.remove('hidden');
-  });
-
-  document.getElementById(dismissId).addEventListener('click', () => {
-    overlay.classList.add('hidden');
-  });
-
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) overlay.classList.add('hidden');
-  });
-
-  document.getElementById(confirmId).addEventListener('click', async () => {
-    overlay.classList.add('hidden');
-    try {
-      const res = await fetch(`/api/router/order/${orderId}/${endpoint}`, withAuthOptions({ method: 'POST' }));
-      if (res.ok) {
-        refresh(new AbortController().signal);
-      } else {
-        const data = await res.json().catch(() => ({}));
-        alert(data.message || `Error: ${res.status}`);
-      }
-    } catch (e) {
-      alert(e.message);
-    }
-  });
-}
-
-setupOverlay('cancel-order', 'cancel-overlay', 'cancel-dismiss', 'cancel-confirm', 'cancel');
-setupOverlay('clear-order', 'clear-overlay', 'clear-dismiss', 'clear-confirm', 'clear');
+initConfirmAction({
+  triggerId: 'clear-order',
+  overlayId: 'clear-overlay',
+  dismissId: 'clear-dismiss',
+  confirmId: 'clear-confirm',
+  url: `/api/router/order/${encodedOrderId}/clear`,
+  onSuccess: () => startPolling(refresh),
+});
 
 {
-  const overlay = document.getElementById('refund-overlay');
+  const modal = bindModal(document.getElementById('refund-overlay'), ['refund-dismiss']);
   const input = document.getElementById('refund-fee-input');
   const error = document.getElementById('refund-error');
+  const confirmBtn = document.getElementById('refund-confirm');
 
   document.getElementById('refund-order').addEventListener('click', () => {
     input.value = '';
     error.textContent = '';
-    overlay.classList.remove('hidden');
+    modal.open();
     input.focus();
   });
 
-  document.getElementById('refund-dismiss').addEventListener('click', () => {
-    overlay.classList.add('hidden');
-  });
-
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) overlay.classList.add('hidden');
-  });
-
-  document.getElementById('refund-confirm').addEventListener('click', async () => {
+  confirmBtn.addEventListener('click', async () => {
+    if (confirmBtn.disabled) return;
     error.textContent = '';
 
     const value = input.value.trim();
@@ -374,31 +266,22 @@ setupOverlay('clear-order', 'clear-overlay', 'clear-dismiss', 'clear-confirm', '
       body.fee_rate = feeRate;
     }
 
+    confirmBtn.disabled = true;
     try {
-      const res = await fetch(`/api/router/order/${orderId}/refund`, withAuthOptions({
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      }));
-
-      if (!res.ok) {
-        const message = await res.text().catch(() => '');
-        error.textContent = message || `Error: ${res.status}`;
-        return;
-      }
-
-      const refund = await res.json();
+      const refund = await sendJson('POST', `/api/router/order/${encodedOrderId}/refund`, body);
 
       copyable('refund-destination', truncateMiddle(refund.destination, 20, 8), refund.destination);
       set('refund-amount', refund.amount, formatAmount);
       set('refund-fee-rate', refund.fee_rate, v => v + ' sat/vB');
       copyable('refund-psbt', truncateMiddle(refund.psbt, 40, 16), refund.psbt);
 
-      overlay.classList.add('hidden');
+      modal.close();
       document.getElementById('refund-order').classList.add('hidden');
       document.getElementById('refund-result').classList.remove('hidden');
     } catch (e) {
       error.textContent = e.message;
+    } finally {
+      confirmBtn.disabled = false;
     }
   });
 }
@@ -408,10 +291,9 @@ document.getElementById('refund-close').addEventListener('click', () => {
   document.getElementById('refund-order').classList.remove('hidden');
 });
 
-initCopyables();
-initDelegatedCopyables('sessions-list');
-initAuthProbe().then(ok => {
-  if (!ok) return;
+if (!isU32(orderId)) {
+  showNotFound();
+} else {
   startPolling(refresh);
-});
+}
 </script>

@@ -143,6 +143,7 @@ pub struct OrderSummary {
     pub hashrate: HashRate,
     pub delivered_hash_days: HashDays,
     pub best_share: Option<Difficulty>,
+    pub tap_id: Option<u32>,
 }
 
 impl OrderSummary {
@@ -159,6 +160,7 @@ impl OrderSummary {
             hashrate: stats.hashrate_1m(now),
             delivered_hash_days: stats.delivered_work().to_hash_days(),
             best_share: stats.best_share,
+            tap_id: order.payment().and_then(|payment| payment.tap_id),
         }
     }
 
@@ -178,6 +180,7 @@ impl OrderSummary {
             hashrate: stats.hashrate_1m(now),
             delivered_hash_days: stats.delivered_work().to_hash_days(),
             best_share: stats.best_share,
+            tap_id: entry.bucket.as_ref().and_then(|bucket| bucket.tap_id),
         })
     }
 }
@@ -297,6 +300,8 @@ pub(crate) fn router(
     axum::Router::new()
         .route("/", get(home))
         .route("/order/{id}", get(order_page))
+        .route("/taps", get(taps_page))
+        .route("/tap/{id}", get(tap_page))
         .route("/review", get(review_page))
         .route("/api/router/status", get(status))
         .route("/api/router/order", post(add_order))
@@ -333,6 +338,14 @@ async fn order_page(
     auth: NavbarAuth,
 ) -> ServerResult<Response> {
     Ok(render_page(OrderHtml, chain, auth))
+}
+
+async fn taps_page(Extension(chain): Extension<Chain>, auth: NavbarAuth) -> ServerResult<Response> {
+    Ok(render_page(TapsHtml, chain, auth))
+}
+
+async fn tap_page(Extension(chain): Extension<Chain>, auth: NavbarAuth) -> ServerResult<Response> {
+    Ok(render_page(TapHtml, chain, auth))
 }
 
 async fn review_page(
@@ -640,6 +653,7 @@ struct OrdersQuery {
     statuses: Vec<OrderStatus>,
     review: Option<Review>,
     kind: Option<OrderKind>,
+    tap_id: Option<u32>,
 }
 
 impl OrdersQuery {
@@ -665,6 +679,12 @@ impl OrdersQuery {
                     query.kind = Some(parse_order_kind(&value)?);
                 }
                 "kind" => query.kind = None,
+                "tap_id" if !value.trim().is_empty() => {
+                    query.tap_id = Some(value.parse().map_err(|err| {
+                        ServerError::BadRequest(format!("invalid tap_id filter `{value}`: {err}"))
+                    })?);
+                }
+                "tap_id" => query.tap_id = None,
                 _ => {}
             }
         }
@@ -686,6 +706,12 @@ impl OrdersQuery {
         if self
             .kind
             .is_some_and(|kind| !kind.matches(!order.is_sink()))
+        {
+            return false;
+        }
+
+        if let Some(tap_id) = self.tap_id
+            && order.payment().and_then(|payment| payment.tap_id) != Some(tap_id)
         {
             return false;
         }
@@ -712,6 +738,12 @@ impl OrdersQuery {
         if self
             .kind
             .is_some_and(|kind| !kind.matches(entry.bucket.is_some()))
+        {
+            return false;
+        }
+
+        if let Some(tap_id) = self.tap_id
+            && entry.bucket.as_ref().and_then(|bucket| bucket.tap_id) != Some(tap_id)
         {
             return false;
         }
@@ -1080,6 +1112,29 @@ mod tests {
             Some("address=tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx"),
             false,
         );
+        case(Some("tap_id=0"), false);
+
+        let mut tapped = test_entry(OrderStatus::Expired);
+        tapped.bucket.as_mut().unwrap().tap_id = Some(4);
+        assert!(
+            OrdersQuery::parse(Some("tap_id=4"))
+                .ok()
+                .unwrap()
+                .matches_entry(7, &tapped)
+        );
+        assert!(
+            !OrdersQuery::parse(Some("tap_id=5"))
+                .ok()
+                .unwrap()
+                .matches_entry(7, &tapped)
+        );
+        assert!(
+            OrdersQuery::parse(Some("tap_id=5&tap_id="))
+                .ok()
+                .unwrap()
+                .matches_entry(7, &tapped)
+        );
+        assert!(OrdersQuery::parse(Some("tap_id=foo")).is_err());
     }
 
     #[test]
@@ -1154,6 +1209,7 @@ mod tests {
         assert_eq!(summary.endpoint, "bar:3333");
         assert_eq!(summary.requested_hash_days.unwrap().as_f64(), 100.0);
         assert_eq!(summary.target_hashrate, Some(HashRate::from_hps(100.0)));
+        assert_eq!(summary.tap_id, None);
     }
 
     async fn json_body<T: serde::de::DeserializeOwned>(response: Response) -> T {
@@ -1422,6 +1478,38 @@ mod tests {
         .await;
         assert_eq!(cold_order0.tap_id, Some(0));
         assert_eq!(cold_order0.txids, vec![tx1.compute_txid()]);
+
+        let tap_orders = json_body::<Vec<OrderSummary>>(
+            list_orders(
+                ApiAuth,
+                State(router.router.clone()),
+                RawQuery(Some("tap_id=0".into())),
+            )
+            .await
+            .ok()
+            .unwrap(),
+        )
+        .await;
+        assert_eq!(
+            tap_orders
+                .iter()
+                .map(|order| (order.id, order.tap_id))
+                .collect::<Vec<_>>(),
+            vec![(1, Some(0)), (0, Some(0))],
+        );
+
+        let other_tap_orders = json_body::<Vec<OrderSummary>>(
+            list_orders(
+                ApiAuth,
+                State(router.router.clone()),
+                RawQuery(Some("tap_id=1".into())),
+            )
+            .await
+            .ok()
+            .unwrap(),
+        )
+        .await;
+        assert!(other_tap_orders.is_empty());
 
         let response = cancel_tap(AdminAuth, State(router.router.clone()), Path(0))
             .await

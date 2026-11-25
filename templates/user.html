@@ -37,7 +37,7 @@
         <tbody></tbody>
       </table>
       </div>
-      <div class=table-pagination>
+      <div class="table-pagination hidden">
         <button class=page-prev type=button>&lsaquo; Prev</button>
         <span class=page-status>1/1</span>
         <button class=page-next type=button>Next &rsaquo;</button>
@@ -64,7 +64,7 @@
         <tbody id=sessions-list></tbody>
       </table>
       </div>
-      <div class=table-pagination>
+      <div class="table-pagination hidden">
         <button class=page-prev type=button>&lsaquo; Prev</button>
         <span class=page-status>1/1</span>
         <button class=page-next type=button>Next &rsaquo;</button>
@@ -75,7 +75,7 @@
 
 <script>
 const apiBase = '{{ self.api_base }}';
-const userAddress = window.location.pathname.split('/').pop();
+const userAddress = encodeURIComponent(pathSegment());
 let allWorkers = [];
 let allSessions = [];
 
@@ -141,7 +141,5 @@ function applySearch() {
 }
 
 document.getElementById('user-search').addEventListener('input', applySearch);
-initDelegatedCopyables('sessions-list');
 startPolling(refresh);
-initCopyables();
 </script>

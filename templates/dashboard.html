@@ -15,7 +15,8 @@
     <sup>{{ self.superscript() }}</sup>
   </a>
   <a href="/users" class=navbar-item>Users</a>
-%% if self.content.show_review() {
+%% if self.content.is_router() {
+  <a href="/taps" class=navbar-item>Taps</a>
   <a href="/review" class=navbar-item>Review</a>
 %% }
 %% if self.auth.enabled && !self.auth.authed {

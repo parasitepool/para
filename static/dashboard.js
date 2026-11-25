@@ -7,7 +7,7 @@ const CONFIG = {
   COPY_FEEDBACK_DURATION: 1000,
   DEFAULT_POLL_INTERVAL: 5000,
   STALE_AFTER_MS: 15000,
-  FILTER_DEBOUNCE_MS: 250
+  FILTER_DEBOUNCE_MS: 250,
 };
 
 function withAuthOptions(options = {}) {
@@ -24,27 +24,16 @@ function escapeHtml(value) {
   })[ch]);
 }
 
+function pathSegment() {
+  return window.location.pathname.split('/').filter(Boolean).pop() || '';
+}
+
+function isU32(value) {
+  return /^\d+$/.test(value) && Number(value) <= 0xffffffff;
+}
 
 function redirectToLogin() {
   location.href = `/login?next=${encodeURIComponent(location.pathname + location.search)}`;
-}
-
-async function initAuthProbe() {
-  try {
-    const res = await fetch('/api/router/status', withAuthOptions());
-    if (res.status === 401) {
-      redirectToLogin();
-      return false;
-    }
-  } catch (_) {
-    return true;
-  }
-
-  for (const id of ['halt-btn', 'pace-btn', 'capacity-btn', 'premium-btn']) {
-    document.getElementById(id)?.classList.remove('hidden');
-  }
-
-  return true;
 }
 
 async function logout() {
@@ -92,6 +81,42 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('[data-tabs]').forEach(initTabs);
 });
 
+const copyTimers = new WeakMap();
+
+document.addEventListener('click', async (e) => {
+  const el = e.target.closest('.copyable');
+  if (!el) return;
+  const full = el.dataset.full;
+  if (!full) return;
+  if (el.tagName === 'A') {
+    if (e.metaKey || e.ctrlKey || e.shiftKey) return;
+    e.preventDefault();
+  }
+  try {
+    await navigator.clipboard.writeText(full);
+    if (!el.dataset.formatted) el.dataset.formatted = el.textContent;
+    clearTimeout(copyTimers.get(el));
+    el.textContent = 'Copied!';
+    el.classList.add('copied');
+    copyTimers.set(el, setTimeout(() => {
+      el.textContent = el.dataset.formatted;
+      el.classList.remove('copied');
+      copyTimers.delete(el);
+    }, CONFIG.COPY_FEEDBACK_DURATION));
+  } catch (err) {
+    console.error('Copy failed:', err);
+  }
+});
+
+async function copyToClipboard(text, statusEl) {
+  try {
+    await navigator.clipboard.writeText(text);
+    if (statusEl) statusEl.textContent = 'Copied to clipboard';
+  } catch (err) {
+    console.error('Copy failed:', err);
+  }
+}
+
 const logState = {
   paused: false,
   allLogs: [],
@@ -106,7 +131,6 @@ function createLogLine(level, text) {
   lvl.textContent = level;
   line.appendChild(lvl);
   line.appendChild(document.createTextNode(' ' + text));
-  line.dataset.text = (level + ' ' + text).toLowerCase();
   return line;
 }
 
@@ -209,15 +233,19 @@ function connectWs() {
   });
 }
 
-function initLogControls() {
+function initLogs() {
+  const showBtn = document.getElementById('log-show');
+  const hideBtn = document.getElementById('log-hide');
+  const controls = document.getElementById('log-controls');
+  const logs = document.getElementById('logs');
   const pauseBtn = document.getElementById('log-pause');
   const filterInput = document.getElementById('log-filter');
   const clearBtn = document.getElementById('log-clear');
   const levelToggle = document.getElementById('log-level-toggle');
   const levelOptions = document.getElementById('log-level-options');
-  if (!pauseBtn) return;
+  if (!logs) return;
 
-  pauseBtn.addEventListener('click', () => {
+  pauseBtn?.addEventListener('click', () => {
     logState.paused = !logState.paused;
     pauseBtn.textContent = logState.paused ? 'Resume' : 'Pause';
     pauseBtn.className = logState.paused ? 'paused' : '';
@@ -247,6 +275,22 @@ function initLogControls() {
       levelOptions.classList.add('hidden');
     }
   });
+
+  showBtn?.addEventListener('click', () => {
+    showBtn.classList.add('hidden');
+    controls?.classList.remove('hidden');
+    logs.classList.remove('hidden');
+    logRenderDirty = false;
+    renderLogs();
+  });
+
+  hideBtn?.addEventListener('click', () => {
+    showBtn?.classList.remove('hidden');
+    controls?.classList.add('hidden');
+    logs.classList.add('hidden');
+  });
+
+  connectWs();
 }
 
 const SI_PREFIXES = ['', 'K', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y'];
@@ -314,7 +358,7 @@ function formatTruncated(n) {
   if (n === null || n === undefined) return '-';
   if (Math.abs(n) < 0.005) return '0.00';
   const truncated = Math.floor(n * 100) / 100;
-  return truncated.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  return truncated.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function rejectionPct(accepted, rejected) {
@@ -368,6 +412,26 @@ function statusClass(status) {
   return status === 'active' ? 'connected' : status;
 }
 
+const ORDER_STATUS_PRIORITY = Object.fromEntries(
+  ['active', 'in_mempool', 'pending', 'expired', 'disconnected', 'fulfilled', 'cancelled']
+    .map((status, i) => [status, i])
+);
+
+function compareOrderStatus(a, b) {
+  const aValue = ORDER_STATUS_PRIORITY[a.status] ?? Number.MAX_SAFE_INTEGER;
+  const bValue = ORDER_STATUS_PRIORITY[b.status] ?? Number.MAX_SAFE_INTEGER;
+  return aValue === bValue ? compareString(a.status, b.status) : aValue - bValue;
+}
+
+function compareOrderProgress(a, b) {
+  const aProgress = orderProgressValue(a);
+  const bProgress = orderProgressValue(b);
+  if (aProgress === null && bProgress === null) return 0;
+  if (aProgress === null) return 1;
+  if (bProgress === null) return -1;
+  return aProgress - bProgress;
+}
+
 function orderProgressValue(order) {
   const requested = Number(order.requested_hash_days);
   const delivered = Number(order.delivered_hash_days);
@@ -383,6 +447,40 @@ function formatOrderProgress(order) {
     <span class=order-progress-fill style="width:${progress}%"></span>
     <span class=order-progress-label>${escapeHtml(label)}</span>
   </div>`;
+}
+
+function renderOrderRow(order, {
+  showEndpoint = true,
+  showHashrate = true,
+  showReview = true,
+  showTap = false,
+  markUnlimited = false,
+} = {}) {
+  const safeId = escapeHtml(order.id);
+  const tapTag = showTap && order.tap_id != null
+    ? ` <span class=tap-tag>tap #${escapeHtml(order.tap_id)}</span>`
+    : '';
+  const target = order.requested_hash_days == null ? 'Unlimited' : formatHashDays(order.requested_hash_days);
+  const reviewMarker = !showReview ? ''
+    : order.review === 'flagged' ? ' <span class=flagged>⚑</span>'
+    : order.review === 'cleared' ? ' <span class=cleared>✓</span>' : '';
+  const rowClass = markUnlimited && order.requested_hash_days == null ? ' class=unlimited-order' : '';
+  const href = `/order/${safeId}`;
+  const a = (content) => `<a class=row-link href="${href}">${content}</a>`;
+
+  let html = `<tr${rowClass}>
+    <td>${a(safeId + tapTag)}</td>
+    <td class="${escapeHtml(statusClass(order.status))}">${a(escapeHtml(formatStatus(order.status)) + reviewMarker)}</td>`;
+  if (showEndpoint) {
+    html += `<td class=col-flex>${a(escapeHtml(order.endpoint))}</td>
+    <td>${a(escapeHtml(truncateMiddle(order.username)))}</td>`;
+  }
+  html += `<td>${a(escapeHtml(target))}</td>`;
+  if (showHashrate) {
+    html += `<td>${a(escapeHtml(formatHashrate(order.hashrate)))}</td>`;
+  }
+  html += `<td>${a(formatOrderProgress(order))}</td></tr>`;
+  return html;
 }
 
 function set(id, value, formatter = v => v) {
@@ -405,7 +503,7 @@ function write(el, text, full) {
     el.dataset.full = String(full);
   }
   el.dataset.formatted = text;
-  if (!el.matches(':hover')) {
+  if (!el.matches(':hover') && !el.classList.contains('copied')) {
     el.textContent = text;
   }
 }
@@ -416,68 +514,6 @@ function copyable(id, formatted, raw) {
     write(el, (formatted !== null && formatted !== undefined) ? String(formatted) : '-', raw);
   }
   return el;
-}
-
-function initCopyables() {
-  document.querySelectorAll('.copyable').forEach(el => {
-    el.addEventListener('click', async () => {
-      const full = el.dataset.full;
-      if (!full) return;
-      try {
-        await navigator.clipboard.writeText(full);
-        const formatted = el.dataset.formatted || el.textContent;
-        el.textContent = 'Copied!';
-        el.classList.add('copied');
-        setTimeout(() => {
-          el.textContent = formatted;
-          el.classList.remove('copied');
-        }, CONFIG.COPY_FEEDBACK_DURATION);
-      } catch (e) { console.error('Copy failed:', e); }
-    });
-  });
-}
-
-function initDelegatedCopyables(containerId, selector = '.copyable') {
-  const container = document.getElementById(containerId);
-  if (!container) return;
-  container.addEventListener('click', async (e) => {
-    const el = e.target.closest(selector);
-    if (!el) return;
-    const full = el.dataset.full;
-    if (!full) return;
-    try {
-      await navigator.clipboard.writeText(full);
-      const formatted = el.dataset.formatted || el.textContent;
-      el.textContent = 'Copied!';
-      el.classList.add('copied');
-      setTimeout(() => {
-        el.textContent = formatted;
-        el.classList.remove('copied');
-      }, CONFIG.COPY_FEEDBACK_DURATION);
-    } catch (e) { console.error('Copy failed:', e); }
-  });
-}
-
-function setupLogToggle() {
-  const showBtn = document.getElementById('log-show');
-  const hideBtn = document.getElementById('log-hide');
-  const controls = document.getElementById('log-controls');
-  const logs = document.getElementById('logs');
-  if (!showBtn || !hideBtn || !controls || !logs) return;
-
-  showBtn.addEventListener('click', () => {
-    showBtn.classList.add('hidden');
-    controls.classList.remove('hidden');
-    logs.classList.remove('hidden');
-    logRenderDirty = false;
-    renderLogs();
-  });
-
-  hideBtn.addEventListener('click', () => {
-    showBtn.classList.remove('hidden');
-    controls.classList.add('hidden');
-    logs.classList.add('hidden');
-  });
 }
 
 function renderBitcoinData(data) {
@@ -631,16 +667,18 @@ function initFilterTable({
   tiebreak,
   renderRow,
   onFilterChange,
-  serverPaging,
+  cursorPaging,
   pageSize = 25,
 }) {
   const tbody = root.querySelector('tbody');
   const headers = Array.from(root.querySelectorAll('th[data-sort]'));
+  const colCount = root.querySelectorAll('thead th').length || 1;
   const validSorts = new Set(headers.map(th => th.dataset.sort));
   const searchInput = root.querySelector('input[type=search][data-filter]');
   const multiSelects = Array.from(root.querySelectorAll('.multi-select[data-filter]'));
   const selects = Array.from(root.querySelectorAll('select[data-filter]'));
   const resetButton = root.querySelector('.table-reset');
+  const pagination = root.querySelector('.table-pagination');
   const prevButton = root.querySelector('.page-prev');
   const nextButton = root.querySelector('.page-next');
   const pageStatus = root.querySelector('.page-status');
@@ -649,9 +687,20 @@ function initFilterTable({
   let sortDirection = defaultSort.direction;
   let currentPage = 0;
   let rows = [];
-  let pageRows = [];
   let totalCount = 0;
   let filterTimer = null;
+
+  let cursor = null;
+  let cursorStack = [];
+  let nextCursor = null;
+  let forceNextRender = false;
+
+  function resetCursor() {
+    cursor = null;
+    cursorStack = [];
+    nextCursor = null;
+    forceNextRender = true;
+  }
 
   function checkboxes(multi) {
     return Array.from(multi.querySelectorAll('input[type=checkbox]'));
@@ -735,11 +784,6 @@ function initFilterTable({
   function buildQuery() {
     const params = new URLSearchParams();
     addFilterParams(params);
-
-    if (Array.from(params.keys()).length === 0) {
-      params.set('limit', String(pageSize));
-    }
-
     return params.toString();
   }
 
@@ -749,7 +793,7 @@ function initFilterTable({
     for (const multi of multiSelects) params.delete(multi.dataset.filter);
     for (const select of selects) params.delete(select.dataset.filter);
     for (const name of ['sort', 'direction', 'page']) params.delete(stateParam(name));
-    addStateParams(params, !serverPaging);
+    addStateParams(params, !cursorPaging);
     const query = params.toString();
     history.replaceState(null, '', query ? `${location.pathname}?${query}` : location.pathname);
   }
@@ -773,7 +817,7 @@ function initFilterTable({
       : defaultSort.direction;
 
     const requestedPage = Number(params.get(stateParam('page')));
-    currentPage = !serverPaging && Number.isInteger(requestedPage) && requestedPage > 1
+    currentPage = !cursorPaging && Number.isInteger(requestedPage) && requestedPage > 1
       ? requestedPage - 1
       : 0;
   }
@@ -781,6 +825,7 @@ function initFilterTable({
   function applyFilterChange() {
     clearTimeout(filterTimer);
     filterTimer = null;
+    if (cursorPaging) resetCursor();
     syncUrl();
     onFilterChange?.();
   }
@@ -815,46 +860,74 @@ function initFilterTable({
     }
   }
 
-  function render() {
-    if (!tbody || tbody.querySelector('.copyable:hover')) return;
+  function renderBody(items) {
+    tbody.innerHTML = items.length === 0
+      ? `<tr><td colspan=${colCount} class=table-empty>None</td></tr>`
+      : items.map(renderRow).join('');
+  }
+
+  function render(force = false) {
+    if (!tbody) return;
+    if (!force && tbody.querySelector('.copyable:hover, .copyable.copied')) return;
 
     const sorted = rows.slice().sort(compareRows);
 
-    if (serverPaging) {
-      tbody.innerHTML = sorted.map(renderRow).join('');
+    if (cursorPaging) {
+      renderBody(sorted);
       updateSortHeaders();
       return;
     }
 
     totalCount = sorted.length;
-    const pageCount = Math.max(1, Math.ceil(sorted.length / pageSize));
+    const pageCount = Math.max(1, Math.ceil(totalCount / pageSize));
     const previousPage = currentPage;
     currentPage = Math.max(0, Math.min(currentPage, pageCount - 1));
     if (currentPage !== previousPage) syncUrl();
     const pageStart = currentPage * pageSize;
-    pageRows = sorted.slice(pageStart, pageStart + pageSize);
 
-    tbody.innerHTML = pageRows.map(renderRow).join('');
+    renderBody(sorted.slice(pageStart, pageStart + pageSize));
 
+    const hasPrev = currentPage > 0;
+    const hasNext = currentPage < pageCount - 1;
     if (pageStatus) {
       pageStatus.textContent = totalCount === 0
         ? '0/0'
         : `${currentPage + 1}/${pageCount} (${totalCount})`;
     }
-    if (prevButton) prevButton.disabled = currentPage === 0;
-    if (nextButton) nextButton.disabled = currentPage >= pageCount - 1;
+    if (prevButton) prevButton.disabled = !hasPrev;
+    if (nextButton) nextButton.disabled = !hasNext;
+    if (pagination) pagination.classList.toggle('hidden', !hasPrev && !hasNext);
     updateSortHeaders();
   }
 
-  function setRows(newRows) {
+  function setRows(newRows, force = false) {
     rows = newRows;
-    render();
+    render(force);
   }
 
-  function setPageState({ page, hasPrev, hasNext }) {
-    if (pageStatus) pageStatus.textContent = `Page ${page + 1}`;
+  function fetchCursorPage(signal) {
+    const params = new URLSearchParams(buildQuery());
+    if (cursorPaging.extraParams) {
+      for (const [key, value] of Object.entries(cursorPaging.extraParams)) {
+        params.set(key, String(value));
+      }
+    }
+    params.set('limit', String(cursorPaging.pageSize || 50));
+    if (cursor != null) params.set('cursor', cursor);
+    return fetchPage(`${cursorPaging.url}?${params}`, signal);
+  }
+
+  function applyPage(page) {
+    const force = forceNextRender;
+    forceNextRender = false;
+    nextCursor = page.nextCursor;
+    setRows(page.rows, force);
+    const hasPrev = cursorStack.length > 0;
+    const hasNext = nextCursor != null;
+    if (pageStatus) pageStatus.textContent = `Page ${cursorStack.length + 1}`;
     if (prevButton) prevButton.disabled = !hasPrev;
     if (nextButton) nextButton.disabled = !hasNext;
+    if (pagination) pagination.classList.toggle('hidden', !hasPrev && !hasNext);
   }
 
   searchInput?.addEventListener('input', scheduleFilterChange);
@@ -898,27 +971,35 @@ function initFilterTable({
       }
       currentPage = 0;
       syncUrl();
-      render();
+      render(true);
     });
   }
 
   prevButton?.addEventListener('click', () => {
-    if (serverPaging) {
-      serverPaging.onPrev();
+    if (cursorPaging) {
+      if (cursorStack.length === 0) return;
+      cursor = cursorStack.pop();
+      forceNextRender = true;
+      cursorPaging.onPageChange();
     } else if (currentPage > 0) {
       currentPage -= 1;
       syncUrl();
-      render();
+      render(true);
     }
   });
 
   nextButton?.addEventListener('click', () => {
-    if (serverPaging) {
-      serverPaging.onNext();
+    if (cursorPaging) {
+      if (nextCursor == null) return;
+      cursorStack.push(cursor);
+      cursor = nextCursor;
+      nextCursor = null;
+      forceNextRender = true;
+      cursorPaging.onPageChange();
     } else if ((currentPage + 1) * pageSize < totalCount) {
       currentPage += 1;
       syncUrl();
-      render();
+      render(true);
     }
   });
 
@@ -926,7 +1007,73 @@ function initFilterTable({
   syncUrl();
   updateSortHeaders();
 
-  return { buildQuery, setRows, setPageState, render };
+  if (cursorPaging?.summaryEl) {
+    cursorPaging.summaryEl.textContent =
+      'Newest first, sorting applies to the current page';
+  }
+
+  const api = { buildQuery, setRows, render };
+  if (cursorPaging) {
+    api.fetchPage = fetchCursorPage;
+    api.applyPage = applyPage;
+    api.resetCursor = resetCursor;
+  }
+  return api;
+}
+
+function bindModal(overlay, closeIds = []) {
+  const open = () => overlay.classList.remove('hidden');
+  const close = () => overlay.classList.add('hidden');
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) close();
+  });
+  for (const id of closeIds) {
+    document.getElementById(id)?.addEventListener('click', close);
+  }
+  return { open, close };
+}
+
+async function sendJson(method, url, body) {
+  const options = { method };
+  if (body !== undefined) {
+    options.headers = { 'Content-Type': 'application/json' };
+    options.body = typeof body === 'string' ? body : JSON.stringify(body);
+  }
+  const res = await fetch(url, withAuthOptions(options));
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(text || `Error: ${res.status}`);
+  }
+  if (res.status === 204) return null;
+  return res.json().catch(() => null);
+}
+
+function initConfirmAction({ triggerId, overlayId, dismissId, confirmId, url, onSuccess }) {
+  const overlay = document.getElementById(overlayId);
+  const modal = bindModal(overlay, [dismissId]);
+
+  document.getElementById(triggerId).addEventListener('click', modal.open);
+
+  document.getElementById(confirmId).addEventListener('click', async () => {
+    modal.close();
+    try {
+      await sendJson('POST', url);
+      onSuccess();
+    } catch (e) {
+      alert(e.message);
+    }
+  });
+}
+
+function showModalPayment(els, { title, descHtml, address, linkHref, linkText }) {
+  els.title.textContent = title;
+  for (const el of els.hide || []) el.classList.add('hidden');
+  els.error.textContent = '';
+  if (els.desc && descHtml !== undefined) els.desc.innerHTML = descHtml;
+  els.address.textContent = address;
+  els.link.href = linkHref;
+  els.link.textContent = linkText;
+  els.payment.classList.remove('hidden');
 }
 
 async function fetchJson(url, options) {
@@ -1017,38 +1164,73 @@ function ensureTicker() {
   tickerInterval = setInterval(renderTicker, 1000);
 }
 
-let pollInterval;
+let pollTimer;
 let pollController;
+let activePollFn;
+let activePollInterval;
+let pollGen = 0;
+
+function schedulePoll(gen) {
+  clearTimeout(pollTimer);
+  if (gen !== pollGen || document.hidden) return;
+  pollTimer = setTimeout(() => runPoll(gen), activePollInterval);
+}
+
+async function runPoll(gen) {
+  if (gen !== pollGen) return;
+  clearTimeout(pollTimer);
+  if (pollController) pollController.abort();
+  const controller = new AbortController();
+  pollController = controller;
+  try {
+    await activePollFn(controller.signal);
+    if (gen === pollGen && !controller.signal.aborted) markUpdated();
+  } catch (e) {
+    if (e.name !== 'AbortError') console.error('refresh error:', e);
+  } finally {
+    if (pollController === controller) pollController = null;
+    schedulePoll(gen);
+  }
+}
 
 function startPolling(refreshFn, intervalMs) {
-  async function poll() {
-    if (pollController) pollController.abort();
-    pollController = new AbortController();
-    try {
-      await refreshFn(pollController.signal);
-      markUpdated();
-    } catch (e) {
-      if (e.name !== 'AbortError') console.error('refresh error:', e);
-    }
-  }
+  activePollFn = refreshFn;
+  activePollInterval = intervalMs || CONFIG.DEFAULT_POLL_INTERVAL;
+  const gen = ++pollGen;
   ensureTicker();
-  poll();
-  clearInterval(pollInterval);
-  pollInterval = setInterval(poll, intervalMs || CONFIG.DEFAULT_POLL_INTERVAL);
+  runPoll(gen);
 }
 
 function stopPolling() {
-  clearInterval(pollInterval);
+  pollGen++;
+  activePollFn = null;
+  clearTimeout(pollTimer);
   clearInterval(tickerInterval);
-  pollInterval = null;
+  pollTimer = null;
   tickerInterval = null;
   if (pollController) pollController.abort();
+  pollController = null;
+  dataBindings = null;
   const el = document.getElementById('last-updated');
   if (el) el.classList.add('invisible');
 }
 
+document.addEventListener('visibilitychange', () => {
+  if (!activePollFn) return;
+  if (document.hidden) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  } else {
+    runPoll(pollGen);
+  }
+});
+
 window.addEventListener('beforeunload', () => {
-  clearInterval(pollInterval);
-  clearInterval(tickerInterval);
-  if (pollController) pollController.abort();
+  stopPolling();
+  clearTimeout(wsReconnectTimeout);
+  if (logState.ws) {
+    logState.ws.onclose = null;
+    logState.ws.close();
+    logState.ws = null;
+  }
 });

@@ -55,9 +55,11 @@ table th, table td { padding: 12px 16px; text-align: left; }
 hr.divider { border: none; border-top: 1px solid #444; margin: 24px 0; }
 hr.divider + table { margin-top: 0; }
 .tab-bar { display: flex; gap: 8px; margin-bottom: 15px; }
+.btn,
 #log-show,
 #log-controls button,
-.tab-bar button {
+.tab-bar button,
+.confirm-modal .modal-buttons button {
   background: #333;
   border: 1px solid #444;
   color: #eee;
@@ -65,11 +67,20 @@ hr.divider + table { margin-top: 0; }
   cursor: pointer;
   font: inherit;
 }
-#log-show:hover, #log-controls button:hover, .tab-bar button:hover { background: #444; }
+.btn:hover,
+#log-show:hover,
+#log-controls button:hover,
+.tab-bar button:hover,
+.confirm-modal .modal-buttons button:hover { background: #444; }
+.btn:disabled,
+.confirm-modal .modal-buttons button:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-block { margin: 8px 0; width: 100%; }
 .tab-bar button.active { background: #14231a; border-color: #4a3; color: #6d8; }
 table th { color: #888; font-weight: normal; border-bottom: 1px solid #444; }
 table td { border-bottom: 1px solid #333; }
 table tbody tr:hover { background: #1a1a1a; }
+.table-empty { color: #666; text-align: center; }
+.tap-tag { color: #888; font-size: 0.8em; }
 .connected { color: #4f4; }
 .pending { color: #fa0; }
 .in_mempool { color: #fd5; }
@@ -79,7 +90,7 @@ table tbody tr:hover { background: #1a1a1a; }
 .expired { color: #f84; }
 .flagged { color: #f44; font-weight: bold; }
 .cleared { color: #888; }
-.order-link { color: inherit; text-decoration: none; display: block; margin: -12px -16px; padding: 12px 16px; }
+.row-link { color: inherit; text-decoration: none; display: block; margin: -12px -16px; padding: 12px 16px; }
 .order-progress {
   position: relative;
   width: 120px;
@@ -279,11 +290,105 @@ table tbody tr:hover { background: #1a1a1a; }
   font-size: 0.9em;
   margin: -4px 0 8px;
 }
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+.confirm-modal {
+  background: #1a1a1a;
+  border: 1px solid #444;
+  padding: 30px;
+  width: 400px;
+  max-width: 90vw;
+  text-align: center;
+}
+.confirm-modal h2 {
+  margin: 0 0 16px;
+  font-size: 1.22em;
+  color: #888;
+}
+.confirm-modal p {
+  color: #aaa;
+  margin: 0 0 20px;
+  font-size: 0.9em;
+}
+.confirm-modal .modal-buttons {
+  display: flex;
+  gap: 10px;
+}
+.confirm-modal .modal-buttons button { flex: 1; }
+.form-modal { text-align: left; }
+.form-modal h2 { margin: 0 0 20px; text-align: center; }
+.form-modal .tab-bar { margin-bottom: 16px; }
+.form-modal .tab-bar button { flex: 1; }
+.form-modal label {
+  display: block;
+  margin-bottom: 4px;
+  color: #888;
+  font-size: 0.9em;
+}
+.form-modal input {
+  width: 100%;
+  background: #111;
+  border: 1px solid #444;
+  color: #eee;
+  padding: 8px 12px;
+  font: inherit;
+  box-sizing: border-box;
+  margin-bottom: 14px;
+}
+.form-modal input::placeholder { color: #555; }
+.form-modal .modal-buttons { margin-top: 6px; }
+.form-modal .modal-error {
+  color: #f55;
+  font-size: 0.85em;
+  margin-bottom: 10px;
+  min-height: 1.4em;
+}
+.form-modal .modal-payment {
+  text-align: center;
+  padding: 10px 0;
+}
+.form-modal .modal-payment p {
+  color: #888;
+  margin: 0 0 14px;
+  font-size: 0.9em;
+}
+.form-modal .modal-payment .address {
+  background: #111;
+  border: 1px solid #444;
+  padding: 10px 14px;
+  word-break: break-all;
+  color: #eee;
+  font-size: 0.85em;
+  cursor: pointer;
+  margin-bottom: 14px;
+}
+.form-modal .modal-payment .copied {
+  color: #4a4;
+  font-size: 0.8em;
+  min-height: 1.4em;
+}
+.form-modal .modal-payment .detail-link {
+  display: inline-block;
+  color: #888;
+  font-size: 0.85em;
+  margin-bottom: 14px;
+  text-decoration: none;
+}
+.form-modal .modal-payment .detail-link:hover {
+  color: #eee;
+  text-decoration: underline;
+}
 @media (max-width: 1140px) {
   body { padding: 76px 20px 20px; }
   .navbar { padding: 10px 20px; gap: 16px; }
   .wrapper { width: auto; }
-  .columns { flex-direction: column; gap: 30px; align-items: center; }
   .grid { gap: 30px; }
   .column { width: 100%; max-width: 500px; }
   .column-full { width: 100%; max-width: 500px; }

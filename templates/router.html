@@ -6,258 +6,25 @@
     width: 1048px;
   }
 
-  .action-bar button {
-    background: #333;
-    border: 1px solid #444;
-    color: #eee;
-    padding: 8px 16px;
-    cursor: pointer;
-    font: inherit;
-  }
-
-  .action-bar button:hover { background: #444; }
-  .action-bar button:disabled { opacity: 0.4; cursor: not-allowed; }
-
   #halt-btn.active { background: #663300; border-color: #886600; color: #ffcc00; }
   #pace-btn.active { background: #1a4d1a; border-color: #2d7a2d; color: #5fdf5f; }
-
-  .confirm-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.7);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 2000;
-  }
-
-  .confirm-overlay.hidden { display: none; }
-
-  .confirm-modal {
-    background: #1a1a1a;
-    border: 1px solid #444;
-    padding: 30px;
-    width: 400px;
-    max-width: 90vw;
-    text-align: center;
-  }
-
-  .confirm-modal h2 {
-    margin: 0 0 16px;
-    font-size: 1.22em;
-    color: #888;
-  }
-
-  .confirm-modal p {
-    color: #aaa;
-    margin: 0 0 20px;
-    font-size: 0.9em;
-  }
-
-  .confirm-modal .modal-buttons {
-    display: flex;
-    gap: 10px;
-  }
-
-  .confirm-modal .modal-buttons button {
-    flex: 1;
-    background: #333;
-    border: 1px solid #444;
-    color: #eee;
-    padding: 8px 16px;
-    cursor: pointer;
-    font: inherit;
-  }
-
-  .confirm-modal .modal-buttons button:hover { background: #444; }
 
   #orders-table tbody tr.unlimited-order {
     background: #181818;
   }
-  #order-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.7);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 2000;
-  }
-
-  #order-overlay.hidden { display: none; }
-
-  #order-modal {
-    background: #1a1a1a;
-    border: 1px solid #444;
-    padding: 30px;
-    width: 400px;
-    max-width: 90vw;
-  }
-
-  #order-modal h2 {
-    margin: 0 0 20px;
-    font-size: 1.22em;
-    text-align: center;
-    color: #888;
-  }
-
-  #order-modal label {
-    display: block;
-    margin-bottom: 4px;
-    color: #888;
-    font-size: 0.9em;
-  }
-
-  #order-modal input {
-    width: 100%;
-    background: #111;
-    border: 1px solid #444;
-    color: #eee;
-    padding: 8px 12px;
-    font: inherit;
-    box-sizing: border-box;
-    margin-bottom: 14px;
-  }
-
-  #order-modal input::placeholder { color: #555; }
-
-  #order-modal .modal-buttons {
-    display: flex;
-    gap: 10px;
-    margin-top: 6px;
-  }
-
-  #order-modal .modal-buttons button {
-    flex: 1;
-    background: #333;
-    border: 1px solid #444;
-    color: #eee;
-    padding: 8px 16px;
-    cursor: pointer;
-    font: inherit;
-  }
-
-  #order-modal .modal-buttons button:hover { background: #444; }
-
-  #order-error {
-    color: #f55;
-    font-size: 0.85em;
-    margin-bottom: 10px;
-    min-height: 1.4em;
-  }
-
-  #order-payment {
-    text-align: center;
-    padding: 10px 0;
-  }
-
-  #order-payment p {
-    color: #888;
-    margin: 0 0 14px;
-    font-size: 0.9em;
-  }
-
-  #order-payment .address {
-    background: #111;
-    border: 1px solid #444;
-    padding: 10px 14px;
-    word-break: break-all;
-    color: #eee;
-    font-size: 0.85em;
-    cursor: pointer;
-    margin-bottom: 14px;
-  }
-
-  #order-payment .copied {
-    color: #4a4;
-    font-size: 0.8em;
-    min-height: 1.4em;
-  }
-
-  #capacity-overlay, #premium-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.7);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 2000;
-  }
-
-  #capacity-overlay.hidden, #premium-overlay.hidden { display: none; }
-
-  #capacity-modal, #premium-modal {
-    background: #1a1a1a;
-    border: 1px solid #444;
-    padding: 30px;
-    width: 400px;
-    max-width: 90vw;
-  }
-
-  #capacity-modal h2, #premium-modal h2 {
-    margin: 0 0 20px;
-    font-size: 1.22em;
-    text-align: center;
-    color: #888;
-  }
-
-  #capacity-modal label, #premium-modal label {
-    display: block;
-    margin-bottom: 4px;
-    color: #888;
-    font-size: 0.9em;
-  }
-
-  #capacity-modal input, #premium-modal input {
-    width: 100%;
-    background: #111;
-    border: 1px solid #444;
-    color: #eee;
-    padding: 8px 12px;
-    font: inherit;
-    box-sizing: border-box;
-    margin-bottom: 14px;
-  }
-
-  #capacity-modal input::placeholder, #premium-modal input::placeholder { color: #555; }
-
-  #capacity-modal .modal-buttons, #premium-modal .modal-buttons {
-    display: flex;
-    gap: 10px;
-    margin-top: 6px;
-  }
-
-  #capacity-modal .modal-buttons button, #premium-modal .modal-buttons button {
-    flex: 1;
-    background: #333;
-    border: 1px solid #444;
-    color: #eee;
-    padding: 8px 16px;
-    cursor: pointer;
-    font: inherit;
-  }
-
-  #capacity-modal .modal-buttons button:hover, #premium-modal .modal-buttons button:hover { background: #444; }
-
-  #capacity-error, #premium-error {
-    color: #f55;
-    font-size: 0.85em;
-    margin-bottom: 10px;
-    min-height: 1.4em;
-  }
 
   @media (max-width: 1140px) {
-    .action-bar { width: 100%; grid-template-columns: repeat(5, 1fr); }
+    .action-bar { width: 100%; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
   }
 </style>
 
 <div class="grid grid-stack">
   <div class=action-bar>
-    <button id=capacity-btn class=hidden>Capacity</button>
-    <button id=premium-btn class=hidden>Premium</button>
-    <button id=pace-btn class=hidden>Pace: OFF</button>
-    <button id=halt-btn class=hidden>Halt: OFF</button>
-    <button id=add-order-btn>Add Order</button>
+    <button id=capacity-btn class=btn>Capacity</button>
+    <button id=premium-btn class=btn>Premium</button>
+    <button id=pace-btn class=btn>Pace: OFF</button>
+    <button id=halt-btn class=btn>Halt: OFF</button>
+    <button id=add-order-btn class=btn>Add Order</button>
   </div>
 
   <div class="column column-full" data-tabs>
@@ -396,7 +163,7 @@
         <tbody></tbody>
       </table>
       </div>
-      <div class=table-pagination>
+      <div class="table-pagination hidden">
         <button class=page-prev type=button>&lsaquo; Prev</button>
         <span class=page-status>1/1</span>
         <button class=page-next type=button>Next &rsaquo;</button>
@@ -404,32 +171,39 @@
     </div>
   </div>
 
-  <div id=order-overlay class=hidden>
-    <div id=order-modal>
+  <div id=order-overlay class="confirm-overlay hidden">
+    <div id=order-modal class="confirm-modal form-modal">
       <h2 id=order-modal-title>Add Order</h2>
+      <div id=order-mode-tabs class=tab-bar>
+        <button type=button data-mode=order class=active>Order</button>
+        <button type=button data-mode=tap>Tap</button>
+      </div>
       <div id=order-form-fields>
         <label for=order-endpoint>Endpoint</label>
-        <input id=order-endpoint placeholder="host:port" value="localhost:42069">
+        <input id=order-endpoint placeholder="host:port">
         <label for=order-username>Username</label>
         <input id=order-username placeholder="user.worker">
         <label for=order-password>Password</label>
         <input id=order-password placeholder="optional">
-        <label for=order-hashdays>Hashdays</label>
-        <input id=order-hashdays placeholder="e.g. 1.5 PHd, 500 THd">
-        <label for=order-hashrate>Hashrate</label>
-        <input id=order-hashrate placeholder="optional, defaults to 1 day delivery">
-        <label for=order-price>Price (sats/PHd)</label>
-        <input id=order-price placeholder="e.g. 1000" inputmode="numeric">
+        <div id=order-only-fields>
+          <label for=order-hashdays>Hashdays</label>
+          <input id=order-hashdays placeholder="e.g. 1.5 PHd, 500 THd">
+          <label for=order-hashrate>Hashrate</label>
+          <input id=order-hashrate placeholder="optional, defaults to 1 day delivery">
+          <label for=order-price>Price (sats/PHd)</label>
+          <input id=order-price placeholder="e.g. 1000" inputmode="numeric">
+        </div>
       </div>
-      <div id=order-error></div>
+      <div id=order-error class=modal-error></div>
       <div id=order-form-buttons class=modal-buttons>
         <button id=order-cancel>Cancel</button>
         <button id=order-submit>Add</button>
       </div>
-      <div id=order-payment class=hidden>
-        <p>Send <strong id=order-payment-amount></strong> sats to:</p>
+      <div id=order-payment class="modal-payment hidden">
+        <p id=order-payment-desc></p>
         <div class=address id=order-payment-address></div>
         <div class=copied id=order-payment-copied></div>
+        <a class=detail-link id=order-payment-link></a>
         <div class=modal-buttons>
           <button id=order-payment-close>Close</button>
         </div>
@@ -459,12 +233,12 @@
     </div>
   </div>
 
-  <div id=capacity-overlay class=hidden>
-    <div id=capacity-modal>
+  <div id=capacity-overlay class="confirm-overlay hidden">
+    <div id=capacity-modal class="confirm-modal form-modal">
       <h2>Set Capacity</h2>
       <label for=capacity-input>Capacity</label>
       <input id=capacity-input placeholder="e.g. 1 EHd, 500 PHd">
-      <div id=capacity-error></div>
+      <div id=capacity-error class=modal-error></div>
       <div class=modal-buttons>
         <button id=capacity-cancel>Cancel</button>
         <button id=capacity-confirm>Set</button>
@@ -472,12 +246,12 @@
     </div>
   </div>
 
-  <div id=premium-overlay class=hidden>
-    <div id=premium-modal>
+  <div id=premium-overlay class="confirm-overlay hidden">
+    <div id=premium-modal class="confirm-modal form-modal">
       <h2>Set Premium</h2>
       <label for=premium-input>Premium (%)</label>
       <input id=premium-input placeholder="e.g. 1, 5, 10" inputmode="decimal">
-      <div id=premium-error></div>
+      <div id=premium-error class=modal-error></div>
       <div class=modal-buttons>
         <button id=premium-cancel>Cancel</button>
         <button id=premium-confirm>Set</button>
@@ -522,73 +296,34 @@
 <div id=logs class=hidden></div>
 
 <script>
-let currentHashPrice = null;
-let currentCapacity = null;
-let currentPremium = null;
-const ORDER_PAGE_SIZE = 50;
-let ordersCursor = null;
-let ordersCursorStack = [];
-let ordersNextCursor = null;
-const ORDER_STATUS_PRIORITY = Object.fromEntries(
-  ['active', 'in_mempool', 'pending', 'expired', 'disconnected', 'fulfilled', 'cancelled']
-    .map((status, i) => [status, i])
-);
-
-function compareProgress(a, b) {
-  const aProgress = orderProgressValue(a);
-  const bProgress = orderProgressValue(b);
-  if (aProgress === null && bProgress === null) return 0;
-  if (aProgress === null) return 1;
-  if (bProgress === null) return -1;
-  return aProgress - bProgress;
-}
-
-function compareStatus(a, b) {
-  const aValue = ORDER_STATUS_PRIORITY[a.status] ?? Number.MAX_SAFE_INTEGER;
-  const bValue = ORDER_STATUS_PRIORITY[b.status] ?? Number.MAX_SAFE_INTEGER;
-  return aValue === bValue ? compareString(a.status, b.status) : aValue - bValue;
-}
-
-function renderRow(order) {
-  const safeId = escapeHtml(order.id);
-  const shortUsername = truncateMiddle(order.username);
-  const target = order.requested_hash_days == null ? 'Unlimited' : formatHashDays(order.requested_hash_days);
-  const hashrate = formatHashrate(order.hashrate);
-  const progress = formatOrderProgress(order);
-  const rowClass = order.requested_hash_days == null ? ' class=unlimited-order' : '';
-  const reviewMarker = order.review === 'flagged' ? ' <span class="flagged">⚑</span>'
-    : order.review === 'cleared' ? ' <span class="cleared">✓</span>' : '';
-  const href = `/order/${safeId}`;
-  const a = (content, cls) => `<a class="order-link${cls ? ' ' + cls : ''}" href="${href}">${content}</a>`;
-  return `<tr${rowClass}>
-    <td>${a(safeId)}</td>
-    <td class="${escapeHtml(statusClass(order.status))}">${a(escapeHtml(formatStatus(order.status)) + reviewMarker)}</td>
-    <td class=col-flex>${a(escapeHtml(order.endpoint))}</td>
-    <td>${a(escapeHtml(shortUsername))}</td>
-    <td>${a(escapeHtml(target))}</td>
-    <td>${a(escapeHtml(hashrate))}</td>
-    <td>${a(progress)}</td>
-  </tr>`;
-}
+const routerState = {
+  halt: false,
+  pace: false,
+  hashPrice: null,
+  capacity: null,
+  premium: null,
+};
 
 const ordersTable = initFilterTable({
   root: document.getElementById('orders-root'),
   defaultSort: { column: 'id', direction: 'desc' },
   sorts: {
-    status: compareStatus,
+    status: compareOrderStatus,
     endpoint: 'string',
     username: 'string',
     requested_hash_days: (a, b) => compareNullableNumber(a.requested_hash_days, b.requested_hash_days),
-    progress: compareProgress,
+    progress: compareOrderProgress,
   },
   ascByDefault: ['status'],
   tiebreak: (a, b) => compareNumber(b.id, a.id),
-  renderRow,
-  onFilterChange: () => {
-    resetOrders();
-    startPolling(refresh);
+  renderRow: order => renderOrderRow(order, { showTap: true, markUnlimited: true }),
+  onFilterChange: () => startPolling(refresh),
+  cursorPaging: {
+    url: '/api/router/orders',
+    pageSize: 50,
+    summaryEl: document.getElementById('orders-summary'),
+    onPageChange: () => startPolling(refresh),
   },
-  serverPaging: { onPrev: prevOrdersPage, onNext: nextOrdersPage },
 });
 
 async function fetchCurrentHashPrice(signal) {
@@ -600,92 +335,47 @@ async function fetchCurrentHashPrice(signal) {
   return match[1];
 }
 
-function resetOrders() {
-  ordersCursor = null;
-  ordersCursorStack = [];
-  ordersNextCursor = null;
-}
-
-function nextOrdersPage() {
-  if (ordersNextCursor == null) return;
-  ordersCursorStack.push(ordersCursor);
-  ordersCursor = ordersNextCursor;
-  ordersNextCursor = null;
-  startPolling(refresh);
-}
-
-function prevOrdersPage() {
-  if (ordersCursorStack.length === 0) return;
-  ordersCursor = ordersCursorStack.pop();
-  startPolling(refresh);
-}
-
-function applyOrderPage(page) {
-  ordersNextCursor = page.nextCursor;
-  ordersTable.setRows(page.rows);
-  ordersTable.setPageState({
-    page: ordersCursorStack.length,
-    hasPrev: ordersCursorStack.length > 0,
-    hasNext: ordersNextCursor != null,
-  });
-  document.getElementById('orders-summary').textContent =
-    'Newest first, sorting applies to the current page';
-}
-
-function fetchOrders(signal) {
-  const params = new URLSearchParams(ordersTable.buildQuery());
-  params.set('limit', String(ORDER_PAGE_SIZE));
-  if (ordersCursor != null) params.set('cursor', ordersCursor);
-  return fetchPage(`/api/router/orders?${params}`, signal);
-}
-
 async function refresh(signal) {
   const [routerData, ordersPage, systemData, bitcoinData] = await Promise.all([
     fetchJson('/api/router/status', { signal }),
-    fetchOrders(signal),
+    ordersTable.fetchPage(signal),
     fetchJsonIfAllowed('/api/system/status', { signal }),
     fetchJsonIfAllowed('/api/bitcoin/status', { signal }),
   ]);
 
+  routerState.halt = Boolean(routerData.halt);
+  routerState.pace = Boolean(routerData.pace);
   if (Number.isSafeInteger(routerData.hash_price)) {
-    currentHashPrice = String(routerData.hash_price);
+    routerState.hashPrice = String(routerData.hash_price);
   }
+  routerState.capacity = formatHashDays(routerData.total_capacity_hash_days);
 
-  const haltBtn = document.getElementById('halt-btn');
-  const paceBtn = document.getElementById('pace-btn');
-  const addOrderBtn = document.getElementById('add-order-btn');
-  if (haltBtn) {
-    haltBtn.dataset.active = routerData.halt;
-    haltBtn.textContent = routerData.halt ? 'Halt: ON' : 'Halt: OFF';
-    haltBtn.classList.toggle('active', routerData.halt);
-  }
-  if (paceBtn) {
-    paceBtn.dataset.active = routerData.pace;
-    paceBtn.textContent = routerData.pace ? 'Pace: ON' : 'Pace: OFF';
-    paceBtn.classList.toggle('active', routerData.pace);
-  }
-  currentCapacity = formatHashDays(routerData.total_capacity_hash_days);
-
-  const capacityBtn = document.getElementById('capacity-btn');
-  if (capacityBtn) {
-    capacityBtn.textContent = 'Capacity: ' + currentCapacity;
-  }
   const hashValue = Number(routerData.hash_value);
   const difficultyMultiplier = Number(routerData.difficulty_multiplier);
-  currentPremium =
+  routerState.premium =
     Number.isFinite(hashValue) && hashValue > 0 &&
     Number.isFinite(difficultyMultiplier) && difficultyMultiplier > 0
       ? (routerData.hash_price / hashValue / difficultyMultiplier - 1) * 100
       : null;
 
-  const premiumBtn = document.getElementById('premium-btn');
-  if (premiumBtn && currentPremium != null) {
-    premiumBtn.textContent = 'Premium: ' + formatTruncated(currentPremium) + '%';
+  const haltBtn = document.getElementById('halt-btn');
+  haltBtn.textContent = routerState.halt ? 'Halt: ON' : 'Halt: OFF';
+  haltBtn.classList.toggle('active', routerState.halt);
+
+  const paceBtn = document.getElementById('pace-btn');
+  paceBtn.textContent = routerState.pace ? 'Pace: ON' : 'Pace: OFF';
+  paceBtn.classList.toggle('active', routerState.pace);
+
+  document.getElementById('capacity-btn').textContent = 'Capacity: ' + routerState.capacity;
+
+  if (routerState.premium != null) {
+    document.getElementById('premium-btn').textContent =
+      'Premium: ' + formatTruncated(routerState.premium) + '%';
   }
-  if (addOrderBtn) {
-    addOrderBtn.disabled = routerData.halt;
-    addOrderBtn.title = routerData.halt ? 'Router is halted' : '';
-  }
+
+  const addOrderBtn = document.getElementById('add-order-btn');
+  addOrderBtn.disabled = routerState.halt;
+  addOrderBtn.title = routerState.halt ? 'Router is halted' : '';
 
   applyData(routerData);
   const available = routerData.total_capacity_hash_days != null && routerData.used_capacity_hash_days != null
@@ -703,19 +393,17 @@ async function refresh(signal) {
   renderBitcoinData(bitcoinData);
   renderSystemData(systemData);
 
-  if (!signal.aborted) applyOrderPage(ordersPage);
+  if (!signal.aborted) ordersTable.applyPage(ordersPage);
 }
-initLogControls();
-setupLogToggle();
-initCopyables();
-initAuthProbe().then(ok => {
-  if (!ok) return;
-  startPolling(refresh);
-  connectWs();
-});
+
+initLogs();
+startPolling(refresh);
 
 {
-  const overlay = document.getElementById('order-overlay');
+  const modal = bindModal(document.getElementById('order-overlay'), ['order-cancel', 'order-payment-close']);
+  const modeTabs = document.getElementById('order-mode-tabs');
+  const modeButtons = [...modeTabs.querySelectorAll('[data-mode]')];
+  const orderOnlyFields = document.getElementById('order-only-fields');
   const endpoint = document.getElementById('order-endpoint');
   const username = document.getElementById('order-username');
   const password = document.getElementById('order-password');
@@ -727,60 +415,95 @@ initAuthProbe().then(ok => {
   const formButtons = document.getElementById('order-form-buttons');
   const modalTitle = document.getElementById('order-modal-title');
   const payment = document.getElementById('order-payment');
-  const paymentAmount = document.getElementById('order-payment-amount');
+  const paymentDesc = document.getElementById('order-payment-desc');
   const paymentAddress = document.getElementById('order-payment-address');
   const paymentCopied = document.getElementById('order-payment-copied');
+  const paymentLink = document.getElementById('order-payment-link');
+  const submitBtn = document.getElementById('order-submit');
 
-  function resetModal() {
+  const paymentEls = {
+    title: modalTitle,
+    hide: [modeTabs, formFields, formButtons],
+    error,
+    desc: paymentDesc,
+    address: paymentAddress,
+    link: paymentLink,
+    payment,
+  };
+
+  let orderMode = 'order';
+
+  function setOrderMode(mode) {
+    orderMode = mode;
+    for (const btn of modeButtons) {
+      btn.classList.toggle('active', btn.dataset.mode === mode);
+    }
+    orderOnlyFields.classList.toggle('hidden', mode === 'tap');
+    modalTitle.textContent = mode === 'tap' ? 'Add Tap' : 'Add Order';
+    error.textContent = '';
+  }
+
+  for (const btn of modeButtons) {
+    btn.addEventListener('click', () => setOrderMode(btn.dataset.mode));
+  }
+
+  document.getElementById('add-order-btn').addEventListener('click', async () => {
     endpoint.value = '';
     username.value = '';
     password.value = '';
     hashdays.value = '';
     hashrate.value = '';
-    price.value = currentHashPrice || '';
-    error.textContent = '';
-    modalTitle.textContent = 'Add Order';
+    price.value = routerState.hashPrice || '';
+    setOrderMode('order');
+    modeTabs.classList.remove('hidden');
     formFields.classList.remove('hidden');
     formButtons.classList.remove('hidden');
     payment.classList.add('hidden');
     paymentCopied.textContent = '';
-  }
-
-  document.getElementById('add-order-btn').addEventListener('click', async () => {
-    resetModal();
-    overlay.classList.remove('hidden');
+    modal.open();
     endpoint.focus();
 
+    const initialPrice = price.value;
     try {
-      currentHashPrice = await fetchCurrentHashPrice();
-      price.value = currentHashPrice;
+      routerState.hashPrice = await fetchCurrentHashPrice();
+      if (price.value === initialPrice) price.value = routerState.hashPrice;
     } catch (e) {
       console.error('Failed to fetch current hash price:', e);
     }
   });
 
-  document.getElementById('order-cancel').addEventListener('click', () => {
-    overlay.classList.add('hidden');
-  });
-
-  document.getElementById('order-payment-close').addEventListener('click', () => {
-    overlay.classList.add('hidden');
-  });
-
   paymentAddress.addEventListener('click', () => {
-    navigator.clipboard.writeText(paymentAddress.textContent);
-    paymentCopied.textContent = 'Copied to clipboard';
+    copyToClipboard(paymentAddress.textContent, paymentCopied);
   });
 
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) overlay.classList.add('hidden');
-  });
-
-  document.getElementById('order-submit').addEventListener('click', async () => {
+  submitBtn.addEventListener('click', async () => {
+    if (submitBtn.disabled) return;
     error.textContent = '';
 
     if (!endpoint.value || !username.value) {
       error.textContent = 'Endpoint and username are required';
+      return;
+    }
+
+    const target = { endpoint: endpoint.value, username: username.value };
+    if (password.value) target.password = password.value;
+
+    if (orderMode === 'tap') {
+      submitBtn.disabled = true;
+      try {
+        const data = await sendJson('POST', '/api/router/tap', { upstream_target: target });
+        showModalPayment(paymentEls, {
+          title: 'Tap Created',
+          descHtml: 'Send BTC to this address to spawn orders at the current hash price:',
+          address: data.payment_address,
+          linkHref: `/tap/${data.tap_id}`,
+          linkText: `View Tap #${data.tap_id}`,
+        });
+      } catch (e) {
+        error.textContent = e.message;
+      } finally {
+        submitBtn.disabled = false;
+      }
       return;
     }
 
@@ -810,185 +533,121 @@ initAuthProbe().then(ok => {
       return;
     }
 
-    const target = { endpoint: endpoint.value, username: username.value };
-    if (password.value) target.password = password.value;
-
-    const order = { upstream_target: target, hash_days: parsedHashdays };
+    const order = { upstream_target: target, hash_days: parsedHashdays, hash_price: 0 };
     if (parsedHashrate !== null) order.hash_rate = parsedHashrate;
-    order.hash_price = 0;
 
     const requestBody = JSON.stringify(order)
       .replace('"hash_price":0', `"hash_price":${parsedPrice}`);
 
+    submitBtn.disabled = true;
     try {
-      const res = await fetch('/api/router/order', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: requestBody,
+      const data = await sendJson('POST', '/api/router/order', requestBody);
+      showModalPayment(paymentEls, {
+        title: 'Payment Required',
+        descHtml: `Send <strong>${escapeHtml(data.payment_amount)}</strong> sats to:`,
+        address: data.payment_address,
+        linkHref: `/order/${data.order_id}`,
+        linkText: `View Order #${data.order_id}`,
       });
-
-      if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        error.textContent = text || `Error: ${res.status}`;
-        return;
-      }
-
-      const data = await res.json();
-      modalTitle.textContent = 'Payment Required';
-      formFields.classList.add('hidden');
-      formButtons.classList.add('hidden');
-      error.textContent = '';
-      paymentAmount.textContent = data.payment_amount;
-      paymentAddress.textContent = data.payment_address;
-      payment.classList.remove('hidden');
+      ordersTable.resetCursor();
+      startPolling(refresh);
     } catch (e) {
       error.textContent = e.message;
+    } finally {
+      submitBtn.disabled = false;
     }
   });
 }
 
-function initConfirmModal(prefix, endpoint, enableTitle, disableTitle, enableDesc, disableDesc) {
-  const overlay = document.getElementById(`${prefix}-overlay`);
+function initToggleModal(prefix, endpoint, enableTitle, disableTitle, enableDesc, disableDesc) {
+  const modal = bindModal(document.getElementById(`${prefix}-overlay`), [`${prefix}-cancel`]);
   const title = document.getElementById(`${prefix}-modal-title`);
   const desc = document.getElementById(`${prefix}-modal-desc`);
-  const btn = document.getElementById(`${prefix}-btn`);
 
-  btn.addEventListener('click', () => {
-    const on = btn.dataset.active === 'true';
+  document.getElementById(`${prefix}-btn`).addEventListener('click', () => {
+    const on = routerState[prefix];
     title.textContent = on ? disableTitle : enableTitle;
     desc.textContent = on ? disableDesc : enableDesc;
-    overlay.classList.remove('hidden');
-  });
-
-  document.getElementById(`${prefix}-cancel`).addEventListener('click', () => {
-    overlay.classList.add('hidden');
-  });
-
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) overlay.classList.add('hidden');
+    modal.open();
   });
 
   document.getElementById(`${prefix}-confirm`).addEventListener('click', async () => {
-    const on = btn.dataset.active === 'true';
-    overlay.classList.add('hidden');
+    modal.close();
     try {
-      const res = await fetch(endpoint, withAuthOptions({
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: !on }),
-      }));
-      if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        alert(text || `Error: ${res.status}`);
-        return;
-      }
-      location.reload();
+      await sendJson('PUT', endpoint, { enabled: !routerState[prefix] });
+      startPolling(refresh);
     } catch (e) {
       alert(e.message);
     }
   });
 }
 
-initConfirmModal('halt', '/api/router/halt',
+initToggleModal('halt', '/api/router/halt',
   'Enable Halt', 'Disable Halt',
   'New bucket orders will be rejected until halt is disabled.',
   'New bucket orders will be accepted again.');
 
-initConfirmModal('pace', '/api/router/pace',
+initToggleModal('pace', '/api/router/pace',
   'Enable Pace', 'Disable Pace',
   'New connections spill to sink orders once open buckets reach target, and persistent bucket overflow is shed to sinks.',
   'Bucket orders will absorb all incoming hashrate while open.');
 
-{
-  const overlay = document.getElementById('capacity-overlay');
-  const input = document.getElementById('capacity-input');
-  const error = document.getElementById('capacity-error');
+function initSettingModal(prefix, endpoint, initialValue, parseValue, invalidMessage, buildBody) {
+  const modal = bindModal(document.getElementById(`${prefix}-overlay`), [`${prefix}-cancel`]);
+  const input = document.getElementById(`${prefix}-input`);
+  const error = document.getElementById(`${prefix}-error`);
+  const confirmBtn = document.getElementById(`${prefix}-confirm`);
 
-  document.getElementById('capacity-btn').addEventListener('click', () => {
-    input.value = currentCapacity || '';
+  document.getElementById(`${prefix}-btn`).addEventListener('click', () => {
+    input.value = initialValue() ?? '';
     error.textContent = '';
-    overlay.classList.remove('hidden');
+    modal.open();
     input.focus();
   });
 
-  document.getElementById('capacity-cancel').addEventListener('click', () => {
-    overlay.classList.add('hidden');
-  });
-
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) overlay.classList.add('hidden');
-  });
-
-  document.getElementById('capacity-confirm').addEventListener('click', async () => {
+  confirmBtn.addEventListener('click', async () => {
+    if (confirmBtn.disabled) return;
     error.textContent = '';
-    const parsed = parseHashDays(input.value);
-    if (parsed === null || parsed <= 0) {
-      error.textContent = 'Capacity must be positive (e.g. 1 EHd, 500 PHd)';
+    const parsed = parseValue(input.value);
+    if (parsed === null) {
+      error.textContent = invalidMessage;
       return;
     }
+    confirmBtn.disabled = true;
     try {
-      const res = await fetch('/api/router/capacity', withAuthOptions({
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ capacity_hash_days: parsed }),
-      }));
-      if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        error.textContent = text || `Error: ${res.status}`;
-        return;
-      }
-      overlay.classList.add('hidden');
-      location.reload();
+      await sendJson('PUT', endpoint, buildBody(parsed));
+      modal.close();
+      startPolling(refresh);
     } catch (e) {
       error.textContent = e.message;
+    } finally {
+      confirmBtn.disabled = false;
     }
   });
 }
 
-{
-  const overlay = document.getElementById('premium-overlay');
-  const input = document.getElementById('premium-input');
-  const error = document.getElementById('premium-error');
+initSettingModal(
+  'capacity',
+  '/api/router/capacity',
+  () => routerState.capacity,
+  value => {
+    const parsed = parseHashDays(value);
+    return parsed !== null && parsed > 0 ? parsed : null;
+  },
+  'Capacity must be positive (e.g. 1 EHd, 500 PHd)',
+  capacity_hash_days => ({ capacity_hash_days }),
+);
 
-  document.getElementById('premium-btn').addEventListener('click', () => {
-    input.value = currentPremium != null ? currentPremium : '';
-    error.textContent = '';
-    overlay.classList.remove('hidden');
-    input.focus();
-  });
-
-  document.getElementById('premium-cancel').addEventListener('click', () => {
-    overlay.classList.add('hidden');
-  });
-
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) overlay.classList.add('hidden');
-  });
-
-  document.getElementById('premium-confirm').addEventListener('click', async () => {
-    error.textContent = '';
-    const parsed = parseFloat(input.value);
-    if (!isFinite(parsed) || parsed <= -100) {
-      error.textContent = 'Premium must be a number greater than -100 (e.g. 1, 5, 10)';
-      return;
-    }
-    try {
-      const res = await fetch('/api/router/premium', withAuthOptions({
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ premium_percent: parsed }),
-      }));
-      if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        error.textContent = text || `Error: ${res.status}`;
-        return;
-      }
-      overlay.classList.add('hidden');
-      location.reload();
-    } catch (e) {
-      error.textContent = e.message;
-    }
-  });
-}
+initSettingModal(
+  'premium',
+  '/api/router/premium',
+  () => routerState.premium,
+  value => {
+    const parsed = parseFloat(value);
+    return Number.isFinite(parsed) && parsed > -100 ? parsed : null;
+  },
+  'Premium must be a number greater than -100 (e.g. 1, 5, 10)',
+  premium_percent => ({ premium_percent }),
+);
 
 </script>
